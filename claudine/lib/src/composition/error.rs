@@ -1,5 +1,6 @@
 //! Composition-specific error types.
 
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::prose::Prose;
@@ -12,8 +13,12 @@ use chrono::{DateTime, Utc};
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
 
+use darkmatter::markdown::compose::expression::ExpressionError;
+use serde_json::{Value, json};
+
 use super::frontmatter_excerpt::FrontmatterExcerpt;
 use super::types::{ResolutionMode, ResolvedCompositionSource, SessionInteractivitySource};
+use crate::diagnostics::{Category, Diagnostic, Disposition, Origin, code_spec};
 use crate::provider::Provider;
 use thiserror::Error;
 
@@ -30,8 +35,14 @@ pub const LOOP_RATE_LIMITED_EXIT_CODE: i32 = 75;
 #[derive(Error, Debug)]
 pub enum CompositionError {
     /// The file reference string could not be parsed.
-    #[error("invalid file reference: {0}")]
-    InvalidReference(String),
+    #[error("invalid file reference `{reference}`: {source}")]
+    InvalidReference {
+        /// The raw reference string that failed to resolve.
+        reference: String,
+        /// The typed resolution failure from `biscuit-file`.
+        #[source]
+        source: biscuit_file::FileReferenceError,
+    },
 
     /// The resolved file does not exist.
     #[error("file not found: {0}")]
@@ -983,17 +994,45 @@ pub enum CompositionError {
     },
 
     // -- Schema errors --------------------------------------------------------
-    /// A `$schema` reference could not be resolved or compiled.
+    /// A `$schema` reference could not be *resolved* — a missing file, an
+    /// unsupported `http://` / `https://` URL, or a referenced file that is
+    /// neither a SimplifiedSchema nor a JSON Schema.
     ///
-    /// Covers both file resolution failures (e.g. unsupported `http://` URL,
-    /// missing file) and schema compilation failures (invalid SimplifiedSchema
-    /// or JSON Schema structure).
+    /// This is strictly a reference-resolution failure. A *syntax* error in the
+    /// schema body itself is [`SchemaParse`], whose remediation is about
+    /// constraint grammar rather than file paths.
+    ///
+    /// [`SchemaParse`]: CompositionError::SchemaParse
     #[error("schema load failed for {}: {message}", source_path.display())]
     SchemaLoad {
         /// The prompt file whose `$schema` reference failed to load.
         source_path: PathBuf,
         /// Human-readable description of the failure.
         message: String,
+    },
+
+    /// A `$schema` declaration could not be *parsed* or lowered to a JSON Schema.
+    ///
+    /// Distinct from [`SchemaLoad`] (reference resolution): this is a syntax
+    /// error in the inline SimplifiedSchema body — a malformed type-and-constraint
+    /// expression, an invalid constraint conversion, or an unsupported `$schema`
+    /// shape. The remediation names the constraint grammar, not the file path,
+    /// because the path is fine and the body is wrong.
+    ///
+    /// [`SchemaLoad`]: CompositionError::SchemaLoad
+    #[error("schema parse failed for {}: {message}", source_path.display())]
+    SchemaParse {
+        /// The prompt file whose `$schema` body failed to parse.
+        source_path: PathBuf,
+        /// The schema property the failure is attributed to, when the typed
+        /// cause identifies one (`None` for whole-shape failures).
+        property: Option<String>,
+        /// The grammar / conversion error message from the schema subsystem.
+        message: String,
+        /// Byte span of the offending token within the type-and-constraint
+        /// string, when the typed cause carries one. Retained for the focused
+        /// excerpt; `None` for conversion / shape failures that have no span.
+        span: Option<Range<usize>>,
     },
 
     /// One or more present frontmatter properties failed schema validation.
@@ -1592,6 +1631,12 @@ impl CompositionError {
             CompositionError::SchemaLoad { .. } => {
                 Some(FrontmatterHighlight::Property("$schema".to_string()))
             }
+            CompositionError::SchemaParse { property, .. } => match property {
+                // Highlight the specific schema property line when the typed
+                // cause names one; otherwise fall back to the `$schema` parent.
+                Some(prop) => Some(FrontmatterHighlight::Property(format!("$schema.{prop}"))),
+                None => Some(FrontmatterHighlight::Property("$schema".to_string())),
+            },
             CompositionError::InlineHashMalformed(_) => {
                 Some(FrontmatterHighlight::Property("hash".to_string()))
             }
@@ -1613,6 +1658,13 @@ impl CompositionError {
                 Some((only, [])) => Some(FrontmatterHighlight::Property(pointer_to_dotted(only))),
                 _ => Some(FrontmatterHighlight::BlockOnly),
             },
+            // A whole-value frontmatter interpolation failure names its receiving
+            // key — focus the excerpt on that line rather than dumping the whole
+            // block. Body interpolation (key `None`) falls through to BlockOnly.
+            CompositionError::ComposeFailed(MarkdownError::Interpolation {
+                key: Some(key),
+                ..
+            }) => Some(FrontmatterHighlight::Property(key.clone())),
             CompositionError::InlineComposeSequenceMismatch { .. }
             | CompositionError::ComposeFailed(_)
             | CompositionError::ShellExpansionFailed { .. } => Some(FrontmatterHighlight::BlockOnly),
@@ -2153,6 +2205,39 @@ impl BlockError for CompositionError {
                          directory. Remote `http://` / `https://` references are not supported.",
                     )
             }
+            CompositionError::SchemaParse {
+                source_path,
+                property,
+                message,
+                // The span feeds the focused frontmatter excerpt rather than the
+                // block body; the body names the property and the typed message.
+                span: _,
+            } => {
+                let file_link = render_file_link(source_path);
+                // A property-scoped failure is a type-and-constraint syntax error
+                // (Grammar/Convert); a property-less one is a wrong-shape `$schema`
+                // value. Each gets the remediation that actually applies.
+                let (scope, hint) = match property {
+                    Some(prop) => (
+                        format!(" for property <cyan>`{}`</cyan>", Prose::escape_text(prop)),
+                        "Check the SimplifiedSchema type-and-constraint syntax. Constraints are \
+                         separated by `;` and a constraint's arguments by `,` — e.g. \
+                         `file(required; match(**/*.md))`.",
+                    ),
+                    None => (
+                        String::new(),
+                        "The `$schema` value must be a file reference, an inline SimplifiedSchema \
+                         mapping, or a JSON Schema object.",
+                    ),
+                };
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("CompositionError", "invalid schema"))
+                    .body(format!(
+                        "The `$schema` declared in {file_link} is not a valid schema{scope}.\n\n\
+                         {message}"
+                    ))
+                    .hint(hint)
+            }
             CompositionError::SchemaValidation {
                 source_path,
                 message,
@@ -2596,6 +2681,120 @@ fn escape_prose_path(input: &str) -> String {
     out
 }
 
+/// Map a `ComposeFailed`'s inner [`MarkdownError`] to a composition code,
+/// delegating an interpolation failure to its deepest typed cause (design §9:
+/// the code follows the same deepest-meaningful-cause walk as rendering).
+fn compose_failed_code(md: &MarkdownError) -> &'static str {
+    match md {
+        MarkdownError::Interpolation { cause, .. } => match cause.as_ref() {
+            ExpressionError::FileReference(_) => "composition.invalid_file_reference",
+            ExpressionError::UnknownFunction { .. } => "composition.unknown_function",
+            _ => "composition.expression_invalid",
+        },
+        MarkdownError::FrontmatterParse { .. } | MarkdownError::FrontmatterFenceMismatch { .. } => {
+            "composition.frontmatter_parse"
+        }
+        MarkdownError::ShellExpansion(_) => "composition.shell_expansion",
+        MarkdownError::SchemaValidationFailed { .. } => "composition.schema_validation",
+        _ => "composition.failed",
+    }
+}
+
+impl Diagnostic for CompositionError {
+    fn code(&self) -> &'static str {
+        match self {
+            // Transparent wrapper: classify by the cause it carries (§6).
+            CompositionError::WithFrontmatter { inner, .. } => inner.code(),
+            CompositionError::ComposeFailed(md) => compose_failed_code(md),
+            CompositionError::InvalidReference { .. } | CompositionError::FileNotFound { .. } => {
+                "composition.invalid_file_reference"
+            }
+            CompositionError::SchemaLoad { .. } => "composition.schema_load",
+            CompositionError::SchemaParse { .. } => "composition.schema_parse",
+            CompositionError::SchemaValidation { .. } => "composition.schema_validation",
+            CompositionError::MissingProperties { .. }
+            | CompositionError::SequenceMissingProperties { .. } => "composition.missing_properties",
+            CompositionError::FrontmatterParse(_) => "composition.frontmatter_parse",
+            CompositionError::ShellExpansionFailed { .. } => "composition.shell_expansion",
+            // The lifecycle-stack family shares one authoring-error code; the
+            // `variant` facet still distinguishes them for finer handlers.
+            CompositionError::LifecycleInvalid { .. }
+            | CompositionError::LifecycleSayConflict(_)
+            | CompositionError::LifecycleUnknownEffect(..)
+            | CompositionError::LifecycleInterpolationLeak { .. }
+            | CompositionError::LifecycleUndefinedVariable { .. }
+            | CompositionError::LifecycleStackInvalidShape { .. }
+            | CompositionError::LifecycleActionInvalidShortForm { .. }
+            | CompositionError::LifecycleActionInvalidLongForm { .. }
+            | CompositionError::LifecycleUnknownVerb { .. }
+            | CompositionError::LifecycleStackAmbiguous { .. }
+            | CompositionError::LifecycleWrongArity { .. }
+            | CompositionError::LifecycleActionPlacement { .. }
+            | CompositionError::LifecycleActionOrder { .. }
+            | CompositionError::LifecycleInvalidArgs { .. }
+            | CompositionError::LifecycleErrNotAvailable { .. }
+            | CompositionError::LifecycleEvaluationError { .. } => "composition.lifecycle_invalid",
+            // Everything else is a composition failure without a finer code yet.
+            _ => "composition.failed",
+        }
+    }
+
+    fn category(&self) -> Category {
+        code_spec(self.code())
+            .map(|spec| spec.category)
+            .unwrap_or(Category::Composition)
+    }
+
+    fn disposition(&self) -> Disposition {
+        code_spec(self.code())
+            .map(|spec| spec.disposition)
+            .unwrap_or(Disposition::Correctable)
+    }
+
+    fn origin(&self) -> Origin {
+        code_spec(self.code())
+            .map(|spec| spec.origin)
+            .unwrap_or(Origin::Author)
+    }
+
+    fn detail(&self) -> Value {
+        match self {
+            CompositionError::WithFrontmatter { inner, .. } => inner.detail(),
+            CompositionError::ComposeFailed(MarkdownError::Interpolation {
+                cause,
+                expression,
+                ..
+            }) => match cause.as_ref() {
+                ExpressionError::FileReference(diagnostic) => json!({
+                    "reference": diagnostic.reference,
+                    "kind": format!("{:?}", diagnostic.kind),
+                    "base_dir": diagnostic.base_dir.to_string_lossy(),
+                }),
+                ExpressionError::UnknownFunction { name } => json!({ "name": name }),
+                other => json!({ "expression": expression, "message": other.to_string() }),
+            },
+            CompositionError::SchemaParse {
+                source_path,
+                property,
+                message,
+                ..
+            } => json!({
+                "source_path": source_path.to_string_lossy(),
+                "property": property,
+                "message": message,
+            }),
+            CompositionError::SchemaLoad {
+                source_path,
+                message,
+            } => json!({
+                "source_path": source_path.to_string_lossy(),
+                "message": message,
+            }),
+            _ => Value::Null,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2748,6 +2947,41 @@ mod tests {
             "expected WithFrontmatter wrapper, got: {err:?}"
         );
         assert!(err.frontmatter_excerpt().is_some(), "expected excerpt attached");
+    }
+
+    #[test]
+    fn enrich_frontmatter_interpolation_focuses_on_receiving_key() {
+        use darkmatter::markdown::SourceRef;
+        use darkmatter::markdown::compose::expression::ExpressionError;
+
+        // A whole-value interpolation failure naming a receiving key must focus
+        // the excerpt on that key's line, not dump the whole frontmatter block.
+        let source = source_from(
+            "---\n$schema:\n    spec: file(match(**/*spec*.md))\niteration: \"{{ frontmatter(spec, 'x') }}\"\n---\nbody\n",
+        );
+        let md_err = MarkdownError::Interpolation {
+            key: Some("iteration".to_string()),
+            expression: "frontmatter(spec, 'x')".to_string(),
+            source: Box::new(SourceRef::Effective {
+                rendered: "frontmatter(spec, 'x')".to_string(),
+                origin_key: Some("iteration".to_string()),
+            }),
+            cause: Box::new(ExpressionError::Parse("boom".to_string())),
+        };
+        let err = CompositionError::ComposeFailed(md_err);
+        assert!(
+            matches!(
+                err.frontmatter_block_spec(),
+                Some(FrontmatterHighlight::Property(ref p)) if p == "iteration"
+            ),
+            "interpolation error must focus the excerpt on its receiving key"
+        );
+
+        let enriched = err.enrich_frontmatter(&source, true);
+        assert!(
+            enriched.frontmatter_excerpt().is_some(),
+            "a focused excerpt must be attached"
+        );
     }
 
     #[test]

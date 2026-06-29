@@ -397,7 +397,7 @@ fn resolve_composition_source(
                 // (e.g. malformed frontmatter) must not be reported as
                 // "no match" — its own typed error already names the file and
                 // the cause.
-                if !shared.silent && matches!(e, CompositionError::InvalidReference(_)) {
+                if !shared.silent && matches!(e, CompositionError::InvalidReference { .. }) {
                     let term = crate::log::terminal();
                     claudine::harness::report::report_source_file(
                         file,

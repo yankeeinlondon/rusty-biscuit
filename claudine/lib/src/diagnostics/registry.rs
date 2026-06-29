@@ -195,6 +195,14 @@ pub const CODES: &[CodeSpec] = &[
         detail: &["source_path", "message"],
     },
     CodeSpec {
+        code: "composition.schema_parse",
+        category: Category::Composition,
+        disposition: Disposition::Correctable,
+        origin: Origin::Author,
+        severity_override: None,
+        detail: &["source_path", "property", "message"],
+    },
+    CodeSpec {
         code: "composition.schema_validation",
         category: Category::Composition,
         disposition: Disposition::Correctable,
@@ -499,9 +507,9 @@ mod tests {
 
     #[test]
     fn catalog_covers_the_ratified_count() {
-        // 12 categories, ~38 codes per the catalog totals; the faithful
-        // transcription of §3 lands at 42. This pins the count so an
-        // accidental drop or duplicate is caught.
-        assert_eq!(CODES.len(), 42);
+        // 12 categories; the faithful transcription of §3 landed at 42, plus the
+        // additive `composition.schema_parse` (finding #6) → 43. This pins the
+        // count so an accidental drop or duplicate is caught.
+        assert_eq!(CODES.len(), 43);
     }
 }

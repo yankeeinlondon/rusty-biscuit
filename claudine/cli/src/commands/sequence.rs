@@ -95,11 +95,17 @@ fn resolve_sequence_source(file_ref: &str) -> Result<ResolvedCompositionSource, 
 
     // YAML sequence files are treated as frontmatter without a Markdown body.
     let reference = biscuit_file::FileReference::new(file_ref)
-        .map_err(|e| CompositionError::InvalidReference(format!("{file_ref}: {e}")))?
+        .map_err(|e| CompositionError::InvalidReference {
+            reference: file_ref.to_string(),
+            source: e,
+        })?
         .with_package_area_magic_path();
     let resolved_path = reference
         .resolve()
-        .map_err(|e| CompositionError::InvalidReference(format!("{file_ref}: {e}")))?
+        .map_err(|e| CompositionError::InvalidReference {
+            reference: file_ref.to_string(),
+            source: e,
+        })?
         .ok_or_else(|| CompositionError::FileNotFound(file_ref.to_string()))?;
 
     let ext = resolved_path

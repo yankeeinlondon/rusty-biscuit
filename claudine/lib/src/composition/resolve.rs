@@ -40,12 +40,18 @@ pub fn resolve_composition_source(
     // when the `biscuit-file` resolver dominates compose prep cost.
     let _span = tracing::info_span!("compose_prep.file_reference", file = %file_ref).entered();
     let reference = FileReference::new(file_ref)
-        .map_err(|e| CompositionError::InvalidReference(format!("{file_ref}: {e}")))?
+        .map_err(|e| CompositionError::InvalidReference {
+            reference: file_ref.to_string(),
+            source: e,
+        })?
         .with_package_area_magic_path();
 
     let resolved_path = reference
         .resolve()
-        .map_err(|e| CompositionError::InvalidReference(format!("{file_ref}: {e}")))?
+        .map_err(|e| CompositionError::InvalidReference {
+            reference: file_ref.to_string(),
+            source: e,
+        })?
         .ok_or_else(|| CompositionError::FileNotFound(file_ref.to_string()))?;
 
     // Validate markdown extension

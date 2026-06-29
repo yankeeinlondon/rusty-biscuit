@@ -35,8 +35,9 @@
 
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::schemas::{
-    Constraint, DarkmatterSchemas, EffectiveSchema, PropertyAtom, PropertyDef, SchemaShape,
-    SimplifiedSchema, SimplifiedType, TypeExpr, ValidationProblem, ValidationProblemKind,
+    Constraint, DarkmatterSchemas, EffectiveSchema, PropertyAtom, PropertyDef, SchemaError,
+    SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr, ValidationProblem,
+    ValidationProblemKind,
 };
 
 use super::error::{
@@ -171,6 +172,59 @@ fn run_prepare(
     }
 }
 
+/// Classify a schema preparation failure into the typed
+/// [`CompositionError::SchemaParse`] (a body-syntax error) or
+/// [`CompositionError::SchemaLoad`] (a reference-resolution error), keyed on the
+/// typed [`SchemaError`] cause.
+///
+/// Grammar / conversion / shape errors are body-syntax problems and carry the
+/// constraint-grammar remediation; everything else (missing file, remote URL,
+/// ambiguous reference, I/O, validator construction) — and the no-typed-cause
+/// case — keeps the path-focused `SchemaLoad` with `fallback_message`.
+///
+/// [`SchemaError`]: darkmatter::markdown::schemas::SchemaError
+fn schema_error_to_composition_error(
+    source_path: &std::path::Path,
+    fallback_message: String,
+    schema_error: Option<&SchemaError>,
+) -> CompositionError {
+    // Grammar/Convert attach a synthetic name (`<root>`, `<arm[N]>`) for purely
+    // structural failures; only a real, user-addressable property is worth
+    // surfacing as scope.
+    fn real_property(name: &str) -> Option<String> {
+        (!name.starts_with('<')).then(|| name.to_string())
+    }
+
+    match schema_error {
+        Some(SchemaError::Grammar {
+            property,
+            message,
+            span,
+        }) => CompositionError::SchemaParse {
+            source_path: source_path.to_path_buf(),
+            property: real_property(property),
+            message: message.clone(),
+            span: Some(span.clone()),
+        },
+        Some(SchemaError::Convert { property, message }) => CompositionError::SchemaParse {
+            source_path: source_path.to_path_buf(),
+            property: real_property(property),
+            message: message.clone(),
+            span: None,
+        },
+        Some(SchemaError::FrontmatterShape { message }) => CompositionError::SchemaParse {
+            source_path: source_path.to_path_buf(),
+            property: None,
+            message: message.clone(),
+            span: None,
+        },
+        _ => CompositionError::SchemaLoad {
+            source_path: source_path.to_path_buf(),
+            message: fallback_message,
+        },
+    }
+}
+
 fn handle_compose_error(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
@@ -184,8 +238,19 @@ fn handle_compose_error(
 
     match markdown_err {
         MarkdownError::SchemaValidationFailed {
-            problems, summary, ..
-        } => translate_schema_failure(source, options, mode, problems, summary, dropped),
+            problems,
+            summary,
+            source: schema_source,
+            ..
+        } => translate_schema_failure(
+            source,
+            options,
+            mode,
+            problems,
+            summary,
+            schema_source,
+            dropped,
+        ),
         other => Err(CompositionError::ComposeFailed(other)),
     }
 }
@@ -196,15 +261,25 @@ fn translate_schema_failure(
     mode: PrepareMode,
     problems: Vec<ValidationProblem>,
     summary: String,
+    schema_source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
     dropped: &mut Vec<DroppedOptional>,
 ) -> Result<PreparedComposition, CompositionError> {
-    // Empty problems list signals a preparation failure (e.g. `$schema: 42`,
-    // unresolvable file reference). Surface as `SchemaLoad`.
+    // Empty problems list signals a preparation failure: either a *parse* error
+    // in the schema body, or a *reference-resolution* failure. The typed
+    // `SchemaError` carried on the source distinguishes them — a grammar/convert/
+    // shape error is a body-syntax problem (`SchemaParse`, with constraint-grammar
+    // remediation), whereas a missing file / remote URL / ambiguous reference is a
+    // resolution failure (`SchemaLoad`, with path remediation). Without a typed
+    // cause, fall back to `SchemaLoad`.
     if problems.is_empty() {
-        return Err(CompositionError::SchemaLoad {
-            source_path: source.resolved_path.clone(),
-            message: summary,
-        });
+        let typed = schema_source
+            .as_deref()
+            .and_then(|err| err.downcast_ref::<SchemaError>());
+        return Err(schema_error_to_composition_error(
+            &source.resolved_path,
+            summary,
+            typed,
+        ));
     }
 
     let effective = load_effective_schema(source, options.file_ref_fallback_dir.as_deref())?;
@@ -434,12 +509,12 @@ fn load_effective_schema(
     if let Some(fallback) = file_ref_fallback_dir {
         schemas = schemas.with_file_ref_fallback_dir(fallback);
     }
-    schemas
-        .effective_for(&source.markdown)
-        .map_err(|err| CompositionError::SchemaLoad {
-            source_path: source.resolved_path.clone(),
-            message: err.to_string(),
-        })
+    schemas.effective_for(&source.markdown).map_err(|err| {
+        // A grammar/convert/shape error is a body-syntax problem (`SchemaParse`);
+        // a missing file / remote URL / ambiguous reference stays `SchemaLoad`.
+        // `effective_for` hands us the typed cause directly — no downcast needed.
+        schema_error_to_composition_error(&source.resolved_path, err.to_string(), Some(&err))
+    })
 }
 
 fn build_schema_validation_error(
@@ -1584,14 +1659,44 @@ mod tests {
     }
 
     #[test]
-    fn schema_load_error_for_invalid_schema_value() {
+    fn schema_parse_error_for_invalid_schema_shape() {
         let dir = TempDir::new().unwrap();
+        // `$schema: 42` is a wrong-shape value (a `SchemaError::FrontmatterShape`),
+        // which is a malformed-schema problem, not a reference-resolution one.
         let source = make_source(&dir, "---\n$schema: 42\n---\nbody\n");
 
         let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
         assert!(
-            matches!(err, CompositionError::SchemaLoad { .. }),
+            matches!(
+                err,
+                CompositionError::SchemaParse { property: None, .. }
+            ),
             "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn schema_parse_error_for_grammar_failure_names_property_and_keeps_path_load_distinct() {
+        let dir = TempDir::new().unwrap();
+        // A bad constraint separator (`,` instead of `;`) is a grammar error in
+        // the schema body — the motivating bug. It must surface as `SchemaParse`
+        // attributed to the offending property, NOT the path-focused `SchemaLoad`.
+        let source = make_source(
+            &dir,
+            "---\n$schema:\n    spec: file(required, match(**/*spec*.md))\nspec: \"x\"\n---\nbody\n",
+        );
+
+        let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+        let CompositionError::SchemaParse {
+            property, message, ..
+        } = &err
+        else {
+            panic!("expected SchemaParse, got: {err:?}");
+        };
+        assert_eq!(property.as_deref(), Some("spec"));
+        assert!(
+            message.contains("between constraints"),
+            "message must carry the typed grammar detail, got: {message}"
         );
     }
 

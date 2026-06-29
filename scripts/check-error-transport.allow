@@ -11,23 +11,27 @@
 # trimmed collapse line are covered by one entry — acceptable for a heuristic
 # review guard scoped to claudine/lib/src/composition.
 #
-# ── Reason A: Phase 6 conversion targets (real-errors plan, Phase 6 tasks 2–5)
-#    These collapse a typed lower-layer cause (biscuit_file::FileReferenceError,
-#    std::io::Error, a typed harness error) into a String-carrying
-#    CompositionError variant. They are slated to carry the typed `#[source]`
-#    instead, but that conversion is downstream of the un-landed Phase 2/3 typed
-#    substrate and changes enum signatures (exhaustive-match cascade in the CLI
-#    error walker) that cannot be verified without `cargo`. Allowlisted as
-#    known-pending until that interactive conversion sweep lands.
+# ── Reason A: heterogeneous / circular sources — a single typed `#[source]` is
+#    not a good fit, so the contextual String is the appropriate representation.
+#    `InvalidReference` (the one clean single-cause collapse — always a
+#    biscuit_file::FileReferenceError) WAS converted to carry its typed
+#    `#[source]` (finding #3) and is no longer listed here. The entries below
+#    each aggregate *several distinct* lower-layer error types under one variant,
+#    where no single typed cause exists to preserve:
+#      - MarkdownLoad: MarkdownError (resolve.rs) OR std::io::Error OR a
+#        biscuit_file Yaml/JSON-conversion/Frontmatter error (sequence load).
+#      - SequenceExternalLoad: FileReferenceError OR a Yaml error OR a synthetic
+#        "file not found" / "unable to resolve home" message with no source.
+#      - AtomicWriteFailed: the *top-level* ClaudineError (carrying it as a
+#        CompositionError #[source] would be circular).
+#    These are documented exceptions, not discarded single typed causes.
 #
-# resolve.rs — invalid file reference (FileReferenceError → String), x2 sites
-.map_err(|e| CompositionError::InvalidReference(format!("{file_ref}: {e}")))?
-# resolve.rs — markdown read failure (std::io::Error → String)
+# resolve.rs — markdown load failure (MarkdownError | std::io::Error → String)
 .map_err(|e| CompositionError::MarkdownLoad(format!("{}: {e}", resolved_path.display())))?;
-# sequence.rs — external sequence load (FileReferenceError → String), x2 sites
+# sequence.rs — external sequence load (FileReferenceError | Yaml | synthetic → String)
 .map_err(|e| CompositionError::SequenceExternalLoad(format!("`{raw}`: {e}")))?;
 .map_err(|e| CompositionError::SequenceExternalLoad(format!("`{raw}`: {e}")))?
-# closure.rs — atomic write failure (std::io::Error → String)
+# closure.rs — atomic write failure (top-level ClaudineError → String; circular if typed)
 .map_err(|e| CompositionError::AtomicWriteFailed(e.to_string()))?;
 # lifecycle_control.rs — proxy-target harness resolution (typed harness error → String)
 crate::harness::resolve_harness_path(target, &ctx).map_err(|e| e.to_string())?;
