@@ -26,11 +26,11 @@ success:
           action:
               - warn: "{{feature_or_fix}} review {{iteration}} in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready"
               - message: "⚠️  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed but was deemed NOT production ready"
-              - effect: small-group-cheer
+              - effect: sad-trombone
 failure:
     stderr: "{{feature_or_fix}} review {{iteration}} for `{{parent_dir(spec)}}` in the {{ctx.area}} package area failed to complete!"
     message: "💥 {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area }}** failed to complete ({{err.message}})!"
-    effect: two-tone
+    effect: phase-jump-3
 ---
 # Review of {{title_case(without_date(parent_dir(spec)))}}
 > - {{capitalize(feature_or_fix)}}: `{{parent_dir(spec)}}`
@@ -98,8 +98,8 @@ test is at the wrong level under "Findings" with severity at least "high".
 
 ## Closure
 
-- Save your review suggestions to "@{{ctx.area}}/{{dir}}/review-{{iteration}}.md"
-- Save the following frontmatter properties on "@{{ctx.area}}/{{dir}}/review-{{iteration}}.md":
+- Save your review suggestions to "@{{review-file}}"
+- Save the following frontmatter properties on "@{{review-file}}.md":
     - based on your review suggestions indicate whether you think this feature is **ready for production** by setting the `ready` frontmatter property to `true` or `false`
     - set the `agent` frontmatter property to "{{ctx.agent}}/{{ctx.model}}" 
     - set the `created` frontmatter property to "{{ctx.now}}"
