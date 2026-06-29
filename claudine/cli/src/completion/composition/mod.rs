@@ -28,6 +28,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
+use super::fuzzy;
 use super::scopes::{self, ComposeMode, ScopeContext};
 
 mod compose;
@@ -178,6 +179,19 @@ fn finalize(mut candidates: Vec<Candidate>) -> Vec<String> {
 /// guard is defensive).
 fn display_name(path: &Path) -> Option<String> {
     path.file_name().and_then(|n| n.to_str()).map(String::from)
+}
+
+/// True when a completion query `active` matches a file `basename`.
+///
+/// Tries a fuzzy subsequence against the extension-stripped stem (so `pl`
+/// matches `plan.md`) **or** against the full basename (so once the user
+/// types into the extension, `plan.`, `plan.m`, and `plan.md` still match
+/// `plan.md`). An empty query matches everything. Directory candidates do
+/// not use this — they match their full leaf name directly.
+fn file_name_matches(basename: &str, active: &str) -> bool {
+    active.is_empty()
+        || fuzzy::fuzzy_match(name_stem(basename), active)
+        || fuzzy::fuzzy_match(basename, active)
 }
 
 /// Strip `.md` / `.markdown` / `.yaml` / `.yml` (case-insensitive) from a
@@ -368,6 +382,25 @@ mod tests {
         assert_eq!(name_stem("steps.yml"), "steps");
     }
 
+    // -- file_name_matches ------------------------------------------------
+
+    #[test]
+    fn file_name_matches_stem_and_extension_typing() {
+        // Empty query matches everything.
+        assert!(file_name_matches("plan.md", ""));
+        // Stem match (the common case).
+        assert!(file_name_matches("plan.md", "plan"));
+        assert!(file_name_matches("plan.md", "pl"));
+        // Typing into the extension must keep matching — the regression:
+        // a `.` is not in the stem, so stem-only matching dropped these.
+        assert!(file_name_matches("plan.md", "plan."));
+        assert!(file_name_matches("plan.md", "plan.m"));
+        assert!(file_name_matches("plan.md", "plan.md"));
+        // Non-matches.
+        assert!(!file_name_matches("plan.md", "xyz"));
+        assert!(!file_name_matches("plan.md", "plan.xx"));
+    }
+
     // -- end-to-end (compose) ---------------------------------------------
 
     #[test]
@@ -502,6 +535,47 @@ mod tests {
             vec!["@plan.md".to_string()],
             "magic must render @<basename>, no path: {got:?}"
         );
+    }
+
+    #[test]
+    fn compose_magic_matches_while_typing_extension() {
+        // Regression: `@plan.` (and `@plan.md`) must keep matching `plan.md`,
+        // not just the bare-stem `@plan`.
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        write(
+            &tmp.path().join("prompts").join("plan.md"),
+            "---\ntitle: X\n---\n",
+        );
+        let mut ctx = ScopeContext::discover_from(tmp.path());
+        ctx.home = None;
+        for q in ["@plan", "@plan.", "@plan.m", "@plan.md"] {
+            let got = run(ComposeMode::Compose, &ctx, q);
+            assert!(
+                got.iter().any(|c| c == "@plan.md"),
+                "{q} must complete to @plan.md: {got:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn compose_word_matches_while_typing_extension() {
+        // The same extension-typing fix applies to non-magic Word mode.
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        write(
+            &tmp.path().join("prompts").join("plan.md"),
+            "---\ntitle: X\n---\n",
+        );
+        let mut ctx = ScopeContext::discover_from(tmp.path());
+        ctx.home = None;
+        for q in ["plan", "plan.", "plan.md"] {
+            let got = run(ComposeMode::Compose, &ctx, q);
+            assert!(
+                got.iter().any(|c| c == "prompts/plan.md"),
+                "{q} must complete to prompts/plan.md: {got:?}"
+            );
+        }
     }
 
     #[test]

@@ -14,9 +14,9 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use super::{Candidate, name_stem};
+use super::{Candidate, file_name_matches};
 use crate::completion::frontmatter;
-use crate::completion::fuzzy::{self, PartialLen};
+use crate::completion::fuzzy::PartialLen;
 use crate::completion::scopes::{ComposeMode, Scope, ScopeContext, ScopeSet};
 use crate::completion::walker;
 
@@ -68,8 +68,7 @@ pub(super) fn gather_magic(
             let Some(basename) = entry_path.file_name().and_then(|n| n.to_str()) else {
                 continue;
             };
-            let match_target = name_stem(basename);
-            if partial_len.matching_enabled() && !fuzzy::fuzzy_match(match_target, active) {
+            if partial_len.matching_enabled() && !file_name_matches(basename, active) {
                 continue;
             }
             if !seen_basenames.insert(basename.to_ascii_lowercase()) {
