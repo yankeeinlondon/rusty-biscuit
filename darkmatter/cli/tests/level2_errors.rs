@@ -139,6 +139,50 @@ fn run_md_compose_with_sibling(
     Some((frame, canonical))
 }
 
+/// Like [`run_md_compose_named`], but stages an arbitrary set of sibling files
+/// at paths relative to the prompt's directory (creating parent directories as
+/// needed) before composing. Used to exercise the stale-directory "Did you
+/// mean?" suggestion path, which walks up from a missing parent directory to
+/// the nearest existing ancestor — so nested sibling fixtures must exist on
+/// disk during the capture.
+fn run_md_compose_with_nested_siblings(
+    file_name: &str,
+    file_body: &str,
+    siblings: &[(&str, &str)],
+) -> Option<(CapturedFrame, std::path::PathBuf)> {
+    match evaluate_level(Level::L2, WezTermHarness::available(), "WezTerm") {
+        LevelDecision::Run => {}
+        LevelDecision::Skip(msg) => {
+            eprintln!("{msg}");
+            return None;
+        }
+        LevelDecision::Panic(msg) => panic!("{msg}"),
+    }
+
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join(file_name);
+    fs::write(&file_path, file_body).unwrap();
+    for (rel, body) in siblings {
+        let target = dir.path().join(rel);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&target, body).unwrap();
+    }
+    let canonical = file_path.canonicalize().expect("canonicalize failed");
+
+    let mut guard = SHARED_HARNESS
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().unwrap();
+
+    run_with_sentinel(harness, "clear");
+
+    let cmd = format!("md compose {}", file_path.display());
+    let frame = run_with_sentinel(harness, &cmd);
+    drop(dir);
+    Some((frame, canonical))
+}
+
 // Unterminated page block to trigger PageBlockError::UnterminatedBlock.
 const UNTERMINATED_BLOCK: &str = "::block when=\"true\"\nbody\n";
 
@@ -345,6 +389,18 @@ fn level2_schema_validation_block_renders_per_problem_description() {
 // failing key is always a regular frontmatter property.
 const INVALID_FILE_REFERENCE: &str = "---\nagent: \"codex\"\nspec: \"does-not-exist-spec.md\"\niteration: \"{{ frontmatter(spec, 'review_iterations') ? frontmatter(spec, 'review_iterations') : 1 }}\"\n---\n# Body\n";
 
+// Same top-level failing interpolation shape as INVALID_FILE_REFERENCE (the
+// `iteration` key references a missing file through `frontmatter(spec, …)`), but
+// the document ALSO declares a `$schema:` block typing `spec`/`iteration` and
+// keeps the unrelated `agent:` key. Frontmatter interpolation runs BEFORE schema
+// validation in the compose pipeline, so the top-level `iteration` file-reference
+// error wins — the `$schema:` type specs never raise a competing schema error.
+// Because the `$schema:` block is present in the source, the focused excerpt
+// unions the involved keys' `$schema`-nested paths and surfaces the `$schema`
+// structural parent alongside the involved keys, while still excluding the
+// unrelated `agent:` key.
+const INVALID_FILE_REFERENCE_WITH_SCHEMA: &str = "---\nagent: \"codex\"\n$schema:\n    spec: 'string(required)'\n    iteration: 'string(required)'\nspec: \"does-not-exist-spec.md\"\niteration: \"{{ frontmatter(spec, 'review_iterations') ? frontmatter(spec, 'review_iterations') : 1 }}\"\n---\n# Body\n";
+
 // Same authoring-fatal reference shape as INVALID_FILE_REFERENCE, but `spec`
 // points at `spec.md` and a near-miss sibling `specs.md` is placed on disk next
 // to the prompt. The reference (`spec.md`) is one edit from `specs.md`, well
@@ -358,6 +414,25 @@ const INVALID_FILE_REFERENCE_WITH_SIBLING: &str = "---\nagent: \"codex\"\nspec: 
 // Real on-disk near-miss sibling for the reference `spec.md` above. Levenshtein
 // distance 1 (`spec.md` → `specs.md`), so it is guaranteed to be suggested.
 const SIBLING_CANDIDATE_NAME: &str = "specs.md";
+
+// Stale-directory reference fixture (the motivating real-errors case): the
+// prompt references `features/2026-06-21-opencode-log-fix/spec.md`, but the
+// real sibling under the nearest existing ancestor (`features/`) is
+// `features/2026-06-28-real-errors/spec.md`. The render-time suggestion logic
+// walks up from the missing parent to `features/`, enumerates sibling
+// directories, requires `spec.md` to exist inside a candidate, and ranks by
+// directory-name similarity — so the rendered report should append a
+// "Did you mean?" section naming the relative path `2026-06-28-real-errors/spec.md`.
+const STALE_DIRECTORY_REFERENCE: &str = "---\nagent: \"codex\"\nspec: \"features/2026-06-21-opencode-log-fix/spec.md\"\niteration: \"{{ frontmatter(spec, 'review_iterations') ? frontmatter(spec, 'review_iterations') : 1 }}\"\n---\n# Body\n";
+
+// Real on-disk sibling for the stale-directory reference above. The dated
+// folder name is dissimilar enough from the missing segment that the strict
+// filename gate would reject it; leaf-existence (`spec.md` inside the folder)
+// is the quality signal that lets the suggestion through.
+const STALE_DIRECTORY_FIXTURE_REL: &str = "features/2026-06-28-real-errors/spec.md";
+
+// Rendered form of the suggestion (relative to the nearest existing ancestor).
+const STALE_DIRECTORY_SUGGESTION: &str = "2026-06-28-real-errors/spec.md";
 
 /// Level-2 capture for the invalid-file-reference report (the real-errors
 /// reference failure): drives `md compose` against a fixture whose `iteration`
@@ -416,6 +491,78 @@ fn level2_invalid_file_reference_renders_headline_excerpt_and_osc8_link() {
     );
 }
 
+/// Level-2 capture proving the focused excerpt surfaces the `$schema` structural
+/// parent when the document declares one (real-errors spec): drives `md compose`
+/// against a fixture whose top-level `iteration` interpolation fails (file
+/// reference) AND whose `$schema:` block types `spec`/`iteration`. Frontmatter
+/// interpolation runs before schema validation, so the file-reference error wins;
+/// because the `$schema:` block is present, the focused excerpt unions the
+/// involved keys' `$schema`-nested paths and shows the `$schema:` parent while
+/// excluding the unrelated `agent:` key. Mirrors the Claudine CLI
+/// `level2_invalid_file_reference_excerpt_includes_schema_parent_in_tmux` test so
+/// the report is proven identical through BOTH binaries.
+#[test]
+#[serial(level2_terminal)]
+fn level2_invalid_file_reference_excerpt_includes_schema_parent() {
+    let Some((frame, canonical)) =
+        run_md_compose_named("schema-ref.md", INVALID_FILE_REFERENCE_WITH_SCHEMA)
+    else {
+        return;
+    };
+
+    // Root cause still wins over the `$schema` type specs (interpolation runs
+    // before schema validation in the compose pipeline).
+    assert!(
+        frame.plain.contains("invalid file path"),
+        "expected root-cause headline 'invalid file path'. plain:\n{}",
+        frame.plain
+    );
+
+    // The focused excerpt surfaces the `$schema` structural parent plus the
+    // involved keys. `$schema:` proves the parent block is shown; `spec:` and
+    // `iteration:` are the involved keys (present both top-level and under the
+    // `$schema` parent — the excerpt unions whichever paths resolve).
+    for needle in ["$schema:", "spec:", "iteration:"] {
+        assert!(
+            frame.plain.contains(needle),
+            "focused excerpt missing {needle:?}. plain:\n{}",
+            frame.plain
+        );
+    }
+
+    // The unrelated `agent:` key must be excluded from the focused excerpt.
+    // Assert against the YAML excerpt key form (`agent:` with colon), not the
+    // bare word, so incidental prose mentioning `agent` would not fail the test.
+    assert!(
+        !frame.plain.contains("agent:"),
+        "unrelated key 'agent:' leaked into the focused excerpt. plain:\n{}",
+        frame.plain
+    );
+
+    // OSC8 hyperlink to the prompt file. macOS aliases `/var` to `/private/var`;
+    // accept either spelling.
+    let canonical_url = format!("file://{}", canonical.to_string_lossy());
+    let aliased_url = canonical_url.replacen("file:///private", "file://", 1);
+    let osc8_canonical = format!("\x1b]8;;{}", canonical_url);
+    let osc8_aliased = format!("\x1b]8;;{}", aliased_url);
+    assert!(
+        frame.raw.contains(&osc8_canonical) || frame.raw.contains(&osc8_aliased),
+        "expected OSC8 hyperlink for {canonical_url} (or aliased {aliased_url}). raw:\n{}",
+        frame.raw
+    );
+    assert!(
+        frame.plain.contains("schema-ref.md"),
+        "expected the linked prompt filename. plain:\n{}",
+        frame.plain
+    );
+
+    assert!(
+        frame.raw.contains('\u{1b}'),
+        "schema-parent report should carry styling through the real terminal. raw:\n{}",
+        frame.raw
+    );
+}
+
 /// Level-2 capture for the file-reference "Did you mean?" suggestion path: drives
 /// `md compose` against a fixture that references a missing `spec.md` while a real
 /// near-miss sibling (`specs.md`) sits next to the prompt, captures the live pane,
@@ -452,6 +599,57 @@ fn level2_invalid_file_reference_renders_did_you_mean_suggestion() {
     assert!(
         frame.plain.contains(SIBLING_CANDIDATE_NAME),
         "expected the candidate filename {SIBLING_CANDIDATE_NAME:?} in the suggestions. plain:\n{}",
+        frame.plain
+    );
+
+    assert!(
+        frame.raw.contains('\u{1b}'),
+        "suggestion report should carry styling through the real terminal. raw:\n{}",
+        frame.raw
+    );
+}
+
+/// Level-2 capture for the file-reference "Did you mean?" suggestion on the
+/// STALE-DIRECTORY shape: drives `md compose` against a fixture whose `spec:`
+/// references `features/2026-06-21-opencode-log-fix/spec.md` (a stale dated
+/// directory) while the real sibling `features/2026-06-28-real-errors/spec.md`
+/// lives under the nearest existing ancestor (`features/`). Captures the live
+/// pane and verifies the rendered report appends a "Did you mean?" section
+/// naming the suggested relative path `2026-06-28-real-errors/spec.md`. Mirrors
+/// the Claudine CLI `level2_stale_directory_reference_renders_did_you_mean_in_tmux`
+/// test so the suggestion is proven identical through both binaries (real-errors
+/// spec requirement).
+#[test]
+#[serial(level2_terminal)]
+fn level2_stale_directory_reference_renders_did_you_mean_suggestion() {
+    let Some((frame, _)) = run_md_compose_with_nested_siblings(
+        "stale-dir-ref.md",
+        STALE_DIRECTORY_REFERENCE,
+        &[(STALE_DIRECTORY_FIXTURE_REL, "siblings: []\n")],
+    ) else {
+        return;
+    };
+
+    // Same authoring-fatal headline — the suggestion is an addition to the
+    // report, not a replacement for the root cause.
+    assert!(
+        frame.plain.contains("invalid file path"),
+        "expected root-cause headline 'invalid file path'. plain:\n{}",
+        frame.plain
+    );
+
+    // The "Did you mean?" section header survives to the rendered pane.
+    assert!(
+        frame.plain.contains("Did you mean?"),
+        "expected the 'Did you mean?' suggestions section. plain:\n{}",
+        frame.plain
+    );
+
+    // The relative path of the real sibling (sibling_dir/leaf) is named as a
+    // candidate.
+    assert!(
+        frame.plain.contains(STALE_DIRECTORY_SUGGESTION),
+        "expected the candidate relative path {STALE_DIRECTORY_SUGGESTION:?} in the suggestions. plain:\n{}",
         frame.plain
     );
 
