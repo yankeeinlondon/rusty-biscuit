@@ -262,6 +262,118 @@ Plan for {{count}}.
 }
 
 // ============================================================================
+// SchemaParse focused excerpt + OSC8 link (real-errors review-2 medium)
+// ============================================================================
+
+#[cfg(unix)]
+#[test]
+fn compose_schema_grammar_error_reports_invalid_schema_without_launching_provider() {
+    // A bad constraint separator (`,` instead of `;`) in the `$schema.spec`
+    // type-and-constraint string is a grammar error. It must surface as the
+    // typed `invalid schema` report (not a path-focused `schema load failed`),
+    // name the offending property, and never launch the provider.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let count_path = workspace.path().join("call-count.txt");
+
+    let md_file = workspace.path().join("plan.md");
+    fs::write(
+        &md_file,
+        "---\n$schema:\n    spec: file(required, match(**/*spec*.md))\nspec: \"x\"\n---\nPlan.\n",
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\necho touched >> {count}\nexit 0\n",
+            count = count_path.display()
+        ),
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("invalid schema"),
+        "expected the `invalid schema` (SchemaParse) header; stderr:\n{plain}"
+    );
+    assert!(
+        plain.contains("spec"),
+        "expected the offending property name `spec`; stderr:\n{plain}"
+    );
+    assert!(
+        !plain.to_lowercase().contains("schema load failed"),
+        "grammar error must not collapse into path-focused `schema load failed`; stderr:\n{plain}"
+    );
+    assert!(
+        !count_path.exists(),
+        "no provider session should have been launched on a schema parse error"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_schema_grammar_error_force_color_highlights_line_and_links_file() {
+    // With color forced on (optimistic terminal), the SchemaParse report must
+    // append the frontmatter excerpt with the offending `$schema.spec` line
+    // highlighted and an OSC8 link to the prompt file. The excerpt is TTY-gated
+    // but `FORCE_COLOR=1` lifts the gate even under a piped stderr.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("plan.md");
+    fs::write(
+        &md_file,
+        "---\n$schema:\n    spec: file(required, match(**/*spec*.md))\nspec: \"x\"\n---\nPlan.\n",
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\ncat > /dev/null\nexit 0\n",
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env_remove("NO_COLOR")
+        .env("FORCE_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    // The appended YAML excerpt reproduces the offending frontmatter line.
+    assert!(
+        plain.contains("spec: file(required, match(**/*spec*.md))"),
+        "expected the appended frontmatter excerpt with the offending line; stderr:\n{plain}"
+    );
+    // OSC8 hyperlink wrapping the prompt path survives under FORCE_COLOR.
+    assert!(
+        stderr.contains("\u{1b}]8;;"),
+        "expected an OSC8 link to the prompt file under FORCE_COLOR; raw stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("plan.md"),
+        "expected the prompt file name in the linked report; raw stderr:\n{stderr}"
+    );
+}
+
+// ============================================================================
 // Composition-tolerant pre-validation (review-3 regression)
 // ============================================================================
 
