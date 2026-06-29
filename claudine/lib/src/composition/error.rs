@@ -2812,6 +2812,7 @@ impl Diagnostic for CompositionError {
             | CompositionError::LifecycleWrongArity { .. }
             | CompositionError::LifecycleActionPlacement { .. }
             | CompositionError::LifecycleActionOrder { .. }
+            | CompositionError::LifecycleMultipleLifecycleActions { .. }
             | CompositionError::LifecycleInvalidArgs { .. }
             | CompositionError::LifecycleErrNotAvailable { .. }
             | CompositionError::LifecycleEvaluationError { .. } => "composition.lifecycle_invalid",
@@ -2915,12 +2916,15 @@ impl Diagnostic for CompositionError {
                     json!(missing.iter().map(|p| p.name.clone()).collect::<Vec<_>>());
                 base["pointer_paths"] = json!(pointer_paths);
             }
-            // `composition.frontmatter_parse` declares `source_path`. The
-            // typed `MarkdownError` does not expose a path uniformly here, so
-            // the key projects as `null`.
-            // `composition.shell_expansion` declares `command`.
-            CompositionError::ShellExpansionFailed { source_path, .. } => {
-                base["command"] = json!(source_path.to_string_lossy());
+            // `composition.shell_expansion` declares `command`: the failed
+            // authored shell command, NOT the Markdown source path. Most
+            // `ShellExpansionError` variants carry it; the command-less variants
+            // (`ParseDirective`, `PolicyIo`, `Preflight`) leave the seeded
+            // `null` in place rather than substitute the file path.
+            CompositionError::ShellExpansionFailed { error, .. } => {
+                if let Some(command) = error.command() {
+                    base["command"] = json!(command);
+                }
             }
             // `io.write_failed` declares `path`.
             CompositionError::AtomicWriteFailed { path, .. } => {
@@ -2986,7 +2990,12 @@ impl Diagnostic for CompositionError {
             CompositionError::LifecycleSayConflict(property)
             | CompositionError::LifecycleUnknownEffect(property, _)
             | CompositionError::LifecycleInterpolationLeak { property, .. }
-            | CompositionError::LifecycleUndefinedVariable { property, .. } => {
+            | CompositionError::LifecycleUndefinedVariable { property, .. }
+            // These two cardinality errors carry no dedicated `message` field,
+            // so synthesize one from the `#[error]` rendering like the other
+            // message-less lifecycle variants above.
+            | CompositionError::LifecycleActionOrder { property, .. }
+            | CompositionError::LifecycleMultipleLifecycleActions { property, .. } => {
                 base["property"] = json!(property);
                 base["message"] = json!(self.to_string());
             }
@@ -3950,6 +3959,47 @@ mod tests {
         );
     }
 
+    #[test]
+    fn shell_expansion_detail_command_is_the_failed_command_not_source_path() {
+        // `composition.shell_expansion` declares `command`. A handler reading
+        // `detail["command"]` must get the authored shell command, never the
+        // Markdown source path. `shell_expansion_failed_err` carries
+        // `command: "cmd-that-fails"` and `source_path: "prompts/test.md"`.
+        let detail = shell_expansion_failed_err().detail();
+        assert_eq!(
+            detail["command"],
+            json!("cmd-that-fails"),
+            "command must project the failed command, got: {detail}"
+        );
+    }
+
+    #[test]
+    fn shell_expansion_detail_command_is_null_for_command_less_variant() {
+        // `ParseDirective` carries no command, so `command` stays the seeded
+        // JSON null rather than falling back to the source path.
+        use darkmatter::markdown::compose::ShellCommandOrigin;
+
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            PathBuf::from("/repo/prompts/test.md"),
+            PathBuf::from("prompts/test.md"),
+            "---\ntitle: Test\n---\n",
+        );
+        let err = CompositionError::ShellExpansionFailed {
+            source_path: PathBuf::from("prompts/test.md"),
+            error: Box::new(ShellExpansionError::ParseDirective {
+                ctx: Box::new(ctx),
+                origin: ShellCommandOrigin::Body { line: 1 },
+                message: "bad directive".to_string(),
+            }),
+        };
+        let detail = err.detail();
+        assert_eq!(
+            detail["command"],
+            Value::Null,
+            "command-less variant must leave `command` as JSON null, got: {detail}"
+        );
+    }
+
     // -------------------------------------------------------------------------
     // New lifecycle action form errors (Phase 2)
     // -------------------------------------------------------------------------
@@ -4022,6 +4072,52 @@ mod tests {
         let rendered = err.to_string();
         assert!(rendered.contains("set_frontmatter"), "got: {rendered}");
         assert!(rendered.contains("expected 3 arguments"), "got: {rendered}");
+    }
+
+    #[test]
+    fn lifecycle_multiple_actions_code_is_lifecycle_invalid() {
+        // Regression: this cardinality variant used to fall through code()'s
+        // catch-all to `composition.failed`, diverging from its sibling
+        // `LifecycleActionOrder` which already mapped to the lifecycle family.
+        let err = CompositionError::LifecycleMultipleLifecycleActions {
+            source_path: PathBuf::from("prompts/plan.md"),
+            property: "start".to_string(),
+        };
+        assert_eq!(err.code(), "composition.lifecycle_invalid");
+    }
+
+    #[test]
+    fn lifecycle_multiple_actions_detail_projects_property_and_message() {
+        let err = CompositionError::LifecycleMultipleLifecycleActions {
+            source_path: PathBuf::from("prompts/plan.md"),
+            property: "start".to_string(),
+        };
+        let detail = err.detail();
+        assert_eq!(
+            detail["property"],
+            json!("start"),
+            "property must project the offending event name, got: {detail}"
+        );
+        // No dedicated `message` field on this variant, so the synthesized
+        // value must be a present, non-null string.
+        assert!(
+            detail["message"].is_string(),
+            "message must be a present non-null string, got: {detail}"
+        );
+    }
+
+    #[test]
+    fn lifecycle_action_order_detail_projects_property_and_message() {
+        // The named counterpart in the review: it too lacked an explicit
+        // detail() arm and only got `property: null`. Guard it per-variant.
+        let err = CompositionError::LifecycleActionOrder {
+            source_path: PathBuf::from("prompts/plan.md"),
+            property: "start".to_string(),
+        };
+        assert_eq!(err.code(), "composition.lifecycle_invalid");
+        let detail = err.detail();
+        assert_eq!(detail["property"], json!("start"), "got: {detail}");
+        assert!(detail["message"].is_string(), "got: {detail}");
     }
 
     #[test]

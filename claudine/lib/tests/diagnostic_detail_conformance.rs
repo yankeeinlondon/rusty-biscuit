@@ -20,12 +20,14 @@
 
 use std::path::PathBuf;
 
+use biscuit_terminal::errors::SourceContext;
 use claudine::adapters::AdapterError;
 use claudine::composition::{CompositionError, MissingProperty};
 use claudine::diagnostics::{Diagnostic, code_spec};
 use claudine::error::ClaudineError;
 use claudine::harness::error::HarnessError;
 use claudine::provider::Provider;
+use darkmatter::markdown::compose::{ShellCommandOrigin, ShellExpansionError};
 use serde_json::Value;
 
 /// Assert that `err.detail()` is a JSON object that carries every field the
@@ -150,10 +152,19 @@ fn composition_representatives() -> Vec<CompositionError> {
             frontmatter_description: None,
             pointer_paths: vec![],
         },
-        // composition.shell_expansion is covered by the HarnessError
-        // representative below (its `command` projection); CompositionError's
-        // ShellExpansionFailed needs a heavy SourceContext fixture, so it is
-        // omitted here — the code family is already asserted.
+        // composition.shell_expansion (command-carrying variant)
+        CompositionError::ShellExpansionFailed {
+            source_path: PathBuf::from("p.md"),
+            error: Box::new(ShellExpansionError::Denied {
+                ctx: Box::new(SourceContext::new(
+                    PathBuf::from("/repo/p.md"),
+                    PathBuf::from("p.md"),
+                    "---\ntitle: Test\n---\n# Body\n\n::shell \"rm -rf /\"\n",
+                )),
+                command: "rm -rf /".to_string(),
+                origin: ShellCommandOrigin::Body { line: 6 },
+            }),
+        },
         // io.write_failed (atomic write)
         CompositionError::AtomicWriteFailed {
             path: PathBuf::from("p.md"),
@@ -166,6 +177,19 @@ fn composition_representatives() -> Vec<CompositionError> {
             source_file: PathBuf::from("p.md"),
             unknown_field: None,
             expected_fields: vec![],
+        },
+        // composition.lifecycle_invalid (cardinality: more than one control action).
+        // Per-variant representative — these message-less lifecycle variants were
+        // previously unwired from code()/detail() and fell through to the
+        // catch-all; cover them explicitly, not just one family representative.
+        CompositionError::LifecycleMultipleLifecycleActions {
+            source_path: PathBuf::from("p.md"),
+            property: "start".to_string(),
+        },
+        // composition.lifecycle_invalid (cardinality: control action not last)
+        CompositionError::LifecycleActionOrder {
+            source_path: PathBuf::from("p.md"),
+            property: "start".to_string(),
         },
         // composition.failed (catch-all)
         CompositionError::NoRunnableProviders,
