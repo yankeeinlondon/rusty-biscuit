@@ -24,7 +24,7 @@ success:
               - effect: small-group-cheer
         - when: "frontmatter(review_file,'ready') != true"
           action:
-              - stderr: "{{feature_or_fix}} review {{iteration}} in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready"
+              - warn: "{{feature_or_fix}} review {{iteration}} in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready"
               - message: "⚠️  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed but was deemed NOT production ready"
               - effect: small-group-cheer
 failure:
