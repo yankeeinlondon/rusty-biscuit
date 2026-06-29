@@ -79,23 +79,23 @@ fn complete_subcommand_drives_dynamic_completion() {
 }
 
 // ----------------------------------------------------------------------
-// @-sigil stripping
+// @-sigil kept; filename-only render
 // ----------------------------------------------------------------------
 
 #[test]
-fn magic_at_inserts_relative_path_without_sigil() {
-    let ws = TestWorkspace::named("contract-magic-strips-sigil");
+fn magic_at_inserts_filename_with_sigil() {
+    let ws = TestWorkspace::named("contract-magic-keeps-sigil");
     seed_cargo_workspace(ws.path(), &["pkg"]);
     write_file(&ws.path().join("prompts").join("review.md"), "# Review\n");
 
     let got = run_complete(ws.path(), &["compose", "@rev"]);
     assert!(
-        got.iter().any(|c| c == "prompts/review.md"),
-        "@ magic must resolve to a concrete relative path; got: {got:?}"
+        got.iter().any(|c| c == "@review.md"),
+        "@ magic must keep the sigil and render the filename; got: {got:?}"
     );
     assert!(
-        !got.iter().any(|c| c.starts_with('@')),
-        "no emitted candidate may retain the @ sigil; got: {got:?}"
+        got.iter().all(|c| c.starts_with('@') && !c.contains('/')),
+        "every magic candidate must be `@<basename>`; got: {got:?}"
     );
 }
 
