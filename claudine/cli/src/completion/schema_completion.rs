@@ -33,6 +33,7 @@ use darkmatter::markdown::schemas::{
 use super::default_glob;
 use super::fuzzy;
 use super::scopes::{self, ScopeContext};
+use super::walker;
 
 /// Resolve `file_arg` to a loaded [`EffectiveSchema`].
 ///
@@ -422,10 +423,7 @@ fn file_candidates(
     if patterns.is_empty() {
         // Bare `file` / `file[]` falls back to the default markdown glob.
         let candidates = default_glob::default_markdown_candidates_filtered(ctx, |path| {
-            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-                return false;
-            };
-            active.is_empty() || fuzzy::fuzzy_match(name, &active)
+            active.is_empty() || rel_or_name_matches(path, &base, &active)
         });
         for path in candidates {
             let Ok(rel) = path.strip_prefix(&base) else {
@@ -458,6 +456,7 @@ fn file_candidates(
         .hidden(true)
         .git_ignore(true)
         .require_git(false)
+        .filter_entry(walker::entry_passes_filters)
         .build();
     for entry in walker.flatten() {
         let path = entry.path();
@@ -477,7 +476,11 @@ fn file_candidates(
         if !matcher.is_match(rel_str, file_name) {
             continue;
         }
-        if !active.is_empty() && !fuzzy::fuzzy_match(file_name, &active) {
+        // Filter the typed partial against the repo-relative path, not the
+        // basename: `match(...)` candidates routinely share a basename
+        // (e.g. every `**/*spec*.md` hit is `spec.md`), so only path-fragment
+        // matching lets the user narrow by directory.
+        if !active.is_empty() && !contains_ci(rel_str, &active) {
             continue;
         }
         if !excluded.is_empty() && excluded.contains(rel_str) {
@@ -524,6 +527,7 @@ pub(crate) fn file_candidate_paths(patterns: &[String], ctx: &ScopeContext) -> V
         .hidden(true)
         .git_ignore(true)
         .require_git(false)
+        .filter_entry(walker::entry_passes_filters)
         .build();
     for entry in walker.flatten() {
         let path = entry.path();
@@ -547,6 +551,33 @@ pub(crate) fn file_candidate_paths(patterns: &[String], ctx: &ScopeContext) -> V
     }
     out.sort();
     out
+}
+
+/// Case-insensitive substring test.
+///
+/// The typed partial is applied as a `*active*` filter — it may appear
+/// anywhere in the candidate path — matching the ENTER-autocomplete `*query*`
+/// contract rather than a fuzzy subsequence.
+fn contains_ci(haystack: &str, needle: &str) -> bool {
+    haystack
+        .to_ascii_lowercase()
+        .contains(&needle.to_ascii_lowercase())
+}
+
+/// Substring-match `active` against `path`'s repo-relative form (falling back
+/// to the basename when `path` is not under `base`).
+///
+/// Used by the bare-`file` default-glob branch so it filters on the same
+/// repo-relative path the match-glob branch does — what the user types is a
+/// fragment of the path that will be inserted, and shared basenames make
+/// basename-only matching useless for `file(match(...))` candidates.
+fn rel_or_name_matches(path: &Path, base: &Path, active: &str) -> bool {
+    let target = path
+        .strip_prefix(base)
+        .ok()
+        .and_then(|rel| rel.to_str())
+        .or_else(|| path.file_name().and_then(|n| n.to_str()));
+    target.is_some_and(|t| contains_ci(t, active))
 }
 
 /// Normalize a value partial by stripping surrounding quotes and the `@`
@@ -954,6 +985,117 @@ mod tests {
         assert!(
             !got.iter().any(|c| c.contains("other.jpg")),
             "non-matching extension must be filtered: {got:?}"
+        );
+    }
+
+    #[test]
+    fn property_value_match_pattern_excludes_underscore_dirs_and_files() {
+        // Regression: a `file(match(...))` property walked the repo with a
+        // bespoke `WalkBuilder` that honored only `.hidden`/gitignore, so
+        // `_`-prefixed archive directories (`_completed/`, `_unscheduled/`)
+        // and `_`-prefixed files leaked into completion. The match path must
+        // share the scope walker's `_`-prefix exclusion.
+        let effective = effective_from_doc(concat!(
+            "---\n",
+            "$schema:\n",
+            "  spec: \"file(match('**/*spec*.md'))\"\n",
+            "---\nbody\n",
+        ));
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        write(
+            &tmp.path().join("features").join("live").join("spec.md"),
+            "# live\n",
+        );
+        write(
+            &tmp.path()
+                .join("features")
+                .join("_completed")
+                .join("done")
+                .join("spec.md"),
+            "# done\n",
+        );
+        write(&tmp.path().join("_draft-spec.md"), "# draft\n");
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = property_value(&effective, "spec", "", &ctx);
+        assert!(
+            got.iter().any(|c| c == "spec='features/live/spec.md'"),
+            "live spec must surface: {got:?}"
+        );
+        assert!(
+            !got.iter().any(|c| c.contains("_completed")),
+            "_completed dir must be elided from match path: {got:?}"
+        );
+        assert!(
+            !got.iter().any(|c| c.contains("_draft-spec.md")),
+            "_-prefixed file must be elided from match path: {got:?}"
+        );
+    }
+
+    #[test]
+    fn property_value_match_pattern_filters_by_path_substring() {
+        // The typed partial is a `*active*` substring filter over the
+        // repo-relative path, so a directory fragment narrows candidates that
+        // share a basename (`spec.md`).
+        let effective = effective_from_doc(concat!(
+            "---\n",
+            "$schema:\n",
+            "  spec: \"file(match('**/*spec*.md'))\"\n",
+            "---\nbody\n",
+        ));
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        write(
+            &tmp.path().join("features").join("realwork").join("spec.md"),
+            "# r\n",
+        );
+        write(
+            &tmp.path().join("features").join("other").join("spec.md"),
+            "# o\n",
+        );
+        let ctx = ScopeContext::discover_from(tmp.path());
+
+        let got = property_value(&effective, "spec", "real", &ctx);
+        assert_eq!(
+            got,
+            vec!["spec='features/realwork/spec.md'".to_string()],
+            "partial must filter by directory substring, not basename: {got:?}"
+        );
+
+        // Case-insensitive.
+        let got_upper = property_value(&effective, "spec", "REAL", &ctx);
+        assert_eq!(got_upper, got, "substring filter must be case-insensitive");
+
+        // A fragment matching no path returns nothing.
+        assert!(property_value(&effective, "spec", "zzz", &ctx).is_empty());
+    }
+
+    #[test]
+    fn file_candidate_paths_match_pattern_excludes_underscore_dirs() {
+        // The ENTER-path chooser shares the same exclusion contract.
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        write(
+            &tmp.path().join("features").join("live").join("spec.md"),
+            "# live\n",
+        );
+        write(
+            &tmp.path()
+                .join("features")
+                .join("_completed")
+                .join("spec.md"),
+            "# done\n",
+        );
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = file_candidate_paths(&["**/*spec*.md".to_string()], &ctx);
+        assert!(
+            got.iter().any(|p| p.ends_with("features/live/spec.md")),
+            "live spec must surface: {got:?}"
+        );
+        assert!(
+            !got.iter()
+                .any(|p| p.components().any(|c| c.as_os_str() == "_completed")),
+            "_completed dir must be elided from ENTER-path match walk: {got:?}"
         );
     }
 

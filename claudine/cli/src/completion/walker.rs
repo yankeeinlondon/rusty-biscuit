@@ -210,7 +210,12 @@ where
 /// Applied to every entry including the scope root. Depth 0 (the scope
 /// root) is always retained so the walker can descend; all other entries
 /// are tested against the `_`-prefix convention and the curated skip list.
-fn entry_passes_filters(entry: &DirEntry) -> bool {
+///
+/// Exposed so the schema `match(...)` file-completion path can share the
+/// exact same `_`-prefix and [`SKIP_DIRS`] exclusion as the scope walker
+/// (it walks the repo with its own glob-matching `WalkBuilder` rather than
+/// through [`walk_scope`], but the exclusion contract must be identical).
+pub(crate) fn entry_passes_filters(entry: &DirEntry) -> bool {
     if entry.depth() == 0 {
         return true;
     }

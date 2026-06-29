@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use ignore::{DirEntry, WalkBuilder};
 
 use super::scopes::{self, ComposeMode, ScopeContext, ScopeKind};
-use super::walker::{MAX_CANDIDATES, SKIP_DIRS};
+use super::walker::{self, MAX_CANDIDATES};
 
 /// Gather markdown candidates from the default glob.
 ///
@@ -108,22 +108,11 @@ fn prompt_dirs(ctx: &ScopeContext) -> HashSet<PathBuf> {
 
 /// Entry filter used by the default-glob walker.
 ///
-/// Depth 0 (the walk root) is always retained. All other entries must pass
-/// the `_`-prefix gate, the curated skip list, and must not sit inside an
-/// excluded prompt directory.
+/// Shares the `_`-prefix and curated-skip-list exclusion with the scope
+/// walker via [`walker::entry_passes_filters`], then adds the default-glob-only
+/// rule that an entry must not sit inside an excluded prompt directory.
 fn passes_default_filters(entry: &DirEntry, excluded: &HashSet<PathBuf>) -> bool {
-    if entry.depth() == 0 {
-        return true;
-    }
-    let Some(name) = entry.file_name().to_str() else {
-        // Non-UTF-8 names are rare; let the extension check downstream
-        // reject them rather than masking broken filesystems here.
-        return true;
-    };
-    if name.starts_with('_') {
-        return false;
-    }
-    if SKIP_DIRS.contains(&name) {
+    if !walker::entry_passes_filters(entry) {
         return false;
     }
     let path = entry.path();
