@@ -22,7 +22,7 @@ fn map_load_error(path: &Path, err: MarkdownError) -> CompositionError {
         | MarkdownError::FrontmatterFenceMismatch { .. } => CompositionError::FrontmatterParse(err),
         other => CompositionError::MarkdownLoad {
             path: path.to_path_buf(),
-            source: MarkdownLoadCause::Parse(other),
+            source: MarkdownLoadCause::Parse(Box::new(other)),
         },
     }
 }
@@ -302,7 +302,7 @@ mod tests {
             MarkdownLoadCause::Parse(md_err) => md_err,
             other => panic!("expected Parse cause, got: {other:?}"),
         };
-        assert!(matches!(parsed, MarkdownError::AstParse(_)));
+        assert!(matches!(**parsed, MarkdownError::AstParse(_)));
     }
 
     #[test]

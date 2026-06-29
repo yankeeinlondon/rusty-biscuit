@@ -137,7 +137,7 @@ fn resolve_sequence_source(file_ref: &str) -> Result<ResolvedCompositionSource, 
         frontmatter.insert(key, value.clone()).map_err(|e| {
             CompositionError::MarkdownLoad {
                 path: resolved_path.clone(),
-                source: MarkdownLoadCause::Parse(e),
+                source: MarkdownLoadCause::Parse(Box::new(e)),
             }
         })?;
     }

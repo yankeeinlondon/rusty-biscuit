@@ -1262,8 +1262,12 @@ pub enum MarkdownLoadCause {
     #[error(transparent)]
     Read(#[from] std::io::Error),
     /// A non-frontmatter Markdown parse failure.
+    ///
+    /// Boxed to keep `MarkdownLoadCause` (and thus the `MarkdownLoad`
+    /// `Err` variant) small — `MarkdownError` is the heavy member here,
+    /// mirroring how `MarkdownError` itself boxes its own large children.
     #[error(transparent)]
-    Parse(#[from] MarkdownError),
+    Parse(#[from] Box<MarkdownError>),
     /// A YAML load/convert failure (CLI sequence YAML path).
     #[error(transparent)]
     Yaml(#[from] biscuit_file::YamlError),
