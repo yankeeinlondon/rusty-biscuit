@@ -13,7 +13,10 @@ use chrono::{DateTime, Utc};
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
 
-use darkmatter::markdown::compose::expression::ExpressionError;
+use darkmatter::markdown::compose::expression::file_suggestions::DEFAULT_MAX_SUGGESTIONS;
+use darkmatter::markdown::compose::expression::{
+    ExpressionError, FileRefFailure, FileReferenceDiagnostic, suggest_sibling_files,
+};
 use serde_json::{Value, json};
 
 use super::frontmatter_excerpt::FrontmatterExcerpt;
@@ -211,8 +214,20 @@ pub enum CompositionError {
     InlineHashMalformed(#[source] MarkdownError),
 
     /// Atomic file write failed during inline composition.
-    #[error("atomic write failed: {0}")]
-    AtomicWriteFailed(String),
+    ///
+    /// Carries the file path and the typed [`crate::error::ClaudineError`]
+    /// source (boxed because `ClaudineError` can itself contain a
+    /// `CompositionError`, which would otherwise make the type infinitely
+    /// sized) so the path and underlying cause reach the CLI walker instead of
+    /// being flattened to a string.
+    #[error("atomic write to {path} failed: {source}")]
+    AtomicWriteFailed {
+        /// The file whose atomic write failed.
+        path: PathBuf,
+        /// The underlying typed write failure.
+        #[source]
+        source: Box<crate::error::ClaudineError>,
+    },
 
     /// The composition target file lacks required read/write permissions.
     #[error("insufficient file permissions (need read+write): {0}")]
@@ -1558,6 +1573,15 @@ impl CompositionError {
             FrontmatterHighlight::Property(property) => {
                 FrontmatterExcerpt::capture(source_text, Some(&property), stderr_is_tty)
             }
+            FrontmatterHighlight::SchemaSpan {
+                property,
+                span_start,
+            } => FrontmatterExcerpt::capture_schema_span(
+                source_text,
+                property.as_deref(),
+                span_start,
+                stderr_is_tty,
+            ),
             FrontmatterHighlight::BlockOnly => {
                 FrontmatterExcerpt::capture(source_text, None, stderr_is_tty)
             }
@@ -1631,11 +1655,25 @@ impl CompositionError {
             CompositionError::SchemaLoad { .. } => {
                 Some(FrontmatterHighlight::Property("$schema".to_string()))
             }
-            CompositionError::SchemaParse { property, .. } => match property {
-                // Highlight the specific schema property line when the typed
-                // cause names one; otherwise fall back to the `$schema` parent.
-                Some(prop) => Some(FrontmatterHighlight::Property(format!("$schema.{prop}"))),
-                None => Some(FrontmatterHighlight::Property("$schema".to_string())),
+            CompositionError::SchemaParse {
+                property, span, ..
+            } => match span {
+                // A grammar `span` lets the excerpt land on the exact line of a
+                // multi-line schema value; the property name scopes it to the
+                // right `$schema.<prop>` entry (or the `$schema` parent when the
+                // failure is structural and carries no real property name).
+                Some(range) => Some(FrontmatterHighlight::SchemaSpan {
+                    property: property
+                        .as_deref()
+                        .map(|prop| format!("$schema.{prop}")),
+                    span_start: range.start,
+                }),
+                // Convert / shape failures carry no span; highlight the property
+                // line when named, else the `$schema` parent.
+                None => match property {
+                    Some(prop) => Some(FrontmatterHighlight::Property(format!("$schema.{prop}"))),
+                    None => Some(FrontmatterHighlight::Property("$schema".to_string())),
+                },
             },
             CompositionError::InlineHashMalformed(_) => {
                 Some(FrontmatterHighlight::Property("hash".to_string()))
@@ -1679,6 +1717,14 @@ enum FrontmatterHighlight {
     Property(String),
     /// Highlight a 1-based document line (used for delimiter-level errors).
     Line(usize),
+    /// Highlight a schema property whose type-and-constraint string failed to
+    /// parse, using the grammar `span` to land on the right line of a multi-line
+    /// value. `property` is the dotted key (`None` for whole-shape failures);
+    /// `span_start` is the byte offset into the property's type string.
+    SchemaSpan {
+        property: Option<String>,
+        span_start: usize,
+    },
     /// Show the frontmatter block with no line highlighted.
     BlockOnly,
 }
@@ -2209,8 +2255,10 @@ impl BlockError for CompositionError {
                 source_path,
                 property,
                 message,
-                // The span feeds the focused frontmatter excerpt rather than the
-                // block body; the body names the property and the typed message.
+                // The span drives the appended frontmatter excerpt's highlight
+                // line (see `frontmatter_block_spec` → `SchemaSpan`), not the
+                // block body; the body names the property and the typed message
+                // and OSC8-links the prompt file via `render_file_link`.
                 span: _,
             } => {
                 let file_link = render_file_link(source_path);
@@ -2700,6 +2748,38 @@ fn compose_failed_code(md: &MarkdownError) -> &'static str {
     }
 }
 
+/// Build the `composition.invalid_file_reference` `detail` payload from a
+/// [`FileReferenceDiagnostic`].
+///
+/// Emits exactly the field set the registry declares (`reference`, `kind`,
+/// `base_dir`, `suggestions`, `fallback_dir`). `kind` is the catalog snake_case
+/// slug, never the `Debug` form. `suggestions` reuses the **same** render-time
+/// did-you-mean computation as the interpolation block (a missing reference,
+/// `base_dir`-joined, ranked against its siblings) so `err.detail.suggestions`
+/// is byte-for-byte what the human report shows. `fallback_dir` is omitted (it
+/// projects to `null`) when the resolution context carried none.
+fn file_reference_detail(diagnostic: &FileReferenceDiagnostic) -> Value {
+    // Mirror the render gate (errors/blocks.rs): suggestions are computed only
+    // for a *missing* reference — a malformed/remote reference has no sibling
+    // hint, so the array stays empty rather than fabricating one.
+    let suggestions = if matches!(diagnostic.kind, FileRefFailure::NotFound) {
+        let expected = diagnostic.base_dir.join(&diagnostic.reference);
+        suggest_sibling_files(&expected, DEFAULT_MAX_SUGGESTIONS)
+    } else {
+        Vec::new()
+    };
+    json!({
+        "reference": diagnostic.reference,
+        "kind": diagnostic.kind.as_str(),
+        "base_dir": diagnostic.base_dir.to_string_lossy(),
+        "suggestions": suggestions,
+        "fallback_dir": diagnostic
+            .fallback_dir
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned()),
+    })
+}
+
 impl Diagnostic for CompositionError {
     fn code(&self) -> &'static str {
         match self {
@@ -2716,6 +2796,7 @@ impl Diagnostic for CompositionError {
             | CompositionError::SequenceMissingProperties { .. } => "composition.missing_properties",
             CompositionError::FrontmatterParse(_) => "composition.frontmatter_parse",
             CompositionError::ShellExpansionFailed { .. } => "composition.shell_expansion",
+            CompositionError::AtomicWriteFailed { .. } => "io.write_failed",
             // The lifecycle-stack family shares one authoring-error code; the
             // `variant` facet still distinguishes them for finer handlers.
             CompositionError::LifecycleInvalid { .. }
@@ -2765,11 +2846,9 @@ impl Diagnostic for CompositionError {
                 expression,
                 ..
             }) => match cause.as_ref() {
-                ExpressionError::FileReference(diagnostic) => json!({
-                    "reference": diagnostic.reference,
-                    "kind": format!("{:?}", diagnostic.kind),
-                    "base_dir": diagnostic.base_dir.to_string_lossy(),
-                }),
+                ExpressionError::FileReference(diagnostic) => {
+                    file_reference_detail(diagnostic)
+                }
                 ExpressionError::UnknownFunction { name } => json!({ "name": name }),
                 other => json!({ "expression": expression, "message": other.to_string() }),
             },
@@ -2789,6 +2868,9 @@ impl Diagnostic for CompositionError {
             } => json!({
                 "source_path": source_path.to_string_lossy(),
                 "message": message,
+            }),
+            CompositionError::AtomicWriteFailed { path, .. } => json!({
+                "path": path.to_string_lossy(),
             }),
             _ => Value::Null,
         }
@@ -2981,6 +3063,85 @@ mod tests {
         assert!(
             enriched.frontmatter_excerpt().is_some(),
             "a focused excerpt must be attached"
+        );
+    }
+
+    #[test]
+    fn enrich_schema_parse_highlights_offending_property_line() {
+        // A grammar failure attributed to `spec` (bad `,` separator) must focus
+        // the excerpt on the `$schema.spec` type-string line (line 3), not the
+        // top-level `spec` value on line 4 and not the whole block.
+        let source = source_from(
+            "---\n$schema:\n    spec: file(required, match(**/*spec*.md))\nspec: \"x\"\n---\nbody\n",
+        );
+        let err = CompositionError::SchemaParse {
+            source_path: PathBuf::from("review.md"),
+            property: Some("spec".to_string()),
+            message: "expected `;` between constraints".to_string(),
+            span: Some(14..15),
+        }
+        .enrich_frontmatter(&source, true);
+
+        let excerpt = err.frontmatter_excerpt().expect("excerpt must attach");
+        assert_eq!(
+            excerpt.highlight_line(),
+            Some(3),
+            "must highlight the `$schema.spec` type-string line"
+        );
+        assert_ne!(
+            excerpt.highlight_line(),
+            Some(4),
+            "must not highlight the unrelated top-level `spec` value line"
+        );
+    }
+
+    #[test]
+    fn enrich_schema_parse_shape_falls_back_to_schema_parent_line() {
+        // A whole-shape failure (no property, no span) highlights the `$schema`
+        // parent line (line 2).
+        let source = source_from("---\n$schema: 42\n---\nbody\n");
+        let err = CompositionError::SchemaParse {
+            source_path: PathBuf::from("review.md"),
+            property: None,
+            message: "expected mapping, got integer".to_string(),
+            span: None,
+        }
+        .enrich_frontmatter(&source, true);
+
+        let excerpt = err.frontmatter_excerpt().expect("excerpt must attach");
+        assert_eq!(excerpt.highlight_line(), Some(2));
+    }
+
+    #[test]
+    fn schema_parse_block_links_prompt_file_and_strips_when_no_color() {
+        // The rendered body OSC8-links the prompt file when color is available,
+        // and strips all escapes (no raw OSC8) at `ColorDepth::None`.
+        let err = CompositionError::SchemaParse {
+            source_path: PathBuf::from("review.md"),
+            property: Some("spec".to_string()),
+            message: "expected `;` between constraints".to_string(),
+            span: Some(14..15),
+        };
+
+        let color_term = Terminal::new_optimistic(80);
+        let linked = err.report_block_error(&color_term);
+        assert!(
+            linked.contains("\x1b]8;;"),
+            "color render must carry an OSC8 link; got: {linked:?}"
+        );
+
+        let plain_term = Terminal::builder()
+            .width(80)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+            .build();
+        let plain = err.report_block_error(&plain_term);
+        assert!(
+            !plain.contains('\x1b'),
+            "no-color render must strip escapes; got: {plain:?}"
+        );
+        assert!(
+            plain.contains("review.md"),
+            "plain render must still name the prompt file; got: {plain}"
         );
     }
 
@@ -3856,5 +4017,118 @@ mod tests {
         assert!(rendered.contains("plan"), "got: {rendered}");
         assert!(rendered.contains("500"), "got: {rendered}");
         assert!(rendered.contains("narrow"), "got: {rendered}");
+    }
+
+    /// Wrap a [`FileReferenceDiagnostic`] in the same `ComposeFailed` /
+    /// `Interpolation` shape the live compose path produces, so `detail()`
+    /// exercises the real projection.
+    fn file_ref_compose_error(diagnostic: FileReferenceDiagnostic) -> CompositionError {
+        use darkmatter::markdown::SourceRef;
+        CompositionError::ComposeFailed(MarkdownError::Interpolation {
+            key: Some("spec".to_string()),
+            expression: "frontmatter('features/spec.md')".to_string(),
+            source: Box::new(SourceRef::Effective {
+                rendered: "frontmatter('features/spec.md')".to_string(),
+                origin_key: Some("spec".to_string()),
+            }),
+            cause: Box::new(ExpressionError::FileReference(diagnostic)),
+        })
+    }
+
+    #[test]
+    fn file_reference_detail_serializes_kind_as_snake_case() {
+        // `kind` must be the catalog snake_case slug, never the Debug form.
+        for (kind, expected) in [
+            (FileRefFailure::NotFound, "not_found"),
+            (FileRefFailure::Malformed, "malformed"),
+            (FileRefFailure::FoundElsewhere, "found_elsewhere"),
+            (FileRefFailure::RemoteNotEnabled, "remote_not_enabled"),
+        ] {
+            let err = file_ref_compose_error(FileReferenceDiagnostic {
+                function: "frontmatter",
+                reference: "features/spec.md".to_string(),
+                kind,
+                base_dir: PathBuf::from("/repo"),
+                fallback_dir: None,
+                source: None,
+            });
+            let detail = err.detail();
+            assert_eq!(
+                detail["kind"],
+                json!(expected),
+                "kind must serialize snake_case, not Debug: {detail}"
+            );
+            assert_ne!(detail["kind"], json!(format!("{kind:?}")));
+        }
+    }
+
+    #[test]
+    fn file_reference_detail_emits_full_registry_field_set() {
+        let err = file_ref_compose_error(FileReferenceDiagnostic {
+            function: "frontmatter",
+            reference: "features/spec.md".to_string(),
+            kind: FileRefFailure::Malformed,
+            base_dir: PathBuf::from("/repo/area"),
+            fallback_dir: None,
+            source: None,
+        });
+        let detail = err.detail();
+        // Every field the registry declares for the code is present.
+        for field in ["reference", "kind", "base_dir", "suggestions", "fallback_dir"] {
+            assert!(
+                detail.get(field).is_some(),
+                "detail missing registry field `{field}`: {detail}"
+            );
+        }
+        assert_eq!(detail["reference"], json!("features/spec.md"));
+        assert_eq!(detail["base_dir"], json!("/repo/area"));
+        // No fallback_dir set → projects to null (the optional sentinel).
+        assert_eq!(detail["fallback_dir"], Value::Null);
+        // Malformed reference offers no sibling suggestions.
+        assert_eq!(detail["suggestions"], json!([]));
+    }
+
+    #[test]
+    fn file_reference_detail_carries_fallback_dir_when_set() {
+        let err = file_ref_compose_error(FileReferenceDiagnostic {
+            function: "frontmatter",
+            reference: "features/spec.md".to_string(),
+            kind: FileRefFailure::NotFound,
+            base_dir: PathBuf::from("/repo/area"),
+            fallback_dir: Some(PathBuf::from("/launch/area")),
+            source: None,
+        });
+        let detail = err.detail();
+        assert_eq!(detail["fallback_dir"], json!("/launch/area"));
+    }
+
+    #[test]
+    fn file_reference_detail_suggestions_match_rendered_did_you_mean() {
+        // A missing `specs.md` next to a real `spec.md`: the detail
+        // `suggestions` must equal the exact render-time computation.
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("spec.md"), b"x").unwrap();
+
+        let diagnostic = FileReferenceDiagnostic {
+            function: "frontmatter",
+            reference: "specs.md".to_string(),
+            kind: FileRefFailure::NotFound,
+            base_dir: dir.path().to_path_buf(),
+            fallback_dir: None,
+            source: None,
+        };
+        let err = file_ref_compose_error(diagnostic.clone());
+        let detail = err.detail();
+
+        // The same computation the renderer runs (errors/blocks.rs).
+        let expected_path = diagnostic.base_dir.join(&diagnostic.reference);
+        let rendered = suggest_sibling_files(&expected_path, DEFAULT_MAX_SUGGESTIONS);
+
+        assert_eq!(rendered, vec!["spec.md".to_string()], "fixture sanity");
+        assert_eq!(
+            detail["suggestions"],
+            json!(rendered),
+            "err.detail.suggestions must equal the rendered did-you-mean set"
+        );
     }
 }

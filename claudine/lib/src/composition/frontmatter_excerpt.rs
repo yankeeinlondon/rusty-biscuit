@@ -54,6 +54,44 @@ impl FrontmatterExcerpt {
         })
     }
 
+    /// Capture an excerpt for a schema-body parse failure, mapping a byte span
+    /// within the offending property's type-and-constraint string to a source
+    /// line.
+    ///
+    /// `property` is the dotted schema-property path (e.g. `"$schema.spec"`) the
+    /// typed `SchemaError::Grammar` failure was attributed to. The byte span is
+    /// an offset **into that property's type-and-constraint string** (not the
+    /// document), so it is mapped to a source line by counting the line-breaks
+    /// the span crosses inside the property's value region. For the usual
+    /// single-line type string (`spec: file(required, match(...))`) the span
+    /// crosses no line-break and the highlight lands on the property line; for a
+    /// multi-line YAML block scalar it advances to the continuation line the span
+    /// points into.
+    ///
+    /// When `property` is `None`, or the property cannot be located, the
+    /// highlight falls back to the `$schema` parent line.
+    ///
+    /// ## Returns
+    ///
+    /// `None` when `source_text` has no well-formed frontmatter block.
+    pub fn capture_schema_span(
+        source_text: &str,
+        property: Option<&str>,
+        span_start: usize,
+        stderr_is_tty: bool,
+    ) -> Option<Self> {
+        let block = capture_frontmatter_block(source_text)?;
+        let highlight_line = property
+            .and_then(|p| locate_property_line(&block, p))
+            .map(|line| line + value_line_offset(&block, line, span_start))
+            .or_else(|| locate_property_line(&block, "$schema"));
+        Some(Self {
+            block,
+            highlight_line,
+            stderr_is_tty,
+        })
+    }
+
     /// Capture a near-miss frontmatter excerpt by line number.
     ///
     /// Recognizes a matched dash-only (`----`+) fence pair at the top of the
@@ -232,6 +270,50 @@ pub fn locate_property_line(block: &str, dotted_property: &str) -> Option<usize>
     found.map(|idx| idx + 1)
 }
 
+/// Map a byte offset within a property's type-and-constraint string to the
+/// number of source line-breaks it crosses, so a schema-grammar `span` can
+/// advance the highlight onto the right continuation line of a multi-line value.
+///
+/// `property_line` is the 1-based source line of the `key:` entry inside `block`.
+/// The property's value text is everything after the first `:` on that line plus
+/// any deeper-indented continuation lines (a YAML block scalar). The returned
+/// offset is `0` for the common single-line type string, since its value text
+/// holds no line-break before `span_start`.
+fn value_line_offset(block: &str, property_line: usize, span_start: usize) -> usize {
+    let lines: Vec<&str> = block.lines().collect();
+    let Some(key_idx) = property_line.checked_sub(1).filter(|&i| i < lines.len()) else {
+        return 0;
+    };
+    let key_indent = indent_of(lines[key_idx]);
+
+    // Reconstruct the value text exactly as the schema lexer saw it: the inline
+    // remainder after `key:`, then each deeper-indented continuation line joined
+    // by the `\n` the lexer's span counts against.
+    let inline = lines[key_idx]
+        .split_once(':')
+        .map_or("", |(_, rest)| rest.trim_start());
+    let mut value = String::from(inline);
+    for line in &lines[key_idx + 1..] {
+        if is_blank_or_comment(line) {
+            value.push('\n');
+            continue;
+        }
+        if indent_of(line) <= key_indent {
+            break;
+        }
+        value.push('\n');
+        value.push_str(line.trim_start());
+    }
+
+    // Clamp to a char boundary at or below `span_start` so a span landing mid
+    // UTF-8 sequence (e.g. a non-ASCII description) never panics the slice.
+    let mut end = span_start.min(value.len());
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value[..end].matches('\n').count()
+}
+
 /// The byte-width of a line's leading spaces, as a signed value for comparison
 /// against the synthetic `-1` root indent.
 fn indent_of(line: &str) -> isize {
@@ -351,6 +433,72 @@ mod tests {
             !rendered.contains('\x1b'),
             "plain appendix must have no escape bytes; got: {rendered:?}"
         );
+    }
+
+    // An inline `$schema` mapping whose `spec` type-string has a bad constraint
+    // separator (`,` instead of `;`). `spec` is the 3rd file line.
+    const SCHEMA_DOC: &str =
+        "---\n$schema:\n    spec: file(required, match(**/*spec*.md))\nspec: \"x\"\n---\nbody\n";
+
+    #[test]
+    fn schema_span_highlights_offending_property_line() {
+        // The span points into the single-line `spec` type string, so it must
+        // land on the property's own line (line 3), not the `$schema` parent.
+        let excerpt =
+            FrontmatterExcerpt::capture_schema_span(SCHEMA_DOC, Some("$schema.spec"), 13, true)
+                .unwrap();
+        assert_eq!(excerpt.highlight_line, Some(3));
+    }
+
+    #[test]
+    fn schema_span_does_not_highlight_unrelated_line() {
+        // The top-level `spec: "x"` value on line 4 must never be highlighted in
+        // place of the `$schema.spec` type-string line.
+        let excerpt =
+            FrontmatterExcerpt::capture_schema_span(SCHEMA_DOC, Some("$schema.spec"), 13, true)
+                .unwrap();
+        assert_ne!(excerpt.highlight_line, Some(4));
+    }
+
+    #[test]
+    fn schema_span_falls_back_to_schema_parent_without_property() {
+        // A structural failure with no real property name falls back to the
+        // `$schema:` parent line (line 2).
+        let excerpt =
+            FrontmatterExcerpt::capture_schema_span(SCHEMA_DOC, None, 0, true).unwrap();
+        assert_eq!(excerpt.highlight_line, Some(2));
+    }
+
+    #[test]
+    fn value_line_offset_zero_for_single_line_value() {
+        let block = capture_frontmatter_block(SCHEMA_DOC).unwrap();
+        // Any in-range span into the single-line `spec` value crosses no newline.
+        assert_eq!(value_line_offset(&block, 3, 0), 0);
+        assert_eq!(value_line_offset(&block, 3, 13), 0);
+    }
+
+    #[test]
+    fn value_line_offset_counts_newlines_across_continuation_lines() {
+        // Defensive mechanic: when a value's reconstructed text spans physical
+        // lines (a YAML block scalar), the offset counts the line-breaks the span
+        // crosses. Real SimplifiedSchema type strings are single-line, so this
+        // path returns 0 in practice; the test pins the multi-line arithmetic.
+        let doc = "---\n$schema:\n    spec: a\n      b\n      c\n---\nbody\n";
+        let block = capture_frontmatter_block(doc).unwrap();
+        // Reconstructed value text for `spec` is "a\nb\nc"; a span past the first
+        // newline lands one continuation line down, past the second lands two.
+        assert_eq!(value_line_offset(&block, 3, 0), 0);
+        assert_eq!(value_line_offset(&block, 3, "a\nb".len()), 1);
+        assert_eq!(value_line_offset(&block, 3, "a\nb\nc".len()), 2);
+    }
+
+    #[test]
+    fn schema_span_appendix_withheld_when_not_tty() {
+        let excerpt =
+            FrontmatterExcerpt::capture_schema_span(SCHEMA_DOC, Some("$schema.spec"), 13, false)
+                .unwrap();
+        let term = Terminal::new_optimistic(80);
+        assert_eq!(excerpt.render_appendix(&term), "");
     }
 
     const NEAR_MISS_DOC: &str = "----\nname: cross-platform\ndescription: near-miss fence\n----\n# Body\n";

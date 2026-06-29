@@ -53,8 +53,12 @@ use crate::harness::error::HarnessError;
 /// Visible in lifecycle stack expressions as `err.kind`, `err.variant`,
 /// `err.msg` (legacy aliases, always present) plus the [`Diagnostic`] facets
 /// `err.code`, `err.category`, `err.disposition`, `err.origin`, and
-/// `err.detail.*` when the source error is classifiable. A bare `err` resolves
-/// to the whole object.
+/// `err.detail.*` when the source error is classifiable. When facets are
+/// present the promoted handleability conveniences (error-catalog §2.6) project
+/// too — the predicate sugar `err.is_transient` / `err.is_throttled` /
+/// `err.is_correctable` and `err.reset_at` / `err.retry_after_ms` lifted from
+/// `detail` — as terse aliases over the canonical `disposition`/`detail.*`. A
+/// bare `err` resolves to the whole object.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LifecycleErrorInfo {
     /// The source error type name (e.g. `"ClaudineError"`,
@@ -69,11 +73,16 @@ pub struct LifecycleErrorInfo {
     /// source error).
     pub msg: String,
 
-    /// The classification facets, when the source error implements
-    /// [`Diagnostic`]. `None` for error types not yet wired into the contract,
-    /// in which case only the legacy `kind`/`variant`/`msg` aliases project.
-    /// Boxed to keep `LifecycleErrorInfo` small — it is the `Err` type of several
-    /// hot `Result`-returning lifecycle helpers.
+    /// The classification facets, when the source is classifiable.
+    ///
+    /// Populated for every typed [`Diagnostic`] source ([`CompositionError`],
+    /// [`ClaudineError`], [`HarnessError`]) and for a recognized
+    /// provider/cap/timeout/runaway `error_kind` label routed through
+    /// [`Self::from_action_failure`]. `None` only for a generic lifecycle
+    /// action verb (`shell`, `set_frontmatter`) that names no error_kind, in
+    /// which case only the legacy `kind`/`variant`/`msg` aliases project. Boxed
+    /// to keep `LifecycleErrorInfo` small — it is the `Err` type of several hot
+    /// `Result`-returning lifecycle helpers.
     pub facets: Option<Box<DiagnosticFacets>>,
 }
 
@@ -105,32 +114,52 @@ impl DiagnosticFacets {
             detail: err.detail(),
         }
     }
+
+    /// Build facets from a locked catalog `code`, deriving
+    /// `category`/`disposition`/`origin` from its [`crate::diagnostics::CodeSpec`].
+    ///
+    /// Used for the provider/cap/timeout/runaway failures that reach the
+    /// lifecycle `err` global as a synthesized `error_kind` string rather than
+    /// a typed [`Diagnostic`] error (see
+    /// [`crate::diagnostics::code_for_error_kind`]). The structured `detail`
+    /// payload is not reconstructable from the label alone, so it projects as
+    /// `null`; `code`/`category`/`disposition`/`origin` are the handleable
+    /// surface here. Returns `None` for a code absent from the catalog.
+    pub fn from_code(code: &'static str) -> Option<Self> {
+        let spec = crate::diagnostics::code_spec(code)?;
+        Some(Self {
+            code: spec.code,
+            category: spec.category.as_str(),
+            disposition: spec.disposition.as_str(),
+            origin: spec.origin.as_str(),
+            detail: Value::Null,
+        })
+    }
 }
 
 impl LifecycleErrorInfo {
-    /// Build the snapshot from a [`ClaudineError`].
-    ///
-    /// `ClaudineError` does not yet implement [`Diagnostic`], so only the legacy
-    /// `kind`/`variant`/`msg` aliases project (facets are `None`).
+    /// Build the snapshot from a [`ClaudineError`], capturing its [`Diagnostic`]
+    /// facets so `err.code` / `err.detail.*` project alongside the legacy
+    /// aliases. Covers the top-level Claudine and provider error surface
+    /// (`provider.unavailable`, `io.*`, `config.*`, `usage.*`, …).
     pub fn from_claudine_error(err: &ClaudineError) -> Self {
         Self {
             kind: "ClaudineError",
             variant: variant_name_from_debug(err),
             msg: err.to_string(),
-            facets: None,
+            facets: Some(Box::new(DiagnosticFacets::from_diagnostic(err))),
         }
     }
 
-    /// Build the snapshot from a [`HarnessError`].
-    ///
-    /// `HarnessError` does not yet implement [`Diagnostic`], so only the legacy
-    /// `kind`/`variant`/`msg` aliases project (facets are `None`).
+    /// Build the snapshot from a [`HarnessError`], capturing its [`Diagnostic`]
+    /// facets so `err.code` / `err.detail.*` project alongside the legacy
+    /// aliases.
     pub fn from_harness_error(err: &HarnessError) -> Self {
         Self {
             kind: "HarnessError",
             variant: variant_name_from_debug(err),
             msg: err.to_string(),
-            facets: None,
+            facets: Some(Box::new(DiagnosticFacets::from_diagnostic(err))),
         }
     }
 
@@ -154,12 +183,24 @@ impl LifecycleErrorInfo {
     /// underlying typed error's message. This lets a subsequent `failure`
     /// event observe `err.kind`, `err.variant`, and `err.msg` after a
     /// setup-phase action error routes the run to `failure`.
+    ///
+    /// When `verb` is a recognized provider/cap/timeout/runaway `error_kind`
+    /// label (the wrapper attributes a guard trip or provider failure honestly
+    /// via [`crate::diagnostics::code_for_error_kind`]), the matching catalog
+    /// facets are attached so `err.code` / `err.category` / `err.disposition` /
+    /// `err.origin` project alongside the legacy aliases. A generic action verb
+    /// (`shell`, `set_frontmatter`) is not an error_kind, so it stays
+    /// facet-less.
     pub fn from_action_failure(verb: impl Into<String>, msg: impl Into<String>) -> Self {
+        let variant = verb.into();
+        let facets = crate::diagnostics::code_for_error_kind(&variant)
+            .and_then(DiagnosticFacets::from_code)
+            .map(Box::new);
         Self {
             kind: "LifecycleAction",
-            variant: verb.into(),
+            variant,
             msg: msg.into(),
-            facets: None,
+            facets,
         }
     }
 
@@ -168,6 +209,15 @@ impl LifecycleErrorInfo {
     /// The legacy `kind`/`variant`/`msg` aliases are always present; the
     /// [`Diagnostic`] facets (`code`/`category`/`disposition`/`origin`/`detail`)
     /// are added only when the source error was classifiable.
+    ///
+    /// When facets are present, the promoted handleability conveniences from
+    /// error-catalog §2.6 project alongside them: the predicate sugar
+    /// `is_transient`/`is_throttled`/`is_correctable` (derived from
+    /// `disposition`) and `reset_at`/`retry_after_ms` (lifted from
+    /// `detail`, `null` when the active code carries no such field). These are
+    /// sugar only — `disposition` and `detail.*` stay canonical. They derive
+    /// from facets, so they project **only** when facets are present; a
+    /// facet-less generic action verb keeps projecting only the legacy aliases.
     pub fn to_value(&self) -> Value {
         let mut obj = serde_json::Map::new();
         obj.insert("kind".to_string(), Value::from(self.kind));
@@ -179,8 +229,42 @@ impl LifecycleErrorInfo {
             obj.insert("disposition".to_string(), Value::from(facets.disposition));
             obj.insert("origin".to_string(), Value::from(facets.origin));
             obj.insert("detail".to_string(), facets.detail.clone());
+
+            // Promoted handleability conveniences (error-catalog §2.6): sugar
+            // over the canonical `disposition`/`detail.*`, projected only when
+            // facets exist.
+            obj.insert(
+                "is_transient".to_string(),
+                Value::from(facets.disposition == "transient"),
+            );
+            obj.insert(
+                "is_throttled".to_string(),
+                Value::from(facets.disposition == "throttled"),
+            );
+            obj.insert(
+                "is_correctable".to_string(),
+                Value::from(facets.disposition == "correctable"),
+            );
+            obj.insert("reset_at".to_string(), promoted_detail_field(&facets.detail, "reset_at"));
+            obj.insert(
+                "retry_after_ms".to_string(),
+                promoted_detail_field(&facets.detail, "retry_after_ms"),
+            );
         }
         Value::Object(obj)
+    }
+}
+
+/// Lift a promoted convenience field out of a `detail` payload.
+///
+/// Returns the field's value when `detail` is an object carrying a present,
+/// non-null entry under `field`; otherwise [`Value::Null`]. A non-object
+/// `detail` (the `from_code` path leaves it `Value::Null`) yields `null`,
+/// keeping the promoted field absent-but-readable per error-catalog §2.6.
+fn promoted_detail_field(detail: &Value, field: &str) -> Value {
+    match detail.get(field) {
+        Some(v) if !v.is_null() => v.clone(),
+        _ => Value::Null,
     }
 }
 
@@ -444,16 +528,197 @@ mod tests {
     }
 
     #[test]
-    fn non_diagnostic_error_projects_only_legacy_aliases() {
-        // A HarnessError does not implement `Diagnostic` yet, so no facet keys
-        // appear — only the legacy aliases.
-        let info = LifecycleErrorInfo::from_harness_error(&HarnessError::ShellCommandDenied {
-            command: "x".to_string(),
-        });
+    fn generic_action_verb_projects_only_legacy_aliases() {
+        // A generic lifecycle action verb (not an error_kind) is not
+        // classifiable, so no facet keys appear — only the legacy aliases.
+        let info = LifecycleErrorInfo::from_action_failure("set_frontmatter", "boom");
         let value = info.to_value();
         assert!(value.get("kind").is_some());
-        assert!(value.get("code").is_none(), "no facets without Diagnostic");
+        assert!(value.get("variant").is_some());
+        assert!(value.get("code").is_none(), "no facets for a generic verb");
         assert!(value.get("detail").is_none());
+        // The promoted sugar derives from facets, so it is absent too — a
+        // facet-less verb projects only the legacy aliases (catalog §2.6).
+        assert!(value.get("is_transient").is_none());
+        assert!(value.get("is_throttled").is_none());
+        assert!(value.get("is_correctable").is_none());
+        assert!(value.get("reset_at").is_none());
+        assert!(value.get("retry_after_ms").is_none());
+    }
+
+    #[test]
+    fn harness_error_projects_diagnostic_facets() {
+        // The "harness" failure surface: a HarnessError now carries facets.
+        let info = LifecycleErrorInfo::from_harness_error(&HarnessError::ShellCommandDenied {
+            command: "rm -rf /".to_string(),
+        });
+        let value = info.to_value();
+        assert_eq!(value.get("kind"), Some(&json!("HarnessError")));
+        assert_eq!(value.get("variant"), Some(&json!("ShellCommandDenied")));
+        assert_eq!(value.get("code"), Some(&json!("composition.shell_expansion")));
+        assert_eq!(value.get("category"), Some(&json!("composition")));
+        assert_eq!(value.get("disposition"), Some(&json!("correctable")));
+        assert_eq!(value.get("origin"), Some(&json!("author")));
+        assert_eq!(value["detail"]["command"], json!("rm -rf /"));
+    }
+
+    #[test]
+    fn claudine_provider_error_projects_provider_facets() {
+        // The "provider" + "top-level Claudine" surface, via `from_claudine_error`.
+        let info = LifecycleErrorInfo::from_claudine_error(&ClaudineError::ProviderNotAvailable(
+            "codex".to_string(),
+        ));
+        let value = info.to_value();
+        assert_eq!(value.get("kind"), Some(&json!("ClaudineError")));
+        assert_eq!(value.get("code"), Some(&json!("provider.unavailable")));
+        assert_eq!(value.get("category"), Some(&json!("provider")));
+        assert_eq!(value.get("origin"), Some(&json!("environment")));
+        assert_eq!(value["detail"]["provider"], json!("codex"));
+    }
+
+    #[test]
+    fn claudine_io_error_projects_io_facets() {
+        // A top-level Claudine io failure projects an `io.*` code.
+        let info = LifecycleErrorInfo::from_claudine_error(&ClaudineError::Io(
+            std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+        ));
+        let value = info.to_value();
+        assert_eq!(value.get("code"), Some(&json!("io.permission_denied")));
+        assert_eq!(value.get("category"), Some(&json!("io")));
+    }
+
+    #[test]
+    fn action_failure_error_kind_projects_cap_facets() {
+        // The "cap" surface: a provider rate-limit reaches the lifecycle `err`
+        // as an `error_kind` string carried through `from_action_failure`.
+        let info = LifecycleErrorInfo::from_action_failure("rate_limit", "slow down");
+        let value = info.to_value();
+        assert_eq!(value.get("code"), Some(&json!("cap.rate_limit")));
+        assert_eq!(value.get("category"), Some(&json!("cap")));
+        assert_eq!(value.get("disposition"), Some(&json!("throttled")));
+        assert_eq!(value.get("origin"), Some(&json!("provider")));
+    }
+
+    #[test]
+    fn action_failure_error_kind_projects_timeout_facets() {
+        // The "timeout" surface.
+        let info = LifecycleErrorInfo::from_action_failure("step_timeout", "30m of silence");
+        let value = info.to_value();
+        assert_eq!(value.get("code"), Some(&json!("timeout.step_silence")));
+        assert_eq!(value.get("category"), Some(&json!("timeout")));
+    }
+
+    #[test]
+    fn action_failure_error_kind_projects_runaway_facets() {
+        // The "runaway" surface.
+        let info = LifecycleErrorInfo::from_action_failure("runaway_volume", "flood");
+        let value = info.to_value();
+        assert_eq!(value.get("code"), Some(&json!("runaway.volume")));
+        assert_eq!(value.get("category"), Some(&json!("runaway")));
+        assert_eq!(value.get("disposition"), Some(&json!("unrecoverable")));
+    }
+
+    #[test]
+    fn action_failure_error_kind_projects_provider_facets() {
+        // The "provider" run surface, via an `agent_failure` error_kind.
+        let info = LifecycleErrorInfo::from_action_failure("agent_failure", "exit 1");
+        let value = info.to_value();
+        assert_eq!(value.get("code"), Some(&json!("provider.exited")));
+        assert_eq!(value.get("category"), Some(&json!("provider")));
+    }
+
+    #[test]
+    fn throttled_cap_promotes_is_throttled_and_null_cap_fields() {
+        // A rate-limit cap reaches `err` via `from_action_failure`, so its
+        // facets come from the `from_code` path → `detail` is `Null`. The
+        // predicate sugar reflects the throttled disposition; the cap fields
+        // promote to `null` because the label can't reconstruct them.
+        let info = LifecycleErrorInfo::from_action_failure("rate_limit", "slow down");
+        let value = info.to_value();
+        assert_eq!(value.get("disposition"), Some(&json!("throttled")));
+        assert_eq!(value.get("is_throttled"), Some(&json!(true)));
+        assert_eq!(value.get("is_transient"), Some(&json!(false)));
+        assert_eq!(value.get("is_correctable"), Some(&json!(false)));
+        assert_eq!(value.get("reset_at"), Some(&Value::Null));
+        assert_eq!(value.get("retry_after_ms"), Some(&Value::Null));
+    }
+
+    #[test]
+    fn transient_error_promotes_is_transient_only() {
+        let info = LifecycleErrorInfo::from_action_failure("step_timeout", "30m of silence");
+        let value = info.to_value();
+        assert_eq!(value.get("disposition"), Some(&json!("transient")));
+        assert_eq!(value.get("is_transient"), Some(&json!(true)));
+        assert_eq!(value.get("is_throttled"), Some(&json!(false)));
+        assert_eq!(value.get("is_correctable"), Some(&json!(false)));
+    }
+
+    #[test]
+    fn correctable_error_promotes_is_correctable_only() {
+        // A composition error is `correctable`; its `detail` carries no cap
+        // fields, so `reset_at`/`retry_after_ms` promote to `null`.
+        let value =
+            LifecycleErrorInfo::from_composition_error(&CompositionError::NoRunnableProviders)
+                .to_value();
+        assert_eq!(value.get("disposition"), Some(&json!("correctable")));
+        assert_eq!(value.get("is_correctable"), Some(&json!(true)));
+        assert_eq!(value.get("is_transient"), Some(&json!(false)));
+        assert_eq!(value.get("is_throttled"), Some(&json!(false)));
+        assert_eq!(value.get("reset_at"), Some(&Value::Null));
+        assert_eq!(value.get("retry_after_ms"), Some(&Value::Null));
+    }
+
+    #[test]
+    fn cap_detail_promotes_reset_at_and_retry_after_ms_to_top_level() {
+        // No typed `Diagnostic` reconstructs a cap `detail` (the cap codes reach
+        // `err` via the label-only `from_code` path), so hand-build facets whose
+        // `detail` carries the cap fields and assert they promote out of detail.
+        let info = LifecycleErrorInfo {
+            kind: "LifecycleAction",
+            variant: "rate_limit".to_string(),
+            msg: "slow down".to_string(),
+            facets: Some(Box::new(DiagnosticFacets {
+                code: "cap.rate_limit",
+                category: "cap",
+                disposition: "throttled",
+                origin: "provider",
+                detail: json!({
+                    "provider": "claude",
+                    "reset_at": "2026-06-28T17:30:00Z",
+                    "retry_after_ms": 5_400_000u64,
+                }),
+            })),
+        };
+        let value = info.to_value();
+        // Promoted to the top level …
+        assert_eq!(value.get("reset_at"), Some(&json!("2026-06-28T17:30:00Z")));
+        assert_eq!(value.get("retry_after_ms"), Some(&json!(5_400_000u64)));
+        assert_eq!(value.get("is_throttled"), Some(&json!(true)));
+        // … while `detail.*` stays canonical.
+        assert_eq!(value["detail"]["reset_at"], json!("2026-06-28T17:30:00Z"));
+        assert_eq!(value["detail"]["retry_after_ms"], json!(5_400_000u64));
+    }
+
+    #[test]
+    fn null_detail_field_promotes_to_null() {
+        // A facet `detail` object that carries no cap fields yields `null`
+        // promoted values — not an error, per the null-sentinel convention.
+        let info = LifecycleErrorInfo {
+            kind: "LifecycleAction",
+            variant: "x".to_string(),
+            msg: "m".to_string(),
+            facets: Some(Box::new(DiagnosticFacets {
+                code: "document.missing_frontmatter",
+                category: "document",
+                disposition: "correctable",
+                origin: "provider",
+                detail: json!({ "doc": "spec.md", "property": "status" }),
+            })),
+        };
+        let value = info.to_value();
+        assert_eq!(value.get("reset_at"), Some(&Value::Null));
+        assert_eq!(value.get("retry_after_ms"), Some(&Value::Null));
+        assert_eq!(value.get("is_correctable"), Some(&json!(true)));
     }
 
     #[test]

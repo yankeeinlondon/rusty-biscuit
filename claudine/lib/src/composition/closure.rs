@@ -144,7 +144,10 @@ pub fn apply_inline_closure(
         .unwrap_or_else(|| md.as_string());
 
     crate::config::atomic::atomic_write(target_path, final_text.as_bytes())
-        .map_err(|e| CompositionError::AtomicWriteFailed(e.to_string()))?;
+        .map_err(|e| CompositionError::AtomicWriteFailed {
+            path: target_path.to_path_buf(),
+            source: Box::new(e),
+        })?;
 
     // Compute the post-write fm-segment-change signal for tooling that wants
     // to distinguish frontmatter drift from body drift. The `hash` and
