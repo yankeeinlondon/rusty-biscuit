@@ -48,12 +48,13 @@ When a user types `claudine compose ` they are now ready to specify the Markdown
 
 > **Reader's note:** an earlier draft proposed a new `files.prompts.default_glob` config override. That override is not part of this feature. The completion contract is currently scope-driven rather than config-driven; adding configurable scopes would affect ranking, deduplication, `@` magic priority, and completion latency, so it should be specified separately if still wanted.
 
-- because we support magic paths (e.g., those with a leading `@`) it means that a single path reference by the user could possibly reference more than one valid completion. The completion engine walks the magic scopes in priority order and the first scope that produces file candidates wins for the file tier:
+- magic paths (those with a leading `@`) are a **filename search**: the completion keeps the `@` and inserts only the filename (`@<basename>`), never a path. The completion engine walks the magic scopes in priority order and dedupes candidates by basename, so a filename present in several scopes surfaces once:
     - if the user typed `claudine compose @plan` and pressed tab
     - assuming that both `~/.claudine/prompts/plan.md` and `{repo-root}/prompts/plan.md` existed
-    - shell completions would recognize that the user wants to use the magic path syntax and that `prompts/plan.md` is a valid completion
-    - once the user presses ENTER and the claudine process kicks off it will do the final resolution back to the single file
-    - the inserted candidate strips the `@` sigil because `@` is a search sigil, not part of the committed path value
+    - shell completions recognize the magic-path syntax and complete to `@plan.md` (one entry — the duplicate basename is collapsed; the closest scope owns the rank)
+    - the `@` is **kept** because it is a runtime-resolution marker, not part of a committed path; the user does not need to see (or commit) the resolved file path — this keeps the magic surface clutter-free
+    - once the user presses ENTER and the claudine process kicks off, the committed `@plan.md` is resolved to the single closest file: the runtime registers the same prompt-scope directories as magic search roots, closest-first, and the nearest existing file wins
+    - magic mode never surfaces directory candidates — directory drilling is reserved for non-`@` (Word-mode) relative paths
 
 ### `sequence` operation
 
@@ -201,7 +202,7 @@ All terminal copy in the confirmation dialog, chooser detail pane, and missing-p
 ## Acceptance Criteria / Definition of Done
 
 - **Shared bounded walker.** Shell completion and autocomplete share a single bounded walker and the documented exclusion rules (scope-priority order, `.gitignore`, `_`-prefix directories, `node_modules`/`target`, one `sniff` call per invocation, `MAX_CANDIDATES = 500`). Verifiable by asserting both paths route through the same walker entry point. The autocomplete path additionally pushes the `*query*` substring filter into the walk so the cap counts query-matching files, not raw discoveries.
-- **Current completion contract preserved.** Dynamic completion continues to use `claudine __complete`; `claudine completions <shell>` remains the bootstrap install command; selected `@` magic candidates still insert concrete paths without the `@` sigil.
+- **Current completion contract preserved.** Dynamic completion continues to use `claudine __complete`; `claudine completions <shell>` remains the bootstrap install command. Selected `@` magic candidates keep the `@` and insert the filename only (`@<basename>`), deduped by basename; the committed `@<basename>` is resolved to the closest matching prompt at launch.
 - **No config override in this feature.** No `files.prompts.default_glob` or equivalent config key is added as part of this feature.
 - **Latency.** An autocomplete latency assertion reuses the existing `completion_perf.rs` fixture and confirms p95 stays within the same ~100ms-class budget as completion.
 - **Autocomplete failure modes.** All three are observable: NO matches → error; more-than-cap matches → a visible `narrow your query` error (no silent truncation), where "more-than-cap" counts query-matching files; non-TTY → error.

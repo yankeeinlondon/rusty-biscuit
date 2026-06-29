@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-7ac7e63acb07c5fd
-last_updated: 2026-06-25
+hash: ef46db3751d8e999-47ec16a6dcbca472
+last_updated: 2026-06-28
 ---
 # Claudine Composition
 
@@ -70,8 +70,12 @@ every `<TAB>`. The supplement engine applies these rules in order:
   to a `.gitignore`-aware walk of the enclosing git repo.
 - **Case-insensitive substring matching** on the filename with `.md`
   stripped for matching only. `@omp<TAB>` matches `prompt.md`.
-- **`KEY=<TAB>` setters** return zero candidates so shell default
-  behavior kicks in.
+- **`KEY=<TAB>` setters** offer schema-aware completion when the prompt
+  declares `$schema` (property names before `=`; enum members and
+  `file`-glob paths after `=`). Without a schema, the value slot still
+  supports `@`-gated file completion; plain string/number values yield
+  no candidates so shell default behavior kicks in. See
+  [Shell Completions](shell-completions.md).
 
 Install with `claudine completions <shell>` — regenerate and reinstall
 after a Claudine upgrade that changes the callback wiring. The hidden
