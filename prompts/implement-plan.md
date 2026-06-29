@@ -30,6 +30,7 @@ blocked:
 failure:
     say: "Phase {{phase}} of a plan in the {{area}} package area, ran into problems!"
     message: "❌️  phase **{{phase}}** (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}` ({{area}}, {{ctx.agent}}/{{ctx.model}}: {{err.message}})"
+    effect: sad-trombone
 loop:
     until: "phase >= total_phases"
     action: "increment(phase)"
