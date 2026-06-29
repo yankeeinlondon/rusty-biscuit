@@ -29,8 +29,10 @@
 
 set -euo pipefail
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "${script_dir}/.." && pwd)"
+# Clear CDPATH so a matched entry isn't echoed to stdout (which would corrupt
+# these path captures), and `--` guards against odd directory names.
+script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+repo_root="$(CDPATH= cd -- "${script_dir}/.." >/dev/null 2>&1 && pwd)"
 allow_file="${script_dir}/check-error-transport.allow"
 
 if [[ $# -eq 0 ]]; then
