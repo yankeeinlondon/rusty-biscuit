@@ -33,6 +33,12 @@ pub use error::FileReferenceError;
 #[cfg(feature = "fetch")]
 pub use error::FetchError;
 
+/// Pure path-discovery helpers shared by magic (`@`) resolution. Exposed so
+/// callers can register convention magic search roots (e.g. a tool's
+/// `prompts/` directories) computed from the same git-root / package-area /
+/// home anchors the resolver itself uses.
+pub use context::{find_git_root, find_package_area, home_dir};
+
 /// Entry form for a partial completion token.
 ///
 /// Corresponds to the subset of [`ReferenceKind`] variants that
