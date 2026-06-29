@@ -10,7 +10,7 @@ initialize:
 dir: "{{dirname(spec || design)}}"
 design: "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}"
 iteration: "{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1  : 1   }}"
-review_file: "{{ctx.area}}/{{dir}}/review-{{iteration}}.md"
+review_file: "{{dir}}/review-{{iteration}}.md"
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 start:
     message: "👓 starting {{feature_or_fix}} review #{{iteration}} of `{{parent_dir(spec)}}` (_in the **{{ctx.area}}** package area_)"
