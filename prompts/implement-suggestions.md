@@ -1,14 +1,13 @@
 ---
 $schema:
-    spec: string(required)
-    design: string
+    spec: file(required; match(**/*spec*.md))
+    design: file(match(**/*design*.md))
 iteration: "{{ frontmatter(spec, 'review_iterations') ? frontmatter(spec, 'review_iterations') || 1 : 1 }}"
 review: "{{ dirname(spec) + '/' + 'review-' + iteration + '.md' }}"
 # is the review "production ready"?
 ready: "{{ review && file_exists(review) ? frontmatter(review, 'ready') : null }}"
 
-design_file: "{{ dirname(review) + '/design.md' }}"
-design: "{{ file_exists(design_file) ? design_file : null }}"
+design: "{{ file_exists(dirname(review) + '/design.md') ? dirname(review) + '/design.md' : null }}"
 
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 
@@ -22,6 +21,7 @@ failure:
     message: "❌ implementation of the review #{{iteration}} suggestions from **{{ parent_dir(review) }}** failed to complete ({{err.message}})!"
     effect: phase-jump-3
 ---
+
 # Implement Review Suggestions for {{title_case(without_date(parent_dir(spec)))}}
 
 > - **{{capitalize(feature_or_fix)}}:** `{{parent_dir(review)}}`
