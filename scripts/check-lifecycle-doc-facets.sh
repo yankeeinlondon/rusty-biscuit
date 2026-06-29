@@ -26,8 +26,10 @@
 # Usage:
 #   scripts/check-lifecycle-doc-facets.sh [file ...]
 #
-# Default target is `claudine/docs/topics/lifecycle.md`. Multiple lifecycle doc
-# files may be supplied (e.g. when a new lifecycle topic doc is added).
+# Default targets are every public lifecycle/composition topic that mentions
+# lifecycle `err.*`: `lifecycle.md`, `composition.md`, and
+# `frontmatter-properties.md`. Explicit files may be supplied (e.g. when a new
+# lifecycle topic doc is added) to override the default set.
 
 set -euo pipefail
 
@@ -39,7 +41,14 @@ script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 
 repo_root="$(CDPATH= cd -- "${script_dir}/.." >/dev/null 2>&1 && pwd)"
 
 if [[ $# -eq 0 ]]; then
-    files=("${repo_root}/claudine/docs/topics/lifecycle.md")
+    # Every public lifecycle/composition topic that documents lifecycle `err.*`.
+    # The deprecated aliases are allowed only inside an explicit
+    # "Deprecated aliases" section (see the window logic below).
+    files=(
+        "${repo_root}/claudine/docs/topics/lifecycle.md"
+        "${repo_root}/claudine/docs/topics/composition.md"
+        "${repo_root}/claudine/docs/topics/frontmatter-properties.md"
+    )
 else
     files=("$@")
 fi
