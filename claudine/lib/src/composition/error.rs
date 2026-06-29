@@ -56,8 +56,14 @@ pub enum CompositionError {
     NotMarkdown(String),
 
     /// The Markdown file could not be loaded or parsed.
-    #[error("failed to load Markdown: {0}")]
-    MarkdownLoad(String),
+    #[error("failed to load Markdown: {}: {source}", path.display())]
+    MarkdownLoad {
+        /// The file whose load/parse failed.
+        path: PathBuf,
+        /// The typed lower-layer cause.
+        #[source]
+        source: MarkdownLoadCause,
+    },
 
     /// The document's frontmatter (the YAML between the leading `---` markers)
     /// is present but failed to parse.
@@ -836,8 +842,16 @@ pub enum CompositionError {
     SequenceEmpty,
 
     /// The external YAML file could not be loaded.
-    #[error("failed to load external sequence file: {0}")]
-    SequenceExternalLoad(String),
+    #[error("failed to load external sequence file: {context}: {source}")]
+    SequenceExternalLoad {
+        /// Display context: the raw reference (formatted as `` `raw` ``) for the
+        /// reference-resolution sites, or the resolved YAML path for the load
+        /// sites.
+        context: String,
+        /// The typed lower-layer cause.
+        #[source]
+        source: SequenceLoadCause,
+    },
 
     /// The external YAML file has an unexpected root shape.
     #[error("external sequence file has wrong structure: {0}")]
@@ -1235,6 +1249,46 @@ pub enum CompositionError {
         /// [`Self::LifecycleEvaluationError`]).
         inner: Box<CompositionError>,
     },
+}
+
+/// Heterogeneous lower-layer cause of a Markdown source-load failure.
+///
+/// Carried as the typed `#[source]` of [`CompositionError::MarkdownLoad`] so a
+/// programmatic handler can recover the concrete lower-layer type via
+/// [`std::error::Error::source`] instead of inspecting a flattened string.
+#[derive(Error, Debug)]
+pub enum MarkdownLoadCause {
+    /// The file could not be read.
+    #[error(transparent)]
+    Read(#[from] std::io::Error),
+    /// A non-frontmatter Markdown parse failure.
+    #[error(transparent)]
+    Parse(#[from] MarkdownError),
+    /// A YAML load/convert failure (CLI sequence YAML path).
+    #[error(transparent)]
+    Yaml(#[from] biscuit_file::YamlError),
+}
+
+/// Heterogeneous lower-layer cause of an external sequence-file load failure.
+///
+/// Carried as the typed `#[source]` of
+/// [`CompositionError::SequenceExternalLoad`] so a programmatic handler can
+/// recover the concrete lower-layer type via [`std::error::Error::source`]
+/// instead of inspecting a flattened string.
+#[derive(Error, Debug)]
+pub enum SequenceLoadCause {
+    /// A file-reference resolution failure.
+    #[error(transparent)]
+    Reference(#[from] biscuit_file::FileReferenceError),
+    /// A YAML load/convert failure.
+    #[error(transparent)]
+    Yaml(#[from] biscuit_file::YamlError),
+    /// The reference resolved but no file exists at the resolved path.
+    #[error("file not found")]
+    NotFound,
+    /// `~` expansion failed because no home directory is known.
+    #[error("unable to resolve home directory")]
+    HomeDir,
 }
 
 /// A single required schema property that is missing from frontmatter.

@@ -6,20 +6,24 @@ use std::path::Path;
 use biscuit_file::FileReference;
 use darkmatter::markdown::{Markdown, MarkdownError};
 
-use super::error::CompositionError;
+use super::error::{CompositionError, MarkdownLoadCause};
 use super::types::ResolvedCompositionSource;
 
 /// Map a Markdown load failure to the most actionable `CompositionError`.
 ///
 /// A malformed-frontmatter failure routes to [`CompositionError::FrontmatterParse`]
 /// (which carries the typed error for rich rendering); any other failure
-/// (e.g. a read error from `try_from`) falls back to the flat
-/// [`CompositionError::MarkdownLoad`] string.
+/// (e.g. a parse error from `try_from`) routes to
+/// [`CompositionError::MarkdownLoad`] carrying the typed
+/// [`MarkdownLoadCause`].
 fn map_load_error(path: &Path, err: MarkdownError) -> CompositionError {
     match err {
         MarkdownError::FrontmatterParse { .. }
         | MarkdownError::FrontmatterFenceMismatch { .. } => CompositionError::FrontmatterParse(err),
-        other => CompositionError::MarkdownLoad(format!("{}: {other}", path.display())),
+        other => CompositionError::MarkdownLoad {
+            path: path.to_path_buf(),
+            source: MarkdownLoadCause::Parse(other),
+        },
     }
 }
 
@@ -65,8 +69,12 @@ pub fn resolve_composition_source(
         ));
     }
 
-    let original_text = fs::read_to_string(&resolved_path)
-        .map_err(|e| CompositionError::MarkdownLoad(format!("{}: {e}", resolved_path.display())))?;
+    let original_text = fs::read_to_string(&resolved_path).map_err(|e| {
+        CompositionError::MarkdownLoad {
+            path: resolved_path.clone(),
+            source: MarkdownLoadCause::Read(e),
+        }
+    })?;
 
     // Parse fallibly so malformed frontmatter surfaces as a real error. The
     // infallible `From<String>` drops a `FrontmatterParse` error and returns an
@@ -149,9 +157,58 @@ pub fn is_markdown_path(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::error::Error as _;
     use std::fs;
+    use std::io::{self, ErrorKind};
     use std::path::PathBuf;
     use tempfile::TempDir;
+
+    #[test]
+    fn markdown_load_read_cause_is_recoverable() {
+        let err = CompositionError::MarkdownLoad {
+            path: PathBuf::from("/tmp/whatever.md"),
+            source: MarkdownLoadCause::Read(io::Error::other("boom")),
+        };
+
+        // The typed source walks to the sub-enum; the transparent arm carries
+        // the concrete io::Error, recoverable by matching the variant.
+        let cause = err.source().expect("MarkdownLoad must carry a source");
+        let load_cause = cause
+            .downcast_ref::<MarkdownLoadCause>()
+            .expect("source must be a MarkdownLoadCause");
+        let io_err = match load_cause {
+            MarkdownLoadCause::Read(io_err) => io_err,
+            other => panic!("expected Read cause, got: {other:?}"),
+        };
+        assert_eq!(io_err.kind(), ErrorKind::Other);
+        assert_eq!(io_err.to_string(), "boom");
+    }
+
+    #[test]
+    fn markdown_load_parse_cause_round_trips() {
+        // A non-frontmatter MarkdownError routed through map_load_error lands in
+        // the MarkdownLoad::Parse arm with the typed MarkdownError reachable.
+        let file = PathBuf::from("/tmp/whatever.md");
+        let other = MarkdownError::AstParse("synthetic ast failure".to_string());
+        let err = map_load_error(&file, other);
+        match &err {
+            CompositionError::MarkdownLoad {
+                source: MarkdownLoadCause::Parse(_),
+                ..
+            } => {}
+            other => panic!("expected MarkdownLoad::Parse, got: {other:?}"),
+        }
+
+        let load_cause = err
+            .source()
+            .and_then(|s| s.downcast_ref::<MarkdownLoadCause>())
+            .expect("source must be a MarkdownLoadCause");
+        let parsed = match load_cause {
+            MarkdownLoadCause::Parse(md_err) => md_err,
+            other => panic!("expected Parse cause, got: {other:?}"),
+        };
+        assert!(matches!(parsed, MarkdownError::AstParse(_)));
+    }
 
     #[test]
     fn resolve_absolute_markdown_file() {
@@ -220,7 +277,7 @@ mod tests {
             "expected FrontmatterParse for ---- fence, got: {err:?}"
         );
         assert!(
-            !matches!(err, CompositionError::MarkdownLoad(_)),
+            !matches!(err, CompositionError::MarkdownLoad { .. }),
             "must not fall back to MarkdownLoad: {err:?}"
         );
         assert!(
