@@ -86,6 +86,30 @@ fn kind_matches(kind: &str, table: &[&str]) -> bool {
     table.iter().any(|entry| entry.eq_ignore_ascii_case(kind))
 }
 
+/// Classify a provider `error_kind` string into its [`BadgeCategory`], if it
+/// names a known auth/billing/quota/rate-limit/permission condition.
+///
+/// Shares the same lookup tables and `Auth > Billing > Quota > RateLimit >
+/// Permission` precedence as [`derive_badges`], so the diagnostic facet layer
+/// classifies an `error_kind` the same way the operator badge does. Returns
+/// `None` for kinds that are not a cap/auth condition (e.g. a runaway/timeout
+/// guard label).
+pub fn badge_category_for_kind(kind: &str) -> Option<BadgeCategory> {
+    if kind_matches(kind, AUTH_KINDS) {
+        Some(BadgeCategory::Auth)
+    } else if kind_matches(kind, BILLING_KINDS) {
+        Some(BadgeCategory::Billing)
+    } else if kind_matches(kind, QUOTA_KINDS) {
+        Some(BadgeCategory::Quota)
+    } else if kind_matches(kind, RATE_LIMIT_KINDS) {
+        Some(BadgeCategory::RateLimit)
+    } else if kind_matches(kind, PERMISSION_KINDS) {
+        Some(BadgeCategory::Permission)
+    } else {
+        None
+    }
+}
+
 /// Derive zero or more badges from a completed session summary.
 ///
 /// Pure function — reads `error_kind`, `rate_limit`, and `context_usage`

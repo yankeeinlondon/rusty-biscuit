@@ -168,7 +168,16 @@ pub const CODES: &[CodeSpec] = &[
         disposition: Disposition::Correctable,
         origin: Origin::Author,
         severity_override: None,
-        detail: &["reference", "kind", "base_dir", "suggestions"],
+        // `fallback_dir` is optional (the launch-area anchor, projected to
+        // `null` when absent) but still a declared field so the registry and
+        // `CompositionError::detail()` agree on the full payload shape.
+        detail: &[
+            "reference",
+            "kind",
+            "base_dir",
+            "suggestions",
+            "fallback_dir",
+        ],
     },
     CodeSpec {
         code: "composition.unknown_function",
@@ -471,7 +480,7 @@ mod tests {
     fn invalid_file_reference_projects_file_reference_diagnostic_fields() {
         let spec = code_spec("composition.invalid_file_reference").unwrap();
         assert_eq!(spec.origin, Origin::Author);
-        for field in ["reference", "kind", "base_dir", "suggestions"] {
+        for field in ["reference", "kind", "base_dir", "suggestions", "fallback_dir"] {
             assert!(
                 spec.detail.contains(&field),
                 "missing FileReferenceDiagnostic detail field `{field}`"

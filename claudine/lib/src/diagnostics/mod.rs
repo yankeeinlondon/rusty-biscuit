@@ -21,18 +21,36 @@
 //! The closed facet enums live in [`facets`]; the locked code catalog (the
 //! single source of truth `claudine errors` introspects) lives in [`registry`].
 //!
-//! ## Status
+//! ## Wired implementations
 //!
-//! This is the ratified, additive contract substrate. The `Diagnostic`
-//! *implementations* for the concrete typed errors (composition, provider,
-//! cap, lifecycle `err.*` projection) are wired in a later step — they depend
-//! on the typed-error cascade that converts the still-`String`-typed error
-//! boundaries, which is tracked in the Phase 2/3/6 implementation notes of the
-//! feature plan.
+//! The concrete `Diagnostic` projections are live:
+//!
+//! - [`CompositionError`] projects every composition code (including the full
+//!   `composition.invalid_file_reference` `detail` payload — `reference`,
+//!   `kind` as a snake_case slug, `base_dir`, the render-time `suggestions`,
+//!   and the optional `fallback_dir`).
+//! - [`ClaudineError`] and [`HarnessError`] project the top-level Claudine,
+//!   provider, io, config, and usage surface, so lifecycle `err.*` exposes
+//!   their facets via [`LifecycleErrorInfo::from_claudine_error`] /
+//!   [`from_harness_error`].
+//! - Provider / cap / timeout / runaway failures arrive at the lifecycle `err`
+//!   global as a synthesized `error_kind` string rather than a typed error;
+//!   [`code_for_error_kind`] maps that label to its locked code so
+//!   [`LifecycleErrorInfo::from_action_failure`] still projects the full facet
+//!   surface.
+//!
+//! [`CompositionError`]: crate::composition::CompositionError
+//! [`ClaudineError`]: crate::error::ClaudineError
+//! [`HarnessError`]: crate::harness::error::HarnessError
+//! [`LifecycleErrorInfo::from_claudine_error`]: crate::composition::lifecycle_context::LifecycleErrorInfo::from_claudine_error
+//! [`from_harness_error`]: crate::composition::lifecycle_context::LifecycleErrorInfo::from_harness_error
+//! [`LifecycleErrorInfo::from_action_failure`]: crate::composition::lifecycle_context::LifecycleErrorInfo::from_action_failure
 
+mod error_kind;
 mod facets;
 mod registry;
 
+pub use error_kind::code_for_error_kind;
 pub use facets::{Category, Disposition, Origin, Severity};
 pub use registry::{CODES, CodeSpec, code_spec};
 

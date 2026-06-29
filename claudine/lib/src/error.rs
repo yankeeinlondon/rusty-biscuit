@@ -1,7 +1,13 @@
 use biscuit_file::YamlParseError;
+use biscuit_terminal::components::status::StatusState;
+use biscuit_terminal::components::status_block::StatusBlock;
+use biscuit_terminal::errors::{BlockError, ErrorHeader, StatusBlockExt};
+use biscuit_terminal::terminal::Terminal;
 use darkmatter::markdown::MarkdownError;
+use serde_json::{Value, json};
 use std::path::PathBuf;
 
+use crate::diagnostics::{Category, Diagnostic, Disposition, Origin, code_spec};
 use crate::provider::Provider;
 /// All errors that can occur within the Claudine library.
 #[derive(Debug, thiserror::Error)]
@@ -233,5 +239,188 @@ pub enum ClaudineError {
     SystemPromptComposition(#[from] MarkdownError),
 }
 
+impl BlockError for ClaudineError {
+    fn status_block(&self, _term: &Terminal) -> StatusBlock {
+        // Claudine's library errors are reported by the CLI's top-level walker,
+        // which renders the typed `Display` text; the block-style report here
+        // carries the same message under the variant-derived code so the
+        // `Diagnostic` supertrait has a uniform human surface.
+        StatusBlock::new(StatusState::Error)
+            .error_header(ErrorHeader::new("ClaudineError", self.code()))
+            .body(self.to_string())
+    }
+}
+
+impl Diagnostic for ClaudineError {
+    fn code(&self) -> &'static str {
+        match self {
+            // `provider.*` — the agent run as infrastructure.
+            ClaudineError::ProviderNotAvailable(_) => "provider.unavailable",
+            ClaudineError::Adapter(_) => "provider.stream_error",
+            // `io.*` — filesystem / network plumbing.
+            ClaudineError::Io(e) => match e.kind() {
+                std::io::ErrorKind::PermissionDenied => "io.permission_denied",
+                _ => "io.read_failed",
+            },
+            ClaudineError::HttpError(_) | ClaudineError::UrlError(_) => "io.network",
+            ClaudineError::Sqlite(_) | ClaudineError::SystemPromptFileNotFound(_) => {
+                "io.read_failed"
+            }
+            ClaudineError::LockError { .. } | ClaudineError::LinkingError(_) => "io.write_failed",
+            // `config.*` — Claudine/user configuration is invalid.
+            ClaudineError::ConfigNotFound(_)
+            | ClaudineError::ConfigValidation(_)
+            | ClaudineError::JsonParse(_)
+            | ClaudineError::TomlParse(_)
+            | ClaudineError::YamlParse(_)
+            | ClaudineError::ChronoParse(_)
+            | ClaudineError::RegexError(_)
+            | ClaudineError::ProtectRuleParse { .. }
+            | ClaudineError::ProtectInvalidPolicy(_)
+            | ClaudineError::ProtectEnforcementMapping(_)
+            | ClaudineError::PolicyBackendUnavailable(_)
+            | ClaudineError::PolicySourceDiscovery(_)
+            | ClaudineError::PolicyNativeParse { .. }
+            | ClaudineError::PolicyCliParse { .. }
+            | ClaudineError::PolicyApplyFailed { .. }
+            | ClaudineError::PolicyAmbiguousContext(_) => "config.invalid",
+            ClaudineError::McpCatalogNotFound
+            | ClaudineError::McpServerNotFound { .. }
+            | ClaudineError::McpAliasConflict { .. }
+            | ClaudineError::McpAmbiguousMatch { .. }
+            | ClaudineError::McpImportConflict { .. } => "config.mcp_invalid",
+            // `usage.*` — Rust API misuse / unsupported operations.
+            ClaudineError::ConfigCreationNotSupported { .. }
+            | ClaudineError::McpProviderNotSupported { .. }
+            | ClaudineError::PolicyUnsupportedQuery { .. }
+            | ClaudineError::PolicyUnsupportedMutation { .. } => "usage.unsupported",
+            // `composition.*` — delegate a system-prompt compose failure.
+            ClaudineError::SystemPromptComposition(_) => "composition.failed",
+            // Everything else is an unclassified internal condition.
+            ClaudineError::TemplateError(_)
+            | ClaudineError::LaunchContextDetection(_)
+            | ClaudineError::ReportingPathUnavailable(_)
+            | ClaudineError::InvalidReportingDateRange { .. } => "internal.bug",
+        }
+    }
+
+    fn category(&self) -> Category {
+        code_spec(self.code())
+            .map(|spec| spec.category)
+            .unwrap_or(Category::Internal)
+    }
+
+    fn disposition(&self) -> Disposition {
+        code_spec(self.code())
+            .map(|spec| spec.disposition)
+            .unwrap_or(Disposition::Unrecoverable)
+    }
+
+    fn origin(&self) -> Origin {
+        code_spec(self.code())
+            .map(|spec| spec.origin)
+            .unwrap_or(Origin::Internal)
+    }
+
+    fn detail(&self) -> Value {
+        match self {
+            ClaudineError::ProviderNotAvailable(provider) => json!({ "provider": provider }),
+            ClaudineError::SystemPromptFileNotFound(path) => json!({ "path": path }),
+            // `io.write_failed` declares `path`.
+            ClaudineError::LockError { path } => json!({ "path": path.to_string_lossy() }),
+            // `io.network` declares `url`, `message`.
+            ClaudineError::HttpError(_) | ClaudineError::UrlError(_) => {
+                json!({ "url": Value::Null, "message": self.to_string() })
+            }
+            // `config.invalid` declares `field`, `message`.
+            ClaudineError::ConfigValidation(message)
+            | ClaudineError::ProtectInvalidPolicy(message)
+            | ClaudineError::ProtectEnforcementMapping(message)
+            | ClaudineError::PolicySourceDiscovery(message)
+            | ClaudineError::PolicyAmbiguousContext(message) => {
+                json!({ "field": Value::Null, "message": message })
+            }
+            ClaudineError::PolicyApplyFailed { path, message } => {
+                json!({ "field": path.to_string_lossy(), "message": message })
+            }
+            ClaudineError::McpServerNotFound { id } => {
+                json!({ "server": id, "message": self.to_string() })
+            }
+            ClaudineError::McpProviderNotSupported { provider, reason } => {
+                json!({ "operation": reason, "provider": provider.to_string() })
+            }
+            ClaudineError::TemplateError(message)
+            | ClaudineError::LaunchContextDetection(message)
+            | ClaudineError::ReportingPathUnavailable(message) => json!({ "message": message }),
+            _ => Value::Null,
+        }
+    }
+}
+
 /// Convenience type alias for Claudine results.
 pub type Result<T> = std::result::Result<T, ClaudineError>;
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+
+    #[test]
+    fn provider_not_available_classifies_as_provider_unavailable() {
+        let err = ClaudineError::ProviderNotAvailable("codex".to_string());
+        assert_eq!(err.code(), "provider.unavailable");
+        assert_eq!(err.category(), Category::Provider);
+        assert_eq!(err.origin(), Origin::Environment);
+        assert_eq!(err.detail()["provider"], json!("codex"));
+    }
+
+    #[test]
+    fn io_permission_denied_classifies_as_io_permission() {
+        let err = ClaudineError::Io(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "denied",
+        ));
+        assert_eq!(err.code(), "io.permission_denied");
+        assert_eq!(err.category(), Category::Io);
+    }
+
+    #[test]
+    fn generic_io_classifies_as_io_read() {
+        let err = ClaudineError::Io(std::io::Error::other("boom"));
+        assert_eq!(err.code(), "io.read_failed");
+    }
+
+    #[test]
+    fn config_validation_classifies_as_config_invalid() {
+        let err = ClaudineError::ConfigValidation("bad field".to_string());
+        assert_eq!(err.code(), "config.invalid");
+        assert_eq!(err.detail()["message"], json!("bad field"));
+    }
+
+    #[test]
+    fn unsupported_operation_classifies_as_usage_unsupported() {
+        let err = ClaudineError::McpProviderNotSupported {
+            provider: Provider::Goose,
+            reason: "no MCP".to_string(),
+        };
+        assert_eq!(err.code(), "usage.unsupported");
+        assert_eq!(err.detail()["operation"], json!("no MCP"));
+    }
+
+    #[test]
+    fn every_variant_maps_to_a_locked_catalog_code() {
+        // Spot-check across families that each `code()` is a real catalog row.
+        for err in [
+            ClaudineError::ProviderNotAvailable("x".into()),
+            ClaudineError::ConfigValidation("x".into()),
+            ClaudineError::McpCatalogNotFound,
+            ClaudineError::TemplateError("x".into()),
+            ClaudineError::LinkingError("x".into()),
+        ] {
+            assert!(
+                code_spec(err.code()).is_some(),
+                "`{err:?}` → `{}` is not a locked catalog code",
+                err.code()
+            );
+        }
+    }
+}
