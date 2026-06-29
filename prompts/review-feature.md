@@ -20,7 +20,7 @@ success:
         - when: "frontmatter(review_file,'ready') == true"
           action:
               - success: "{{feature_or_fix}} review {{iteration}} in **{{ctx.area}}** finished and deemed code to be **production ready**"
-              - message: "✅  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed successfully"
+              - message: "✅  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed successfully (_**production ready**_)"
               - effect: small-group-cheer
         - when: "frontmatter(review_file,'ready') != true"
           action:
