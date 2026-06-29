@@ -282,6 +282,7 @@ Match handlers on these **faceted** fields — a stable, versioned contract (see
 | `err.category` | string | Coarse domain — the dotted prefix of `code` (`composition`, `cap`, `timeout`, `provider`, `document`, `vcs`, `io`, `config`, `usage`, `runaway`, `auth`, `internal`). |
 | `err.disposition` | string | Generic remediation strategy: `transient`, `throttled`, `correctable`, `needs_input`, or `unrecoverable`. |
 | `err.origin` | string | Who remediates: `provider`, `author`, `caller`, `environment`, or `internal`. |
+| `err.severity` | string | Operator-facing severity: `info`, `warning`, or `error`. Defaulted from `disposition` (`transient`/`throttled`/`needs_input` → `warning`, `correctable`/`unrecoverable` → `error`) and overridable per code. |
 | `err.detail.*` | typed | Per-instance payload — the fields that vary per occurrence (`err.detail.reference`, `err.detail.property`, `err.detail.reset_at`, …). Shape depends on `code`; an absent field reads as `null`. |
 
 Promoted conveniences (sugar over the canonical fields, present only when the error is classifiable):
@@ -301,12 +302,14 @@ failure:
 
 #### Deprecated aliases
 
-The original `err` fields remain available for backward compatibility but are **deprecated** — new documents should match the faceted fields above. These describe Claudine's internal Rust error shape, not the stable contract, so they drift and are not portable:
+The original `err` fields remain available for backward compatibility but are **deprecated** — new documents should match the faceted fields above.
+
+`err.kind` and `err.variant` are the deprecated *spellings* of `err.category` and `err.code`: for a classifiable error they carry exactly those facet values, so prefer the faceted names directly. They fall back to Claudine's internal Rust error labels **only** for a facet-less action failure (a generic `shell`/`set_frontmatter` verb that maps to no diagnostic code), where there is no faceted equivalent — those residual values describe the internal shape, drift, and are not portable.
 
 | Deprecated field | Type | Description |
 |------------------|------|-------------|
-| `err.kind` | string | The source Rust error *type* name (`ClaudineError`, `HarnessError`, `CompositionError`). Not a category. |
-| `err.variant` | string | The Rust enum *arm* name (`Io`, `ShellCommandDenied`, `SchemaLoad`). Not a code. |
+| `err.kind` | string | Deprecated alias of `err.category`. Mirrors the category for a classifiable error; falls back to the internal Rust error *type* name (`ClaudineError`, `HarnessError`, `CompositionError`) only for a facet-less action failure. |
+| `err.variant` | string | Deprecated alias of `err.code`. Mirrors the code for a classifiable error; falls back to the internal Rust enum *arm* name (`Io`, `ShellCommandDenied`, `SchemaLoad`) only for a facet-less action failure. |
 | `err.msg` | string | The human-readable `Display` rendering of the error. Prose; matching on it is discouraged. |
 
 ### `doc.err` Escape Hatch
