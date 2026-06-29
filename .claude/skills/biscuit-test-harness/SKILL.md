@@ -166,6 +166,18 @@ runs nextest with `-j 1`, and tears the panes down in a trap. Tests use
 `<Backend>Harness::shared_or_spawn()` to attach to that pane and fall
 back to per-process spawning when the env var is missing.
 
+**Parallel self-spawn mode (`BISCUIT_L2_THREADS`).** The shared-pane +
+`-j 1` model serializes the *entire* tier for the sake of whichever tests
+attach to the shared pane. An area whose L2 suite is dominated by
+self-isolating tests (each spawns its OWN session/PTY — e.g. claudine)
+sets `BISCUIT_L2_THREADS=N` (claudine uses `min(cores, 8)`): `_test_l2`
+then skips the broker, exports no `BISCUIT_SHARED_*`, and runs nextest at
+`-j N`. With the env var unset, every `shared_or_spawn()` takes its
+fallback branch and spawns an *owned*, `Drop`-cleaned pane, so there is
+no shared resource to contend for. Default (`1`/unset) keeps the serial
+shared-pane path. Backstop: claudine-cli L2 carries a 1 s leak-grace
+override in `.config/nextest.toml` for concurrent child teardown.
+
 ## Level 3 — `cliclick`
 
 `src/cliclick.rs` wraps the `cliclick` Homebrew utility to synthesize

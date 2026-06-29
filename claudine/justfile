@@ -88,8 +88,23 @@ test-contract *args="":
 # Level-2 PTY tests. Gated by `require_level!(Level::L2, pty_available(), ...)`;
 # skip cleanly when /dev/ptmx is unavailable, hard-fail when
 # BISCUIT_TEST_LEVEL_REQUIRED=2 is set.
+#
+# claudine's L2 suite is dominated by self-isolating tests (each spawns its
+# own tmux session / PTY), so it runs in `_test_l2`'s parallel self-spawn
+# mode rather than the shared-pane `-j 1` path: no broker, no shared pane,
+# every `shared_or_spawn()` falls back to an owned, Drop-cleaned pane. Cap
+# concurrency at `min(cores, 8)` so concurrent claudine+git+tmux children
+# don't saturate the host and trip nextest's slow/leak timeouts. Force the
+# old serial path with `BISCUIT_L2_THREADS=1 just test-l2`.
 test-l2 *args="":
-    @just _test_l2 claudine-cli {{ args }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null \
+        || sysctl -n hw.ncpu 2>/dev/null \
+        || nproc 2>/dev/null \
+        || echo 4)"
+    threads=$(( cores < 8 ? cores : 8 ))
+    BISCUIT_L2_THREADS="${BISCUIT_L2_THREADS:-${threads}}" just _test_l2 claudine-cli {{ args }}
 
 # Level-3 OS-keyboard-injection tests. Gated by `require_level!(Level::L3, ...)`;
 # the recipe exports RUN_LEVEL3=1, and each test also skips cleanly when its

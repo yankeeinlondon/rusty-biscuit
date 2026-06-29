@@ -4,8 +4,8 @@ description: |-
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
   `require_level!` gating, nextest filtersets, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 1acc7c1c76b11142-9d61f99b8c9672e3
-last_updated: 2026-06-06
+hash: 1acc7c1c76b11142-ce770f461c0ba526
+last_updated: 2026-06-29
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
@@ -74,7 +74,7 @@ Every curated package area defines these 12 recipes:
 |----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `sanity`       | Fast confidence (≤15 s). `cargo nextest run --lib --bins -E '!set:slow'`.                                                                                                                                                                                                                                                                    |
 | `test`         | Full L1 suite.                                                                                                                                                                                                                                                                                                                               |
-| `test-l2`      | Real-terminal tests. Pre-spawns one shared pane per backend via `biscuit-harness-broker`, exports `BISCUIT_SHARED_*_ID` env vars, runs nextest with `-j 1`, tears panes down in a trap. Tests use `<Backend>Harness::shared_or_spawn()` to attach to the pre-spawned pane and fall back to per-process spawning when the env var is missing. |
+| `test-l2`      | Real-terminal tests. **Default (serial):** pre-spawns one shared pane per backend via `biscuit-harness-broker`, exports `BISCUIT_SHARED_*_ID`, runs nextest `-j 1`, tears panes down in a trap; tests `<Backend>Harness::shared_or_spawn()` attach to that pane. **Parallel self-spawn mode (`BISCUIT_L2_THREADS=N`):** skips the broker, exports no `BISCUIT_SHARED_*`, runs `-j N`; every `shared_or_spawn()` then takes its owned-pane fallback, so there is no shared resource. See "Running L2 Tests" below. |
 | `test-l3`      | OS keyboard/mouse tests.                                                                                                                                                                                                                                                                                                                     |
 | `test-browser` | Headless browser tests. Runs `-j 1` (one Chrome at a time); the tier gets a 5s `leak-timeout` override for Chrome teardown.                                                                                                                                                                                                                                                                                                                      |
 | `test-real`    | External resource tests.                                                                                                                                                                                                                                                                                                                     |
@@ -100,10 +100,9 @@ recipe also preserves Ctrl+C as exit `130`.
 
 `level2_*` tests spawn **real terminal windows / panes**. Run them **only** via
 `just test-l2`, never `cargo test` / `cargo nextest run -E 'test(/level2_/)'`
-directly. The recipe pre-spawns **one shared pane per backend** and runs nextest
-**`-j 1`**; bypassing it spawns windows in parallel, races on global GUI state,
-leaks windows on timeout/panic, and produces ambiguous `osascript`/PTY failures
-that look like — but are not — code regressions.
+directly: the recipe owns pane spawning/teardown and the serial-vs-parallel mode
+choice. Bypassing it leaks windows on timeout/panic and produces ambiguous
+`osascript`/PTY failures that look like — but are not — code regressions.
 
 - A wall of single-backend failures (e.g. every `*_in_wezterm`) usually means
   that emulator is **absent/unscriptable here**, not that the renderer broke —
@@ -113,6 +112,56 @@ that look like — but are not — code regressions.
   `level2_apple_terminal_*` failure, read **`apple-terminal-harness-pitfalls.md`**.
 - Spawning must **never steal foreground focus** and must **never close a window
   it did not create** — these are hard harness invariants.
+
+### Serialization is per-*resource*, not per-*tier*
+
+The default `-j 1` is **conservative**, not fundamental. It protects two specific
+hazards, not the tier as a whole:
+
+1. **The single shared broker pane** — every `shared_or_spawn()` test attaches to
+   *one* pane per backend, so two at once would clobber it.
+2. **GUI backends with global OS state** — WezTerm/Kitty window lists and focus,
+   and especially **Apple Terminal's single global AppleScript state**
+   (`AppleTerminalHarness` *must* stay serial).
+
+A test that (a) spawns its **own** uniquely-named session/PTY (e.g.
+`TmuxHarness::new() + spawn_shell()`, or its own `tmux new-session -s
+…_{pid}_{seq}` it kills at the end) and (b) targets a **headless** backend has
+**no shared resource** and is parallel-safe. Most L2 suites are dominated by such
+tests and pay the `-j 1` tax purely as collateral. This is what
+`BISCUIT_L2_THREADS=N` exploits: with no `BISCUIT_SHARED_*` exported,
+`shared_or_spawn()` itself falls back to an **owned, `Drop`-cleaned** pane, so the
+whole tier self-isolates and runs at `-j N`. claudine wires this in its
+`test-l2` at `min(cores, 8)` (~6× faster); other areas keep the serial default.
+
+**Backend parallel-safety:** **tmux** = headless, immune to the host gotcha,
+cleanup reaps only dead-pid sessions → fully parallel-safe (validated).
+**WezTerm** = background panes (`biscuit-bg` workspace, off-screen) coexist and
+sidestep the focus/window-list race → parallel-safe (validated), but spawn cost
+is high. **Kitty** = same off-screen background model (likely parallel-safe, not
+yet validated). **Apple Terminal** = **serial-only** (single global AppleScript
+state + focus snapshot/restore). Prefer tmux for any L2 test you want to fan out.
+
+Note the **`available()` bar is runtime reachability, not "installed"**: WezTerm
+needs `WEZTERM_UNIX_SOCKET`, Kitty needs `KITTY_LISTEN_ON` — each exported *only*
+to processes that terminal launches. So GUI-backend tests run only when the suite
+is launched from inside that terminal (or it is cold-started with remote control;
+see the `biscuit-test-harness` skill). A clean SKIP there is the host gotcha, not
+a missing app.
+
+**Parallel-safety prerequisites for a self-isolating L2 test:** unique temp dir
+per test (key on `{pid}-{nanos}-{atomic}`, never a fixed path); cleanup that
+reaps only **dead-pid** resources, never live ones; and no dependence on shared
+pane geometry/state.
+
+**Flakiness under parallel load** concentrates in timing-sensitive tests (signal
+delivery, interactive choosers). `retries = 3` is the sanctioned backstop. Avoid
+the **two-phase capture race**: polling for an *intermediate* marker (a chooser
+hint) and then taking a *separate* `capture()` for the *final* content can grab a
+half-painted frame under load — poll for the content you will assert on, in the
+same loop, before capturing. Areas running parallel L2 also want a 1 s
+`leak-timeout` override (see Leaked Process Detection) for concurrent child
+teardown.
 
 ## Nextest Filtersets
 
@@ -144,6 +193,14 @@ reap them:
      `-j 1` (see below) so only one Chrome tears down at a time —
      `#[serial(browser)]` cannot serialize them under nextest's
      process-per-test model.
+   - **Parallel-L2 grace (generalizable).** Any tier run at `-j N` whose tests
+     spawn short-lived children (tmux/PTY/git) wants the same treatment: their
+     concurrent teardown lags the 100ms pipe-drain check and trips spurious
+     `LEAK-FAIL`s on whichever test loses the race. The fix is a scoped 1s grace,
+     e.g. `filter = 'package(claudine-cli) & test(/level2_/)'` with
+     `leak-timeout = { period = "1s", result = "fail" }` (same shape as the
+     `worktree` and `tts-audio` groups). Keep `result = "fail"` — the grace only
+     widens the wait window, it does not stop catching a genuine leak.
 2. **`just test-leaks` (post-run sweep, all platforms).** Wraps `just test` in
    `leak-sweep` (`tools/test-toolkit`, `--features leak-sweep`). It diffs the
    process list before/after the whole run and reports survivors whose
