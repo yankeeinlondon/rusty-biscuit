@@ -609,6 +609,27 @@ pub enum ShellExpansionError {
     Preflight(Box<crate::markdown::types::MarkdownError>),
 }
 
+impl ShellExpansionError {
+    /// The authored shell command this error is about, when the variant carries
+    /// one.
+    ///
+    /// `ParseDirective`, `PolicyIo`, and `Preflight` describe failures that are
+    /// not scoped to a single resolved command, so they return `None`.
+    pub fn command(&self) -> Option<&str> {
+        match self {
+            Self::CommandNotFound { command, .. }
+            | Self::Blacklisted { command, .. }
+            | Self::ApprovalRequired { command, .. }
+            | Self::Denied { command, .. }
+            | Self::NotPreApproved { command, .. }
+            | Self::DynamicCommandShape { command, .. }
+            | Self::Timeout { command, .. }
+            | Self::ExecutionFailed { command, .. } => Some(command),
+            Self::ParseDirective { .. } | Self::PolicyIo { .. } | Self::Preflight(_) => None,
+        }
+    }
+}
+
 impl biscuit_terminal::errors::BlockError for ShellExpansionError {
     fn status_block(
         &self,
