@@ -19,6 +19,8 @@ use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::components::status_block::StatusBlock;
 use biscuit_terminal::errors::{ErrorHeader, SourceContext, StatusBlockExt};
 
+use crate::markdown::compose::expression::file_suggestions::DEFAULT_MAX_SUGGESTIONS;
+use crate::markdown::compose::expression::{ExpressionError, FileRefFailure, suggest_sibling_files};
 use crate::markdown::highlighting::highlight_yaml_lines;
 use crate::markdown::schemas::{ValidationProblem, ValidationProblemKind};
 
@@ -243,6 +245,77 @@ pub(crate) fn transform_block(message: &str) -> StatusBlock {
         .hint("Review the transform pipeline inputs and any configured rules.")
 }
 
+/// Build the [`StatusBlock`] for [`MarkdownError::Interpolation`].
+///
+/// The headline and hint are derived from the typed `cause` (never the mechanism
+/// word "interpolation"), so the author sees the real problem — an invalid file
+/// path, an unknown function — rather than the layer that surfaced it. The scope
+/// (`key`, `expression`) names where the failing expression lives. The focused
+/// frontmatter excerpt and did-you-mean suggestions are layered on by the
+/// file-reference render path.
+///
+/// [`MarkdownError::Interpolation`]: crate::markdown::MarkdownError::Interpolation
+pub(crate) fn interpolation_block(
+    key: Option<&str>,
+    expression: &str,
+    cause: &ExpressionError,
+) -> StatusBlock {
+    let scope = match key {
+        Some(k) => format!(
+            "The <inverse>{}</inverse> frontmatter property",
+            Prose::escape_text(k)
+        ),
+        None => "A document expression".to_string(),
+    };
+
+    match cause {
+        ExpressionError::FileReference(diagnostic) => {
+            let headline = match diagnostic.kind {
+                FileRefFailure::RemoteNotEnabled => "remote reference not enabled",
+                _ => "invalid file path",
+            };
+            let mut body = format!(
+                "{scope} references the file <orange>{}</orange>, which could not be resolved.",
+                Prose::escape_text(&diagnostic.reference)
+            );
+            // Did-you-mean: for a *missing* (not malformed/remote) reference, rank
+            // the siblings of the expected path against its leaf name. Computed
+            // here at render time only — the hot eval loop never touches disk.
+            if matches!(diagnostic.kind, FileRefFailure::NotFound) {
+                let expected = diagnostic.base_dir.join(&diagnostic.reference);
+                let suggestions = suggest_sibling_files(&expected, DEFAULT_MAX_SUGGESTIONS);
+                if !suggestions.is_empty() {
+                    body.push_str("\n\n<b>Did you mean?</b>");
+                    for suggestion in suggestions {
+                        body.push_str(&format!(
+                            "\n- <green>{}</green>",
+                            Prose::escape_text(&suggestion)
+                        ));
+                    }
+                }
+            }
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("MarkdownError", headline))
+                .body(body)
+                .hint(
+                    "Confirm the path is correct, or guard an optional reference with \
+                     `file_exists(...)` so a missing file is not treated as an error.",
+                )
+        }
+        other => {
+            let body = format!(
+                "{scope} failed to evaluate <dim>`{}`</dim>:\n\n{}",
+                Prose::escape_text(expression),
+                Prose::escape_text(&other.to_string())
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("MarkdownError", "interpolation failed"))
+                .body(body)
+                .hint("Review the expression and the values it references.")
+        }
+    }
+}
+
 /// Build the [`StatusBlock`] for [`MarkdownError::RenderTree`].
 pub(crate) fn render_tree_block(message: &str) -> StatusBlock {
     StatusBlock::new(StatusState::Error)
@@ -415,6 +488,33 @@ mod tests {
         assert!(out.contains("file load failed"), "missing summary: {out}");
         assert!(out.contains("NotFound"), "missing I/O kind: {out}");
         assert!(out.contains("no such file"), "missing error message: {out}");
+    }
+
+    #[test]
+    fn interpolation_block_file_reference_offers_did_you_mean() {
+        use crate::markdown::compose::expression::FileReferenceDiagnostic;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("spec.md"), b"x").unwrap();
+        // A near-miss leaf (`specs.md` vs the real `spec.md`) must rank as a
+        // suggestion alongside the cause-driven headline and receiving-key scope.
+        let cause = ExpressionError::FileReference(FileReferenceDiagnostic {
+            function: "frontmatter",
+            reference: "specs.md".to_string(),
+            kind: FileRefFailure::NotFound,
+            base_dir: dir.path().to_path_buf(),
+            fallback_dir: None,
+            source: None,
+        });
+        let out = render_block(&interpolation_block(
+            Some("result"),
+            "frontmatter('specs.md')",
+            &cause,
+        ));
+        assert!(out.contains("invalid file path"), "cause-driven headline: {out}");
+        assert!(out.contains("result"), "must name the receiving key: {out}");
+        assert!(out.contains("Did you mean"), "must offer suggestions: {out}");
+        assert!(out.contains("spec.md"), "must suggest the sibling: {out}");
     }
 
     #[test]

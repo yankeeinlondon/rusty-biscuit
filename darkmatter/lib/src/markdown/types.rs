@@ -10,6 +10,7 @@ use biscuit_terminal::terminal::Terminal;
 use indexmap::IndexMap;
 use thiserror::Error;
 
+use crate::markdown::compose::expression::ExpressionError;
 use crate::markdown::errors::blocks;
 use crate::markdown::schemas::ValidationProblem;
 
@@ -20,6 +21,27 @@ use biscuit_terminal::errors::SourceContext;
 /// Uses `IndexMap` to preserve insertion order so that frontmatter keys
 /// are serialized in the same order they appeared in the source document.
 pub type FrontmatterMap = IndexMap<String, serde_json::Value>;
+
+/// Where an interpolation error's failing expression physically lives.
+///
+/// `OnDisk` carries a real [`SourceContext`] for a frontmatter region that maps
+/// to a file, so the renderer can show a focused, line-numbered excerpt.
+/// `Effective` is the late-binding fallback — DM2 event-time resolution and body
+/// text have no stable on-disk locus to slice, so the resolved/expression text is
+/// carried instead. Modeling both keeps the excerpt renderer total: it never
+/// fabricates line numbers for a region that does not exist on disk.
+#[derive(Debug, Clone)]
+pub enum SourceRef {
+    /// Compose-time: the error maps to a real frontmatter region in a file.
+    OnDisk(SourceContext),
+    /// Late-binding or body text: no stable on-disk locus; carry the text.
+    Effective {
+        /// The resolved value or raw expression to display in lieu of a slice.
+        rendered: String,
+        /// The frontmatter key the expression originated from, when known.
+        origin_key: Option<String>,
+    },
+}
 
 /// Errors that can occur when working with Markdown documents.
 #[derive(Error, Debug)]
@@ -72,6 +94,29 @@ pub enum MarkdownError {
     /// Transform pipeline error.
     #[error("Transform error: {0}")]
     Transform(String),
+
+    /// A frontmatter or body `{{ … }}` interpolation failed to evaluate.
+    ///
+    /// The typed evaluation `cause` is preserved verbatim; this wrapper adds only
+    /// *scope* — which frontmatter key (`None` for body text), the expression
+    /// span, and where it lives ([`SourceRef`]). The rendered block derives its
+    /// headline and hint from `cause`, never from the mechanism word
+    /// "interpolation", so the author sees the root cause (e.g. an invalid file
+    /// path) rather than the layer that surfaced it.
+    #[error("interpolation of `{expression}` failed: {cause}")]
+    Interpolation {
+        /// The frontmatter key whose whole value failed, or `None` for body text.
+        key: Option<String>,
+        /// The `{{ … }}` span text that failed.
+        expression: String,
+        /// Where the failing expression physically lives. Boxed to keep
+        /// `MarkdownError` small (the `SourceContext` it can carry is large),
+        /// matching the boxing convention of the other heavy variants.
+        source: Box<SourceRef>,
+        /// The typed evaluation cause. Boxed for the same size reason.
+        #[source]
+        cause: Box<ExpressionError>,
+    },
 
     /// Transclusion pipeline error.
     #[error("Transclusion error: {0}")]
@@ -227,6 +272,14 @@ impl BlockError for MarkdownError {
             MarkdownError::InvalidLineRange(message) => blocks::invalid_line_range_block(message),
             MarkdownError::Serialization(source) => blocks::serialization_block(source),
             MarkdownError::Transform(message) => blocks::transform_block(message),
+            MarkdownError::Interpolation {
+                key,
+                expression,
+                // The on-disk excerpt is layered on by the file-reference render
+                // path; the leaf block renders cause + scope.
+                source: _,
+                cause,
+            } => blocks::interpolation_block(key.as_deref(), expression, cause),
             MarkdownError::RenderTree(source) => blocks::render_tree_block(&source.to_string()),
             MarkdownError::MalformedStoredHash { property, reason } => {
                 blocks::malformed_stored_hash_block(property, reason)
