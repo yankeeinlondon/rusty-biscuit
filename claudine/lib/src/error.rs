@@ -7,7 +7,7 @@ use darkmatter::markdown::MarkdownError;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
-use crate::diagnostics::{Category, Diagnostic, Disposition, Origin, code_spec};
+use crate::diagnostics::{Category, Diagnostic, Disposition, Origin, code_spec, null_detail_for};
 use crate::provider::Provider;
 /// All errors that can occur within the Claudine library.
 #[derive(Debug, thiserror::Error)]
@@ -323,14 +323,31 @@ impl Diagnostic for ClaudineError {
     }
 
     fn detail(&self) -> Value {
+        // The base object carries every field the mapped code declares,
+        // pre-seeded to `null`, so an unavailable optional still projects its
+        // key (error-catalog §2.5; the catalog makes the field set handleable).
+        // Each explicit arm overwrites the keys it can populate; variants with
+        // no extractable specifics keep the all-`null` base.
+        let mut base = null_detail_for(self.code());
+
         match self {
-            ClaudineError::ProviderNotAvailable(provider) => json!({ "provider": provider }),
-            ClaudineError::SystemPromptFileNotFound(path) => json!({ "path": path }),
+            // `provider.unavailable` declares `provider`, `path`. The variant
+            // only knows the provider name; the executable path is unknown.
+            ClaudineError::ProviderNotAvailable(provider) => {
+                base["provider"] = json!(provider);
+            }
+            // `io.read_failed` declares `path`.
+            ClaudineError::SystemPromptFileNotFound(path) => {
+                base["path"] = json!(path);
+            }
             // `io.write_failed` declares `path`.
-            ClaudineError::LockError { path } => json!({ "path": path.to_string_lossy() }),
-            // `io.network` declares `url`, `message`.
+            ClaudineError::LockError { path } => {
+                base["path"] = json!(path.to_string_lossy());
+            }
+            // `io.network` declares `url`, `message`. The typed source carries
+            // no parsed URL to surface, so only `message` is populated.
             ClaudineError::HttpError(_) | ClaudineError::UrlError(_) => {
-                json!({ "url": Value::Null, "message": self.to_string() })
+                base["message"] = json!(self.to_string());
             }
             // `config.invalid` declares `field`, `message`.
             ClaudineError::ConfigValidation(message)
@@ -338,22 +355,91 @@ impl Diagnostic for ClaudineError {
             | ClaudineError::ProtectEnforcementMapping(message)
             | ClaudineError::PolicySourceDiscovery(message)
             | ClaudineError::PolicyAmbiguousContext(message) => {
-                json!({ "field": Value::Null, "message": message })
+                base["message"] = json!(message);
             }
             ClaudineError::PolicyApplyFailed { path, message } => {
-                json!({ "field": path.to_string_lossy(), "message": message })
+                base["field"] = json!(path.to_string_lossy());
+                base["message"] = json!(message);
             }
+            ClaudineError::PolicyNativeParse { source_id, message } => {
+                base["field"] = json!(source_id);
+                base["message"] = json!(message);
+            }
+            ClaudineError::PolicyCliParse { provider, message } => {
+                base["field"] = json!(provider.to_string());
+                base["message"] = json!(message);
+            }
+            ClaudineError::ProtectRuleParse { pattern, .. } => {
+                base["field"] = json!(pattern);
+                base["message"] = json!(self.to_string());
+            }
+            // The remaining `config.invalid` variants carry a typed parse
+            // source but no distinct `field`; surface the display message.
+            ClaudineError::ConfigNotFound(_)
+            | ClaudineError::JsonParse(_)
+            | ClaudineError::TomlParse(_)
+            | ClaudineError::YamlParse(_)
+            | ClaudineError::ChronoParse(_)
+            | ClaudineError::RegexError(_)
+            | ClaudineError::PolicyBackendUnavailable(_) => {
+                base["message"] = json!(self.to_string());
+            }
+            // `config.mcp_invalid` declares `server`, `message`.
             ClaudineError::McpServerNotFound { id } => {
-                json!({ "server": id, "message": self.to_string() })
+                base["server"] = json!(id);
+                base["message"] = json!(self.to_string());
             }
+            ClaudineError::McpAliasConflict { existing_id, .. } => {
+                base["server"] = json!(existing_id);
+                base["message"] = json!(self.to_string());
+            }
+            ClaudineError::McpAmbiguousMatch { query, .. } => {
+                base["server"] = json!(query);
+                base["message"] = json!(self.to_string());
+            }
+            ClaudineError::McpImportConflict { name, .. } => {
+                base["server"] = json!(name);
+                base["message"] = json!(self.to_string());
+            }
+            ClaudineError::McpCatalogNotFound => {
+                base["message"] = json!(self.to_string());
+            }
+            // `usage.unsupported` declares `operation`, `provider`.
             ClaudineError::McpProviderNotSupported { provider, reason } => {
-                json!({ "operation": reason, "provider": provider.to_string() })
+                base["operation"] = json!(reason);
+                base["provider"] = json!(provider.to_string());
             }
+            ClaudineError::ConfigCreationNotSupported { provider } => {
+                base["operation"] = json!(self.to_string());
+                base["provider"] = json!(provider.to_string());
+            }
+            ClaudineError::PolicyUnsupportedQuery { provider, query } => {
+                base["operation"] = json!(query);
+                base["provider"] = json!(provider.to_string());
+            }
+            ClaudineError::PolicyUnsupportedMutation { provider, op } => {
+                base["operation"] = json!(op);
+                base["provider"] = json!(provider.to_string());
+            }
+            // `internal.bug` declares `message`.
             ClaudineError::TemplateError(message)
             | ClaudineError::LaunchContextDetection(message)
-            | ClaudineError::ReportingPathUnavailable(message) => json!({ "message": message }),
-            _ => Value::Null,
+            | ClaudineError::ReportingPathUnavailable(message) => {
+                base["message"] = json!(message);
+            }
+            ClaudineError::InvalidReportingDateRange { .. } => {
+                base["message"] = json!(self.to_string());
+            }
+            // `provider.stream_error` (`Adapter`), `io.read_failed`
+            // (`Sqlite`), `io.permission_denied` / `io.read_failed` (`Io`),
+            // `io.write_failed` (`LinkingError`), and the
+            // `composition.failed`-mapped `SystemPromptComposition` all carry
+            // no field the registry declares that is separately extractable
+            // here; the all-`null` base already satisfies their key set.
+            _ => {}
         }
+
+        base
     }
 }
 

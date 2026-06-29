@@ -54,7 +54,7 @@ pub use error_kind::code_for_error_kind;
 pub use facets::{Category, Disposition, Origin, Severity};
 pub use registry::{CODES, CodeSpec, code_spec};
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use biscuit_terminal::errors::BlockError;
 
@@ -99,6 +99,35 @@ pub trait Diagnostic: BlockError {
     fn severity(&self) -> Severity {
         self.disposition().default_severity()
     }
+}
+
+/// A `detail` object whose keys are exactly the field set the locked catalog
+/// declares for `code`, every value pre-seeded to JSON `null`.
+///
+/// `detail()` projections call this to satisfy the registry contract
+/// (error-catalog §2.5): every field a code lists must be a *present* key in
+/// `err.detail`, so an absent optional projects as `null` rather than vanishing.
+/// Each variant then overwrites the keys it can populate, leaving the rest
+/// `null`. Returns an empty object for an unknown code (none of our mapped
+/// codes are unknown, but the fallback keeps the projection total).
+///
+/// ## Examples
+///
+/// ```
+/// use claudine::diagnostics::null_detail_for;
+/// use serde_json::json;
+///
+/// let base = null_detail_for("io.read_failed");
+/// assert_eq!(base, json!({ "path": null }));
+/// ```
+pub fn null_detail_for(code: &str) -> Value {
+    let mut object = Map::new();
+    if let Some(spec) = code_spec(code) {
+        for &field in spec.detail {
+            object.insert(field.to_string(), Value::Null);
+        }
+    }
+    Value::Object(object)
 }
 
 /// Fold an operator [`BadgeCategory`] onto the unified [`Category`].

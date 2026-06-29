@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 
 use super::frontmatter_excerpt::FrontmatterExcerpt;
 use super::types::{ResolutionMode, ResolvedCompositionSource, SessionInteractivitySource};
-use crate::diagnostics::{Category, Diagnostic, Disposition, Origin, code_spec};
+use crate::diagnostics::{Category, Diagnostic, Disposition, Origin, code_spec, null_detail_for};
 use crate::provider::Provider;
 use thiserror::Error;
 
@@ -2839,41 +2839,165 @@ impl Diagnostic for CompositionError {
     }
 
     fn detail(&self) -> Value {
+        // Seed every key the mapped code declares to `null` so an unavailable
+        // optional still projects its key (error-catalog §2.5). Explicit arms
+        // overwrite the keys they can populate; variants with no extractable
+        // specifics keep the all-`null` base.
+        let mut base = null_detail_for(self.code());
+
         match self {
-            CompositionError::WithFrontmatter { inner, .. } => inner.detail(),
+            CompositionError::WithFrontmatter { inner, .. } => return inner.detail(),
             CompositionError::ComposeFailed(MarkdownError::Interpolation {
                 cause,
                 expression,
                 ..
             }) => match cause.as_ref() {
                 ExpressionError::FileReference(diagnostic) => {
-                    file_reference_detail(diagnostic)
+                    return file_reference_detail(diagnostic);
                 }
-                ExpressionError::UnknownFunction { name } => json!({ "name": name }),
-                other => json!({ "expression": expression, "message": other.to_string() }),
+                // `composition.unknown_function` declares `name`, `suggestions`.
+                // The interpolation cause carries no sibling-name ranking, so
+                // `suggestions` stays the seeded empty array.
+                ExpressionError::UnknownFunction { name } => {
+                    base["name"] = json!(name);
+                    base["suggestions"] = json!([]);
+                }
+                other => {
+                    base["expression"] = json!(expression);
+                    base["message"] = json!(other.to_string());
+                }
             },
+            // The remaining `composition.invalid_file_reference` constructors
+            // (the typed-source and resolved-not-found variants) carry no
+            // `FileReferenceDiagnostic`, so only `reference` is recoverable.
+            CompositionError::InvalidReference { reference, .. } => {
+                base["reference"] = json!(reference);
+            }
+            CompositionError::FileNotFound(reference) => {
+                base["reference"] = json!(reference);
+            }
             CompositionError::SchemaParse {
                 source_path,
                 property,
                 message,
                 ..
-            } => json!({
-                "source_path": source_path.to_string_lossy(),
-                "property": property,
-                "message": message,
-            }),
+            } => {
+                base["source_path"] = json!(source_path.to_string_lossy());
+                base["property"] = json!(property);
+                base["message"] = json!(message);
+            }
             CompositionError::SchemaLoad {
                 source_path,
                 message,
-            } => json!({
-                "source_path": source_path.to_string_lossy(),
-                "message": message,
-            }),
-            CompositionError::AtomicWriteFailed { path, .. } => json!({
-                "path": path.to_string_lossy(),
-            }),
-            _ => Value::Null,
+            } => {
+                base["source_path"] = json!(source_path.to_string_lossy());
+                base["message"] = json!(message);
+            }
+            // `composition.schema_validation` declares `source_path`,
+            // `problems`, `pointer_paths`.
+            CompositionError::SchemaValidation {
+                source_path,
+                problems,
+                ..
+            } => {
+                base["source_path"] = json!(source_path.to_string_lossy());
+                base["problems"] = json!(problems);
+                base["pointer_paths"] = json!([]);
+            }
+            // `composition.missing_properties` declares `missing`,
+            // `pointer_paths`.
+            CompositionError::MissingProperties {
+                missing,
+                pointer_paths,
+                ..
+            } => {
+                base["missing"] =
+                    json!(missing.iter().map(|p| p.name.clone()).collect::<Vec<_>>());
+                base["pointer_paths"] = json!(pointer_paths);
+            }
+            // `composition.frontmatter_parse` declares `source_path`. The
+            // typed `MarkdownError` does not expose a path uniformly here, so
+            // the key projects as `null`.
+            // `composition.shell_expansion` declares `command`.
+            CompositionError::ShellExpansionFailed { source_path, .. } => {
+                base["command"] = json!(source_path.to_string_lossy());
+            }
+            // `io.write_failed` declares `path`.
+            CompositionError::AtomicWriteFailed { path, .. } => {
+                base["path"] = json!(path.to_string_lossy());
+            }
+            // `composition.lifecycle_invalid` declares `property`, `message`.
+            // The lifecycle family threads a `property` (and usually a
+            // `message`); project both where the variant carries them.
+            CompositionError::LifecycleInvalid {
+                property, message, ..
+            } => {
+                base["property"] = json!(property);
+                base["message"] = json!(message);
+            }
+            CompositionError::LifecycleStackInvalidShape {
+                property, message, ..
+            }
+            | CompositionError::LifecycleStackAmbiguous {
+                property, message, ..
+            } => {
+                base["property"] = json!(property);
+                base["message"] = json!(message);
+            }
+            CompositionError::LifecycleActionInvalidShortForm {
+                property, message, ..
+            }
+            | CompositionError::LifecycleActionInvalidLongForm {
+                property, message, ..
+            }
+            | CompositionError::LifecycleWrongArity {
+                property, message, ..
+            }
+            | CompositionError::LifecycleInvalidArgs {
+                property, message, ..
+            } => {
+                base["property"] = json!(property);
+                base["message"] = json!(message);
+            }
+            CompositionError::LifecycleUnknownVerb {
+                property, verb, ..
+            } => {
+                base["property"] = json!(property);
+                base["message"] = json!(format!("unknown lifecycle action `{verb}`"));
+            }
+            CompositionError::LifecycleActionPlacement {
+                property, action, ..
+            } => {
+                base["property"] = json!(property);
+                base["message"] = json!(format!("action `{action}` is not valid here"));
+            }
+            CompositionError::LifecycleErrNotAvailable {
+                property, event, ..
+            } => {
+                base["property"] = json!(property);
+                base["message"] = json!(format!("`err` is not available in the `{event}` event"));
+            }
+            CompositionError::LifecycleEvaluationError {
+                event, message, ..
+            } => {
+                base["property"] = json!(event);
+                base["message"] = json!(message);
+            }
+            CompositionError::LifecycleSayConflict(property)
+            | CompositionError::LifecycleUnknownEffect(property, _)
+            | CompositionError::LifecycleInterpolationLeak { property, .. }
+            | CompositionError::LifecycleUndefinedVariable { property, .. } => {
+                base["property"] = json!(property);
+                base["message"] = json!(self.to_string());
+            }
+            // Every other variant maps to a code (`composition.failed`,
+            // `composition.frontmatter_parse`, …) whose declared keys it cannot
+            // populate from extractable instance data; the all-`null` base
+            // already satisfies the registry key set.
+            _ => {}
         }
+
+        base
     }
 }
 
