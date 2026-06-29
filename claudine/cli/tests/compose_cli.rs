@@ -134,8 +134,8 @@ fn compose_dry_run_malformed_whole_value_spec_path_aborts_without_leaking() {
         "error must name the offending key; stderr:\n{plain_err}"
     );
     assert!(
-        plain_err.contains("Interpolation parse failed"),
-        "error must report the interpolation parse failure; stderr:\n{plain_err}"
+        plain_err.contains("parse error"),
+        "error must report the typed interpolation parse failure; stderr:\n{plain_err}"
     );
     // The original leak: the raw malformed template surfacing as a successful
     // effective-frontmatter result on stdout. It must be gone.

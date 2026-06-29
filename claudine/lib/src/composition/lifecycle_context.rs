@@ -39,6 +39,7 @@ use darkmatter::markdown::compose::subtree::InjectedGlobal;
 use serde_json::{Map, Value};
 
 use super::error::CompositionError;
+use crate::diagnostics::Diagnostic;
 use crate::error::ClaudineError;
 use crate::harness::error::HarnessError;
 
@@ -50,8 +51,11 @@ use crate::harness::error::HarnessError;
 /// and `msg` carries the human-readable message.
 ///
 /// Visible in lifecycle stack expressions as `err.kind`, `err.variant`,
-/// `err.msg`. A bare `err` resolves to the whole object.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `err.msg` (legacy aliases, always present) plus the [`Diagnostic`] facets
+/// `err.code`, `err.category`, `err.disposition`, `err.origin`, and
+/// `err.detail.*` when the source error is classifiable. A bare `err` resolves
+/// to the whole object.
+#[derive(Debug, Clone, PartialEq)]
 pub struct LifecycleErrorInfo {
     /// The source error type name (e.g. `"ClaudineError"`,
     /// `"HarnessError"`, `"CompositionError"`).
@@ -64,33 +68,81 @@ pub struct LifecycleErrorInfo {
     /// The human-readable error message (the `Display` rendering of the
     /// source error).
     pub msg: String,
+
+    /// The classification facets, when the source error implements
+    /// [`Diagnostic`]. `None` for error types not yet wired into the contract,
+    /// in which case only the legacy `kind`/`variant`/`msg` aliases project.
+    /// Boxed to keep `LifecycleErrorInfo` small — it is the `Err` type of several
+    /// hot `Result`-returning lifecycle helpers.
+    pub facets: Option<Box<DiagnosticFacets>>,
+}
+
+/// The [`Diagnostic`] facets captured from a typed error, projected into the
+/// lifecycle `err` global as `err.code` / `err.category` / `err.disposition` /
+/// `err.origin` / `err.detail.*`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiagnosticFacets {
+    /// Stable dotted code (`composition.invalid_file_reference`).
+    pub code: &'static str,
+    /// Coarse domain slug (`composition`).
+    pub category: &'static str,
+    /// Generic-strategy slug (`correctable`).
+    pub disposition: &'static str,
+    /// Who must remediate (`author`).
+    pub origin: &'static str,
+    /// Typed per-instance payload, projected to `err.detail.*`.
+    pub detail: Value,
+}
+
+impl DiagnosticFacets {
+    /// Capture the facets of any [`Diagnostic`]-implementing error.
+    pub fn from_diagnostic<D: Diagnostic + ?Sized>(err: &D) -> Self {
+        Self {
+            code: err.code(),
+            category: err.category().as_str(),
+            disposition: err.disposition().as_str(),
+            origin: err.origin().as_str(),
+            detail: err.detail(),
+        }
+    }
 }
 
 impl LifecycleErrorInfo {
     /// Build the snapshot from a [`ClaudineError`].
+    ///
+    /// `ClaudineError` does not yet implement [`Diagnostic`], so only the legacy
+    /// `kind`/`variant`/`msg` aliases project (facets are `None`).
     pub fn from_claudine_error(err: &ClaudineError) -> Self {
         Self {
             kind: "ClaudineError",
             variant: variant_name_from_debug(err),
             msg: err.to_string(),
+            facets: None,
         }
     }
 
     /// Build the snapshot from a [`HarnessError`].
+    ///
+    /// `HarnessError` does not yet implement [`Diagnostic`], so only the legacy
+    /// `kind`/`variant`/`msg` aliases project (facets are `None`).
     pub fn from_harness_error(err: &HarnessError) -> Self {
         Self {
             kind: "HarnessError",
             variant: variant_name_from_debug(err),
             msg: err.to_string(),
+            facets: None,
         }
     }
 
-    /// Build the snapshot from a [`CompositionError`].
+    /// Build the snapshot from a [`CompositionError`], capturing its
+    /// [`Diagnostic`] facets so `err.code` / `err.detail.*` project alongside the
+    /// legacy aliases.
     pub fn from_composition_error(err: &CompositionError) -> Self {
         Self {
             kind: "CompositionError",
             variant: variant_name_from_debug(err),
             msg: err.to_string(),
+            facets: Some(Box::new(DiagnosticFacets::from_diagnostic(err))),
         }
     }
 
@@ -107,16 +159,28 @@ impl LifecycleErrorInfo {
             kind: "LifecycleAction",
             variant: verb.into(),
             msg: msg.into(),
+            facets: None,
         }
     }
 
     /// Render the snapshot as a JSON object for evaluation lookups.
+    ///
+    /// The legacy `kind`/`variant`/`msg` aliases are always present; the
+    /// [`Diagnostic`] facets (`code`/`category`/`disposition`/`origin`/`detail`)
+    /// are added only when the source error was classifiable.
     pub fn to_value(&self) -> Value {
-        serde_json::json!({
-            "kind": self.kind,
-            "variant": self.variant,
-            "msg": self.msg,
-        })
+        let mut obj = serde_json::Map::new();
+        obj.insert("kind".to_string(), Value::from(self.kind));
+        obj.insert("variant".to_string(), Value::from(self.variant.clone()));
+        obj.insert("msg".to_string(), Value::from(self.msg.clone()));
+        if let Some(facets) = &self.facets {
+            obj.insert("code".to_string(), Value::from(facets.code));
+            obj.insert("category".to_string(), Value::from(facets.category));
+            obj.insert("disposition".to_string(), Value::from(facets.disposition));
+            obj.insert("origin".to_string(), Value::from(facets.origin));
+            obj.insert("detail".to_string(), facets.detail.clone());
+        }
+        Value::Object(obj)
     }
 }
 
@@ -352,11 +416,44 @@ mod tests {
             kind: "ClaudineError",
             variant: "Io".to_string(),
             msg: "disk full".to_string(),
+            facets: None,
         };
         let value = info.to_value();
         assert_eq!(value.get("kind"), Some(&json!("ClaudineError")));
         assert_eq!(value.get("variant"), Some(&json!("Io")));
         assert_eq!(value.get("msg"), Some(&json!("disk full")));
+    }
+
+    #[test]
+    fn composition_error_projects_diagnostic_facets_with_legacy_aliases() {
+        let err = CompositionError::SchemaLoad {
+            source_path: std::path::PathBuf::from("p.md"),
+            message: "bad".to_string(),
+        };
+        let value = LifecycleErrorInfo::from_composition_error(&err).to_value();
+        // Legacy aliases stay present.
+        assert_eq!(value.get("kind"), Some(&json!("CompositionError")));
+        assert_eq!(value.get("variant"), Some(&json!("SchemaLoad")));
+        assert!(value.get("msg").is_some());
+        // New typed facets project alongside.
+        assert_eq!(value.get("code"), Some(&json!("composition.schema_load")));
+        assert_eq!(value.get("category"), Some(&json!("composition")));
+        assert_eq!(value.get("disposition"), Some(&json!("correctable")));
+        assert_eq!(value.get("origin"), Some(&json!("author")));
+        assert_eq!(value["detail"]["source_path"], json!("p.md"));
+    }
+
+    #[test]
+    fn non_diagnostic_error_projects_only_legacy_aliases() {
+        // A HarnessError does not implement `Diagnostic` yet, so no facet keys
+        // appear — only the legacy aliases.
+        let info = LifecycleErrorInfo::from_harness_error(&HarnessError::ShellCommandDenied {
+            command: "x".to_string(),
+        });
+        let value = info.to_value();
+        assert!(value.get("kind").is_some());
+        assert!(value.get("code").is_none(), "no facets without Diagnostic");
+        assert!(value.get("detail").is_none());
     }
 
     #[test]
@@ -405,6 +502,7 @@ mod tests {
             kind: "ClaudineError",
             variant: "Io".to_string(),
             msg: "disk full".to_string(),
+            facets: None,
         };
         let timing = LifecycleTiming {
             document_ms: Some(100),
@@ -434,6 +532,7 @@ mod tests {
             kind: "ClaudineError",
             variant: "Io".to_string(),
             msg: "disk full".to_string(),
+            facets: None,
         };
         let globals = lifecycle_injected_globals(Some(&info), None, None);
         let state = state(json!({}));
@@ -470,6 +569,7 @@ mod tests {
             kind: "ClaudineError",
             variant: "Io".to_string(),
             msg: "disk full".to_string(),
+            facets: None,
         };
         let globals = lifecycle_injected_globals(Some(&info), None, None);
         let state = state(json!({"err": "literal-value"}));

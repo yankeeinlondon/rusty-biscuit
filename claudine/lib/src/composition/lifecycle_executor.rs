@@ -124,7 +124,10 @@ pub enum StackControl {
 }
 
 /// The result of running one lifecycle event's communication + stack.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+// `Eq` is intentionally omitted: `LifecycleErrorInfo` carries a `serde_json::Value`
+// detail payload (not `Eq`). `PartialEq` is sufficient for the tests that compare
+// outcomes.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct LifecycleEventOutcome {
     /// The lifecycle control action that terminated stack processing, if any.
     /// `None` means the stack ran to completion (or there was no stack).
@@ -2315,6 +2318,7 @@ mod tests {
             kind: "ClaudineError",
             variant: "Io".to_string(),
             msg: "disk full".to_string(),
+            facets: None,
         };
         let (_dir, engine) = temp_engine();
         let shell = MockShell::new(0);
@@ -2507,6 +2511,7 @@ mod tests {
             kind: "ClaudineError",
             variant: "Io".to_string(),
             msg: msg.to_string(),
+            facets: None,
         }
     }
 
