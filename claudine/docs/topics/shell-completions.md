@@ -426,17 +426,23 @@ claudine compose file.md spec=@d<TAB>
 → spec='docs/spec.md'
 ```
 
-The completer walks `docs/`, `features/`, `fixes/`, and `reviews/` at
-three scope levels:
-
-1. Repo root.
-2. Package-area root.
-3. Package root.
+The completer walks `docs/`, `features/`, `fixes/`, and `reviews/`
+**under the invoking `cwd`** — the launch area, i.e. the directory the
+user was in when they pressed `<TAB>`.
 
 **Why only four subdirs.** These are the directories a composition
 frontmatter setter realistically points at: documentation, planning
 artefacts, fix drafts, review outputs. Offering the entire repo would
 drown the candidate list.
+
+**Why anchored on the `cwd`, not the repo root.** A frontmatter file
+reference resolves at runtime against the **launch area** (captured as
+`launch_cwd` and threaded into the read-side resolver as
+`file_ref_fallback_dir`). The completion process is never `chdir`'d, so
+its `cwd` *is* that launch area. Anchoring here keeps every offered path
+byte-identical to what the runtime resolver accepts; a repo-root-relative
+candidate would resolve to a non-existent `<launch_cwd>/<repo-relative>`
+path at launch.
 
 ### Markdown-extension gate
 
@@ -531,7 +537,8 @@ property and dispatches by `CompletionKind`:
   match when a value partial is typed; all members surface when the
   partial is empty.
 - **`file(match='*.png', …)` → filesystem paths** rooted at the
-  effective repo root (or cwd when no repo), filtered by the
+  invoking `cwd` (the launch area; see the "Why anchored on the `cwd`"
+  note under *Setter values*), filtered by the
   property's glob patterns. The walk shares the scope walker's
   exclusion rules — `.gitignore` plus the `_`-prefix and curated
   skip-list (`target`, `node_modules`, …) elision — so archived
@@ -601,10 +608,11 @@ Claudine prints the non-interactive remediation block instead.
   press `Space` to toggle items, then `Enter` to submit the set.
 
 Candidates come from the schema's `match(...)` globs when present;
-otherwise the bare `file`/`file[]` fallback walks the effective repo
-root (or CWD when not in a repo) for markdown files, excluding prompt
-directories so composition prompts do not leak into generic file
-values. Both walks share the scope walker's exclusion rules —
+otherwise the bare `file`/`file[]` fallback walks the invoking `cwd`
+(the launch area — the runtime missing-property chooser runs *before*
+the wrapper's `switch_process_cwd`, so its `cwd` is still the launch
+area) for markdown files, excluding prompt directories so composition
+prompts do not leak into generic file values. Both walks share the scope walker's exclusion rules —
 `.gitignore`, the `_`-prefix elision, and the curated skip-list
 (`target`, `node_modules`, …).
 

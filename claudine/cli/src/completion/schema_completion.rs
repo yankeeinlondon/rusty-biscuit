@@ -298,9 +298,9 @@ fn yaml_root_property_keys(value: &YamlValue) -> Vec<String> {
 /// - `enum` → enum members matching `value_partial` (prefix-insensitive when
 ///   `value_partial` is non-empty; all members for an empty partial).
 /// - `file` → filesystem paths matching the property's `match(...)` globs.
-///   Walks the filesystem starting from the effective repo root (or cwd when
-///   no repo). Empty `match` patterns return no candidates — fall back to
-///   shell-native file completion.
+///   Walks the filesystem starting from the invoking `cwd` (the launch area;
+///   see [`scopes::property_value_root`]). Empty `match` patterns return no
+///   candidates — fall back to shell-native file completion.
 ///
 /// Each candidate is rendered as the **full** `name='value'` token so the
 /// shell can replace the entire setter under the cursor (matches the
@@ -406,9 +406,7 @@ fn file_candidates(
     is_array: bool,
     ctx: &ScopeContext,
 ) -> Vec<String> {
-    let base: PathBuf = scopes::effective_repo_root(ctx)
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| ctx.cwd.clone());
+    let base: PathBuf = scopes::property_value_root(ctx).to_path_buf();
 
     let (active, prefix_segments) = if is_array {
         parse_array_file_value(value_partial)
@@ -503,16 +501,15 @@ fn file_candidates(
 ///
 /// - `patterns` empty → delegates to [`default_glob::default_markdown_candidates`]
 ///   (bare `file`/`file[]` fallback).
-/// - `patterns` non-empty → walks from the effective repo root (or cwd)
-///   and returns every file that satisfies the `match(...)` globs.
+/// - `patterns` non-empty → walks from the invoking `cwd` (the launch area;
+///   see [`scopes::property_value_root`]) and returns every file that
+///   satisfies the `match(...)` globs.
 ///
 /// Used by the ENTER-path missing-property chooser. TAB completion uses
 /// [`file_candidates`] instead because it needs formatted setter tokens and
 /// array-continuation exclusion.
 pub(crate) fn file_candidate_paths(patterns: &[String], ctx: &ScopeContext) -> Vec<PathBuf> {
-    let base: PathBuf = scopes::effective_repo_root(ctx)
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| ctx.cwd.clone());
+    let base: PathBuf = scopes::property_value_root(ctx).to_path_buf();
 
     if patterns.is_empty() {
         return default_glob::default_markdown_candidates(ctx);
@@ -1068,6 +1065,41 @@ mod tests {
 
         // A fragment matching no path returns nothing.
         assert!(property_value(&effective, "spec", "zzz", &ctx).is_empty());
+    }
+
+    #[test]
+    fn property_value_match_pattern_anchors_on_cwd_not_repo_root() {
+        // Regression: a `file(match(...))` property walked the effective repo
+        // root, so a user completing inside a package area saw matches from
+        // the whole repo — and the offered repo-relative path did not resolve
+        // at runtime (read-side refs anchor on the launch `cwd`). The walk
+        // must start at `cwd` and surface only files beneath it, rendered
+        // cwd-relative.
+        let effective = effective_from_doc(concat!(
+            "---\n",
+            "$schema:\n",
+            "  review: \"file(match('**/*.md'))\"\n",
+            "---\nbody\n",
+        ));
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        // A doc above the cwd (repo root) and one under the cwd (package area).
+        write(&tmp.path().join("docs").join("top.md"), "# top\n");
+        write(
+            &tmp.path().join("claudine").join("docs").join("area.md"),
+            "# area\n",
+        );
+
+        let ctx = ScopeContext::discover_from(&tmp.path().join("claudine"));
+        let got = property_value(&effective, "review", "", &ctx);
+        assert!(
+            got.iter().any(|c| c == "review='docs/area.md'"),
+            "cwd-local doc must surface, rendered cwd-relative: {got:?}"
+        );
+        assert!(
+            !got.iter().any(|c| c.contains("top.md")),
+            "repo-root doc above the cwd must NOT surface: {got:?}"
+        );
     }
 
     #[test]
