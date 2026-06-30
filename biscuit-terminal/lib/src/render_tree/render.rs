@@ -1961,9 +1961,18 @@ impl Writer<'_> {
             .attrs
             .table_terminal_hints_ref()
             .unwrap_or(&default_terminal_hints);
-        let table = Table::new()
+        let mut table = Table::new()
             .with_columns(columns.clone())
             .with_data(data.clone());
+
+        // Carry only the content-box `width` from the node's layout onto the
+        // planning input. Margins stay default here: the tree has already
+        // reduced `available_width` by the block's margins, so re-applying them
+        // would double-count. `width` (e.g. `width: 100%`) drives whether the
+        // planner fills to the available width or hugs its content.
+        if let Some(layout) = table_node.attrs.layout_ref() {
+            table.layout_mut().width = layout.width.clone();
+        }
 
         // ── Pass 1: width planning ─────────────────────────────────────────
         let available = self.opts.context.available_width.max(1);

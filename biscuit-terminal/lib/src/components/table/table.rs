@@ -26,6 +26,7 @@ use crate::{
         wrap_policy::WordWrap,
     },
 };
+use renderable::layout::Width;
 
 pub use super::cell::TableCellContent;
 use super::cell::pad_cell;
@@ -505,12 +506,20 @@ impl Table {
             ));
         }
 
+        let border_overhead = measurements.border_overhead;
+
         if !measurements.word_wrap_needed {
             for column in &mut measurements.columns {
                 if column.fixed_width.is_none() {
                     column.resolved_width = column.columnar_width_requirement;
                 }
             }
+
+            self.apply_width_fill(
+                &mut measurements.columns,
+                available_render_width,
+                border_overhead,
+            );
 
             let table_width = table_total_width(
                 measurements
@@ -574,6 +583,12 @@ impl Table {
             }
         }
 
+        self.apply_width_fill(
+            &mut measurements.columns,
+            available_render_width,
+            border_overhead,
+        );
+
         let table_width = table_total_width(
             measurements
                 .columns
@@ -590,6 +605,45 @@ impl Table {
             table_width,
             dropped_notes,
         })
+    }
+
+    /// Grow the last visible column so the rendered table reaches an explicit
+    /// [`Width::Fixed`] target (e.g. `width: 100%` ⇒
+    /// `Width::Fixed(Length::Percent(100.0))`).
+    ///
+    /// [`Width::Auto`] and [`Width::FitContent`] hug their content — the
+    /// historical table behavior — and are deliberately left untouched here so
+    /// the change is opt-in: only a caller that sets an explicit fixed width
+    /// fills to the margin. The last visible column absorbs the slack, capped at
+    /// its `max_width` when one is set. Slack is only ever added, so a table
+    /// whose content already meets or exceeds the target is unchanged.
+    fn apply_width_fill(
+        &self,
+        columns: &mut [MeasuredColumn],
+        available_render_width: usize,
+        border_overhead: usize,
+    ) {
+        let Width::Fixed(target) = &self.layout.width else {
+            return;
+        };
+
+        let content_budget = available_render_width.saturating_sub(border_overhead);
+        let target_content = (resolve_cells(target, available_render_width as u32) as usize)
+            .saturating_sub(border_overhead)
+            .min(content_budget);
+
+        let content_used: usize = columns.iter().map(|column| column.resolved_width).sum();
+        if target_content <= content_used {
+            return;
+        }
+        let mut slack = target_content - content_used;
+
+        if let Some(last) = columns.last_mut() {
+            if let Some(max) = last.max_width {
+                slack = slack.min(max.saturating_sub(last.resolved_width));
+            }
+            last.resolved_width += slack;
+        }
     }
 
     fn visible_column_indices(&self, available_width: u32) -> Vec<usize> {
@@ -2637,6 +2691,73 @@ mod tests {
         assert!(result.contains("Name"));
         assert!(result.contains("Alice"));
         assert!(result.contains("Bob"));
+    }
+
+    // ── width: 100% fill ──────────────────────────────────────────
+
+    fn two_column_table() -> Table {
+        Table::new()
+            .with_columns(vec![TableColumn::new("A"), TableColumn::new("B")])
+            .with_data(vec![vec!["x".into(), "y".into()]])
+    }
+
+    #[test]
+    fn width_auto_hugs_content_below_available() {
+        // The default `Width::Auto` keeps the historical content-hugging
+        // behavior: tiny content does not stretch to the available width.
+        let plan = two_column_table().plan_widths(60).expect("plan");
+        assert!(
+            plan.table_width < 60,
+            "Auto must hug content, not fill; table_width={}",
+            plan.table_width
+        );
+    }
+
+    #[test]
+    fn width_fixed_full_fills_last_column_to_available() {
+        let mut table = two_column_table();
+        table.layout_mut().width = Width::Fixed(renderable::layout::TargetValue::universal(
+            renderable::layout::Length::Percent(100.0),
+        ));
+
+        let plan = table.plan_widths(60).expect("plan");
+        assert_eq!(
+            plan.table_width, 60,
+            "width: 100% must fill the available width"
+        );
+
+        let widths = plan.content_widths();
+        assert!(
+            widths[1] > widths[0],
+            "the last column must absorb the slack; widths={widths:?}"
+        );
+    }
+
+    #[test]
+    fn width_fixed_full_respects_last_column_max_width() {
+        // When the last column is capped, fill cannot exceed that cap, so the
+        // table may stop short of the available width rather than overflow it.
+        let mut table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("A"),
+                TableColumn::new("B").with_max_width(4),
+            ])
+            .with_data(vec![vec!["x".into(), "y".into()]]);
+        table.layout_mut().width = Width::Fixed(renderable::layout::TargetValue::universal(
+            renderable::layout::Length::Percent(100.0),
+        ));
+
+        let plan = table.plan_widths(60).expect("plan");
+        assert!(
+            plan.content_widths()[1] <= 4,
+            "capped last column must not exceed its max_width; widths={:?}",
+            plan.content_widths()
+        );
+        assert!(
+            plan.table_width <= 60,
+            "fill never overflows the available width; table_width={}",
+            plan.table_width
+        );
     }
 
     #[test]
