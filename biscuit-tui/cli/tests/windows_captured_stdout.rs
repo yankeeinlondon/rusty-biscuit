@@ -10,65 +10,145 @@
 //! to the console (`CONOUT$`) and deliver ONLY the submitted value to the
 //! captured stream — no TUI chrome, no ANSI/escape (`0x1b`) bytes.
 //!
-//! ## Why this is opt-in / skip-clean
+//! ## Why this is an executable, cross-compile-checked test (not a manual gate)
 //!
-//! Two environment constraints make an always-on automated assertion
-//! impossible, so the spawn is gated behind BOTH `cfg(windows)` AND an explicit
-//! `BISCUIT_TUI_WINDOWS_CONSOLE_TEST=1` opt-in. Absent the env var the test
-//! returns early (clean pass), mirroring how
-//! `active_redirect_routes_stdout_to_console_and_pipe_gets_only_submitted_value`
-//! returns early when `!io::stderr().is_terminal()`.
+//! Earlier this file returned early unless `BISCUIT_TUI_WINDOWS_CONSOLE_TEST=1`
+//! AND a human pressed Enter, so it "never ran" in any automated suite. That gap
+//! is closed here: the Enter keystroke is now injected **deterministically**
+//! into the attached console's input buffer with `WriteConsoleInputW`, so no
+//! human keypress is required. The test follows the proven claudine precedent
+//! (`claudine/cli/tests/level3_wrap_ctrl_c.rs`): it is `#[cfg(windows)]` and
+//! `#[ignore]`d (not early-returning), so it COMPILES on every Windows target
+//! and RUNS only when explicitly invoked with `--ignored` on a real Windows
+//! console.
 //!
-//! 1. **Console required.** The captured-stdout shape only has meaning when a
-//!    real console is attached for the prompt to render into. Under nextest,
-//!    stderr is captured, which trips the standalone headless guard
-//!    (`stdout && stderr both !is_terminal` → `no interactive terminal
-//!    available`) and prevents the real shape entirely.
-//! 2. **Live keypress.** Submitting a value drives the crossterm event loop,
-//!    which reads physical key events from the console. Injecting those
-//!    deterministically in automated CI is impractical, so the guaranteed path
-//!    is the documented manual/CI-runner reproduction (see
-//!    `features/2026-06-19-review-findings/windows-captured-stdout-repro.md`),
-//!    which a human/runner drives with the env var set.
+//! ## Why `WriteConsoleInputW` (not crossterm event injection)
 //!
-//! The PRIMARY guaranteed-here deliverable is that this file COMPILES for the
-//! active Windows target and NEVER runs (skips) on macOS/Linux or on any
-//! Windows run without the env var.
+//! The prompt's event loop reads physical key events from the console input
+//! buffer via the Win32 console API. Writing synthetic `KEY_EVENT` records with
+//! `WriteConsoleInputW` is exactly what a physical keypress produces at the OS
+//! boundary, so the submit travels the same path a user's Enter would — no
+//! crossterm-internal seam, no behavior shortcut.
+//!
+//! ## Why stderr is inherited
+//!
+//! stdout is piped (the `FOO=$(question ...)` capture shape under test). stderr
+//! stays inherited so the console remains attached for the prompt to render
+//! into; piping both would trip the standalone headless guard (both streams
+//! `!is_terminal` → `no interactive terminal available`) and the captured shape
+//! would never occur.
+//!
+//! ## Verification status
+//!
+//! The dev host is macOS, so this test's runtime pass must be observed on a
+//! Windows host / CI; on macOS it is *cross-compile-checked* for
+//! `x86_64-pc-windows-gnu`, which is the maximum honest verification from this
+//! host. The Windows-host gates are the path-filtered
+//! `.github/workflows/biscuit-tui-windows-captured-stdout.yml` workflow and
+//! `just test-windows-captured-stdout`. The repro recipe lives in
+//! `features/2026-06-19-review-findings/windows-captured-stdout-repro.md`.
+//!
+//! Until a green Windows-host run is recorded the path is **compile-checked, not
+//! yet runtime-confirmed** — this test plus its workflow/just recipe are the
+//! executable harness that closes the gap, not a claim it has already passed on
+//! Windows.
 #![cfg(windows)]
 
 use std::io::Read;
 use std::process::{Command, Stdio};
+use std::thread;
+use std::time::Duration;
 
-use assert_cmd::cargo::cargo_bin;
+use windows::Win32::Foundation::TRUE;
+use windows::Win32::System::Console::{
+    GetStdHandle, INPUT_RECORD, INPUT_RECORD_0, KEY_EVENT, KEY_EVENT_RECORD,
+    KEY_EVENT_RECORD_0, STD_INPUT_HANDLE, WriteConsoleInputW,
+};
+use windows::Win32::UI::Input::KeyboardAndMouse::VK_RETURN;
 
-/// Opt-in env var. A Windows operator (or CI runner) sets this to `1` only when
-/// a real console is attached and they will supply the prompt keystroke.
-const OPT_IN_ENV: &str = "BISCUIT_TUI_WINDOWS_CONSOLE_TEST";
+/// Write a single Enter (VK_RETURN) keydown+keyup pair into the attached
+/// console's input buffer so the running `question choose-one` prompt submits
+/// the default-highlighted first option.
+///
+/// Returns whether both records were accepted by the console.
+fn inject_enter() -> bool {
+    // SAFETY: `GetStdHandle(STD_INPUT_HANDLE)` returns the process's standard
+    // input handle (the attached console's input buffer). It does not transfer
+    // ownership and must not be closed; we only read from it via
+    // `WriteConsoleInputW` below. An invalid/redirected handle surfaces as an
+    // `Err` here, which the caller treats as "could not inject".
+    let stdin = match unsafe { GetStdHandle(STD_INPUT_HANDLE) } {
+        Ok(h) => h,
+        Err(_) => return false,
+    };
 
+    // One keydown record and one keyup record. `uChar` carries `\r` so consumers
+    // that read the translated character (not just the virtual-key code) also see
+    // a carriage return, matching a physical Enter.
+    let make = |down: bool| INPUT_RECORD {
+        EventType: KEY_EVENT as u16,
+        Event: INPUT_RECORD_0 {
+            KeyEvent: KEY_EVENT_RECORD {
+                bKeyDown: if down { TRUE } else { Default::default() },
+                wRepeatCount: 1,
+                wVirtualKeyCode: VK_RETURN.0,
+                wVirtualScanCode: 0,
+                uChar: KEY_EVENT_RECORD_0 {
+                    UnicodeChar: u16::from(b'\r'),
+                },
+                dwControlKeyState: 0,
+            },
+        },
+    };
+    let records = [make(true), make(false)];
+
+    let mut written: u32 = 0;
+    // SAFETY: `records` is a valid, fully-initialized slice of two
+    // `INPUT_RECORD`s that outlives this single synchronous call; `&mut written`
+    // is a valid out-param. `WriteConsoleInputW` neither retains the pointer nor
+    // mutates beyond `written`.
+    let ok = unsafe { WriteConsoleInputW(stdin, &records, &mut written) };
+    ok.is_ok() && written == records.len() as u32
+}
+
+/// On a real Windows console, `question` with stdout captured to a pipe must
+/// render its prompt to the console and deliver ONLY the submitted value to the
+/// captured stream — no ESC (`0x1b`) byte, i.e. no TUI/ANSI chrome.
+///
+/// `#[ignore]`d because it needs a real attached console to render into and to
+/// accept the injected console-input record. The path-filtered
+/// `.github/workflows/biscuit-tui-windows-captured-stdout.yml` workflow runs it
+/// in CI; to run the same gate manually on a Windows host:
+///
+/// ```text
+/// just test-windows-captured-stdout
+/// ```
 #[test]
+#[ignore = "requires a Windows host with an attached console; cross-compile-checked but not runtime-run on the macOS dev host"]
 fn captured_stdout_receives_only_value_no_tui_bytes() {
-    // Clean skip unless an operator/CI runner has provided a real console with
-    // the captured-stdout shape. This mirrors the in-process active-path test,
-    // which returns early when the required console shape is absent.
-    if std::env::var(OPT_IN_ENV).as_deref() != Ok("1") {
-        eprintln!(
-            "skipping: set {OPT_IN_ENV}=1 on a Windows console to run the \
-             captured-stdout boundary check (see \
-             features/2026-06-19-review-findings/windows-captured-stdout-repro.md)"
-        );
-        return;
-    }
-
     // Spawn `question` with stdout captured to a pipe (the `FOO=$(question ...)`
-    // shape) while stderr is INHERITED so the console stays attached for the
-    // prompt. The operator selects an option and submits with Enter.
-    let mut child = Command::new(cargo_bin("question"))
+    // shape) while stderr/stdin stay attached so the console renders the prompt
+    // and our injected key event reaches it.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_question"))
         .args(["choose-one", "Red", "Green", "Blue"])
         .stdin(Stdio::inherit())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
         .expect("spawn question");
+
+    // Let the prompt render its first frame and install its event loop before we
+    // inject the submit keystroke; injecting earlier could race the loop and the
+    // record would be discarded. The delay is bounded (deterministic, no human
+    // in the loop).
+    thread::sleep(Duration::from_millis(750));
+    let injected = inject_enter();
+    if !injected {
+        // A second deterministic Enter covers the rare case where the first
+        // record landed before the loop was reading. Still no human keypress.
+        thread::sleep(Duration::from_millis(250));
+        let _ = inject_enter();
+    }
 
     let mut captured = Vec::new();
     child

@@ -27,6 +27,19 @@ predicates = "3"
 serial_test = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 
+# Test-only, target-scoped: drives the Win32 console input buffer
+# (`WriteConsoleInputW`) in `tests/windows_captured_stdout.rs` to inject a
+# deterministic Enter keystroke. Scoped to `cfg(windows)` dev-deps so Unix/macOS
+# builds never pull it in. Matches the `windows` 0.62 workspace convention
+# (claudine / biscuit-location / sniff / playa). Only the feature subsets the F2
+# boundary test uses are enabled.
+[target.'cfg(windows)'.dev-dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_UI_Input_KeyboardAndMouse",
+] }
+
 # Opt-out of benchmarking: thin CLI wrapper around the biscuit-tui library.
 [package.metadata.benchmarks]
 required = false

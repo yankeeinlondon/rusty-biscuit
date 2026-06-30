@@ -12,18 +12,21 @@ the submitted value — no TUI chrome, no ANSI/escape (`0x1b`) bytes.
 
 In-process handle tests in `lib/src/core/standalone/tests.rs` prove the
 `CONOUT$` / `SetStdHandle` strategy, but cannot prove the real process boundary.
-This recipe is the human/CI-runner path for that boundary, paired with the
-opt-in gated test `cli/tests/windows_captured_stdout.rs`.
+This recipe pairs with the executable boundary test
+`cli/tests/windows_captured_stdout.rs`: section A is the human PowerShell sanity
+check, sections B and C are the automated Windows-host gates.
 
-## Why this is manual / opt-in
+## Why a console is still required (but no human keypress is)
 
-A console must be attached for the prompt to render into, and submitting a value
-drives the crossterm event loop, which reads physical key events. Under nextest,
-stderr is captured, which trips the standalone headless guard (both stdout and
-stderr non-tty → `no interactive terminal available`) and prevents the real
-shape. So the spawn in `windows_captured_stdout.rs` is gated behind both
-`cfg(windows)` and the env var `BISCUIT_TUI_WINDOWS_CONSOLE_TEST=1`, and skips
-cleanly otherwise.
+A console must be attached for the prompt to render into. Under nextest, stderr
+is captured, which trips the standalone headless guard (both stdout and stderr
+non-tty → `no interactive terminal available`) and prevents the real shape — so
+the test needs a real attached console. The submit keystroke, however, is no
+longer manual: the test injects a deterministic **Enter** into the console input
+buffer with `WriteConsoleInputW`, so it runs unattended. Following the claudine
+precedent, `windows_captured_stdout.rs` is `#[cfg(windows)]` + `#[ignore]`d (not
+early-returning): it COMPILES on every Windows target and RUNS only when invoked
+with `--ignored` on a real Windows console.
 
 ## A. Reproduce the captured-stdout shape interactively (PowerShell)
 
@@ -53,36 +56,47 @@ the captured variable holds ONLY the submitted option value (`Red`, `Green`, or
 `Blue`) with no escape sequences. If TUI/ANSI bytes leak into the captured
 variable, F2 is violated.
 
-## B. Run the gated boundary test on a Windows runner
+## B. Run the executable boundary test on a Windows host
 
-The gated test spawns `question` with stdout piped and stderr inherited (console
-attached), then asserts the captured stream has no `0x1b` byte and holds exactly
-the submitted value. It requires an attached console and a live Enter keypress,
-so set the opt-in env var and run it with the package's nextest:
+The boundary test spawns `question` with stdout piped and stderr inherited
+(console attached), injects a deterministic Enter via `WriteConsoleInputW` to
+submit the default-highlighted first option, then asserts the captured stream has
+no `0x1b` byte and holds exactly the submitted value. It requires an attached
+console but **no human keypress**. Run it on a Windows host with:
 
 ```powershell
-$env:BISCUIT_TUI_WINDOWS_CONSOLE_TEST = "1"
-cargo nextest run -p biscuit-tui-cli --no-capture `
-  -E 'test(captured_stdout_receives_only_value_no_tui_bytes)'
+just test-windows-captured-stdout
 ```
 
-`--no-capture` is required so the prompt reaches the console and your keystroke
-reaches the prompt. Highlight an option and press Enter when the prompt appears.
+or directly (the `just` recipe wraps this exact invocation):
 
-**Expected PASS observation:** the test prints the prompt to the console, you
-submit a value, and the assertions pass (no ESC bytes; captured value is one of
-`Red | Green | Blue`).
+```powershell
+cargo test -p biscuit-tui-cli --test windows_captured_stdout `
+  -- --ignored captured_stdout_receives_only_value_no_tui_bytes --nocapture
+```
 
-Without the env var (the normal CI/local shape, including macOS/Linux where the
-file is not even compiled), the test returns early and passes as a clean skip.
+`--ignored` selects the `#[ignore]`d test; `--nocapture` lets the prompt reach
+the console so the injected Enter lands on a live event loop.
 
-## C. CI matrix linkage
+**Expected PASS observation:** the prompt renders to the console, the injected
+Enter submits the highlighted option, and the assertions pass (no ESC bytes;
+captured value is one of `Red | Green | Blue`).
 
-Cross-compilation alone is verified continuously: this branch was checked with
-`cargo check -p biscuit-tui-cli --target x86_64-pc-windows-gnu` from a macOS
-host, proving the gated test and crate compile for Windows. The full
-`windows-latest` runner coverage belongs to the CI matrix described in
-[`features/2026-06-07-matrix-testing/spec.md`](../../../features/2026-06-07-matrix-testing/spec.md);
-the interactive parts of this recipe (A and B) are the operator/manual path that
-a maintainer runs on a real Windows console when validating an F2-affecting
-change.
+On macOS/Linux the file is not compiled (`#![cfg(windows)]`); on a Windows run
+that does not pass `--ignored`, the test is skipped (still listed, not run).
+
+## C. CI gate and verification status
+
+The path-filtered workflow
+[`.github/workflows/biscuit-tui-windows-captured-stdout.yml`](../../../.github/workflows/biscuit-tui-windows-captured-stdout.yml)
+runs this test on `windows-latest` (`shell: cmd`, attached console) for changes
+under `biscuit-tui/**`, `just/**`, `Cargo.toml`, `Cargo.lock`, or the workflow
+file, and is also `workflow_dispatch`-runnable.
+
+From the macOS dev host the maximum honest verification is cross-compilation:
+`cargo check -p biscuit-tui-cli --target x86_64-pc-windows-gnu --test windows_captured_stdout`,
+which proves the rewritten test and its `windows` dev-dependency compile for
+Windows. Until a green run is recorded on the Windows workflow / a Windows host,
+the path is **compile-checked, not yet runtime-confirmed**. The interactive
+section A remains the operator sanity check a maintainer can run on a real
+Windows console.
