@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-cd86eb7d6e54dbfb
-last_updated: 2026-06-27
+hash: ef46db3751d8e999-3c4993b2ba6a72be
+last_updated: 2026-06-30
 ---
 # Claudine CLI Reference
 
@@ -293,7 +293,7 @@ Runs the full composition pipeline **up to but not including provider launch**, 
 - **Non-TTY shell gate:** an unapproved shell command in a non-TTY environment exits non-zero with `Cannot dry-run: shell command 'X' requires interactive approval. Run with --yolo to auto-approve, or pre-approve the command in your configuration.` In a TTY the normal interactive approval prompt fires. Bypass with `--yolo`.
 - **`sequence --dry-run`** concatenates all step bodies to stdout in order, prints each step's metadata to stderr separated by a `=== Document N of M ===` divider (before every document after the first), and fails fast on the first composition error.
 
-See [Composition — Dry Run](../../../claudine/docs/topics/composition.md#dry-run) for the full reference.
+See [Composition — Dry Run](composition.md#dry-run) for the full reference.
 
 ### Session interactivity
 
@@ -308,7 +308,7 @@ Composition commands resolve session interactivity from (highest to lowest prece
 
 ### `--perf`
 
-Opt-in flag (composition commands and the provider wrappers) that prints a **reconciling performance tree** to **stderr** after the run. The `Performance` headline is true wall-clock and equals the sum of its top-level `Structural` buckets (`pre-dispatch`, `prep phase`, `environment setup`, `agent execution`) plus a synthetic `unattributed` remainder — the headline can never contradict the body. Nested `Breakdown` rows itemize cost (Darkmatter composition stages, agent sub-timings) without double-counting; a percent column shows each row's share of wall-clock, a single `▇ HOT` marker flags the dominant leaf (≥20% of wall-clock), and `×N` annotates stages that ran more than once. Dry runs render `agent execution` as an `—` leaf. The report is stderr-only (never pollutes piped stdout) and is emitted even under `--silent`/`--quiet`. `sequence` aggregates one report across all steps. See [Composition — Performance Reporting](../../../claudine/docs/topics/composition.md#performance-reporting) for the full reference.
+Opt-in flag (composition commands and the provider wrappers) that prints a **reconciling performance tree** to **stderr** after the run. The `Performance` headline is true wall-clock and equals the sum of its top-level `Structural` buckets (`pre-dispatch`, `prep phase`, `environment setup`, `agent execution`) plus a synthetic `unattributed` remainder — the headline can never contradict the body. Nested `Breakdown` rows itemize cost (Darkmatter composition stages, agent sub-timings) without double-counting; a percent column shows each row's share of wall-clock, a single `▇ HOT` marker flags the dominant leaf (≥20% of wall-clock), and `×N` annotates stages that ran more than once. Dry runs render `agent execution` as an `—` leaf. The report is stderr-only (never pollutes piped stdout) and is emitted even under `--silent`/`--quiet`. `sequence` aggregates one report across all steps. See [Composition — Performance Reporting](composition.md#performance-reporting) for the full reference.
 
 **Positional Arguments:**
 - Exactly one file reference (supports `@` magic paths)
@@ -396,7 +396,7 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 | `--asp <FILE>` | Append a system prompt from a file (alias: `--append-system-prompt`) |
 | `--rsp <FILE>` | Replace the provider's system prompt with contents from a file (alias: `--replace-system-prompt`) |
 | `-t, --timeout <DURATION>` | Wall-clock timeout like 30s, 5m, 2h (non-interactive only) |
-| `--stall-timeout <DURATION>` | OpenCode-only stalled-generation backstop (live-but-dead retry-churn guard); built-in `10m`, `0s` disables. Inert config on non-OpenCode providers. See [Timeouts](../../../claudine/docs/topics/timeouts.md#opencode-stalled-generation-backstop) |
+| `--stall-timeout <DURATION>` | OpenCode-only stalled-generation backstop (live-but-dead retry-churn guard); built-in `10m`, `0s` disables. Inert config on non-OpenCode providers. See [Timeouts](timeouts.md#opencode-stalled-generation-backstop) |
 | `-o, --output <FORMAT>` | Set output format (json, text, stream) |
 | `--include <ENV_NAME>` | Keep a sensitive env var name that would otherwise be filtered |
 | `--mcp` | Compose a Claudine-managed MCP session from the effective defaults |
@@ -455,7 +455,7 @@ static shell script. Runtime file selection also happens through the
 ENTER-path autocomplete: when a composition command runs interactively
 and a required file value is missing (omitted positional argument or a
 `file`/`file[]` schema property), Claudine opens a `ChooseOne` or
-`ChooseMany` chooser. See [Shell Completions](../../../claudine/docs/topics/shell-completions.md)
+`ChooseMany` chooser. See [Shell Completions](completions/shell-completions.md)
 for details.
 
 ---
