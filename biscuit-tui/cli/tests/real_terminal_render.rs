@@ -37,13 +37,20 @@
 //! reason across processes.
 //!
 //! Every test here spawns in the background ([`SpawnVisibility::Background`],
-//! the harness default) so a test run never steals desktop focus. There are
-//! deliberately no Level-3 (OS keyboard injection / cliclick) tests: those
-//! require a focused GUI window and produce flaky, focus-stealing results.
-//! Keyboard-driven behavior (navigation, Ctrl/Alt chord selection) is
-//! verified instead by feeding the equivalent terminal byte sequences into a
-//! headless tmux pane — see the keyboard-driven tmux tests near the end of
+//! the harness default) so a test run never steals desktop focus. These
+//! headless byte-injection tests are the always-on contract: keyboard-driven
+//! behavior (navigation, Ctrl/Alt chord selection, relaxed Ctrl/Alt+Shift
+//! matching) is verified by feeding the equivalent terminal byte sequences into
+//! a headless tmux/WezTerm pane — see the keyboard-driven tests near the end of
 //! this file.
+//!
+//! Physical-keypress (OS keyboard injection / cliclick) proof of the relaxed
+//! Ctrl+Shift / Alt+Shift chords lives in `level3_chord_select.rs`. Those
+//! Level-3 tests require a focused GUI window and steal desktop focus, so they
+//! are gated behind `RUN_LEVEL3=1` (via `just test-l3`) and never run in normal
+//! CI/dev. This file's L2 byte-injection tests prove the binary decodes the
+//! chord bytes; the L3 file proves a real terminal emits those bytes for a
+//! physical chord.
 
 #![cfg(unix)]
 
@@ -744,6 +751,116 @@ fn level2_wezterm_ctrl_shift_r_kitty_bytes_select_red() {
         frame.plain.contains("PICK:Red"),
         "kitty Ctrl+Shift+r bytes piped into a real WezTerm pane MUST relaxed-match \
          + submit the [CTRL+r] Red option; got: {:?}",
+        frame.plain
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Level 2 — relaxed Ctrl/Alt+Shift chord matching for choose-many
+//
+// The choose-many reducer shares the relaxed matcher with choose-one
+// (`modifiers.contains(...)` + `c.to_ascii_lowercase()`), but the user-observable
+// path differs: a choose-many hotkey *toggles* a selection and does NOT submit.
+// These tests mirror the choose-one relaxed-match tests above and then submit
+// with Enter so the captured value reflects the toggled selection. A single
+// toggled option submits as just its label (`Red`), so we assert `PICK:Red`.
+// Together with `choose_many/tests.rs::{ctrl_shift_chord_matches_ctrl_hotkey,
+// alt_shift_chord_matches_alt_hotkey}` (L1 reducer) and the L3 physical-key
+// tests in `level3_chord_select.rs`, this closes the choose-many parity gap
+// review-3 flagged.
+// ---------------------------------------------------------------------------
+
+#[test]
+#[serial(level2)]
+fn level2_tmux_alt_shift_r_chord_selects_red_choose_many() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("shared tmux harness present");
+
+    harness.send_text(b"clear\n").expect("clear");
+    harness.settle();
+    let bin = sh_quote(&question_binary());
+    let cmd = format!(
+        "out=$({bin} choose-many {r} {g} {b}); printf '\\nPICK:%s\\n' \"$out\"\n",
+        r = sh_quote("[ALT+r] Red"),
+        g = sh_quote("[ALT+g] Green"),
+        b = sh_quote("[ALT+b] Blue"),
+    );
+    harness.send_text(cmd.as_bytes()).expect("launch question");
+    std::thread::sleep(Duration::from_millis(QUESTION_RENDER_MS));
+
+    // `tmux send-keys M-R` (capital R) emits the `ESC R` Alt/Meta chord — the
+    // legacy byte sequence for Alt+Shift+r. The matcher lowercases 'R' -> 'r'
+    // and toggles the `[ALT+r]` option, so the extra SHIFT does not suppress it.
+    // choose-many toggles without submitting, so we then press Enter to submit.
+    harness.send_key("M-R").expect("send Alt+Shift+R");
+    std::thread::sleep(Duration::from_millis(300));
+    harness.send_key("Enter").expect("submit selection");
+    std::thread::sleep(Duration::from_millis(500));
+
+    let frame = harness.capture().expect("capture tmux pane");
+
+    assert!(
+        frame.plain.contains("PICK:Red"),
+        "Alt+Shift+R MUST relaxed-match + toggle the [ALT+r] Red option in choose-many \
+         (submitted via Enter); got: {:?}",
+        frame.plain
+    );
+}
+
+// CONTROL|SHIFT needs the kitty keyboard protocol (legacy terminals collapse
+// Ctrl+R and Ctrl+Shift+R to the same 0x12 byte), so we inject the kitty CSI-u
+// encoding through WezTerm exactly as the choose-one test does. See the
+// `level2_wezterm_ctrl_shift_r_kitty_bytes_select_red` comment block above for
+// the modifier-bit derivation (`\x1b[114;6u` = Ctrl+Shift+`r`).
+#[test]
+#[serial(level2)]
+#[cfg(target_os = "macos")]
+fn level2_wezterm_ctrl_shift_r_kitty_bytes_select_red_choose_many() {
+    require_level!(Level::L2, WezTermHarness::available(), "WezTerm");
+
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+
+    harness.send_text(b"clear\n").expect("clear");
+    harness.settle();
+    let bin = sh_quote(&question_binary());
+    let cmd = format!(
+        "out=$({bin} choose-many {r} {g} {b}); printf '\\nPICK:%s\\n' \"$out\"\n",
+        r = sh_quote("[CTRL+r] Red"),
+        g = sh_quote("[CTRL+g] Green"),
+        b = sh_quote("[CTRL+b] Blue"),
+    );
+    harness.send_text(cmd.as_bytes()).expect("launch question");
+    std::thread::sleep(Duration::from_millis(QUESTION_RENDER_MS));
+
+    // Kitty CSI-u bytes for Ctrl+Shift+r toggle the `[CTRL+r]` option; choose-many
+    // does not submit on toggle, so submit with a carriage return afterward.
+    harness
+        .send_text(b"\x1b[114;6u")
+        .expect("send kitty Ctrl+Shift+r");
+    std::thread::sleep(Duration::from_millis(300));
+    harness.send_text(b"\r").expect("submit selection");
+    std::thread::sleep(Duration::from_millis(500));
+
+    let frame = harness.capture().expect("capture wezterm pane");
+    // The Enter submit returns the shell to a prompt; if for any reason it did
+    // not, a best-effort Ctrl+C keeps the shared pane usable for the next test.
+    if !frame.plain.contains("PICK:Red") {
+        cleanup_via_ctrl_c(harness);
+        eprintln!("=== Level-2 capture (raw, with escapes) ===");
+        eprintln!("{:?}", frame.raw);
+        eprintln!("=== Level-2 capture (plain) ===");
+        eprintln!("{:?}", frame.plain);
+    }
+
+    assert!(
+        frame.plain.contains("PICK:Red"),
+        "kitty Ctrl+Shift+r bytes piped into a real WezTerm pane MUST relaxed-match \
+         + toggle the [CTRL+r] Red option in choose-many (submitted via Enter); got: {:?}",
         frame.plain
     );
 }
