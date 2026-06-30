@@ -955,6 +955,129 @@ Plan for {{topic}}.
 }
 
 // ============================================================================
+// Motivating case: lazy `file` output + eager `file` input (eager-files spec)
+// ============================================================================
+//
+// Mirrors `sniff/prompts/plan-review-implementation.md` after the migration in
+// `features/2026-06-29-eager-files/spec.md`: `review` is an eager INPUT that
+// must exist, `plan` is a lazy OUTPUT path this run is about to create. The
+// pair proves the reported bug is fixed end-to-end through the compiled binary:
+// a lazy `plan` pointing at a not-yet-existing file composes, while a missing
+// eager `review` still aborts before the provider launches.
+
+#[cfg(unix)]
+#[test]
+fn compose_lazy_plan_output_composes_with_present_eager_review() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    // The eager `review` input exists; the lazy `plan` output names a path that
+    // does NOT exist yet (this run would create it).
+    fs::write(
+        workspace.path().join("design-review.md"),
+        "# Review\n",
+    )
+    .unwrap();
+
+    let md_file = workspace.path().join("plan-review.md");
+    fs::write(
+        &md_file,
+        r#"---
+$schema:
+  review: 'file(eager; required; match(**/*review*.md))'
+  plan: 'file'
+  iteration: 'number'
+review: design-review.md
+plan: plan-1.md
+iteration: 1
+---
+Implement {{plan}} from {{review}}.
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\ncat > /dev/null\nexit 0\n",
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_missing_eager_review_aborts_without_launching_provider() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let count_path = workspace.path().join("call-count.txt");
+
+    // Same prompt, but the eager `review` input is absent from disk. The lazy
+    // `plan` output is still a not-yet-existing path; only the missing eager
+    // `review` may cause the failure.
+    let md_file = workspace.path().join("plan-review.md");
+    fs::write(
+        &md_file,
+        r#"---
+$schema:
+  review: 'file(eager; required; match(**/*review*.md))'
+  plan: 'file'
+  iteration: 'number'
+review: missing-review.md
+plan: plan-1.md
+iteration: 1
+---
+Implement {{plan}} from {{review}}.
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\necho touched >> {count}\nexit 0\n",
+            count = count_path.display()
+        ),
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("CompositionError"),
+        "expected typed CompositionError surface; stderr:\n{plain}"
+    );
+    assert!(
+        plain.to_lowercase().contains("schema validation"),
+        "missing eager `review` must surface a schema validation error; stderr:\n{plain}"
+    );
+    assert!(
+        plain.contains("review"),
+        "expected the offending `review` property; stderr:\n{plain}"
+    );
+    assert!(
+        !count_path.exists(),
+        "no provider session should have been launched on a missing eager input"
+    );
+}
+
+// ============================================================================
 // Schema-aware shell completion
 // ============================================================================
 

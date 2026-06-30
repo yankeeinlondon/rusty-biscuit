@@ -645,17 +645,19 @@ fn format_array_candidate(property: &str, prefix_segments: &[String], selected: 
 /// Compiled positive + negative globset pair for a Darkmatter
 /// `file(match(...))` constraint.
 ///
-/// Mirrors Darkmatter's `x-darkmatter-match` keyword semantics: a path is
-/// accepted iff (a) at least one positive pattern matches AND (b) no
+/// Implements `file(match(...))` glob semantics for completion filtering: a
+/// path is accepted iff (a) at least one positive pattern matches AND (b) no
 /// negative pattern matches. When the constraint contains only negative
 /// patterns, every non-rejected path is accepted (`positive: None`).
+///
+/// `match(...)` is suggestion metadata only — Darkmatter no longer validates
+/// against it — so these globs shape completion candidates, not validation.
 ///
 /// Each pattern is added to the globset twice — once with its raw shape
 /// (which may contain path separators like `src/**/*.rs`) and once as a
 /// `**/`-anchored variant so filename-only patterns like `*.png` continue
-/// to match files in subdirectories. This matches Darkmatter's
-/// multi-candidate validator: `*.md` accepts `docs/api.md` because the
-/// resolved filename `api.md` is one of the views the validator tests.
+/// to match files in subdirectories: `*.md` accepts `docs/api.md` because the
+/// resolved filename `api.md` is one of the views tested.
 struct MatchGlobs {
     positive: Option<GlobSet>,
     negative: GlobSet,
