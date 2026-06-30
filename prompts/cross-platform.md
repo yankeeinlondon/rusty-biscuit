@@ -12,12 +12,12 @@ description: |-
 review: "@{{ctx.area}}/reviews/{{ctx.today}}-cross-platform/review-1.md"
 favorites: true
 start:
-    message: "🎛️ starting a **cross-platform** review in the **{{ctx.area}}**"
+    message: "🎛️ starting a **cross-platform** review in the **{{ctx.area}}** package area (_{{ctx.now}}_)"
 success:
     stack:
         - when: "frontmatter(review, 'ready') == true"
           action:
-              - message: "✅ **cross-platform** review completed successfully (_all platforms are deemed to be in good shape_)"
+              - message: "✅ **cross-platform** review in **{{ctx.area}}** completed successfully (_all platforms are deemed to be in good shape_). Review took: {{timing.duration}}."
               - effect: small-group-cheer
         - when: "frontmatter(review, 'ready') != true"
           action:
