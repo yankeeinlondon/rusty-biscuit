@@ -22,7 +22,7 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::terminal::TerminalOptions;
 use darkmatter::testing::strip_ansi_codes;
 #[cfg(feature = "audio-ducking")]
-use playa::ducking::{DuckConfig, backend_name, create_backend};
+use playa::ducking::{DuckConfig, DuckGuard, backend_name, create_backend};
 
 const MISSING_FG: &str = "\x1b[38;2;140;140;140m";
 const RESET: &str = "\x1b[0m";
@@ -803,12 +803,11 @@ async fn print_duck_info() {
             println!("  - Used because your output device doesn't support software volume");
             println!();
 
-            // Check if nowplaying-cli is available
-            let has_nowplaying = std::process::Command::new("which")
-                .arg("nowplaying-cli")
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false);
+            // Portable PATH lookup via sniff's executable index, so this works
+            // the same way regardless of the host's shell or `which` binary.
+            let has_nowplaying = sniff::executable_index::ExecutableIndex::build_path_only()
+                .find("nowplaying-cli")
+                .is_some();
 
             if has_nowplaying {
                 println!("Detection: Using nowplaying-cli (all apps supported)");
