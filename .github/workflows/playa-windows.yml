@@ -1,0 +1,75 @@
+name: playa-windows
+
+# Opt-in native-Windows verification for the playa package area. macOS and Linux
+# are exercised by the canonical `test` workflow, but playa carries a meaningful
+# amount of `cfg(target_os = "windows")` code (WASAPI SFX routing, per-session
+# ducking, the `windows` crate bindings) that only a real Windows host compiles.
+# These checks build the Windows-only feature surfaces and run the platform-
+# neutral library tests on `windows-latest` so a green run is real evidence the
+# Windows code path compiles and the default test suite passes there.
+#
+# `--target x86_64-pc-windows-msvc` is the host target on windows-latest; pinning
+# it explicitly keeps the matrix unambiguous and matches the review's commands.
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/playa-windows.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "playa/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/playa-windows.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "playa/**"
+  workflow_dispatch: {}
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CARGO_TERM_COLOR: never
+
+concurrency:
+  group: playa-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Windows native verification
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: playa-windows
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Check playa native SFX + native playback
+        shell: cmd
+        run: cargo check -p playa --target x86_64-pc-windows-msvc --features sfx-native-windows,native-playback
+
+      - name: Check playa Windows audio ducking
+        shell: cmd
+        run: cargo check -p playa --target x86_64-pc-windows-msvc --features audio-ducking-windows
+
+      - name: Check playa-cli
+        shell: cmd
+        run: cargo check -p playa-cli --target x86_64-pc-windows-msvc
+
+      - name: Run playa library tests (no default features)
+        shell: cmd
+        run: cargo nextest run -p playa --target x86_64-pc-windows-msvc --no-default-features
