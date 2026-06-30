@@ -27,7 +27,7 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::schemas::{
     CompletionKind, Constraint, DarkmatterSchemas, EffectiveSchema, PropertyAtom, PropertyDef,
-    SchemaShape, SimplifiedSchema, completion as dm_completion,
+    SchemaArm, SimplifiedSchema, completion as dm_completion,
 };
 
 use super::default_glob;
@@ -110,13 +110,14 @@ pub(crate) fn property_names(
     supplied: &HashSet<String>,
     declared_order: &[String],
 ) -> Vec<String> {
-    let Some(shape) = single_shape(effective) else {
+    let defs = collect_property_defs(effective);
+    if defs.is_empty() {
         return Vec::new();
-    };
+    }
 
     let mut required: Vec<(usize, String)> = Vec::new();
     let mut optional: Vec<(usize, String)> = Vec::new();
-    for (iter_idx, (name, def)) in shape.properties.iter().enumerate() {
+    for (iter_idx, (name, def)) in defs.into_iter().enumerate() {
         if supplied.contains(name) {
             continue;
         }
@@ -169,8 +170,9 @@ fn declaration_rank(declared_order: &[String], name: &str, iter_idx: usize) -> u
 /// - **String file reference** → loads the referenced file (YAML or JSON) and
 ///   returns the property-names from its `$schema` mapping (or its root
 ///   `properties` object for raw JSON Schema files).
-/// - **Sequence (root union)** → returns an empty `Vec`; root unions have no
-///   single property set so completion already declines them.
+/// - **Sequence (root union)** → returns an empty `Vec`; a root union has no
+///   single authored property order, so callers fall back to the arm-merge
+///   order that [`collect_property_defs`] produces (first-seen across arms).
 ///
 /// Returns an empty `Vec` on any failure (file missing, frontmatter not
 /// parseable, no `$schema`, unsupported shape). Callers treat the empty
@@ -371,10 +373,34 @@ fn name_matches(name: &str, partial: &str) -> bool {
     fuzzy::fuzzy_match(name, partial)
 }
 
-fn single_shape(effective: &EffectiveSchema) -> Option<&SchemaShape> {
-    match effective.simplified.as_ref()? {
-        SimplifiedSchema::Single(shape) => Some(shape),
-        SimplifiedSchema::Union(_) => None,
+/// Collect every property `(name, def)` a schema exposes for setter-name
+/// completion.
+///
+/// A [`SimplifiedSchema::Single`] yields its shape's properties in declaration
+/// order. A [`SimplifiedSchema::Union`] (root-level union) yields the union of
+/// every inline arm's properties, deduplicated by name in first-seen (arm)
+/// order, so a `spec`-or-`design` root union offers both names. Unresolved
+/// [`SchemaArm::FileRef`] arms are skipped.
+fn collect_property_defs(effective: &EffectiveSchema) -> Vec<(&String, &PropertyDef)> {
+    let Some(simplified) = effective.simplified.as_ref() else {
+        return Vec::new();
+    };
+    match simplified {
+        SimplifiedSchema::Single(shape) => shape.properties.iter().collect(),
+        SimplifiedSchema::Union(arms) => {
+            let mut out: Vec<(&String, &PropertyDef)> = Vec::new();
+            let mut seen: HashSet<&str> = HashSet::new();
+            for arm in arms {
+                if let SchemaArm::Inline(shape) = arm {
+                    for (name, def) in shape.properties.iter() {
+                        if seen.insert(name.as_str()) {
+                            out.push((name, def));
+                        }
+                    }
+                }
+            }
+            out
+        }
     }
 }
 
@@ -824,6 +850,50 @@ mod tests {
                 "description=".to_string(),
             ],
         );
+    }
+
+    #[test]
+    fn property_names_offers_root_union_arm_properties() {
+        // A root union (`$schema:` sequence) where each arm declares a single
+        // file-typed property must offer every arm's property name, in arm
+        // order. Regression: `single_shape` returned None for unions so the
+        // setter-name slot produced nothing.
+        let effective = effective_from_doc(concat!(
+            "---\n",
+            "$schema:\n",
+            "  - spec: \"file(match('**/spec*.md'))\"\n",
+            "  - design: \"file(match('**/design*.md'))\"\n",
+            "---\nbody\n",
+        ));
+        let got = property_names(&effective, "", &HashSet::new(), &[]);
+        assert_eq!(got, vec!["spec=".to_string(), "design=".to_string()]);
+    }
+
+    #[test]
+    fn property_value_offers_files_for_root_union_arm() {
+        // The value slot for a root-union arm's file property must surface the
+        // arm's `match(...)` candidates.
+        let effective = effective_from_doc(concat!(
+            "---\n",
+            "$schema:\n",
+            "  - spec: \"file(match('**/spec*.md'))\"\n",
+            "  - design: \"file(match('**/design*.md'))\"\n",
+            "---\nbody\n",
+        ));
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        write(&tmp.path().join("features").join("a").join("spec.md"), "# s\n");
+        write(
+            &tmp.path().join("features").join("b").join("design.md"),
+            "# d\n",
+        );
+        let ctx = ScopeContext::discover_from(tmp.path());
+
+        let spec = property_value(&effective, "spec", "", &ctx);
+        assert_eq!(spec, vec!["spec='features/a/spec.md'".to_string()]);
+
+        let design = property_value(&effective, "design", "", &ctx);
+        assert_eq!(design, vec!["design='features/b/design.md'".to_string()]);
     }
 
     #[test]

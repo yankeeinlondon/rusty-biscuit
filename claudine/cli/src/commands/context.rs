@@ -20,9 +20,10 @@ use darkmatter::markdown::compose::expression::semantics::{
 use darkmatter::markdown::compose::ComposeContext;
 
 use crate::commands::context_render::{
-    configure_shared_table, context_column_widths, function_first_column_width, inline_code_text,
-    middle_elide, render_context_section, render_table_resilient, report_column,
-    render_unordered_list, MAX_REPORT_WIDTH, TableLayout, EXAMPLE_COLUMN_MIN_WIDTH,
+    configure_shared_table, context_column_widths, example_column_floor,
+    function_first_column_width, inline_code_text, middle_elide, render_context_section,
+    render_table_resilient, report_column, render_unordered_list, MAX_REPORT_WIDTH, TableLayout,
+    EXAMPLE_COLUMN_MIN_WIDTH,
 };
 #[cfg(test)]
 use crate::commands::context_render::render_table_within_contract;
@@ -452,6 +453,13 @@ fn render_expression_table(
     let middle_header = middle_header.into();
     let with_examples = show_examples(term);
 
+    // Floor the `Example` column at its own (capped) intrinsic width so a long
+    // `Description` line cannot starve it under the planner's greedy surplus
+    // distribution. See `example_column_floor`.
+    let example_strings: Vec<String> =
+        rows.iter().map(|(_, _, example)| example.to_string()).collect();
+    let example_width = example_column_floor(example_strings.iter().map(String::as_str));
+
     render_table_resilient(term, |layout| {
         let mut first = report_column(first_header.clone());
         if layout == TableLayout::Pinned {
@@ -459,7 +467,11 @@ fn render_expression_table(
         }
         let mut columns = vec![first, report_column(middle_header.clone())];
         if with_examples {
-            columns.push(report_column("Example"));
+            let mut example = report_column("Example");
+            if layout == TableLayout::Pinned {
+                example = example.with_min_width(example_width);
+            }
+            columns.push(example);
         }
         let mut table = Table::new().with_columns(columns);
         configure_shared_table(&mut table);
@@ -779,6 +791,15 @@ fn render_side_effects_report() {
         let cat_heading = Prose::new(format!("<blue><b>{category}</b></blue>"));
         log::data(&cat_heading.render(&term));
 
+        // Floor the `Example` column so a long `Description` line cannot starve
+        // it under the planner's greedy surplus distribution. See
+        // `example_column_floor`.
+        let example_strings: Vec<String> = effects
+            .iter()
+            .map(|effect| format_effect_example(effect.example.as_ref(), &term))
+            .collect();
+        let example_width = example_column_floor(example_strings.iter().map(String::as_str));
+
         let rendered = render_table_resilient(&term, |layout| {
             let mut capability = report_column("Capability");
             if layout == TableLayout::Pinned {
@@ -790,7 +811,11 @@ fn render_side_effects_report() {
                 report_column("Safety"),
             ];
             if with_examples {
-                columns.insert(2, report_column("Example"));
+                let mut example = report_column("Example");
+                if layout == TableLayout::Pinned {
+                    example = example.with_min_width(example_width);
+                }
+                columns.insert(2, example);
             }
             let mut table = Table::new().with_columns(columns);
             configure_shared_table(&mut table);
@@ -1124,6 +1149,43 @@ mod tests {
                 "narrow expression table must keep the `{header}` column; output:\n{narrow}",
             );
         }
+    }
+
+    /// A long `Description` line must not starve the trailing `Example` column.
+    /// The shared planner grants surplus width greedily in column order, so
+    /// before the floor was introduced a group with one very long description
+    /// (the `String Mutations` `without_date` row) collapsed `Example` to a
+    /// one-token-wide sliver. With the floor, a representative example stays on
+    /// a single rendered line.
+    #[test]
+    fn expression_table_example_column_survives_long_description() {
+        // Plain terminal so the example renders verbatim (no inline-code SGR).
+        let mut term = Terminal::new_optimistic(140);
+        term.color_depth =
+            biscuit_terminal::discovery::detection::ColorDepth::None;
+        term.is_tty = false;
+
+        let example = "kebab_case(\"Hello World\") → hello-world";
+        let long_description =
+            "Removes substrings that are real YYYY-MM-DD calendar dates, leaving surrounding text untouched.";
+        let rows = vec![
+            (
+                "kebab_case(x)".into(),
+                "Converts a string to kebab-case.".into(),
+                example.into(),
+            ),
+            (
+                "without_date(string)".into(),
+                long_description.into(),
+                "without_date(\"Note 2024-06-15\") → Note".into(),
+            ),
+        ];
+        let out = render_expression_table(&term, "Function", 20, "Description", rows);
+
+        assert!(
+            out.lines().any(|line| line.contains(example)),
+            "example must render contiguously on one line, not wrapped to a sliver; output:\n{out}",
+        );
     }
 
     /// `show_examples` is the single threshold both the expression sub-tables and

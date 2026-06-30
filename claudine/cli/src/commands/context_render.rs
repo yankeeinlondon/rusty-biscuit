@@ -5,7 +5,7 @@ use biscuit_terminal::components::table::table::{Table, TableColumn};
 use biscuit_terminal::discovery::detection::ColorDepth;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::block_constraint::visible_width;
-use biscuit_terminal::utils::layout::{Alignment, Edges, Length, TargetValue, WordWrap};
+use biscuit_terminal::utils::layout::{Alignment, Edges, Length, TargetValue, Width, WordWrap};
 
 /// Maximum visible width for context reports, including margins, borders, and
 /// separators.
@@ -184,12 +184,16 @@ pub fn render_unordered_list(items: &[String], term: &Terminal) -> String {
 /// [`Table`].
 ///
 /// - 1ch left margin and 1ch right margin
+/// - `width: 100%` so every report table fills the available width to the right
+///   margin (the last column absorbs any slack), rather than hugging content —
+///   tables with and without wrapped cells then share one right edge
 /// - Total rendered width never exceeds `min(terminal width, 140)` visible
 ///   cells, counting margins, borders, separators, and content
 /// - Below 140ch the table uses the available width without overflow
 #[allow(dead_code)]
 pub fn configure_shared_table(table: &mut Table) {
     table.layout_mut().margin = Edges::x(Length::ch(1));
+    table.layout_mut().width = Width::Fixed(TargetValue::universal(Length::Percent(100.0)));
 }
 
 /// Renders `table` under the shared width contract.
@@ -313,6 +317,28 @@ pub fn function_first_column_width<'a>(
         .max()
         .unwrap_or(0)
         .max(header_width)
+        .min(40)
+}
+
+/// `Example`-column floor: the intrinsic width of the rendered example cells
+/// (and the `Example` header), capped at 40ch.
+///
+/// Used as a `min_width` on the trailing `Example` column so a long
+/// `Description` line cannot starve it. The shared `Table` planner grants its
+/// surplus width to shrinkable columns greedily in column order (see
+/// `resolve_width_plan`), so without a floor a group whose widest description
+/// happens to consume the surplus leaves `Example` at its break-minimum — a
+/// one-token-wide sliver that wraps almost vertically. Reserving the floor
+/// before the surplus pass keeps the two flexible columns balanced. At widths
+/// too narrow to honor the floor, [`render_table_resilient`] drops the pins and
+/// falls back to the break-aware [`TableLayout::Wrap`] layout.
+#[allow(dead_code)]
+pub fn example_column_floor<'a>(examples: impl Iterator<Item = &'a str>) -> usize {
+    examples
+        .map(|s| visible_width(s) as usize)
+        .max()
+        .unwrap_or(0)
+        .max(visible_width("Example") as usize)
         .min(40)
 }
 
@@ -649,6 +675,32 @@ mod tests {
         let w = function_first_column_width("Function", sigs.into_iter());
         let expected = visible_width("min(a, b)") as usize;
         assert_eq!(w, expected.max(visible_width("Function") as usize).min(40));
+    }
+
+    // =====================================================================
+    // Example-column floor
+    // =====================================================================
+
+    #[test]
+    fn example_column_floor_uses_intrinsic_width_and_includes_header() {
+        // The widest example governs the floor; the `Example` header still
+        // participates so a column of tiny examples never falls below it.
+        let examples = vec!["a → 1", "kebab_case(\"Hello World\") → hello-world"];
+        let w = example_column_floor(examples.into_iter());
+        assert_eq!(w, visible_width("kebab_case(\"Hello World\") → hello-world") as usize);
+
+        let tiny = vec!["x", "y"];
+        assert_eq!(
+            example_column_floor(tiny.into_iter()),
+            visible_width("Example") as usize,
+            "floor never drops below the header width",
+        );
+    }
+
+    #[test]
+    fn example_column_floor_caps_at_40() {
+        let huge = "an_extremely_long_invocation(with, many, arguments) → and_a_long_result_value";
+        assert_eq!(example_column_floor(std::iter::once(huge)), 40);
     }
 
     #[test]
