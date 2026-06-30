@@ -30,13 +30,33 @@
 //! boundary, so the submit travels the same path a user's Enter would — no
 //! crossterm-internal seam, no behavior shortcut.
 //!
-//! ## Why stderr is inherited
+//! ## Why the test self-establishes and PROVES the console precondition
+//!
+//! A bare `cargo test` under GitHub Actions runs with its stdout/stderr wired to
+//! pipes, not a console — Actions captures the process. A child `question` would
+//! then inherit a non-console stderr and take the headless bail path
+//! (`run_standalone_with_chrome` errors when both stdout AND stderr are
+//! non-terminals), so a green run would NOT exercise the attached-console
+//! contract at all. `--nocapture` only disables the Rust harness buffer; it does
+//! not turn the Actions pipe into a console.
+//!
+//! To make a green run real evidence, the test does not *assume* a console: it
+//! **attaches one** with `AllocConsole` (a no-op-equivalent when one already
+//! exists), rewires the process std handles onto `CONOUT$` / `CONIN$` so the
+//! inherited child streams are real console buffers, and then **proves** the
+//! precondition — `stderr.is_terminal()` AND `CONOUT$` openable — panicking with
+//! a specific diagnostic if either fails. Because the test is `#[ignore]`d and
+//! run via `--ignored`, that panic surfaces as a visible CI failure. It also
+//! prints a `F2 precondition HELD` line so a green Actions log *records* that the
+//! precondition genuinely held, exactly as the review demands.
+//!
+//! ## Why stdout is piped but stderr/stdin are inherited consoles
 //!
 //! stdout is piped (the `FOO=$(question ...)` capture shape under test). stderr
-//! stays inherited so the console remains attached for the prompt to render
-//! into; piping both would trip the standalone headless guard (both streams
-//! `!is_terminal` → `no interactive terminal available`) and the captured shape
-//! would never occur.
+//! stays a console so the headless guard is not tripped (both streams
+//! `!is_terminal` → `no interactive terminal available`) and so the prompt has a
+//! real console to render into; stdin stays a console so the injected
+//! `WriteConsoleInputW` Enter reaches the child's event loop.
 //!
 //! ## Verification status
 //!
@@ -48,23 +68,153 @@
 //! `just test-windows-captured-stdout`. The repro recipe lives in
 //! `features/2026-06-19-review-findings/windows-captured-stdout-repro.md`.
 //!
-//! Until a green Windows-host run is recorded the path is **compile-checked, not
-//! yet runtime-confirmed** — this test plus its workflow/just recipe are the
-//! executable harness that closes the gap, not a claim it has already passed on
-//! Windows.
+//! Because the test now proves the attached-console precondition (and fails
+//! loudly if it cannot establish one), a green Windows-host run IS reliable
+//! evidence that the captured-stdout-with-console contract held — not merely
+//! that the binary compiled.
 #![cfg(windows)]
 
-use std::io::Read;
+use std::io::{IsTerminal, Read};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
-use windows::Win32::Foundation::TRUE;
+use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, TRUE};
+use windows::Win32::Storage::FileSystem::{
+    CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+};
 use windows::Win32::System::Console::{
-    GetStdHandle, INPUT_RECORD, INPUT_RECORD_0, KEY_EVENT, KEY_EVENT_RECORD,
-    KEY_EVENT_RECORD_0, STD_INPUT_HANDLE, WriteConsoleInputW,
+    AllocConsole, GetStdHandle, INPUT_RECORD, INPUT_RECORD_0, KEY_EVENT, KEY_EVENT_RECORD,
+    KEY_EVENT_RECORD_0, STD_ERROR_HANDLE, STD_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    SetStdHandle, WriteConsoleInputW,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::VK_RETURN;
+use windows::core::PCWSTR;
+
+/// NUL-terminated UTF-16 `CONOUT$` — the console screen buffer device path that
+/// resolves to the active console even after the process's standard handles have
+/// been redirected (the Windows analog of `/dev/tty`).
+const CONOUT: [u16; 8] = utf16z(b"CONOUT$\0");
+/// NUL-terminated UTF-16 `CONIN$` — the console input buffer device path.
+const CONIN: [u16; 7] = utf16z(b"CONIN$\0");
+
+/// Widen an ASCII, NUL-terminated byte literal to a UTF-16 array of the same
+/// length in a `const` context.
+const fn utf16z<const N: usize>(bytes: &[u8; N]) -> [u16; N] {
+    let mut out = [0u16; N];
+    let mut i = 0;
+    while i < N {
+        out[i] = bytes[i] as u16;
+        i += 1;
+    }
+    out
+}
+
+/// Open a console device (`CONOUT$` / `CONIN$`) for read+write, returning the
+/// handle or `None` on failure. Callers own the returned handle and must close
+/// it.
+fn open_console_device(path: &[u16]) -> Option<HANDLE> {
+    // SAFETY: `path` is a static, NUL-terminated UTF-16 buffer that outlives the
+    // call; the access/share/disposition arguments are documented constants. No
+    // security attributes and no template handle are passed (`None`).
+    // `CreateFileW` returns `Err` for an invalid handle, which we map to `None`.
+    unsafe {
+        CreateFileW(
+            PCWSTR(path.as_ptr()),
+            GENERIC_READ.0 | GENERIC_WRITE.0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAGS_AND_ATTRIBUTES(0),
+            None,
+        )
+        .ok()
+    }
+}
+
+/// Point a process standard handle (`STD_OUTPUT_HANDLE` / `STD_ERROR_HANDLE` /
+/// `STD_INPUT_HANDLE`) at a freshly opened console device so a child spawned
+/// with `Stdio::inherit()` inherits a real console for that stream.
+///
+/// Returns whether the redirect was installed. The opened device handle is
+/// intentionally leaked: it must outlive every child spawn in this test, and the
+/// process exits immediately after, so an explicit close would only risk
+/// invalidating the std handle the child still needs.
+fn redirect_std_handle_to_console(std_handle: STD_HANDLE, device: &[u16]) -> bool {
+    let Some(handle) = open_console_device(device) else {
+        return false;
+    };
+    // SAFETY: `std_handle` is a valid STD_* identifier; `handle` is the console
+    // device just opened via `CreateFileW`. `SetStdHandle` only records the new
+    // value for subsequent `GetStdHandle` / inherited-handle resolution; it does
+    // not take ownership of, or close, any prior handle.
+    unsafe { SetStdHandle(std_handle, handle).is_ok() }
+}
+
+/// Attach a console to this process if it has none, then wire the process std
+/// handles to real console buffers so an inheriting child sees a console on
+/// stdout (unused here — child stdout is piped), stderr, and stdin.
+///
+/// `AllocConsole` allocates a fresh console for a process that has none; if one
+/// already exists it fails (classically `ERROR_ACCESS_DENIED`), which is the
+/// benign "console already present" case — we still rewire the std handles so
+/// they point at console devices even if a prior step (e.g. Actions) redirected
+/// them to pipes. Returns a human-readable description of the `AllocConsole`
+/// outcome for the precondition log.
+fn establish_console() -> String {
+    // SAFETY: `AllocConsole` takes no arguments and only affects this process's
+    // console association. On success it resets the std handles to the new
+    // console; on "already attached" it is a no-op for our purposes. Either way
+    // we re-derive the std handles below.
+    let alloc = match unsafe { AllocConsole() } {
+        Ok(()) => "AllocConsole=allocated".to_string(),
+        Err(e) => format!("AllocConsole=already-present-or-failed ({e})"),
+    };
+
+    // Re-point stderr and stdin at real console devices. AllocConsole resets the
+    // std handles on a fresh allocation, but when a console already existed and
+    // the parent (CI) had redirected stderr/stdin to pipes, the reset does not
+    // happen — opening CONOUT$/CONIN$ and SetStdHandle-ing them guarantees the
+    // inherited child streams are console buffers regardless.
+    let err_ok = redirect_std_handle_to_console(STD_ERROR_HANDLE, &CONOUT);
+    let in_ok = redirect_std_handle_to_console(STD_INPUT_HANDLE, &CONIN);
+    // stdout is rewired too for completeness, though this test pipes the child's
+    // stdout rather than inheriting it.
+    let out_ok = redirect_std_handle_to_console(STD_OUTPUT_HANDLE, &CONOUT);
+
+    format!("{alloc}; std-redirect out={out_ok} err={err_ok} in={in_ok}")
+}
+
+/// Prove the F2 precondition: this process's stderr is a real console
+/// (`is_terminal`) AND `CONOUT$` is openable. Panics with a specific diagnostic
+/// otherwise — under `--ignored` that is a visible CI failure, which is the
+/// point: a passing run now means the attached-console contract was genuinely
+/// exercised.
+fn assert_console_precondition(alloc_summary: &str) {
+    let stderr_is_console = std::io::stderr().is_terminal();
+    let conout = open_console_device(&CONOUT);
+    let conout_usable = conout.is_some();
+    if let Some(h) = conout {
+        // SAFETY: `h` is the handle just opened by `open_console_device`; it has
+        // not been published anywhere, so this is its single close.
+        unsafe {
+            let _ = CloseHandle(h);
+        }
+    }
+
+    assert!(
+        stderr_is_console && conout_usable,
+        "F2 precondition NOT met after console setup [{alloc_summary}]: \
+         stderr.is_terminal()={stderr_is_console}, CONOUT$ openable={conout_usable} — \
+         this run does NOT verify the captured-stdout-with-console contract",
+    );
+
+    // Recorded in the (--nocapture) CI log so a green run documents that the
+    // precondition genuinely held, not merely that the binary compiled.
+    println!(
+        "F2 precondition HELD: console attached, stderr.is_terminal()=true, CONOUT$ usable [{alloc_summary}]"
+    );
+}
 
 /// Write a single Enter (VK_RETURN) keydown+keyup pair into the attached
 /// console's input buffer so the running `question choose-one` prompt submits
@@ -74,7 +224,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::VK_RETURN;
 fn inject_enter() -> bool {
     // SAFETY: `GetStdHandle(STD_INPUT_HANDLE)` returns the process's standard
     // input handle (the attached console's input buffer). It does not transfer
-    // ownership and must not be closed; we only read from it via
+    // ownership and must not be closed; we only write to it via
     // `WriteConsoleInputW` below. An invalid/redirected handle surfaces as an
     // `Err` here, which the caller treats as "could not inject".
     let stdin = match unsafe { GetStdHandle(STD_INPUT_HANDLE) } {
@@ -116,7 +266,10 @@ fn inject_enter() -> bool {
 /// captured stream — no ESC (`0x1b`) byte, i.e. no TUI/ANSI chrome.
 ///
 /// `#[ignore]`d because it needs a real attached console to render into and to
-/// accept the injected console-input record. The path-filtered
+/// accept the injected console-input record. The test self-establishes that
+/// console (`AllocConsole` + `SetStdHandle` onto `CONOUT$`/`CONIN$`) and fails
+/// loudly via [`assert_console_precondition`] if it cannot, so a green run is
+/// real evidence. The path-filtered
 /// `.github/workflows/biscuit-tui-windows-captured-stdout.yml` workflow runs it
 /// in CI; to run the same gate manually on a Windows host:
 ///
@@ -124,11 +277,17 @@ fn inject_enter() -> bool {
 /// just test-windows-captured-stdout
 /// ```
 #[test]
-#[ignore = "requires a Windows host with an attached console; cross-compile-checked but not runtime-run on the macOS dev host"]
+#[ignore = "requires a Windows host; self-attaches a console and proves the precondition, but only runs under --ignored on Windows (cross-compile-checked on the macOS dev host)"]
 fn captured_stdout_receives_only_value_no_tui_bytes() {
+    // Establish and PROVE the attached-console precondition BEFORE spawning the
+    // child. A bail here (panic) is intentional: it means this run cannot verify
+    // the F2 contract, and that must be a visible failure, not a silent pass.
+    let alloc_summary = establish_console();
+    assert_console_precondition(&alloc_summary);
+
     // Spawn `question` with stdout captured to a pipe (the `FOO=$(question ...)`
-    // shape) while stderr/stdin stay attached so the console renders the prompt
-    // and our injected key event reaches it.
+    // shape) while stderr/stdin stay attached to the console established above, so
+    // the console renders the prompt and our injected key event reaches it.
     let mut child = Command::new(env!("CARGO_BIN_EXE_question"))
         .args(["choose-one", "Red", "Green", "Blue"])
         .stdin(Stdio::inherit())
