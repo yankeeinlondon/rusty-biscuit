@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 use biscuit_file::FileReference;
 use regex::Regex;
 
-use super::error::CompositionError;
+use super::error::{CompositionError, SequenceLoadCause};
 use super::types::{SequencePlan, SequenceSource, SequenceStep, SequenceStepOverlay};
 
 /// Matches `{{key}}` and `{{key || default}}` placeholder patterns.
@@ -84,10 +84,9 @@ fn resolve_sequence_reference(raw: &str, source_path: &Path) -> Result<PathBuf, 
     // Expand ~ to HOME directly, since FileReference treats `@` as the
     // magic-search prefix and there is no dedicated tilde form.
     if let Some(rest) = raw.strip_prefix('~') {
-        let home = dirs::home_dir().ok_or_else(|| {
-            CompositionError::SequenceExternalLoad(format!(
-                "`{raw}`: unable to resolve home directory"
-            ))
+        let home = dirs::home_dir().ok_or_else(|| CompositionError::SequenceExternalLoad {
+            context: format!("`{raw}`"),
+            source: SequenceLoadCause::HomeDir,
         })?;
         let suffix = rest.trim_start_matches('/');
         return Ok(home.join(suffix));
@@ -102,8 +101,11 @@ fn resolve_sequence_reference(raw: &str, source_path: &Path) -> Result<PathBuf, 
             raw
         };
 
-        let file_ref = FileReference::new(ref_input)
-            .map_err(|e| CompositionError::SequenceExternalLoad(format!("`{raw}`: {e}")))?;
+        let file_ref =
+            FileReference::new(ref_input).map_err(|e| CompositionError::SequenceExternalLoad {
+                context: format!("`{raw}`"),
+                source: e.into(),
+            })?;
         // Magic (`@`), package (`!`), and other special references must be
         // resolved relative to the source document's directory, not the
         // process CWD. Without this, `claudine sequence /abs/path/to/seq.md`
@@ -112,9 +114,13 @@ fn resolve_sequence_reference(raw: &str, source_path: &Path) -> Result<PathBuf, 
         let base_dir = source_path.parent().unwrap_or_else(|| Path::new("."));
         let resolved = file_ref
             .resolve_from(base_dir)
-            .map_err(|e| CompositionError::SequenceExternalLoad(format!("`{raw}`: {e}")))?
-            .ok_or_else(|| {
-                CompositionError::SequenceExternalLoad(format!("`{raw}`: file not found"))
+            .map_err(|e| CompositionError::SequenceExternalLoad {
+                context: format!("`{raw}`"),
+                source: e.into(),
+            })?
+            .ok_or_else(|| CompositionError::SequenceExternalLoad {
+                context: format!("`{raw}`"),
+                source: SequenceLoadCause::NotFound,
             })?;
         return Ok(resolved);
     }
@@ -217,13 +223,14 @@ fn load_external_sequence(
     document_fail_fast: bool,
 ) -> Result<SequencePlan, CompositionError> {
     let yaml = biscuit_file::Yaml::new(yaml_path).map_err(|e| {
-        CompositionError::SequenceExternalLoad(format!("{}: {e}", yaml_path.display()))
+        CompositionError::SequenceExternalLoad {
+            context: yaml_path.display().to_string(),
+            source: SequenceLoadCause::Yaml(e),
+        }
     })?;
-    let json_value = yaml.as_json().map_err(|e| {
-        CompositionError::SequenceExternalLoad(format!(
-            "YAML-to-JSON conversion failed for {}: {e}",
-            yaml_path.display()
-        ))
+    let json_value = yaml.as_json().map_err(|e| CompositionError::SequenceExternalLoad {
+        context: yaml_path.display().to_string(),
+        source: SequenceLoadCause::Yaml(e),
     })?;
     let root = json_value.as_object().ok_or_else(|| {
         CompositionError::SequenceExternalWrongType("root must be an object".to_string())
@@ -924,7 +931,18 @@ edition = "2024"
             resolve_sequence_reference("{{SEQ_ROOT}}/steps.yaml", &source_path).unwrap_err();
 
         assert!(
-            matches!(error, CompositionError::SequenceExternalLoad(ref msg) if msg.contains("SEQ_ROOT"))
+            matches!(
+                error,
+                CompositionError::SequenceExternalLoad {
+                    source: SequenceLoadCause::Reference(_),
+                    ..
+                }
+            ),
+            "expected a typed Reference cause, got: {error:?}"
+        );
+        assert!(
+            error.to_string().contains("SEQ_ROOT"),
+            "message should still name the unresolved env var: {error}"
         );
     }
 
@@ -944,6 +962,71 @@ edition = "2024"
             matches!(err, CompositionError::SequenceTemplateWrongType { .. }),
             "got: {err}"
         );
+    }
+
+    #[test]
+    fn external_malformed_yaml_carries_typed_yaml_cause() {
+        use std::error::Error as _;
+
+        let dir = TempDir::new().unwrap();
+        let yaml_path = dir.path().join("broken.yaml");
+        // Unbalanced flow mapping: a YAML parse failure, surfaced by Yaml::new.
+        fs::write(&yaml_path, "sequence: [unterminated\n").unwrap();
+
+        let source = make_source(&dir, &[("sequence", json!("broken.yaml"))], "Prompt");
+        let err = resolve_sequence_plan(&source).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CompositionError::SequenceExternalLoad {
+                    source: SequenceLoadCause::Yaml(_),
+                    ..
+                }
+            ),
+            "expected a typed Yaml cause, got: {err:?}"
+        );
+
+        let load_cause = err
+            .source()
+            .and_then(|s| s.downcast_ref::<SequenceLoadCause>())
+            .expect("source must be a SequenceLoadCause");
+        assert!(matches!(load_cause, SequenceLoadCause::Yaml(_)));
+    }
+
+    #[test]
+    #[serial]
+    fn external_missing_file_reference_yields_not_found() {
+        let dir = TempDir::new().unwrap();
+        let source_path = dir.path().join("docs/source.md");
+        fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        fs::write(&source_path, "---\n---\nbody\n").unwrap();
+        init_git_repo(dir.path());
+
+        // A magic reference that resolves to nothing under the source's git
+        // scope surfaces the NotFound synthetic.
+        let err =
+            resolve_sequence_reference("@no-such-dir/missing.yaml", &source_path).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CompositionError::SequenceExternalLoad {
+                    source: SequenceLoadCause::NotFound,
+                    ..
+                }
+            ),
+            "expected NotFound, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn sequence_load_cause_home_dir_display() {
+        // Triggering a missing HOME cross-platform is awkward; assert the
+        // synthetic cause's Display directly.
+        assert_eq!(
+            SequenceLoadCause::HomeDir.to_string(),
+            "unable to resolve home directory"
+        );
+        assert_eq!(SequenceLoadCause::NotFound.to_string(), "file not found");
     }
 
     // -- build_step_overlay ---------------------------------------------------

@@ -1026,11 +1026,15 @@ impl<'a> Parser<'a> {
 
         let constraint = match (keyword.as_str(), has_args) {
             ("required", false) => Constraint::Required,
+            ("eager", false) => Constraint::Eager,
             ("not-empty", false) => Constraint::NotEmpty,
             ("integer", false) => Constraint::Integer,
             ("unique", false) => Constraint::Unique,
             ("required", true) => {
                 return self.err("`required` does not take arguments", kw_span);
+            }
+            ("eager", true) => {
+                return self.err("`eager` does not take arguments", kw_span);
             }
             ("default", true) => {
                 self.lex.pos += 1; // consume (
@@ -1499,6 +1503,35 @@ mod tests {
             atom.constraints,
             vec![Constraint::Match(vec!["*.md".into(), "!_*.md".into()])]
         );
+    }
+
+    #[test]
+    fn parses_file_eager() {
+        let atom = parse("file(eager)");
+        assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::File));
+        assert_eq!(atom.constraints, vec![Constraint::Eager]);
+    }
+
+    #[test]
+    fn parses_file_eager_with_required_and_match() {
+        let atom = parse("file(eager; required; match('**/*review*.md'))");
+        assert_eq!(
+            atom.constraints,
+            vec![
+                Constraint::Eager,
+                Constraint::Required,
+                Constraint::Match(vec!["**/*review*.md".into()]),
+            ]
+        );
+    }
+
+    #[test]
+    fn eager_takes_no_args() {
+        let err = parse_err("file(eager())");
+        let SchemaError::Grammar { message, .. } = err else {
+            panic!("expected Grammar error, got {err:?}")
+        };
+        assert!(message.contains("does not take arguments"));
     }
 
     #[test]

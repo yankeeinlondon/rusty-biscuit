@@ -464,12 +464,39 @@ _sanity pkg *args="":
 # tests fall back to per-process spawning (which themselves skip
 # cleanly via `require_level!`). This means the recipe degrades
 # gracefully on hosts without every terminal installed.
+#
+# ## Parallel self-spawn mode (`BISCUIT_L2_THREADS`)
+#
+# The shared-pane + `-j 1` model above serializes the WHOLE tier for the
+# sake of the (often small) subset of tests that attach to the shared
+# pane via `<Backend>::shared_or_spawn()`. An area whose L2 suite is
+# dominated by self-isolating tests (each spawns its OWN tmux session /
+# PTY — e.g. claudine) pays a steep serial tax for no isolation benefit.
+#
+# Setting `BISCUIT_L2_THREADS` to a value other than `1` switches this
+# recipe into parallel self-spawn mode: it skips the broker entirely and
+# exports NO `BISCUIT_SHARED_*` var, so EVERY `shared_or_spawn()` call
+# takes its fallback branch and spawns an OWNED, `Drop`-cleaned pane of
+# its own. With no shared resource, nextest runs at `-j N` safely. The
+# default (`1`, or unset) preserves the shared-pane serial path verbatim
+# for every other package area.
 _test_l2 pkg *args="":
     #!/usr/bin/env bash
     set -euo pipefail
     echo
     echo -e "🖥  Level-2 tests for {{ bold }}{{ pkg }}{{ reset }}"
     echo
+
+    # Parallel self-spawn mode: no shared pane, no broker, `-j N`. Every
+    # test self-isolates via `shared_or_spawn()`'s owned fallback, so
+    # there is nothing to contend for. See the recipe comment above.
+    l2_threads="${BISCUIT_L2_THREADS:-1}"
+    if [[ "${l2_threads}" != "1" ]]; then
+        echo -e "  {{ dim }}parallel self-spawn mode: -j ${l2_threads}, no shared pane{{ reset }}"
+        echo
+        cargo nextest run -p {{ pkg }} -E 'test(/level2_/)' --no-tests=pass -j "${l2_threads}" {{ args }}
+        exit $?
+    fi
 
     # Build the broker once (no-op if already up to date) and resolve
     # its absolute path through cargo metadata.

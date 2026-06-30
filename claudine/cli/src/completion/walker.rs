@@ -31,7 +31,7 @@
 //! soon as the accumulator reaches the limit — callers that need a
 //! different cap pass an explicit budget via [`walk_scope_limited`].
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use ignore::{DirEntry, WalkBuilder};
 
@@ -52,7 +52,7 @@ pub(crate) const MAX_CANDIDATES: usize = 500;
 /// mature project if left alone, so they are pruned at every depth —
 /// `.gitignore` alone is not enough because many projects under-specify
 /// these trees in their ignore files.
-const SKIP_DIRS: &[&str] = &[
+pub(crate) const SKIP_DIRS: &[&str] = &[
     ".git",
     "target",
     "node_modules",
@@ -79,23 +79,98 @@ pub(crate) fn walk_scope(scope: &Scope) -> Vec<PathBuf> {
 /// Used by tests that need to exercise budget-exhaustion behavior without
 /// having to fabricate 500+ files on disk.
 pub(crate) fn walk_scope_limited(scope: &Scope, budget: usize) -> Vec<PathBuf> {
+    walk_scope_core(scope, budget, |_| true).0
+}
+
+/// Walk outcome that distinguishes "exhausted the budget with matches"
+/// from a clean result.
+///
+/// The ENTER autocomplete path needs this to emit the "narrow your query"
+/// error rather than silently truncating when the query-matching count
+/// exceeds [`MAX_CANDIDATES`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum WalkOutcome {
+    /// All matching entries fit within the budget.
+    Complete(Vec<PathBuf>),
+    /// The budget was exceeded while matching entries; the contained
+    /// count is the minimum number of matches (it may be larger).
+    OverCapacity(usize),
+}
+
+impl WalkOutcome {
+    /// Unwrap a complete result, panicking if the walk was over capacity.
+    #[cfg(test)]
+    pub(crate) fn unwrap_complete(self) -> Vec<PathBuf> {
+        match self {
+            WalkOutcome::Complete(v) => v,
+            WalkOutcome::OverCapacity(n) => {
+                panic!("expected complete walk, got over capacity ({n})")
+            }
+        }
+    }
+}
+
+/// Walk a single scope with a path predicate and explicit budget.
+///
+/// Only entries whose path contains `predicate` as a substring count
+/// toward the budget. The walker still descends into directories that do
+/// not themselves match so children remain reachable. When the matching
+/// count would exceed the budget, [`WalkOutcome::OverCapacity`] is returned
+/// immediately.
+///
+/// This is the shared core used by both the shell-completion path
+/// ([`walk_scope`], [`walk_scope_limited`]) and the ENTER autocomplete
+/// path. The predicate lets autocomplete push the `*query*` filter into
+/// the walk so the cap counts query-matching files, not raw discoveries.
+pub(crate) fn walk_scope_filtered<P>(
+    scope: &Scope,
+    budget: usize,
+    predicate: P,
+) -> WalkOutcome
+where
+    P: Fn(&Path) -> bool,
+{
+    let (paths, over_capacity) = walk_scope_core(scope, budget, predicate);
+    if over_capacity {
+        WalkOutcome::OverCapacity(paths.len() + 1)
+    } else {
+        WalkOutcome::Complete(paths)
+    }
+}
+
+/// Shared implementation for all scope walks.
+///
+/// Returns the collected paths (truncated to `budget`) and a flag that is
+/// `true` when at least one additional matching entry was discovered past
+/// the budget. The shell-completion path ignores the flag and uses the
+/// truncated vector; the ENTER autocomplete path promotes the flag to
+/// [`WalkOutcome::OverCapacity`].
+fn walk_scope_core<P>(
+    scope: &Scope,
+    budget: usize,
+    predicate: P,
+) -> (Vec<PathBuf>, bool)
+where
+    P: Fn(&Path) -> bool,
+{
+    if !scope.path.is_dir() {
+        return (Vec::new(), false);
+    }
+    if budget == 0 {
+        return (Vec::new(), false);
+    }
+
     let _span = tracing::trace_span!(
         target: "claudine::completion",
-        "completion::walk_scope",
+        "completion::walk_scope_filtered",
         path = %scope.path.display(),
         follow_links = scope.follow_links,
         budget = budget,
     )
     .entered();
 
-    if !scope.path.is_dir() {
-        return Vec::new();
-    }
-    if budget == 0 {
-        return Vec::new();
-    }
-
     let mut out: Vec<PathBuf> = Vec::new();
+    let mut over_capacity = false;
 
     let walker = WalkBuilder::new(&scope.path)
         .hidden(false)
@@ -107,7 +182,7 @@ pub(crate) fn walk_scope_limited(scope: &Scope, budget: usize) -> Vec<PathBuf> {
         .build();
 
     for result in walker {
-        if out.len() >= budget {
+        if over_capacity {
             break;
         }
         let Ok(entry) = result else { continue };
@@ -116,10 +191,18 @@ pub(crate) fn walk_scope_limited(scope: &Scope, budget: usize) -> Vec<PathBuf> {
         if entry.depth() == 0 {
             continue;
         }
-        out.push(entry.into_path());
+        let path = entry.path();
+        if !predicate(path) {
+            continue;
+        }
+        if out.len() >= budget {
+            over_capacity = true;
+        } else {
+            out.push(path.to_path_buf());
+        }
     }
 
-    out
+    (out, over_capacity)
 }
 
 /// Return `true` when the entry should be descended into / emitted.
@@ -127,7 +210,12 @@ pub(crate) fn walk_scope_limited(scope: &Scope, budget: usize) -> Vec<PathBuf> {
 /// Applied to every entry including the scope root. Depth 0 (the scope
 /// root) is always retained so the walker can descend; all other entries
 /// are tested against the `_`-prefix convention and the curated skip list.
-fn entry_passes_filters(entry: &DirEntry) -> bool {
+///
+/// Exposed so the schema `match(...)` file-completion path can share the
+/// exact same `_`-prefix and [`SKIP_DIRS`] exclusion as the scope walker
+/// (it walks the repo with its own glob-matching `WalkBuilder` rather than
+/// through [`walk_scope`], but the exclusion contract must be identical).
+pub(crate) fn entry_passes_filters(entry: &DirEntry) -> bool {
     if entry.depth() == 0 {
         return true;
     }
@@ -396,22 +484,68 @@ mod tests {
     }
 
     #[test]
-    fn entry_passes_filters_retains_root_depth_0() {
-        // An entry at depth 0 is the scope root itself — we never want to
-        // filter it out even if its name happens to match a skip rule.
-        //
-        // This is a behavior-not-code-reachable test: we exercise the
-        // filter by observing that a scope whose last path component is
-        // `target` still has its children walked.
+    fn filtered_walk_counts_matches_not_raw_discoveries() {
         let tmp = TempDir::new().unwrap();
         init_git(tmp.path());
-        let root = tmp.path().join("target");
-        write_file(&root.join("ok.md"), "# o");
-        let got = walk_scope(&scope(root, true));
-        let rendered: Vec<String> = got.iter().map(|p| p.display().to_string()).collect();
+        let root = tmp.path().join("prompts");
+        write_file(&root.join("plan.md"), "# p");
+        write_file(&root.join("notes.md"), "# n");
+        write_file(&root.join("other.md"), "# o");
+
+        let got = walk_scope_filtered(&scope(root, true), MAX_CANDIDATES, |p| {
+            p.to_str()
+                .map(|s| s.to_ascii_lowercase().contains("plan"))
+                .unwrap_or(false)
+        });
+        let paths = got.unwrap_complete();
+        assert_eq!(paths.len(), 1, "only plan.md matches: {paths:?}");
         assert!(
-            rendered.iter().any(|p| p.ends_with("ok.md")),
-            "root directory named `target` must not self-prune: {rendered:?}"
+            paths[0].to_str().unwrap().contains("plan.md"),
+            "expected plan.md: {paths:?}"
         );
+    }
+
+    #[test]
+    fn filtered_walk_over_capacity_reports_more_than_cap() {
+        let tmp = TempDir::new().unwrap();
+        init_git(tmp.path());
+        let root = tmp.path().join("prompts");
+        for i in 0..20 {
+            write_file(&root.join(format!("plan{i}.md")), "# x");
+        }
+        write_file(&root.join("other.md"), "# o");
+
+        let got = walk_scope_filtered(&scope(root, true), 5, |p| {
+            p.to_str()
+                .map(|s| s.to_ascii_lowercase().contains("plan"))
+                .unwrap_or(false)
+        });
+        assert!(
+            matches!(got, WalkOutcome::OverCapacity(n) if n > 5),
+            "expected over-capacity with at least 6 matches, got: {got:?}"
+        );
+    }
+
+    #[test]
+    fn filtered_walk_zero_budget_returns_empty() {
+        let tmp = TempDir::new().unwrap();
+        init_git(tmp.path());
+        let root = tmp.path().join("prompts");
+        write_file(&root.join("plan.md"), "# p");
+
+        let got = walk_scope_filtered(&scope(root, true), 0, |p| {
+            p.to_str()
+                .map(|s| s.to_ascii_lowercase().contains("plan"))
+                .unwrap_or(false)
+        });
+        assert_eq!(got.unwrap_complete().len(), 0);
+    }
+
+    #[test]
+    fn filtered_walk_nonexistent_scope_returns_empty() {
+        let tmp = TempDir::new().unwrap();
+        let missing = tmp.path().join("does-not-exist");
+        let got = walk_scope_filtered(&scope(missing, true), MAX_CANDIDATES, |_| true);
+        assert!(got.unwrap_complete().is_empty());
     }
 }

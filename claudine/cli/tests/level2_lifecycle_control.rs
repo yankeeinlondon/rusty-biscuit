@@ -10,14 +10,14 @@
 //!
 //! ## Controls covered and their *actual* wired behavior
 //!
-//! - **Retry from `failure`** — `failure.stack` ending in `retry(N)` re-invokes
+//! - **Retry from `failure`** — `failure.stack` ending in `{retry: N}` re-invokes
 //!   the provider; the provider runs `1 + N` times (the original attempt plus N
 //!   retries), `failure` fires each attempt, the budget exhausts, then
 //!   `finalize` fires once. Asserted via the `provider-ran` / `failure` line
 //!   counts in `events.log`.
 //! - **Retry from `finalize` (verify in `success`, recover in `finalize`)** — a
-//!   `success.stack` raises `error()` on a missing artifact, which routes
-//!   through `failure` and carries an `err` into `finalize`; the `finalize.stack`
+//!   `success.stack` raises `{error: "..."}` on a missing artifact, which routes
+//!   through the `failure` event and carries an `err` into `finalize`; the `finalize.stack`
 //!   `retry`s. The fake provider produces the artifact on its second invocation,
 //!   so the retried attempt verifies clean and the terminal `finalize` runs its
 //!   no-`err` branch. Exercises the `finalize` recovery surface and the
@@ -28,7 +28,7 @@
 //!   session id, so this is the always-reached branch. Asserted via the typed
 //!   error text in the pane and the `failure`→`finalize` markers.
 //! - **Resume from `failure` with a session id** — a fake resume-capable Claude
-//!   reports a stream session id on the failing first attempt; `resume(...)`
+//!   reports a stream session id on the failing first attempt; `{resume: "..."}`
 //!   re-enters at `start`, invokes the provider with the resume argv/session id,
 //!   delivers the follow-up prompt, then reaches `success`/`finalize`.
 //! - **Defer from `failure`** — `defer` parses and dispatches, but its runtime
@@ -36,7 +36,7 @@
 //!   surfaces the typed "not implemented" error; `failure` and `finalize` still
 //!   fire. Asserted via `events.log` markers and the error text in the pane.
 //!
-//! - **Proxy from `failure`** — `failure.stack` ending in `proxy('@target.md')`
+//! - **Proxy from `failure`** — `failure.stack` ending in `{proxy: "@target.md"}`
 //!   hands off to the target document, which runs its OWN lifecycle
 //!   (`start`/`success`/`finalize`) once with its own provider exit. The source
 //!   document's `failure`/`proxy` stack does NOT re-fire (no infinite loop), and
@@ -46,7 +46,7 @@
 //!   on hand-off, so the target's events fire and the source's stack cannot
 //!   re-trigger.)
 //!
-//! - **Proxy from `initialize`** — `initialize.stack` ending in `proxy('@target.md')`
+//! - **Proxy from `initialize`** — `initialize.stack` ending in `{proxy: "@target.md"}`
 //!   hands off before the source's `start`. The target's own `initialize` fires
 //!   and respects target-side `Skip`/`Proxy`/`Error` controls, including nested
 //!   proxy cycle detection.
@@ -66,7 +66,7 @@
 //!   `stack:` side effects in the captured terminal output.
 //!
 //! - **`success.stack` downgrade** — when the stack ends in
-//!   `error('downgraded')`, the already-fired original top-level communication
+//!   `{error: "downgraded"}`, the already-fired original top-level communication
 //!   is preserved, the `failure` event fires next, and the terminal lifecycle
 //!   state is failure. Asserted by marker ordering in the pane. Downgrade from
 //!   `blocked.stack` is no longer supported because the shell-audit blocked
@@ -405,7 +405,7 @@ fn run_provider_in_tmux_for(staged: &Staged, provider_flag: &str, done_marker: &
     pane
 }
 
-/// Retry from `failure`: `retry(2)` re-invokes the provider, so it runs 3 times
+/// Retry from `failure`: `{retry: 2}` re-invokes the provider, so it runs 3 times
 /// (original + 2 retries), `failure` fires each attempt, the budget exhausts,
 /// then `finalize` fires exactly once.
 #[test]
@@ -417,11 +417,11 @@ fn level2_lifecycle_failure_retry_reinvokes_provider_until_budget_exhausted() {
 title: lifecycle retry
 failure:
   stack:
-    - action: "append_line('events.log', 'failure')"
-    - action: "retry(2)"
+    - action: {append_line: ["events.log", "failure"]}
+    - action: {retry: 2}
 finalize:
   stack:
-    - action: "append_line('events.log', 'finalize')"
+    - action: {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#;
@@ -435,7 +435,7 @@ Body
 
     assert_eq!(
         provider_runs, 3,
-        "retry(2) must invoke the provider 3 times (original + 2 retries); \
+        "{{retry: 2}} must invoke the provider 3 times (original + 2 retries); \
          got {lines:?}; pane:\n{pane}"
     );
     assert_eq!(
@@ -456,7 +456,7 @@ Body
 }
 
 /// Verify-in-`success`, recover-in-`finalize`: a `success.stack` that detects a
-/// missing artifact raises `error()`, which routes through the `failure` event
+/// missing artifact raises `{error: "..."}`, which routes through the `failure` event
 /// and carries an `err` into `finalize`; the `finalize.stack` then `retry`s the
 /// whole run. The fake provider creates the awaited artifact on its **second**
 /// invocation, so the retried attempt verifies clean and the run ends in a
@@ -473,15 +473,15 @@ success:
   stack:
     - when: "!file_exists('attempt2.flag')"
       action:
-        - "append_line('events.log', 'verify-failed')"
-        - "error('artifact missing')"
+        - {append_line: ["events.log", "verify-failed"]}
+        - {error: "artifact missing"}
 finalize:
   stack:
     - when: "err"
       action:
-        - "append_line('events.log', 'finalize-retry')"
-        - "retry(1)"
-    - action: "append_line('events.log', 'finalize-done')"
+        - {append_line: ["events.log", "finalize-retry"]}
+        - {retry: 1}
+    - action: {append_line: ["events.log", "finalize-done"]}
 ---
 Body
 "#;
@@ -511,7 +511,7 @@ Body
 
     assert_eq!(
         provider_runs, 2,
-        "finalize retry(1) re-runs the provider exactly once (original + 1 retry); \
+        "finalize {{retry: 1}} re-runs the provider exactly once (original + 1 retry); \
          got {lines:?}; pane:\n{pane}"
     );
     assert_eq!(
@@ -548,11 +548,11 @@ fn level2_lifecycle_failure_resume_without_session_surfaces_typed_error() {
 title: lifecycle resume
 failure:
   stack:
-    - action: "append_line('events.log', 'failure')"
-    - action: "resume('please finish the work')"
+    - action: {append_line: ["events.log", "failure"]}
+    - action: {resume: "please finish the work"}
 finalize:
   stack:
-    - action: "append_line('events.log', 'finalize')"
+    - action: {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#;
@@ -593,17 +593,17 @@ fn level2_lifecycle_failure_resume_with_session_reinvokes_provider_with_follow_u
 title: lifecycle resume success
 start:
   stack:
-    - action: "append_line('events.log', 'start')"
+    - action: {{append_line: ["events.log", "start"]}}
 failure:
   stack:
-    - action: "append_line('events.log', 'failure')"
-    - action: "resume('{follow_up}')"
+    - action: {{append_line: ["events.log", "failure"]}}
+    - action: {{resume: "{follow_up}"}}
 success:
   stack:
-    - action: "append_line('events.log', 'success')"
+    - action: {{append_line: ["events.log", "success"]}}
 finalize:
   stack:
-    - action: "append_line('events.log', 'finalize')"
+    - action: {{append_line: ["events.log", "finalize"]}}
 ---
 Original body
 "#
@@ -681,13 +681,14 @@ fn level2_lifecycle_failure_defer_returns_not_implemented() {
 title: lifecycle defer
 failure:
   stack:
-    - action: "append_line('events.log', 'failure')"
-    - action: defer
-      delay: 5m
-      reason: provider failed
+    - action: {append_line: ["events.log", "failure"]}
+    - action:
+        action: defer
+        delay: 5m
+        reason: provider failed
 finalize:
   stack:
-    - action: "append_line('events.log', 'finalize')"
+    - action: {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#;
@@ -730,7 +731,7 @@ fn write_proxy_goose(bin_dir: &Path, events_log: &Path, target_sentinel: &str) {
 }
 
 /// Proxy from `failure`: the source document's `failure.stack` ends in
-/// `proxy('@target.md')`. The target runs its OWN lifecycle once
+/// `{proxy: "@target.md"}`. The target runs its OWN lifecycle once
 /// (`start`/`success`/`finalize`) with a clean provider exit. The source's
 /// `failure`/`proxy` stack must NOT re-fire (no infinite loop), and the
 /// target's markers must appear.
@@ -755,9 +756,9 @@ fn level2_lifecycle_failure_proxy_runs_target_document_no_loop() {
     // proxies to the target. Source has its own `finalize` that must NOT fire
     // (the run hands off before the source's terminal finalize).
     let main_doc = "---\ntitle: proxy source\nfailure:\n  stack:\n    \
-         - action: \"append_line('events.log', 'source-failure')\"\n    \
-         - action: \"proxy('@target.md')\"\nfinalize:\n  stack:\n    \
-         - action: \"append_line('events.log', 'source-finalize')\"\n---\nsource body\n";
+         - action: {append_line: ['events.log', 'source-failure']}\n    \
+         - action: {proxy: '@target.md'}\nfinalize:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'source-finalize']}\n---\nsource body\n";
     let main_file = workspace.path().join("main.md");
     fs::write(&main_file, main_doc).unwrap();
 
@@ -765,9 +766,9 @@ fn level2_lifecycle_failure_proxy_runs_target_document_no_loop() {
     // `start`/`success`/`finalize` fire exactly once.
     let target_doc = format!(
         "---\ntitle: proxy target\nstart:\n  stack:\n    \
-         - action: \"append_line('events.log', 'target-start')\"\nsuccess:\n  stack:\n    \
-         - action: \"append_line('events.log', 'target-success')\"\nfinalize:\n  stack:\n    \
-         - action: \"append_line('events.log', 'target-finalize')\"\n---\n{target_sentinel}\n"
+         - action: {{append_line: ['events.log', 'target-start']}}\nsuccess:\n  stack:\n    \
+         - action: {{append_line: ['events.log', 'target-success']}}\nfinalize:\n  stack:\n    \
+         - action: {{append_line: ['events.log', 'target-finalize']}}\n---\n{target_sentinel}\n"
     );
     fs::write(workspace.path().join("target.md"), target_doc).unwrap();
 
@@ -834,10 +835,10 @@ title: success ordering
 success:
   stderr: "SUCCESS-TOP"
   stack:
-    - action: "stderr('SUCCESS-STACK')"
+    - action: {stderr: "SUCCESS-STACK"}
 finalize:
   stack:
-    - action: "append_line('events.log', 'finalize')"
+    - action: {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#;
@@ -862,7 +863,7 @@ Body
     );
 }
 
-/// A `success.stack` ending in `error('downgraded')` downgrades the run to
+/// A `success.stack` ending in `{error: "downgraded"}` downgrades the run to
 /// failure. The original success top-level communication still fires, the
 /// failure event fires, and the final lifecycle state is failure.
 #[test]
@@ -875,15 +876,15 @@ title: success downgrade
 success:
   stderr: "SUCCESS-TOP"
   stack:
-    - action: "stderr('SUCCESS-STACK')"
-    - action: "error('downgraded')"
+    - action: {stderr: "SUCCESS-STACK"}
+    - action: {error: "downgraded"}
 failure:
   stderr: "FAILURE-TOP"
   stack:
-    - action: "stderr('FAILURE-STACK')"
+    - action: {stderr: "FAILURE-STACK"}
 finalize:
   stack:
-    - action: "append_line('events.log', 'finalize')"
+    - action: {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#;
@@ -927,14 +928,14 @@ fn level2_lifecycle_blocked_top_level_communication_fires_before_stack() {
 title: blocked ordering
 start:
   stack:
-    - action: "shell('rm -rf /tmp/nonexistent')"
+    - action: {shell: "rm -rf /tmp/nonexistent"}
 blocked:
   stderr: "BLOCKED-TOP"
   stack:
-    - action: "stderr('BLOCKED-STACK')"
+    - action: {stderr: "BLOCKED-STACK"}
 finalize:
   stack:
-    - action: "append_line('events.log', 'finalize')"
+    - action: {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#;
@@ -959,7 +960,7 @@ Body
     );
 }
 
-/// `initialize.stack` ending in `proxy('@target.md')` hands off to the target
+/// `initialize.stack` ending in `{proxy: "@target.md"}` hands off to the target
 /// before the source's `start`. The target's own `initialize` fires, then its
 /// normal lifecycle (`start`, `success`, `finalize`) runs. The source's
 /// `start`/`success`/`finalize` do not fire.
@@ -969,16 +970,16 @@ fn level2_lifecycle_initialize_proxy_runs_target_initialize() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
     let source_doc = "---\ntitle: proxy source\ninitialize:\n  stack:\n    \
-         - action: \"append_line('events.log', 'source-init')\"\n    \
-         - action: \"proxy('@target.md')\"\nstart:\n  stack:\n    \
-         - action: \"append_line('events.log', 'source-start')\"\nsuccess:\n  stack:\n    \
-         - action: \"append_line('events.log', 'source-success')\"\nfinalize:\n  stack:\n    \
-         - action: \"append_line('events.log', 'source-finalize')\"\n---\nsource body\n";
+         - action: {append_line: ['events.log', 'source-init']}\n    \
+         - action: {proxy: '@target.md'}\nstart:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'source-start']}\nsuccess:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'source-success']}\nfinalize:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'source-finalize']}\n---\nsource body\n";
     let target_doc = "---\ntitle: proxy target\ninitialize:\n  stack:\n    \
-         - action: \"append_line('events.log', 'target-init')\"\nstart:\n  stack:\n    \
-         - action: \"append_line('events.log', 'target-start')\"\nsuccess:\n  stack:\n    \
-         - action: \"append_line('events.log', 'target-success')\"\nfinalize:\n  stack:\n    \
-         - action: \"append_line('events.log', 'target-finalize')\"\n---\ntarget body\n";
+         - action: {append_line: ['events.log', 'target-init']}\nstart:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'target-start']}\nsuccess:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'target-success']}\nfinalize:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'target-finalize']}\n---\ntarget body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, true);
     let pane = run_in_tmux_for(&staged, "target-finalize");
 
@@ -1019,8 +1020,8 @@ fn level2_lifecycle_initialize_proxy_runs_target_initialize() {
     );
 }
 
-/// `initialize.stack` ending in `proxy('@target.md')` hands off to a target
-/// whose own `initialize.stack` ends in `skip()`. The run exits cleanly with
+/// `initialize.stack` ending in `{proxy: "@target.md"}` hands off to a target
+/// whose own `initialize.stack` ends in `skip`. The run exits cleanly with
 /// no provider invocation and no source lifecycle beyond the proxy.
 #[test]
 #[serial(level2_lifecycle_control)]
@@ -1028,11 +1029,11 @@ fn level2_lifecycle_initialize_proxy_respects_target_skip() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
     let source_doc = "---\ntitle: proxy source\ninitialize:\n  stack:\n    \
-         - action: \"proxy('@target.md')\"\nstart:\n  stack:\n    \
-         - action: \"append_line('events.log', 'source-start')\"\n---\nsource body\n";
+         - action: {proxy: '@target.md'}\nstart:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'source-start']}\n---\nsource body\n";
     let target_doc = "---\ntitle: proxy target\ninitialize:\n  stack:\n    \
-         - action: \"append_line('events.log', 'target-init')\"\n    \
-         - action: \"skip()\"\n---\ntarget body\n";
+         - action: {append_line: ['events.log', 'target-init']}\n    \
+         - action: skip\n---\ntarget body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, false);
     let pane = run_in_tmux_for(&staged, "target-init");
 
@@ -1053,8 +1054,8 @@ fn level2_lifecycle_initialize_proxy_respects_target_skip() {
     );
 }
 
-/// `initialize.stack` ending in `proxy('@target.md')` hands off to a target
-/// whose own `initialize.stack` ends in `error(...)`. The run routes to the
+/// `initialize.stack` ending in `{proxy: "@target.md"}` hands off to a target
+/// whose own `initialize.stack` ends in `{error: "..."}`. The run routes to the
 /// target's failure + finalize and surfaces the error.
 #[test]
 #[serial(level2_lifecycle_control)]
@@ -1062,11 +1063,11 @@ fn level2_lifecycle_initialize_proxy_respects_target_error() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
     let source_doc = "---\ntitle: proxy source\ninitialize:\n  stack:\n    \
-         - action: \"proxy('@target.md')\"\n---\nsource body\n";
+         - action: {proxy: '@target.md'}\n---\nsource body\n";
     let target_doc = "---\ntitle: proxy target\ninitialize:\n  stack:\n    \
-         - action: \"error('target init failed')\"\nfailure:\n  stack:\n    \
-         - action: \"append_line('events.log', 'target-failure')\"\nfinalize:\n  stack:\n    \
-         - action: \"append_line('events.log', 'target-finalize')\"\n---\ntarget body\n";
+         - action: {error: 'target init failed'}\nfailure:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'target-failure']}\nfinalize:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'target-finalize']}\n---\ntarget body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, true);
     let pane = run_in_tmux_for(&staged, "target-finalize");
 
@@ -1099,10 +1100,10 @@ fn level2_lifecycle_initialize_proxy_cycle_guarded() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
     let source_doc = "---\ntitle: proxy source\ninitialize:\n  stack:\n    \
-         - action: \"proxy('@target.md')\"\n---\nsource body\n";
+         - action: {proxy: '@target.md'}\n---\nsource body\n";
     let target_doc = "---\ntitle: proxy target\ninitialize:\n  stack:\n    \
-         - action: \"append_line('events.log', 'target-init')\"\n    \
-         - action: \"proxy('@doc.md')\"\n---\ntarget body\n";
+         - action: {append_line: ['events.log', 'target-init']}\n    \
+         - action: {proxy: '@doc.md'}\n---\ntarget body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, false);
     let pane = run_in_tmux_for(&staged, "target-init");
 
@@ -1138,17 +1139,17 @@ fn level2_lifecycle_proxy_target_harness_plan_failure_routes_blocked_finalize_wi
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
     let source_doc = "---\ntitle: proxy source\ninitialize:\n  stack:\n    \
-         - action: \"proxy('@target.md')\"\n---\nsource body\n";
+         - action: {proxy: '@target.md'}\n---\nsource body\n";
     // `timeout: "not a duration"` passes lifecycle parse + the target's
     // `initialize`, then fails `parse_harness_plan` (a typed HarnessError)
     // before the provider launches. The target's blocked/finalize stacks read
     // the `err` payload routed in by the Finding-5 fix.
     let target_doc = "---\ntitle: proxy target\ntimeout: \"not a duration\"\ninitialize:\n  stack:\n    \
-         - action: \"append_line('events.log', 'target-init')\"\nblocked:\n  stack:\n    \
-         - action: \"append_line('events.log', 'blocked-err-kind=' + err.kind)\"\n    \
-         - action: \"append_line('events.log', 'blocked-err-variant=' + err.variant)\"\nfinalize:\n  stack:\n    \
-         - when: \"err\"\n      action: \"append_line('events.log', 'finalize-err-msg=' + err.msg)\"\n    \
-         - action: \"append_line('events.log', 'target-finalize')\"\n---\ntarget body\n";
+         - action: {append_line: ['events.log', 'target-init']}\nblocked:\n  stack:\n    \
+         - action: {append_line: ['events.log', \"{{ 'blocked-err-kind=' + err.kind }}\"]}\n    \
+         - action: {append_line: ['events.log', \"{{ 'blocked-err-variant=' + err.variant }}\"]}\nfinalize:\n  stack:\n    \
+         - when: \"err\"\n      action: {append_line: ['events.log', \"{{ 'finalize-err-msg=' + err.msg }}\"]}\n    \
+         - action: {append_line: ['events.log', 'target-finalize']}\n---\ntarget body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, false);
     let pane = run_in_tmux_for(&staged, "target-finalize");
 
@@ -1167,12 +1168,13 @@ fn level2_lifecycle_proxy_target_harness_plan_failure_routes_blocked_finalize_wi
         "a pre-provider harness-plan parse failure must not launch the provider; \
          got {lines:?}; pane:\n{pane}"
     );
-    // The target's blocked.stack fired and observed the typed err payload — the
-    // HarnessError surfaced as a LifecycleAction-kinded err with the harness
-    // error's variant.
+    // The target's blocked.stack fired and observed the typed err payload. The
+    // typed HarnessError (`InvalidTimeout` → `composition.lifecycle_invalid`) is
+    // classifiable, so the deprecated `err.kind` alias now reads as its
+    // `err.category` facet (`composition`), not the internal Rust type name.
     assert!(
-        lines.iter().any(|l| l == "blocked-err-kind=HarnessError"),
-        "blocked.stack must fire and observe err.kind='HarnessError'; \
+        lines.iter().any(|l| l == "blocked-err-kind=composition"),
+        "blocked.stack must fire and observe err.kind='composition' (alias of err.category); \
          got {lines:?}; pane:\n{pane}"
     );
     assert!(
@@ -1211,10 +1213,10 @@ fn level2_lifecycle_proxy_target_lifecycle_parse_failure_routes_blocked_finalize
     // lifecycle parse fails, the guard still holds the source's lifecycle, so the
     // source's stacks fire with the routed `err`.
     let source_doc = "---\ntitle: proxy source\ninitialize:\n  stack:\n    \
-         - action: \"proxy('@target.md')\"\nblocked:\n  stack:\n    \
-         - action: \"append_line('events.log', 'blocked-err-kind=' + err.kind)\"\nfinalize:\n  stack:\n    \
-         - when: \"err\"\n      action: \"append_line('events.log', 'finalize-err-msg=' + err.msg)\"\n    \
-         - action: \"append_line('events.log', 'source-finalize')\"\n---\nsource body\n";
+         - action: {proxy: '@target.md'}\nblocked:\n  stack:\n    \
+         - action: {append_line: ['events.log', \"{{ 'blocked-err-kind=' + err.kind }}\"]}\nfinalize:\n  stack:\n    \
+         - when: \"err\"\n      action: {append_line: ['events.log', \"{{ 'finalize-err-msg=' + err.msg }}\"]}\n    \
+         - action: {append_line: ['events.log', 'source-finalize']}\n---\nsource body\n";
     // The target's `success.stack` carries a malformed item (no `action` key),
     // which `parse_lifecycle_config` rejects with a typed CompositionError
     // (`LifecycleStackInvalidShape`) on hand-off.
@@ -1231,10 +1233,13 @@ fn level2_lifecycle_proxy_target_lifecycle_parse_failure_routes_blocked_finalize
         "a target lifecycle parse failure must not launch the provider; \
          got {lines:?}; pane:\n{pane}"
     );
+    // The typed CompositionError (`LifecycleStackInvalidShape` →
+    // `composition.lifecycle_invalid`) is classifiable, so the deprecated
+    // `err.kind` alias now reads as its `err.category` facet (`composition`).
     assert!(
-        lines.iter().any(|l| l == "blocked-err-kind=CompositionError"),
-        "the proxying document's blocked.stack must fire with err.kind='CompositionError'; \
-         got {lines:?}; pane:\n{pane}"
+        lines.iter().any(|l| l == "blocked-err-kind=composition"),
+        "the proxying document's blocked.stack must fire with err.kind='composition' \
+         (alias of err.category); got {lines:?}; pane:\n{pane}"
     );
     assert!(
         lines.iter().any(|l| l.starts_with("finalize-err-msg=") && l.len() > "finalize-err-msg=".len()),
@@ -1287,16 +1292,16 @@ exit_expressions:
     kind: regex
 start:
   stack:
-    - action: "append_line('events.log', 'start')"
+    - action: {append_line: ["events.log", "start"]}
 failure:
   stack:
-    - action: "append_line('events.log', 'failure-kind=' + err.kind)"
-    - action: "append_line('events.log', 'failure-variant=' + err.variant)"
+    - action: {append_line: ["events.log", "{{ 'failure-kind=' + err.kind }}"]}
+    - action: {append_line: ["events.log", "{{ 'failure-variant=' + err.variant }}"]}
 finalize:
   stack:
     - when: "err"
-      action: "append_line('events.log', 'finalize-msg=' + err.msg)"
-    - action: "append_line('events.log', 'finalize')"
+      action: {append_line: ["events.log", "{{ 'finalize-msg=' + err.msg }}"]}
+    - action: {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#;

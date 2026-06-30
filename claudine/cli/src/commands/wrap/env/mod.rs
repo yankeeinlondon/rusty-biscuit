@@ -282,7 +282,20 @@ pub(crate) fn build_child_env_with_launch(
     );
 
     for (key, value) in env_overrides {
-        set_added_env(&mut env, &mut added, key, value.clone());
+        if key == "OPENCODE_CONFIG_CONTENT" {
+            // The OpenCode inline config is contributed by several producers
+            // (system prompt here, MCP and YOLO later). Merge into any value
+            // already present — which may be a user-supplied config preserved by
+            // sanitize — instead of overwriting it.
+            let current = env.get(std::ffi::OsStr::new(key)).map(|v| v.as_os_str());
+            let overlay: serde_json::Value = serde_json::from_str(value)
+                .map_err(|e| eyre!("invalid OPENCODE_CONFIG_CONTENT override: {e}"))?;
+            let merged = claudine::opencode_config::merge_overlay(current, overlay)
+                .map_err(|e| eyre!("failed to merge OPENCODE_CONFIG_CONTENT: {e}"))?;
+            set_added_env(&mut env, &mut added, key, merged);
+        } else {
+            set_added_env(&mut env, &mut added, key, value.clone());
+        }
     }
 
     warnings.extend(launch_ctx.warnings.iter().cloned());

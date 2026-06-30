@@ -1,5 +1,6 @@
 ---
-hash: ef46db3751d8e999-c3d2924067dee01d
+hash: ef46db3751d8e999-ddc8a530571dc9a5
+last_updated: 2026-06-25
 ---
 # Claudine Composition
 
@@ -69,8 +70,12 @@ every `<TAB>`. The supplement engine applies these rules in order:
   to a `.gitignore`-aware walk of the enclosing git repo.
 - **Case-insensitive substring matching** on the filename with `.md`
   stripped for matching only. `@omp<TAB>` matches `prompt.md`.
-- **`KEY=<TAB>` setters** return zero candidates so shell default
-  behavior kicks in.
+- **`KEY=<TAB>` setters** offer schema-aware completion when the prompt
+  declares `$schema` (property names before `=`; enum members and
+  `file`-glob paths after `=`). Without a schema, the value slot still
+  supports `@`-gated file completion; plain string/number values yield
+  no candidates so shell default behavior kicks in. See
+  [Shell Completions](shell-completions.md).
 
 Install with `claudine completions <shell>` — regenerate and reinstall
 after a Claudine upgrade that changes the callback wiring. The hidden
@@ -100,6 +105,8 @@ Steps:
 5. **Execute** — run a non-interactive session (or interactive with `-i`) through the wrapper-grade pipeline
 
 The composed prompt is sent to the provider. Output streams to the terminal with Markdown-to-terminal rendering in non-interactive mode.
+
+> **Deferred lifecycle keys.** The Prepare stage composes every frontmatter key *except* the seven lifecycle event keys (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, `loop`). Those keep their authored `{{ … }}` spans raw in `effective_frontmatter`; Claudine interpolates them through Darkmatter a **second time, at event-time**, so they can read the runtime globals (`err`, `timing`, `current`) and the live document state. See [lifecycle.md — When Lifecycle Properties Interpolate](lifecycle.md#when-lifecycle-properties-interpolate). The single exception is `shell` commands (positional `shell: "…"` or key/value `command:`), resolved against early-binding surfaces at pre-flight so the approved command is byte-identical to the executed one.
 
 ## Inline Composition
 
@@ -361,7 +368,7 @@ Dry-run output follows Unix stream conventions so `claudine compose --dry-run do
 - **stdout** — the composed document body (the data product).
 - **stderr** — the finalized YAML frontmatter (syntax-highlighted) followed by a metadata table.
 
-The metadata table rows, in order: **Document** (frontmatter `name`, or the relative path, rendered as a blue OSC8 link), **Description** (italic + dim, only when set), **Agent** (the resolved provider name when one is selected, or a classified resolution breakdown — no-agent, invalid frontmatter hint, not-installed hint, multi-suggestion list, auto-selected single suggestion, or zero-installed list — rendered as a multi-line cell), **Model** (the resolved model, or `default`), **YOLO** (`true`/`false`), **Session** (`interactive` or `non-interactive` with the resolved source in parentheses, e.g. `interactive (frontmatter)` or `non-interactive (--no-interactive)`), and **Area** (the focused monorepo area, only when inside a monorepo).
+The metadata table rows, in order: **Document** (frontmatter `name`, or the relative path, rendered as a blue OSC8 link), **Description** (italic + dim, only when set), **Agent** (the resolved provider name when one is selected, or a classified resolution breakdown — no-agent, invalid frontmatter hint, not-installed hint, multi-suggestion list, auto-selected single suggestion, or zero-installed list — rendered as a multi-line cell), **Model** (the resolved model, or `default`), **YOLO** (`true`/`false`), **Session** (`interactive` or `non-interactive` with the resolved source in parentheses, e.g. `interactive (frontmatter)` or `non-interactive (--no-interactive)`), **Area** (the focused monorepo area, only when inside a monorepo), and **Deferred** (the lifecycle event keys left raw in the YAML block above because they interpolate at event-time, only when at least one such key is present — so a raw `{{err.code}}` span there reads as intentional, not as an unresolved-variable bug).
 
 `--quiet` and `--silent` have **no effect** in dry-run mode: the full output is always rendered.
 
@@ -400,6 +407,8 @@ initialize → start → (success | blocked | failure) → finalize → loop
 - **`loop`** is the post-`finalize` gate. Lifecycle concerns authored inside the `loop:` block run first, then the `while`/`until` condition is evaluated, then per-iteration mutations are applied only when continuing.
 
 Legacy prompts that only declare `start`, `success`, `blocked`, and `failure` continue to behave the same way. See [lifecycle.md](lifecycle.md) for the full lifecycle reference, including stacks, control actions, the `err`/`timing`/`current` globals, and examples.
+
+Each lifecycle property interpolates **when its event fires**, not during the initial compose — Darkmatter defers the seven lifecycle keys from compose-time resolution (so their `{{ … }}` spans survive raw in `effective_frontmatter`) and Claudine re-interpolates each property/action string through Darkmatter just-in-time, against the live document state plus the in-scope late-binding globals. Resolution fails closed before any side effect dispatches. See [lifecycle.md — Binding Time: Early vs Late](lifecycle.md#binding-time-early-vs-late).
 
 ### Loop Execution
 

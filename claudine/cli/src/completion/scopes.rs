@@ -82,6 +82,28 @@ pub(crate) fn effective_repo_root(ctx: &ScopeContext) -> Option<&Path> {
         .or(ctx.git_root.as_deref())
 }
 
+/// Root directory that frontmatter **property-value** file completion walks
+/// and renders paths against — always the invoking `cwd`, never the repo root.
+///
+/// A frontmatter file reference (a `name=value` setter, a `$schema`
+/// `file`/`file[]` property) resolves at runtime against the **launch area**:
+/// the directory the user was in when they started the composition, captured
+/// as `LaunchWorkspaceContext.launch_cwd` and threaded into the read-side
+/// resolver as `file_ref_fallback_dir`. Both completion surfaces observe that
+/// same launch area as their `cwd`: the `claudine __complete` process is never
+/// `chdir`'d by the wrapper, and the runtime missing-property chooser runs
+/// *before* `switch_process_cwd`. Anchoring value completion here keeps every
+/// offered path byte-identical to what the runtime resolver accepts. Anchoring
+/// at the repo root (the previous behavior) offered repo-relative paths that
+/// resolved to a non-existent `<launch_cwd>/<repo-relative>` at runtime.
+///
+/// This deliberately differs from [`effective_repo_root`], which still governs
+/// the prompt-*file* positional scopes (a prompt may legitimately live anywhere
+/// in the repo's prompt roots).
+pub(crate) fn property_value_root(ctx: &ScopeContext) -> &Path {
+    &ctx.cwd
+}
+
 /// Ordered scope set for a composition command.
 ///
 /// Iteration order matches the priority ordering used when rendering

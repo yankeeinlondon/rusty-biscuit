@@ -199,6 +199,15 @@ pub(crate) fn options_hash(options: &ComposeOptions) -> u64 {
         parts.push(format!("baseline_schema={}", canonical));
     }
 
+    // The launch-area anchor changes read-side file resolution (file_exists,
+    // frontmatter, file schema validation), so distinct anchors must not share
+    // a cache entry. A `Some` discriminant keeps `None` distinct from
+    // `Some("")`.
+    match options.file_ref_fallback_dir {
+        Some(ref dir) => parts.push(format!("file_ref_fallback_dir=Some:{}", dir.display())),
+        None => parts.push("file_ref_fallback_dir=None".to_string()),
+    }
+
     xx_hash(&parts.join("\0"))
 }
 
@@ -659,5 +668,21 @@ mod tests {
         assert_ne!(options_hash(&base), options_hash(&with_a));
         assert_ne!(options_hash(&base), options_hash(&with_b));
         assert_ne!(options_hash(&with_a), options_hash(&with_b));
+    }
+
+    #[test]
+    fn options_hash_sensitive_to_file_ref_fallback_dir() {
+        let base = ComposeOptions::new();
+        let with_a = ComposeOptions::new().with_file_ref_fallback_dir("/launch/area-a");
+        let with_b = ComposeOptions::new().with_file_ref_fallback_dir("/launch/area-b");
+
+        // None vs Some, and Some(a) vs Some(b), must all differ.
+        assert_ne!(options_hash(&base), options_hash(&with_a));
+        assert_ne!(options_hash(&base), options_hash(&with_b));
+        assert_ne!(options_hash(&with_a), options_hash(&with_b));
+
+        // Identical anchors must hash identically.
+        let with_a_again = ComposeOptions::new().with_file_ref_fallback_dir("/launch/area-a");
+        assert_eq!(options_hash(&with_a), options_hash(&with_a_again));
     }
 }

@@ -77,6 +77,26 @@ pub struct PrepareOptions {
     /// default) preserves Darkmatter's source-relative fallback for
     /// library-only callers and tests.
     pub shell_working_directory: Option<PathBuf>,
+    /// Pre-captured early-binding context snapshot.
+    ///
+    /// When `Some`, [`prepare_direct`]/[`prepare_inline`] compose and run shell
+    /// preflight against this exact snapshot instead of calling
+    /// [`ComposeContext::capture`], so the body and the lifecycle reuse one
+    /// `ctx.*`/`env.*` capture rooted at the launch area. `env_overrides` are
+    /// still applied to it. `None` (the default) preserves the
+    /// capture-at-prepare behavior for library-only callers and tests.
+    pub prepared_context: Option<ComposeContext>,
+    /// Explicit fallback directory for caller-supplied file references.
+    ///
+    /// When `Some`, body interpolation and schema validation resolve
+    /// caller-supplied paths (e.g. a CLI-supplied `spec`) against this
+    /// directory after the document dir misses, so prepare-time resolution
+    /// is independent of the ambient process CWD and agrees with event-time
+    /// resolution. CLI callers populate this from
+    /// `CompositionPrepContext::launch_workspace.launch_cwd`. `None` (the
+    /// default) preserves the legacy ambient-CWD behavior for library-only
+    /// callers and tests.
+    pub file_ref_fallback_dir: Option<PathBuf>,
 }
 
 /// Walk up from a file path to find the nearest `.git` directory.
@@ -94,8 +114,7 @@ fn find_git_root_from_path(path: &Path) -> Option<PathBuf> {
 use super::error::CompositionError;
 use super::guardrails::load_or_create_guardrails;
 use super::lifecycle::{
-    parse_lifecycle_config, validate_no_err_in_no_error_events, validate_no_interpolation_leaks,
-    validate_no_undefined_lifecycle_variables,
+    LIFECYCLE_EVENT_KEYS, parse_lifecycle_config, validate_no_err_in_no_error_events,
 };
 use super::types::{
     AgentHint, CompositionClosurePlan, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
@@ -121,16 +140,31 @@ pub fn prepare_direct(
             replacement: replacement.to_string(),
         });
     }
-    let mut ctx = ComposeContext::capture();
+    // Reuse the single composition-start snapshot when the caller supplied one
+    // (so body, preflight, and lifecycle share one `ctx.*`/`env.*` capture);
+    // otherwise capture now for library-only callers and tests.
+    let mut ctx = options
+        .prepared_context
+        .clone()
+        .unwrap_or_else(ComposeContext::capture);
     for (key, value) in &options.env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
     }
+    // Retain the composed context so pre-flight shell resolution (C3) can build
+    // an early-binding lookup over the same `ctx.*`/`env.*` state main compose saw.
     let mut compose_opts = bind_agent_workspace(
-        ComposeOptions::new_with_context(ctx),
+        ComposeOptions::new_with_context(ctx.clone()),
         &source.resolved_path,
         options.shell_working_directory.as_deref(),
     )
     .with_perf(options.perf_enabled)
+    // Defer the seven lifecycle event subtrees so their authored `{{ }}`
+    // spans survive raw in `effective_frontmatter` for event-time
+    // interpolation (C1). Non-lifecycle keys compose as today, so
+    // variable *values* (`phase`, `pass_icon`, …) are composed before
+    // launch and may still be mutated by lifecycle/loop side effects
+    // during the run.
+    .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied())
     // The composed body is delivered verbatim to the agent and reported as the
     // user prompt. Darkmatter's default strips incidental single newlines, which
     // would collapse an author's line-structured prompt into one paragraph —
@@ -144,6 +178,9 @@ pub fn prepare_direct(
     }
     if let Some(approved) = options.pre_approved_commands {
         compose_opts = compose_opts.with_pre_approved_commands(approved);
+    }
+    if let Some(fallback) = options.file_ref_fallback_dir.clone() {
+        compose_opts = compose_opts.with_file_ref_fallback_dir(fallback);
     }
     let (composed, report) = source
         .markdown
@@ -192,14 +229,29 @@ pub fn prepare_direct(
         agent_invalid: agent_full.invalid,
         agent_was_list: agent_full.is_list,
     };
-    let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
-    validate_no_interpolation_leaks(&lifecycle, &source.resolved_path, &report.warnings)?;
-    validate_no_undefined_lifecycle_variables(
-        source.markdown.frontmatter(),
+    let mut lifecycle =
+        parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
+    // Pre-flight shell resolution (C3): resolve each shell command in the
+    // deferred lifecycle subtree via DM2 with an early-binding-only lookup
+    // and stamp the resolved bytes back so the approved command equals the
+    // executed command. Late-binding references (`err`/`timing`/`current`)
+    // are rejected with a typed error.
+    super::preflight::resolve_lifecycle_shell_commands(
+        &mut lifecycle,
         &effective_frontmatter,
-        &lifecycle,
+        &ctx,
         &source.resolved_path,
+        options.file_ref_fallback_dir.as_deref(),
     )?;
+    // Lifecycle communication/action strings are deferred by design (C1): they
+    // keep their `{{ }}` spans through prepare and resolve at event-time via
+    // DM2 (C2), where strict mode fails closed on undefined roots and malformed
+    // expressions, and the post-DM2 dispatch-time leak guard (C4) backstops a
+    // surviving span before any side effect is sent. The prepare-time leak and
+    // undefined-variable scans therefore no longer run over these deferred
+    // strings — they would flag the authored spans as bugs. The `err`-placement
+    // scan stays: a bare `err` in a no-error event is invalid regardless of
+    // binding time.
     validate_no_err_in_no_error_events(&lifecycle, &source.resolved_path)?;
 
     let source_repo_root = options
@@ -215,6 +267,7 @@ pub fn prepare_direct(
         selection_hints,
         closure: CompositionClosurePlan::Direct,
         lifecycle,
+        deferred_lifecycle_keys: sorted_deferred_keys(&report),
         compose_perf: report.perf,
         dropped_optionals: Vec::new(),
         warnings: report.warnings.clone(),
@@ -258,16 +311,27 @@ pub fn prepare_inline(
 
     // Build temporary markdown (frontmatter + prompt as body) and compose
     let temp_md = Markdown::with_frontmatter(fm.clone(), &prompt_text);
-    let mut ctx = ComposeContext::capture();
+    // Reuse the single composition-start snapshot when supplied; see
+    // `prepare_direct`.
+    let mut ctx = options
+        .prepared_context
+        .clone()
+        .unwrap_or_else(ComposeContext::capture);
     for (key, value) in &options.env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
     }
+    // Retain the composed context so pre-flight shell resolution (C3) can build
+    // an early-binding lookup over the same `ctx.*`/`env.*` state main compose saw.
     let mut compose_opts = bind_agent_workspace(
-        ComposeOptions::new_with_context(ctx),
+        ComposeOptions::new_with_context(ctx.clone()),
         &source.resolved_path,
         options.shell_working_directory.as_deref(),
     )
     .with_perf(options.perf_enabled)
+    // Defer the seven lifecycle event subtrees so their authored `{{ }}`
+    // spans survive raw in `effective_frontmatter` for event-time
+    // interpolation (C1). Non-lifecycle keys compose as today.
+    .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied())
     // The composed body is delivered verbatim to the agent and reported as the
     // user prompt. Darkmatter's default strips incidental single newlines, which
     // would collapse an author's line-structured prompt into one paragraph —
@@ -281,6 +345,9 @@ pub fn prepare_inline(
     }
     if let Some(approved) = options.pre_approved_commands {
         compose_opts = compose_opts.with_pre_approved_commands(approved);
+    }
+    if let Some(fallback) = options.file_ref_fallback_dir.clone() {
+        compose_opts = compose_opts.with_file_ref_fallback_dir(fallback);
     }
     let (composed, report) = temp_md
         .compose_with(compose_opts)
@@ -319,14 +386,18 @@ pub fn prepare_inline(
         agent_invalid: agent_full.invalid,
         agent_was_list: agent_full.is_list,
     };
-    let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
-    validate_no_interpolation_leaks(&lifecycle, &source.resolved_path, &report.warnings)?;
-    validate_no_undefined_lifecycle_variables(
-        source.markdown.frontmatter(),
+    let mut lifecycle =
+        parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
+    // Pre-flight shell resolution (C3): see `prepare_direct`.
+    super::preflight::resolve_lifecycle_shell_commands(
+        &mut lifecycle,
         &effective_frontmatter,
-        &lifecycle,
+        &ctx,
         &source.resolved_path,
+        options.file_ref_fallback_dir.as_deref(),
     )?;
+    // Deferred lifecycle strings resolve at event-time (C2); the prepare-time
+    // leak / undefined-variable scans do not run over them. See `prepare_direct`.
     validate_no_err_in_no_error_events(&lifecycle, &source.resolved_path)?;
 
     let mut prompt = composed.content().to_string();
@@ -365,6 +436,7 @@ pub fn prepare_inline(
             original_hash,
         }),
         lifecycle,
+        deferred_lifecycle_keys: sorted_deferred_keys(&report),
         compose_perf: report.perf,
         dropped_optionals: Vec::new(),
         warnings: report.warnings.clone(),
@@ -379,6 +451,17 @@ fn frontmatter_to_value(fm: &darkmatter::markdown::Frontmatter) -> serde_json::V
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect(),
     )
+}
+
+/// Collect Darkmatter's intentionally-deferred (DM1) lifecycle keys from a
+/// compose report into a stable, sorted list for dry-run labeling (C5).
+///
+/// The report already limits the set to keys present in the source
+/// frontmatter; sorting makes the dry-run output deterministic.
+fn sorted_deferred_keys(report: &darkmatter::markdown::compose::ComposeReport) -> Vec<String> {
+    let mut keys: Vec<String> = report.deferred_frontmatter_keys.iter().cloned().collect();
+    keys.sort();
+    keys
 }
 
 /// Parse selection hints (`agent`, `model`) from a raw Markdown frontmatter
@@ -763,13 +846,12 @@ mod tests {
     }
 
     #[test]
-    fn malformed_lifecycle_interpolation_fails_preparation() {
-        // A *mixed* lifecycle string (literal text plus a malformed `{{ … }}`)
-        // is not whole-value executable state, so Darkmatter leaves it lenient
-        // and the claudine leak guard is the layer that rejects it. (A
-        // whole-value malformed span is caught earlier by Darkmatter's strict
-        // frontmatter interpolation — see
-        // `implement_suggestions_prompt_rejects_malformed_spec_path`.)
+    fn lifecycle_malformed_span_is_deferred_raw_through_prepare() {
+        // C1: lifecycle communication strings are deferred from compose-time
+        // resolution, so their authored `{{ }}` spans survive prepare intact.
+        // A malformed span is no longer a prepare-time leak — it is resolved
+        // (and fails closed) at event-time via DM2 (C2). Prepare keeps the raw
+        // span verbatim.
         let dir = TempDir::new().unwrap();
         let source = make_source(
             &dir,
@@ -780,26 +862,24 @@ mod tests {
             "Content",
         );
 
-        let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
-        match err {
-            CompositionError::LifecycleInterpolationLeak {
-                property,
-                expression,
-                ..
-            } => {
-                assert_eq!(property, "start.message");
-                assert!(expression.contains("parent_dir(review))"));
-            }
-            other => panic!("expected LifecycleInterpolationLeak, got: {other:?}"),
-        }
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        let message = prepared
+            .lifecycle
+            .start
+            .as_ref()
+            .unwrap()
+            .message
+            .as_ref()
+            .unwrap();
+        assert_eq!(message, "leak {{ parent_dir(review)) }}");
     }
 
     #[test]
-    fn undefined_lifecycle_variable_fails_preparation() {
-        // Regression: a bare `{{ missing_lifecycle_var }}` resolves to an empty
-        // string during composition with no Darkmatter warning, so the
-        // post-compose leak guard never sees it. Preparation must still fail
-        // before the message becomes eligible for lifecycle dispatch.
+    fn undefined_lifecycle_variable_is_deferred_not_rejected_at_prepare() {
+        // Previously a bare `{{ missing }}` in a lifecycle string was rejected
+        // at prepare. With event-time interpolation (C2) the span is deferred;
+        // an unknown root fails closed at event-time via DM2 strict mode rather
+        // than at prepare. Prepare keeps the raw span.
         let dir = TempDir::new().unwrap();
         let source = make_source(
             &dir,
@@ -813,22 +893,22 @@ mod tests {
             "Content",
         );
 
-        let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
-        match err {
-            CompositionError::LifecycleUndefinedVariable {
-                property, variable, ..
-            } => {
-                assert_eq!(property, "start.message");
-                assert_eq!(variable, "missing_lifecycle_var");
-            }
-            other => panic!("expected LifecycleUndefinedVariable, got: {other:?}"),
-        }
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        let message = prepared
+            .lifecycle
+            .start
+            .as_ref()
+            .unwrap()
+            .message
+            .as_ref()
+            .unwrap();
+        assert_eq!(message, "before {{ missing_lifecycle_var }} after");
     }
 
     #[test]
-    fn lifecycle_variable_defined_in_frontmatter_passes_preparation() {
-        // A bare variable that names a real frontmatter key is defined, so it
-        // must not trip the undefined-variable guard.
+    fn lifecycle_message_referencing_frontmatter_is_deferred_raw() {
+        // A bare frontmatter reference in a lifecycle string is deferred to
+        // event-time, not resolved at prepare.
         let dir = TempDir::new().unwrap();
         let source = make_source(
             &dir,
@@ -848,13 +928,13 @@ mod tests {
             .message
             .as_ref()
             .unwrap();
-        assert_eq!(message, "working on claudine");
+        assert_eq!(message, "working on {{ area }}");
     }
 
     #[test]
-    fn lifecycle_fallback_for_undefined_variable_passes_preparation() {
-        // Fallback (`{{ x || 'y' }}`) intentionally tolerates an undefined
-        // operand, so the guard must leave it alone.
+    fn lifecycle_fallback_span_is_deferred_raw() {
+        // Fallback (`{{ x || 'y' }}`) is deferred like any other lifecycle
+        // span; it resolves at event-time.
         let dir = TempDir::new().unwrap();
         let source = make_source(
             &dir,
@@ -874,11 +954,11 @@ mod tests {
             .message
             .as_ref()
             .unwrap();
-        assert_eq!(message, "default");
+        assert_eq!(message, "{{ missing_lifecycle_var || 'default' }}");
     }
 
     #[test]
-    fn clean_lifecycle_interpolation_passes_preparation() {
+    fn lifecycle_ctx_interpolation_is_deferred_raw() {
         let dir = TempDir::new().unwrap();
         let source = make_source(
             &dir,
@@ -892,17 +972,15 @@ mod tests {
         let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
         let start = prepared.lifecycle.start.as_ref().unwrap();
         let message = start.message.as_ref().unwrap();
-        assert!(!message.contains("{{"));
-        assert!(!message.contains("}}"));
+        // Deferred: the span survives raw for event-time interpolation (C2).
+        assert_eq!(message, "{{ ctx.today }}");
     }
 
     #[test]
-    fn lifecycle_leak_reported_for_first_field_in_deterministic_order() {
+    fn multiple_lifecycle_spans_all_deferred_raw() {
+        // Every lifecycle communication string is deferred; none trips a
+        // prepare-time leak. They all resolve at event-time.
         let dir = TempDir::new().unwrap();
-        // Mixed lifecycle strings stay lenient in Darkmatter and surface
-        // through the claudine leak guard, which reports the first leaking
-        // field in deterministic order. Whole-value malformed spans would
-        // instead be rejected earlier by Darkmatter's strict interpolation.
         let source = make_source(
             &dir,
             &[
@@ -913,13 +991,15 @@ mod tests {
             "Content",
         );
 
-        let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
-        match err {
-            CompositionError::LifecycleInterpolationLeak { property, .. } => {
-                assert_eq!(property, "start.message");
-            }
-            other => panic!("expected LifecycleInterpolationLeak, got: {other:?}"),
-        }
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(
+            prepared.lifecycle.start.as_ref().unwrap().message.as_deref(),
+            Some("leak {{ parent_dir(review)) }}")
+        );
+        assert_eq!(
+            prepared.lifecycle.failure.as_ref().unwrap().say.as_deref(),
+            Some("leak {{ broken( }}")
+        );
     }
 
     #[test]
@@ -952,14 +1032,23 @@ mod tests {
         };
 
         let err = prepare_direct(&source, options).unwrap_err();
-        let msg = err.to_string();
-        assert!(
-            msg.contains("spec_path"),
-            "error must name the offending key, got: {msg}"
+        // The offending key is captured as structured scope (not Display prose),
+        // and the typed cause is an interpolation parse failure.
+        let CompositionError::ComposeFailed(MarkdownError::Interpolation { key, cause, .. }) = &err
+        else {
+            panic!("expected ComposeFailed(Interpolation), got: {err:?}");
+        };
+        assert_eq!(
+            key.as_deref(),
+            Some("spec_path"),
+            "error must capture the offending key"
         );
         assert!(
-            msg.contains("Interpolation parse failed"),
-            "error must report the interpolation parse failure, got: {msg}"
+            matches!(
+                cause.as_ref(),
+                darkmatter::markdown::compose::expression::ExpressionError::Parse(_)
+            ),
+            "cause must be an interpolation parse failure, got: {cause:?}"
         );
     }
 
@@ -985,7 +1074,9 @@ mod tests {
     }
 
     #[test]
-    fn direct_lifecycle_ctx_agent_uses_env_overrides() {
+    fn direct_lifecycle_ctx_message_is_deferred_raw() {
+        // A lifecycle message referencing `ctx.*` is deferred to event-time;
+        // env-override-driven ctx resolution happens then (C2), not at prepare.
         let dir = TempDir::new().unwrap();
         let source = make_source(
             &dir,
@@ -1008,7 +1099,7 @@ mod tests {
 
         let prepared = prepare_direct(&source, options).unwrap();
         let start = prepared.lifecycle.start.as_ref().unwrap();
-        assert_eq!(start.message.as_deref(), Some("codex/gpt-5"));
+        assert_eq!(start.message.as_deref(), Some("{{ctx.agent}}/{{ctx.model}}"));
     }
 
     #[test]
@@ -1397,5 +1488,181 @@ mod tests {
 
         let hints = parse_selection_hints_from_frontmatter(md.frontmatter()).unwrap();
         assert_eq!(hints.interactive, Some(true));
+    }
+
+    // ── C1: deferred lifecycle subtree (raw spans survive prepare) ───────
+
+    #[test]
+    fn lifecycle_err_span_survives_raw_in_effective_frontmatter() {
+        // C1: deferring the lifecycle keys leaves `{{err.msg}}` raw in
+        // `effective_frontmatter`, and `parse_lifecycle_config` reads it raw —
+        // the span the original bug collapsed to empty now survives for
+        // event-time interpolation.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[("failure", json!({"message": "❌️ {{err.msg}}"}))],
+            "Do the work.",
+        );
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+
+        let fm = prepared.effective_frontmatter.as_object().unwrap();
+        let failure = fm.get("failure").unwrap();
+        assert_eq!(
+            failure.get("message").unwrap(),
+            &json!("❌️ {{err.msg}}"),
+            "deferred lifecycle subtree retains its raw span"
+        );
+        assert_eq!(
+            prepared
+                .lifecycle
+                .failure
+                .as_ref()
+                .unwrap()
+                .message
+                .as_deref(),
+            Some("❌️ {{err.msg}}"),
+            "parse_lifecycle_config sees the raw span"
+        );
+    }
+
+    // ── C3: pre-flight shell resolution (early-binding only) ─────────────
+
+    fn first_shell_command(
+        lifecycle: &crate::composition::lifecycle::LifecycleConfig,
+        signal: crate::composition::lifecycle::LifecycleSignal,
+    ) -> darkmatter::markdown::compose::expression::Expr {
+        use crate::composition::lifecycle_actions::LifecycleActionKind;
+        let stack = lifecycle.stack(signal).expect("stack present");
+        for item in stack {
+            for action in &item.actions {
+                if let LifecycleActionKind::Shell(shell) = &action.kind {
+                    return shell.command.clone();
+                }
+            }
+        }
+        panic!("no shell action in stack");
+    }
+
+    #[test]
+    fn shell_command_early_binding_resolves_at_preflight() {
+        use crate::composition::lifecycle::LifecycleSignal;
+        use darkmatter::markdown::compose::expression::Expr;
+        // `{"shell": "git fetch {{branch}}"}` resolves `branch` (a frontmatter
+        // key) at pre-flight; the stamped command equals what will execute.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("branch", json!("main")),
+                (
+                    "start",
+                    json!({"stack": [{"action": {"shell": "git fetch {{branch}}"}}]}),
+                ),
+            ],
+            "Do the work.",
+        );
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        let command = first_shell_command(&prepared.lifecycle, LifecycleSignal::Start);
+        assert_eq!(command, Expr::StringLiteral("git fetch main".to_string()));
+    }
+
+    #[test]
+    fn shell_command_late_binding_reference_rejected_at_prepare() {
+        // `{"shell": "rm {{err.msg}}"}` references a late-binding global;
+        // shell is resolved at pre-flight (before any event fires), so it is
+        // rejected with the property path.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[(
+                "failure",
+                json!({"stack": [{"action": {"shell": "rm {{err.msg}}"}}]}),
+            )],
+            "Do the work.",
+        );
+
+        let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+        match err {
+            CompositionError::LifecycleShellResolution {
+                property,
+                raw,
+                message,
+                ..
+            } => {
+                assert_eq!(property, "failure.stack[0].action[0].command");
+                assert_eq!(raw, "rm {{err.msg}}");
+                assert!(
+                    message.contains("err"),
+                    "message names the late-binding root: {message}"
+                );
+            }
+            other => panic!("expected LifecycleShellResolution, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn shell_long_form_command_late_binding_rejected_at_prepare() {
+        // Long-form `command: "rm {{err.msg}}"` is rejected the same way as
+        // the positional `shell: ...` form.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[(
+                "failure",
+                json!({"stack": [{"action": {"action": "shell", "command": "rm {{err.msg}}"}}]}),
+            )],
+            "Do the work.",
+        );
+
+        let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+        match err {
+            CompositionError::LifecycleShellResolution { property, raw, .. } => {
+                assert_eq!(property, "failure.stack[0].action[0].command");
+                assert_eq!(raw, "rm {{err.msg}}");
+            }
+            other => panic!("expected LifecycleShellResolution, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compose_error_preserves_frontmatter_fence_mismatch_source() {
+        // `map_compose_error` is a catch-all for non-shell MarkdownErrors.
+        // A compose-time (transclusion/reload) surface that produces a
+        // `FrontmatterFenceMismatch` must keep the typed error in the chain so
+        // the CLI walker can render the rich Darkmatter block instead of a flat
+        // string.
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            PathBuf::from("nested.md"),
+            PathBuf::from("nested.md"),
+            "----\nname: x\n----\n".to_string(),
+        );
+        let md_err = MarkdownError::FrontmatterFenceMismatch {
+            ctx,
+            found: "----".to_string(),
+            line: 1,
+        };
+        let path = PathBuf::from("nested.md");
+        let composed = map_compose_error(&path, md_err);
+
+        match composed {
+            CompositionError::ComposeFailed(inner) => {
+                let msg = inner.to_string();
+                assert!(
+                    msg.contains("----"),
+                    "typed error must name the offending fence: {msg}"
+                );
+                assert!(
+                    matches!(
+                        inner,
+                        MarkdownError::FrontmatterFenceMismatch { ref found, .. } if found == "----"
+                    ),
+                    "inner MarkdownError must be FrontmatterFenceMismatch: {inner:?}"
+                );
+            }
+            other => panic!("expected ComposeFailed, got: {other:?}"),
+        }
     }
 }

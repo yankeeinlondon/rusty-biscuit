@@ -26,6 +26,8 @@ fn prop_supported(name: &str) -> MissingProperty {
         description: None,
         interactive_shape: Some(InteractiveShape::Text {
             format: TextFormat::Plain,
+            min_len: None,
+            max_len: None,
         }),
     }
 }

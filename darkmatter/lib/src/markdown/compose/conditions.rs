@@ -145,11 +145,11 @@ pub fn evaluate_condition<L: EvaluationLookup>(
         span: parse_error_span(expr, e.position),
     })?;
 
-    let value = evaluate(&parsed, state).map_err(|message| ConditionError::Eval {
+    let value = evaluate(&parsed, state).map_err(|error| ConditionError::Eval {
         ctx: Box::new(ctx),
         expr: expr.to_string(),
         line,
-        message,
+        message: error.to_string(),
     })?;
 
     let result = is_truthy(&value);
@@ -278,11 +278,11 @@ pub fn evaluate_condition_against(
     })?;
 
     let lookup = ShortcutLookup::new(data, work_dir);
-    let value = evaluate(&parsed, &lookup).map_err(|message| ConditionError::Eval {
+    let value = evaluate(&parsed, &lookup).map_err(|error| ConditionError::Eval {
         ctx: Box::new(ctx),
         expr: expr.to_string(),
         line: 1,
-        message,
+        message: error.to_string(),
     })?;
 
     let result = is_truthy(&value);

@@ -232,6 +232,22 @@ mod tests {
     }
 
     #[test]
+    fn eager_file_match_patterns_still_reach_completion() {
+        // Regression: `match(...)` is no longer lowered into the compiled JSON
+        // Schema (the `x-darkmatter-match` keyword was removed), but completion
+        // reads patterns from the SimplifiedSchema atom, so they must still
+        // surface — including on an eager `file(eager; match(...))` field.
+        let eff = effective("$schema:\n  review: \"file(eager; match('**/*review*.md'))\"\n");
+        let suggestion = for_property(&eff, "review").expect("review should be completable");
+        match suggestion.kind {
+            CompletionKind::File { patterns } => {
+                assert_eq!(patterns, vec!["**/*review*.md"]);
+            }
+            other => panic!("expected File completion, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn enum_property_returns_members() {
         let eff = effective("$schema:\n  status: enum(draft, published, archived)\n");
         let suggestion = for_property(&eff, "status").expect("status should be completable");

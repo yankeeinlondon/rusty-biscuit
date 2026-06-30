@@ -39,6 +39,7 @@ Administration:
   logs              Query and sync Claudine JSONL logs
   completions       Generate shell completions
   context           Show Darkmatter runtime context, expression engine, and side effects
+  errors            Show the diagnostic error-code contract (codes, dispositions, details)
 
 Options:
   -v, --verbose     Increase presentation detail for human-facing output

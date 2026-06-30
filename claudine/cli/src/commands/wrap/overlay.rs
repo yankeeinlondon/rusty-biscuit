@@ -42,10 +42,14 @@ pub(crate) fn materialize_passthrough_harness_seed(
     );
     let (composed, _report) = source_markdown.compose_with(options)?;
 
+    let frontmatter = frontmatter_map_to_value(composed.frontmatter());
+    let live_frontmatter =
+        super::harness_orch::MaterializedHarnessPrompt::live_cell_from(&frontmatter);
     Ok(super::harness_orch::MaterializedHarnessPrompt {
-        frontmatter: frontmatter_map_to_value(composed.frontmatter()),
+        frontmatter,
         prompt,
         env_overrides: Vec::new(),
         inline_closure_plan: None,
+        live_frontmatter,
     })
 }

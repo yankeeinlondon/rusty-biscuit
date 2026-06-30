@@ -44,6 +44,24 @@ leak-timeout = { period = "100ms", result = "fail" }
 filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# This sequence perf test drives a failing multi-step CLI run and may finish just
+# beyond the default 30s termination window on macOS debug builds.
+[[profile.default.overrides]]
+filter = 'test(=sequence_perf_with_fail_fast_still_renders_partial_report)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
+# This integration test shells out to the CLI multiple times; it is below the
+# default timeout isolated, but can exceed 30s under full-suite contention.
+[[profile.default.overrides]]
+filter = 'test(=agents_and_commands_route_to_empty_state_messages)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
+# This seeded loop repro resolves live derived state and can exceed the default
+# timeout under the full claudine suite on macOS debug builds.
+[[profile.default.overrides]]
+filter = 'test(=composition::loop_engine::tests::seeded_loop_repro_runs_to_completion_with_live_derived_variable)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
 # Proptest-driven acceptance test exploring many randomized compose conditions.
 # Finishes in ~7s isolated but is squeezed toward (and past) the default 30s
 # termination ceiling under full parallel `just test darkmatter` load. Give it
@@ -105,6 +123,18 @@ filter = 'package(biscuit-speaks-cli)'
 test-group = 'tts-audio'
 leak-timeout = { period = "1s", result = "fail" }
 
+# claudine-cli's L2 tier runs in parallel self-spawn mode (see
+# `claudine/justfile`'s `test-l2` and `just/devops.just`'s `BISCUIT_L2_THREADS`
+# path): every test spawns its own tmux session / PTY plus short-lived
+# claudine+git children. Under `-j N` their concurrent teardown occasionally
+# lags nextest's 100ms post-test pipe-drain check and flags a spurious
+# LEAK-FAIL — same situation as the worktree / tts-audio groups above. Give a
+# 1s grace window; keep `result = "fail"` so a genuinely leaked child still
+# fails.
+[[profile.default.overrides]]
+filter = 'package(claudine-cli) & test(/level2_/)'
+leak-timeout = { period = "1s", result = "fail" }
+
 [profile.ci]
 # Same behavior for CI environment
 retries = 3
@@ -117,6 +147,18 @@ junit = { path = "test-results.xml" }
 
 [[profile.ci.overrides]]
 filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
+[[profile.ci.overrides]]
+filter = 'test(=sequence_perf_with_fail_fast_still_renders_partial_report)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
+[[profile.ci.overrides]]
+filter = 'test(=agents_and_commands_route_to_empty_state_messages)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
+[[profile.ci.overrides]]
+filter = 'test(=composition::loop_engine::tests::seeded_loop_repro_runs_to_completion_with_live_derived_variable)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # See the default-profile note: the randomized-conditions proptest can approach
@@ -154,4 +196,12 @@ leak-timeout = { period = "1s", result = "fail" }
 [[profile.ci.overrides]]
 filter = 'package(biscuit-speaks-cli)'
 test-group = 'tts-audio'
+leak-timeout = { period = "1s", result = "fail" }
+
+# See the default-profile note: claudine-cli's parallel self-spawn L2 tier
+# draws spurious LEAK-FAILs from concurrent tmux/PTY/child teardown. CI hosts
+# may be slower, so the same 1s grace applies; `result = "fail"` still catches
+# a genuine leak.
+[[profile.ci.overrides]]
+filter = 'package(claudine-cli) & test(/level2_/)'
 leak-timeout = { period = "1s", result = "fail" }

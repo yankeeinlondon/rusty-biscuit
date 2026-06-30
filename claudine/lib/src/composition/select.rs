@@ -602,6 +602,7 @@ mod tests {
             compose_perf: None,
             dropped_optionals: Vec::new(),
             warnings: Vec::new(),
+            deferred_lifecycle_keys: Vec::new(),
         }
     }
 

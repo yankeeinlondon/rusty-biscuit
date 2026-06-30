@@ -37,6 +37,7 @@ mod tests {
             ("--timeout", "30"),
             ("-t", "30"),
             ("--step-timeout", "30s"),
+            ("--stall-timeout", "10m"),
             ("--operation", "ship"),
             ("--op", "ship"),
             ("--set", "{\"k\":\"v\"}"),

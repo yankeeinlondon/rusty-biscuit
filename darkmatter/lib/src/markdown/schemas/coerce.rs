@@ -262,7 +262,7 @@ fn coerce_root_union(
         let wrapped = validate::wrap_arm_as_root_schema(arm);
         // A schema that fails to build cannot be a valid arm; skip it. The
         // surrounding validator already surfaces build failures elsewhere.
-        let Ok(validator) = build_validator(&wrapped) else {
+        let Ok(validator) = build_validator(&wrapped, None, None) else {
             continue;
         };
         if arm_accepts(&validator, &candidate, shell_pending) {
@@ -385,7 +385,7 @@ fn coerce_property_union(arms: &[Value], value: &Value) -> Option<Value> {
             Some(target) => coerce_value(&target, value).unwrap_or_else(|| value.clone()),
             None => value.clone(),
         };
-        let Ok(validator) = build_validator(arm) else {
+        let Ok(validator) = build_validator(arm, None, None) else {
             continue;
         };
         if validator.is_valid(&candidate) {
@@ -1438,11 +1438,15 @@ mod tests {
 
     #[test]
     fn nullable_wrapper_file_yields_to_string() {
+        // Bare optional `file` lowers to the lazy `darkmatter-file-reference`
+        // inside the 3-arm nullable wrapper; coercion only cares that the file
+        // arm is a string, so the result is `ToString` regardless of which
+        // file format the arm carries.
         let frag = json!({
             "anyOf": [
                 {"type": "null"},
                 {"const": ""},
-                {"type": "string", "format": "darkmatter-file"}
+                {"type": "string", "format": "darkmatter-file-reference"}
             ]
         });
         assert_eq!(coercion_target(&frag), Some(CoercionTarget::ToString));
@@ -1562,7 +1566,7 @@ mod tests {
                     "anyOf": [
                         {"type": "null"},
                         {"const": ""},
-                        {"type": "string", "format": "darkmatter-file"}
+                        {"type": "string", "format": "darkmatter-file-reference"}
                     ]
                 }
             }

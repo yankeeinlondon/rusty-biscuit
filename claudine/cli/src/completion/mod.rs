@@ -22,11 +22,14 @@
 //!    subcommands so unknown passthrough tokens do not crash the walk.
 //!    No composition-specific candidates are produced through this path.
 
+pub(crate) mod autocomplete_ui;
 pub(crate) mod bootstrap;
 pub(crate) mod composition;
+pub(crate) mod default_glob;
 pub(crate) mod engine;
 pub(crate) mod frontmatter;
 pub(crate) mod fuzzy;
+pub(crate) mod operation_file;
 pub(crate) mod root_menu;
 pub(crate) mod schema_completion;
 pub(crate) mod scopes;

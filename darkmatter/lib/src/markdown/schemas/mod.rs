@@ -16,8 +16,10 @@
 //! - [`simplified::convert`] — [`to_json_schema`] lowers a parsed schema to
 //!   Draft 2020-12 JSON Schema.
 //! - [`simplified`] — YAML-shape layer over `serde_yaml_ng::Value`.
-//! - [`format`] — custom format validators (`darkmatter-file`) and keyword
-//!   validators (`x-darkmatter-match`, `x-darkmatter-url-scheme`).
+//! - [`format`] — custom format validators (`darkmatter-file` eager,
+//!   `darkmatter-file-reference` lazy) and the `x-darkmatter-url-scheme`
+//!   keyword validator. (`match(...)` is suggestion metadata only — never a
+//!   validation keyword.)
 //! - [`validate`] — `Validator` construction + LRU [`ValidatorCache`].
 //! - [`resolve`] — `$schema` resolution and baseline merge.
 //! - [`about`] — typed descriptor catalog that backs `md schema about`.
@@ -99,6 +101,25 @@ impl DarkmatterSchemas {
     /// Creates a new [`DarkmatterSchemas`] with no baseline.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Sets the explicit fallback directory for `format: darkmatter-file`
+    /// property-value resolution (typically the captured launch area).
+    ///
+    /// When set, file-typed frontmatter values resolve against this directory
+    /// instead of the ambient process working directory, so schema validation
+    /// agrees with expression-side `file_exists`/`frontmatter` resolution
+    /// after the wrapper has `chdir`'d away from the launch area. `None`
+    /// (the default) preserves the legacy ambient-CWD behavior.
+    ///
+    /// Must be called before any `validate` / `effective_for` call. The
+    /// fallback is baked into the compiled validators via the cache; changing
+    /// it after validators are cached leaves stale validators that still
+    /// resolve against the prior directory.
+    #[must_use]
+    pub fn with_file_ref_fallback_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.cache = self.cache.with_file_ref_fallback_dir(dir);
+        self
     }
 
     /// Attaches a parsed SimplifiedSchema as the baseline.
@@ -192,13 +213,18 @@ impl DarkmatterSchemas {
             (None, None) => return Ok(None),
         };
 
-        let validator = self.cache.validator_for(&merged_json)?;
-        let arm_validators = build_arm_validators(&merged_json, &self.cache)?;
+        // Anchor `format: darkmatter-file` value resolution document-first
+        // against the prompt directory, then the cache's launch-area fallback —
+        // the same order the expression path uses for `file_exists`/`frontmatter`.
+        let validator = self.cache.validator_for(&merged_json, Some(&base_dir))?;
+        let arm_validators = build_arm_validators(&merged_json, &self.cache, &base_dir)?;
         Ok(Some(EffectiveSchema {
             simplified: resolved.and_then(|r| r.simplified),
             json_schema: merged_json,
             validator,
             arm_validators,
+            base_dir: Some(base_dir),
+            file_ref_fallback_dir: self.cache.file_ref_fallback_dir().map(Path::to_path_buf),
         }))
     }
 
@@ -253,6 +279,13 @@ pub struct EffectiveSchema {
     /// Per-arm validators when `json_schema` is a root `anyOf` union.
     /// `None` for ordinary schemas.
     arm_validators: Option<Vec<Arc<Validator>>>,
+    /// Prompt document directory the validator was built with, the
+    /// document-first anchor for `format: darkmatter-file` re-resolution when
+    /// substituting a targeted diagnostic.
+    base_dir: Option<PathBuf>,
+    /// Captured launch-area fallback the validator was built with, the second
+    /// anchor for `format: darkmatter-file` re-resolution.
+    file_ref_fallback_dir: Option<PathBuf>,
 }
 
 impl EffectiveSchema {
@@ -278,9 +311,23 @@ impl EffectiveSchema {
         positions: &PositionMap,
     ) -> ValidationReport {
         let coerced = coerce::coerce_frontmatter(&self.json_schema, frontmatter);
+        let anchors = validate::FileRefAnchors {
+            base_dir: self.base_dir.as_deref(),
+            fallback: self.file_ref_fallback_dir.as_deref(),
+        };
         let mut problems = match &self.arm_validators {
-            Some(arms) => validate::collect_root_union_problems(arms, &coerced.value, positions),
-            None => validate::collect_problems(&self.validator, &coerced.value, positions),
+            Some(arms) => validate::collect_root_union_problems_with_anchors(
+                arms,
+                &coerced.value,
+                positions,
+                anchors,
+            ),
+            None => validate::collect_problems_with_anchors(
+                &self.validator,
+                &coerced.value,
+                positions,
+                anchors,
+            ),
         };
         // Enrich each problem with its declared property description (Decision
         // #2). Whitespace-only descriptions (#8) and descriptions identical to
@@ -361,6 +408,7 @@ pub struct ValidationProblem {
 fn build_arm_validators(
     schema: &Value,
     cache: &ValidatorCache,
+    base_dir: &Path,
 ) -> Result<Option<Vec<Arc<Validator>>>, SchemaError> {
     let Some(arms) = schema.get("anyOf").and_then(Value::as_array) else {
         return Ok(None);
@@ -368,7 +416,7 @@ fn build_arm_validators(
     let mut out = Vec::with_capacity(arms.len());
     for arm in arms {
         let arm_schema = validate::wrap_arm_as_root_schema(arm);
-        out.push(cache.validator_for(&arm_schema)?);
+        out.push(cache.validator_for(&arm_schema, Some(base_dir))?);
     }
     Ok(Some(out))
 }
@@ -725,6 +773,270 @@ mod tests {
         assert_eq!(
             problem.description, None,
             "whitespace-only description must be suppressed"
+        );
+    }
+
+    // ── file_ref_fallback_dir threading (Phase 2 Track B) ───────────────
+
+    /// RAII guard that restores the process CWD on drop, even on panic.
+    /// Tests that mutate CWD are annotated with
+    /// `#[serial_test::serial("darkmatter-file-cwd")]` to prevent races with
+    /// the ambient-CWD tests in `format::tests` and `validate::tests`.
+    struct CwdGuard {
+        prior: std::path::PathBuf,
+    }
+
+    impl CwdGuard {
+        fn enter(dir: &std::path::Path) -> Self {
+            let prior = std::env::current_dir().expect("read CWD");
+            std::env::set_current_dir(dir).expect("set CWD");
+            Self { prior }
+        }
+    }
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.prior);
+        }
+    }
+
+    /// A `file`-typed schema property value resolves via the captured
+    /// fallback even when the process CWD is an unrelated directory
+    /// (verification goal #7 precursor). The format validator closure
+    /// captures the fallback dir and resolves via `FileReference::resolve_from`
+    /// instead of the ambient-CWD `resolve()`.
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn file_format_resolves_via_fallback_when_cwd_unrelated() {
+        let launch_dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(launch_dir.path().join("spec.md"), "# Spec\n").expect("write spec");
+        let unrelated_dir = tempfile::tempdir().expect("tempdir");
+
+        let md = md_with_schema("$schema:\n  spec: 'file(eager; required)'\nspec: spec.md\n");
+        let api = DarkmatterSchemas::new()
+            .with_file_ref_fallback_dir(launch_dir.path().to_path_buf());
+
+        let _cwd = CwdGuard::enter(unrelated_dir.path());
+        let report = api.validate(&md).expect("validate");
+
+        assert!(
+            report.valid,
+            "expected file-format validation to resolve via fallback: {:?}",
+            report.problems,
+        );
+    }
+
+    /// A `file`-typed schema property value that exists under the ambient CWD
+    /// but NOT under the prompt directory or the fallback dir fails validation
+    /// — proving the document-first / fallback anchors (not the ambient CWD)
+    /// drive resolution when configured. The prompt has a real file source in
+    /// a third directory so its `base_dir` is distinct from the CWD.
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn file_format_fallback_rejects_when_not_under_fallback() {
+        let prompt_dir = tempfile::tempdir().expect("tempdir");
+        let fallback_dir = tempfile::tempdir().expect("tempdir");
+        let cwd_dir = tempfile::tempdir().expect("tempdir");
+        // File exists under CWD but NOT under the prompt dir or the fallback dir.
+        std::fs::write(cwd_dir.path().join("ambient.md"), "# Ambient\n").expect("write");
+
+        let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(eager; required)'\nspec: ambient.md\n");
+        let api = DarkmatterSchemas::new()
+            .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
+
+        let _cwd = CwdGuard::enter(cwd_dir.path());
+        let report = api.validate(&md).expect("validate");
+
+        assert!(
+            !report.valid,
+            "expected validation to fail because ambient.md is under neither the prompt dir nor the fallback dir: {:?}",
+            report.problems,
+        );
+    }
+
+    /// `$schema: ./schema.yaml` resolves relative to the document directory,
+    /// NOT the fallback dir (verification goal #6). Only `file`-typed property
+    /// VALUES use the fallback; `$schema` REFERENCE resolution stays
+    /// document-relative in `schemas::resolve`.
+    #[test]
+    fn schema_reference_stays_document_relative_with_fallback() {
+        let doc_dir = tempfile::tempdir().expect("tempdir");
+        let fallback_dir = tempfile::tempdir().expect("tempdir");
+        // schema.yaml lives ONLY in the document dir.
+        std::fs::write(
+            doc_dir.path().join("schema.yaml"),
+            "title: string(required)\n",
+        )
+        .expect("write schema");
+        let doc_path = doc_dir.path().join("doc.md");
+        std::fs::write(
+            &doc_path,
+            "---\n$schema: ./schema.yaml\ntitle: Hello\n---\nbody\n",
+        )
+        .expect("write doc");
+
+        let md = Markdown::try_from(doc_path.as_path()).expect("read doc");
+        // Fallback points at a dir WITHOUT schema.yaml — if the $schema
+        // reference were resolved via the fallback, this would fail.
+        let api = DarkmatterSchemas::new()
+            .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
+        let report = api.validate(&md).expect("validate");
+        assert!(
+            report.valid,
+            "$schema reference must resolve from the document dir, not the fallback: {:?}",
+            report.problems,
+        );
+    }
+
+    /// A root-union `$schema` with a string arm referencing a YAML file
+    /// still resolves that arm relative to the document directory, not the
+    /// fallback (verification goal #6, root-union variant).
+    #[test]
+    fn root_union_schema_string_arm_stays_document_relative_with_fallback() {
+        let doc_dir = tempfile::tempdir().expect("tempdir");
+        let fallback_dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            doc_dir.path().join("arm-a.yaml"),
+            "kind: string(required)\n",
+        )
+        .expect("write arm-a");
+        let doc_path = doc_dir.path().join("doc.md");
+        std::fs::write(
+            &doc_path,
+            "---\n$schema:\n  - ./arm-a.yaml\n  - fallback: string\nkind: feature\n---\nbody\n",
+        )
+        .expect("write doc");
+
+        let md = Markdown::try_from(doc_path.as_path()).expect("read doc");
+        let api = DarkmatterSchemas::new()
+            .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
+        let report = api.validate(&md).expect("validate");
+        assert!(
+            report.valid,
+            "root-union string arm must resolve from the document dir: {:?}",
+            report.problems,
+        );
+    }
+
+    // ── file-property document-first resolution (Finding 1) ──────────────
+    //
+    // A `file`-typed schema property VALUE must resolve document-first (the
+    // prompt directory) before the launch-area fallback, matching the
+    // expression path's `file_exists`/`frontmatter` order. These L1 tests
+    // write a real prompt file so `base_dir` is the prompt directory, point
+    // the fallback at a separate directory, and assert each rung of the
+    // resolution order independently of the ambient process CWD.
+
+    /// Writes `---\n{frontmatter}---\nbody\n` to `dir/prompt.md` and reads it
+    /// back as a `Markdown` whose source is that file (so `base_dir_for`
+    /// returns the prompt directory).
+    fn prompt_with_source(dir: &std::path::Path, frontmatter: &str) -> Markdown {
+        let path = dir.join("prompt.md");
+        std::fs::write(&path, format!("---\n{frontmatter}---\nbody\n")).expect("write prompt");
+        Markdown::try_from(path.as_path()).expect("read prompt")
+    }
+
+    /// Document-first precedence: a `spec.md` present in BOTH the prompt
+    /// directory and the launch-area fallback must resolve to the prompt-dir
+    /// copy. We prove the prompt-dir copy wins by deleting it afterwards is
+    /// unnecessary — instead we assert validation succeeds while the fallback
+    /// copy is the only other candidate, and the conflicting-filename
+    /// precedence is covered structurally by the resolver unit test
+    /// `resolve_ctx::document_relative_hit_wins_over_fallback_conflict`.
+    /// Here we additionally guard that resolution does not depend on the
+    /// ambient CWD by switching it to an unrelated directory.
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn file_property_present_in_both_resolves_prompt_dir() {
+        let prompt_dir = tempfile::tempdir().expect("tempdir");
+        let fallback_dir = tempfile::tempdir().expect("tempdir");
+        let unrelated = tempfile::tempdir().expect("tempdir");
+        std::fs::write(prompt_dir.path().join("spec.md"), "# prompt copy\n").expect("write prompt spec");
+        std::fs::write(fallback_dir.path().join("spec.md"), "# fallback copy\n").expect("write fallback spec");
+
+        let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(eager; required)'\nspec: spec.md\n");
+        let api = DarkmatterSchemas::new()
+            .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
+
+        let _cwd = CwdGuard::enter(unrelated.path());
+        let report = api.validate(&md).expect("validate");
+        assert!(
+            report.valid,
+            "a file value present in both dirs must validate via the prompt dir: {:?}",
+            report.problems,
+        );
+    }
+
+    /// A `file` value that exists ONLY in the prompt directory still validates
+    /// when a fallback is configured (document-first hit). Independent of the
+    /// ambient CWD.
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn file_property_present_only_in_prompt_dir_validates() {
+        let prompt_dir = tempfile::tempdir().expect("tempdir");
+        let fallback_dir = tempfile::tempdir().expect("tempdir");
+        let unrelated = tempfile::tempdir().expect("tempdir");
+        std::fs::write(prompt_dir.path().join("local.md"), "# local\n").expect("write local");
+
+        let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(eager; required)'\nspec: ./local.md\n");
+        let api = DarkmatterSchemas::new()
+            .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
+
+        let _cwd = CwdGuard::enter(unrelated.path());
+        let report = api.validate(&md).expect("validate");
+        assert!(
+            report.valid,
+            "a file value beside the prompt must validate even with a fallback set: {:?}",
+            report.problems,
+        );
+    }
+
+    /// A `file` value that exists ONLY under the launch-area fallback (not the
+    /// prompt directory) still validates via the fallback rung. Independent of
+    /// the ambient CWD.
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn file_property_present_only_in_fallback_validates() {
+        let prompt_dir = tempfile::tempdir().expect("tempdir");
+        let fallback_dir = tempfile::tempdir().expect("tempdir");
+        let unrelated = tempfile::tempdir().expect("tempdir");
+        std::fs::write(fallback_dir.path().join("caller.md"), "# caller\n").expect("write caller");
+
+        let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(eager; required)'\nspec: caller.md\n");
+        let api = DarkmatterSchemas::new()
+            .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
+
+        let _cwd = CwdGuard::enter(unrelated.path());
+        let report = api.validate(&md).expect("validate");
+        assert!(
+            report.valid,
+            "a file value under the launch-area fallback must validate: {:?}",
+            report.problems,
+        );
+    }
+
+    /// Guard: with both a prompt-dir anchor and a fallback configured, a value
+    /// that exists ONLY under the process CWD (neither the prompt dir nor the
+    /// fallback) must NOT validate — there is no ambient-CWD rung on the
+    /// production path.
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn file_property_present_only_in_cwd_does_not_validate() {
+        let prompt_dir = tempfile::tempdir().expect("tempdir");
+        let fallback_dir = tempfile::tempdir().expect("tempdir");
+        let cwd_dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(cwd_dir.path().join("ambient.md"), "# ambient\n").expect("write ambient");
+
+        let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(eager; required)'\nspec: ambient.md\n");
+        let api = DarkmatterSchemas::new()
+            .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
+
+        let _cwd = CwdGuard::enter(cwd_dir.path());
+        let report = api.validate(&md).expect("validate");
+        assert!(
+            !report.valid,
+            "a file value found only under the ambient CWD must NOT validate: {:?}",
+            report.problems,
         );
     }
 }

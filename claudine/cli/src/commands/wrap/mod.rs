@@ -57,9 +57,9 @@ pub(crate) use resume::{
     append_resume_passthrough_args, check_resume_support, normalize_resume_args,
 };
 use wrapper_stages::{
-    detect_wrapper_harness, emit_preflight_preamble, parse_cli_timeouts,
-    prepare_stream_and_prompt, resolve_and_apply_system_prompt, resolve_opencode_model,
-    run_execution_stage, validate_timeout_constraints,
+    apply_opencode_yolo_config_overlay, detect_wrapper_harness, emit_preflight_preamble,
+    parse_cli_timeouts, prepare_stream_and_prompt, resolve_and_apply_system_prompt,
+    resolve_opencode_model, run_execution_stage, validate_timeout_constraints,
 };
 
 use biscuit_terminal::terminal::Terminal;
@@ -540,6 +540,19 @@ fn run_provider_wrapper_inner(
         &mut prompt_source,
         &mut deferred_warnings,
         &mut deferred_messages,
+    )?;
+
+    // ------------------------------------------------------------------
+    // Stage 10.5: OpenCode YOLO config overlay
+    // ------------------------------------------------------------------
+    // Applied last (after MCP) so the permission block is the authoritative
+    // Claudine overlay and survives the MCP / system-prompt writers. Gated on
+    // OpenCode + YOLO-took-effect + non-interactive; a no-op otherwise.
+    apply_opencode_yolo_config_overlay(
+        provider,
+        yolo_enabled,
+        non_interactive_requested,
+        &mut env_plan,
     )?;
 
     let child_cwd = env_plan.child_cwd.as_path();

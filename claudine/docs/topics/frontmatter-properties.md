@@ -1,5 +1,6 @@
 ---
-hash: ef46db3751d8e999-c23e55c3dfb977f4
+hash: ef46db3751d8e999-12761fc556d77531
+last_updated: 2026-06-25
 ---
 # Frontmatter Properties Reference
 
@@ -26,6 +27,8 @@ Claudine reads and acts on a number of YAML frontmatter properties across its co
 
 Each lifecycle property is a top-level frontmatter key whose value is a sub-object with notification fields.
 
+> **Event-time interpolation.** The seven lifecycle event keys (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, `loop`) are deferred from compose-time resolution: their `{{ … }}` spans survive raw in `effective_frontmatter` and interpolate **when the event fires**, against the live document state plus the runtime globals (`err`, `timing`, `current`). This is what lets `failure.message: "{{err.code}}"` report the real error. Resolution fails closed before any side effect dispatches. The single exception is shell commands (the positional `shell: "…"` action and the key/value `command:` parameter), resolved against early-binding surfaces (`doc.*`/`ctx.*`/`env.*`/read-side functions) at pre-flight so the approved command is byte-identical to the executed one — a late-binding reference there is rejected at prepare time. See [lifecycle.md — When Lifecycle Properties Interpolate](lifecycle.md#when-lifecycle-properties-interpolate).
+
 | Property | Description | Details | Symbols |
 |----------|-------------|---------|---------|
 | `start` | Emitted when a composition run begins. Fires once (idempotent) before the provider child process is spawned. | [lifecycle.md](lifecycle.md) · [composition.md](composition.md) | [`LifecycleConfig.start`](../../lib/src/composition/lifecycle.rs) [`LifecycleSignal::Start`](../../lib/src/composition/lifecycle.rs) [`LifecycleRunGuard::emit_start_once`](../../lib/src/composition/lifecycle.rs) |
@@ -41,7 +44,7 @@ These fields appear inside each lifecycle notification object.
 |----------|-------------|---------|---------|
 | `say` | TTS text spoken when the lifecycle signal fires. Mutually exclusive with `say_first`. When both `say` and `effect` are present, the effect plays first then speech follows. | [lifecycle.md](lifecycle.md) | [`LifecycleNotification.say`](../../lib/src/composition/lifecycle.rs) · [`AudioPhase::Speak`](../../lib/src/composition/lifecycle.rs) |
 | `say_first` | TTS text spoken **before** sound effects. Mutually exclusive with `say`. When both `say_first` and `effect` are present, speech plays first then the effect follows. | [lifecycle.md](lifecycle.md) | [`LifecycleNotification.say_first`](../../lib/src/composition/lifecycle.rs) · [`CompositionError::LifecycleSayConflict`](../../lib/src/composition/error.rs) |
-| `effect` | Sound effect to play, specified as a kebab-case name from the built-in catalog (e.g., `"confirmation"`, `"sad-trombone"`). Validated at parse time against the `playa::SoundEffect` catalog. | [lifecycle.md](lifecycle.md) | [`LifecycleNotification.effect`](../../lib/src/composition/lifecycle.rs) · [`CompositionError::LifecycleUnknownEffect`](../../lib/src/composition/error.rs) |
+| `effect` | Sound effect to play, specified as a kebab-case name from the built-in catalog (e.g., `"confirmation"`, `"sad-trombone"`). A literal name is validated at parse time against the `playa::SoundEffect` catalog; an interpolated name (`effect: "{{effect_name}}"`) is validated against the resolved value at event-time, reporting `LifecycleUnknownEffect` with the property path. | [lifecycle.md](lifecycle.md) | [`LifecycleNotification.effect`](../../lib/src/composition/lifecycle.rs) · [`CompositionError::LifecycleUnknownEffect`](../../lib/src/composition/error.rs) |
 | `message` | Message dispatched via the configured messaging route (Discord, Slack, Signal, WhatsApp, webhooks). Requires a route configured in `claudine.toml`. Failures are non-fatal. | [lifecycle.md](lifecycle.md) · [configuring-actions.md](configuring-actions.md) | [`LifecycleNotification.message`](../../lib/src/composition/lifecycle.rs) · [`LifecycleEmitter::emit_message`](../../lib/src/composition/lifecycle.rs) |
 | `stderr` | Styled status line written to stderr. Rendered as a `Status` component using color-coded state (Info for start, Success for success, Error for blocked/failure). The only emission that still fires under Ctrl+C interrupt. | [lifecycle.md](lifecycle.md) | [`LifecycleNotification.stderr`](../../lib/src/composition/lifecycle.rs) · [`LifecycleEmitter::emit_stderr`](../../lib/src/composition/lifecycle.rs) |
 | `notify` | Desktop notification title. Zero-config; does not require a messaging route. Independent from `message` (both can fire concurrently). Failures are non-fatal. | [lifecycle.md](lifecycle.md) | [`LifecycleNotification.notify`](../../lib/src/composition/lifecycle.rs) · [`LifecycleEmitter::emit_notification`](../../lib/src/composition/lifecycle.rs) |

@@ -207,6 +207,53 @@ impl Default for Frontmatter {
     }
 }
 
+/// Detects a near-miss frontmatter fence at the start of a document.
+///
+/// Returns the offending fence (e.g. `"----"`) when **all** of the following
+/// hold, so the caller can raise a typed error instead of silently treating
+/// the YAML as body text:
+///
+/// 1. The first line's trimmed content is a dash-only run (`^-+$`) of length
+///    `>= 4` (i.e. not exactly `---`).
+/// 2. A later line exists whose trimmed content is the **same** dash-only run.
+/// 3. The strict interior between the two fences is non-empty, parses as a
+///    YAML **mapping**, and has at least one key.
+///
+/// If any condition fails, the document is treated as having no frontmatter —
+/// a leading `----` thematic break followed by prose is left untouched.
+fn detect_near_miss_frontmatter_fence(lines: &[&str]) -> Option<String> {
+    if lines.is_empty() {
+        return None;
+    }
+
+    let first = lines[0].trim();
+    if !is_dash_only_fence(first) || first.len() < 4 {
+        return None;
+    }
+
+    let closing_idx = lines
+        .iter()
+        .skip(1)
+        .position(|line| line.trim() == first)
+        .map(|idx| idx + 1)?;
+
+    let interior = &lines[1..closing_idx];
+    if interior.is_empty() {
+        return None;
+    }
+
+    let yaml_content = interior.join("\n");
+    match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&yaml_content) {
+        Ok(serde_yaml_ng::Value::Mapping(map)) if !map.is_empty() => Some(first.to_string()),
+        _ => None,
+    }
+}
+
+/// Returns `true` when `text` is non-empty and contains only `-` characters.
+fn is_dash_only_fence(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|b| b == b'-')
+}
+
 /// Parses frontmatter from markdown content.
 ///
 /// Frontmatter must be at the start of the document between `---` delimiters.
@@ -218,6 +265,13 @@ pub(super) fn parse_frontmatter(
 
     // Check if document starts with frontmatter delimiter
     if lines.is_empty() || lines[0].trim() != "---" {
+        if let Some(fence) = detect_near_miss_frontmatter_fence(&lines) {
+            return Err(MarkdownError::FrontmatterFenceMismatch {
+                ctx: ctx.clone(),
+                found: fence,
+                line: 1,
+            });
+        }
         return Ok((Frontmatter::new(), content.to_string()));
     }
 
@@ -795,6 +849,95 @@ This is content."#;
             Some("$(basename \"reviews/foo.md\" .md)".to_string())
         );
         assert!(remaining.starts_with("# Body"));
+    }
+
+    #[test]
+    fn test_parse_frontmatter_near_miss_fence_four_dashes() {
+        let content = "----\ntitle: Test\n----\n# Hello\n";
+
+        let err = parse_frontmatter(content).unwrap_err();
+        match err {
+            MarkdownError::FrontmatterFenceMismatch { found, line, .. } => {
+                assert_eq!(found, "----");
+                assert_eq!(line, 1);
+            }
+            other => panic!("expected FrontmatterFenceMismatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_frontmatter_near_miss_fence_five_dashes() {
+        let content = "-----\ntitle: Test\n-----\n# Hello\n";
+
+        let err = parse_frontmatter(content).unwrap_err();
+        match err {
+            MarkdownError::FrontmatterFenceMismatch { found, line, .. } => {
+                assert_eq!(found, "-----");
+                assert_eq!(line, 1);
+            }
+            other => panic!("expected FrontmatterFenceMismatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_frontmatter_thematic_break_plus_prose_is_body() {
+        let content = "----\n# Hello World\n\nThis is content.";
+
+        let (fm, remaining) = parse_frontmatter(content).unwrap();
+
+        assert!(fm.is_empty());
+        assert_eq!(remaining, content);
+    }
+
+    #[test]
+    fn test_parse_frontmatter_near_miss_around_scalar_is_body() {
+        let content = "----\njust a scalar\n----\n# Hello\n";
+
+        let (fm, remaining) = parse_frontmatter(content).unwrap();
+
+        assert!(fm.is_empty());
+        assert_eq!(remaining, content);
+    }
+
+    #[test]
+    fn test_parse_frontmatter_near_miss_around_sequence_is_body() {
+        let content = "----\n- one\n- two\n----\n# Hello\n";
+
+        let (fm, remaining) = parse_frontmatter(content).unwrap();
+
+        assert!(fm.is_empty());
+        assert_eq!(remaining, content);
+    }
+
+    #[test]
+    fn test_parse_frontmatter_near_miss_empty_map_is_body() {
+        let content = "----\n{}\n----\n# Hello\n";
+
+        let (fm, remaining) = parse_frontmatter(content).unwrap();
+
+        assert!(fm.is_empty());
+        assert_eq!(remaining, content);
+    }
+
+    #[test]
+    fn test_parse_frontmatter_mismatched_fence_lengths_is_body() {
+        let content = "----\ntitle: Test\n-----\n# Hello\n";
+
+        let (fm, remaining) = parse_frontmatter(content).unwrap();
+
+        assert!(fm.is_empty());
+        assert_eq!(remaining, content);
+    }
+
+    #[test]
+    fn test_parse_frontmatter_three_dashes_still_parses() {
+        let content = "---\ntitle: Test\n---\n# Hello\n";
+
+        let (fm, remaining) = parse_frontmatter(content).unwrap();
+        let title: Option<String> = fm.get("title").unwrap();
+
+        assert_eq!(title, Some("Test".to_string()));
+        assert!(remaining.starts_with("# Hello"));
     }
 
     #[test]

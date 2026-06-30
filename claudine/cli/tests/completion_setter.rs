@@ -10,8 +10,8 @@
 //!   return zero candidates so the shell falls back to its default.
 //! - Emitted candidates always wrap the value in `'...'` — a user-typed
 //!   opening `"` is normalized to `'`.
-//! - Scope includes `docs/`, `features/`, `fixes/`, and `reviews/` at
-//!   the repo root, package-area root, and package root (in that order).
+//! - Scope includes `docs/`, `features/`, `fixes/`, and `reviews/` under
+//!   the invoking `cwd` (the launch area), rendered cwd-relative.
 //! - Scope works on all three composition subcommands (`compose`,
 //!   `inline-compose`, `sequence`).
 //! - A setter-shaped cursor wins over the positional classification
@@ -131,36 +131,51 @@ fn setter_scope_covers_all_four_subdirs() {
 }
 
 #[test]
-fn setter_scope_includes_package_area_docs() {
+fn setter_scope_anchors_on_cwd_excludes_parent_dirs() {
     let ws = TestWorkspace::named("complete-setter-area-scope");
     seed_cargo_workspace(ws.path(), &["claudine/lib"]);
-    // Area-level doc under claudine/features.
-    let area_feat = ws.path().join("claudine").join("features");
-    write_file(&area_feat.join("plan.md"), "# p\n");
+    // A feature doc one level ABOVE the cwd (at the package-area level) and
+    // one UNDER the cwd. Only the cwd-local one may surface.
+    write_file(
+        &ws.path().join("claudine").join("features").join("plan.md"),
+        "# parent\n",
+    );
+    write_file(
+        &ws.path()
+            .join("claudine")
+            .join("lib")
+            .join("features")
+            .join("plan.md"),
+        "# local\n",
+    );
 
-    // cwd is the package directory — area resolution must still find
-    // the feature doc at the parent (claudine/) area level.
+    // cwd is the package directory; candidates anchor on it and render
+    // cwd-relative — the parent-area doc must NOT surface.
     let cwd = ws.path().join("claudine").join("lib");
     let got = run_complete(&cwd, &["compose", "foo.md", "spec=@p"]);
     assert!(
-        got.iter().any(|c| c == "spec='claudine/features/plan.md'"),
-        "expected area-scope feature doc: {got:?}"
+        got.iter().any(|c| c == "spec='features/plan.md'"),
+        "expected cwd-local feature doc rendered cwd-relative: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c.contains("claudine/features")),
+        "parent-area doc above the cwd must NOT surface: {got:?}"
     );
 }
 
 #[test]
-fn setter_scope_includes_package_docs() {
+fn setter_scope_renders_package_docs_relative_to_cwd() {
     let ws = TestWorkspace::named("complete-setter-pkg-scope");
     seed_cargo_workspace(ws.path(), &["claudine/lib"]);
-    // Package-level doc.
+    // Package-level doc, under the cwd.
     let pkg_docs = ws.path().join("claudine").join("lib").join("docs");
     write_file(&pkg_docs.join("api.md"), "# api\n");
 
     let cwd = ws.path().join("claudine").join("lib");
     let got = run_complete(&cwd, &["compose", "foo.md", "ref=@a"]);
     assert!(
-        got.iter().any(|c| c == "ref='claudine/lib/docs/api.md'"),
-        "expected package-scope doc: {got:?}"
+        got.iter().any(|c| c == "ref='docs/api.md'"),
+        "expected cwd-relative package doc: {got:?}"
     );
 }
 
@@ -357,24 +372,22 @@ fn setter_resolves_nested_feature_directory_path() {
 
 #[test]
 fn setter_resolves_in_plain_git_checkout() {
-    // review-3 finding 3: review-2 added plain-git fixtures for
-    // composition, but setter-value completion also depends on
-    // `effective_repo_root` via `repo_or_cwd(ctx)`. Lock in the
-    // regression guard so a future scopes.rs refactor does not silently
-    // break setter-value behavior in repos without a Cargo workspace.
+    // review-3 finding 3: lock in that setter-value completion works in a
+    // repo without a Cargo workspace (sniff::detect_repo_structure returns
+    // None). The walk anchors on the invoking `cwd`, so seed the doc under
+    // the cwd and assert it surfaces cwd-relative.
     let ws = TestWorkspace::named("complete-setter-plain-git");
     seed_plain_git_repo(ws.path());
     // intentionally NO Cargo.toml — sniff::detect_repo_structure
     // returns None for this layout.
-    write_file(&ws.path().join("docs").join("spec.md"), "# spec\n");
-
     let nested = ws.path().join("nested").join("child");
     fs::create_dir_all(&nested).unwrap();
+    write_file(&nested.join("docs").join("spec.md"), "# spec\n");
 
     let got = run_complete(&nested, &["compose", "foobar.md", "spec=@spec"]);
 
     assert!(
         got.iter().any(|c| c == "spec='docs/spec.md'"),
-        "plain-git setter-value did not resolve docs/spec.md: {got:?}"
+        "plain-git setter-value did not resolve cwd-local docs/spec.md: {got:?}"
     );
 }

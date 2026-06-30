@@ -4,6 +4,7 @@ created: 2026-06-21
 area: claudine
 packages:
     - claudine
+review_iterations: 2
 ---
 
 # OpenCode 1.17.8 `stream error` Usage-Cap Detection Drift

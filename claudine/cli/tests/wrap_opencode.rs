@@ -640,6 +640,84 @@ exit 0
     );
 }
 
+/// review-1 (High) regression: the OpenCode **1.17.8** `message="stream error"`
+/// usage-cap line must drive the wrapper to terminate on the *first* cap error,
+/// end-to-end through the real spawn/bridge/summary path — not merely be
+/// classifiable in isolation. This proves acceptance criterion 2 of
+/// `2026-06-21-opencode-log-fix/spec.md` ("the wrapper terminates on the first
+/// cap error") at the process layer, complementing the Level 1 parser/bridge
+/// unit coverage.
+///
+/// The fake `opencode` emits the exact captured 1.17.8 stderr line (spec.md:36)
+/// and then `sleep 30`. If the wrapper failed to classify and abort, the child
+/// would block on that sleep and the `assert_cmd` `.timeout(...)` guard would
+/// trip — so a prompt failure is itself the load-bearing assertion.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn opencode_stderr_stream_error_cap_1_17_8_forces_early_termination() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+    seed_minimal_config(&fake_home);
+
+    // Single-quote shell quoting preserves the inner double-quotes of the
+    // captured 1.17.8 line verbatim. The fake writes only this cap line to
+    // stderr, then sleeps so the bridge has to abort it.
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+printf '%s\n' 'timestamp=2026-06-22T04:07:15.161Z level=ERROR run=da37e0dd message="stream error" providerID=zai-coding-plan modelID=glm-5.2 session.id=ses_1127ec2fdffepaJc2kEnX093eo small=false agent=build mode=primary error.error="AI_APICallError: Usage limit reached for 5 hour. Your limit will reset at 2026-06-22 13:59:38"' >&2
+sleep 30
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "test-model")
+        .timeout(std::time::Duration::from_secs(30))
+        .args(["opencode", "describe the thing"])
+        .assert()
+        .failure();
+
+    let output = assert.get_output();
+    let exit_code = output.status.code().unwrap_or(-1);
+    assert_eq!(
+        exit_code,
+        1,
+        "1.17.8 stream-error cap must map to exit_code=1; got {exit_code}, stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let row = read_summary_row(&fake_home);
+    assert_eq!(row["extra"]["exit_code"], serde_json::json!(1));
+    // `summary.error_kind = Some("usage_limit_reached")` (set by
+    // `apply_early_termination_to_summary` for `EarlyTermination::RateLimit`)
+    // is serialized into the JSONL row as `extra.exit_reason`.
+    assert_eq!(
+        row["extra"]["exit_reason"],
+        serde_json::json!("usage_limit_reached"),
+        "1.17.8 cap must classify as usage_limit_reached: row={row}",
+    );
+    let rate_limit = &row["extra"]["provider_summary"]["rate_limit"];
+    assert_eq!(
+        rate_limit["is_throttled"],
+        serde_json::json!(true),
+        "rate_limit.is_throttled should be true: row={row}",
+    );
+    // The cap reset (`2026-06-22 13:59:38`) must be extracted from the new
+    // `error.error=` envelope despite the dropped `error` JSON wrapper.
+    assert!(
+        rate_limit["reset_at"].is_string(),
+        "rate_limit.reset_at should be populated from the 1.17.8 line: row={row}",
+    );
+}
+
 /// Phase 6 scenario: a malformed asset stderr line during an otherwise-
 /// successful run should surface as a Warning event (rendered once per
 /// line) without failing the session. Per the 2026-04-18 OpenCode

@@ -1,0 +1,8 @@
+# Fixture manifest for the `file_match_valid` validation case.
+#
+# The document references `./Cargo.toml`, which under the document-first
+# file-reference resolution contract resolves next to `doc.md` (this file),
+# not the ambient process CWD. Its presence keeps the `file(match(*.toml))`
+# value resolving to an existing `.toml` regardless of where the tests run.
+[package]
+name = "fixture-only"

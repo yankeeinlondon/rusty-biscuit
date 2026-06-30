@@ -22,6 +22,7 @@ pub mod fuzzy;
 pub mod keybindings;
 pub mod label;
 pub mod sort;
+pub mod split_pane;
 pub mod standalone;
 pub mod terminal_style;
 pub mod theme;
@@ -33,6 +34,7 @@ pub use fuzzy::FuzzyFilter;
 pub use keybindings::KeyBindings;
 pub use label::{Label, LabelPosition, render_with_label};
 pub use sort::{OptionSort, SortOrder};
+pub use split_pane::{SplitDirection, SplitPane, SplitRatio};
 pub use standalone::{
     ABORTED_KIND, CANCELLED_KIND, HandleEvent, LoopExit, StandaloneState, drive_event_loop,
     drive_event_loop_with_chrome, run_standalone, run_standalone_with_chrome,

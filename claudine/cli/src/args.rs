@@ -109,4 +109,6 @@ pub(crate) enum Commands {
     Sequence(commands::sequence::SequenceArgs),
     /// Show Darkmatter runtime context, expression engine, and side effects.
     Context(commands::context::ContextArgs),
+    /// Show the diagnostic error-code contract (codes, dispositions, details).
+    Errors(commands::errors::ErrorsArgs),
 }

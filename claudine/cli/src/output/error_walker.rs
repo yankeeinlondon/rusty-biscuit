@@ -10,12 +10,16 @@
 //! If no cause implements [`BlockError`], the caller falls back to
 //! `color_eyre`'s default `Debug` output.
 
+use biscuit_terminal::discovery::detection::ColorDepth;
 use biscuit_terminal::errors::BlockError;
 use biscuit_terminal::terminal::Terminal;
+use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+use claudine::composition::lifecycle_context::LifecycleErrorInfo;
 use claudine::composition::{CompositionError, FrontmatterExcerpt};
 use color_eyre::eyre::Report;
 use darkmatter::markdown::errors::as_block_error;
 use std::error::Error as StdError;
+use std::path::Path;
 
 /// Try to render `report` as a darkmatter [`BlockError`] report.
 ///
@@ -49,7 +53,79 @@ pub(crate) fn try_render_block_report(report: &Report, term: &Terminal) -> Optio
         }
     }
 
+    // Ensure plain-mode / NO_COLOR output contains no ANSI escape bytes even
+    // when the deepest block error (e.g. MarkdownError) renders with styles.
+    if matches!(term.color_depth, ColorDepth::None) {
+        out = strip_escape_codes(&out);
+    }
+
     Some(out)
+}
+
+/// Render a lifecycle evaluation error to stderr **at its catch point**,
+/// before any catch events (`failure`/`finalize`) fire (Decision #2).
+///
+/// Builds the original [`CompositionError::lifecycle_evaluation`] block and
+/// renders it through the same styled `BlockError` surface the outer CLI
+/// renderer uses, so TTY-gating and `ColorDepth::None` escape-stripping are
+/// shared (no hand-rolled ANSI). Returns the same error wrapped in
+/// [`CompositionError::already_emitted`] so the caller can thread it on and the
+/// outer renderer suppresses the duplicate styled block.
+///
+/// Emits exactly once per call; callers invoke it once, before running catch
+/// events, so the original crash is visible ahead of any `finalize` output.
+pub(crate) fn emit_lifecycle_evaluation_error_early(
+    source_path: &Path,
+    event: &str,
+    info: &LifecycleErrorInfo,
+    term: &Terminal,
+) -> CompositionError {
+    let error = CompositionError::lifecycle_evaluation(event, source_path, info);
+    let rendered = error.report_block_error(term);
+    crate::log::message("");
+    crate::log::message(&rendered);
+    crate::log::message("");
+    error.already_emitted()
+}
+
+/// Render a lifecycle evaluation error's styled block to stderr at its catch
+/// point and return it marked already-emitted (Decision #2).
+///
+/// Use at any catch/surface site that is about to return a
+/// [`CompositionError::LifecycleEvaluationError`] to the run's outer renderer,
+/// when no further lifecycle events fire afterwards (a raise inside the catch
+/// `failure`/`finalize` event, or a loop-engine error consumed by the CLI). The
+/// styled block goes through the same `BlockError` surface and TTY/`NO_COLOR`
+/// gating as the outer renderer. Any error that is **not** an un-emitted
+/// `LifecycleEvaluationError` (including one already marked) is returned
+/// unchanged, so this is safe to apply uniformly.
+pub(crate) fn emit_lifecycle_evaluation_error_block(
+    error: CompositionError,
+    term: &Terminal,
+) -> CompositionError {
+    if matches!(error, CompositionError::LifecycleEvaluationError { .. }) {
+        let rendered = error.report_block_error(term);
+        crate::log::message("");
+        crate::log::message(&rendered);
+        crate::log::message("");
+        return error.already_emitted();
+    }
+    error
+}
+
+/// Whether the report's cause chain carries an already-emitted lifecycle
+/// evaluation error, so the outer renderer must not re-render its styled block.
+pub(crate) fn evaluation_error_already_emitted(report: &Report) -> bool {
+    let mut current: Option<&(dyn StdError + 'static)> = Some(report.as_ref());
+    while let Some(err) = current {
+        if let Some(comp) = err.downcast_ref::<CompositionError>()
+            && comp.is_already_emitted()
+        {
+            return true;
+        }
+        current = err.source();
+    }
+    false
 }
 
 /// Find the first [`CompositionError::WithFrontmatter`] in the cause chain,
@@ -216,6 +292,133 @@ mod tests {
         assert!(plain.contains("sequence:"), "yaml block missing: {plain}");
     }
 
+    const SCHEMA_DOC: &str =
+        "---\n$schema:\n    spec: file(required, match(**/*spec*.md))\nspec: \"x\"\n---\nbody\n";
+
+    fn schema_parse_with_frontmatter(stderr_is_tty: bool) -> CompositionError {
+        let excerpt = FrontmatterExcerpt::capture_schema_span(
+            SCHEMA_DOC,
+            Some("$schema.spec"),
+            14,
+            stderr_is_tty,
+        )
+        .expect("frontmatter block");
+        CompositionError::WithFrontmatter {
+            inner: Box::new(CompositionError::SchemaParse {
+                source_path: PathBuf::from("review.md"),
+                property: Some("spec".to_string()),
+                message: "expected `;` between constraints".to_string(),
+                span: Some(14..15),
+            }),
+            excerpt,
+        }
+    }
+
+    #[test]
+    fn schema_parse_appends_highlighted_frontmatter_and_links_file_on_tty() {
+        let report: Report = eyre!(schema_parse_with_frontmatter(true));
+        let term = width80();
+        let rendered = try_render_block_report(&report, &term).expect("block error found");
+        let plain = strip_escape_codes(&rendered);
+
+        // The primary diagnostic still renders from the inner SchemaParse error.
+        assert!(plain.contains("invalid schema"), "header missing:\n{plain}");
+        assert!(plain.contains("spec"), "property name missing:\n{plain}");
+        // The appended excerpt shows the offending `$schema.spec` line.
+        assert!(
+            plain.contains("spec: file(required, match(**/*spec*.md))"),
+            "offending frontmatter line missing:\n{plain}"
+        );
+        // The OSC8 link to the prompt file survives at optimistic color depth.
+        assert!(
+            rendered.contains("\u{1b}]8;;"),
+            "expected an OSC8 link to the prompt file; raw:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn schema_parse_withholds_frontmatter_block_when_not_tty() {
+        let report: Report = eyre!(schema_parse_with_frontmatter(false));
+        let rendered = try_render_block_report(&report, &width80()).expect("block error found");
+        let plain = strip_escape_codes(&rendered);
+        assert!(plain.contains("invalid schema"), "header missing:\n{plain}");
+        // Non-TTY output must not expose the frontmatter body.
+        assert!(
+            !plain.contains("file(required, match"),
+            "frontmatter excerpt leaked to non-tty:\n{plain}"
+        );
+    }
+
+    #[test]
+    fn renders_lifecycle_evaluation_error_for_success_when() {
+        // A `success.when` guard that *raised* (vs. cleanly evaluating to
+        // `false`) renders the styled lifecycle-evaluation block: the event
+        // name, the offending surface, the raised reason, and — critically —
+        // text that distinguishes a crashed guard from a clean false guard.
+        let err = CompositionError::LifecycleEvaluationError {
+            source_path: PathBuf::from("review.md"),
+            event: "success".to_string(),
+            surface: "when".to_string(),
+            message: "frontmatter(review_file,'ready') raised: path did not resolve".to_string(),
+        };
+        let report: Report = eyre!(err);
+        let rendered = try_render_block_report(&report, &width80()).expect("block error found");
+        let plain = strip_escape_codes(&rendered);
+
+        assert!(plain.contains("lifecycle evaluation error"), "header missing:\n{plain}");
+        assert!(plain.contains("success"), "event name missing:\n{plain}");
+        assert!(plain.contains("when:"), "surface label missing:\n{plain}");
+        assert!(plain.contains("did not resolve"), "reason missing:\n{plain}");
+        // Distinguish a crashed guard from a clean false guard.
+        assert!(
+            plain.contains("crashed expression") && plain.contains("false"),
+            "crashed-vs-false distinction missing:\n{plain}"
+        );
+    }
+
+    #[test]
+    fn renders_lifecycle_evaluation_error_for_finalize() {
+        // An evaluation error raised *inside* `finalize` itself is still
+        // surfaced (visible, not swallowed). Non-recursion is enforced in the
+        // orchestrator (see `loop_control` L1 tests); here we prove the
+        // user-facing render is produced.
+        let err = CompositionError::LifecycleEvaluationError {
+            source_path: PathBuf::from("review.md"),
+            event: "finalize".to_string(),
+            surface: "interpolation".to_string(),
+            message: "unknown root `missing_root`".to_string(),
+        };
+        let report: Report = eyre!(err);
+        let rendered = try_render_block_report(&report, &width80()).expect("block error found");
+        let plain = strip_escape_codes(&rendered);
+
+        assert!(plain.contains("lifecycle evaluation error"), "header missing:\n{plain}");
+        assert!(plain.contains("finalize"), "event name missing:\n{plain}");
+        assert!(plain.contains("interpolated string"), "surface label missing:\n{plain}");
+        assert!(plain.contains("missing_root"), "reason missing:\n{plain}");
+    }
+
+    #[test]
+    fn lifecycle_evaluation_error_is_plain_without_color() {
+        // Non-TTY / NO_COLOR follows the existing CLI error rendering
+        // convention: `report_block_error` strips escapes at `ColorDepth::None`.
+        let err = CompositionError::LifecycleEvaluationError {
+            source_path: PathBuf::from("review.md"),
+            event: "success".to_string(),
+            surface: "when".to_string(),
+            message: "boom".to_string(),
+        };
+        let report: Report = eyre!(err);
+        let mut term = Terminal::new_optimistic(80);
+        term.color_depth = biscuit_terminal::discovery::detection::ColorDepth::None;
+        let rendered = try_render_block_report(&report, &term).expect("block error found");
+        assert!(
+            !rendered.contains('\u{1b}'),
+            "ANSI escapes leaked into NO_COLOR output:\n{rendered}"
+        );
+        assert!(rendered.contains("lifecycle evaluation error"), "got:\n{rendered}");
+    }
+
     #[test]
     fn renders_frontmatter_parse_block_through_composition_error() {
         let yaml_err: biscuit_file::YamlParseError =
@@ -238,5 +441,56 @@ mod tests {
         let plain = strip_escape_codes(&rendered);
         assert!(plain.contains("frontmatter parse failed"), "got:\n{plain}");
         assert!(plain.contains("metadata.md"), "got:\n{plain}");
+    }
+
+    /// Acceptance criterion #7: the fence-mismatch path still reports the typed
+    /// error and actionable hint in non-TTY / no-color output, but withholds
+    /// the TTY-only frontmatter appendix and emits no ANSI escape bytes.
+    #[test]
+    fn fence_mismatch_non_tty_has_no_ansi_and_no_appendix() {
+        const FENCE_DOC: &str =
+            "----\nname: cross-platform\ndescription: near-miss fence\n----\n# Body\n";
+        let excerpt = FrontmatterExcerpt::capture_line(FENCE_DOC, 1, false)
+            .expect("near-miss frontmatter block");
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            PathBuf::from("metadata.md"),
+            PathBuf::from("metadata.md"),
+            FENCE_DOC.to_string(),
+        );
+        let md = MarkdownError::FrontmatterFenceMismatch {
+            ctx,
+            found: "----".to_string(),
+            line: 1,
+        };
+        let err = CompositionError::WithFrontmatter {
+            inner: Box::new(CompositionError::FrontmatterParse(md)),
+            excerpt,
+        };
+        let report: Report = eyre!(err);
+
+        let mut term = Terminal::builder()
+            .width(80)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+            .build();
+        term.is_nerd_font = Some(false);
+
+        let rendered = try_render_block_report(&report, &term).expect("block error found");
+        assert!(
+            !rendered.contains('\x1b'),
+            "plain render must contain no escape byte; got: {rendered:?}"
+        );
+        // The diagnostic text and actionable hint still reach the user.
+        assert!(
+            rendered.contains("frontmatter fence mismatch"),
+            "missing diagnostic: {rendered}"
+        );
+        assert!(
+            rendered.contains("Use exactly three dashes"),
+            "missing fix hint: {rendered}"
+        );
+        // The captured excerpt block (rendered as part of the MarkdownError
+        // status block, not the TTY-only Claudine appendix) still pinpoints the
+        // offending fence line so the user can act on it.
+        assert!(rendered.contains("> 1 │ ----"), "missing fence highlight: {rendered}");
     }
 }

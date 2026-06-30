@@ -28,7 +28,8 @@
 //! - [`ExpressionFunctionAction`] — read-only Darkmatter expression
 //!   functions invoked for their result.
 
-use darkmatter::markdown::compose::expression::Expr;
+use darkmatter::effects::EFFECT_DESCRIPTORS;
+use darkmatter::markdown::compose::expression::{EXPRESSION_FUNCTION_DESCRIPTORS, Expr};
 
 use super::lifecycle::LifecycleSignal;
 
@@ -333,52 +334,418 @@ pub struct ExpressionFunctionAction {
     pub args: Vec<Expr>,
 }
 
-/// The positional parameter names for a known Darkmatter side-effect verb,
-/// in call order.
+/// Parsed form of a canonical descriptor signature string such as
+/// `set_frontmatter(file, prop, value)` or `and(...)`.
+///
+/// `optional_tail` counts trailing parameters that are absent from every
+/// overload of the verb (e.g. `ensure_file` has one optional tail parameter,
+/// `content`). `variadic` is set for descriptors that explicitly use `...`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Signature {
+    /// The verb name.
+    pub verb: String,
+    /// Ordered positional parameter names.
+    pub params: Vec<String>,
+    /// Number of trailing parameters that are optional across all overloads.
+    pub optional_tail: usize,
+    /// Whether the descriptor accepts a variable number of arguments.
+    pub variadic: bool,
+}
+
+impl Signature {
+    /// Minimum number of arguments required by this signature.
+    pub fn required_count(&self) -> usize {
+        self.params.len().saturating_sub(self.optional_tail)
+    }
+
+    /// Maximum number of arguments accepted by this signature.
+    ///
+    /// Returns `None` for variadic signatures.
+    pub fn max_count(&self) -> Option<usize> {
+        if self.variadic {
+            None
+        } else {
+            Some(self.params.len())
+        }
+    }
+}
+
+/// Parse a canonical descriptor signature string into a typed [`Signature`].
+///
+/// Supported forms:
+/// - `verb(p1, p2, ...)` — fixed positional parameters
+/// - `verb(p1, p2?, ...)` — trailing optional parameters (explicit `?`)
+/// - `verb(p1, [p2], ...)` — trailing optional parameters (bracket notation;
+///   the Darkmatter catalog form, e.g. `number(x, [default])`)
+/// - `verb(...)` — variadic
+///
+/// Returns `None` for syntactically malformed signatures.
+pub fn parse_signature(signature: &str) -> Option<Signature> {
+    let signature = signature.trim();
+    let open = signature.find('(')?;
+    let close = signature.rfind(')')?;
+    if close != signature.len() - 1 || open == 0 {
+        return None;
+    }
+
+    let verb = signature[..open].trim().to_string();
+    if verb.is_empty() {
+        return None;
+    }
+
+    let inner = signature[open + 1..close].trim();
+    if inner == "..." {
+        return Some(Signature {
+            verb,
+            params: Vec::new(),
+            optional_tail: 0,
+            variadic: true,
+        });
+    }
+
+    if inner.is_empty() {
+        return Some(Signature {
+            verb,
+            params: Vec::new(),
+            optional_tail: 0,
+            variadic: false,
+        });
+    }
+
+    let mut params = Vec::new();
+    let mut optional_tail = 0;
+    for raw in split_signature_params(inner) {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            return None;
+        }
+        // Two optional-parameter spellings are accepted: a trailing `?`
+        // (`content?`) and Darkmatter's catalog bracket form (`[default]`).
+        let optional_name = raw
+            .strip_suffix('?')
+            .or_else(|| raw.strip_prefix('[').and_then(|s| s.strip_suffix(']')));
+        if let Some(stripped) = optional_name {
+            optional_tail += 1;
+            let name = stripped.trim();
+            if name.is_empty() {
+                return None;
+            }
+            params.push(name.to_string());
+        } else {
+            if optional_tail > 0 {
+                // A required parameter cannot follow an optional one.
+                return None;
+            }
+            params.push(raw.to_string());
+        }
+    }
+
+    Some(Signature {
+        verb,
+        params,
+        optional_tail,
+        variadic: false,
+    })
+}
+
+/// Split a signature parameter list on commas, respecting nested parentheses,
+/// brackets, and quotes so that type-like expressions or default values are
+/// kept intact.
+fn split_signature_params(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut depth = 0i32;
+    let mut quote: Option<char> = None;
+    for (i, ch) in s.char_indices() {
+        if let Some(qc) = quote {
+            if ch == qc {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => {
+                out.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    if start <= s.len() {
+        out.push(&s[start..]);
+    }
+    out
+}
+
+/// The positional parameter signature for a known Darkmatter side-effect verb.
+///
+/// Derived from [`EFFECT_DESCRIPTORS`]. Overloaded verbs (e.g. `ensure_file`)
+/// are merged so that parameters present only in longer overloads are marked
+/// as optional tail parameters.
 ///
 /// Long-form side-effect actions carry their arguments as named sibling keys
-/// (`file:`, `prop:`, `value:`). The parser uses this table to reorder those
-/// named parameters into the verb's positional call order so the executor can
-/// dispatch positionally. Returns `None` for verbs not in the catalog.
+/// (`file:`, `prop:`, `value:`). The parser uses this signature to reorder
+/// those named parameters into the verb's positional call order so the
+/// executor can dispatch positionally.
+pub fn side_effect_signature(verb: &str) -> Option<Signature> {
+    SIDE_EFFECT_SIGNATURES.get(verb).cloned()
+}
+
+/// Lazily-built map from side-effect verb to merged positional signature.
 ///
-/// `ensure_file` lists `content` as its optional second parameter; the
-/// executor calls `ensure_file_with_content` when both are present and
-/// `ensure_file` otherwise.
+/// Build cost is paid once and the result is immutable; no runtime I/O or
+/// host probing is performed.
+static SIDE_EFFECT_SIGNATURES: std::sync::LazyLock<std::collections::HashMap<String, Signature>> =
+    std::sync::LazyLock::new(build_side_effect_signatures);
+
+fn build_side_effect_signatures() -> std::collections::HashMap<String, Signature> {
+    let mut by_verb: std::collections::HashMap<String, Vec<Signature>> =
+        std::collections::HashMap::new();
+    for desc in EFFECT_DESCRIPTORS {
+        if let Some(sig) = parse_signature(desc.signature) {
+            by_verb.entry(sig.verb.clone()).or_default().push(sig);
+        }
+    }
+
+    let mut out = std::collections::HashMap::new();
+    for (verb, sigs) in by_verb {
+        out.insert(verb, merge_signatures(&sigs));
+    }
+    out
+}
+
+/// Merge overloaded signatures for one verb into a single signature with the
+/// longest parameter list and an `optional_tail` covering parameters that do
+/// not appear in the shortest overload.
 ///
-/// ## Notes
+/// Assumes overloads only add trailing parameters, which is true for the
+/// current Darkmatter catalog (`ensure_file(file)` / `ensure_file(file, content)`,
+/// `frontmatter(file)` / `frontmatter(file, prop)`).
 ///
-/// The Darkmatter side-effect catalog is the authority. This table mirrors
-/// the public verb signatures in `darkmatter/lib/src/effects/verbs.rs`; keep
-/// the two in sync when the catalog gains or renames a verb.
-pub fn side_effect_signature(verb: &str) -> Option<&'static [&'static str]> {
-    let sig: &'static [&'static str] = match verb {
-        "set_frontmatter" => &["file", "prop", "value"],
-        "merge_frontmatter" => &["file", "obj"],
-        "delete_frontmatter" => &["file", "prop"],
-        "increment_frontmatter" => &["file", "prop"],
-        "decrement_frontmatter" => &["file", "prop"],
-        "append_frontmatter" => &["file", "prop", "value"],
-        "prepend_frontmatter" => &["file", "prop", "value"],
-        "ensure_file" => &["file", "content"],
-        "ensure_dir" => &["dir"],
-        "append_line" => &["file", "text"],
-        "append_jsonl" => &["file", "obj"],
-        "http_post" => &["url", "body"],
-        _ => return None,
-    };
-    Some(sig)
+/// The merged `optional_tail` is the larger of two sources: the parameters the
+/// shortest overload omits, and the longest overload's own intrinsic optional
+/// tail (`[default]` / `name?` markers). The latter matters for a single
+/// non-overloaded signature such as `number(x, [default])`, where `base` and
+/// `longest` are the same signature and the omitted-parameter count is zero.
+fn merge_signatures(sigs: &[Signature]) -> Signature {
+    debug_assert!(!sigs.is_empty());
+    let mut sorted = sigs.to_vec();
+    sorted.sort_by_key(|s| s.params.len());
+    let base = sorted.first().expect("non-empty signature list").clone();
+    let longest = sorted.last().expect("non-empty signature list").clone();
+    let from_overloads = longest.params.len().saturating_sub(base.params.len());
+    let optional_tail = from_overloads.max(longest.optional_tail);
+    Signature {
+        verb: longest.verb,
+        params: longest.params,
+        optional_tail,
+        variadic: longest.variadic,
+    }
 }
 
 /// Returns `true` when `verb` names a known Darkmatter side-effect.
 ///
-/// Short-form `verb(args)` actions whose verb is not a communication,
-/// shell, or lifecycle-control keyword parse as
+/// Positional actions whose verb is not a communication, shell, or
+/// lifecycle-control keyword are first parsed as
 /// [`ExpressionFunctionAction`]. At execution time the stack executor uses
 /// this predicate to route a known side-effect verb (e.g.
 /// `ensure_file('@x')`) to the side-effect engine rather than the read-only
 /// expression engine.
 pub fn is_known_side_effect(verb: &str) -> bool {
     side_effect_signature(verb).is_some()
+}
+
+/// Returns `true` when `verb` names any known lifecycle action verb.
+///
+/// This is the parse-time validator required by decision #6 in the
+/// positional-and-key-value plan. It unions communication channels, the
+/// `shell` verb, lifecycle control verbs, Darkmatter side-effect verbs, and
+/// Darkmatter expression-function verbs.
+pub fn is_known_lifecycle_verb(verb: &str) -> bool {
+    if CommunicationChannel::from_verb(verb).is_some() || verb == "shell" {
+        return true;
+    }
+    if is_lifecycle_control_verb(verb) {
+        return true;
+    }
+    if is_known_side_effect(verb) {
+        return true;
+    }
+    is_known_expression_function_verb(verb)
+}
+
+/// Returns `true` when `verb` names a lifecycle control action.
+fn is_lifecycle_control_verb(verb: &str) -> bool {
+    matches!(
+        verb,
+        "stop" | "skip" | "error" | "proxy" | "retry" | "resume" | "defer"
+    )
+}
+
+/// Returns `true` when `verb` names a known Darkmatter expression function.
+fn is_known_expression_function_verb(verb: &str) -> bool {
+    EXPRESSION_FUNCTION_DESCRIPTORS
+        .iter()
+        .any(|d| parsed_verb_of(d.signature) == Some(verb))
+}
+
+/// Extract the verb name from a raw descriptor signature string.
+fn parsed_verb_of(signature: &str) -> Option<&str> {
+    let signature = signature.trim();
+    let open = signature.find('(')?;
+    if open == 0 {
+        return None;
+    }
+    Some(&signature[..open])
+}
+
+/// Positional signature for a known Darkmatter expression-function verb.
+///
+/// Derived from [`EXPRESSION_FUNCTION_DESCRIPTORS`]. Overloaded functions are
+/// merged so that parameters present only in longer overloads are marked as
+/// optional tail parameters.
+pub fn expression_function_signature(verb: &str) -> Option<Signature> {
+    let sigs: Vec<Signature> = EXPRESSION_FUNCTION_DESCRIPTORS
+        .iter()
+        .filter_map(|d| {
+            let sig = parse_signature(d.signature)?;
+            if sig.verb == verb { Some(sig) } else { None }
+        })
+        .collect();
+    if sigs.is_empty() {
+        return None;
+    }
+    Some(merge_signatures(&sigs))
+}
+
+/// Returns every lifecycle action verb known to the parser.
+///
+/// Used for did-you-mean suggestions when a positional or key/value verb is
+/// not recognized.
+pub fn all_lifecycle_verbs() -> Vec<&'static str> {
+    let mut verbs: Vec<&'static str> = Vec::new();
+    for channel in [
+        CommunicationChannel::Say,
+        CommunicationChannel::Speak,
+        CommunicationChannel::Effect,
+        CommunicationChannel::Message,
+        CommunicationChannel::Notify,
+        CommunicationChannel::Stderr,
+        CommunicationChannel::Info,
+        CommunicationChannel::Warn,
+        CommunicationChannel::Success,
+        CommunicationChannel::Stdout,
+    ] {
+        verbs.push(channel.verb());
+    }
+    verbs.push("shell");
+    verbs.extend([
+        "stop", "skip", "error", "proxy", "retry", "resume", "defer",
+    ]);
+    for desc in EFFECT_DESCRIPTORS {
+        if let Some(verb) = parsed_verb_of(desc.signature) {
+            verbs.push(verb);
+        }
+    }
+    for desc in EXPRESSION_FUNCTION_DESCRIPTORS {
+        if let Some(verb) = parsed_verb_of(desc.signature) {
+            verbs.push(verb);
+        }
+    }
+    verbs.sort_unstable();
+    verbs.dedup();
+    verbs
+}
+
+/// Produce a did-you-mean rewrite from a removed short-form action to its
+/// positional form.
+///
+/// Examples:
+/// - `success("x")` → `success: "x"`
+/// - `set_frontmatter('a','b','c')` → `set_frontmatter: ["a","b","c"]`
+/// - `stop()` → `stop: []`
+pub fn rewrite_to_positional(raw: &str) -> String {
+    let Some(open) = raw.find('(') else {
+        return format!("{raw}: []");
+    };
+    let close = raw.rfind(')').unwrap_or(raw.len());
+    let verb = raw[..open].trim();
+    let args_raw = raw[open + 1..close].trim();
+
+    if args_raw.is_empty() {
+        return format!("{verb}: []");
+    }
+
+    let args = split_short_form_args(args_raw);
+    if args.is_empty() {
+        return format!("{verb}: []");
+    }
+    if args.len() == 1 {
+        return format!("{verb}: {}", yaml_like_arg(args[0]));
+    }
+    let formatted: Vec<String> = args.iter().map(|a| yaml_like_arg(a)).collect();
+    format!("{verb}: [{}]", formatted.join(", "))
+}
+
+/// Split a short-form argument list on commas at the top level.
+fn split_short_form_args(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut depth = 0i32;
+    let mut quote: Option<char> = None;
+    for (i, ch) in s.char_indices() {
+        if let Some(qc) = quote {
+            if ch == qc {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => {
+                out.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    if start <= s.len() {
+        out.push(&s[start..]);
+    }
+    out
+}
+
+/// Render a short-form argument as a YAML-like scalar for the did-you-mean
+/// rewrite. This is a best-effort visual aid, not a full YAML serializer.
+fn yaml_like_arg(arg: &str) -> String {
+    let trimmed = arg.trim();
+    if trimmed.is_empty() {
+        return "\"\"".to_string();
+    }
+    // Strip one layer of matching quotes so 'a' becomes a, "a" becomes a.
+    let unquoted = unwrap_matching_quotes(trimmed);
+    // If the unquoted value looks like a bare scalar (no special chars), show
+    // it as a quoted string so the rewrite is unambiguously YAML.
+    format!("\"{}\"", unquoted.replace('"', "\\\""))
+}
+
+fn unwrap_matching_quotes(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    if bytes.len() >= 2 {
+        let q = bytes[0];
+        if (q == b'\'' || q == b'"') && bytes[bytes.len() - 1] == q {
+            let inner = &s[1..s.len() - 1];
+            if !inner.as_bytes().contains(&q) {
+                return inner;
+            }
+        }
+    }
+    s
 }
 
 #[cfg(test)]
@@ -508,5 +875,202 @@ mod tests {
         };
         assert!(lc_stop.is_lifecycle_control());
         assert!(!comm.is_lifecycle_control());
+    }
+
+    // -------------------------------------------------------------------------
+    // Signature parser
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn parse_signature_fixed_positional() {
+        let sig = parse_signature("set_frontmatter(file, prop, value)").unwrap();
+        assert_eq!(sig.verb, "set_frontmatter");
+        assert_eq!(sig.params, vec!["file", "prop", "value"]);
+        assert_eq!(sig.optional_tail, 0);
+        assert!(!sig.variadic);
+        assert_eq!(sig.required_count(), 3);
+        assert_eq!(sig.max_count(), Some(3));
+    }
+
+    #[test]
+    fn parse_signature_optional_tail() {
+        let sig = parse_signature("ensure_file(file, content?)").unwrap();
+        assert_eq!(sig.verb, "ensure_file");
+        assert_eq!(sig.params, vec!["file", "content"]);
+        assert_eq!(sig.optional_tail, 1);
+        assert!(!sig.variadic);
+        assert_eq!(sig.required_count(), 1);
+        assert_eq!(sig.max_count(), Some(2));
+    }
+
+    #[test]
+    fn parse_signature_bracket_optional_tail() {
+        // Darkmatter's catalog form for an optional trailing parameter.
+        let sig = parse_signature("number(x, [default])").unwrap();
+        assert_eq!(sig.verb, "number");
+        assert_eq!(sig.params, vec!["x", "default"]);
+        assert_eq!(sig.optional_tail, 1);
+        assert!(!sig.variadic);
+        assert_eq!(sig.required_count(), 1);
+        assert_eq!(sig.max_count(), Some(2));
+    }
+
+    #[test]
+    fn parse_signature_variadic() {
+        let sig = parse_signature("and(...)").unwrap();
+        assert_eq!(sig.verb, "and");
+        assert!(sig.params.is_empty());
+        assert_eq!(sig.optional_tail, 0);
+        assert!(sig.variadic);
+        assert_eq!(sig.required_count(), 0);
+        assert_eq!(sig.max_count(), None);
+    }
+
+    #[test]
+    fn parse_signature_zero_arg() {
+        let sig = parse_signature("stop()").unwrap();
+        assert_eq!(sig.verb, "stop");
+        assert!(sig.params.is_empty());
+        assert!(!sig.variadic);
+        assert_eq!(sig.required_count(), 0);
+        assert_eq!(sig.max_count(), Some(0));
+    }
+
+    #[test]
+    fn parse_signature_malformed() {
+        assert!(parse_signature("no_parens").is_none());
+        assert!(parse_signature("(file)").is_none());
+        assert!(parse_signature("verb(").is_none());
+        assert!(parse_signature("verb(file").is_none());
+        assert!(parse_signature("verb(a, ?)").is_none());
+        assert!(parse_signature("verb(a?, b)").is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // Side-effect signature derivation
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn side_effect_signature_derives_from_descriptors() {
+        let set = side_effect_signature("set_frontmatter").unwrap();
+        assert_eq!(set.params, vec!["file", "prop", "value"]);
+        assert_eq!(set.optional_tail, 0);
+
+        let ensure = side_effect_signature("ensure_file").unwrap();
+        assert_eq!(ensure.params, vec!["file", "content"]);
+        assert_eq!(ensure.optional_tail, 1);
+
+        assert!(side_effect_signature("not_a_verb").is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // Expression-function signature derivation
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn expression_function_signature_bracket_optional() {
+        // `number(x, [default])` — the bracketed param is optional, so the
+        // one-argument form `number("{{ value }}")` is valid arity.
+        let sig = expression_function_signature("number").unwrap();
+        assert_eq!(sig.params, vec!["x", "default"]);
+        assert_eq!(sig.optional_tail, 1);
+        assert_eq!(sig.required_count(), 1);
+        assert_eq!(sig.max_count(), Some(2));
+
+        let round = expression_function_signature("round").unwrap();
+        assert_eq!(round.required_count(), 1);
+        assert_eq!(round.max_count(), Some(2));
+    }
+
+    #[test]
+    fn expression_function_signature_merges_overloads() {
+        // Overloaded functions: the shorter overload's missing parameters are
+        // optional, so the one-argument positional form is valid arity.
+        let frontmatter = expression_function_signature("frontmatter").unwrap();
+        assert_eq!(frontmatter.params, vec!["file", "prop"]);
+        assert_eq!(frontmatter.optional_tail, 1);
+        assert_eq!(frontmatter.required_count(), 1);
+        assert_eq!(frontmatter.max_count(), Some(2));
+
+        let link = expression_function_signature("link").unwrap();
+        assert_eq!(link.required_count(), 1);
+        assert_eq!(link.max_count(), Some(2));
+
+        let validate = expression_function_signature("validate_schema").unwrap();
+        assert_eq!(validate.required_count(), 1);
+        assert_eq!(validate.max_count(), Some(2));
+    }
+
+    #[test]
+    fn expression_function_signature_variadic_preserved() {
+        let and = expression_function_signature("and").unwrap();
+        assert!(and.variadic);
+        assert_eq!(and.required_count(), 0);
+        assert_eq!(and.max_count(), None);
+
+        assert!(expression_function_signature("not_a_function").is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // Known-verb predicate
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn is_known_lifecycle_verb_unions_families() {
+        // Communication
+        assert!(is_known_lifecycle_verb("success"));
+        assert!(is_known_lifecycle_verb("message"));
+        assert!(is_known_lifecycle_verb("stderr"));
+
+        // Shell
+        assert!(is_known_lifecycle_verb("shell"));
+
+        // Control
+        assert!(is_known_lifecycle_verb("stop"));
+        assert!(is_known_lifecycle_verb("retry"));
+        assert!(is_known_lifecycle_verb("defer"));
+
+        // Side-effect
+        assert!(is_known_lifecycle_verb("set_frontmatter"));
+        assert!(is_known_lifecycle_verb("ensure_file"));
+
+        // Expression function
+        assert!(is_known_lifecycle_verb("length"));
+        assert!(is_known_lifecycle_verb("and"));
+        assert!(is_known_lifecycle_verb("or"));
+    }
+
+    #[test]
+    fn is_known_lifecycle_verb_rejects_unknown() {
+        assert!(!is_known_lifecycle_verb("sucess"));
+        assert!(!is_known_lifecycle_verb("nope"));
+        assert!(!is_known_lifecycle_verb(""));
+    }
+
+    // -------------------------------------------------------------------------
+    // Short-form rewrite helper
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn rewrite_to_positional_communication() {
+        assert_eq!(rewrite_to_positional("success(\"x\")"), "success: \"x\"");
+    }
+
+    #[test]
+    fn rewrite_to_positional_multi_arg() {
+        assert_eq!(
+            rewrite_to_positional("set_frontmatter('a','b','c')"),
+            "set_frontmatter: [\"a\", \"b\", \"c\"]"
+        );
+    }
+
+    #[test]
+    fn rewrite_to_positional_zero_arg() {
+        assert_eq!(rewrite_to_positional("stop()"), "stop: []");
+    }
+
+    #[test]
+    fn rewrite_to_positional_bare_verb() {
+        assert_eq!(rewrite_to_positional("stop"), "stop: []");
     }
 }

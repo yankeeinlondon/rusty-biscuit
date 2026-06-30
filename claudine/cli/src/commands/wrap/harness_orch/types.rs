@@ -36,6 +36,30 @@ pub(crate) struct MaterializedHarnessPrompt {
     pub(crate) prompt: String,
     pub(crate) env_overrides: Vec<(String, String)>,
     pub(crate) inline_closure_plan: Option<claudine::composition::InlineClosurePlan>,
+    /// Shared cross-event live document frontmatter for the current attempt.
+    ///
+    /// Seeded from `frontmatter` when the prompt is materialized and threaded
+    /// into every lifecycle event's [`claudine::composition::lifecycle_executor::StackExecutionContext`]
+    /// for this iteration. A lifecycle frontmatter side effect that targets the
+    /// document persists here so a *later* event in the same attempt
+    /// (`start` → `success`/`finalize`) reads the mutated value, per the
+    /// late-binding spec's "current effective document state at the moment the
+    /// event fires" contract. Re-created each loop iteration (a retry
+    /// re-materializes from disk), giving the correct per-attempt lifetime.
+    pub(crate) live_frontmatter: std::cell::RefCell<serde_json::Map<String, serde_json::Value>>,
+}
+
+impl MaterializedHarnessPrompt {
+    /// Build the per-attempt live-frontmatter cell from a frontmatter value.
+    ///
+    /// A non-object frontmatter (e.g. the synthesized `Null` used when
+    /// materialization failed) seeds an empty map, matching the stack-context
+    /// builder's empty-frontmatter fallback.
+    pub(crate) fn live_cell_from(
+        frontmatter: &serde_json::Value,
+    ) -> std::cell::RefCell<serde_json::Map<String, serde_json::Value>> {
+        std::cell::RefCell::new(frontmatter.as_object().cloned().unwrap_or_default())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -58,4 +82,14 @@ pub(crate) struct AttemptLaunch {
     /// True when `step_timeout` came from CLI, frontmatter, or a valid env
     /// value instead of Claudine's built-in default.
     pub(crate) step_timeout_user_configured: bool,
+    /// Resolved OpenCode stalled-generation backstop budget (CLI >
+    /// frontmatter > env > built-in `10m`). `None` disables the backstop.
+    /// Honored only by the OpenCode bridge in structured-stream mode; passed
+    /// to `build_structured_plumbing`, ignored on every other path.
+    pub(crate) stall_timeout: Option<std::time::Duration>,
+    /// True when `stall_timeout` came from CLI, frontmatter, or a valid env
+    /// value instead of Claudine's built-in `10m` default. Drives the
+    /// "only enforced in structured-stream mode" warning on non-structured
+    /// attempts.
+    pub(crate) stall_timeout_user_configured: bool,
 }

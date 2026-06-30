@@ -68,6 +68,8 @@ pub mod ast;
 pub mod catalog;
 pub mod ctx;
 pub(crate) mod doc_namespace;
+pub mod error;
+pub mod file_suggestions;
 pub mod functions;
 pub mod lexer;
 pub mod parser;
@@ -80,6 +82,8 @@ pub use catalog::{
     ExpressionFunctionDescriptor, EXPRESSION_FUNCTION_DESCRIPTORS,
 };
 pub use ctx::CtxLookup;
+pub use error::{ArityBound, ExpressionError, FileRefFailure, FileReferenceDiagnostic};
+pub use file_suggestions::{collect_sibling_candidates, suggest_sibling_files};
 pub use resolve_ctx::ResolutionContext;
 pub use lexer::{
     ComparisonOp, ExpressionFinder, ExpressionLocation, Lexer, LexerError, ParseMode, Token,
@@ -105,8 +109,8 @@ fn to_number_arithmetic(value: &Value) -> Option<f64> {
 /// Converts an expression value into a number for arithmetic operations,
 /// returning an error message tagged with the originating operator when the
 /// value cannot be represented as a number.
-fn require_number(value: &Value, op_label: &str) -> Result<f64, String> {
-    to_number_arithmetic(value).ok_or_else(|| format!("{op_label} requires numeric operands"))
+fn require_number(value: &Value, op_label: &'static str) -> Result<f64, ExpressionError> {
+    to_number_arithmetic(value).ok_or(ExpressionError::Arithmetic { op: op_label })
 }
 
 /// Converts a value to a number for array indexing.
@@ -228,6 +232,23 @@ pub trait EvaluationLookup {
     fn context_variable_names(&self) -> &[&'static str] {
         &[]
     }
+
+    /// Returns `true` when `root` is a known variable root for this lookup.
+    ///
+    /// `root` is the first dotted segment of a variable path (so `err.msg`
+    /// contributes `err`, `ctx.today` contributes `ctx`). Strict-mode subtree
+    /// compose ([`compose_subtree`](crate::markdown::compose::subtree::compose_subtree)
+    /// with [`SubtreeStrictness::Strict`]) rejects a reference whose root is
+    /// *not* known; a known root that resolves to `null`/empty still renders
+    /// empty.
+    ///
+    /// The default `true` preserves existing lenient behavior for lookups that
+    /// do not participate in strict-mode subtree compose.
+    ///
+    /// [`SubtreeStrictness::Strict`]: crate::markdown::compose::subtree::SubtreeStrictness::Strict
+    fn is_known_variable_root(&self, _root: &str) -> bool {
+        true
+    }
 }
 
 /// Checks if a JSON value is truthy.
@@ -339,7 +360,7 @@ pub fn scalar_string(value: &Value) -> String {
 /// let expr = Expr::Variable("name".to_string());
 /// assert_eq!(evaluate(&expr, &lookup).unwrap(), json!("Alice"));
 /// ```
-pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, String> {
+pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, ExpressionError> {
     match expr {
         Expr::Variable(path) => Ok(lookup.get(path).unwrap_or(Value::Null)),
         Expr::StringLiteral(s) => Ok(Value::String(s.clone())),
@@ -347,8 +368,9 @@ pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, S
             let num = if n.fract() == 0.0 {
                 serde_json::Number::from(*n as i64)
             } else {
-                serde_json::Number::from_f64(*n)
-                    .ok_or_else(|| format!("Invalid numeric literal: {n}"))?
+                serde_json::Number::from_f64(*n).ok_or_else(|| {
+                    ExpressionError::Parse(format!("Invalid numeric literal: {n}"))
+                })?
             };
             Ok(Value::Number(num))
         }
@@ -364,7 +386,10 @@ pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, S
                 return Ok(Value::Null);
             }
             let num = require_number(&value, "Unary '-'")?;
-            json_number(-num)
+            json_number(-num).map_err(|message| ExpressionError::Other {
+                function: "Unary '-'".to_string(),
+                message,
+            })
         }
         Expr::Binary { op, left, right } => {
             let left = evaluate(left, lookup)?;
@@ -429,7 +454,7 @@ pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, S
     }
 }
 
-fn evaluate_binary(op: BinaryOp, left: &Value, right: &Value) -> Result<Value, String> {
+fn evaluate_binary(op: BinaryOp, left: &Value, right: &Value) -> Result<Value, ExpressionError> {
     if op == BinaryOp::Add && (left.is_string() || right.is_string()) {
         return Ok(Value::String(format!(
             "{}{}",
@@ -454,19 +479,28 @@ fn evaluate_binary(op: BinaryOp, left: &Value, right: &Value) -> Result<Value, S
         BinaryOp::Mul => lhs * rhs,
         BinaryOp::Div => {
             if rhs == 0.0 {
-                return Err("Division by zero".to_string());
+                return Err(ExpressionError::Other {
+                    function: "division".to_string(),
+                    message: "Division by zero".to_string(),
+                });
             }
             lhs / rhs
         }
         BinaryOp::Mod => {
             if rhs == 0.0 {
-                return Err("Remainder by zero".to_string());
+                return Err(ExpressionError::Other {
+                    function: "remainder".to_string(),
+                    message: "Remainder by zero".to_string(),
+                });
             }
             // C-style remainder: sign follows dividend (Rust's `%` already does this for f64).
             lhs % rhs
         }
     };
-    json_number(result)
+    json_number(result).map_err(|message| ExpressionError::Other {
+        function: label.to_string(),
+        message,
+    })
 }
 
 fn evaluate_index(base: &Value, index: &Value) -> Value {
@@ -537,13 +571,19 @@ fn is_arity_error(message: &str) -> bool {
 
 /// Returns a plain-text error for an unrecognized function name, with a fuzzy
 /// did-you-mean suggestion when one exists.
-fn unknown_function_error(name: &str) -> String {
+fn unknown_function_error(name: &str) -> ExpressionError {
     let mut text = format!("{UNKNOWN_FUNCTION_PREFIX} {name}");
     if let Some(suggestion) = suggest(EXPRESSION_FUNCTION_DESCRIPTORS, name, 1).first() {
         text.push_str("\n\nDid you mean:\n  ");
         text.push_str(&describe_for_error(*suggestion));
     }
-    text
+    ExpressionError::UnknownFunction {
+        name: text
+            .strip_prefix(UNKNOWN_FUNCTION_PREFIX)
+            .map(str::trim)
+            .unwrap_or(name)
+            .to_string(),
+    }
 }
 
 /// Appends the matched function descriptor's signature, description, and example
@@ -561,11 +601,23 @@ fn enrich_arity_error(name: &str, message: &str) -> String {
     }
 }
 
+fn classify_function_error(function: &str, message: String) -> ExpressionError {
+    let message = if is_arity_error(&message) {
+        enrich_arity_error(function, &message)
+    } else {
+        message
+    };
+    ExpressionError::Other {
+        function: function.to_string(),
+        message,
+    }
+}
+
 fn evaluate_function<L: EvaluationLookup>(
     name: &str,
     args: &[Expr],
     lookup: &L,
-) -> Result<Value, String> {
+) -> Result<Value, ExpressionError> {
     let name = name.to_ascii_lowercase();
     match name.as_str() {
         // `and`/`or` short-circuit, so they must evaluate their arguments
@@ -598,31 +650,30 @@ fn evaluate_function<L: EvaluationLookup>(
             if let Some(ctx) = lookup.resolution_context()
                 && let Some(result) = functions::dispatch_fs(other, &evaluated, &ctx)
             {
-                return result.map_err(|message| {
-                    if is_arity_error(&message) {
-                        enrich_arity_error(other, &message)
-                    } else {
-                        message
+                return result.map_err(|error| match error {
+                    ExpressionError::Other { function, message } if is_arity_error(&message) => {
+                        ExpressionError::Other {
+                            function,
+                            message: enrich_arity_error(other, &message),
+                        }
                     }
+                    other => other,
                 });
             }
             if let Some(result) = functions::dispatch(other, &evaluated) {
-                return result.map_err(|message| {
-                    if is_arity_error(&message) {
-                        enrich_arity_error(other, &message)
-                    } else {
-                        message
-                    }
-                });
+                return result.map_err(|message| classify_function_error(other, message));
             }
             // A known filesystem function reaches here only because the lookup
             // returned no resolution context — an opt-out or test lookup, not a
             // real document surface (all of which now supply one). Keep it
             // recoverable so it doesn't read as an unknown symbol.
             if functions::is_fs_function(other) {
-                return Err(format!(
-                    "Filesystem function '{name}' requires a document resolution context, which is unavailable here"
-                ));
+                return Err(ExpressionError::Other {
+                    function: other.to_string(),
+                    message: format!(
+                        "Filesystem function '{name}' requires a document resolution context, which is unavailable here"
+                    ),
+                });
             }
             Err(unknown_function_error(other))
         }
@@ -881,7 +932,7 @@ mod tests {
                 op,
                 right: Box::new(literal(right)),
             };
-            evaluate(&expr, &state)
+            evaluate(&expr, &state).map_err(|error| error.to_string())
         }
 
         fn literal(value: Value) -> Expr {
@@ -977,7 +1028,7 @@ mod tests {
                 left: Box::new(literal(left)),
                 right: Box::new(literal(right)),
             };
-            evaluate(&expr, &state)
+            evaluate(&expr, &state).map_err(|error| error.to_string())
         }
 
         fn literal(value: Value) -> Expr {
@@ -1507,12 +1558,12 @@ mod tests {
 
         fn eval_expr(expr_str: &str) -> Result<Value, String> {
             let expr = parse(expr_str).map_err(|e| e.message)?;
-            evaluate(&expr, &lookup(json!({})))
+            evaluate(&expr, &lookup(json!({}))).map_err(|error| error.to_string())
         }
 
         fn eval_expr_with_data(expr_str: &str, data: Value) -> Result<Value, String> {
             let expr = parse(expr_str).map_err(|e| e.message)?;
-            evaluate(&expr, &lookup(data))
+            evaluate(&expr, &lookup(data)).map_err(|error| error.to_string())
         }
 
         // ── Strict date validators ─────────────────────────────────────

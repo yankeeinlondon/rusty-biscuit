@@ -425,13 +425,17 @@ a lifecycle `failure`/`finalize` stack can branch on the `err` global
 | Termination | `error_kind` | Failure event | Recovery path |
 |---|---|---|---|
 | `TimedOut` | `timeout` / `step_timeout` | `Timeout` | `failure` stack `Retry`/`Resume` |
-| `Aborted` | `exit_expression` / `runaway_repetition` / `runaway_volume` / `repeated_stream_error` | `AgentFailure` | none (fail-fast) |
+| `Aborted` | `exit_expression` / `runaway_repetition` / `runaway_volume` / `repeated_stream_error` / `stalled_generation` | `AgentFailure` | none (fail-fast) |
 
 `repeated_stream_error` is an OpenCode-specific stderr backstop: consecutive
 `message="stream error"` records crossing `MAX_CONSECUTIVE_STREAM_ERRORS` (5)
 with no step advance abort the run, bounding OpenCode's unbounded backoff
 retries when the provider fails every attempt. It is fail-fast (`Aborted`),
 never a `failure`-stack `Retry` that would reproduce the failure loop.
+
+`stalled_generation` is the OpenCode **live-but-dead** backstop — see
+[OpenCode stalled-generation backstop](#opencode-stalled-generation-backstop)
+below. It is likewise fail-fast (`Aborted`), never a `failure`-stack `Retry`.
 
 ### Configuration surface
 
@@ -480,6 +484,76 @@ the volume cap sits at 50k lines / 32 MiB. Do not tune these down
 without a real false-positive incident. The wall-clock `timeout` remains
 opt-in and unchanged; the volume cap is the always-on content backstop
 that bounds the unbounded capture buffer even when no timeout is set.
+
+## OpenCode stalled-generation backstop
+
+This is **not** a third general timeout rule — `timeout` and `step_timeout`
+remain the only two (see [Overview](#overview)). The stalled-generation
+backstop is an **OpenCode-scoped** guard for a failure shape neither timeout
+catches: a *live-but-dead* run where the provider keeps retrying a dropped
+generation. OpenCode re-emits a `service=llm ... stream` (`llm_call_start`)
+record on every retry, and those retries keep the byte heartbeat alive, so
+`step_timeout` never fires — yet no assistant text, reasoning, tool call, or
+step advance is ever produced. The run is "alive" on the wire but
+producing nothing.
+
+The guard keys on a **retry-churn fingerprint** and trips only when **both**
+conditions hold on the same `llm_call_start`:
+
+1. **Retry churn.** The count of streamed `LlmCall` (`is_stream == true`)
+   records since the last progress event is
+   `>= MAX_GENERATIONS_WITHOUT_PROGRESS` (a constant, `4`).
+2. **Progress silence.** `now - last_progress_at >= stall_timeout`
+   (built-in default `10m`).
+
+Either condition alone never fires. The count condition is what makes the
+guard safe against a single legitimately-slow generation: one slow first
+call past the silence budget does not trip, because the retry count has not
+accumulated. The two conditions are also **anti-correlated** with healthy
+output — a run streaming assistant text or advancing steps resets the count,
+so it cannot reach the churn threshold. A long tool producing **no**
+`llm_call_start` records at all never trips this guard, even past
+`stall_timeout`.
+
+Progress events that reset the count and advance `last_progress_at` come from
+**both** producers, which share one progress cell. On the stderr bridge: a
+genuine `StepLoop` advance, `StepExit`, and subagent lifecycle (`SubagentStart`
+/ `SubagentStop`). On the stdout NDJSON stream (a separate reader thread): every
+progress-class semantic event — `OutputText`, `Reasoning`, `ToolCall`,
+`ToolResult`, `SubagentStart`, `SubagentStop`, `FileChange`, `PlanUpdate` — via
+a stdout progress observer wired to the same cell. This matters because the
+stderr bridge never sees stdout events; without the stdout-side reset a run that
+made real stdout progress could still trip on a later `llm_call_start`.
+Liveness-only events do **not** reset on either producer: another
+`llm_call_start`, a deduped/repeated `StepLoop` for the same `(session_id,
+step)`, `http_response`, `permission_evaluated`, `service=bus` lines, raw bytes,
+and the stdout `Info`/`Warning`/`Error`/session-turn-envelope events.
+
+On trip the guard emits a terminal `SemanticEvent::Error`
+(`SemanticErrorKind::AgentNative`, label **"Stalled Generation"**) and routes
+to `ProcessTermination::Aborted` with `error_kind = "stalled_generation"`. It
+is **fail-fast** — never `TimedOut`, so it never takes a `handle_timeout:` /
+`failure`-stack `Retry` path that would re-launch the provider and reproduce
+the stall. The synthesized `session_end` summary carries `generation_count`
+and `stall_duration_ms` plus available OpenCode metadata (session id, step,
+agent, provider id, model id, mode); it never stores prompt text or tool
+payloads.
+
+### Configuration
+
+| Layer | Surface | Notes |
+|---|---|---|
+| CLI flag | `--stall-timeout <DURATION>` | wrapper and compose; highest priority |
+| Frontmatter | `stall_timeout: 10m` | per-document (per-step in `sequence`) |
+| Env default | `CLAUDINE_OPENCODE_STALL_TIMEOUT` | duration string |
+| Built-in | `10m` | `Duration::from_secs(10 * 60)` |
+
+Precedence is the same strict top-down chain as `step_timeout`
+(CLI > frontmatter > env > built-in), and the same duration grammar applies.
+`0s` at any layer **disables** the guard for that run. Non-OpenCode runs
+accept `stall_timeout` silently as inert config (a `debug!` trace only, never
+a warning) so portable prompt files stay provider-neutral. There is no
+`stall_timeout_warn` companion.
 
 ## Provider-specific stream variants
 

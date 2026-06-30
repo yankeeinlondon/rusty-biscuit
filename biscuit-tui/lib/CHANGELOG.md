@@ -37,3 +37,19 @@ All notable changes to this project will be documented in this file.
 - `run_standalone_with_chrome` — variant that wraps the component in a
   `FrameChromeConfig` (border + margin) without callers having to
   compose the widget stack themselves.
+- `core::split_pane::{SplitPane, SplitDirection, SplitRatio}` —
+  geometry-only two-pane layout primitive
+  (`SplitPane::split(area) -> (Rect, Rect)`). A container/layout
+  primitive like `FrameChrome`, not an input (captures no value, no
+  `HandleEvent`). `Auto` direction is resolved from the area's shape
+  each split; 50/50 default; ratios clamp on construction
+  (`Percent` to `1..=99`, `*Fixed` to `>= 1`) so no pane is
+  voluntarily starved.
+- `ChooseOneState::active_option` / `active_value` /
+  `active_description` — active-item accessors keyed off `hover()`
+  (the highlighted row, distinct from the submitted
+  `selected_value()`). They return the option as-is — including a
+  `disabled` one — and `None` when the list is empty. The entry
+  point for a `SplitPane` master/detail pane that derives its
+  content from the active highlight each frame; `ChoiceOption` is
+  unchanged.

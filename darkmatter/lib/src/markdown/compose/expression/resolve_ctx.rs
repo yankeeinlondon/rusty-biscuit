@@ -2,9 +2,9 @@
 //!
 //! Read-only: these helpers resolve and read paths; they never mutate.
 
-use biscuit_file::PathPosition;
+use biscuit_file::{FileReference, FileReferenceError, PathPosition};
 use serde_json::{Map, Value};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
 
@@ -21,6 +21,14 @@ pub struct ResolutionContext {
     pub base_dir: PathBuf,
     /// Magic (`@`) search paths, mirroring the compose link-resolution config.
     pub magic_paths: Vec<(PathBuf, PathPosition)>,
+    /// Explicit fallback anchor for caller-supplied file references that are
+    /// not authored inside the document (e.g. a CLI-supplied path relative to
+    /// the launch area). Resolution tries `base_dir` (document dir) first;
+    /// only when that misses does it consult this directory. `None` disables
+    /// the fallback, preserving the legacy document-only behavior for small
+    /// unit tests. Production constructors thread the captured launch area
+    /// here so resolution is independent of the mutated ambient process CWD.
+    pub file_ref_fallback_dir: Option<PathBuf>,
     /// Run-local remote-fetch runtime for URL-typed arguments. `None` disables
     /// remote reads in expression functions.
     pub(crate) remote_fetch: Option<RemoteFetchRuntime>,
@@ -40,10 +48,20 @@ impl ResolutionContext {
         Self {
             base_dir,
             magic_paths: Vec::new(),
+            file_ref_fallback_dir: None,
             remote_fetch: None,
             ctx_values: Map::new(),
             home_dir: None,
         }
+    }
+
+    /// Sets the explicit fallback directory for caller-supplied file
+    /// references (typically the captured launch area). Resolution still
+    /// tries `base_dir` (the document directory) first.
+    #[must_use]
+    pub fn with_file_ref_fallback_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.file_ref_fallback_dir = Some(dir.into());
+        self
     }
 
     /// Sets a captured context value (e.g. `agent`) for read-side functions.
@@ -156,6 +174,43 @@ pub fn normalize_path_arg(raw: &str) -> String {
     out
 }
 
+/// Canonical caller-supplied file-reference resolver encoding the single
+/// resolution order shared by the expression path and the schema validator.
+///
+/// Resolution order for local filesystem references:
+///
+/// 1. absolute paths are returned as-is by `FileReference`;
+/// 2. document-relative via `file_ref.resolve_from(base_dir)`;
+/// 3. launch-area fallback via `file_ref.resolve_from(fallback)` when present;
+/// 4. **no ambient-CWD fallback** — callers that need it must pass an explicit
+///    `fallback`.
+///
+/// The caller owns constructing `file_ref` (including any `@` magic-path
+/// injection), so the two production surfaces — read-side expression functions
+/// and the `darkmatter-file` schema format validator — share the order while
+/// retaining their own preprocessing. This replaces the implicit ambient-CWD
+/// `FileReference::resolve()` fallback so resolution no longer depends on the
+/// mutated process working directory.
+///
+/// ## Returns
+///
+/// - `Ok(Some(path))` when the reference resolves to a path.
+/// - `Ok(None)` when the reference is well-formed but resolves to nothing.
+/// - `Err` when the reference requires state that cannot be determined.
+pub(crate) fn resolve_file_ref_with_fallback(
+    file_ref: &FileReference,
+    base_dir: &Path,
+    fallback: Option<&Path>,
+) -> Result<Option<PathBuf>, FileReferenceError> {
+    if let Some(path) = file_ref.resolve_from(base_dir)? {
+        return Ok(Some(path));
+    }
+    if let Some(fallback) = fallback {
+        return file_ref.resolve_from(fallback);
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,6 +244,70 @@ mod tests {
         let ctx = ResolutionContext::new(PathBuf::from("/tmp/docdir"));
         assert_eq!(ctx.base_dir, PathBuf::from("/tmp/docdir"));
         assert!(ctx.magic_paths.is_empty());
+        // `new(base_dir)` leaves the fallback unset so existing unit tests
+        // keep the legacy document-only resolution behavior.
+        assert!(ctx.file_ref_fallback_dir.is_none());
+    }
+
+    #[test]
+    fn with_file_ref_fallback_dir_sets_the_field() {
+        let ctx = ResolutionContext::new(PathBuf::from("/tmp/docdir"))
+            .with_file_ref_fallback_dir("/tmp/launch");
+        assert_eq!(ctx.file_ref_fallback_dir.as_deref(), Some(std::path::Path::new("/tmp/launch")));
+    }
+
+    /// A same-named file present in BOTH the document dir and the launch-area
+    /// fallback resolves to the document-dir copy — document-first contract
+    /// (verification goal #9).
+    #[test]
+    fn document_relative_hit_wins_over_fallback_conflict() {
+        let doc_dir = tempfile::TempDir::new().unwrap();
+        let launch_dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(doc_dir.path().join("spec.md"), "# Document\n").unwrap();
+        std::fs::write(launch_dir.path().join("spec.md"), "# Launch\n").unwrap();
+
+        let file_ref = FileReference::new("spec.md").unwrap();
+        let resolved = resolve_file_ref_with_fallback(
+            &file_ref,
+            doc_dir.path(),
+            Some(launch_dir.path()),
+        )
+        .unwrap()
+        .expect("should resolve");
+
+        assert_eq!(resolved, doc_dir.path().join("spec.md"));
+    }
+
+    /// A path missing under `base_dir` but present under the launch-area
+    /// fallback resolves via the fallback (verification goal #8 precursor).
+    #[test]
+    fn missing_under_base_dir_resolves_via_fallback() {
+        let doc_dir = tempfile::TempDir::new().unwrap();
+        let launch_dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(launch_dir.path().join("caller.md"), "# Caller\n").unwrap();
+
+        let file_ref = FileReference::new("caller.md").unwrap();
+        let resolved = resolve_file_ref_with_fallback(
+            &file_ref,
+            doc_dir.path(),
+            Some(launch_dir.path()),
+        )
+        .unwrap()
+        .expect("should resolve via fallback");
+
+        assert_eq!(resolved, launch_dir.path().join("caller.md"));
+    }
+
+    /// With no fallback, a path missing under `base_dir` resolves to nothing
+    /// (no ambient-CWD consultation) — preserves today's no-fallback behavior.
+    #[test]
+    fn missing_under_base_dir_without_fallback_resolves_to_none() {
+        let doc_dir = tempfile::TempDir::new().unwrap();
+
+        let file_ref = FileReference::new("absent.md").unwrap();
+        let resolved = resolve_file_ref_with_fallback(&file_ref, doc_dir.path(), None).unwrap();
+
+        assert!(resolved.is_none());
     }
 
     /// An evaluated (non-literal) URL the discovery scanner never saw must still
@@ -216,6 +335,7 @@ mod tests {
         let ctx = ResolutionContext {
             base_dir: PathBuf::from("/tmp"),
             magic_paths: Vec::new(),
+            file_ref_fallback_dir: None,
             remote_fetch: Some(rt),
             ctx_values: Map::new(),
             home_dir: None,
@@ -242,6 +362,7 @@ mod tests {
         let ctx = ResolutionContext {
             base_dir: PathBuf::from("/tmp"),
             magic_paths: Vec::new(),
+            file_ref_fallback_dir: None,
             remote_fetch: Some(rt),
             ctx_values: Map::new(),
             home_dir: None,

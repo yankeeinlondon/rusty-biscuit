@@ -107,6 +107,7 @@ fn write_constraints(out: &mut String, constraints: &[Constraint], ty: Simplifie
 fn write_constraint(out: &mut String, c: &Constraint, ty: SimplifiedType) {
     match c {
         Constraint::Required => out.push_str("required"),
+        Constraint::Eager => out.push_str("eager"),
         Constraint::NotEmpty => out.push_str("not-empty"),
         Constraint::Integer => out.push_str("integer"),
         Constraint::Unique => out.push_str("unique"),
@@ -322,6 +323,28 @@ mod tests {
             ty: TypeExpr::Primitive(SimplifiedType::File),
             is_array: true,
             constraints: vec![Constraint::Match(vec!["*.png".into(), "!_*.png".into()])],
+            array_constraints: vec![Constraint::MinItems(1)],
+            description: None,
+        });
+    }
+
+    #[test]
+    fn round_trip_file_eager() {
+        round_trip(PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::File),
+            is_array: false,
+            constraints: vec![Constraint::Eager, Constraint::Required],
+            array_constraints: vec![],
+            description: None,
+        });
+    }
+
+    #[test]
+    fn round_trip_file_eager_array_with_match() {
+        round_trip(PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::File),
+            is_array: true,
+            constraints: vec![Constraint::Eager, Constraint::Match(vec!["*.png".into()])],
             array_constraints: vec![Constraint::MinItems(1)],
             description: None,
         });

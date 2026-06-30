@@ -8,7 +8,7 @@ Shell commands can appear in three places during a Claudine session:
 
 1. **Template `::shell` directives** — Darkmatter's compose pipeline executes these during document composition. A prompt like `commit.md` might contain `::shell sniff repo packages` to inject dynamic content.
 2. **Frontmatter `$(cmd)` expressions** — top-level frontmatter string values of the form `$(command arg ...)` are evaluated by Darkmatter's frontmatter shell expansion phase, with the command's trimmed `stdout` written back into the frontmatter. Example: `today: $(date +%Y-%m-%d)`.
-3. **Lifecycle `shell` stack actions** — `shell(...)` short-form and long-form `shell:` items declared in any reachable lifecycle stack (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, `loop`). Some are conditional (guarded by `when:` or reachable only on a recovery path) but they still need pre-authorization because there is no opportunity to prompt the user mid-session.
+3. **Lifecycle `shell` stack actions** — positional `shell: "…"` actions and key/value `{ action: shell, command: "…" }` actions declared in any reachable lifecycle stack (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, `loop`). Some are conditional (guarded by `when:` or reachable only on a recovery path) but they still need pre-authorization because there is no opportunity to prompt the user mid-session.
 
 Without pre-flight, a shell command that lacks whitelist coverage would either block the process waiting for interactive approval that will never come (in a non-interactive session) or fail with a confusing error deep inside the composition pipeline. The pre-flight eliminates both problems by resolving all approvals upfront.
 
@@ -49,7 +49,7 @@ Each command is checked against shell policy (blacklist, whitelist, approval cac
 
 ### Phase 2: Lifecycle Shell Commands
 
-After composition, Claudine walks every reachable lifecycle stack in the effective frontmatter and discovers its `shell` actions — `shell(...)` short-form and long-form `shell:` items across `initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, and `loop`.
+After composition, Claudine walks every reachable lifecycle stack in the effective frontmatter and discovers its `shell` actions — positional `shell: "…"` actions and key/value `{ action: shell, command: "…" }` actions across `initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, and `loop`.
 
 These commands flow through the same `resolve_shell_approvals` function and the same shared approval cache. Any command already approved in phase 1 is a cache hit. Only genuinely new commands trigger additional prompts.
 
@@ -158,7 +158,7 @@ Pre-flight is especially important for non-interactive sessions where there is n
 
 ### Lifecycle Shell Actions
 
-Shell actions declared anywhere in the lifecycle stacks (`shell(...)` short-form and long-form `shell:` items) are included in the pre-flight scan. This means all shell commands across the entire session lifecycle are authorized upfront, not just those in the template.
+Shell actions declared anywhere in the lifecycle stacks (positional `shell: "…"` actions and key/value `{ action: shell, command: "…" }` actions) are included in the pre-flight scan. This means all shell commands across the entire session lifecycle are authorized upfront, not just those in the template.
 
 ### Sequence Execution
 

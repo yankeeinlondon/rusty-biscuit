@@ -990,15 +990,20 @@ fn split_at_chain_operators(input: &str) -> Vec<&str> {
 /// Scans all top-level string-valued frontmatter entries and returns candidates.
 ///
 /// Only examines top-level keys — nested objects and arrays are ignored.
+/// Keys present in `exclude_keys` are skipped entirely (DM1 passthrough).
 pub(crate) fn scan_frontmatter(
     frontmatter: &Frontmatter,
     pre_interpolation_snapshot: Option<&HashMap<String, String>>,
     ctx: &SourceContext,
+    exclude_keys: &std::collections::HashSet<String>,
 ) -> Result<Vec<FrontmatterShellDirective>, ShellExpansionError> {
     let mut directives = Vec::new();
     let fm = frontmatter.as_map();
 
     for (key, value) in fm.iter() {
+        if exclude_keys.contains(key) {
+            continue;
+        }
         // Only process top-level string values
         if let Value::String(s) = value {
             let original = pre_interpolation_snapshot
@@ -1034,14 +1039,14 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     pre_interpolation_snapshot: Option<&HashMap<String, String>>,
     ctx: &SourceContext,
 ) -> MarkdownResult<FrontmatterShellExpansionReport> {
-    let candidates = scan_frontmatter(frontmatter, pre_interpolation_snapshot, ctx)?;
+    let candidates = scan_frontmatter(frontmatter, pre_interpolation_snapshot, ctx, &options.exclude_keys)?;
 
     if candidates.is_empty() {
         // No directives to execute, but a scan-skipped whole-value `$(...)`
         // (e.g. one behind leading whitespace) could still be sitting in
         // frontmatter. Enabled shell expansion must never leave a raw
         // expansion-form value behind, so guard even on the no-op path.
-        validate_no_whole_value_shell_leak(frontmatter, ctx)?;
+        validate_no_whole_value_shell_leak(frontmatter, ctx, &options.exclude_keys)?;
         return Ok(FrontmatterShellExpansionReport {
             replacements: 0,
             approvals_used: 0,
@@ -1185,7 +1190,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     // Post-expansion leak guard: after replacements, no top-level value may
     // still be a whole-value `$(...)` candidate (e.g. command output that
     // reproduced `$( … )`). Such a value is leaked executable state, not text.
-    validate_no_whole_value_shell_leak(frontmatter, ctx)?;
+    validate_no_whole_value_shell_leak(frontmatter, ctx, &options.exclude_keys)?;
 
     let approvals_used = runtime.shell.take_recent_approval_count();
 
@@ -1325,11 +1330,11 @@ fn evaluate_ternary_condition(
         )
     })?;
 
-    let value = evaluate(&parsed, state).map_err(|message| {
+    let value = evaluate(&parsed, state).map_err(|error| {
         frontmatter_parse_error(
             key,
             ctx,
-            format!("Frontmatter shell ternary condition must be a boolean expression: {message}"),
+            format!("Frontmatter shell ternary condition must be a boolean expression: {error}"),
         )
     })?;
 
@@ -1500,12 +1505,12 @@ fn evaluate_value_branch(
         )
     })?;
 
-    let value = evaluate(&parsed, state).map_err(|message| {
+    let value = evaluate(&parsed, state).map_err(|error| {
         frontmatter_parse_error(
             key,
             ctx,
             format!(
-                "Frontmatter shell ternary {} evaluation failed: {message}",
+                "Frontmatter shell ternary {} evaluation failed: {error}",
                 position.name()
             ),
         )
@@ -1573,8 +1578,12 @@ fn interpolate_branch_text(
 fn validate_no_whole_value_shell_leak(
     frontmatter: &Frontmatter,
     ctx: &SourceContext,
+    exclude_keys: &std::collections::HashSet<String>,
 ) -> Result<(), ShellExpansionError> {
     for (key, value) in frontmatter.as_map().iter() {
+        if exclude_keys.contains(key) {
+            continue;
+        }
         if let Value::String(s) = value {
             match is_whole_value_shell_candidate(s, key, ctx) {
                 WholeValueShellShape::NotCandidate => {}
@@ -1840,7 +1849,12 @@ mod tests {
         frontmatter: &Frontmatter,
         pre_interpolation_snapshot: Option<&std::collections::HashMap<String, String>>,
     ) -> Result<Vec<FrontmatterShellDirective>, ShellExpansionError> {
-        super::scan_frontmatter(frontmatter, pre_interpolation_snapshot, &test_ctx())
+        super::scan_frontmatter(
+            frontmatter,
+            pre_interpolation_snapshot,
+            &test_ctx(),
+            &std::collections::HashSet::new(),
+        )
     }
 
     #[allow(dead_code)]
@@ -2124,7 +2138,7 @@ mod tests {
         let mut fm = Frontmatter::new();
         fm.insert("leaked", json!("$(echo hi)")).unwrap();
 
-        let err = super::validate_no_whole_value_shell_leak(&fm, &test_ctx()).unwrap_err();
+        let err = super::validate_no_whole_value_shell_leak(&fm, &test_ctx(), &std::collections::HashSet::new()).unwrap_err();
         match err {
             ShellExpansionError::ParseDirective { origin, message, .. } => {
                 assert_eq!(
@@ -2149,7 +2163,7 @@ mod tests {
         // strict-start scan but is still a leak after trimming.
         let mut fm = Frontmatter::new();
         fm.insert("padded", json!("   $(echo hi)  ")).unwrap();
-        assert!(super::validate_no_whole_value_shell_leak(&fm, &test_ctx()).is_err());
+        assert!(super::validate_no_whole_value_shell_leak(&fm, &test_ctx(), &std::collections::HashSet::new()).is_err());
     }
 
     #[test]
@@ -2163,7 +2177,7 @@ mod tests {
         fm.insert("expanded", json!("hello")).unwrap();
         fm.insert("number", json!(42)).unwrap();
 
-        assert!(super::validate_no_whole_value_shell_leak(&fm, &test_ctx()).is_ok());
+        assert!(super::validate_no_whole_value_shell_leak(&fm, &test_ctx(), &std::collections::HashSet::new()).is_ok());
     }
 
     #[test]
@@ -2174,7 +2188,7 @@ mod tests {
         let mut fm = Frontmatter::new();
         fm.insert("padded", json!("  $(echo ok")).unwrap();
 
-        let err = super::validate_no_whole_value_shell_leak(&fm, &test_ctx()).unwrap_err();
+        let err = super::validate_no_whole_value_shell_leak(&fm, &test_ctx(), &std::collections::HashSet::new()).unwrap_err();
         match err {
             ShellExpansionError::ParseDirective { origin, message, .. } => {
                 assert_eq!(
@@ -2203,7 +2217,7 @@ mod tests {
         let mut fm = Frontmatter::new();
         fm.insert("padded", json!("  $(file_exists('x'))")).unwrap();
 
-        let err = super::validate_no_whole_value_shell_leak(&fm, &test_ctx()).unwrap_err();
+        let err = super::validate_no_whole_value_shell_leak(&fm, &test_ctx(), &std::collections::HashSet::new()).unwrap_err();
         match err {
             ShellExpansionError::ParseDirective { origin, .. } => {
                 assert_eq!(
@@ -2224,7 +2238,7 @@ mod tests {
         // mixed value, not a whole-value shape — it stays lenient.
         let mut fm = Frontmatter::new();
         fm.insert("padded", json!("  $(echo ok) trailing")).unwrap();
-        assert!(super::validate_no_whole_value_shell_leak(&fm, &test_ctx()).is_ok());
+        assert!(super::validate_no_whole_value_shell_leak(&fm, &test_ctx(), &std::collections::HashSet::new()).is_ok());
     }
 
     #[test]

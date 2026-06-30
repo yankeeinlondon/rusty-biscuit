@@ -153,13 +153,19 @@ impl Markdown {
             // those keys against the shell-expanded values.
             if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
                 let fm_start = perf.is_enabled().then(std::time::Instant::now);
+                // Capture the on-disk locus before borrowing frontmatter so a
+                // file-reference failure can render an OSC8 link + focused
+                // excerpt instead of the late-binding fallback.
+                let fm_source_ctx = self.full_source_context_for_errors();
                 let fm_report = frontmatter_interpolation::interpolate_frontmatter(
                     self.frontmatter_mut(),
                     options.context(),
                     options.fail_fast,
                     shell_expansion_enabled,
                     Some(options.frontmatter_resolution_context()),
-                )?;
+                    &options.exclude_keys,
+                )
+                .map_err(|e| e.with_on_disk_source(&fm_source_ctx))?;
                 report.frontmatter_interpolations_applied = fm_report.replacements;
                 report.warnings.extend(fm_report.warnings);
                 if let Some(start) = fm_start {
@@ -168,6 +174,20 @@ impl Markdown {
                         start.elapsed(),
                     );
                 }
+            }
+
+            // Surface the set of deferred keys that are actually present in
+            // this document's frontmatter (DM1 metadata). Lets callers
+            // distinguish "raw because deferred" from "raw because composition
+            // failed" for dry-run labeling and diagnostics.
+            if !options.exclude_keys.is_empty() {
+                let fm = self.frontmatter().as_map();
+                report.deferred_frontmatter_keys = options
+                    .exclude_keys
+                    .iter()
+                    .filter(|k| fm.contains_key(*k))
+                    .cloned()
+                    .collect();
             }
 
             // Schema Validation: check frontmatter against $schema or baseline
@@ -247,13 +267,16 @@ impl Markdown {
                     && fse_report.replacements > 0
                 {
                     let fm_start = perf.is_enabled().then(std::time::Instant::now);
+                    let fm_source_ctx = self.full_source_context_for_errors();
                     let fm_report = frontmatter_interpolation::interpolate_frontmatter(
                         self.frontmatter_mut(),
                         options.context(),
                         options.fail_fast,
                         false,
                         Some(options.frontmatter_resolution_context()),
-                    )?;
+                        &options.exclude_keys,
+                    )
+                    .map_err(|e| e.with_on_disk_source(&fm_source_ctx))?;
                     report.frontmatter_interpolations_applied += fm_report.replacements;
                     report.warnings.extend(fm_report.warnings);
                     if let Some(start) = fm_start {

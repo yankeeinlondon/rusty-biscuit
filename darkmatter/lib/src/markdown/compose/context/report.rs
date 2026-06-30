@@ -77,6 +77,13 @@ pub struct ComposeReport {
 
     /// Remote-fetch statistics from this compose run.
     pub remote_fetch_stats: Option<super::super::remote_fetch::RemoteFetchStats>,
+
+    /// Top-level frontmatter keys intentionally deferred from compose-time
+    /// resolution (via `ComposeOptions::with_exclude_keys`). Their values
+    /// survive raw in `effective_frontmatter` for caller-owned event-time
+    /// interpolation. Lets callers distinguish "raw because deferred" from
+    /// "raw because composition failed". Empty when no keys were deferred.
+    pub deferred_frontmatter_keys: std::collections::HashSet<String>,
 }
 
 /// Maps a byte range in composed output to its originating source file.
@@ -289,6 +296,10 @@ impl ComposeReport {
             (None, Some(other_perf)) => self.perf = Some(other_perf),
             _ => {}
         }
+
+        // Deferred keys accumulate across recursive child pipelines.
+        self.deferred_frontmatter_keys
+            .extend(other.deferred_frontmatter_keys);
     }
 }
 

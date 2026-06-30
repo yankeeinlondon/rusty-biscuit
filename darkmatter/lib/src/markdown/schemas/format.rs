@@ -3,72 +3,128 @@
 //! Two darkmatter-specific schema fragments require validators beyond the
 //! built-in JSON Schema vocabulary:
 //!
-//! - **`format: darkmatter-file`** — parses the value through
+//! - **`format: darkmatter-file`** (eager) — parses the value through
 //!   [`biscuit_file::FileReference`] and confirms the resolved path exists.
-//!   Path resolution uses the live process working directory at validation
-//!   time, mirroring the spec contract for `file` properties.
-//! - **`x-darkmatter-match`** — runs alongside `darkmatter-file` and filters
-//!   the resolved path through one or more glob patterns (positive +
-//!   negative). Globsets are compiled once when the validator is built.
+//!   Resolution follows the shared document-first / launch-area-fallback
+//!   order ([`resolve_file_ref_with_fallback`]): the prompt document
+//!   directory first, then the captured launch-area fallback, with no
+//!   ambient-CWD fallback on production paths. This mirrors the expression
+//!   path (`file_exists`/`frontmatter`) so schema validation and expression
+//!   functions agree on the same `file` value. Emitted for SimplifiedSchema
+//!   `file(eager)`.
+//! - **`format: darkmatter-file-reference`** (lazy) — validates **syntax
+//!   only** via construction-only [`biscuit_file::FileReference::new`]: a
+//!   syntactically valid but not-yet-existing path passes; no resolve, no
+//!   filesystem/git/env/vault lookup, no existence check. Emitted for
+//!   SimplifiedSchema bare `file`.
 //! - **`x-darkmatter-url-scheme`** — runs alongside `format: uri` and
 //!   restricts the URL scheme to a configured list (case-insensitive).
 //!
-//! `darkmatter-file` is a `Format` (it sees only the string) and the two
-//! `x-darkmatter-*` keywords are custom `Keyword` implementations (they need
-//! the surrounding schema fragment for their constraint list). See the ADR
-//! in `schemas.md` for why both shapes are needed.
+//! `darkmatter-file` / `darkmatter-file-reference` are `Format`s (they see
+//! only the string) and `x-darkmatter-url-scheme` is a custom `Keyword`
+//! implementation (it needs the surrounding schema fragment for its scheme
+//! list). `match(...)` is **not** a validation keyword: it is suggestion
+//! metadata carried on the SimplifiedSchema atom (`Constraint::Match` →
+//! completion), never lowered into the compiled JSON Schema.
 //!
 //! ## Examples
 //!
 //! ```ignore
 //! use jsonschema::{Draft, options};
 //! use darkmatter::markdown::schemas::format::{
-//!     match_keyword_factory, register_darkmatter_formats, url_scheme_keyword_factory,
+//!     register_darkmatter_formats, url_scheme_keyword_factory,
 //! };
 //!
 //! let validator = register_darkmatter_formats(
 //!     options().with_draft(Draft::Draft202012),
+//!     None,
+//!     None,
 //! )
-//! .with_keyword("x-darkmatter-match", match_keyword_factory)
 //! .with_keyword("x-darkmatter-url-scheme", url_scheme_keyword_factory)
 //! .build(&schema)?;
 //! ```
 
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use biscuit_file::{FileReference, FileReferenceError};
-use globset::{Glob, GlobSet, GlobSetBuilder};
 use jsonschema::{Keyword, ValidationError, ValidationOptions, paths::Location};
 use serde_json::{Map, Value};
 use url::Url;
 
-/// Format name registered for `file` SimplifiedSchema atoms.
+use crate::markdown::compose::expression::resolve_ctx::resolve_file_ref_with_fallback;
+
+/// Format name registered for eager `file(eager)` SimplifiedSchema atoms and
+/// for raw JSON Schema authors who want existence-checking.
+///
+/// The eager validator parses the value as a [`FileReference`], resolves it
+/// (document-first → launch-area fallback), and fails when the file does not
+/// exist on disk.
 pub const DARKMATTER_FILE_FORMAT: &str = "darkmatter-file";
 
-/// Keyword name registered for `file(match(...))` constraints.
-pub const DARKMATTER_MATCH_KEYWORD: &str = "x-darkmatter-match";
+/// Format name registered for lazy, syntax-only `file` references.
+///
+/// Emitted by SimplifiedSchema bare `file` (no `eager`). Validation is
+/// construction-only via [`FileReference::new`]: a syntactically valid
+/// reference passes regardless of whether the target exists, resolves, or its
+/// environment/vault/git context is available. Existence checking is the eager
+/// [`DARKMATTER_FILE_FORMAT`]'s job.
+pub const DARKMATTER_FILE_REFERENCE_FORMAT: &str = "darkmatter-file-reference";
 
 /// Keyword name registered for `url(scheme(...))` constraints.
 pub const DARKMATTER_URL_SCHEME_KEYWORD: &str = "x-darkmatter-url-scheme";
 
 /// Registers the `darkmatter-file` format on a `ValidationOptions` builder.
 ///
+/// `base_dir`, when `Some`, is the prompt document directory and is tried
+/// first so references authored inside the document resolve next to it.
+/// `fallback`, when `Some`, is the captured launch area and is tried second
+/// for caller-supplied references not authored in the document. When both are
+/// `None` the validator resolves against the ambient process working
+/// directory (legacy behavior preserved for callers — e.g.
+/// `DarkmatterSchemas::new()` in small unit tests — that configure no anchor).
+///
+/// This matches the shared resolution order encoded by
+/// [`resolve_file_ref_with_fallback`], so the `darkmatter-file` validator and
+/// the expression path (`file_exists`/`frontmatter`) agree on the same `file`
+/// value.
+///
 /// Splitting this out keeps validator construction in
 /// [`crate::markdown::schemas::validate`] tidy and lets tests register only
 /// the format without the keywords.
-pub fn register_darkmatter_formats(options: ValidationOptions) -> ValidationOptions {
-    options.with_format(DARKMATTER_FILE_FORMAT, validate_file_reference)
+///
+/// jsonschema 0.42's `with_format` accepts `F: Fn(&str) -> bool +
+/// Send + Sync + 'static`, so both anchors are captured by move into the
+/// closure — no thread-local or process-global state is required.
+pub fn register_darkmatter_formats(
+    options: ValidationOptions,
+    base_dir: Option<PathBuf>,
+    fallback: Option<PathBuf>,
+) -> ValidationOptions {
+    options
+        .with_format(DARKMATTER_FILE_FORMAT, move |value: &str| {
+            validate_file_reference(value, base_dir.as_deref(), fallback.as_deref())
+        })
+        .with_format(DARKMATTER_FILE_REFERENCE_FORMAT, |value: &str| {
+            // Lazy contract: syntax only. `FileReference::new` is
+            // construction-only — no `resolve()`, no `resolve_from()`, no
+            // filesystem/git/env/vault lookup, no `path.exists()` check — so a
+            // syntactically valid but not-yet-existing path validates here.
+            // Laziness defers *existence*, not *syntax*: a malformed reference
+            // still fails.
+            FileReference::new(value).is_ok()
+        })
 }
 
 /// Validates a string by parsing it as a `FileReference` and confirming the
 /// resolved path exists on disk at validation time.
 ///
-/// Resolution uses the ambient process working directory. Failures (parse,
-/// resolution, missing file) all return `false` so the JSON Schema layer
-/// surfaces a uniform `format: darkmatter-file` error message.
-fn validate_file_reference(value: &str) -> bool {
-    resolve_file_reference(value).is_ok()
+/// Resolution follows the document-first / launch-area-fallback order (see
+/// [`resolve_file_reference`]). Failures (parse, resolution, missing file)
+/// all return `false` so the JSON Schema layer surfaces a uniform
+/// `format: darkmatter-file` error message.
+fn validate_file_reference(value: &str, base_dir: Option<&Path>, fallback: Option<&Path>) -> bool {
+    resolve_file_reference(value, base_dir, fallback).is_ok()
 }
 
 /// Outcome of a [`resolve_file_reference`] call.
@@ -130,18 +186,48 @@ impl fmt::Display for FileReferenceFailure {
     }
 }
 
-/// Parses `value` as a `FileReference`, resolves it against the ambient
-/// process CWD, and confirms the resolved path exists.
+/// Parses `value` as a `FileReference`, resolves it, and confirms the resolved
+/// path exists.
+///
+/// Resolution follows the shared document-first / launch-area-fallback order
+/// ([`resolve_file_ref_with_fallback`]) when either anchor is provided:
+///
+/// 1. absolute paths are returned as-is by `FileReference`;
+/// 2. document-relative via `resolve_from(base_dir)` — **first**, so a `file`
+///    value authored next to the prompt resolves like the expression path's
+///    `file_exists`/`frontmatter` (document-first contract);
+/// 3. launch-area fallback via `resolve_from(fallback)` — **second**, for a
+///    caller-supplied path relative to the launch area;
+/// 4. no ambient-CWD fallback on this anchored path.
+///
+/// When **both** anchors are `None` (small unit tests / callers that configure
+/// no anchor) resolution falls back to the ambient process CWD via
+/// [`FileReference::resolve`] for backward compatibility.
 ///
 /// Returns the resolved path on success, or a [`FileReferenceFailure`]
 /// distinguishing the three failure modes so callers can render a
 /// situation-appropriate diagnostic.
-pub(crate) fn resolve_file_reference(value: &str) -> Result<PathBuf, FileReferenceFailure> {
+pub(crate) fn resolve_file_reference(
+    value: &str,
+    base_dir: Option<&Path>,
+    fallback: Option<&Path>,
+) -> Result<PathBuf, FileReferenceFailure> {
     let reference = FileReference::new(value).map_err(|err| FileReferenceFailure::InvalidSyntax {
         raw: value.to_string(),
         err,
     })?;
-    let path = reference.resolve().map_err(|err| FileReferenceFailure::Resolution {
+    let resolved = match base_dir {
+        // Anchored path: document-first, then launch-area fallback, no
+        // ambient-CWD fallback — identical order to the expression resolver.
+        Some(base_dir) => resolve_file_ref_with_fallback(&reference, base_dir, fallback),
+        // No document anchor configured. When a bare fallback is set, anchor
+        // resolution there; otherwise preserve the legacy ambient-CWD path.
+        None => match fallback {
+            Some(fallback) => reference.resolve_from(fallback),
+            None => reference.resolve(),
+        },
+    };
+    let path = resolved.map_err(|err| FileReferenceFailure::Resolution {
         raw: value.to_string(),
         err,
     })?;
@@ -156,153 +242,6 @@ pub(crate) fn resolve_file_reference(value: &str) -> Result<PathBuf, FileReferen
         });
     }
     Ok(path)
-}
-
-/// Factory for the `x-darkmatter-match` keyword.
-///
-/// Reads the globs from the schema value (which must be a non-empty array of
-/// strings) and compiles two `GlobSet`s — positive (no `!` prefix) and
-/// negative (`!`-prefixed) — at validator-build time. Bad schema input
-/// (non-array, non-string members, empty list, or an unparsable glob)
-/// surfaces as `ValidationError::schema`.
-///
-/// Also enforces the `format: darkmatter-file` co-requirement: the glob
-/// constraint only makes sense when the parent fragment is a
-/// `darkmatter-file` reference. Authors who omit the `format` (or pair it
-/// with any other `format`) get a build-time schema error rather than a
-/// silently-incorrect validator.
-pub fn match_keyword_factory<'a>(
-    parent: &'a Map<String, Value>,
-    schema: &'a Value,
-    _schema_path: Location,
-) -> Result<Box<dyn Keyword>, ValidationError<'a>> {
-    match parent.get("format") {
-        Some(Value::String(f)) if f == DARKMATTER_FILE_FORMAT => {}
-        _ => {
-            return Err(ValidationError::schema(format!(
-                "x-darkmatter-match requires `{DARKMATTER_FILE_FORMAT}` to also be set as `format` on the same fragment"
-            )));
-        }
-    }
-
-    let arr = schema.as_array().ok_or_else(|| {
-        ValidationError::schema("x-darkmatter-match must be an array of glob strings")
-    })?;
-    if arr.is_empty() {
-        return Err(ValidationError::schema(
-            "x-darkmatter-match must contain at least one glob",
-        ));
-    }
-
-    let mut positive = GlobSetBuilder::new();
-    let mut negative = GlobSetBuilder::new();
-    let mut has_positive = false;
-
-    for (idx, item) in arr.iter().enumerate() {
-        let raw = item.as_str().ok_or_else(|| {
-            ValidationError::schema(format!("x-darkmatter-match[{idx}] must be a string"))
-        })?;
-        let (target, has_pos) = if let Some(stripped) = raw.strip_prefix('!') {
-            (stripped, false)
-        } else {
-            (raw, true)
-        };
-        let glob = Glob::new(target).map_err(|err| {
-            ValidationError::schema(format!(
-                "x-darkmatter-match[{idx}] `{raw}` is not a valid glob: {err}"
-            ))
-        })?;
-        if has_pos {
-            positive.add(glob);
-            has_positive = true;
-        } else {
-            negative.add(glob);
-        }
-    }
-
-    let positive = if has_positive {
-        Some(positive.build().map_err(|err| {
-            ValidationError::schema(format!("could not build positive glob set: {err}"))
-        })?)
-    } else {
-        None
-    };
-    let negative = negative.build().map_err(|err| {
-        ValidationError::schema(format!("could not build negative glob set: {err}"))
-    })?;
-
-    Ok(Box::new(DarkmatterMatchKeyword { positive, negative }))
-}
-
-struct DarkmatterMatchKeyword {
-    /// `None` when the constraint contains only negative globs — any path is
-    /// considered to "match" so long as no negative pattern rejects it.
-    positive: Option<GlobSet>,
-    negative: GlobSet,
-}
-
-impl DarkmatterMatchKeyword {
-    fn check(&self, value: &str) -> bool {
-        // Resolve via FileReference to get the path used by the glob test.
-        let Ok(Some(path)) = FileReference::new(value).and_then(|r| r.resolve()) else {
-            // Could not parse or resolve the reference — leave the failure
-            // report to the `darkmatter-file` format validator and treat the
-            // glob constraint as satisfied here.
-            return true;
-        };
-        if !path.exists() {
-            // File is missing — same rationale. Surfacing a glob failure on
-            // top of the format validator's "no existing file matched"
-            // diagnostic would be misleading and duplicated.
-            return true;
-        }
-
-        // Match against several views of the path so patterns like `*.md`
-        // (filename-only) and `src/**/*.rs` (relative path) both work even
-        // when the resolver returns an absolute path.
-        let candidates = match_candidates(&path, value);
-        if candidates.iter().any(|c| self.negative.is_match(c)) {
-            return false;
-        }
-        match &self.positive {
-            Some(positive) => candidates.iter().any(|c| positive.is_match(c)),
-            None => true,
-        }
-    }
-}
-
-fn match_candidates(resolved: &std::path::Path, raw: &str) -> Vec<String> {
-    let mut out = Vec::with_capacity(4);
-    out.push(resolved.to_string_lossy().into_owned());
-    if let Some(name) = resolved.file_name().and_then(|n| n.to_str()) {
-        out.push(name.to_string());
-    }
-    // The raw input is useful for filename-only patterns like `*.md` and
-    // relative paths like `src/**/*.rs` that callers explicitly wrote.
-    out.push(raw.to_string());
-    if let Some(stripped) = raw.strip_prefix("./") {
-        out.push(stripped.to_string());
-    }
-    out
-}
-
-impl Keyword for DarkmatterMatchKeyword {
-    fn validate<'i>(&self, instance: &'i Value) -> Result<(), ValidationError<'i>> {
-        match instance {
-            Value::String(s) if self.check(s) => Ok(()),
-            Value::String(s) => Err(ValidationError::custom(format!(
-                "`{s}` does not match the configured file globs"
-            ))),
-            _ => Ok(()),
-        }
-    }
-
-    fn is_valid(&self, instance: &Value) -> bool {
-        match instance {
-            Value::String(s) => self.check(s),
-            _ => true,
-        }
-    }
 }
 
 /// Factory for the `x-darkmatter-url-scheme` keyword.
@@ -413,7 +352,7 @@ mod tests {
         let path = dir.path().join("README.md");
         std::fs::write(&path, b"x").unwrap();
         let _cwd = CwdGuard::enter(dir.path());
-        assert!(validate_file_reference("./README.md"));
+        assert!(validate_file_reference("./README.md", None, None));
     }
 
     #[test]
@@ -421,7 +360,99 @@ mod tests {
     fn file_format_rejects_missing_file() {
         let dir = temp_dir();
         let _cwd = CwdGuard::enter(dir.path());
-        assert!(!validate_file_reference("./does-not-exist.md"));
+        assert!(!validate_file_reference("./does-not-exist.md", None, None));
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn lazy_reference_format_accepts_missing_file() {
+        // Eager sibling of `file_format_rejects_missing_file`: the lazy,
+        // syntax-only validator accepts a syntactically valid, not-yet-existing
+        // path (no resolve, no existence check).
+        let dir = temp_dir();
+        let _cwd = CwdGuard::enter(dir.path());
+        assert!(FileReference::new("./does-not-exist.md").is_ok());
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn raw_json_schema_format_compat_eager_vs_lazy() {
+        // Raw JSON Schema compatibility contract: `format: darkmatter-file`
+        // stays eager (rejects a missing file), while
+        // `format: darkmatter-file-reference` is lazy syntax-only (accepts the
+        // same missing path, rejects only malformed syntax). Raw JSON Schema
+        // authors keep the established eager `darkmatter-file` semantics.
+        let dir = temp_dir();
+        std::fs::write(dir.path().join("exists.md"), b"x").unwrap();
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let build = |format: &str| {
+            register_darkmatter_formats(
+                jsonschema::options().with_draft(jsonschema::Draft::Draft202012),
+                None,
+                None,
+            )
+            .should_validate_formats(true)
+            .build(&json!({ "type": "string", "format": format }))
+            .expect("validator builds")
+        };
+        let eager = build(DARKMATTER_FILE_FORMAT);
+        let lazy = build(DARKMATTER_FILE_REFERENCE_FORMAT);
+
+        let missing = json!("./missing.md");
+        let existing = json!("./exists.md");
+        // The empty string is rejected at `FileReference` parse time — the
+        // canonical malformed-syntax input.
+        let malformed = json!("");
+
+        assert!(!eager.is_valid(&missing), "eager rejects missing");
+        assert!(eager.is_valid(&existing), "eager accepts existing");
+        assert!(lazy.is_valid(&missing), "lazy accepts missing");
+        assert!(lazy.is_valid(&existing), "lazy accepts existing");
+        assert!(!lazy.is_valid(&malformed), "lazy rejects malformed syntax");
+        assert!(!eager.is_valid(&malformed), "eager rejects malformed syntax");
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn lazy_reference_format_accepts_missing_path_that_eager_rejects() {
+        // Phase 2 checkpoint: the same syntactically valid, not-yet-existing
+        // path passes the lazy `darkmatter-file-reference` validator and fails
+        // the eager `darkmatter-file` validator. Built through
+        // `register_darkmatter_formats` so both closures are exercised exactly
+        // as the production validator wires them.
+        let dir = temp_dir();
+        let _cwd = CwdGuard::enter(dir.path());
+        let missing = serde_json::json!("./not-created-yet.md");
+
+        let build = |format: &str| {
+            register_darkmatter_formats(
+                jsonschema::options().with_draft(jsonschema::Draft::Draft202012),
+                None,
+                None,
+            )
+            .should_validate_formats(true)
+            .build(&json!({ "type": "string", "format": format }))
+            .expect("validator builds")
+        };
+
+        let lazy = build(DARKMATTER_FILE_REFERENCE_FORMAT);
+        let eager = build(DARKMATTER_FILE_FORMAT);
+
+        assert!(
+            lazy.is_valid(&missing),
+            "lazy darkmatter-file-reference must accept a syntactically valid missing path",
+        );
+        assert!(
+            !eager.is_valid(&missing),
+            "eager darkmatter-file must reject a missing path",
+        );
+
+        // Laziness defers existence, not syntax: both reject malformed input
+        // (an empty reference string).
+        let malformed = serde_json::json!("");
+        assert!(!lazy.is_valid(&malformed), "lazy must reject malformed syntax");
+        assert!(!eager.is_valid(&malformed), "eager must reject malformed syntax");
     }
 
     #[test]
@@ -431,7 +462,7 @@ mod tests {
         let path = dir.path().join("README.md");
         std::fs::write(&path, b"x").unwrap();
         let _cwd = CwdGuard::enter(dir.path());
-        let resolved = resolve_file_reference("./README.md").expect("should resolve");
+        let resolved = resolve_file_reference("./README.md", None, None).expect("should resolve");
         // On macOS the temp dir is exposed under both /var/folders/... and
         // /private/var/folders/... depending on how the path is rooted, so
         // compare existence and the trailing component rather than full
@@ -445,7 +476,7 @@ mod tests {
     fn resolve_file_reference_reports_missing_file() {
         let dir = temp_dir();
         let _cwd = CwdGuard::enter(dir.path());
-        let err = resolve_file_reference("./does-not-exist.md")
+        let err = resolve_file_reference("./does-not-exist.md", None, None)
             .expect_err("should fail with NoMatch");
         let rendered = err.to_string();
         assert!(
@@ -460,7 +491,7 @@ mod tests {
     #[test]
     fn resolve_file_reference_reports_invalid_syntax() {
         // Empty input is rejected at parse time.
-        let err = resolve_file_reference("").expect_err("should fail with InvalidSyntax");
+        let err = resolve_file_reference("", None, None).expect_err("should fail with InvalidSyntax");
         let rendered = err.to_string();
         assert!(
             rendered.contains("is not a valid file reference"),
@@ -480,7 +511,7 @@ mod tests {
         // it, but unset it defensively before resolving.
         unsafe { std::env::remove_var(var_name); }
         let raw = format!("{{{{{var_name}}}}}/notes.md");
-        let err = resolve_file_reference(&raw).expect_err("should fail with Resolution");
+        let err = resolve_file_reference(&raw, None, None).expect_err("should fail with Resolution");
         let rendered = err.to_string();
         assert!(
             rendered.contains("could not resolve file reference"),
@@ -499,7 +530,7 @@ mod tests {
     fn resolve_file_reference_reports_resolution_error_for_unconfigured_vault() {
         let dir = temp_dir();
         let _cwd = CwdGuard::enter(dir.path());
-        let err = resolve_file_reference("vault:notes/today.md")
+        let err = resolve_file_reference("vault:notes/today.md", None, None)
             .expect_err("should fail with Resolution");
         let rendered = err.to_string();
         assert!(
@@ -520,7 +551,7 @@ mod tests {
         let dir = temp_dir();
         let _cwd = CwdGuard::enter(dir.path());
         let raw = "/tmp/darkmatter-test-missing-absolute-xyz.md";
-        let err = resolve_file_reference(raw).expect_err("should fail with NoMatch");
+        let err = resolve_file_reference(raw, None, None).expect_err("should fail with NoMatch");
         let rendered = err.to_string();
         assert!(
             rendered.contains("no existing file matched reference"),
@@ -539,7 +570,7 @@ mod tests {
         let dir = temp_dir();
         let _cwd = CwdGuard::enter(dir.path());
         let raw = "@darkmatter-test-missing-magic-xyz.md";
-        let err = resolve_file_reference(raw).expect_err("should fail with NoMatch");
+        let err = resolve_file_reference(raw, None, None).expect_err("should fail with NoMatch");
         let rendered = err.to_string();
         assert!(
             rendered.contains("no existing file matched reference"),
@@ -556,7 +587,7 @@ mod tests {
         let dir = temp_dir();
         let _cwd = CwdGuard::enter(dir.path());
         let raw = "!darkmatter-test-missing-package-xyz.md";
-        let err = resolve_file_reference(raw).expect_err("should fail with NoMatch");
+        let err = resolve_file_reference(raw, None, None).expect_err("should fail with NoMatch");
         let rendered = err.to_string();
         assert!(
             rendered.contains("no existing file matched reference"),
@@ -573,7 +604,7 @@ mod tests {
         let dir = temp_dir();
         let _cwd = CwdGuard::enter(dir.path());
         let raw = "%darkmatter-test-missing-recursive-xyz.md";
-        let err = resolve_file_reference(raw).expect_err("should fail with NoMatch");
+        let err = resolve_file_reference(raw, None, None).expect_err("should fail with NoMatch");
         let rendered = err.to_string();
         assert!(
             rendered.contains("no existing file matched reference"),
@@ -596,141 +627,6 @@ mod tests {
             rendered,
             "no existing file matched reference `./x`",
         );
-    }
-
-    fn make_match_keyword(globs: Value) -> Box<dyn Keyword> {
-        let mut parent = Map::new();
-        parent.insert(
-            "format".into(),
-            Value::String(DARKMATTER_FILE_FORMAT.into()),
-        );
-        match_keyword_factory(&parent, &globs, Location::default()).expect("factory should accept")
-    }
-
-    #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
-    fn match_keyword_positive_only_accepts_match() {
-        let dir = temp_dir();
-        let path = dir.path().join("notes.md");
-        std::fs::write(&path, b"x").unwrap();
-        let _cwd = CwdGuard::enter(dir.path());
-        let kw = make_match_keyword(json!(["*.md"]));
-        assert!(kw.is_valid(&Value::String("./notes.md".into())));
-    }
-
-    #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
-    fn match_keyword_respects_negative_globs() {
-        let dir = temp_dir();
-        let bad = dir.path().join("_draft.md");
-        std::fs::write(&bad, b"x").unwrap();
-        let _cwd = CwdGuard::enter(dir.path());
-        let kw = make_match_keyword(json!(["*.md", "!_*.md"]));
-        assert!(!kw.is_valid(&Value::String("./_draft.md".into())));
-    }
-
-    #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
-    fn match_keyword_negative_only_accepts_unless_excluded() {
-        let dir = temp_dir();
-        let good = dir.path().join("ok.md");
-        std::fs::write(&good, b"x").unwrap();
-        let _cwd = CwdGuard::enter(dir.path());
-        let kw = make_match_keyword(json!(["!_*.md"]));
-        assert!(kw.is_valid(&Value::String("./ok.md".into())));
-    }
-
-    #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
-    fn match_keyword_returns_valid_for_missing_file() {
-        // The glob constraint is intentionally narrow (`*.md`) but the target
-        // file does not exist. The format validator owns the "no existing
-        // file matched" diagnostic; the glob constraint must not also fire
-        // here, otherwise a user sees two errors for the same underlying
-        // issue.
-        let dir = temp_dir();
-        let _cwd = CwdGuard::enter(dir.path());
-        let kw = make_match_keyword(json!(["*.md"]));
-        assert!(
-            kw.is_valid(&Value::String("./does-not-exist.txt".into())),
-            "missing files should be passed through to the format validator",
-        );
-    }
-
-    #[test]
-    fn match_keyword_returns_valid_when_value_cannot_resolve() {
-        // Empty input is rejected at `FileReference::new` time. Same
-        // delegation as the missing-file case: the glob constraint must not
-        // produce its own (misleading) error on top of the format
-        // validator's.
-        let kw = make_match_keyword(json!(["*.md"]));
-        assert!(
-            kw.is_valid(&Value::String("".into())),
-            "unparseable file references should not be double-reported",
-        );
-    }
-
-    #[test]
-    fn match_keyword_rejects_parent_without_format() {
-        // Schema-build guard: `x-darkmatter-match` is only meaningful next
-        // to `format: darkmatter-file`. Without the format, the format
-        // validator never runs, so the glob check has nothing to filter
-        // against and the build must fail loudly.
-        let parent = Map::new();
-        let globs = json!(["*.md"]);
-        let err = match_keyword_factory(&parent, &globs, Location::default())
-            .err()
-            .expect("expected factory error");
-        assert!(
-            err.to_string().contains(DARKMATTER_FILE_FORMAT),
-            "expected error to name the required format, got: {}",
-            err,
-        );
-    }
-
-    #[test]
-    fn match_keyword_rejects_parent_with_wrong_format() {
-        // A different `format` (e.g. `uri`) signals a different contract
-        // and is not interchangeable with `darkmatter-file`. The schema
-        // build must reject this combination.
-        let mut parent = Map::new();
-        parent.insert("format".into(), Value::String("uri".into()));
-        let globs = json!(["*.md"]);
-        let err = match_keyword_factory(&parent, &globs, Location::default())
-            .err()
-            .expect("expected factory error");
-        assert!(
-            err.to_string().contains(DARKMATTER_FILE_FORMAT),
-            "expected error to name the required format, got: {}",
-            err,
-        );
-    }
-
-    #[test]
-    fn match_keyword_rejects_parent_with_non_string_format() {
-        // `format: ["darkmatter-file"]` (an array) or `format: 1` (a number)
-        // are not the contract this keyword expects. Build must fail rather
-        // than silently accept.
-        let mut parent = Map::new();
-        parent.insert("format".into(), Value::Array(vec![]));
-        assert!(
-            match_keyword_factory(&parent, &json!(["*.md"]), Location::default()).is_err(),
-            "non-string format must be rejected",
-        );
-    }
-
-    #[test]
-    fn match_keyword_rejects_empty_arr() {
-        let mut parent = Map::new();
-        parent.insert(
-            "format".into(),
-            Value::String(DARKMATTER_FILE_FORMAT.into()),
-        );
-        let empty = json!([]);
-        let err = match_keyword_factory(&parent, &empty, Location::default())
-            .err()
-            .expect("expected factory error");
-        assert!(err.to_string().contains("at least one glob"));
     }
 
     #[test]

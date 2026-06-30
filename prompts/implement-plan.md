@@ -4,26 +4,35 @@ $schema:
     total_phases: number(required)
     plan: file(required)
     spec: file
-    spec_file: file
-phase: "{{ frontmatter(plan, 'start_phase') || 1 }}"
-dirname: "{{ dirname(plan) }}"
-# spec: "{{ frontmatter( }}"
+description: |-
+    Provide either `plan` or `spec` filepath as a parameter and this
+    prompt will detect the number of phases in the plan and then implement
+    the project phase by phase.
+plan: "{{ file_exists(spec) ? dirname(spec) + '/plan.md'  : null }}"
+phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || 1 : null }}"
 area: "{{ ctx.area }}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
-total_phases: "{{ frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') }}"
-spec_file: "{{ file_exists(spec) ? spec : file_exists(join(dirname, 'spec.md')) ? join(dirname, 'spec.md')  :  '' }}"
+total_phases: "{{ file_exists(plan) ? frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') : 0 }}"
+spec: "{{ file_exists(plan) ? file_exists(dirname(plan) + '/spec.md') ? dirname(plan) + '/spec.md'  :  null : null }}"
+# initialize:
+#     stack:
+#         - when: "phase >= total_phases"
+#           action: 
+#               - warn: "There was an attempt to implement a phase **<yellow>{{phase}}</yellow>** of the plan which is **too large**. This plan only has **<yellow>{{total_phases}}</yellow>** total phases!"
 start:
-    message: "🎬  starting the implementation of phase **#{{phase}}** of `{{parent_dir(plan)}}`\n> &nbsp;&nbsp;&nbsp;&nbsp;**area:** {{ctx.area}}, **agent:** {{ctx.agent}}/{{ctx.model}}"
+    message: "🎬  starting the implementation of phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ctx.area}}, **agent:** {{ctx.agent}}/{{ctx.model}})"
 success: 
     say: "Phase {{phase}} of the plan in the {{area}} package area, was implemented successfully"
-    message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{area}}, {{ctx.agent}}/{{ctx.model}})"
+    message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{ctx.area}}, {{ctx.agent}}/{{ctx.model}})"
+    success: "Completed the implementation of {{plan}}"
 blocked:
-    message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved!"
+    message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved for execution!"
 failure:
     say: "Phase {{phase}} of a plan in the {{area}} package area, ran into problems!"
-    message: "❌️  phase {{phase}} (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}` ({{area}}, {{ctx.agent}}/{{ctx.model}})"
+    message: "❌️  phase **{{phase}}** (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}` ({{area}}, {{ctx.agent}}/{{ctx.model}}: {{err.message}})"
+    effect: sad-trombone
 loop:
-    until: "phase > total_phases"
+    until: "phase >= total_phases"
     action: "increment(phase)"
 ---
 ::block when="total_phases"
@@ -43,8 +52,8 @@ Your task is to implement phase {{phase}} of the plan found in '@{{area}}/{{plan
 > **NOTE:** for context you should read the lessons learned discovered in earlier stages of this plan. You will find these lessons learned in memory/{{memory}}.md. 
 ::end-block
 
-::block when="spec_file"
-> **NOTE:** this plan is based on the specification file: {{spec_file}}
+::block when="spec"
+> **NOTE:** this plan is based on the specification file: {{spec}}
 ::end-block
 
 You are done when:

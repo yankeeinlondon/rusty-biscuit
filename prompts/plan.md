@@ -1,4 +1,7 @@
 ---
+$schema:
+    spec: file(required;match(**/*spec*.md))
+    design: file(match(**/*design*.md))
 description: "Creates a multi-phase, high confidence plan from a _feature_ or _fix_"
 root: "{{ctx.repo_root}}"
 area: "{{ctx.current_package_area == 'root' ? ctx.current_package || '' : ctx.current_package_area}}"

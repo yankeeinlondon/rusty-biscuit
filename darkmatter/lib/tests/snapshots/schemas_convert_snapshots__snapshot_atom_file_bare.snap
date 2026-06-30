@@ -16,7 +16,7 @@ expression: "convert_atom(\"file\")"
           "const": ""
         },
         {
-          "format": "darkmatter-file",
+          "format": "darkmatter-file-reference",
           "type": "string"
         }
       ]

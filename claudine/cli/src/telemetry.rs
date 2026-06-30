@@ -150,6 +150,7 @@ fn command_name(command: &Commands) -> &'static str {
         Commands::InlineCompose(_) => "inline-compose",
         Commands::Sequence(_) => "sequence",
         Commands::Context(_) => "context",
+        Commands::Errors(_) => "errors",
     }
 }
 
@@ -540,6 +541,7 @@ mod tests {
             replace_system_prompt: None,
             timeout: None,
             step_timeout: None,
+            stall_timeout: None,
             dry_run: false,
             quiet: false,
             silent: false,

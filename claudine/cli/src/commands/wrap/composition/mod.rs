@@ -48,13 +48,10 @@ use super::exec::switch_process_cwd;
 use crate::log;
 
 pub(crate) mod dry_run;
-pub(crate) mod inline_cleanup;
 pub(crate) mod prep_context;
 pub(crate) mod target;
 pub(crate) mod timeouts;
 
-// Re-export helpers still used by inline.rs and other callers.
-pub(crate) use inline_cleanup::{cleanup_inline_output, split_frontmatter_and_body};
 pub(crate) use prep_context::CompositionPrepContext;
 pub(crate) use target::{
     agent_prompt_message, composition_dispatch_context, eagerly_resolve_target,
@@ -63,7 +60,7 @@ pub(crate) use target::{
 };
 pub(crate) use timeouts::{
     TimeoutResolutionInput, build_prompt_timing_context, format_interactive_timeout_conflict,
-    frontmatter_timeout_duration, resolve_single_timeout, resolve_timeouts,
+    frontmatter_timeout_duration, resolve_single_timeout, resolve_stall_timeout, resolve_timeouts,
 };
 #[cfg(test)]
 pub(crate) use target::{picker_scope_for_state, resolve_live_target_with_tty};
@@ -138,6 +135,23 @@ fn enforce_repo_launch_detection(
     Ok(())
 }
 
+/// Outcome of running the pre-flight `blocked` + `finalize` lifecycle events.
+///
+/// `Control` carries the blocked stack's flow-control action (if any) for the
+/// caller to dispatch. `EvaluationError` carries a typed
+/// [`CompositionError::LifecycleEvaluationError`] raised by the `blocked` or
+/// `finalize` stack itself — it takes precedence over the original pre-flight
+/// failure because a lifecycle expression crash is the actionable cause.
+#[derive(Debug)]
+enum PreflightBlockedOutcome {
+    /// No evaluation error; the blocked stack's flow-control action (if any).
+    Control(Option<StackControl>),
+    /// A late-binding evaluation error raised in `blocked` (routed through
+    /// failure + finalize with the evaluation error as `err`) or in `finalize`
+    /// (surfaced without re-entering finalize).
+    EvaluationError(CompositionError),
+}
+
 /// Run the `blocked` and `finalize` lifecycle events (top-level
 /// communication **and** typed stack) for a composition preflight failure.
 ///
@@ -149,7 +163,7 @@ fn enforce_repo_launch_detection(
 /// legacy top-level subset (`stderr`/`message`/`notify`/audio) and skips both
 /// the typed stacks and `finalize`. That left documents relying on
 /// `blocked.stack` / `finalize.stack` side effects (e.g.
-/// `append_line('events.log', 'blocked')`) without either marker.
+/// `{append_line: ["events.log", "blocked"]}`) without either marker.
 ///
 /// This helper mirrors the [`StackExecutionContext`] pattern the
 /// `initialize` event uses (see `init_ctx` in
@@ -163,6 +177,51 @@ fn enforce_repo_launch_detection(
 /// `err_info` should faithfully describe which preflight failed
 /// (e.g. `from_action_failure("harness_plan", msg)`) so a user-authored
 /// `blocked.stack` can reference `{{ err.msg }}` meaningfully.
+///
+/// A late-binding evaluation error raised by the `blocked` or `finalize`
+/// stack (a crashed `when:` guard, an unknown root under DM2 strict mode)
+/// takes precedence over the original pre-flight failure: it is routed
+/// through `failure` + `finalize` carrying the evaluation error as `err`
+/// (when raised by `blocked`) and returned as a typed
+/// [`CompositionError::LifecycleEvaluationError`] so the caller halts
+/// non-zero on the actionable cause. A raise inside `finalize` itself is
+/// surfaced without re-entering `finalize` (the re-entry guard from
+/// Decision #3 / `handle_terminal_evaluation_error`).
+/// Decide which evaluation error surfaces after a pre-flight `blocked` catch
+/// ran its `failure`/`finalize` events, keeping the "already emitted to stderr"
+/// bookkeeping correct (Decision #2).
+///
+/// Mirrors `harness_orch::loop_control::surface_catch_evaluation_error` but
+/// returns a [`CompositionError`] (the pre-flight outcome carries one, not a
+/// `Report`): the original `blocked` raise was already emitted as `early`; if a
+/// catch event raised a newer crash, that one is emitted now (no further
+/// lifecycle events fire) and marked emitted, else `early` surfaces unchanged.
+fn surface_preflight_catch_error(
+    source_path: &Path,
+    failure_outcome: Option<&LifecycleEventOutcome>,
+    finalize_outcome: Option<&LifecycleEventOutcome>,
+    early: CompositionError,
+    term: &Terminal,
+) -> CompositionError {
+    if let Some(fin_info) = finalize_outcome.and_then(|o| o.evaluation_error.as_ref()) {
+        crate::output::error_walker::emit_lifecycle_evaluation_error_early(
+            source_path,
+            "finalize",
+            fin_info,
+            term,
+        )
+    } else if let Some(fail_info) = failure_outcome.and_then(|o| o.evaluation_error.as_ref()) {
+        crate::output::error_walker::emit_lifecycle_evaluation_error_early(
+            source_path,
+            "failure",
+            fail_info,
+            term,
+        )
+    } else {
+        early
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn emit_preflight_blocked_and_finalize(
     guard: &mut LifecycleRunGuard<'_>,
@@ -174,26 +233,33 @@ fn emit_preflight_blocked_and_finalize(
     source_path: &Path,
     repo_root: Option<&Path>,
     base_dir: Option<&Path>,
+    ctx_base_dir: Option<&Path>,
+    prepared_context: Option<&darkmatter::markdown::compose::ComposeContext>,
     frontmatter: &serde_json::Map<String, serde_json::Value>,
     document_start: std::time::Instant,
     err_info: claudine::composition::LifecycleErrorInfo,
-) -> Option<StackControl> {
+) -> PreflightBlockedOutcome {
     let timing = claudine::composition::LifecycleTiming::from_instants(
         document_start,
         None,
         std::time::Instant::now(),
     );
-    let current_anchor = base_dir.unwrap_or(source_path);
+    // `current.ctx.*` follows the launch area like event-time `ctx.*` capture.
+    let current_anchor = ctx_base_dir.or(base_dir).unwrap_or(source_path);
     let current =
         claudine::composition::LifecycleCurrent::capture_at_event(current_anchor);
 
     let blocked_ctx = StackExecutionContext {
         signal: LifecycleSignal::Blocked,
         frontmatter,
+        // Single pre-flight `blocked` event — no later event shares this state.
+        live_frontmatter: None,
         err: Some(&err_info),
         timing: Some(&timing),
         current: Some(&current),
         base_dir,
+        ctx_base_dir,
+        prepared_context,
         effect_engine,
         shell_runner: &SystemShellRunner,
         emitter,
@@ -205,21 +271,74 @@ fn emit_preflight_blocked_and_finalize(
     };
     let blocked_outcome = guard.execute_event(LifecycleSignal::Blocked, &blocked_ctx);
 
-    // The finalize stack reuses the same frontmatter / globals / side-effect
-    // routes as the blocked stack; only the signal differs. `with_signal`
-    // borrows `blocked_ctx` by shared reference, which does not conflict with
-    // the `&mut guard` `execute_event` requires because the guard and the
-    // context borrow from disjoint locals (emitter/settings/... passed in as
-    // arguments, not pulled out of the guard).
-    let finalize_ctx = blocked_ctx.with_signal(LifecycleSignal::Finalize);
-    guard.execute_event(LifecycleSignal::Finalize, &finalize_ctx);
+    // A late-binding evaluation error on `blocked` (a crashed `when:` guard or
+    // interpolation) routes through `failure` + `finalize` carrying the
+    // evaluation error as `err`, then surfaces the typed run failure
+    // (Decision #5). `blocked` already took the terminal slot, so we
+    // redesignate it to `Failure` (mirroring the `error()`-downgrade path in
+    // `execute_terminal_event`) and run the failure stack directly via
+    // `run_event_stack` (which bypasses the already-recorded slot). The
+    // subsequent `execute_event(Finalize)` still works because
+    // `terminal_emitted` remains true and `finalize_emitted` is unset.
+    if let Some(eval_info) = blocked_outcome.evaluation_error.as_ref() {
+        // Surface the original `blocked` crash to stderr before the
+        // `failure`/`finalize` catch events fire (Decision #2).
+        let early = crate::output::error_walker::emit_lifecycle_evaluation_error_early(
+            source_path,
+            "blocked",
+            eval_info,
+            term,
+        );
+        guard.redesignate_terminal_to_failure();
+        let failure_ctx = blocked_ctx.with_signal(LifecycleSignal::Failure);
+        let failure_ctx = failure_ctx.with_error(eval_info);
+        let failure_outcome = guard.run_event_stack(LifecycleSignal::Failure, &failure_ctx);
+        // If `failure` raised, thread its error (not the original) into
+        // finalize so a `finalize.stack` can branch on the failure raise.
+        let active_err = failure_outcome
+            .evaluation_error
+            .as_ref()
+            .unwrap_or(eval_info);
+        let finalize_ctx = blocked_ctx.with_signal(LifecycleSignal::Finalize);
+        let finalize_ctx = finalize_ctx.with_error(active_err);
+        let finalize_outcome = guard.execute_event(LifecycleSignal::Finalize, &finalize_ctx);
+        return PreflightBlockedOutcome::EvaluationError(surface_preflight_catch_error(
+            source_path,
+            Some(&failure_outcome),
+            Some(&finalize_outcome),
+            early,
+            term,
+        ));
+    }
 
-    // Surface the blocked stack's flow-control action (if any) so the caller can
-    // dispatch it. At the compose pre-flight layer the provider has not launched
-    // and there is no run-loop to re-enter, so the caller maps `resume` →
-    // `ResumeWithoutSession` and `retry`/`requeue`/`proxy` → a typed
-    // setup-phase-deferred error rather than silently dropping the control.
-    blocked_outcome.control
+    // No evaluation error on `blocked`: run `finalize` with the original
+    // pre-flight `err`. `with_signal` borrows `blocked_ctx` by shared
+    // reference, which does not conflict with the `&mut guard` `execute_event`
+    // requires because the guard and the context borrow from disjoint locals
+    // (emitter/settings/... passed in as arguments, not pulled out of the
+    // guard).
+    let finalize_ctx = blocked_ctx.with_signal(LifecycleSignal::Finalize);
+    let finalize_outcome = guard.execute_event(LifecycleSignal::Finalize, &finalize_ctx);
+
+    // A raise inside `finalize` itself halts without re-entering `finalize`
+    // (the re-entry guard). Surface it to stderr at the point of error.
+    if let Some(eval_info) = finalize_outcome.evaluation_error.as_ref() {
+        let early = crate::output::error_walker::emit_lifecycle_evaluation_error_early(
+            source_path,
+            "finalize",
+            eval_info,
+            term,
+        );
+        return PreflightBlockedOutcome::EvaluationError(early);
+    }
+
+    // Surface the blocked stack's flow-control action (if any) so the caller
+    // can dispatch it. At the compose pre-flight layer the provider has not
+    // launched and there is no run-loop to re-enter, so the caller maps
+    // `resume` → `ResumeWithoutSession` and `retry`/`requeue`/`proxy` → a
+    // typed setup-phase-deferred error rather than silently dropping the
+    // control.
+    PreflightBlockedOutcome::Control(blocked_outcome.control)
 }
 
 /// Translate a compose pre-flight `blocked` stack's surfaced flow-control action
@@ -754,9 +873,11 @@ fn execute_composition_request_inner_with_guard(
                     .inject(&session.servers, &mut string_env, shadow)
                     .map_err(|e| eyre!("MCP injection failed: {e}"))?;
 
-                for (key, value) in string_env {
-                    env_plan.env.insert(key.into(), value.into());
-                }
+                // The OpenCode inline config is shared with the system-prompt
+                // and YOLO producers, so it must merge into any value already on
+                // the plan rather than overwrite it; every other key is a plain
+                // set. Mirrors the direct wrapper at wrapper_mcp.rs.
+                super::wrapper_mcp::merge_injected_env_into_plan(string_env, &mut env_plan)?;
                 mcp_extra_args.extend(result.extra_args);
             }
         } else {
@@ -811,6 +932,18 @@ fn execute_composition_request_inner_with_guard(
         "YOLO".into(),
         if effective_yolo { "true" } else { "false" }.into(),
     );
+
+    // Merge the OpenCode YOLO permission block into `OPENCODE_CONFIG_CONTENT`
+    // as the last Claudine overlay, mirroring the direct wrapper's Stage 10.5.
+    // Runs after the MCP fold above so it cannot be weakened by the MCP or
+    // system-prompt writers; gated on YOLO having actually taken effect
+    // (`effective_yolo`, not `request.yolo`) plus non-interactive.
+    crate::commands::wrap::wrapper_stages::apply_opencode_yolo_config_overlay(
+        provider,
+        effective_yolo,
+        effective_non_interactive,
+        &mut env_plan,
+    )?;
     // One-shot debug trace of the final argv that goes to the provider
     // so operators can verify the catalog flag actually landed without
     // running an external `ps`. Gated by `tracing` (RUST_LOG); never
@@ -962,6 +1095,21 @@ fn execute_composition_request_inner_with_guard(
             child_args.extend(application.args);
             for (k, v) in application.env {
                 if k == "HOME" && env_plan.env.contains_key(std::ffi::OsStr::new("HOME")) {
+                    continue;
+                }
+                // `OPENCODE_CONFIG_CONTENT` is the one inline config the
+                // system-prompt writer shares with the MCP and YOLO producers.
+                // A raw insert here clobbers the YOLO `permission` overlay
+                // applied earlier (mod.rs:826), which silently re-opens the
+                // subagent `external_directory` hang the YOLO overlay exists to
+                // prevent. Route it through the same merge the MCP fold uses so
+                // `instructions`, `mcp`, and `permission` coexist.
+                if k == std::ffi::OsStr::new("OPENCODE_CONFIG_CONTENT") {
+                    let injected = std::collections::HashMap::from([(
+                        "OPENCODE_CONFIG_CONTENT".to_string(),
+                        v.to_string_lossy().to_string(),
+                    )]);
+                    super::wrapper_mcp::merge_injected_env_into_plan(injected, &mut env_plan)?;
                     continue;
                 }
                 env_plan.env.insert(
@@ -1187,6 +1335,28 @@ fn execute_composition_request_inner_with_guard(
         .auto_rehash(false)
         .build();
 
+    // Capture the early-binding context ONCE for this run, against the launch
+    // area (the package area the caller launched from), and reuse the same
+    // snapshot for every lifecycle event (the pre-flight `blocked`/`finalize`
+    // stacks and the post-closure `initialize`) so plain `ctx.*`/`env.*` cannot
+    // diverge per event and no per-event sniff scan runs. Demand-driven over
+    // the effective frontmatter (which still carries the deferred lifecycle
+    // `{{ctx.*}}` strings) plus the composed body. `env_overrides` mirror what
+    // `prepare` applied. `current.*` stays event-time and is captured below.
+    let lifecycle_context = {
+        let fm_json =
+            serde_json::to_string(&request.prepared.effective_frontmatter).unwrap_or_default();
+        let scan = format!("{fm_json}\n{}", request.prepared.prompt);
+        let mut ctx = darkmatter::markdown::compose::ComposeContext::capture_for_content(
+            launch_workspace.launch_cwd.as_path(),
+            &scan,
+        );
+        for (key, value) in &request.env_overrides {
+            ctx.env_mut().insert(key.clone(), value.clone());
+        }
+        ctx
+    };
+
     // Common execution body used both when the caller provides an external
     // lifecycle guard (loop re-entry) and when this function owns the guard
     // (single-run / first loop iteration). The closure captures the prep
@@ -1217,7 +1387,7 @@ fn execute_composition_request_inner_with_guard(
             // Route through the stack-aware runner so `blocked.stack` and
             // `finalize.stack` fire (spec.md:436/650/652), not just the
             // legacy top-level surface.
-            let blocked_control = emit_preflight_blocked_and_finalize(
+            let preflight_outcome = emit_preflight_blocked_and_finalize(
                 guard,
                 &lifecycle_effect_engine,
                 &emitter,
@@ -1227,6 +1397,8 @@ fn execute_composition_request_inner_with_guard(
                 &request.prepared.resolved_path,
                 effective_repo_root,
                 base_dir,
+                Some(launch_workspace.launch_cwd.as_path()),
+                Some(&lifecycle_context),
                 frontmatter,
                 document_start,
                 claudine::composition::LifecycleErrorInfo::from_action_failure(
@@ -1234,12 +1406,17 @@ fn execute_composition_request_inner_with_guard(
                     e.to_string(),
                 ),
             );
-            match preflight_blocked_control_error(
-                blocked_control,
-                &request.prepared.resolved_path,
-            ) {
-                Some(ce) => ce.into(),
-                None => eyre!("{e}"),
+            match preflight_outcome {
+                PreflightBlockedOutcome::EvaluationError(ce) => ce.into(),
+                PreflightBlockedOutcome::Control(control) => {
+                    match preflight_blocked_control_error(
+                        control,
+                        &request.prepared.resolved_path,
+                    ) {
+                        Some(ce) => ce.into(),
+                        None => eyre!("{e}"),
+                    }
+                }
             }
         })?;
 
@@ -1261,7 +1438,7 @@ fn execute_composition_request_inner_with_guard(
                 // is a composition-preflight blocked path: route through
                 // the stack-aware runner so `blocked.stack` and
                 // `finalize.stack` fire.
-                let blocked_control = emit_preflight_blocked_and_finalize(
+                let preflight_outcome = emit_preflight_blocked_and_finalize(
                     guard,
                     &lifecycle_effect_engine,
                     &emitter,
@@ -1271,6 +1448,8 @@ fn execute_composition_request_inner_with_guard(
                     &request.prepared.resolved_path,
                     effective_repo_root,
                     base_dir,
+                    Some(launch_workspace.launch_cwd.as_path()),
+                    Some(&lifecycle_context),
                     frontmatter,
                     document_start,
                     claudine::composition::LifecycleErrorInfo::from_action_failure(
@@ -1278,12 +1457,17 @@ fn execute_composition_request_inner_with_guard(
                         e.to_string(),
                     ),
                 );
-                match preflight_blocked_control_error(
-                    blocked_control,
-                    &request.prepared.resolved_path,
-                ) {
-                    Some(ce) => ce.into(),
-                    None => eyre!("{e}"),
+                match preflight_outcome {
+                    PreflightBlockedOutcome::EvaluationError(ce) => ce.into(),
+                    PreflightBlockedOutcome::Control(control) => {
+                        match preflight_blocked_control_error(
+                            control,
+                            &request.prepared.resolved_path,
+                        ) {
+                            Some(ce) => ce.into(),
+                            None => eyre!("{e}"),
+                        }
+                    }
                 }
             })?;
 
@@ -1510,6 +1694,7 @@ fn execute_composition_request_inner_with_guard(
             effective_non_interactive,
             request.timeout.clone(),
             request.step_timeout.clone(),
+            request.stall_timeout.clone(),
             &harness_base_args,
             &env_plan.env,
             &mut prompt_state,
@@ -1571,6 +1756,8 @@ fn execute_composition_request_inner_with_guard(
         term: &term,
         source_path: &request.prepared.resolved_path,
         repo_root: effective_repo_root,
+        launch_area: Some(launch_workspace.launch_cwd.as_path()),
+        context: Some(&lifecycle_context),
     };
 
     // --- Initialize lifecycle event --------------------------------------
@@ -1589,9 +1776,10 @@ fn execute_composition_request_inner_with_guard(
     // `current.env`/`current.ctx` are captured now, so a side effect or
     // external change since `prepare` is observable through `current.*`. The
     // document-start instant anchors `timing.document_ms` at this event.
+    // `current.ctx.*` follows the launch area like event-time `ctx.*` capture.
     let lifecycle_current =
         claudine::composition::lifecycle_context::LifecycleCurrent::capture_at_event(
-            base_dir.unwrap_or(launch_cwd.as_path()),
+            launch_workspace.launch_cwd.as_path(),
         );
     let lifecycle_timing = claudine::composition::lifecycle_context::LifecycleTiming::from_instants(
         document_start,
@@ -1601,10 +1789,16 @@ fn execute_composition_request_inner_with_guard(
     let init_ctx = StackExecutionContext {
         signal: LifecycleSignal::Initialize,
         frontmatter: fm_map.unwrap_or(&empty_frontmatter),
+        // Single pre-launch `initialize` event; the cross-event live cell is
+        // owned by the harness loop, which re-materializes frontmatter before
+        // its own events fire.
+        live_frontmatter: None,
         err: None,
         timing: Some(&lifecycle_timing),
         current: Some(&lifecycle_current),
         base_dir,
+        ctx_base_dir: Some(launch_workspace.launch_cwd.as_path()),
+        prepared_context: Some(&lifecycle_context),
         effect_engine: &lifecycle_effect_engine,
         shell_runner: &SystemShellRunner,
         emitter: &emitter,
@@ -1615,6 +1809,40 @@ fn execute_composition_request_inner_with_guard(
         settings: &lifecycle_settings,
     };
     let init_outcome = guard.execute_event(LifecycleSignal::Initialize, &init_ctx);
+    // A late-binding evaluation error on `initialize` (a crashed `when:` guard
+    // or interpolation) routes through `failure` → `finalize` like any other
+    // setup failure and halts non-zero (Decision #5). Checked before the
+    // control match because an evaluation raise leaves `control` `None`.
+    if let Some(info) = init_outcome.evaluation_error.as_ref() {
+        // Surface the original `initialize` crash to stderr before the
+        // `failure`/`finalize` catch events fire (Decision #2).
+        let early = crate::output::error_walker::emit_lifecycle_evaluation_error_early(
+            &request.prepared.resolved_path,
+            "initialize",
+            info,
+            &term,
+        );
+        let failure_outcome =
+            guard.execute_event(LifecycleSignal::Failure, &init_ctx.with_error(info));
+        // If `failure` raised, thread its error (not the original) into
+        // finalize so a `finalize.stack` can branch on the failure raise.
+        let active_err = failure_outcome
+            .evaluation_error
+            .as_ref()
+            .unwrap_or(info);
+        let finalize_outcome = guard.execute_event(
+            LifecycleSignal::Finalize,
+            &init_ctx.with_error(active_err).with_signal(LifecycleSignal::Finalize),
+        );
+        return Err(surface_preflight_catch_error(
+            &request.prepared.resolved_path,
+            Some(&failure_outcome),
+            Some(&finalize_outcome),
+            early,
+            &term,
+        )
+        .into());
+    }
     // Set by an `initialize` Proxy control: the resolved target document the
     // run is handed off to. Threaded into `run_body` so the harness loop
     // re-composes and runs the target instead of the original document.
@@ -1642,14 +1870,45 @@ fn execute_composition_request_inner_with_guard(
                         "error",
                         msg.clone(),
                     );
-                guard.execute_event(
+                let failure_outcome = guard.execute_event(
                     LifecycleSignal::Failure,
                     &init_ctx.with_error(&action_error),
                 );
-                guard.execute_event(
+                // If `failure` raised, thread its error (not the original) into
+                // finalize so a `finalize.stack` can branch on the failure raise.
+                let active_err = failure_outcome
+                    .evaluation_error
+                    .as_ref()
+                    .unwrap_or(&action_error);
+                let finalize_outcome = guard.execute_event(
                     LifecycleSignal::Finalize,
-                    &init_ctx.with_error(&action_error).with_signal(LifecycleSignal::Finalize),
+                    &init_ctx.with_error(active_err).with_signal(LifecycleSignal::Finalize),
                 );
+                if failure_outcome.evaluation_error.is_some()
+                    || finalize_outcome.evaluation_error.is_some()
+                {
+                    // A catch event raised an evaluation error (the original was
+                    // an explicit `error(...)`, not an evaluation error, so it
+                    // was not early-emitted). Surface the catch raise to stderr;
+                    // no further lifecycle events fire (Decision #2). The `early`
+                    // fallback is unreachable inside this guard.
+                    let early = CompositionError::catch_evaluation_error(
+                        &request.prepared.resolved_path,
+                        "initialize",
+                        &action_error,
+                        Some(&failure_outcome),
+                        Some(&finalize_outcome),
+                    )
+                    .already_emitted();
+                    return Err(surface_preflight_catch_error(
+                        &request.prepared.resolved_path,
+                        Some(&failure_outcome),
+                        Some(&finalize_outcome),
+                        early,
+                        &term,
+                    )
+                    .into());
+                }
                 return Err(eyre!(msg));
             }
             StackControl::Proxy { target } => {
@@ -1707,13 +1966,52 @@ fn execute_composition_request_inner_with_guard(
         }
     }
     if init_outcome.routes_to_failure(LifecycleSignal::Initialize) {
-        let failure_ctx = init_outcome
-            .action_error
+        let original_info = init_outcome.action_error.as_ref();
+        let failure_ctx = match original_info {
+            Some(e) => init_ctx.with_error(e),
+            None => init_ctx.with_signal(LifecycleSignal::Failure),
+        };
+        let failure_outcome = guard.execute_event(LifecycleSignal::Failure, &failure_ctx);
+        // If `failure` raised, thread its error (not the original) into finalize
+        // so a `finalize.stack` can branch on the failure raise. If there was no
+        // original action error, synthesize one for finalize to carry.
+        let synthetic_info =
+            claudine::composition::lifecycle_context::LifecycleErrorInfo::from_action_failure(
+                "error",
+                "lifecycle initialize failed",
+            );
+        let active_err = failure_outcome
+            .evaluation_error
             .as_ref()
-            .map(|e| init_ctx.with_error(e))
-            .unwrap_or_else(|| init_ctx.with_signal(LifecycleSignal::Failure));
-        guard.execute_event(LifecycleSignal::Failure, &failure_ctx);
-        guard.execute_event(LifecycleSignal::Finalize, &failure_ctx);
+            .or(original_info)
+            .unwrap_or(&synthetic_info);
+        let finalize_ctx = init_ctx.with_signal(LifecycleSignal::Finalize);
+        let finalize_ctx = finalize_ctx.with_error(active_err);
+        let finalize_outcome = guard.execute_event(LifecycleSignal::Finalize, &finalize_ctx);
+        if failure_outcome.evaluation_error.is_some()
+            || finalize_outcome.evaluation_error.is_some()
+        {
+            // A catch event raised an evaluation error while routing this
+            // setup failure. Surface it to stderr; no further lifecycle events
+            // fire (Decision #2). The `early` fallback is unreachable here.
+            let info = original_info.unwrap_or(&synthetic_info);
+            let early = CompositionError::catch_evaluation_error(
+                &request.prepared.resolved_path,
+                "initialize",
+                info,
+                Some(&failure_outcome),
+                Some(&finalize_outcome),
+            )
+            .already_emitted();
+            return Err(surface_preflight_catch_error(
+                &request.prepared.resolved_path,
+                Some(&failure_outcome),
+                Some(&finalize_outcome),
+                early,
+                &term,
+            )
+            .into());
+        }
         return Err(eyre!("lifecycle initialize failed"));
     }
 

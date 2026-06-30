@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-f9dd0b7584edf43b
-last_updated: 2026-06-23
+hash: ef46db3751d8e999-cd86eb7d6e54dbfb
+last_updated: 2026-06-27
 ---
 # Claudine CLI Reference
 
@@ -321,6 +321,7 @@ Opt-in flag (composition commands and the provider wrappers) that prints a **rec
 - `-m, --model <MODEL>`
 - `-s, --system-prompt <PROMPT|FILE>`
 - `-t, --timeout <DURATION>`
+- `--stall-timeout <DURATION>` (OpenCode-only stalled-generation backstop; `0s` disables; env `CLAUDINE_OPENCODE_STALL_TIMEOUT`, frontmatter `stall_timeout`, built-in `10m`)
 - `--dry-run`, `-q, --quiet`, `--silent`, `--perf`
 
 ---
@@ -389,12 +390,13 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 
 | Flag | Description |
 |------|-------------|
-| `-y, --yolo` | Translate to provider-specific auto-approval mode (warn-only for OpenCode) |
+| `-y, --yolo` | Translate to provider-specific auto-approval mode (OpenCode: non-interactive only — pushes `--dangerously-skip-permissions` **and** merges a session-wide `permission` block into `OPENCODE_CONFIG_CONTENT` so subagents are also auto-approved; warn-only/ignored in OpenCode interactive sessions) |
 | `-i, --interactive` | Force interactive mode even when a prompt string is provided |
 | `-m, --model <MODEL>` | Override the model used by the provider |
 | `--asp <FILE>` | Append a system prompt from a file (alias: `--append-system-prompt`) |
 | `--rsp <FILE>` | Replace the provider's system prompt with contents from a file (alias: `--replace-system-prompt`) |
 | `-t, --timeout <DURATION>` | Wall-clock timeout like 30s, 5m, 2h (non-interactive only) |
+| `--stall-timeout <DURATION>` | OpenCode-only stalled-generation backstop (live-but-dead retry-churn guard); built-in `10m`, `0s` disables. Inert config on non-OpenCode providers. See [Timeouts](../../../claudine/docs/topics/timeouts.md#opencode-stalled-generation-backstop) |
 | `-o, --output <FORMAT>` | Set output format (json, text, stream) |
 | `--include <ENV_NAME>` | Keep a sensitive env var name that would otherwise be filtered |
 | `--mcp` | Compose a Claudine-managed MCP session from the effective defaults |
@@ -447,6 +449,14 @@ claudine completions zsh > ~/.zfunc/_claudine
 # Fish
 claudine completions fish > ~/.config/fish/completions/claudine.fish
 ```
+
+**Related runtime behavior.** The `completions` command only installs the
+static shell script. Runtime file selection also happens through the
+ENTER-path autocomplete: when a composition command runs interactively
+and a required file value is missing (omitted positional argument or a
+`file`/`file[]` schema property), Claudine opens a `ChooseOne` or
+`ChooseMany` chooser. See [Shell Completions](../../../claudine/docs/topics/shell-completions.md)
+for details.
 
 ---
 
@@ -636,6 +646,7 @@ Rich formatting uses biscuit-terminal components (Table, Prose with `{{bold}}` /
 | Variable | Description |
 |----------|-------------|
 | `RUST_LOG` | Diagnostic tracing level (also set via the `--debug <LEVEL>` flag) |
+| `CLAUDINE_OPENCODE_STALL_TIMEOUT` | OpenCode stalled-generation backstop default (duration string; `0s` disables). Overridden by `--stall-timeout` / frontmatter `stall_timeout`; built-in `10m` |
 | `HOME` | Used for path resolution |
 | `PATH` | Must include `claudine` binary |
 | `AGENT` | Injected by wrapper: provider name |
