@@ -293,6 +293,22 @@ fn translate_schema_failure(
     }
 
     if !categorized.invalid_optional.is_empty() {
+        let droppable =
+            filter_droppable_invalid_optionals(&categorized.invalid_optional, effective.as_ref());
+        if droppable.len() != categorized.invalid_optional.len() {
+            let hard: Vec<_> = categorized
+                .invalid_optional
+                .iter()
+                .filter(|problem| {
+                    !droppable.iter().any(|droppable_problem| {
+                        droppable_problem.path == problem.path
+                            && droppable_problem.message == problem.message
+                    })
+                })
+                .cloned()
+                .collect();
+            return Err(build_schema_validation_error(&source.resolved_path, &hard));
+        }
         // Drop invalid optionals from a clone of the source AND from the
         // run's `set_overrides` map. Source-only removal is not enough:
         // overrides land on top of frontmatter during compose, so a bad
@@ -300,10 +316,9 @@ fn translate_schema_failure(
         // Retry the prepare step exactly once. If composition still fails,
         // fall through to surface the residual problem (likely a missing
         // required property).
-        let (retry_source, source_drops) =
-            source_with_dropped_optionals(source, &categorized.invalid_optional);
+        let (retry_source, source_drops) = source_with_dropped_optionals(source, &droppable);
         let (retry_options, override_drops) =
-            options_with_dropped_optionals(options.clone(), &categorized.invalid_optional);
+            options_with_dropped_optionals(options.clone(), &droppable);
         dropped.extend(source_drops);
         dropped.extend(override_drops);
         return match run_prepare(&retry_source, retry_options, mode) {
@@ -430,6 +445,21 @@ fn post_shell_validate(
     }
 
     if !categorized.invalid_optional.is_empty() {
+        let droppable = filter_droppable_invalid_optionals(&categorized.invalid_optional, Some(&effective));
+        if droppable.len() != categorized.invalid_optional.len() {
+            let hard: Vec<_> = categorized
+                .invalid_optional
+                .iter()
+                .filter(|problem| {
+                    !droppable.iter().any(|droppable_problem| {
+                        droppable_problem.path == problem.path
+                            && droppable_problem.message == problem.message
+                    })
+                })
+                .cloned()
+                .collect();
+            return Err(build_schema_validation_error(&source.resolved_path, &hard));
+        }
         // Drop invalid optionals from the composed effective frontmatter
         // and revalidate. Track each as a post-shell drop so the CLI can
         // surface a warning to the user.
@@ -440,7 +470,7 @@ fn post_shell_validate(
                 return Ok(prepared);
             }
         };
-        for problem in &categorized.invalid_optional {
+        for problem in &droppable {
             let Some(name) = top_level_pointer_segment(&problem.path) else {
                 continue;
             };
@@ -631,6 +661,21 @@ fn options_with_dropped_optionals(
     (options, drops)
 }
 
+fn filter_droppable_invalid_optionals(
+    invalid_optional: &[ValidationProblem],
+    effective: Option<&EffectiveSchema>,
+) -> Vec<ValidationProblem> {
+    let shape: Option<&SchemaShape> = effective.and_then(|e| match e.simplified.as_ref() {
+        Some(SimplifiedSchema::Single(s)) => Some(s),
+        Some(SimplifiedSchema::Union(_)) | None => None,
+    });
+    invalid_optional
+        .iter()
+        .filter(|problem| !is_eager_file_problem(shape, problem))
+        .cloned()
+        .collect()
+}
+
 // -- categorization ---------------------------------------------------------
 
 struct CategorizedProblems {
@@ -733,6 +778,32 @@ fn is_required(shape: Option<&SchemaShape>, name: &str) -> bool {
         atom.constraints
             .iter()
             .any(|c| matches!(c, Constraint::Required))
+    })
+}
+
+fn is_eager_file_problem(shape: Option<&SchemaShape>, problem: &ValidationProblem) -> bool {
+    if !matches!(problem.kind, ValidationProblemKind::Invalid | ValidationProblemKind::Type) {
+        return false;
+    }
+    let Some(name) = top_level_pointer_segment(&problem.path) else {
+        return false;
+    };
+    let Some(shape) = shape else {
+        return false;
+    };
+    let Some(def) = shape.properties.get(&name) else {
+        return false;
+    };
+    let atoms: Vec<&PropertyAtom> = match def {
+        PropertyDef::Single(atom) => vec![atom],
+        PropertyDef::Union(items) => items.iter().collect(),
+    };
+    atoms.iter().any(|atom| {
+        matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::File))
+            && atom
+                .constraints
+                .iter()
+                .any(|constraint| matches!(constraint, Constraint::Eager))
     })
 }
 
@@ -1228,6 +1299,12 @@ pub fn pre_validate_schema(
             &categorized.invalid_required,
         ));
     }
+    if !categorized.invalid_optional.is_empty() {
+        return Err(build_schema_validation_error(
+            &source.resolved_path,
+            &categorized.invalid_optional,
+        ));
+    }
     if !categorized.missing_required.is_empty() {
         return Err(build_missing_properties_error(
             &source,
@@ -1341,6 +1418,9 @@ pub fn drop_invalid_optionals(
                     continue;
                 };
                 if is_required(shape, &name) {
+                    continue;
+                }
+                if is_eager_file_problem(shape, problem) {
                     continue;
                 }
                 // Composition-tolerant: skip values that look templated,
@@ -2390,6 +2470,51 @@ mod tests {
                 .contains_key("count"),
             "literal invalid optional should still be dropped pre-preflight",
         );
+    }
+
+    #[test]
+    fn drop_invalid_optionals_keeps_optional_eager_file_failures() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            "---\n$schema:\n  spec: 'file(eager)'\nspec: missing/spec.md\n---\nbody\n",
+        );
+
+        let (scrubbed, _, dropped) = drop_invalid_optionals(source, None, None);
+        assert!(dropped.is_empty());
+        assert_eq!(
+            scrubbed.markdown.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!("missing/spec.md")),
+            "optional eager file failures must remain visible for the schema error",
+        );
+    }
+
+    #[test]
+    fn pre_validate_schema_reports_optional_eager_file_failures() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            "---\n$schema:\n  spec: 'file(eager)'\nspec: missing/spec.md\n---\nbody\n",
+        );
+
+        let err = pre_validate_schema(&source, None, None)
+            .expect_err("optional eager file failures should not be dropped");
+        match err {
+            CompositionError::SchemaValidation {
+                message, problems, ..
+            } => {
+                assert!(
+                    message.contains("missing/spec.md"),
+                    "schema validation should retain the invalid file reference: {message}",
+                );
+                assert!(
+                    message.contains("no existing file matched reference"),
+                    "schema validation should retain the targeted file-reference reason: {message}",
+                );
+                assert_eq!(problems, vec!["/spec".to_string()]);
+            }
+            other => panic!("expected SchemaValidation, got {other:?}"),
+        }
     }
 
     #[test]
