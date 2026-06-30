@@ -371,8 +371,29 @@ fn build_problems(
             deeper.retain(|p| seen.insert((p.path.clone(), p.message.clone())));
             return deeper;
         }
+        let mut same_path_file_errors: Vec<ValidationProblem> = context
+            .iter()
+            .flat_map(|arm| arm.iter())
+            .filter(|nested| {
+                nested.instance_path().as_str() == parent && is_file_format_error(nested)
+            })
+            .flat_map(|nested| build_problems(nested, positions, arm_index, anchors))
+            .collect();
+        if !same_path_file_errors.is_empty() {
+            let mut seen: HashSet<(String, String)> = HashSet::new();
+            same_path_file_errors.retain(|p| seen.insert((p.path.clone(), p.message.clone())));
+            return same_path_file_errors;
+        }
     }
     vec![build_problem(err, positions, arm_index, anchors)]
+}
+
+fn is_file_format_error(err: &jsonschema::ValidationError<'_>) -> bool {
+    let ValidationErrorKind::Format { format } = err.kind() else {
+        return false;
+    };
+    format == format::DARKMATTER_FILE_FORMAT
+        || format == format::DARKMATTER_FILE_REFERENCE_FORMAT
 }
 
 fn build_problem(
