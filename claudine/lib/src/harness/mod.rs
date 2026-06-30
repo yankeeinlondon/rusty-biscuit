@@ -25,4 +25,4 @@ pub use shell::{
     validate_and_approve_command_parts,
 };
 pub use speech::speak_when_able;
-pub use timeout::parse_timeout;
+pub use timeout::{parse_timeout, parse_timeout_allow_zero};

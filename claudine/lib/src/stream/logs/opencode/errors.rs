@@ -535,6 +535,10 @@ fn infer_service_from_message(record: &OpenCodeLogRecord) -> &'static str {
             "session.prompt"
         }
         "exiting loop" if record.tags.contains_key("session.id") => "session.prompt",
+        // OpenCode 1.17.8 reuses `message="stream"` for the call start and
+        // `message="stream error"` for the failure (fixes/2026-06-21-opencode-log-fix).
+        // Both route to `llm` so the failure reaches `classify_llm_failure`; the
+        // call start is still distinguished downstream by `classify_llm_call`.
         "stream" | "stream error"
             if record.tags.contains_key("providerID")
                 && record.tags.contains_key("modelID") =>

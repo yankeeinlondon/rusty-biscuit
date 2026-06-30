@@ -202,16 +202,16 @@ loop:
   action: "increment(phase)"
   max: 10
   stack:
-    - action: "append_line('events.log', 'gate:{{phase}}')"
+    - action: {append_line: ["events.log", "gate:{{phase}}"]}
 initialize:
   stack:
-    - action: "append_line('events.log', 'initialize')"
+    - action: {append_line: ["events.log", "initialize"]}
 start:
   stack:
-    - action: "append_line('events.log', 'start')"
+    - action: {append_line: ["events.log", "start"]}
 finalize:
   stack:
-    - action: "append_line('events.log', 'finalize')"
+    - action: {append_line: ["events.log", "finalize"]}
 ---
 Phase {{phase}}
 "#;
@@ -282,22 +282,22 @@ title: lifecycle loop blocked
 phase: 1
 start:
   stack:
-    - action: "shell('rm -rf /tmp/nonexistent')"
+    - action: {shell: "rm -rf /tmp/nonexistent"}
 loop:
   until: "phase > 2"
   action: "increment(phase)"
   max: 10
   stack:
-    - action: "append_line('events.log', 'gate:{{phase}}')"
+    - action: {append_line: ["events.log", "gate:{{phase}}"]}
 initialize:
   stack:
-    - action: "append_line('events.log', 'initialize')"
+    - action: {append_line: ["events.log", "initialize"]}
 blocked:
   stack:
-    - action: "append_line('events.log', 'blocked')"
+    - action: {append_line: ["events.log", "blocked"]}
 finalize:
   stack:
-    - action: "append_line('events.log', 'finalize')"
+    - action: {append_line: ["events.log", "finalize"]}
 ---
 Phase {{phase}}
 "#;
@@ -355,17 +355,17 @@ loop:
   action: "increment(phase)"
   max: 10
   stack:
-    - action: "append_line('events.log', 'gate:{{phase}}')"
+    - action: {append_line: ["events.log", "gate:{{phase}}"]}
 initialize:
   stack:
-    - action: "append_line('events.log', 'initialize')"
+    - action: {append_line: ["events.log", "initialize"]}
     - action: "skip"
 start:
   stack:
-    - action: "append_line('events.log', 'start')"
+    - action: {append_line: ["events.log", "start"]}
 finalize:
   stack:
-    - action: "append_line('events.log', 'finalize')"
+    - action: {append_line: ["events.log", "finalize"]}
 ---
 Phase {{phase}}
 "#;
@@ -401,7 +401,7 @@ Phase {{phase}}
 /// `loop:` gate stack ends in an explicit `error(...)` converts the loop's
 /// final outcome to failure and exits the loop — even though `until: phase > 5`
 /// would otherwise keep iterating. The error takes precedence over the
-/// condition, so the per-iteration `increment(phase)` mutation is NOT applied
+/// condition, so the per-iteration `"increment(phase)"` mutation is NOT applied
 /// and no second iteration runs: exactly one `start`/`finalize`/`provider-ran`,
 /// the gate marker recorded before the error, and a non-zero exit reported in
 /// the pane.
@@ -421,17 +421,17 @@ loop:
   action: "increment(phase)"
   max: 10
   stack:
-    - action: "append_line('events.log', 'gate:{{phase}}')"
-    - action: "error('gate rejected final state')"
+    - action: {append_line: ["events.log", "gate:{{phase}}"]}
+    - action: {error: "gate rejected final state"}
 initialize:
   stack:
-    - action: "append_line('events.log', 'initialize')"
+    - action: {append_line: ["events.log", "initialize"]}
 start:
   stack:
-    - action: "append_line('events.log', 'start')"
+    - action: {append_line: ["events.log", "start"]}
 finalize:
   stack:
-    - action: "append_line('events.log', 'finalize')"
+    - action: {append_line: ["events.log", "finalize"]}
 ---
 Phase {{phase}}
 "#;

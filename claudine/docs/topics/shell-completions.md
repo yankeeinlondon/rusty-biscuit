@@ -20,6 +20,8 @@ Key code:
 - Engine entry point — [`claudine/cli/src/completion/engine.rs`](../../cli/src/completion/engine.rs)
 - Root menu — [`claudine/cli/src/completion/root_menu.rs`](../../cli/src/completion/root_menu.rs)
 - Composition pipeline — [`claudine/cli/src/completion/composition.rs`](../../cli/src/completion/composition.rs)
+- ENTER-path autocomplete UI — [`claudine/cli/src/completion/autocomplete_ui.rs`](../../cli/src/completion/autocomplete_ui.rs)
+- Default markdown glob — [`claudine/cli/src/completion/default_glob.rs`](../../cli/src/completion/default_glob.rs)
 - Setter-value completer — [`claudine/cli/src/completion/setter_value.rs`](../../cli/src/completion/setter_value.rs)
 - Scope resolution — [`claudine/cli/src/completion/scopes.rs`](../../cli/src/completion/scopes.rs)
 - Walker — [`claudine/cli/src/completion/walker.rs`](../../cli/src/completion/walker.rs)
@@ -27,6 +29,7 @@ Key code:
 - Fuzzy matcher — [`claudine/cli/src/completion/fuzzy.rs`](../../cli/src/completion/fuzzy.rs)
 - Shell scripts — [`claudine/cli/src/completion/bootstrap.rs`](../../cli/src/completion/bootstrap.rs)
 - `__complete` CLI contract — [`claudine/cli/src/commands/completions.rs`](../../cli/src/commands/completions.rs)
+- Interactive schema collection — [`claudine/cli/src/commands/schema_interactive.rs`](../../cli/src/commands/schema_interactive.rs)
 
 ## Installation
 
@@ -207,63 +210,59 @@ file.
 
 ### Magic `@` resolution
 
-A partial beginning with `@` is a magic path. It walks the scope set
-in the **magic-path priority order** (see "Scopes" above) and emits
-candidates as paths relative to the repo root (or cwd when outside a
-repo). The `@` sigil is **stripped** on selection.
-
-The first scope that produces one or more matching candidates wins.
-Lower-priority scopes are not emitted for that query, though multiple
-matching files inside the winning scope are preserved.
-
-Two magic-path forms are supported:
-
-#### Bare abbreviation form: `@plan`
-
-Treats the entire body after `@` as the fuzzy-match segment against
-each scope's basenames. The walker enumerates each scope root and the
-matcher fires on the filename stem.
+A partial beginning with `@` is a magic path — a **filename search**. The
+engine walks the scope set in the **magic-path priority order** (see
+"Scopes" above) and emits candidates of the form `@<basename>`: the `@`
+sigil is **kept** and only the filename is inserted, never a path. The `@`
+stays because it is a runtime-resolution marker — at launch the composition
+pipeline resolves the committed `@<basename>` to the closest matching prompt
+(see [Composition](composition.md) and the prompt-magic search roots in
+`claudine::composition::resolve`).
 
 ```text
 claudine compose @plan<TAB>
-→ prompts/plan.md
+→ @plan.md
 ```
+
+Candidates are **deduped by basename** across all magic scopes, so a
+filename present in several scopes (e.g. both `<repo>/prompts/plan.md` and
+`~/.claudine/prompts/plan.md`) surfaces once. The closest scope (iterated
+first) owns the candidate's sort rank; runtime resolution independently
+picks the closest file on disk.
+
+**Why keep the sigil and the filename only.** The whole point of `@` is to
+say "find this prompt by name, wherever it lives" — surfacing the full
+resolved path is clutter the user did not ask for, and there is usually
+exactly one prompt of a given name. Keeping `@<basename>` lets the user
+commit a short, stable token and defers the path decision to launch time,
+where "closest wins."
 
 #### Path-shaped form: `@prompts/plan`
 
-The portion before the last `/` selects a scope-relative subdirectory;
-the portion after is the fuzzy-match segment. The walker descends into
-`<scope>/<dir>` and matches basenames against the trailing segment.
-Multi-segment paths are supported (`@a/b/c`).
+A `/` in the magic body constrains the **walk** to that subdirectory (the
+portion before the last `/`), but the rendered candidate is still
+filename-only. Multi-segment paths are supported (`@a/b/c`).
 
 ```text
-# Resolves against <repo>/prompts/
+# Walk is constrained to <scope>/prompts/, candidate is filename-only
 claudine compose @prompts/plan<TAB>
-→ prompts/plan.md
-
-# Resolves against <repo>/.claudine/prompts/
-claudine compose @.claudine/prompts/plan<TAB>
-→ .claudine/prompts/plan.md
-
-# Nested directories work too — drills into <repo>/prompts/drafts/
-claudine compose @prompts/drafts/plan<TAB>
-→ prompts/drafts/plan.md
+→ @plan.md
 ```
 
-When the path-shaped `dir` does not exist under a particular scope,
-that scope is silently skipped — only scopes whose joined walk root
-resolves to a real directory contribute candidates.
+When the path-shaped `dir` does not exist under a particular scope, that
+scope is silently skipped — only scopes whose joined walk root resolves to a
+real directory contribute candidates.
 
-**Why support path-shaped magic paths.** Users naturally type
-`@prompts/plan` when they have already partially recalled the path.
-Without path-shape support, the engine treated the slash as just
-another character to fuzzy-match, which never hits a real basename
-(no file is literally named `prompts/plan.md`). The path-shape rule
-makes the typed form match the on-disk shape.
+#### No directory candidates in magic mode
 
-#### Magic-path priority for inline-compose / sequence extras
+Magic mode is purely a filename search: it **never** surfaces directory
+candidates, at any prefix length (`@<TAB>` lists prompt filenames only).
+Directory drilling is a Word-mode (non-`@`) behavior — type a bare path like
+`prompts/` to navigate directories. This keeps the `@` surface clutter-free.
 
-Magic resolution searches scopes in this order:
+#### Magic-path priority
+
+Magic resolution searches scopes in this order (closest first):
 
 1. Repo root (`<repo>/prompts/`)
 2. Package-area root
@@ -272,54 +271,17 @@ Magic resolution searches scopes in this order:
 5. Mode-specific extras — `docs/` plus repo-local agent-skill peers
 6. User Claudine scope (`~/.claudine/prompts/`)
 
-The user-global scope is **last**. A `docs/plan.md` in the project
-will suppress a `~/.claudine/prompts/plan.md` of the same basename for
-that `@plan` query.
+The user-global scope is **last**. The basename dedup keeps the closest
+occurrence, so a repo-local `plan.md` owns the `@plan.md` candidate's rank
+over a `~/.claudine/prompts/plan.md` of the same basename. Filenames that
+exist **only** in a lower-priority scope (e.g. a global-only prompt) still
+surface — the union across scopes is offered, just deduped by basename.
 
-**Why repo-local extras win over user-global.** Project-specific
-prompts and design docs should beat user-global prompts because the
-user's intent on `<TAB>` is nearly always "the thing in my current
-project." If the user wants the global file they can either narrow
-their query enough that the local match drops out or type the
-user-scope path directly.
-
-**Why strip the sigil.** The runtime composition pipeline treats `@` as
-a marker for "resolve from the scope tree." Once completion has resolved
-the file, the marker has done its job; leaving it in would force the
-shell to re-resolve on every subsequent edit.
-
-#### Directory candidates in magic mode
-
-Directories surface alongside file matches at Short (1–2 char) and Long
-(3+ char) prefix lengths in magic mode, mirroring Word-mode directory
-behavior. Empty (`@<TAB>`) remains directory-free.
-
-| Prefix length | File matching | Directory matching |
-| :--- | :--- | :--- |
-| Empty (`@<TAB>`) | every file in the winning tier | none |
-| Short (`@pl`) | fuzzy on file stem | starting-substring on dir leaf |
-| Long (`@plan`) | fuzzy on file stem | fuzzy on dir leaf |
-
-For bare magic (e.g. `@pl`), directory candidates come from the
-**repo-wide directory walk** — the same walk Word mode uses — rooted at
-the workspace / git / cwd root. For path-shaped magic (e.g.
-`@prompts/pl`), the directory walk is constrained to the magic-resolved
-subdirectory, so `@prompts/pl<TAB>` surfaces `prompts/planning/` rather
-than every `pl*`-named directory at the repo root.
-
-The directory walk runs **independently of the file-tier shadow rule**.
-The first-hit-wins shadowing in spec §5.5 only applies to **files**:
-when a higher-priority scope (e.g. repo `prompts/`) wins the file tier,
-lower-priority scopes (e.g. `~/.claudine/prompts/`) are shadowed for
-files, but matching directories from the repo-wide walk still surface.
-
-**Why mirror Word and Magic for directories.** The `@` sigil is the
-search sigil — users reach for it interchangeably with Word mode. An
-asymmetry where `pl<TAB>` surfaces `planning/` but `@pl<TAB>` does not
-would be a UX surprise tied to no real semantic distinction. Files
-participate in scope priority because authoring intent depends on which
-prompt source the user wants; directories are filesystem navigation and
-share the same surface across both sigils.
+**Runtime closest-resolution.** The committed `@<basename>` is resolved at
+launch by registering these same prompt directories as magic search roots,
+closest-first; `biscuit_file::FileReference` returns the first existing
+candidate, so the nearest prompt wins. This mirrors the completion scope
+set, so anything the engine offers under `@` is resolvable at launch.
 
 ### Committed directory
 
@@ -464,17 +426,23 @@ claudine compose file.md spec=@d<TAB>
 → spec='docs/spec.md'
 ```
 
-The completer walks `docs/`, `features/`, `fixes/`, and `reviews/` at
-three scope levels:
-
-1. Repo root.
-2. Package-area root.
-3. Package root.
+The completer walks `docs/`, `features/`, `fixes/`, and `reviews/`
+**under the invoking `cwd`** — the launch area, i.e. the directory the
+user was in when they pressed `<TAB>`.
 
 **Why only four subdirs.** These are the directories a composition
 frontmatter setter realistically points at: documentation, planning
 artefacts, fix drafts, review outputs. Offering the entire repo would
 drown the candidate list.
+
+**Why anchored on the `cwd`, not the repo root.** A frontmatter file
+reference resolves at runtime against the **launch area** (captured as
+`launch_cwd` and threaded into the read-side resolver as
+`file_ref_fallback_dir`). The completion process is never `chdir`'d, so
+its `cwd` *is* that launch area. Anchoring here keeps every offered path
+byte-identical to what the runtime resolver accepts; a repo-root-relative
+candidate would resolve to a non-existent `<launch_cwd>/<repo-relative>`
+path at launch.
 
 ### Markdown-extension gate
 
@@ -569,10 +537,19 @@ property and dispatches by `CompletionKind`:
   match when a value partial is typed; all members surface when the
   partial is empty.
 - **`file(match='*.png', …)` → filesystem paths** rooted at the
-  effective repo root (or cwd when no repo), filtered by the
-  property's glob patterns. The walker honors `.gitignore`. An empty
-  `match(...)` list emits zero candidates so the existing `@`-gated
-  path or shell-native completion still handles the slot.
+  invoking `cwd` (the launch area; see the "Why anchored on the `cwd`"
+  note under *Setter values*), filtered by the
+  property's glob patterns. The walk shares the scope walker's
+  exclusion rules — `.gitignore` plus the `_`-prefix and curated
+  skip-list (`target`, `node_modules`, …) elision — so archived
+  `_completed/` artefacts never surface. The typed value partial is
+  applied as a case-insensitive substring (`*partial*`) over the
+  repo-relative path, not just the basename: because `match(...)`
+  candidates routinely share a basename (every `**/*spec*.md` hit is
+  `spec.md`), a directory fragment like `spec=features/real` is the
+  only way to narrow them. An empty `match(...)` list falls back to the
+  default markdown glob (see the ENTER-path note below); the legacy
+  zero-candidate behavior was dropped.
 - **`url`, `email`, `date`, `datetime`, `time` (hint-only)** emit no
   candidates. The `__complete` stdout protocol does not carry a
   description channel today, so the hint string from
@@ -603,6 +580,67 @@ provider sessions are launched, no on-disk caches are written.
 malformed schema or a transient filesystem failure must not break
 `<TAB>` for the entire command. Returning nothing keeps the shell's
 own completion alive in those edge cases.
+
+## ENTER-path autocomplete
+
+When a composition command runs interactively and a required file value
+is missing, Claudine can prompt for it at runtime instead of failing.
+This applies to two surfaces:
+
+1. **The composition positional argument** — `claudine compose <file>`,
+   `claudine inline-compose <file>`, and `claudine sequence <file>`.
+   When the positional file is omitted or does not resolve, Claudine
+   offers every markdown candidate in scope.
+2. **Missing `$schema` properties** — when a frontmatter schema declares
+   a property typed `file` or `file[]`, the value can be supplied
+   interactively at runtime.
+
+The prompt is gated by the same rules as the missing-property prompt:
+stdin and stderr must be TTYs, `--silent` must be off, and
+`prompt_for_missing` must be true in config. If any gate is closed,
+Claudine prints the non-interactive remediation block instead.
+
+### Type-driven chooser
+
+- A property typed `file` (or the single positional argument) uses a
+  single-select `ChooseOne` chooser.
+- A property typed `file[]` uses a multi-select `ChooseMany` chooser:
+  press `Space` to toggle items, then `Enter` to submit the set.
+
+Candidates come from the schema's `match(...)` globs when present;
+otherwise the bare `file`/`file[]` fallback walks the invoking `cwd`
+(the launch area — the runtime missing-property chooser runs *before*
+the wrapper's `switch_process_cwd`, so its `cwd` is still the launch
+area) for markdown files, excluding prompt directories so composition
+prompts do not leak into generic file values. Both walks share the scope walker's exclusion rules —
+`.gitignore`, the `_`-prefix elision, and the curated skip-list
+(`target`, `node_modules`, …).
+
+### Layout
+
+When more than one candidate exists, the chooser renders a two-pane
+layout:
+
+- **Wide terminals** (`width >= height`) — candidate list on the left,
+  live detail pane on the right.
+- **Tall terminals** (`width < height`) — detail pane above the
+  candidate list.
+
+The detail pane shows the file badge, name, description (or
+"no description"), the `$schema` value rendered as YAML, and an OSC8
+path link.
+
+### Single-match shortcut
+
+When only one candidate resolves, Claudine shows a lightweight
+`Use this file? (Y/n)` prose dialog instead of the full chooser.
+Press `Y` or `Enter` to accept; `n` or `Esc` to cancel.
+
+### Cancellation
+
+Pressing `Esc` in the chooser or dialog cancels interactive collection
+and bubbles back as the original `MissingProperties` error, so the CLI
+still surfaces the non-TTY remediation block.
 
 ## Other commands
 
@@ -751,22 +789,20 @@ compose        commands        completions
 ### Composition with a magic path
 
 ```text
+# Filename-only: the @ is kept, the closest plan.md resolves at launch
 $ claudine compose @plan<TAB>
-→ prompts/plan.md
+→ @plan.md
 ```
 
 ### Composition with a path-shaped magic prefix
 
 ```text
+# The path constrains the search; the candidate is still filename-only
 $ claudine compose @prompts/plan<TAB>
-→ prompts/plan.md
+→ @plan.md
 
-$ claudine compose @.claudine/prompts/plan<TAB>
-→ .claudine/prompts/plan.md
-
-# Nested directories work too — drills into <repo>/prompts/drafts/
 $ claudine compose @prompts/drafts/plan<TAB>
-→ prompts/drafts/plan.md
+→ @plan.md
 ```
 
 ### Non-magic repo `.claudine` scope
@@ -818,7 +854,7 @@ $ claudine inline-compose @spec<TAB>
 → docs/feature-spec.md
 ```
 
-### Inline-compose prefers repo-local docs over user-global prompts
+### Inline-compose magic is filename-only and deduped
 
 ```text
 # Given:
@@ -826,7 +862,7 @@ $ claudine inline-compose @spec<TAB>
 #   ~/.claudine/prompts/plan.md   ← has `prompt:` frontmatter
 
 $ claudine inline-compose @plan<TAB>
-→ docs/plan.md                          # repo-local wins; global is suppressed
+→ @plan.md     # one entry; repo-local owns the rank, resolves closest at launch
 ```
 
 ### Sequence against an external YAML
@@ -897,3 +933,6 @@ flowchart TD
 | [`bootstrap.rs`](../../cli/src/completion/bootstrap.rs) | Shell scripts (bash/zsh/fish) + legacy PowerShell/Elvish. |
 | [`commands/completions.rs`](../../cli/src/commands/completions.rs) | `claudine completions` and the hidden `__complete`. |
 | [`schema_completion.rs`](../../cli/src/completion/schema_completion.rs) | Schema-aware property-name and property-value completion for setter slots. |
+| [`autocomplete_ui.rs`](../../cli/src/completion/autocomplete_ui.rs) | ENTER-path chooser / confirmation dialog rendering. |
+| [`default_glob.rs`](../../cli/src/completion/default_glob.rs) | Bare `file`/`file[]` markdown candidate gatherer. |
+| [`commands/schema_interactive.rs`](../../cli/src/commands/schema_interactive.rs) | Interactive collection of missing `$schema` properties. |

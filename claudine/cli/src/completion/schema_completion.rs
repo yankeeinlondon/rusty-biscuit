@@ -30,8 +30,10 @@ use darkmatter::markdown::schemas::{
     SchemaShape, SimplifiedSchema, completion as dm_completion,
 };
 
+use super::default_glob;
 use super::fuzzy;
 use super::scopes::{self, ScopeContext};
+use super::walker;
 
 /// Resolve `file_arg` to a loaded [`EffectiveSchema`].
 ///
@@ -47,6 +49,8 @@ pub(crate) fn load_effective_schema(file_arg: &str, ctx: &ScopeContext) -> Optio
     let path = resolve_prompt_path(file_arg, ctx)?;
     let text = std::fs::read_to_string(&path).ok()?;
     let markdown: Markdown = Markdown::from(text).with_source(ComposeSource::infer_from_path(&path));
+    // Completions lack a launch-area context, so file-typed values fall back
+    // to ambient CWD here (consistent with pre-`chdir` timing).
     DarkmatterSchemas::new().effective_for(&markdown).ok()?
 }
 
@@ -294,9 +298,9 @@ fn yaml_root_property_keys(value: &YamlValue) -> Vec<String> {
 /// - `enum` → enum members matching `value_partial` (prefix-insensitive when
 ///   `value_partial` is non-empty; all members for an empty partial).
 /// - `file` → filesystem paths matching the property's `match(...)` globs.
-///   Walks the filesystem starting from the effective repo root (or cwd when
-///   no repo). Empty `match` patterns return no candidates — fall back to
-///   shell-native file completion.
+///   Walks the filesystem starting from the invoking `cwd` (the launch area;
+///   see [`scopes::property_value_root`]). Empty `match` patterns return no
+///   candidates — fall back to shell-native file completion.
 ///
 /// Each candidate is rendered as the **full** `name='value'` token so the
 /// shell can replace the entire setter under the cursor (matches the
@@ -319,7 +323,7 @@ pub(crate) fn property_value(
             enum_candidates(property, members, value_partial)
         }
         CompletionKind::File { patterns } => {
-            file_candidates(property, patterns, value_partial, ctx)
+            file_candidates(property, patterns, value_partial, suggestion.is_array, ctx)
         }
         // Hints don't produce concrete candidates — the caller falls back
         // to the existing `@`-gated path or shell-native completion.
@@ -399,29 +403,58 @@ fn file_candidates(
     property: &str,
     patterns: &[String],
     value_partial: &str,
+    is_array: bool,
     ctx: &ScopeContext,
 ) -> Vec<String> {
-    // Empty `match()` means "any file" — without a pattern the result set
-    // would be unbounded, so we return nothing and let the existing
-    // `@`-gated path or shell-native file completion handle it.
-    if patterns.is_empty() {
-        return Vec::new();
-    }
-    let Some(matcher) = MatchGlobs::compile(patterns) else {
-        return Vec::new();
+    let base: PathBuf = scopes::property_value_root(ctx).to_path_buf();
+
+    let (active, prefix_segments) = if is_array {
+        parse_array_file_value(value_partial)
+    } else {
+        (normalize_partial(value_partial), Vec::new())
     };
-    let base: PathBuf = scopes::effective_repo_root(ctx)
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| ctx.cwd.clone());
-    let trimmed = value_partial.trim_matches(['"', '\'']);
-    let active = trimmed.trim_start_matches('@');
+    let excluded: HashSet<String> = prefix_segments.iter().cloned().collect();
 
     let mut out: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
+
+    if patterns.is_empty() {
+        // Bare `file` / `file[]` falls back to the default markdown glob.
+        let candidates = default_glob::default_markdown_candidates_filtered(ctx, |path| {
+            active.is_empty() || rel_or_name_matches(path, &base, &active)
+        });
+        for path in candidates {
+            let Ok(rel) = path.strip_prefix(&base) else {
+                continue;
+            };
+            let Some(rel_str) = rel.to_str() else {
+                continue;
+            };
+            if !excluded.is_empty() && excluded.contains(rel_str) {
+                continue;
+            }
+            let rendered = if is_array {
+                format_array_candidate(property, &prefix_segments, rel_str)
+            } else {
+                format!("{property}='{rel_str}'")
+            };
+            if seen.insert(rendered.clone()) {
+                out.push(rendered);
+            }
+        }
+        out.sort();
+        return out;
+    }
+
+    let Some(matcher) = MatchGlobs::compile(patterns) else {
+        return Vec::new();
+    };
+
     let walker = ignore::WalkBuilder::new(&base)
         .hidden(true)
         .git_ignore(true)
         .require_git(false)
+        .filter_entry(walker::entry_passes_filters)
         .build();
     for entry in walker.flatten() {
         let path = entry.path();
@@ -441,14 +474,21 @@ fn file_candidates(
         if !matcher.is_match(rel_str, file_name) {
             continue;
         }
-        // The active partial is fuzzy-matched against the basename — users
-        // typically narrow file completion by typing characters from the
-        // file name, not the leading directory path. Path-qualified globs
-        // are already enforced above by the GlobSet check against `rel_str`.
-        if !active.is_empty() && !fuzzy::fuzzy_match(file_name, active) {
+        // Filter the typed partial against the repo-relative path, not the
+        // basename: `match(...)` candidates routinely share a basename
+        // (e.g. every `**/*spec*.md` hit is `spec.md`), so only path-fragment
+        // matching lets the user narrow by directory.
+        if !active.is_empty() && !contains_ci(rel_str, &active) {
             continue;
         }
-        let rendered = format!("{property}='{rel_str}'");
+        if !excluded.is_empty() && excluded.contains(rel_str) {
+            continue;
+        }
+        let rendered = if is_array {
+            format_array_candidate(property, &prefix_segments, rel_str)
+        } else {
+            format!("{property}='{rel_str}'")
+        };
         if seen.insert(rendered.clone()) {
             out.push(rendered);
         }
@@ -457,20 +497,167 @@ fn file_candidates(
     out
 }
 
+/// Gather absolute file paths for a schema `file`/`file[]` property.
+///
+/// - `patterns` empty → delegates to [`default_glob::default_markdown_candidates`]
+///   (bare `file`/`file[]` fallback).
+/// - `patterns` non-empty → walks from the invoking `cwd` (the launch area;
+///   see [`scopes::property_value_root`]) and returns every file that
+///   satisfies the `match(...)` globs.
+///
+/// Used by the ENTER-path missing-property chooser. TAB completion uses
+/// [`file_candidates`] instead because it needs formatted setter tokens and
+/// array-continuation exclusion.
+pub(crate) fn file_candidate_paths(patterns: &[String], ctx: &ScopeContext) -> Vec<PathBuf> {
+    let base: PathBuf = scopes::property_value_root(ctx).to_path_buf();
+
+    if patterns.is_empty() {
+        return default_glob::default_markdown_candidates(ctx);
+    }
+
+    let Some(matcher) = MatchGlobs::compile(patterns) else {
+        return Vec::new();
+    };
+
+    let mut out: Vec<PathBuf> = Vec::new();
+    let walker = ignore::WalkBuilder::new(&base)
+        .hidden(true)
+        .git_ignore(true)
+        .require_git(false)
+        .filter_entry(walker::entry_passes_filters)
+        .build();
+    for entry in walker.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Ok(rel) = path.strip_prefix(&base) else {
+            continue;
+        };
+        let Some(rel_str) = rel.to_str() else {
+            continue;
+        };
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(rel_str);
+        if !matcher.is_match(rel_str, file_name) {
+            continue;
+        }
+        out.push(path.to_path_buf());
+    }
+    out.sort();
+    out
+}
+
+/// Case-insensitive substring test.
+///
+/// The typed partial is applied as a `*active*` filter — it may appear
+/// anywhere in the candidate path — matching the ENTER-autocomplete `*query*`
+/// contract rather than a fuzzy subsequence.
+fn contains_ci(haystack: &str, needle: &str) -> bool {
+    haystack
+        .to_ascii_lowercase()
+        .contains(&needle.to_ascii_lowercase())
+}
+
+/// Substring-match `active` against `path`'s repo-relative form (falling back
+/// to the basename when `path` is not under `base`).
+///
+/// Used by the bare-`file` default-glob branch so it filters on the same
+/// repo-relative path the match-glob branch does — what the user types is a
+/// fragment of the path that will be inserted, and shared basenames make
+/// basename-only matching useless for `file(match(...))` candidates.
+fn rel_or_name_matches(path: &Path, base: &Path, active: &str) -> bool {
+    let target = path
+        .strip_prefix(base)
+        .ok()
+        .and_then(|rel| rel.to_str())
+        .or_else(|| path.file_name().and_then(|n| n.to_str()));
+    target.is_some_and(|t| contains_ci(t, active))
+}
+
+/// Normalize a value partial by stripping surrounding quotes and the `@`
+/// sigil so it can be used as a fuzzy match target.
+fn normalize_partial(value_partial: &str) -> String {
+    value_partial
+        .trim_matches(['"', '\''])
+        .trim_start_matches('@')
+        .to_string()
+}
+
+/// Parse a `file[]` value partial into the active fuzzy target and the
+/// already-committed prefix segments.
+///
+/// The input may be quoted or unquoted, open or closed. Outer quotes are
+/// stripped for parsing; emitted candidates are always single-quoted. A
+/// top-level comma splits the list. Filenames that themselves contain a
+/// comma are unsupported and will be mis-split — this matches the spec
+/// contract for the exclusion set.
+fn parse_array_file_value(value_partial: &str) -> (String, Vec<String>) {
+    let (body, _quote) = strip_outer_quotes(value_partial);
+    let raw_segments: Vec<&str> = body.split(',').collect();
+    if raw_segments.is_empty() {
+        return (String::new(), Vec::new());
+    }
+    let prefix = &raw_segments[..raw_segments.len() - 1];
+    let active = raw_segments.last().unwrap_or(&"").trim();
+    let prefix_segments = prefix
+        .iter()
+        .map(|s| {
+            s.trim()
+                .trim_matches(['"', '\''])
+                .trim_start_matches('@')
+                .to_string()
+        })
+        .filter(|s| !s.is_empty())
+        .collect();
+    (normalize_partial(active), prefix_segments)
+}
+
+/// Strip a leading quote and, when present, a matching trailing quote.
+/// Returns the unquoted body plus the quote character that was removed.
+/// Unclosed quotes are also stripped from the leading edge so that
+/// `spec='a.md,b<TAB>` parses correctly.
+fn strip_outer_quotes(input: &str) -> (&str, Option<char>) {
+    let first = input.chars().next();
+    let quote = match first {
+        Some('\'') | Some('"') => first,
+        _ => return (input, None),
+    };
+    if input.len() >= 2 && input.ends_with(quote.unwrap()) {
+        (&input[1..input.len() - 1], quote)
+    } else {
+        (&input[1..], quote)
+    }
+}
+
+/// Render a `file[]` candidate, preserving the already-committed segments
+/// and appending the newly selected file. The entire value is wrapped in
+/// single quotes so it round-trips through the setter token parser.
+fn format_array_candidate(property: &str, prefix_segments: &[String], selected: &str) -> String {
+    let mut parts: Vec<String> = prefix_segments.to_vec();
+    parts.push(selected.to_string());
+    let joined = parts.join(",");
+    format!("{property}='{joined}'")
+}
+
 /// Compiled positive + negative globset pair for a Darkmatter
 /// `file(match(...))` constraint.
 ///
-/// Mirrors Darkmatter's `x-darkmatter-match` keyword semantics: a path is
-/// accepted iff (a) at least one positive pattern matches AND (b) no
+/// Implements `file(match(...))` glob semantics for completion filtering: a
+/// path is accepted iff (a) at least one positive pattern matches AND (b) no
 /// negative pattern matches. When the constraint contains only negative
 /// patterns, every non-rejected path is accepted (`positive: None`).
+///
+/// `match(...)` is suggestion metadata only — Darkmatter no longer validates
+/// against it — so these globs shape completion candidates, not validation.
 ///
 /// Each pattern is added to the globset twice — once with its raw shape
 /// (which may contain path separators like `src/**/*.rs`) and once as a
 /// `**/`-anchored variant so filename-only patterns like `*.png` continue
-/// to match files in subdirectories. This matches Darkmatter's
-/// multi-candidate validator: `*.md` accepts `docs/api.md` because the
-/// resolved filename `api.md` is one of the views the validator tests.
+/// to match files in subdirectories: `*.md` accepts `docs/api.md` because the
+/// resolved filename `api.md` is one of the views tested.
 struct MatchGlobs {
     positive: Option<GlobSet>,
     negative: GlobSet,
@@ -801,6 +988,152 @@ mod tests {
     }
 
     #[test]
+    fn property_value_match_pattern_excludes_underscore_dirs_and_files() {
+        // Regression: a `file(match(...))` property walked the repo with a
+        // bespoke `WalkBuilder` that honored only `.hidden`/gitignore, so
+        // `_`-prefixed archive directories (`_completed/`, `_unscheduled/`)
+        // and `_`-prefixed files leaked into completion. The match path must
+        // share the scope walker's `_`-prefix exclusion.
+        let effective = effective_from_doc(concat!(
+            "---\n",
+            "$schema:\n",
+            "  spec: \"file(match('**/*spec*.md'))\"\n",
+            "---\nbody\n",
+        ));
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        write(
+            &tmp.path().join("features").join("live").join("spec.md"),
+            "# live\n",
+        );
+        write(
+            &tmp.path()
+                .join("features")
+                .join("_completed")
+                .join("done")
+                .join("spec.md"),
+            "# done\n",
+        );
+        write(&tmp.path().join("_draft-spec.md"), "# draft\n");
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = property_value(&effective, "spec", "", &ctx);
+        assert!(
+            got.iter().any(|c| c == "spec='features/live/spec.md'"),
+            "live spec must surface: {got:?}"
+        );
+        assert!(
+            !got.iter().any(|c| c.contains("_completed")),
+            "_completed dir must be elided from match path: {got:?}"
+        );
+        assert!(
+            !got.iter().any(|c| c.contains("_draft-spec.md")),
+            "_-prefixed file must be elided from match path: {got:?}"
+        );
+    }
+
+    #[test]
+    fn property_value_match_pattern_filters_by_path_substring() {
+        // The typed partial is a `*active*` substring filter over the
+        // repo-relative path, so a directory fragment narrows candidates that
+        // share a basename (`spec.md`).
+        let effective = effective_from_doc(concat!(
+            "---\n",
+            "$schema:\n",
+            "  spec: \"file(match('**/*spec*.md'))\"\n",
+            "---\nbody\n",
+        ));
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        write(
+            &tmp.path().join("features").join("realwork").join("spec.md"),
+            "# r\n",
+        );
+        write(
+            &tmp.path().join("features").join("other").join("spec.md"),
+            "# o\n",
+        );
+        let ctx = ScopeContext::discover_from(tmp.path());
+
+        let got = property_value(&effective, "spec", "real", &ctx);
+        assert_eq!(
+            got,
+            vec!["spec='features/realwork/spec.md'".to_string()],
+            "partial must filter by directory substring, not basename: {got:?}"
+        );
+
+        // Case-insensitive.
+        let got_upper = property_value(&effective, "spec", "REAL", &ctx);
+        assert_eq!(got_upper, got, "substring filter must be case-insensitive");
+
+        // A fragment matching no path returns nothing.
+        assert!(property_value(&effective, "spec", "zzz", &ctx).is_empty());
+    }
+
+    #[test]
+    fn property_value_match_pattern_anchors_on_cwd_not_repo_root() {
+        // Regression: a `file(match(...))` property walked the effective repo
+        // root, so a user completing inside a package area saw matches from
+        // the whole repo — and the offered repo-relative path did not resolve
+        // at runtime (read-side refs anchor on the launch `cwd`). The walk
+        // must start at `cwd` and surface only files beneath it, rendered
+        // cwd-relative.
+        let effective = effective_from_doc(concat!(
+            "---\n",
+            "$schema:\n",
+            "  review: \"file(match('**/*.md'))\"\n",
+            "---\nbody\n",
+        ));
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        // A doc above the cwd (repo root) and one under the cwd (package area).
+        write(&tmp.path().join("docs").join("top.md"), "# top\n");
+        write(
+            &tmp.path().join("claudine").join("docs").join("area.md"),
+            "# area\n",
+        );
+
+        let ctx = ScopeContext::discover_from(&tmp.path().join("claudine"));
+        let got = property_value(&effective, "review", "", &ctx);
+        assert!(
+            got.iter().any(|c| c == "review='docs/area.md'"),
+            "cwd-local doc must surface, rendered cwd-relative: {got:?}"
+        );
+        assert!(
+            !got.iter().any(|c| c.contains("top.md")),
+            "repo-root doc above the cwd must NOT surface: {got:?}"
+        );
+    }
+
+    #[test]
+    fn file_candidate_paths_match_pattern_excludes_underscore_dirs() {
+        // The ENTER-path chooser shares the same exclusion contract.
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        write(
+            &tmp.path().join("features").join("live").join("spec.md"),
+            "# live\n",
+        );
+        write(
+            &tmp.path()
+                .join("features")
+                .join("_completed")
+                .join("spec.md"),
+            "# done\n",
+        );
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = file_candidate_paths(&["**/*spec*.md".to_string()], &ctx);
+        assert!(
+            got.iter().any(|p| p.ends_with("features/live/spec.md")),
+            "live spec must surface: {got:?}"
+        );
+        assert!(
+            !got.iter()
+                .any(|p| p.components().any(|c| c.as_os_str() == "_completed")),
+            "_completed dir must be elided from ENTER-path match walk: {got:?}"
+        );
+    }
+
+    #[test]
     fn property_value_returns_empty_for_string_property() {
         let effective = effective_from_doc(concat!(
             "---\n",
@@ -816,7 +1149,7 @@ mod tests {
     }
 
     #[test]
-    fn property_value_returns_empty_for_file_without_match() {
+    fn property_value_falls_back_to_default_glob_for_bare_file() {
         let effective = effective_from_doc(concat!(
             "---\n",
             "$schema:\n",
@@ -825,10 +1158,110 @@ mod tests {
         ));
         let tmp = TempDir::new().unwrap();
         seed_repo(tmp.path());
-        write(&tmp.path().join("a.txt"), "");
+        write(&tmp.path().join("readme.md"), "# R\n");
+        write(&tmp.path().join("a.txt"), "text\n");
+        write(&tmp.path().join("prompts").join("plan.md"), "# P\n");
         let ctx = ScopeContext::discover_from(tmp.path());
         let got = property_value(&effective, "cover", "", &ctx);
-        assert!(got.is_empty(), "no `match` => no candidates: {got:?}");
+        assert!(
+            got.iter().any(|c| c == "cover='readme.md'"),
+            "bare file must fall back to default glob markdown candidates: {got:?}"
+        );
+        assert!(
+            !got.iter().any(|c| c.contains("a.txt")),
+            "non-markdown file must be excluded by default glob: {got:?}"
+        );
+        assert!(
+            !got.iter().any(|c| c.contains("prompts")),
+            "prompt directory must be excluded from default glob: {got:?}"
+        );
+    }
+
+    #[test]
+    fn property_value_file_array_first_file_completion() {
+        let effective = effective_from_doc(concat!(
+            "---\n",
+            "$schema:\n",
+            "  attachments: file[]\n",
+            "---\nbody\n",
+        ));
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        write(&tmp.path().join("notes.md"), "# N\n");
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = property_value(&effective, "attachments", "", &ctx);
+        assert!(
+            got.iter().any(|c| c == "attachments='notes.md'"),
+            "file[] first file must complete from default glob: {got:?}"
+        );
+    }
+
+    #[test]
+    fn property_value_file_array_comma_continuation_excludes_prior_files() {
+        let effective = effective_from_doc(concat!(
+            "---\n",
+            "$schema:\n",
+            "  attachments: file[]\n",
+            "---\nbody\n",
+        ));
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        write(&tmp.path().join("a.md"), "# A\n");
+        write(&tmp.path().join("b.md"), "# B\n");
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = property_value(&effective, "attachments", "a.md,", &ctx);
+        assert!(
+            got.iter().any(|c| c == "attachments='a.md,b.md'"),
+            "trailing comma must re-open completion excluding prior file: {got:?}"
+        );
+        assert!(
+            !got.iter().any(|c| c == "attachments='a.md,a.md'"),
+            "already-selected file must be excluded: {got:?}"
+        );
+    }
+
+    #[test]
+    fn property_value_file_array_continuation_filters_by_active_partial() {
+        let effective = effective_from_doc(concat!(
+            "---\n",
+            "$schema:\n",
+            "  attachments: file[]\n",
+            "---\nbody\n",
+        ));
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        write(&tmp.path().join("alpha.md"), "# A\n");
+        write(&tmp.path().join("beta.md"), "# B\n");
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = property_value(&effective, "attachments", "alpha.md,b", &ctx);
+        assert!(
+            got.iter().any(|c| c == "attachments='alpha.md,beta.md'"),
+            "active partial must filter continuation candidates: {got:?}"
+        );
+        assert!(
+            !got.iter().any(|c| c.contains("alpha.md,alpha.md")),
+            "prior file must be excluded even when active partial matches it: {got:?}"
+        );
+    }
+
+    #[test]
+    fn property_value_file_array_continuation_honors_unclosed_quote() {
+        let effective = effective_from_doc(concat!(
+            "---\n",
+            "$schema:\n",
+            "  attachments: file[]\n",
+            "---\nbody\n",
+        ));
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        write(&tmp.path().join("a.md"), "# A\n");
+        write(&tmp.path().join("b.md"), "# B\n");
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = property_value(&effective, "attachments", "'a.md,b", &ctx);
+        assert!(
+            got.iter().any(|c| c == "attachments='a.md,b.md'"),
+            "unclosed quote must still produce a single-quoted candidate: {got:?}"
+        );
     }
 
     #[test]

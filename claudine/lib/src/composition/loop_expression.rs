@@ -61,11 +61,19 @@ impl LoopAmbient {
 /// read-side expression functions (`file_exists`, `absolute`, `relative`, …)
 /// resolve against the document directory. The probe re-runs each iteration
 /// while the base directory stays fixed.
+///
+/// When a fallback directory is also set
+/// ([`with_file_ref_fallback_dir`](Self::with_file_ref_fallback_dir)),
+/// caller-supplied file references that miss under the document dir resolve
+/// against the captured launch area instead of the ambient process CWD, so
+/// `file_exists` inside `loop.while`/`loop.until` stays correct after the
+/// wrapper's `chdir`.
 #[derive(Debug, Clone, Copy)]
 pub struct LoopExpressionLookup<'a> {
     frontmatter: &'a Map<String, Value>,
     ambient: &'a LoopAmbient,
     base_dir: Option<&'a Path>,
+    file_ref_fallback_dir: Option<&'a Path>,
 }
 
 impl<'a> LoopExpressionLookup<'a> {
@@ -75,6 +83,7 @@ impl<'a> LoopExpressionLookup<'a> {
             frontmatter,
             ambient,
             base_dir: None,
+            file_ref_fallback_dir: None,
         }
     }
 
@@ -83,6 +92,17 @@ impl<'a> LoopExpressionLookup<'a> {
     #[must_use]
     pub fn with_base_dir(mut self, base_dir: Option<&'a Path>) -> Self {
         self.base_dir = base_dir;
+        self
+    }
+
+    /// Set the explicit fallback directory for caller-supplied file
+    /// references (typically the captured launch area). Resolution still
+    /// tries the document dir ([`with_base_dir`](Self::with_base_dir)) first;
+    /// only when that misses does it consult this directory. `None` disables
+    /// the fallback.
+    #[must_use]
+    pub fn with_file_ref_fallback_dir(mut self, fallback: Option<&'a Path>) -> Self {
+        self.file_ref_fallback_dir = fallback;
         self
     }
 }
@@ -109,8 +129,13 @@ impl EvaluationLookup for LoopExpressionLookup<'_> {
     }
 
     fn resolution_context(&self) -> Option<ResolutionContext> {
-        self.base_dir
-            .map(|dir| ResolutionContext::new(dir.to_path_buf()))
+        self.base_dir.map(|dir| {
+            let ctx = ResolutionContext::new(dir.to_path_buf());
+            match self.file_ref_fallback_dir {
+                Some(fallback) => ctx.with_file_ref_fallback_dir(fallback.to_path_buf()),
+                None => ctx,
+            }
+        })
     }
 }
 
@@ -388,6 +413,57 @@ mod tests {
                 &lookup
             )
             .unwrap()
+        );
+    }
+
+    /// A caller-supplied file reference that misses under the document dir
+    /// (`base_dir`) but exists under the launch-area fallback resolves via the
+    /// fallback, independent of the ambient process CWD.
+    #[test]
+    fn file_exists_resolves_via_launch_area_fallback() {
+        let prompt_dir = tempfile::TempDir::new().unwrap();
+        let launch_dir = tempfile::TempDir::new().unwrap();
+
+        // The artifact lives ONLY under the launch area.
+        std::fs::write(launch_dir.path().join("spec.md"), "# spec\n").unwrap();
+
+        let fm = map(json!({}));
+        let ambient = ambient();
+
+        // No fallback: the artifact is missing under the prompt dir, so the
+        // `until` condition keeps going (file_exists is falsy).
+        let no_fallback = LoopExpressionLookup::new(&fm, &ambient)
+            .with_base_dir(Some(prompt_dir.path()));
+        assert!(
+            evaluate_condition(
+                &LoopCondition::Until("file_exists('spec.md')".into()),
+                &no_fallback
+            )
+            .unwrap(),
+            "without the fallback, spec.md is missing under the prompt dir"
+        );
+
+        // With the launch-area fallback: the artifact resolves and the `until`
+        // condition stops (file_exists is truthy).
+        let with_fallback = LoopExpressionLookup::new(&fm, &ambient)
+            .with_base_dir(Some(prompt_dir.path()))
+            .with_file_ref_fallback_dir(Some(launch_dir.path()));
+        assert!(
+            !evaluate_condition(
+                &LoopCondition::Until("file_exists('spec.md')".into()),
+                &with_fallback
+            )
+            .unwrap(),
+            "with the fallback, spec.md resolves against the launch area"
+        );
+
+        // The fallback is propagated into the resolution context.
+        let ctx = with_fallback
+            .resolution_context()
+            .expect("resolution context is present");
+        assert_eq!(
+            ctx.file_ref_fallback_dir,
+            Some(launch_dir.path().to_path_buf())
         );
     }
 

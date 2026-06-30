@@ -55,13 +55,16 @@ pub(crate) fn execute_harness_attempt(
         use_structured,
     )
     .entered();
-    // Step-silence enforcement requires live `SemanticEvent` ticks, which only
-    // exist in the structured-stream path. Capture and passthrough attempts
-    // drop the value with a warning rather than silently ignoring it.
-    let launch = if !use_structured && launch.timeout_config.step_timeout.is_some() {
+    // Step-silence and stalled-generation enforcement both require live
+    // `SemanticEvent` ticks, which only exist in the structured-stream path.
+    // Capture and passthrough attempts drop the values with a warning rather
+    // than silently ignoring a user-configured budget.
+    let launch = if !use_structured
+        && (launch.timeout_config.step_timeout.is_some() || launch.stall_timeout.is_some())
+    {
         use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::components::status::{Status, StatusState};
-        if launch.step_timeout_user_configured {
+        if launch.timeout_config.step_timeout.is_some() && launch.step_timeout_user_configured {
             let rendered = Status::new(
                 "step_timeout is only enforced in structured-stream mode; \
                  ignoring for this capture/passthrough attempt"
@@ -71,8 +74,19 @@ pub(crate) fn execute_harness_attempt(
             .render(term);
             eprintln!("{rendered}");
         }
+        if launch.stall_timeout.is_some() && launch.stall_timeout_user_configured {
+            let rendered = Status::new(
+                "stall_timeout is only enforced in structured-stream mode; \
+                 ignoring for this capture/passthrough attempt"
+                    .to_string(),
+            )
+            .state(StatusState::Warning)
+            .render(term);
+            eprintln!("{rendered}");
+        }
         let mut adjusted = launch.clone();
         adjusted.timeout_config.step_timeout = None;
+        adjusted.stall_timeout = None;
         adjusted
     } else {
         launch.clone()
@@ -145,7 +159,12 @@ pub(crate) fn execute_harness_attempt(
         let watchdog_state = Some(sink.watchdog_state());
         let section_stream = sink.section_stream();
         let (build_parser, stderr_bridge, content_early_rx) =
-            super::super::policy::build_structured_plumbing(provider, sink, parser_config);
+            super::super::policy::build_structured_plumbing(
+                provider,
+                sink,
+                parser_config,
+                launch.stall_timeout,
+            );
         let stream_result = if let Some(wire_prompt) = launch.wire_prompt.clone() {
             let runtime_context =
                 match claudine::dispatch::DispatchRuntimeContext::load_for_env(env_context) {

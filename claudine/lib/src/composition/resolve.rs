@@ -1,24 +1,29 @@
 //! File reference resolution for composition sources.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use biscuit_file::FileReference;
+use biscuit_file::{FileReference, PathPosition, find_git_root, find_package_area, home_dir};
 use darkmatter::markdown::{Markdown, MarkdownError};
 
-use super::error::CompositionError;
+use super::error::{CompositionError, MarkdownLoadCause};
 use super::types::ResolvedCompositionSource;
 
 /// Map a Markdown load failure to the most actionable `CompositionError`.
 ///
 /// A malformed-frontmatter failure routes to [`CompositionError::FrontmatterParse`]
 /// (which carries the typed error for rich rendering); any other failure
-/// (e.g. a read error from `try_from`) falls back to the flat
-/// [`CompositionError::MarkdownLoad`] string.
+/// (e.g. a parse error from `try_from`) routes to
+/// [`CompositionError::MarkdownLoad`] carrying the typed
+/// [`MarkdownLoadCause`].
 fn map_load_error(path: &Path, err: MarkdownError) -> CompositionError {
     match err {
-        MarkdownError::FrontmatterParse { .. } => CompositionError::FrontmatterParse(err),
-        other => CompositionError::MarkdownLoad(format!("{}: {other}", path.display())),
+        MarkdownError::FrontmatterParse { .. }
+        | MarkdownError::FrontmatterFenceMismatch { .. } => CompositionError::FrontmatterParse(err),
+        other => CompositionError::MarkdownLoad {
+            path: path.to_path_buf(),
+            source: MarkdownLoadCause::Parse(Box::new(other)),
+        },
     }
 }
 
@@ -28,9 +33,9 @@ fn map_load_error(path: &Path, err: MarkdownError) -> CompositionError {
 /// that the resolved file has a `.md` or `.markdown` extension.
 ///
 /// When invoked from inside a Cargo workspace package area (common for
-/// monorepo prompts like `@prompts/commit.md`), the package area is added
-/// as a prepended magic search root so package-local prompts are found
-/// before repo-wide or HOME-scoped ones.
+/// monorepo prompts like `@prompts/commit.md`), the package area and the
+/// convention prompt directories are added as prepended magic search roots
+/// so a bare `@<file>` resolves to the closest matching prompt.
 pub fn resolve_composition_source(
     file_ref: &str,
 ) -> Result<ResolvedCompositionSource, CompositionError> {
@@ -38,13 +43,19 @@ pub fn resolve_composition_source(
     // resolution phase so trace inspection / `--perf` reporting can see
     // when the `biscuit-file` resolver dominates compose prep cost.
     let _span = tracing::info_span!("compose_prep.file_reference", file = %file_ref).entered();
-    let reference = FileReference::new(file_ref)
-        .map_err(|e| CompositionError::InvalidReference(format!("{file_ref}: {e}")))?
-        .with_package_area_magic_path();
+    let reference = with_prompt_magic_paths(FileReference::new(file_ref).map_err(|e| {
+        CompositionError::InvalidReference {
+            reference: file_ref.to_string(),
+            source: e,
+        }
+    })?);
 
     let resolved_path = reference
         .resolve()
-        .map_err(|e| CompositionError::InvalidReference(format!("{file_ref}: {e}")))?
+        .map_err(|e| CompositionError::InvalidReference {
+            reference: file_ref.to_string(),
+            source: e,
+        })?
         .ok_or_else(|| CompositionError::FileNotFound(file_ref.to_string()))?;
 
     // Validate markdown extension
@@ -58,8 +69,12 @@ pub fn resolve_composition_source(
         ));
     }
 
-    let original_text = fs::read_to_string(&resolved_path)
-        .map_err(|e| CompositionError::MarkdownLoad(format!("{}: {e}", resolved_path.display())))?;
+    let original_text = fs::read_to_string(&resolved_path).map_err(|e| {
+        CompositionError::MarkdownLoad {
+            path: resolved_path.clone(),
+            source: MarkdownLoadCause::Read(e),
+        }
+    })?;
 
     // Parse fallibly so malformed frontmatter surfaces as a real error. The
     // infallible `From<String>` drops a `FrontmatterParse` error and returns an
@@ -74,6 +89,100 @@ pub fn resolve_composition_source(
         original_text,
         markdown,
     })
+}
+
+/// Register the convention prompt directories as magic (`@`) search roots.
+///
+/// Mirrors the completion engine's magic scope set so a value the user
+/// tab-completed to `@<file>` resolves at launch: the roots are the
+/// package-area, repo, and HOME `prompts/` directories, registered
+/// **closest-first**. Because [`FileReference::resolve`] returns the first
+/// existing candidate, the nearest prompt wins.
+///
+/// The package area is also registered as a bare root (replacing
+/// `with_package_area_magic_path`), so the single `cargo metadata` probe
+/// serves both the bare `@<file>` form and the path-shaped
+/// `@prompts/<file>` form.
+fn with_prompt_magic_paths(reference: FileReference) -> FileReference {
+    let Ok(cwd) = std::env::current_dir() else {
+        return reference;
+    };
+    let git_root = find_git_root(&cwd).ok().flatten();
+    let package_area = git_root
+        .as_deref()
+        .and_then(|root| find_package_area(root, &cwd).ok().flatten());
+
+    prompt_magic_roots(
+        git_root.as_deref(),
+        package_area.as_deref(),
+        home_dir().as_deref(),
+    )
+    .into_iter()
+    .fold(reference, |reference, root| {
+        reference.add_magic_path(root, PathPosition::Start)
+    })
+}
+
+/// The convention prompt directories, **closest-first**: package area, then
+/// repo (`prompts/` then `.claudine/prompts/`), then HOME `~/.claudine/
+/// prompts`. The bare package-area root is included first so the single
+/// `cargo metadata` probe also serves the path-shaped `@prompts/<file>` form.
+///
+/// Pure (no IO) so the ordering is unit-testable; the IO that discovers the
+/// anchors lives in [`with_prompt_magic_paths`].
+fn prompt_magic_roots(
+    git_root: Option<&Path>,
+    package_area: Option<&Path>,
+    home: Option<&Path>,
+) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Some(area) = package_area {
+        roots.push(area.to_path_buf());
+        roots.push(area.join("prompts"));
+    }
+    if let Some(root) = git_root {
+        roots.push(root.join("prompts"));
+        roots.push(root.join(".claudine").join("prompts"));
+    }
+    if let Some(home) = home {
+        roots.push(home.join(".claudine").join("prompts"));
+    }
+    roots
+}
+
+/// Enrich a source-load error with the authored frontmatter block.
+///
+/// Source-load failures can happen after the file has resolved and been read
+/// but before a [`ResolvedCompositionSource`] exists. This helper reconstructs
+/// the resolved source text for the CLI render boundary and leaves the error
+/// unchanged when the file cannot be resolved/read again or the error is not
+/// frontmatter-rooted.
+pub fn enrich_composition_source_load_error(
+    file_ref: &str,
+    error: CompositionError,
+    stderr_is_tty: bool,
+) -> CompositionError {
+    let Some(source_text) = read_source_text_for_enrichment(file_ref) else {
+        return error;
+    };
+    error.enrich_frontmatter_text(&source_text, stderr_is_tty)
+}
+
+fn read_source_text_for_enrichment(file_ref: &str) -> Option<String> {
+    let reference = FileReference::new(file_ref)
+        .ok()?
+        .with_package_area_magic_path();
+    let resolved_path = reference.resolve().ok()??;
+
+    let ext = resolved_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    if !matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown") {
+        return None;
+    }
+
+    fs::read_to_string(resolved_path).ok()
 }
 
 /// Validate that the resolved file is readable and writable.
@@ -107,8 +216,94 @@ pub fn is_markdown_path(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::error::Error as _;
     use std::fs;
+    use std::io::{self, ErrorKind};
+    use std::path::PathBuf;
     use tempfile::TempDir;
+
+    #[test]
+    fn prompt_magic_roots_are_closest_first() {
+        // Package area before repo before HOME; the bare area root precedes
+        // its `prompts/` child so the path-shaped `@prompts/x.md` form still
+        // resolves via the existing join. `resolve_direct` returns the first
+        // existing candidate, so this order encodes "closest wins".
+        let area = Path::new("/repo/claudine");
+        let repo = Path::new("/repo");
+        let home = Path::new("/home/u");
+        let got = prompt_magic_roots(Some(repo), Some(area), Some(home));
+        assert_eq!(
+            got,
+            vec![
+                PathBuf::from("/repo/claudine"),
+                PathBuf::from("/repo/claudine/prompts"),
+                PathBuf::from("/repo/prompts"),
+                PathBuf::from("/repo/.claudine/prompts"),
+                PathBuf::from("/home/u/.claudine/prompts"),
+            ],
+        );
+    }
+
+    #[test]
+    fn prompt_magic_roots_skip_absent_anchors() {
+        // No package area, no HOME: only the repo roots are registered.
+        let got = prompt_magic_roots(Some(Path::new("/repo")), None, None);
+        assert_eq!(
+            got,
+            vec![
+                PathBuf::from("/repo/prompts"),
+                PathBuf::from("/repo/.claudine/prompts"),
+            ],
+        );
+        assert!(prompt_magic_roots(None, None, None).is_empty());
+    }
+
+    #[test]
+    fn markdown_load_read_cause_is_recoverable() {
+        let err = CompositionError::MarkdownLoad {
+            path: PathBuf::from("/tmp/whatever.md"),
+            source: MarkdownLoadCause::Read(io::Error::other("boom")),
+        };
+
+        // The typed source walks to the sub-enum; the transparent arm carries
+        // the concrete io::Error, recoverable by matching the variant.
+        let cause = err.source().expect("MarkdownLoad must carry a source");
+        let load_cause = cause
+            .downcast_ref::<MarkdownLoadCause>()
+            .expect("source must be a MarkdownLoadCause");
+        let io_err = match load_cause {
+            MarkdownLoadCause::Read(io_err) => io_err,
+            other => panic!("expected Read cause, got: {other:?}"),
+        };
+        assert_eq!(io_err.kind(), ErrorKind::Other);
+        assert_eq!(io_err.to_string(), "boom");
+    }
+
+    #[test]
+    fn markdown_load_parse_cause_round_trips() {
+        // A non-frontmatter MarkdownError routed through map_load_error lands in
+        // the MarkdownLoad::Parse arm with the typed MarkdownError reachable.
+        let file = PathBuf::from("/tmp/whatever.md");
+        let other = MarkdownError::AstParse("synthetic ast failure".to_string());
+        let err = map_load_error(&file, other);
+        match &err {
+            CompositionError::MarkdownLoad {
+                source: MarkdownLoadCause::Parse(_),
+                ..
+            } => {}
+            other => panic!("expected MarkdownLoad::Parse, got: {other:?}"),
+        }
+
+        let load_cause = err
+            .source()
+            .and_then(|s| s.downcast_ref::<MarkdownLoadCause>())
+            .expect("source must be a MarkdownLoadCause");
+        let parsed = match load_cause {
+            MarkdownLoadCause::Parse(md_err) => md_err,
+            other => panic!("expected Parse cause, got: {other:?}"),
+        };
+        assert!(matches!(**parsed, MarkdownError::AstParse(_)));
+    }
 
     #[test]
     fn resolve_absolute_markdown_file() {
@@ -159,6 +354,61 @@ mod tests {
             matches!(err, CompositionError::FrontmatterParse(_)),
             "expected FrontmatterParse, got: {err:?}"
         );
+    }
+
+    #[test]
+    fn resolve_four_dash_fence_maps_to_frontmatter_parse() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("four-dash.md");
+        fs::write(
+            &file,
+            "----\nname: cross-platform\ndescription: near-miss fence\n----\n# Body\n",
+        )
+        .unwrap();
+
+        let err = resolve_composition_source(file.to_str().unwrap()).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::FrontmatterParse(_)),
+            "expected FrontmatterParse for ---- fence, got: {err:?}"
+        );
+        assert!(
+            !matches!(err, CompositionError::MarkdownLoad { .. }),
+            "must not fall back to MarkdownLoad: {err:?}"
+        );
+        assert!(
+            !matches!(err, CompositionError::FileNotFound(_)),
+            "must not report file not found: {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("----"),
+            "error message should name the offending fence: {msg}"
+        );
+    }
+
+    #[test]
+    fn load_error_enrichment_wraps_actual_four_dash_source() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("four-dash.md");
+        fs::write(
+            &file,
+            "----\nname: cross-platform\ndescription: near-miss fence\n----\n# Body\n",
+        )
+        .unwrap();
+
+        let err = resolve_composition_source(file.to_str().unwrap()).unwrap_err();
+        let err = enrich_composition_source_load_error(file.to_str().unwrap(), err, true);
+
+        match err {
+            CompositionError::WithFrontmatter { inner, excerpt } => {
+                assert!(
+                    matches!(*inner, CompositionError::FrontmatterParse(_)),
+                    "inner error should remain FrontmatterParse"
+                );
+                assert_eq!(excerpt.highlight_line(), Some(1));
+            }
+            other => panic!("expected WithFrontmatter, got: {other:?}"),
+        }
     }
 
     #[test]
@@ -224,5 +474,44 @@ mod tests {
         assert!(is_markdown_path(Path::new("test.MD")));
         assert!(!is_markdown_path(Path::new("test.txt")));
         assert!(!is_markdown_path(Path::new("test")));
+    }
+
+    /// Acceptance criterion #5: the shipped `prompts/cross-platform.md` prompt
+    /// (already fixed to `---` fences) loads as a composition source with
+    /// non-empty frontmatter and a body that begins with the real heading. No
+    /// YAML keys from the frontmatter may leak into the body.
+    #[test]
+    fn cross_platform_prompt_composes_cleanly() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let workspace_root = manifest_dir
+            .parent()
+            .expect("claudine/lib parent")
+            .parent()
+            .expect("workspace root");
+        let path = workspace_root.join("prompts/cross-platform.md");
+
+        let source = resolve_composition_source(path.to_str().unwrap())
+            .expect("cross-platform.md should resolve and parse cleanly");
+
+        assert!(
+            !source.markdown.frontmatter().is_empty(),
+            "frontmatter should be parsed and non-empty"
+        );
+        let name: Option<String> = source.markdown.fm_get("name").unwrap();
+        assert_eq!(name, Some("cross-platform".to_string()));
+
+        let content = source.markdown.content();
+        assert!(
+            content.starts_with("# Ensuring Cross Platform Support"),
+            "body should start with the real heading; got: {content}"
+        );
+        assert!(
+            !content.contains("name: cross-platform"),
+            "frontmatter YAML must not leak into body: {content}"
+        );
+        assert!(
+            !content.contains("description:"),
+            "frontmatter YAML must not leak into body: {content}"
+        );
     }
 }

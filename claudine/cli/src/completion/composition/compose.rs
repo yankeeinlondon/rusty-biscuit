@@ -9,7 +9,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use super::{Candidate, REPO_DIR_WALK_RANK, display_name, name_stem};
+use super::{Candidate, REPO_DIR_WALK_RANK, display_name, file_name_matches};
 use crate::completion::frontmatter;
 use crate::completion::fuzzy::{self, DirMatchMode, PartialLen};
 use crate::completion::scopes::{self, ComposeMode, Scope, ScopeContext, ScopeKind, ScopeSet};
@@ -196,15 +196,14 @@ fn render_entry_word(
     };
 
     if ctx.partial_len.matching_enabled() {
-        // Match against the stem for files and the directory name for
-        // directories. The stem is a more natural target — users type
-        // `plan` intending `plan.md`, not `plan.md` literally.
-        let target = if is_dir {
-            name_cmp.as_str()
+        // Files match the stem OR the full basename (so `plan` and `plan.`
+        // both hit `plan.md`); directories match their full leaf name.
+        let matched = if is_dir {
+            fuzzy::fuzzy_match(&name_cmp, ctx.active)
         } else {
-            name_stem(&name_cmp)
+            file_name_matches(&name_cmp, ctx.active)
         };
-        if !fuzzy::fuzzy_match(target, ctx.active) {
+        if !matched {
             return;
         }
     }

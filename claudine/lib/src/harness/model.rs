@@ -28,6 +28,19 @@ pub struct HarnessPlan {
     /// stall episode instead of killing the child. Parse-time validation
     /// requires `step_timeout_warn < step_timeout` when both are present.
     pub step_timeout_warn: Option<std::time::Duration>,
+    /// OpenCode stalled-generation backstop budget.
+    ///
+    /// Provider-neutral key for portable prompt files, but only honored by
+    /// the OpenCode bridge: it bounds the progress-silence half of the
+    /// stalled-generation guard (the retry-churn count is the other half).
+    /// Three states: `None` = key absent in frontmatter (falls through to the
+    /// built-in `10m` default during resolution); `Some(Duration::ZERO)` = an
+    /// explicit `0s` frontmatter literal, parsed via
+    /// [`crate::harness::parse_timeout_allow_zero`] into a zero-valued
+    /// `Duration` sentinel that disables the guard during resolution;
+    /// `Some(positive)` = an explicit budget. Non-OpenCode runs accept the key
+    /// as inert config.
+    pub stall_timeout: Option<std::time::Duration>,
 }
 
 /// A runtime command that has been tokenized and approved.
@@ -100,7 +113,10 @@ pub struct AttemptOutcome {
 /// populated:
 /// - exit-expression → `pattern` (+ optional `scope`);
 /// - runaway-repetition → `cycle_len` + `repeats`;
-/// - runaway-volume → `lines` + `bytes`.
+/// - runaway-volume → `lines` + `bytes`;
+/// - stalled-generation → `generation_count` + `stall_duration_ms`, plus the
+///   optional OpenCode identity fields (`session_id`, `step`, `agent`,
+///   `provider_id`, `model_id`, `mode`) when OpenCode tagged them.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GuardContext {
     /// Matched exit-expression pattern (literal substring or regex source).
@@ -116,6 +132,29 @@ pub struct GuardContext {
     pub lines: Option<u64>,
     /// Per-turn (streaming) or per-run (capture) byte counter at breach.
     pub bytes: Option<u64>,
+    /// Generation attempts since the last progress-class event at the moment
+    /// the stalled-generation backstop tripped.
+    pub generation_count: Option<u32>,
+    /// Elapsed progress silence in milliseconds at the stalled-generation trip.
+    pub stall_duration_ms: Option<u64>,
+    /// Safe OpenCode identity metadata for the stalled generation, surfaced so
+    /// lifecycle consumers can branch on the run without parsing the prose
+    /// message. Each is present only when OpenCode tagged it on the stalled
+    /// `service=llm` record; none ever carries prompt text, tool payloads,
+    /// HTTP URLs, authorization headers, or raw stderr lines.
+    ///
+    /// OpenCode session id of the stalled generation.
+    pub session_id: Option<String>,
+    /// Reasoning step the stall was observed on.
+    pub step: Option<u32>,
+    /// Agent name driving the generation (e.g. `rust-developer`).
+    pub agent: Option<String>,
+    /// Provider id of the model attempting the generation.
+    pub provider_id: Option<String>,
+    /// Model id attempting the generation.
+    pub model_id: Option<String>,
+    /// OpenCode generation mode (e.g. `primary`, `all`).
+    pub mode: Option<String>,
 }
 
 /// How a child process terminated.

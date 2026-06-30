@@ -18,14 +18,17 @@
 //! 6. Sort by source rank then candidate text.
 //! 7. Render tokens.
 //!
-//! Magic paths (`@...`) resolve against the scope priority order and are
-//! rendered as relative paths — the `@` is a search sigil, not part of the
-//! inserted value. A committed directory token (ending in `/`) shortcuts
-//! the pipeline to walk only inside that directory.
+//! Magic paths (`@...`) are a filename search: they resolve against the
+//! scope priority order and are rendered as `@<basename>` (the `@` is kept;
+//! only the filename is inserted), deduped by basename. The committed
+//! `@<basename>` is resolved to the closest matching file at launch. A
+//! committed directory token (ending in `/`) shortcuts the pipeline to walk
+//! only inside that directory.
 
 use std::collections::HashSet;
 use std::path::Path;
 
+use super::fuzzy;
 use super::scopes::{self, ComposeMode, ScopeContext};
 
 mod compose;
@@ -176,6 +179,19 @@ fn finalize(mut candidates: Vec<Candidate>) -> Vec<String> {
 /// guard is defensive).
 fn display_name(path: &Path) -> Option<String> {
     path.file_name().and_then(|n| n.to_str()).map(String::from)
+}
+
+/// True when a completion query `active` matches a file `basename`.
+///
+/// Tries a fuzzy subsequence against the extension-stripped stem (so `pl`
+/// matches `plan.md`) **or** against the full basename (so once the user
+/// types into the extension, `plan.`, `plan.m`, and `plan.md` still match
+/// `plan.md`). An empty query matches everything. Directory candidates do
+/// not use this — they match their full leaf name directly.
+fn file_name_matches(basename: &str, active: &str) -> bool {
+    active.is_empty()
+        || fuzzy::fuzzy_match(name_stem(basename), active)
+        || fuzzy::fuzzy_match(basename, active)
 }
 
 /// Strip `.md` / `.markdown` / `.yaml` / `.yml` (case-insensitive) from a
@@ -366,6 +382,25 @@ mod tests {
         assert_eq!(name_stem("steps.yml"), "steps");
     }
 
+    // -- file_name_matches ------------------------------------------------
+
+    #[test]
+    fn file_name_matches_stem_and_extension_typing() {
+        // Empty query matches everything.
+        assert!(file_name_matches("plan.md", ""));
+        // Stem match (the common case).
+        assert!(file_name_matches("plan.md", "plan"));
+        assert!(file_name_matches("plan.md", "pl"));
+        // Typing into the extension must keep matching — the regression:
+        // a `.` is not in the stem, so stem-only matching dropped these.
+        assert!(file_name_matches("plan.md", "plan."));
+        assert!(file_name_matches("plan.md", "plan.m"));
+        assert!(file_name_matches("plan.md", "plan.md"));
+        // Non-matches.
+        assert!(!file_name_matches("plan.md", "xyz"));
+        assert!(!file_name_matches("plan.md", "plan.xx"));
+    }
+
     // -- end-to-end (compose) ---------------------------------------------
 
     #[test]
@@ -481,24 +516,97 @@ mod tests {
     }
 
     #[test]
-    fn compose_magic_path_resolves_relative() {
+    fn compose_magic_keeps_sigil_and_renders_filename_only() {
+        // Filename-magic contract: `@plan` completes to `@plan.md` — the `@`
+        // is kept and only the basename is inserted (no path). The committed
+        // `@plan.md` is resolved to the closest file at launch.
         let tmp = TempDir::new().unwrap();
         seed_cargo_workspace(tmp.path(), &["a/lib"]);
         let prompts = tmp.path().join("prompts");
         write(&prompts.join("plan.md"), "---\ntitle: X\n---\n");
 
-        let ctx = ScopeContext::discover_from(tmp.path());
+        // Null out HOME so the user-global scope (real `~/.claudine/prompts`)
+        // cannot leak files into this exact-match assertion.
+        let mut ctx = ScopeContext::discover_from(tmp.path());
+        ctx.home = None;
         let got = run(ComposeMode::Compose, &ctx, "@plan");
-        assert!(
-            got.iter().any(|c| c == "prompts/plan.md"),
-            "magic path must render without @: {got:?}"
+        assert_eq!(
+            got,
+            vec!["@plan.md".to_string()],
+            "magic must render @<basename>, no path: {got:?}"
         );
     }
 
     #[test]
-    fn compose_magic_path_shaped_resolves_scope_relative() {
-        // `@prompts/plan` must resolve against the repo-scope `prompts/`
-        // root and emit `prompts/plan.md`.
+    fn compose_magic_matches_while_typing_extension() {
+        // Regression: `@plan.` (and `@plan.md`) must keep matching `plan.md`,
+        // not just the bare-stem `@plan`.
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        write(
+            &tmp.path().join("prompts").join("plan.md"),
+            "---\ntitle: X\n---\n",
+        );
+        let mut ctx = ScopeContext::discover_from(tmp.path());
+        ctx.home = None;
+        for q in ["@plan", "@plan.", "@plan.m", "@plan.md"] {
+            let got = run(ComposeMode::Compose, &ctx, q);
+            assert!(
+                got.iter().any(|c| c == "@plan.md"),
+                "{q} must complete to @plan.md: {got:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn compose_word_matches_while_typing_extension() {
+        // The same extension-typing fix applies to non-magic Word mode.
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        write(
+            &tmp.path().join("prompts").join("plan.md"),
+            "---\ntitle: X\n---\n",
+        );
+        let mut ctx = ScopeContext::discover_from(tmp.path());
+        ctx.home = None;
+        for q in ["plan", "plan.", "plan.md"] {
+            let got = run(ComposeMode::Compose, &ctx, q);
+            assert!(
+                got.iter().any(|c| c == "prompts/plan.md"),
+                "{q} must complete to prompts/plan.md: {got:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn compose_magic_dedups_basename_across_scopes() {
+        // The same filename in two scopes (repo `prompts/` and repo
+        // `.claudine/prompts/`) must surface once as `@plan.md`.
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        write(
+            &tmp.path().join("prompts").join("plan.md"),
+            "---\ntitle: X\n---\n",
+        );
+        write(
+            &tmp.path().join(".claudine").join("prompts").join("plan.md"),
+            "---\ntitle: Y\n---\n",
+        );
+
+        let mut ctx = ScopeContext::discover_from(tmp.path());
+        ctx.home = None;
+        let got = run(ComposeMode::Compose, &ctx, "@plan");
+        assert_eq!(
+            got.iter().filter(|c| *c == "@plan.md").count(),
+            1,
+            "duplicate basename across scopes must collapse: {got:?}"
+        );
+    }
+
+    #[test]
+    fn compose_magic_path_shaped_constrains_walk_but_renders_filename() {
+        // `@prompts/plan` still constrains the walk to the `prompts/` subtree
+        // but renders the basename only.
         let tmp = TempDir::new().unwrap();
         seed_cargo_workspace(tmp.path(), &["a/lib"]);
         let prompts = tmp.path().join("prompts");
@@ -507,15 +615,15 @@ mod tests {
         let ctx = ScopeContext::discover_from(tmp.path());
         let got = run(ComposeMode::Compose, &ctx, "@prompts/plan");
         assert!(
-            got.iter().any(|c| c == "prompts/plan.md"),
-            "path-shaped magic must resolve scope-relative: {got:?}"
+            got.iter().any(|c| c == "@plan.md"),
+            "path-shaped magic must render filename only: {got:?}"
         );
     }
 
     #[test]
-    fn compose_magic_nested_path_shaped_resolves() {
-        // `@prompts/drafts/plan` must resolve against
-        // `<repo>/prompts/drafts/` and emit `prompts/drafts/plan.md`.
+    fn compose_magic_nested_path_shaped_renders_filename() {
+        // `@prompts/drafts/plan` constrains to `prompts/drafts/` and renders
+        // `@plan.md`.
         let tmp = TempDir::new().unwrap();
         seed_cargo_workspace(tmp.path(), &["a/lib"]);
         let prompts = tmp.path().join("prompts");
@@ -527,8 +635,8 @@ mod tests {
         let ctx = ScopeContext::discover_from(tmp.path());
         let got = run(ComposeMode::Compose, &ctx, "@prompts/drafts/plan");
         assert!(
-            got.iter().any(|c| c == "prompts/drafts/plan.md"),
-            "nested path-shaped magic must resolve: {got:?}"
+            got.iter().any(|c| c == "@plan.md"),
+            "nested path-shaped magic must render filename: {got:?}"
         );
     }
 
@@ -813,13 +921,13 @@ mod tests {
         );
     }
 
-    // -- magic-mode directory parity (review-3 finding 4) -----------------
+    // -- magic mode is filename-only (no directory candidates) ------------
 
     #[test]
-    fn compose_magic_short_prefix_surfaces_repo_dir() {
-        // Review-3 finding 4: `@pl<TAB>` must mirror Word-mode behavior
-        // and surface `planning/` at the repo root alongside file matches
-        // from the magic priority tier.
+    fn compose_magic_short_prefix_surfaces_no_directories() {
+        // Filename-magic contract: `@pl<TAB>` surfaces the matching file as
+        // `@plan.md` and NEVER a directory — directory drilling is reserved
+        // for non-`@` (Word-mode) paths.
         let tmp = TempDir::new().unwrap();
         seed_cargo_workspace(tmp.path(), &["a/lib"]);
         let prompts = tmp.path().join("prompts");
@@ -829,19 +937,19 @@ mod tests {
         let ctx = ScopeContext::discover_from(tmp.path());
         let got = run(ComposeMode::Compose, &ctx, "@pl");
         assert!(
-            got.iter().any(|c| c == "prompts/plan.md"),
-            "magic short prefix must still surface file: {got:?}"
+            got.iter().any(|c| c == "@plan.md"),
+            "magic short prefix must surface file: {got:?}"
         );
         assert!(
-            got.iter().any(|c| c == "planning/"),
-            "magic short prefix must surface repo-wide dir: {got:?}"
+            !got.iter().any(|c| c.ends_with('/')),
+            "magic mode must never surface directories: {got:?}"
         );
     }
 
     #[test]
-    fn compose_magic_long_prefix_fuzzy_matches_repo_dir() {
-        // Review-3 finding 4: at Long prefix lengths magic-mode dir
-        // matching uses fuzzy subsequence semantics, same as Word mode.
+    fn compose_magic_long_prefix_surfaces_no_directories() {
+        // A directory whose name fuzzy-matches the partial must NOT surface
+        // under `@` — only prompt files do.
         let tmp = TempDir::new().unwrap();
         seed_cargo_workspace(tmp.path(), &["a/lib"]);
         fs::create_dir_all(tmp.path().join("documentation")).unwrap();
@@ -849,23 +957,29 @@ mod tests {
         let ctx = ScopeContext::discover_from(tmp.path());
         let got = run(ComposeMode::Compose, &ctx, "@dcm");
         assert!(
-            got.iter().any(|c| c == "documentation/"),
-            "magic long prefix must fuzzy-match dirs: {got:?}"
+            !got.iter().any(|c| c.ends_with('/')),
+            "magic mode must not surface directories: {got:?}"
         );
     }
 
     #[test]
-    fn compose_magic_empty_partial_does_not_surface_repo_dirs() {
-        // Review-3 finding 4 (regression guard): Empty stays directory-
-        // free even for magic mode. `@<TAB>` must not emit any directory
-        // candidates.
+    fn compose_magic_empty_partial_surfaces_no_directories() {
+        // `@<TAB>` lists prompt filenames only, never directories.
         let tmp = TempDir::new().unwrap();
         seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        write(
+            &tmp.path().join("prompts").join("plan.md"),
+            "---\ntitle: X\n---\n",
+        );
         fs::create_dir_all(tmp.path().join("planning")).unwrap();
         fs::create_dir_all(tmp.path().join("docs")).unwrap();
 
         let ctx = ScopeContext::discover_from(tmp.path());
         let got = run(ComposeMode::Compose, &ctx, "@");
+        assert!(
+            got.iter().any(|c| c == "@plan.md"),
+            "empty magic partial must surface prompt files: {got:?}"
+        );
         assert!(
             !got.iter().any(|c| c.ends_with('/')),
             "empty magic partial must not surface dirs: {got:?}"
@@ -873,10 +987,9 @@ mod tests {
     }
 
     #[test]
-    fn compose_magic_path_shaped_short_prefix_surfaces_subdir() {
-        // Review-3 finding 4: path-shaped magic constrains the dir walk
-        // root the same way it constrains the file walk. `@prompts/pl`
-        // must surface both `prompts/plan.md` and `prompts/planning/`.
+    fn compose_magic_path_shaped_surfaces_file_not_subdir() {
+        // Path-shaped magic constrains the walk to `prompts/` but still emits
+        // a filename, and never a directory.
         let tmp = TempDir::new().unwrap();
         seed_cargo_workspace(tmp.path(), &["a/lib"]);
         let prompts = tmp.path().join("prompts");
@@ -886,12 +999,12 @@ mod tests {
         let ctx = ScopeContext::discover_from(tmp.path());
         let got = run(ComposeMode::Compose, &ctx, "@prompts/pl");
         assert!(
-            got.iter().any(|c| c == "prompts/plan.md"),
-            "path-shaped magic must still surface file: {got:?}"
+            got.iter().any(|c| c == "@plan.md"),
+            "path-shaped magic must surface file: {got:?}"
         );
         assert!(
-            got.iter().any(|c| c == "prompts/planning/"),
-            "path-shaped magic must surface scoped dir: {got:?}"
+            !got.iter().any(|c| c.ends_with('/')),
+            "path-shaped magic must not surface dirs: {got:?}"
         );
     }
 

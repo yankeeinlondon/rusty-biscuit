@@ -102,12 +102,12 @@ fn sequence_magic_resolves_relative() {
 
     let got = run_complete(ws.path(), &["sequence", "@dep"]);
     assert!(
-        got.iter().any(|c| c == "prompts/deploy.md"),
-        "@ magic must strip sigil on selection: {got:?}"
+        got.iter().any(|c| c == "@deploy.md"),
+        "@ magic must keep sigil and render filename: {got:?}"
     );
     assert!(
-        !got.iter().any(|c| c.starts_with('@')),
-        "no @-prefixed candidate should be emitted: {got:?}"
+        got.iter().all(|c| c.starts_with('@') && !c.contains('/')),
+        "every magic candidate must be `@<basename>`: {got:?}"
     );
 }
 
@@ -136,10 +136,9 @@ fn sequence_long_prefix_includes_directories() {
 // ---------------------------------------------------------------------
 
 #[test]
-fn sequence_magic_first_hit_wins_shadows_user_global() {
-    // First-hit-wins: once a higher-priority scope produces candidate(s),
-    // lower-priority scopes are not consulted. repo `docs/` outranks
-    // `user_claudine`, so the user-global match must not appear.
+fn sequence_magic_dedups_duplicate_basename() {
+    // The same sequence filename in repo `docs/` and `~/.claudine/prompts/`
+    // collapses to a single `@deploy.md`; runtime resolves the closest.
     let ws = TestWorkspace::named("complete-sequence-magic-priority");
     seed_cargo_workspace(ws.path());
 
@@ -159,14 +158,14 @@ fn sequence_magic_first_hit_wins_shadows_user_global() {
 
     let got = run_complete_with_home(ws.path(), &home, &["sequence", "@deploy"]);
 
-    assert!(
-        got.iter().any(|c| c.ends_with("docs/deploy.md")),
-        "repo-local docs/deploy.md must appear: {got:?}"
+    assert_eq!(
+        got.iter().filter(|c| *c == "@deploy.md").count(),
+        1,
+        "duplicate basename across tiers must collapse to one `@deploy.md`: {got:?}"
     );
     assert!(
-        !got.iter()
-            .any(|c| c.contains(".claudine/prompts/deploy.md")),
-        "user-global deploy.md must NOT appear due to first-hit-wins: {got:?}"
+        got.iter().all(|c| c.starts_with('@') && !c.contains('/')),
+        "every magic candidate must be `@<basename>`: {got:?}"
     );
 }
 
@@ -191,17 +190,16 @@ fn sequence_one_char_prefix_surfaces_repo_dirs() {
 }
 
 #[test]
-fn sequence_magic_short_prefix_surfaces_repo_dirs() {
-    // Review-3 finding 4: `@<short><TAB>` mirrors Word-mode dir behavior
-    // for `sequence` mode. The repo-wide directory walk runs at Short
-    // prefix length independent of the magic file-tier outcome.
+fn sequence_magic_surfaces_no_dirs() {
+    // Filename-magic contract: `sequence @<short><TAB>` never surfaces a
+    // directory — magic mode is a filename search.
     let ws = TestWorkspace::named("complete-sequence-magic-short-dirs");
     seed_cargo_workspace(ws.path());
     fs::create_dir_all(ws.path().join("claudine")).unwrap();
 
     let got = run_complete(ws.path(), &["sequence", "@cl"]);
     assert!(
-        got.iter().any(|c| c == "claudine/"),
-        "sequence magic short prefix must surface `claudine/`: {got:?}"
+        !got.iter().any(|c| c.ends_with('/')),
+        "sequence magic must not surface directories: {got:?}"
     );
 }

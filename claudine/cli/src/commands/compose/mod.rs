@@ -151,6 +151,12 @@ pub struct SharedComposeArgs {
     #[arg(long = "step-timeout", value_name = "DURATION")]
     pub step_timeout: Option<String>,
 
+    /// OpenCode stalled-generation backstop budget (e.g. `10m`). Aborts when
+    /// OpenCode repeatedly drops generations with no progress for this long.
+    /// OpenCode-scoped, structured-stream only; `0s` disables. Default `10m`.
+    #[arg(long = "stall-timeout", value_name = "DURATION")]
+    pub stall_timeout: Option<String>,
+
     /// Set the OPERATION env var for the composed session.
     #[arg(long = "operation", visible_alias = "op", value_name = "OP")]
     pub operation: Option<String>,
@@ -267,6 +273,27 @@ impl SharedComposeArgs {
                 let duration =
                     claudine::harness::parse_timeout(raw, std::path::Path::new("<--step-timeout>"))
                         .map_err(|e| eyre!("invalid --step-timeout value: {e}"))?;
+                Ok(Some(duration.as_secs()))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Parse `--stall-timeout DURATION` into seconds using the same
+    /// [`claudine::harness::parse_timeout_allow_zero`] grammar frontmatter
+    /// uses, so CLI and frontmatter errors share one vocabulary. A `0s` literal
+    /// is the disable sentinel and parses to `Some(0)`; a fractional value such
+    /// as `0.5s` is a valid 500ms budget (rounded down to `Some(0)` seconds
+    /// only by integer seconds truncation, never disabled). Returns `Ok(None)`
+    /// when the flag was not supplied.
+    pub(crate) fn stall_timeout_secs(&self) -> Result<Option<u64>> {
+        match self.stall_timeout.as_deref() {
+            Some(raw) => {
+                let duration = claudine::harness::parse_timeout_allow_zero(
+                    raw,
+                    std::path::Path::new("<--stall-timeout>"),
+                )
+                .map_err(|e| eyre!("invalid --stall-timeout value: {e}"))?;
                 Ok(Some(duration.as_secs()))
             }
             None => Ok(None),

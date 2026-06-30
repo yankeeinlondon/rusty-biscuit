@@ -21,17 +21,23 @@
 //! by the library rather than the rendered terminal output.
 
 use std::io;
+use std::path::Path;
 
+use biscuit_file::FileReference;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::{
-    CompositionError, DroppedOptional, InteractiveSchemaOptions, InteractiveShape, MissingProperty,
-    PreValidatedSchema, PropertyState, PropertyStatus, ResolvedCompositionSource,
-    SchemaStatusReport, TextFormat, build_schema_status_report, pre_validate_schema,
+    CompositionError, DroppedOptional, FileDetail, InteractiveSchemaOptions, InteractiveShape,
+    MissingProperty, PreValidatedSchema, PropertyState, PropertyStatus, ResolvedCompositionSource,
+    SchemaStatusReport, TextFormat, build_schema_status_report, extract_markdown_detail,
+    pre_validate_schema,
 };
 use biscuit_tui::prelude::*;
 
+use crate::completion::autocomplete_ui::{choose_many_files, choose_one_file};
+use crate::completion::schema_completion::file_candidate_paths;
+use crate::completion::scopes::ScopeContext;
 use crate::log;
 
 /// Render the schema status report to stderr using `biscuit-terminal::Prose`.
@@ -192,8 +198,9 @@ pub fn pre_validate_with_interactive_collection(
     set_overrides: Option<&serde_json::Value>,
     interactive: InteractiveSchemaOptions,
     term: &Terminal,
+    file_ref_fallback_dir: Option<&std::path::Path>,
 ) -> Result<PreValidatedSchema, CompositionError> {
-    let first = pre_validate_schema(source, set_overrides);
+    let first = pre_validate_schema(source, set_overrides, file_ref_fallback_dir);
     let Err(err) = first else {
         return first;
     };
@@ -222,7 +229,7 @@ pub fn pre_validate_with_interactive_collection(
         });
     }
 
-    if let Ok(Some(report)) = build_schema_status_report(source, set_overrides) {
+    if let Ok(Some(report)) = build_schema_status_report(source, set_overrides, file_ref_fallback_dir) {
         render_status_report(&report, term);
     }
 
@@ -235,7 +242,7 @@ pub fn pre_validate_with_interactive_collection(
     }
 
     let merged = merge_overrides(set_overrides, collected);
-    pre_validate_schema(source, Some(&serde_json::Value::Object(merged)))
+    pre_validate_schema(source, Some(&serde_json::Value::Object(merged)), file_ref_fallback_dir)
 }
 
 fn merge_overrides(
@@ -308,22 +315,25 @@ fn prompt_for_property(
     prop: &MissingProperty,
     shape: &InteractiveShape,
 ) -> io::Result<serde_json::Value> {
-    let label_text = format_label(prop);
-    let label = Label::new(label_text, LabelPosition::Above);
+    let term = crate::log::terminal();
 
     match shape {
         InteractiveShape::Boolean => {
+            render_intro(prop, "boolean", &term);
+            let label = Label::new(prop.name.clone(), LabelPosition::Above);
             let state = BooleanSwitchState::new().with_label(label);
-            let value: bool = run_standalone(BooleanSwitch::new(), state, None)?;
+            let value: bool = run_standalone(BooleanSwitch::new(), state, inline_height(2))?;
             Ok(serde_json::Value::Bool(value))
         }
         InteractiveShape::EnumOne { members } => {
+            render_intro(prop, "enum", &term);
+            let label = Label::new(prop.name.clone(), LabelPosition::Above);
             let options: Vec<ChoiceOption<String>> = members
                 .iter()
                 .map(|m| ChoiceOption::new(m.as_str(), m.as_str(), m.clone()))
                 .collect();
             let state = ChooseOneState::from_options(options).with_label(label);
-            let selected: Option<String> = run_standalone(ChooseOne::new(), state, None)?;
+            let selected: Option<String> = run_standalone(ChooseOne::new(), state, inline_height(8))?;
             match selected {
                 Some(s) => Ok(serde_json::Value::String(s)),
                 None => Err(io::Error::new(
@@ -333,31 +343,85 @@ fn prompt_for_property(
             }
         }
         InteractiveShape::EnumMany { members } => {
+            render_intro(prop, "enum", &term);
+            let label = Label::new(prop.name.clone(), LabelPosition::Above);
             let options: Vec<ChoiceOption<String>> = members
                 .iter()
                 .map(|m| ChoiceOption::new(m.as_str(), m.as_str(), m.clone()))
                 .collect();
             let state = ChooseManyState::from_options(options).with_label(label);
-            let selected: Vec<String> = run_standalone(ChooseMany::new(), state, None)?;
+            let selected: Vec<String> = run_standalone(ChooseMany::new(), state, inline_height(8))?;
             Ok(serde_json::Value::Array(
                 selected.into_iter().map(serde_json::Value::String).collect(),
             ))
         }
-        InteractiveShape::Number { integer } => collect_number(label, *integer),
-        InteractiveShape::Text { format } => collect_text(label, *format),
+        InteractiveShape::Number { integer, min, max } => {
+            render_intro(prop, "number", &term);
+            collect_number(prop, *integer, *min, *max)
+        }
+        InteractiveShape::Text { format, min_len, max_len } => {
+            render_intro(prop, "string", &term);
+            collect_text(prop, *format, *min_len, *max_len)
+        }
+        InteractiveShape::File { is_array, patterns } => {
+            collect_file(prop, *is_array, patterns)
+        }
     }
 }
 
-fn collect_text(label: Label, _format: TextFormat) -> io::Result<serde_json::Value> {
-    let state = TextInputState::new().with_label(label);
-    let value: String = run_standalone(TextInput::new(), state, None)?;
+fn render_intro(prop: &MissingProperty, kind: &str, term: &Terminal) {
+    let message = match kind {
+        "string" => format!(
+            "The {} requires a string value; please input a value to continue:",
+            prop.name
+        ),
+        "number" => format!(
+            "The {} requires a numeric value; please input a value to continue:",
+            prop.name
+        ),
+        "boolean" => format!("The {} requires a boolean value:", prop.name),
+        _ => format!("Please provide a value for {}:", prop.name),
+    };
+    let mut prose = Prose::new(message);
+    if let Some(desc) = prop.description.as_deref().filter(|d| !d.trim().is_empty()) {
+        prose = Prose::new(format!("{}\n\n<i><dim>{}</dim></i>", prose.content(), escape_prose(desc)));
+    }
+    eprintln!("{}", prose.render(term));
+}
+
+fn collect_text(
+    prop: &MissingProperty,
+    _format: TextFormat,
+    min_len: Option<usize>,
+    max_len: Option<usize>,
+) -> io::Result<serde_json::Value> {
+    let label = Label::new(prop.name.clone(), LabelPosition::Above);
+    let mut state = TextInputState::new().with_label(label);
+    if let Some(max) = max_len {
+        state = state.with_max_length(max);
+    }
+    let value: String = run_standalone(TextInput::new(), state, inline_height(2))?;
+    if let Some(min) = min_len
+        && value.chars().count() < min
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("value must be at least {min} characters"),
+        ));
+    }
     Ok(serde_json::Value::String(value))
 }
 
 /// Run a text input, parsing into a JSON number. On parse failure
 /// re-prompt with an inline validation error and keep the previous
 /// buffer contents so the user can correct the value.
-fn collect_number(label: Label, integer: bool) -> io::Result<serde_json::Value> {
+fn collect_number(
+    prop: &MissingProperty,
+    integer: bool,
+    min: Option<f64>,
+    max: Option<f64>,
+) -> io::Result<serde_json::Value> {
+    let label = Label::new(prop.name.clone(), LabelPosition::Above);
     let mut previous: Option<(String, String)> = None;
     loop {
         let mut state = TextInputState::new().with_label(label.clone());
@@ -365,8 +429,12 @@ fn collect_number(label: Label, integer: bool) -> io::Result<serde_json::Value> 
             state = state.with_value(&buf);
             state.set_validation_error(err);
         }
-        let raw: String = run_standalone(TextInput::new(), state, None)?;
-        match parse_number(&raw, integer) {
+        // Height 4 (label, input, error, hint) keeps the inline viewport's
+        // bottom-row help-hint overlay off the validation-error row
+        // (`inner_area.y + 1`). At height 3 the hint and error collide on the
+        // last row and the hint wins, hiding the parse error on a retry.
+        let raw: String = run_standalone(TextInput::new(), state, inline_height(4))?;
+        match parse_number(&raw, integer, min, max) {
             Ok(value) => return Ok(value),
             Err(message) => {
                 previous = Some((raw, message));
@@ -375,37 +443,178 @@ fn collect_number(label: Label, integer: bool) -> io::Result<serde_json::Value> 
     }
 }
 
-fn parse_number(raw: &str, integer: bool) -> Result<serde_json::Value, String> {
+fn parse_number(
+    raw: &str,
+    integer: bool,
+    min: Option<f64>,
+    max: Option<f64>,
+) -> Result<serde_json::Value, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err("value required".to_string());
     }
-    if integer {
+    let value = if integer {
         if let Ok(n) = trimmed.parse::<i64>() {
-            return Ok(serde_json::Value::Number(serde_json::Number::from(n)));
-        }
-        // Accept floats that are exact integers.
-        if let Ok(n) = trimmed.parse::<f64>()
+            serde_json::Value::Number(serde_json::Number::from(n))
+        } else if let Ok(n) = trimmed.parse::<f64>()
             && n.fract() == 0.0
             && n.is_finite()
             && let Some(num) = serde_json::Number::from_f64(n)
         {
-            return Ok(serde_json::Value::Number(num));
+            serde_json::Value::Number(num)
+        } else {
+            return Err(format!("`{trimmed}` is not a valid integer"));
         }
-        Err(format!("`{trimmed}` is not a valid integer"))
     } else {
         if let Ok(n) = trimmed.parse::<i64>() {
-            return Ok(serde_json::Value::Number(serde_json::Number::from(n)));
-        }
-        if let Ok(n) = trimmed.parse::<f64>()
+            serde_json::Value::Number(serde_json::Number::from(n))
+        } else if let Ok(n) = trimmed.parse::<f64>()
             && let Some(num) = serde_json::Number::from_f64(n)
         {
-            return Ok(serde_json::Value::Number(num));
+            serde_json::Value::Number(num)
+        } else {
+            return Err(format!("`{trimmed}` is not a valid number"));
         }
-        Err(format!("`{trimmed}` is not a valid number"))
+    };
+
+    let float_value = value.as_f64().unwrap_or(f64::NAN);
+    if let Some(lo) = min
+        && float_value < lo
+    {
+        return Err(format!("value must be at least {lo}"));
+    }
+    if let Some(hi) = max
+        && float_value > hi
+    {
+        return Err(format!("value must be at most {hi}"));
+    }
+    Ok(value)
+}
+
+fn inline_height(rows: u16) -> Option<HeightSpec> {
+    Some(HeightSpec::Cells(rows))
+}
+
+fn collect_file(
+    prop: &MissingProperty,
+    is_array: bool,
+    patterns: &[String],
+) -> io::Result<serde_json::Value> {
+    let ctx = ScopeContext::discover();
+    let mut paths = file_candidate_paths(patterns, &ctx);
+
+    if paths.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("no files available for `{}`", prop.name),
+        ));
+    }
+
+    paths.sort();
+    let options: Vec<ChoiceOption<FileDetail>> = paths
+        .into_iter()
+        .map(|path| {
+            let detail = extract_file_detail(&path);
+            let label = path_label(&path, &ctx);
+            ChoiceOption::new(label, detail.name.clone(), detail)
+        })
+        .collect();
+
+    let term = crate::log::terminal();
+    let intro = format!(
+        "The {} requires a valid file reference; choose from the files below:",
+        prop.name
+    );
+    eprintln!("{}", Prose::new(intro).render(&term));
+    if let Some(desc) = prop.description.as_deref().filter(|d| !d.trim().is_empty()) {
+        eprintln!(
+            "{}",
+            Prose::new(format!("<i><dim>{}</dim></i>", escape_prose(desc))).render(&term)
+        );
+    }
+
+    let selected = if is_array {
+        let selected = choose_many_files(options)?;
+        if selected.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "no files selected",
+            ));
+        }
+        selected
+            .into_iter()
+            .map(|d| resolve_file_value(&d.path))
+            .collect::<io::Result<Vec<_>>>()?
+    } else {
+        let selected = choose_one_file(options)?.ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "no file selected")
+        })?;
+        vec![resolve_file_value(&selected.path)?]
+    };
+
+    if is_array {
+        Ok(serde_json::Value::Array(selected))
+    } else {
+        Ok(selected.into_iter().next().unwrap_or(serde_json::Value::Null))
     }
 }
 
+fn extract_file_detail(path: &Path) -> FileDetail {
+    if let Some(ext) = path.extension().and_then(|e| e.to_str())
+        && matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown")
+    {
+        return extract_markdown_detail(path, "FILE");
+    }
+    let name = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| path.display().to_string());
+    FileDetail {
+        badge: "FILE".to_string(),
+        name,
+        path: path.to_path_buf(),
+        description: None,
+        schema_lines: Vec::new(),
+        has_custom_name: false,
+    }
+}
+
+fn path_label(path: &Path, ctx: &ScopeContext) -> String {
+    if let Some(root) = crate::completion::scopes::effective_repo_root(ctx)
+        && let Ok(rel) = path.strip_prefix(root)
+        && let Some(rel_str) = rel.to_str()
+        && !rel_str.is_empty()
+    {
+        return rel_str.to_string();
+    }
+    if let Some(home) = &ctx.home
+        && path.starts_with(home)
+        && let Ok(rel) = path.strip_prefix(home)
+        && let Some(rel_str) = rel.to_str()
+        && !rel_str.is_empty()
+    {
+        return format!("~/{rel_str}");
+    }
+    path.display().to_string()
+}
+
+fn resolve_file_value(path: &Path) -> io::Result<serde_json::Value> {
+    let reference = FileReference::new(path.to_str().unwrap_or(""))
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
+    let resolved = reference
+        .resolve()
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("file not found: {}", path.display()),
+            )
+        })?;
+    Ok(serde_json::Value::String(resolved.display().to_string()))
+}
+
+#[allow(dead_code)]
 fn format_label(prop: &MissingProperty) -> String {
     let type_part = prop
         .type_label
@@ -449,35 +658,47 @@ mod tests {
 
     #[test]
     fn parse_number_accepts_integer() {
-        let value = parse_number("42", false).unwrap();
+        let value = parse_number("42", false, None, None).unwrap();
         assert_eq!(value, serde_json::json!(42));
     }
 
     #[test]
     fn parse_number_accepts_float() {
-        let value = parse_number("3.14", false).unwrap();
+        let value = parse_number("3.14", false, None, None).unwrap();
         assert!(value.as_f64().is_some());
     }
 
     #[test]
     fn parse_number_rejects_non_numeric() {
-        assert!(parse_number("hello", false).is_err());
+        assert!(parse_number("hello", false, None, None).is_err());
     }
 
     #[test]
     fn parse_number_integer_mode_rejects_non_integer() {
-        assert!(parse_number("3.14", true).is_err());
+        assert!(parse_number("3.14", true, None, None).is_err());
     }
 
     #[test]
     fn parse_number_integer_mode_accepts_whole_float() {
-        let value = parse_number("3.0", true).unwrap();
+        let value = parse_number("3.0", true, None, None).unwrap();
         assert!(value.as_i64().is_some() || value.as_f64().is_some());
     }
 
     #[test]
     fn parse_number_rejects_empty() {
-        assert!(parse_number("   ", false).is_err());
+        assert!(parse_number("   ", false, None, None).is_err());
+    }
+
+    #[test]
+    fn parse_number_enforces_minimum() {
+        assert!(parse_number("5", false, Some(10.0), None).is_err());
+        assert_eq!(parse_number("10", false, Some(10.0), None).unwrap(), serde_json::json!(10));
+    }
+
+    #[test]
+    fn parse_number_enforces_maximum() {
+        assert!(parse_number("15", false, None, Some(10.0)).is_err());
+        assert_eq!(parse_number("10", false, None, Some(10.0)).unwrap(), serde_json::json!(10));
     }
 
     #[test]
@@ -486,6 +707,8 @@ mod tests {
             "tier",
             InteractiveShape::Text {
                 format: TextFormat::Plain,
+                min_len: None,
+                max_len: None,
             },
         );
         let label = format_label(&prop);
@@ -574,11 +797,39 @@ mod tests {
         assert!(!interactive.allowed());
 
         let term = Terminal::default();
-        let err = pre_validate_with_interactive_collection(&source, None, interactive, &term)
+        let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None)
             .unwrap_err();
         assert!(
             matches!(err, CompositionError::MissingProperties { .. }),
             "expected MissingProperties when interactive not allowed: {err:?}"
+        );
+    }
+
+    #[test]
+    fn pre_validate_with_interactive_returns_missing_for_file_property_when_not_allowed() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("test.md");
+        fs::write(
+            &file,
+            "---\n$schema:\n  cover: 'file(required)'\n---\nbody\n",
+        )
+        .unwrap();
+        let source = claudine::composition::resolve_composition_source(file.to_str().unwrap())
+            .unwrap();
+
+        // Non-TTY options deny prompting, so a missing `file` property must
+        // still surface as MissingProperties rather than trying to drive a
+        // chooser.
+        let interactive = InteractiveSchemaOptions::default();
+        assert!(!interactive.allowed());
+
+        let term = Terminal::default();
+        let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None)
+            .unwrap_err();
+        assert!(
+            matches!(err, CompositionError::MissingProperties { .. }),
+            "expected MissingProperties for file property when not interactive: {err:?}"
         );
     }
 
@@ -602,6 +853,7 @@ mod tests {
             Some(&overrides),
             InteractiveSchemaOptions::default(),
             &term,
+            None,
         )
         .unwrap();
         let fm = pre.set_overrides.unwrap();
@@ -634,7 +886,7 @@ mod tests {
         assert!(interactive.allowed());
 
         let term = Terminal::default();
-        let err = pre_validate_with_interactive_collection(&source, None, interactive, &term)
+        let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None)
             .unwrap_err();
         assert!(
             matches!(err, CompositionError::UnsupportedInteractiveSchema { .. }),

@@ -4,13 +4,19 @@
 //! stacks), checks them against the whitelist, prompts the user for any that
 //! need approval, and returns the full pre-approved set.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::ComposeOptions;
+use darkmatter::markdown::compose::expression::{Expr, ExpressionFinder, ResolutionContext, parse};
+use darkmatter::markdown::compose::subtree::SubtreeCompose;
+use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, EffectiveStateBuilder};
 
 use crate::composition::error::CompositionError;
-use crate::composition::lifecycle::{LifecycleConfig, collect_lifecycle_shell_commands};
+use crate::composition::lifecycle::{
+    LATE_BINDING_ROOTS, LifecycleConfig, LifecycleSignal, collect_lifecycle_shell_commands,
+};
+use crate::composition::lifecycle_actions::LifecycleActionKind;
 use crate::harness::shell::{ShellApprovalOptions, tokenize_words_strict};
 
 /// Result of pre-flight shell command approval.
@@ -193,6 +199,220 @@ pub fn resolve_shell_approvals(
     })
 }
 
+/// Resolves the `{{ }}` interpolation inside every lifecycle `shell` command
+/// at pre-flight (C3), stamping the resolved bytes back into the parsed
+/// command so the approved command equals the executed command.
+///
+/// Shell commands live inside the deferred lifecycle subtree (see
+/// [`LATE_BINDING_ROOTS`] and `ComposeOptions::with_exclude_keys`), so after
+/// main compose they still carry their authored `{{ }}` spans. Unlike the
+/// communication/action surfaces — which interpolate at event-time (C2) —
+/// `shell` commands are approved at pre-flight, before any event fires, and so
+/// resolve against an **early-binding-only** lookup: `doc.*`, `ctx.*`, `env.*`,
+/// and read-side functions. A late-binding reference (`err`/`timing`/`current`)
+/// is rejected with [`CompositionError::LifecycleShellResolution`] because its
+/// value does not yet exist.
+///
+/// Positional `shell` actions (`shell: "..."`) and key/value `shell` actions
+/// (`{ action: shell, command: ... }`) with any `on_error:` text are covered.
+/// Non-string command expressions (e.g. a bare `command: "ctx.repo"` parsed as a
+/// variable) and literals with no interpolation span are left untouched — there
+/// is nothing to stamp.
+///
+/// ## Errors
+///
+/// Returns [`CompositionError::LifecycleShellResolution`] when a command's
+/// interpolation references a late-binding global, fails to parse, references
+/// an unknown root (a typo), or calls an unknown function. The error names the
+/// dotted property path (e.g. `failure.stack[0].action[1].command`) and the
+/// raw command string.
+pub fn resolve_lifecycle_shell_commands(
+    lifecycle: &mut LifecycleConfig,
+    effective_frontmatter: &serde_json::Value,
+    context: &ComposeContext,
+    source_path: &Path,
+    file_ref_fallback_dir: Option<&Path>,
+) -> Result<(), CompositionError> {
+    let frontmatter: HashMap<String, serde_json::Value> = effective_frontmatter
+        .as_object()
+        .map(|map| map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        .unwrap_or_default();
+
+    let state = EffectiveStateBuilder::new()
+        .with_frontmatter(frontmatter)
+        .with_context(context.clone())
+        // A deferred lifecycle subtree never defines `ctx`; downgrade any
+        // pathological `ctx` shape to a warning rather than aborting pre-flight.
+        .with_allow_ctx_override(true)
+        .build()
+        .map_err(|e| {
+            CompositionError::PreFlightFailed(format!(
+                "lifecycle shell pre-flight: building early-binding state failed: {e}"
+            ))
+        })?;
+
+    // Read-side functions (`parent_dir`, `dirname`, `file_exists`, …) resolve
+    // against the prompt's parent directory first (document-first contract),
+    // then fall back to the launch-area anchor when supplied — matching the
+    // event-time lifecycle lookup so a launch-relative read-side reference
+    // (`file_exists(spec)`) resolves identically at pre-flight and event-time
+    // instead of depending on the prompt-only anchor.
+    let mut resolution_ctx = ResolutionContext::new(
+        source_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| std::path::PathBuf::from(".")),
+    );
+    if let Some(fallback) = file_ref_fallback_dir {
+        resolution_ctx = resolution_ctx.with_file_ref_fallback_dir(fallback.to_path_buf());
+    }
+
+    for signal in LifecycleSignal::ALL {
+        let event_name = signal.property_name();
+        let Some(stack) = lifecycle.stack_mut(signal) else {
+            continue;
+        };
+        for (idx, item) in stack.iter_mut().enumerate() {
+            for (action_idx, action) in item.actions.iter_mut().enumerate() {
+                let LifecycleActionKind::Shell(shell) = &mut action.kind else {
+                    continue;
+                };
+                let prefix = format!("{event_name}.stack[{idx}].action[{action_idx}]");
+                resolve_shell_command_expr(
+                    &mut shell.command,
+                    &state,
+                    &resolution_ctx,
+                    &format!("{prefix}.command"),
+                    source_path,
+                )?;
+                if let Some(on_error) = &mut shell.on_error {
+                    resolve_shell_command_expr(
+                        on_error,
+                        &state,
+                        &resolution_ctx,
+                        &format!("{prefix}.on_error"),
+                        source_path,
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Resolves the `{{ }}` spans inside one shell-command [`Expr`] and stamps the
+/// resolved string literal back in place.
+///
+/// Only string-literal expressions carrying an interpolation span are touched.
+/// Late-binding references are rejected before resolution so the diagnostic
+/// names the offending global rather than a generic "unknown root".
+fn resolve_shell_command_expr(
+    expr: &mut Expr,
+    state: &darkmatter::markdown::compose::EffectiveState,
+    resolution_ctx: &ResolutionContext,
+    property: &str,
+    source_path: &Path,
+) -> Result<(), CompositionError> {
+    let Expr::StringLiteral(raw) = expr else {
+        return Ok(());
+    };
+    if !raw.contains("{{") {
+        return Ok(());
+    }
+
+    if let Some(root) = first_late_binding_root(raw) {
+        return Err(CompositionError::LifecycleShellResolution {
+            source_path: source_path.to_path_buf(),
+            property: property.to_string(),
+            raw: raw.clone(),
+            message: format!(
+                "late-binding reference `{root}` is not available in shell commands; \
+                 shell commands are resolved at pre-flight (before any event fires), so only \
+                 early-binding values (`doc.*`, `ctx.*`, `env.*`, read-side functions) may be \
+                 used here"
+            ),
+        });
+    }
+
+    let value = serde_json::Value::String(raw.clone());
+    let resolved = SubtreeCompose::new(&value, state)
+        .with_resolution_context(resolution_ctx.clone())
+        .strict()
+        .compose()
+        .map_err(|e| CompositionError::LifecycleShellResolution {
+            source_path: source_path.to_path_buf(),
+            property: property.to_string(),
+            raw: raw.clone(),
+            message: e.to_string(),
+        })?;
+
+    let resolved = match resolved {
+        serde_json::Value::String(s) => s,
+        other => other.to_string(),
+    };
+    *expr = Expr::StringLiteral(resolved);
+    Ok(())
+}
+
+/// Returns the first late-binding root (`err`/`timing`/`current`) referenced by
+/// any `{{ }}` span in `raw`, or `None` when the command uses only
+/// early-binding values.
+fn first_late_binding_root(raw: &str) -> Option<String> {
+    for loc in ExpressionFinder::find_all_plain(raw) {
+        let Ok(expr) = parse(&loc.expression) else {
+            continue;
+        };
+        if let Some(root) = late_binding_root_in_expr(&expr) {
+            return Some(root);
+        }
+    }
+    None
+}
+
+/// Walks an expression tree for the first variable whose root is a late-binding
+/// global. `doc.*` is exempt: it reaches a literal frontmatter property, not a
+/// lifecycle global.
+fn late_binding_root_in_expr(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Variable(path) => {
+            let root = path.split('.').next().unwrap_or(path);
+            LATE_BINDING_ROOTS
+                .contains(&root)
+                .then(|| root.to_string())
+        }
+        Expr::MemberAccess { base, .. } => {
+            if let Expr::Variable(base_path) = base.as_ref() {
+                let root = base_path.split('.').next().unwrap_or(base_path);
+                if root == "doc" {
+                    return None;
+                }
+            }
+            late_binding_root_in_expr(base)
+        }
+        Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) | Expr::Paren(inner) => {
+            late_binding_root_in_expr(inner)
+        }
+        Expr::Binary { left, right, .. } | Expr::Comparison { left, right, .. } => {
+            late_binding_root_in_expr(left).or_else(|| late_binding_root_in_expr(right))
+        }
+        Expr::Index { base, index } => {
+            late_binding_root_in_expr(base).or_else(|| late_binding_root_in_expr(index))
+        }
+        Expr::FunctionCall { args, .. } => args.iter().find_map(late_binding_root_in_expr),
+        Expr::Fallback { primary, fallback } => {
+            late_binding_root_in_expr(primary).or_else(|| late_binding_root_in_expr(fallback))
+        }
+        Expr::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => late_binding_root_in_expr(condition)
+            .or_else(|| late_binding_root_in_expr(then_branch))
+            .or_else(|| late_binding_root_in_expr(else_branch)),
+        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,6 +504,49 @@ mod tests {
         assert_eq!(result.total_discovered, 0);
         assert_eq!(result.already_whitelisted, 0);
         assert_eq!(result.user_approved, 0);
+    }
+
+    /// Regression: the template `::shell` preflight runs a full compose
+    /// pipeline. A `success` (lifecycle) frontmatter key that reads a file the
+    /// run is about to create (`frontmatter(<missing>, …)`) must NOT be
+    /// resolved at compose time — its `{{ … }}` spans are late-bound and fire
+    /// only when the event does. The CLI defers the lifecycle keys by passing
+    /// `with_exclude_keys(LIFECYCLE_EVENT_KEYS)` into the preflight options;
+    /// without it, the now-fatal file-reference check aborts preflight before
+    /// the event that would make the file exist ever runs.
+    #[test]
+    fn lifecycle_key_with_missing_file_ref_is_deferred_in_preflight() {
+        let doc = "---\n\
+status: \"{{ frontmatter('does-not-exist.md', 'ready') }}\"\n\
+---\nbody\n";
+        let md: Markdown = doc.into();
+
+        // Without the exclusion, the file-ref read on a missing file is fatal.
+        let no_exclude = ComposeOptions::new();
+        let unguarded = resolve_shell_approvals(
+            Some(&md),
+            Some(&no_exclude),
+            &ShellApprovalOptions::default(),
+            None,
+            None,
+        );
+        assert!(
+            unguarded.is_err(),
+            "a compose-time read of a missing file must be fatal when not deferred"
+        );
+
+        // With the lifecycle key excluded (DM1), the key survives raw and
+        // preflight succeeds — mirroring the CLI's preflight option builders.
+        let excluded = ComposeOptions::new().with_exclude_keys(["status"]);
+        let guarded = resolve_shell_approvals(
+            Some(&md),
+            Some(&excluded),
+            &ShellApprovalOptions::default(),
+            None,
+            None,
+        )
+        .expect("excluding the lifecycle key must defer its file-ref read past preflight");
+        assert!(guarded.approved_commands.is_empty());
     }
 
     #[test]
@@ -703,6 +966,144 @@ iteration: \"{{ file_exists('design.md') ? 2 : 1 }}\"\n\
         assert!(
             req.origin.line_number() > 0,
             "line should be the real line number, not 0"
+        );
+    }
+
+    // --- Lifecycle shell read-side resolution: launch-area fallback ---------
+    //
+    // A lifecycle `shell` command whose `{{ }}` span calls a read-side
+    // filesystem function (`file_exists`) against a launch-area-relative path
+    // must resolve via the threaded `file_ref_fallback_dir`, not the prompt
+    // directory alone. The regression below keeps the prompt dir, the
+    // launch-area fallback, and the ambient CWD all distinct, with `spec.md`
+    // present ONLY under the fallback, and proves the resolved (stamped)
+    // command depends on the fallback being supplied — independently of the
+    // post-launch process CWD.
+
+    use darkmatter::markdown::compose::ComposeContext;
+
+    /// RAII guard that switches the process CWD and restores it on drop
+    /// (including on panic). Tests using it are `#[serial_test::serial]` to
+    /// avoid racing on process-global CWD with other CWD-mutating tests.
+    struct CwdGuard {
+        prior: std::path::PathBuf,
+    }
+
+    impl CwdGuard {
+        fn enter(dir: &std::path::Path) -> Self {
+            let prior = std::env::current_dir().expect("read CWD");
+            std::env::set_current_dir(dir).expect("set CWD");
+            Self { prior }
+        }
+    }
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.prior);
+        }
+    }
+
+    /// Builds a `start` lifecycle config with a single positional `shell`
+    /// action whose command interpolates `file_exists(spec)`, plus the
+    /// effective frontmatter that supplies `spec`.
+    fn lifecycle_with_file_exists_shell()
+    -> (crate::composition::lifecycle::LifecycleConfig, serde_json::Value) {
+        let frontmatter = serde_json::json!({ "spec": "spec.md" });
+        let fm_with_event = serde_json::json!({
+            "spec": "spec.md",
+            "start": {
+                "stack": [{"action": {"shell": "echo {{ file_exists(spec) }}"}}]
+            }
+        });
+        let config = crate::composition::lifecycle::parse_lifecycle_config(
+            &fm_with_event,
+            Path::new("<test>"),
+        )
+        .expect("lifecycle config parses");
+        (config, frontmatter)
+    }
+
+    /// Reads the resolved (stamped) command string from the first `start`
+    /// stack action.
+    fn resolved_start_shell_command(
+        config: &crate::composition::lifecycle::LifecycleConfig,
+    ) -> String {
+        let stack = config
+            .stack(LifecycleSignal::Start)
+            .expect("start stack present");
+        match &stack[0].actions[0].kind {
+            LifecycleActionKind::Shell(shell) => match &shell.command {
+                Expr::StringLiteral(s) => s.clone(),
+                other => panic!("expected string-literal command, got: {other:?}"),
+            },
+            other => panic!("expected shell action, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial(preflight_cwd)]
+    fn lifecycle_shell_read_side_resolves_via_launch_area_fallback() {
+        let doc_dir = tempfile::TempDir::new().unwrap();
+        let launch_dir = tempfile::TempDir::new().unwrap();
+        let unrelated = tempfile::TempDir::new().unwrap();
+        // spec.md exists ONLY under the launch-area fallback — not the prompt
+        // (document) directory, not the ambient CWD.
+        std::fs::write(launch_dir.path().join("spec.md"), "# Spec\n").unwrap();
+
+        let source_path = doc_dir.path().join("prompt.md");
+        let (mut config, frontmatter) = lifecycle_with_file_exists_shell();
+
+        // Switch the ambient CWD elsewhere to prove resolution is independent
+        // of any post-launch chdir.
+        let _cwd = CwdGuard::enter(unrelated.path());
+
+        resolve_lifecycle_shell_commands(
+            &mut config,
+            &frontmatter,
+            &ComposeContext::capture(),
+            &source_path,
+            Some(launch_dir.path()),
+        )
+        .expect("resolution with the launch-area fallback must succeed");
+
+        assert_eq!(
+            resolved_start_shell_command(&config),
+            "echo true",
+            "file_exists(spec) must see spec.md via the launch-area fallback",
+        );
+    }
+
+    /// Same setup WITHOUT the fallback: `file_exists(spec)` cannot find the
+    /// launch-only file via the prompt dir or the unrelated CWD, so it resolves
+    /// to `false`. This confirms the test above passes because of the fallback,
+    /// not because the file is reachable some other way. Before the fix this
+    /// was the only code path, so the launch-relative reference resolved wrong.
+    #[test]
+    #[serial_test::serial(preflight_cwd)]
+    fn lifecycle_shell_read_side_without_fallback_misses_launch_area_file() {
+        let doc_dir = tempfile::TempDir::new().unwrap();
+        let launch_dir = tempfile::TempDir::new().unwrap();
+        let unrelated = tempfile::TempDir::new().unwrap();
+        std::fs::write(launch_dir.path().join("spec.md"), "# Spec\n").unwrap();
+
+        let source_path = doc_dir.path().join("prompt.md");
+        let (mut config, frontmatter) = lifecycle_with_file_exists_shell();
+
+        let _cwd = CwdGuard::enter(unrelated.path());
+
+        resolve_lifecycle_shell_commands(
+            &mut config,
+            &frontmatter,
+            &ComposeContext::capture(),
+            &source_path,
+            None,
+        )
+        .expect("resolution still succeeds; file just resolves to absent");
+
+        assert_eq!(
+            resolved_start_shell_command(&config),
+            "echo false",
+            "without the fallback the launch-only spec.md is unreachable",
         );
     }
 }

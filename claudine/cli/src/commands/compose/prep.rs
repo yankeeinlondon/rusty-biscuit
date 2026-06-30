@@ -20,9 +20,9 @@ use std::sync::{Arc, Mutex};
 
 use claudine::composition::{
     CompositionError, CompositionExecutionRequest, CompositionMode, DefaultLifecycleEmitter,
-    LifecycleRuntimeContext, LoopExecutionOptions, LoopExecutionResult, PrepareOptions,
-    PreparedComposition, ResolvedCompositionSource, ResolvedExecutionTarget, SharedApprovalCache,
-    SystemShellRunner, build_loop_seed_with_lifecycle, resolve_loop_config,
+    LIFECYCLE_EVENT_KEYS, LifecycleRuntimeContext, LoopExecutionOptions, LoopExecutionResult,
+    PrepareOptions, PreparedComposition, ResolvedCompositionSource, ResolvedExecutionTarget,
+    SharedApprovalCache, SystemShellRunner, build_loop_seed_with_lifecycle, resolve_loop_config,
 };
 use claudine::system_prompt::SystemPromptArgs;
 use color_eyre::eyre::{Result, eyre};
@@ -93,6 +93,7 @@ pub(crate) fn run_composition_inner(
 
     validate_timeout_flags(&shared)?;
     shared.step_timeout_secs()?;
+    shared.stall_timeout_secs()?;
     let set_overrides = merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
     let system_prompt_args = shared.system_prompt_args();
 
@@ -139,6 +140,12 @@ pub(crate) fn run_composition_inner(
     // and missing required values (non-interactive) surface as typed
     // errors here, never as Darkmatter raw errors.
     let schema_t = std::time::Instant::now();
+    // Pre-validation runs BEFORE the wrapper's `switch_process_cwd`, so the
+    // ambient CWD is still the launch area. Capture it explicitly as the
+    // `file`-typed property fallback anchor so caller-supplied area-relative
+    // paths resolve here exactly as they will at prepare time and event time,
+    // rather than depending on the soon-to-be-mutated process CWD.
+    let launch_area_fallback = std::env::current_dir().ok();
     let (source, set_overrides) = {
         let interactive_opts = resolve_interactive_options(shared.silent);
         let term = crate::log::terminal();
@@ -147,6 +154,7 @@ pub(crate) fn run_composition_inner(
             set_overrides.as_ref(),
             interactive_opts,
             &term,
+            launch_area_fallback.as_deref(),
         )
         .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
         emit_dropped_optional_warnings(&pre.dropped_optionals);
@@ -254,7 +262,23 @@ pub(crate) fn run_composition_inner(
             ctx.env_mut().insert(key.clone(), value.clone());
         }
         let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
-            .with_source_file(&source.resolved_path);
+            .with_source_file(&source.resolved_path)
+            // Defer the lifecycle event keys (DM1), exactly as the main prepare
+            // passes do. The preflight runs a full compose pipeline purely to
+            // discover template `::shell` directives; without the exclusion it
+            // also resolves the deferred lifecycle subtree at compose time, so a
+            // `success`/`failure` event's read-side file reference (e.g.
+            // `frontmatter(plan, …)` over a plan this very run is about to
+            // create) trips the now-fatal file-ref check before the event that
+            // would make the file exist ever fires. Lifecycle shell commands are
+            // audited separately via `collect_lifecycle_shell_commands`.
+            .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied())
+            // Anchor `file`-typed schema validation on the launch area so a
+            // caller-supplied area-relative path resolves here document-first
+            // then launch-area — exactly as the main prepare pass and the
+            // lifecycle events do. Without it the preflight's built-in schema
+            // validation would fall back to the (already-mutated) process CWD.
+            .with_file_ref_fallback_dir(prep_context.launch_workspace.launch_cwd.clone());
         if let Some(ref overrides) = set_overrides {
             opts = opts.with_set_overrides(overrides.clone());
         }
@@ -342,27 +366,48 @@ fn validate_timeout_flags(shared: &SharedComposeArgs) -> Result<()> {
 }
 
 /// Resolve the composition source, with inline-specific error reporting
-/// for reference-resolution failures.
+/// for reference-resolution failures and an ENTER-path autocomplete fallback
+/// when the file reference is not found.
 fn resolve_composition_source(
     file: &str,
     kind: CompositionKind,
     shared: &SharedComposeArgs,
 ) -> Result<ResolvedCompositionSource> {
+    let stderr_is_tty = std::io::stderr().is_terminal()
+        || std::env::var_os("FORCE_COLOR").is_some();
     match claudine::composition::resolve_composition_source(file) {
         Ok(source) => Ok(source),
+        Err(CompositionError::FileNotFound(_)) => {
+            let mode = match kind {
+                CompositionKind::Direct => crate::completion::scopes::ComposeMode::Compose,
+                CompositionKind::Inline => {
+                    crate::completion::scopes::ComposeMode::InlineCompose
+                }
+            };
+            let selected =
+                crate::completion::operation_file::autocomplete_operation_file(file, mode)?;
+            claudine::composition::resolve_composition_source(&selected).map_err(|e| {
+                claudine::composition::enrich_composition_source_load_error(
+                    &selected,
+                    e,
+                    stderr_is_tty,
+                )
+                .into()
+            })
+        }
         Err(e) => {
+            let e = claudine::composition::enrich_composition_source_load_error(
+                file,
+                e,
+                stderr_is_tty,
+            );
             if kind.is_inline() {
                 // Only a genuine reference-resolution failure means the file
                 // was not found. A file that resolved but failed to load/parse
                 // (e.g. malformed frontmatter) must not be reported as
                 // "no match" — its own typed error already names the file and
                 // the cause.
-                if !shared.silent
-                    && matches!(
-                        e,
-                        CompositionError::FileNotFound(_) | CompositionError::InvalidReference(_)
-                    )
-                {
+                if !shared.silent && matches!(e, CompositionError::InvalidReference { .. }) {
                     let term = crate::log::terminal();
                     claudine::harness::report::report_source_file(
                         file,
@@ -410,6 +455,7 @@ fn build_and_run_loop(
     shared_approval_cache: &SharedApprovalCache,
     header_emitted: bool,
     prep_context: &CompositionPrepContext,
+    prepared_context: &darkmatter::markdown::compose::ComposeContext,
     verbose: u8,
     shared: &SharedComposeArgs,
 ) -> std::result::Result<Option<LoopExecutionResult>, CompositionError> {
@@ -464,6 +510,8 @@ fn build_and_run_loop(
         term: &term,
         source_path: &source.resolved_path,
         repo_root: effective_repo_root,
+        launch_area: Some(prep_context.launch_workspace.launch_cwd.as_path()),
+        context: Some(prepared_context),
     };
 
     let lifecycle_mutation_root = effective_repo_root
@@ -595,6 +643,7 @@ fn build_execution_request(
         system_prompt_args: system_prompt_args.clone(),
         timeout: shared.timeout.clone(),
         step_timeout: shared.step_timeout.clone(),
+        stall_timeout: shared.stall_timeout.clone(),
         operation: shared.operation.clone(),
         sandbox: shared.sandbox,
         repo: shared.repo,
@@ -652,6 +701,26 @@ fn execute_loop_or_single(
         || std::env::var_os("FORCE_COLOR").is_some();
 
     let file_for_loop = file.clone();
+
+    // Capture the early-binding context ONCE, against the launch area (the
+    // package area the caller launched from), and reuse the same snapshot for
+    // body compose, shell preflight, and lifecycle events. This is the single
+    // source of truth for `ctx.*`/`env.*`: the body and the lifecycle can no
+    // longer diverge, and there is no per-event re-scan. `capture_for_document`
+    // is demand-driven over both frontmatter and body, so the lifecycle
+    // `{{ctx.*}}` strings in frontmatter pull in the groups they need.
+    // `current.*` stays event-time and is captured separately.
+    let prepared_context = {
+        let mut ctx = darkmatter::markdown::compose::ComposeContext::capture_for_document(
+            prep_context.launch_workspace.launch_cwd.as_path(),
+            &source.markdown,
+        );
+        for (key, value) in &env_overrides {
+            ctx.env_mut().insert(key.clone(), value.clone());
+        }
+        ctx
+    };
+
     let loop_prepare_options = PrepareOptions {
         set_overrides: set_overrides.clone(),
         pre_approved_commands: Some(preflight.approved_commands.clone()),
@@ -659,6 +728,8 @@ fn execute_loop_or_single(
         perf_enabled: shared.perf,
         source_repo_root: prep_context.source_repo_root.clone(),
         shell_working_directory: Some(prep_context.launch_workspace.child_cwd.clone()),
+        prepared_context: Some(prepared_context.clone()),
+        file_ref_fallback_dir: Some(prep_context.launch_workspace.launch_cwd.clone()),
     };
 
     if !shared.dry_run {
@@ -674,6 +745,7 @@ fn execute_loop_or_single(
             &shared_approval_cache,
             header_emitted,
             &prep_context,
+            &prepared_context,
             verbose,
             &shared,
         )?;
@@ -694,6 +766,15 @@ fn execute_loop_or_single(
                     emit_rate_limit_halt(&error);
                     return Ok(claudine::composition::LOOP_RATE_LIMITED_EXIT_CODE);
                 }
+                // A late-binding evaluation error surfaced by the loop engine
+                // (`initialize` / `loop` gate) has no stderr renderer in the
+                // lib; emit its styled block here, at the consumption boundary,
+                // before returning (no further lifecycle events fire). Marks it
+                // already-emitted so the outer renderer does not double-emit.
+                let error = crate::output::error_walker::emit_lifecycle_evaluation_error_block(
+                    error,
+                    &wrap_terminal(),
+                );
                 return Err(error.enrich_frontmatter(&source, stderr_is_tty).into());
             }
             return Ok(loop_result.final_exit_code);
@@ -721,6 +802,8 @@ fn execute_loop_or_single(
                 shell_working_directory: Some(
                     prep_context.launch_workspace.child_cwd.clone(),
                 ),
+                prepared_context: Some(prepared_context.clone()),
+                file_ref_fallback_dir: Some(prep_context.launch_workspace.launch_cwd.clone()),
             },
         )
         .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?
@@ -747,4 +830,97 @@ fn execute_loop_or_single(
     }
 
     execute_composition_request(request, verbose, startup_timings, shared.perf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn shared_args() -> SharedComposeArgs {
+        SharedComposeArgs {
+            provider: None,
+            claude: false,
+            codex: false,
+            gemini: false,
+            goose: false,
+            kimicode: false,
+            opencode: false,
+            qwen: false,
+            roo: false,
+            exclude: Vec::new(),
+            yolo: false,
+            interactive: false,
+            no_interactive: false,
+            include: Vec::new(),
+            model: None,
+            output: None,
+            append_system_prompt: None,
+            replace_system_prompt: None,
+            timeout: None,
+            step_timeout: None,
+            stall_timeout: None,
+            operation: None,
+            sandbox: false,
+            repo: false,
+            dry_run: false,
+            quiet: false,
+            silent: true,
+            set: None,
+            mcp: false,
+            mcp_use: Vec::new(),
+            strict: false,
+            perf: false,
+            max_iterations: None,
+            on_rate_limit: None,
+        }
+    }
+
+    fn malformed_prompt(dir: &TempDir) -> String {
+        let file = dir.path().join("malformed.md");
+        fs::write(
+            &file,
+            "----\nname: malformed\ndescription: near-miss fence\n----\n# Body\n",
+        )
+        .unwrap();
+        file.to_string_lossy().into_owned()
+    }
+
+    fn assert_frontmatter_enriched(report: color_eyre::Report) {
+        let err = report
+            .downcast::<CompositionError>()
+            .expect("report should carry CompositionError");
+        match err {
+            CompositionError::WithFrontmatter { inner, .. } => {
+                assert!(
+                    matches!(*inner, CompositionError::FrontmatterParse(_)),
+                    "inner error should remain FrontmatterParse"
+                );
+            }
+            other => panic!("expected WithFrontmatter, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compose_source_load_error_is_frontmatter_enriched() {
+        let dir = TempDir::new().unwrap();
+        let file = malformed_prompt(&dir);
+
+        let report =
+            resolve_composition_source(&file, CompositionKind::Direct, &shared_args()).unwrap_err();
+
+        assert_frontmatter_enriched(report);
+    }
+
+    #[test]
+    fn inline_compose_source_load_error_is_frontmatter_enriched() {
+        let dir = TempDir::new().unwrap();
+        let file = malformed_prompt(&dir);
+
+        let report =
+            resolve_composition_source(&file, CompositionKind::Inline, &shared_args()).unwrap_err();
+
+        assert_frontmatter_enriched(report);
+    }
 }

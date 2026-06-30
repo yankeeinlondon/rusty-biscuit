@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use claudine::runaway::Trip;
-use claudine::stream::logs::EarlyTermination;
+use claudine::stream::logs::{EarlyTermination, StalledGenerationContext};
 use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -841,6 +841,20 @@ pub(crate) fn apply_early_termination_to_summary(
             summary.error_kind = Some("repeated_stream_error".into());
             summary.error_message = Some(render_repeated_stream_error_message(*count));
         }
+        EarlyTermination::StalledGeneration {
+            generation_count,
+            stall_duration,
+            context,
+        } => {
+            summary.exit_code = 1;
+            summary.is_error = true;
+            summary.error_kind = Some("stalled_generation".into());
+            summary.error_message = Some(render_stalled_generation_message(
+                *generation_count,
+                *stall_duration,
+                context,
+            ));
+        }
     }
 }
 
@@ -868,6 +882,15 @@ pub(crate) fn early_termination_message(termination: &EarlyTermination) -> Optio
         EarlyTermination::RepeatedStreamError { count } => {
             Some(render_repeated_stream_error_message(*count))
         }
+        EarlyTermination::StalledGeneration {
+            generation_count,
+            stall_duration,
+            context,
+        } => Some(render_stalled_generation_message(
+            *generation_count,
+            *stall_duration,
+            context,
+        )),
     }
 }
 
@@ -907,6 +930,47 @@ fn render_repeated_stream_error_message(count: u32) -> String {
         "provider stream failed {count} times with no progress; \
          terminated to stop the retry loop"
     )
+}
+
+/// Render the error message for an [`EarlyTermination::StalledGeneration`]
+/// trip, naming the generation-attempt count, the elapsed progress silence,
+/// and any available safe OpenCode context (session id, step, agent, provider
+/// id, model id, mode). Never includes prompt text or tool payloads.
+fn render_stalled_generation_message(
+    generation_count: u32,
+    stall_duration: Duration,
+    context: &StalledGenerationContext,
+) -> String {
+    let seconds = stall_duration.as_secs();
+    let mut message = format!(
+        "provider attempted {generation_count} generations over {seconds}s with no progress; \
+         terminated to stop the stalled-generation loop"
+    );
+
+    let mut details: Vec<String> = Vec::new();
+    if let Some(session_id) = &context.session_id {
+        details.push(format!("session={session_id}"));
+    }
+    if let Some(step) = context.step {
+        details.push(format!("step={step}"));
+    }
+    if let Some(agent) = &context.agent {
+        details.push(format!("agent={agent}"));
+    }
+    if let Some(provider_id) = &context.provider_id {
+        details.push(format!("provider={provider_id}"));
+    }
+    if let Some(model_id) = &context.model_id {
+        details.push(format!("model={model_id}"));
+    }
+    if let Some(mode) = &context.mode {
+        details.push(format!("mode={mode}"));
+    }
+    if !details.is_empty() {
+        message.push_str(&format!(" ({})", details.join(", ")));
+    }
+
+    message
 }
 
 /// Convert a [`WatchdogTermination`] request from the watchdog ticker into
@@ -952,11 +1016,16 @@ pub(crate) fn early_termination_process_outcome(
         // The repeated-stream-error backstop is also a fail-fast abort: the
         // provider failed every retry, so a retryable timeout classification
         // would only reproduce the loop.
+        //
+        // The stalled-generation backstop fires for the same reason: retrying
+        // a silently-dropped generation loop reproduces the stall, so it must
+        // never route through `TimedOut` / `handle_timeout:`.
         Some(
             EarlyTermination::ExitExpression { .. }
             | EarlyTermination::RunawayRepetition { .. }
             | EarlyTermination::RunawayVolume { .. }
-            | EarlyTermination::RepeatedStreamError { .. },
+            | EarlyTermination::RepeatedStreamError { .. }
+            | EarlyTermination::StalledGeneration { .. },
         ) => claudine::harness::ProcessTermination::Aborted,
         None => claudine::harness::ProcessTermination::Completed,
     }
@@ -1014,6 +1083,23 @@ pub(crate) fn early_termination_guard_context(
         EarlyTermination::RunawayVolume { lines, bytes } => Some(GuardContext {
             lines: Some(*lines),
             bytes: Some(*bytes),
+            ..GuardContext::default()
+        }),
+        EarlyTermination::StalledGeneration {
+            generation_count,
+            stall_duration,
+            context,
+        } => Some(GuardContext {
+            generation_count: Some(*generation_count),
+            stall_duration_ms: Some(stall_duration.as_millis() as u64),
+            // Carry only the safe identity metadata the detector captured;
+            // each stays `None` when OpenCode never tagged it.
+            session_id: context.session_id.clone(),
+            step: context.step,
+            agent: context.agent.clone(),
+            provider_id: context.provider_id.clone(),
+            model_id: context.model_id.clone(),
+            mode: context.mode.clone(),
             ..GuardContext::default()
         }),
         EarlyTermination::RateLimit { .. }
@@ -1318,6 +1404,63 @@ mod tests {
     }
 
     #[test]
+    fn early_termination_process_outcome_maps_stalled_generation_to_aborted() {
+        // Fail-fast: a stalled-generation loop must never route through
+        // `TimedOut` / `handle_timeout:` (which would re-run the provider and
+        // reproduce the silent generation-drop stall).
+        let termination = EarlyTermination::StalledGeneration {
+            generation_count: 4,
+            stall_duration: Duration::from_secs(600),
+            context: StalledGenerationContext::default(),
+        };
+
+        let outcome = early_termination_process_outcome(Some(&termination));
+
+        assert_eq!(outcome, claudine::harness::ProcessTermination::Aborted);
+    }
+
+    #[test]
+    fn apply_early_termination_stalled_generation_sets_summary_fields_and_context() {
+        let mut summary = StreamExecutionSummary {
+            exit_code: 143,
+            is_error: false,
+            ..Default::default()
+        };
+
+        apply_early_termination_to_summary(
+            &mut summary,
+            &EarlyTermination::StalledGeneration {
+                generation_count: 4,
+                stall_duration: Duration::from_secs(600),
+                context: StalledGenerationContext {
+                    session_id: Some("ses_x".into()),
+                    step: Some(7),
+                    agent: Some("build".into()),
+                    provider_id: Some("zai-coding-plan".into()),
+                    model_id: Some("glm-5.2".into()),
+                    mode: Some("build".into()),
+                },
+            },
+        );
+
+        assert_eq!(summary.exit_code, 1);
+        assert!(summary.is_error);
+        assert_eq!(summary.error_kind.as_deref(), Some("stalled_generation"));
+        let msg = summary.error_message.as_deref().unwrap_or("");
+        assert!(
+            msg.contains('4'),
+            "message must name the generation-attempt count: {msg}",
+        );
+        assert!(
+            msg.contains("600"),
+            "message must name the elapsed progress silence: {msg}",
+        );
+        // Safe context is surfaced; prompt text / tool payloads never are.
+        assert!(msg.contains("ses_x"), "message must name the session id: {msg}");
+        assert!(msg.contains("glm-5.2"), "message must name the model id: {msg}");
+    }
+
+    #[test]
     fn trip_to_early_termination_preserves_exit_expression_fields() {
         let trip = claudine::runaway::Trip::ExitExpression {
             pattern: "STOP.".into(),
@@ -1384,6 +1527,36 @@ mod tests {
         assert_eq!(gc.lines, Some(50_001));
         assert_eq!(gc.bytes, Some(33_554_432));
 
+        // Stalled-generation → generation_count + stall_duration_ms, and every
+        // runaway/exit-expression cluster field stays None. With an empty
+        // context the optional OpenCode identity fields are absent too.
+        let gc = early_termination_guard_context(&EarlyTermination::StalledGeneration {
+            generation_count: 4,
+            stall_duration: Duration::from_secs(600),
+            context: StalledGenerationContext::default(),
+        })
+        .expect("stalled-generation has guard context");
+        assert_eq!(gc.generation_count, Some(4));
+        assert_eq!(gc.stall_duration_ms, Some(600_000));
+        assert!(
+            gc.pattern.is_none()
+                && gc.scope.is_none()
+                && gc.cycle_len.is_none()
+                && gc.repeats.is_none()
+                && gc.lines.is_none()
+                && gc.bytes.is_none(),
+            "stalled-generation must not populate runaway/exit-expression clusters",
+        );
+        assert!(
+            gc.session_id.is_none()
+                && gc.step.is_none()
+                && gc.agent.is_none()
+                && gc.provider_id.is_none()
+                && gc.model_id.is_none()
+                && gc.mode.is_none(),
+            "absent OpenCode metadata must leave the identity fields None",
+        );
+
         // Non-content terminations carry no guard context.
         assert!(
             early_termination_guard_context(&EarlyTermination::Timeout {
@@ -1391,6 +1564,38 @@ mod tests {
             })
             .is_none()
         );
+    }
+
+    #[test]
+    fn early_termination_guard_context_carries_opencode_identity_metadata() {
+        // When the detector captured OpenCode identity tags, the structured
+        // guard context exposes them so lifecycle consumers can branch on the
+        // run without parsing the prose message.
+        let gc = early_termination_guard_context(&EarlyTermination::StalledGeneration {
+            generation_count: 4,
+            stall_duration: Duration::from_secs(600),
+            context: StalledGenerationContext {
+                session_id: Some("ses_10ea40010ffeUlahGfHA4R7Mmv".into()),
+                step: Some(70),
+                agent: Some("rust-developer".into()),
+                provider_id: Some("zai-coding-plan".into()),
+                model_id: Some("glm-5.2".into()),
+                mode: Some("all".into()),
+            },
+        })
+        .expect("stalled-generation has guard context");
+
+        assert_eq!(gc.generation_count, Some(4));
+        assert_eq!(gc.stall_duration_ms, Some(600_000));
+        assert_eq!(
+            gc.session_id.as_deref(),
+            Some("ses_10ea40010ffeUlahGfHA4R7Mmv")
+        );
+        assert_eq!(gc.step, Some(70));
+        assert_eq!(gc.agent.as_deref(), Some("rust-developer"));
+        assert_eq!(gc.provider_id.as_deref(), Some("zai-coding-plan"));
+        assert_eq!(gc.model_id.as_deref(), Some("glm-5.2"));
+        assert_eq!(gc.mode.as_deref(), Some("all"));
     }
 
     #[test]
@@ -1440,6 +1645,18 @@ mod tests {
             EarlyTermination::RunawayVolume {
                 lines: 99,
                 bytes: 1234,
+            },
+            EarlyTermination::StalledGeneration {
+                generation_count: 4,
+                stall_duration: Duration::from_secs(600),
+                context: StalledGenerationContext {
+                    session_id: Some("ses_x".into()),
+                    step: Some(7),
+                    agent: Some("build".into()),
+                    provider_id: Some("zai-coding-plan".into()),
+                    model_id: Some("glm-5.2".into()),
+                    mode: Some("build".into()),
+                },
             },
         ];
 

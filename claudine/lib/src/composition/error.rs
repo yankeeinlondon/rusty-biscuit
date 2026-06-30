@@ -1,6 +1,7 @@
 //! Composition-specific error types.
 
-use std::path::PathBuf;
+use std::ops::Range;
+use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::status::StatusState;
@@ -12,8 +13,15 @@ use chrono::{DateTime, Utc};
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
 
+use darkmatter::markdown::compose::expression::file_suggestions::DEFAULT_MAX_SUGGESTIONS;
+use darkmatter::markdown::compose::expression::{
+    ExpressionError, FileRefFailure, FileReferenceDiagnostic, suggest_sibling_files,
+};
+use serde_json::{Value, json};
+
 use super::frontmatter_excerpt::FrontmatterExcerpt;
 use super::types::{ResolutionMode, ResolvedCompositionSource, SessionInteractivitySource};
+use crate::diagnostics::{Category, Diagnostic, Disposition, Origin, code_spec, null_detail_for};
 use crate::provider::Provider;
 use thiserror::Error;
 
@@ -30,8 +38,14 @@ pub const LOOP_RATE_LIMITED_EXIT_CODE: i32 = 75;
 #[derive(Error, Debug)]
 pub enum CompositionError {
     /// The file reference string could not be parsed.
-    #[error("invalid file reference: {0}")]
-    InvalidReference(String),
+    #[error("invalid file reference `{reference}`: {source}")]
+    InvalidReference {
+        /// The raw reference string that failed to resolve.
+        reference: String,
+        /// The typed resolution failure from `biscuit-file`.
+        #[source]
+        source: biscuit_file::FileReferenceError,
+    },
 
     /// The resolved file does not exist.
     #[error("file not found: {0}")]
@@ -42,8 +56,14 @@ pub enum CompositionError {
     NotMarkdown(String),
 
     /// The Markdown file could not be loaded or parsed.
-    #[error("failed to load Markdown: {0}")]
-    MarkdownLoad(String),
+    #[error("failed to load Markdown: {}: {source}", path.display())]
+    MarkdownLoad {
+        /// The file whose load/parse failed.
+        path: PathBuf,
+        /// The typed lower-layer cause.
+        #[source]
+        source: MarkdownLoadCause,
+    },
 
     /// The document's frontmatter (the YAML between the leading `---` markers)
     /// is present but failed to parse.
@@ -200,8 +220,20 @@ pub enum CompositionError {
     InlineHashMalformed(#[source] MarkdownError),
 
     /// Atomic file write failed during inline composition.
-    #[error("atomic write failed: {0}")]
-    AtomicWriteFailed(String),
+    ///
+    /// Carries the file path and the typed [`crate::error::ClaudineError`]
+    /// source (boxed because `ClaudineError` can itself contain a
+    /// `CompositionError`, which would otherwise make the type infinitely
+    /// sized) so the path and underlying cause reach the CLI walker instead of
+    /// being flattened to a string.
+    #[error("atomic write to {path} failed: {source}")]
+    AtomicWriteFailed {
+        /// The file whose atomic write failed.
+        path: PathBuf,
+        /// The underlying typed write failure.
+        #[source]
+        source: Box<crate::error::ClaudineError>,
+    },
 
     /// The composition target file lacks required read/write permissions.
     #[error("insufficient file permissions (need read+write): {0}")]
@@ -379,6 +411,135 @@ pub enum CompositionError {
         message: String,
     },
 
+    /// A lifecycle action verb is not recognized at parse time.
+    ///
+    /// Raised for single-key positional objects whose only key is not a known
+    /// lifecycle verb.
+    #[error(
+        "unknown lifecycle action `{verb}` in `{property}` ({source_path}){rewrite}",
+        source_path = source_path.display()
+    )]
+    LifecycleUnknownVerb {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+        /// The unrecognized verb.
+        verb: String,
+        /// Did-you-mean rewrite, empty when no suggestion is available.
+        rewrite: String,
+    },
+
+    /// A lifecycle stack item is ambiguous between positional and key/value
+    /// forms because it is a multi-key object without an explicit `action:` key.
+    #[error(
+        "ambiguous lifecycle stack item in `{property}` ({source_path}): {message}",
+        source_path = source_path.display()
+    )]
+    LifecycleStackAmbiguous {
+        /// The prompt file whose lifecycle frontmatter held the stack item.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+        /// Human-readable description with did-you-mean rewrites.
+        message: String,
+    },
+
+    /// A positional lifecycle action received a direct YAML map value.
+    ///
+    /// Object-valued side-effect arguments must be passed through a whole-value
+    /// `{{ … }}` interpolation span; direct nested YAML objects are rejected.
+    #[error(
+        "lifecycle action `{verb}` in `{property}` received an object value where a scalar or array is expected; \
+         pass object data through a whole-value `{{{{ ... }}}}` interpolation ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleObjectDataThroughInterpolationPositional {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+        /// The action verb.
+        verb: String,
+    },
+
+    /// A key/value lifecycle action parameter received a direct YAML map value.
+    ///
+    /// Object-valued side-effect arguments must be passed through a whole-value
+    /// `{{ … }}` interpolation span; direct nested YAML objects are rejected.
+    #[error(
+        "lifecycle action `{verb}` parameter `{param}` in `{property}` received an object value where a scalar is expected; \
+         pass object data through a whole-value `{{{{ ... }}}}` interpolation ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleObjectDataThroughInterpolationParameter {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+        /// The action verb.
+        verb: String,
+        /// The parameter name.
+        param: String,
+    },
+
+    /// A positional lifecycle action received the wrong number of arguments.
+    #[error(
+        "lifecycle action `{verb}` in `{property}` has the wrong arity ({source_path}): {message}",
+        source_path = source_path.display()
+    )]
+    LifecycleWrongArity {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+        /// The action verb.
+        verb: String,
+        /// Human-readable arity description.
+        message: String,
+    },
+
+    /// The short-form lifecycle action grammar `verb(args)` has been removed.
+    ///
+    /// Authors must use positional (`verb: value`) or key/value
+    /// (`{ action: verb, ... }`) form. The `rewrite` field carries the
+    /// positional equivalent for the did-you-mean message.
+    #[error(
+        "short-form lifecycle action `{raw}` in `{property}` has been removed ({source_path}).\n\n\
+         Use the positional or key/value form instead: {rewrite}",
+        source_path = source_path.display()
+    )]
+    LifecycleShortFormRemoved {
+        /// The prompt file whose lifecycle frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+        /// The raw short-form string exactly as authored.
+        raw: String,
+        /// Positional-form did-you-mean rewrite.
+        rewrite: String,
+    },
+
+    /// A variadic expression-function action was authored in key/value form.
+    ///
+    /// Variadic functions (`and`, `or`) accept a variable number of positional
+    /// arguments and have no deterministic named-parameter mapping, so they
+    /// reject the `{ action: verb, ... }` shape. Authors must use the positional
+    /// array form (`and: [a, b, c]`).
+    #[error(
+        "lifecycle expression function `{verb}` in `{property}` does not support key/value form; \
+         use the positional array form (`{verb}: [...]`) ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleExpressionFunctionKeyValueUnsupported {
+        /// The prompt file whose frontmatter held the action.
+        source_path: PathBuf,
+        /// Owning event name (e.g. `"start"`).
+        property: String,
+        /// The variadic expression-function verb.
+        verb: String,
+    },
+
     /// A lifecycle control action was used in an event where the spec's
     /// "Where valid" matrix forbids it (e.g. `Skip` outside `initialize`).
     ///
@@ -475,6 +636,34 @@ pub enum CompositionError {
         property: String,
         /// The event name the reference appeared in (e.g. `"start"`).
         event: String,
+    },
+
+    /// A lifecycle shell command failed pre-flight resolution via DM2 (C3).
+    ///
+    /// Shell commands live inside the deferred lifecycle subtree, so they are
+    /// unresolved after main compose. Pre-flight resolves each one via DM2
+    /// with an early-binding-only lookup (`doc.*`, `ctx.*`, `env.*`, read-side
+    /// functions) and stamps the resolved bytes back so the approved command
+    /// equals the executed command. This variant covers every failure DM2
+    /// surfaces: malformed expressions, unknown roots (typos), unknown
+    /// functions, and late-binding references (`err`/`timing`/`current`),
+    /// which are rejected because shell commands are approved at pre-flight
+    /// time, before any event fires.
+    #[error(
+        "lifecycle shell command at `{property}` failed pre-flight resolution: {message} \
+         (raw: `{raw}`) ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleShellResolution {
+        /// The prompt file whose lifecycle frontmatter held the command.
+        source_path: PathBuf,
+        /// Dotted lifecycle key path, e.g. `"start.stack[0].action.command"`.
+        property: String,
+        /// The raw command string exactly as authored (pre-resolution).
+        raw: String,
+        /// Human-readable resolution failure (parse error, unknown root,
+        /// late-binding reference, etc.).
+        message: String,
     },
 
     /// A `failure` stack requested `resume(...)` but the agentic loop did
@@ -615,6 +804,34 @@ pub enum CompositionError {
         reason: String,
     },
 
+    /// A late-binding lifecycle expression *raised* at event time — a `when:`
+    /// guard, a top-level communication string, or an action-value
+    /// interpolation that threw (an unknown root under DM2 strict mode, a
+    /// malformed `{{ … }}` span, or a read-side function error).
+    ///
+    /// Unlike a side-effect **dispatch** failure (which honors `no_error: true`
+    /// and the per-phase routing policy), an evaluation error halts on **every**
+    /// event phase and is surfaced to the user. A terminal-phase event
+    /// (`success`/`failure`/`finalize`/`loop`) produces this and exits non-zero
+    /// without retroactively firing `failure`; a setup-phase event
+    /// (`initialize`/`start`/`blocked`) routes it through `failure`/`finalize`
+    /// like any other setup failure.
+    #[error(
+        "lifecycle `{event}` evaluation error in `{surface}`: {message} ({source_path})",
+        source_path = source_path.display()
+    )]
+    LifecycleEvaluationError {
+        /// The prompt file whose lifecycle event raised the error.
+        source_path: PathBuf,
+        /// The lifecycle event name (e.g. `success`, `finalize`, `loop`).
+        event: String,
+        /// The offending surface — `when`, `interpolation`, or an action verb
+        /// (taken from the raised [`super::lifecycle_context::LifecycleErrorInfo::variant`]).
+        surface: String,
+        /// The raised expression's message.
+        message: String,
+    },
+
     // -- Sequence errors -------------------------------------------------------
     /// The `sequence` frontmatter value is not a valid type (must be a list or a string).
     #[error("invalid sequence definition: {0}")]
@@ -625,8 +842,16 @@ pub enum CompositionError {
     SequenceEmpty,
 
     /// The external YAML file could not be loaded.
-    #[error("failed to load external sequence file: {0}")]
-    SequenceExternalLoad(String),
+    #[error("failed to load external sequence file: {context}: {source}")]
+    SequenceExternalLoad {
+        /// Display context: the raw reference (formatted as `` `raw` ``) for the
+        /// reference-resolution sites, or the resolved YAML path for the load
+        /// sites.
+        context: String,
+        /// The typed lower-layer cause.
+        #[source]
+        source: SequenceLoadCause,
+    },
 
     /// The external YAML file has an unexpected root shape.
     #[error("external sequence file has wrong structure: {0}")]
@@ -798,17 +1023,45 @@ pub enum CompositionError {
     },
 
     // -- Schema errors --------------------------------------------------------
-    /// A `$schema` reference could not be resolved or compiled.
+    /// A `$schema` reference could not be *resolved* — a missing file, an
+    /// unsupported `http://` / `https://` URL, or a referenced file that is
+    /// neither a SimplifiedSchema nor a JSON Schema.
     ///
-    /// Covers both file resolution failures (e.g. unsupported `http://` URL,
-    /// missing file) and schema compilation failures (invalid SimplifiedSchema
-    /// or JSON Schema structure).
+    /// This is strictly a reference-resolution failure. A *syntax* error in the
+    /// schema body itself is [`SchemaParse`], whose remediation is about
+    /// constraint grammar rather than file paths.
+    ///
+    /// [`SchemaParse`]: CompositionError::SchemaParse
     #[error("schema load failed for {}: {message}", source_path.display())]
     SchemaLoad {
         /// The prompt file whose `$schema` reference failed to load.
         source_path: PathBuf,
         /// Human-readable description of the failure.
         message: String,
+    },
+
+    /// A `$schema` declaration could not be *parsed* or lowered to a JSON Schema.
+    ///
+    /// Distinct from [`SchemaLoad`] (reference resolution): this is a syntax
+    /// error in the inline SimplifiedSchema body — a malformed type-and-constraint
+    /// expression, an invalid constraint conversion, or an unsupported `$schema`
+    /// shape. The remediation names the constraint grammar, not the file path,
+    /// because the path is fine and the body is wrong.
+    ///
+    /// [`SchemaLoad`]: CompositionError::SchemaLoad
+    #[error("schema parse failed for {}: {message}", source_path.display())]
+    SchemaParse {
+        /// The prompt file whose `$schema` body failed to parse.
+        source_path: PathBuf,
+        /// The schema property the failure is attributed to, when the typed
+        /// cause identifies one (`None` for whole-shape failures).
+        property: Option<String>,
+        /// The grammar / conversion error message from the schema subsystem.
+        message: String,
+        /// Byte span of the offending token within the type-and-constraint
+        /// string, when the typed cause carries one. Retained for the focused
+        /// excerpt; `None` for conversion / shape failures that have no span.
+        span: Option<Range<usize>>,
     },
 
     /// One or more present frontmatter properties failed schema validation.
@@ -905,6 +1158,36 @@ pub enum CompositionError {
         message: Option<String>,
     },
 
+    // -- Autocomplete errors --------------------------------------------------
+    /// No files matched the autocomplete query.
+    #[error("no files matched autocomplete query `{query}`")]
+    AutocompleteNoMatches {
+        /// The user's typed query token.
+        query: String,
+    },
+
+    /// Too many files matched the autocomplete query; the user must narrow it.
+    #[error(
+        "more than {cap} files matched autocomplete query `{query}`; narrow your query"
+    )]
+    AutocompleteOverCap {
+        /// The user's typed query token.
+        query: String,
+        /// The candidate cap that was exceeded.
+        cap: usize,
+    },
+
+    /// Autocomplete requires an interactive terminal.
+    #[error("autocomplete requires an interactive terminal")]
+    AutocompleteNotInteractive,
+
+    /// The user cancelled the autocomplete dialog or chooser.
+    #[error("autocomplete cancelled for query `{query}`")]
+    AutocompleteCancelled {
+        /// The user's typed query token.
+        query: String,
+    },
+
     /// Composition succeeded but produced an empty body.
     ///
     /// The Markdown composed cleanly (no transclusion or shell-expansion
@@ -950,6 +1233,66 @@ pub enum CompositionError {
         /// The captured frontmatter block, appended after the inner diagnostic.
         excerpt: FrontmatterExcerpt,
     },
+
+    /// A lifecycle evaluation error whose styled block was already rendered to
+    /// stderr at its catch point (Decision #2), before any catch events
+    /// (`failure`/`finalize`) fired.
+    ///
+    /// Constructed by [`already_emitted`](CompositionError::already_emitted)
+    /// once the early emit has happened, so the outer CLI renderer recognizes
+    /// the error has been surfaced and suppresses the duplicate styled block —
+    /// while still propagating a non-zero exit. `Display` delegates to `inner`
+    /// so any plain-text fallback keeps the original message.
+    #[error("{inner}")]
+    LifecycleEvaluationAlreadyEmitted {
+        /// The original evaluation error (a
+        /// [`Self::LifecycleEvaluationError`]).
+        inner: Box<CompositionError>,
+    },
+}
+
+/// Heterogeneous lower-layer cause of a Markdown source-load failure.
+///
+/// Carried as the typed `#[source]` of [`CompositionError::MarkdownLoad`] so a
+/// programmatic handler can recover the concrete lower-layer type via
+/// [`std::error::Error::source`] instead of inspecting a flattened string.
+#[derive(Error, Debug)]
+pub enum MarkdownLoadCause {
+    /// The file could not be read.
+    #[error(transparent)]
+    Read(#[from] std::io::Error),
+    /// A non-frontmatter Markdown parse failure.
+    ///
+    /// Boxed to keep `MarkdownLoadCause` (and thus the `MarkdownLoad`
+    /// `Err` variant) small — `MarkdownError` is the heavy member here,
+    /// mirroring how `MarkdownError` itself boxes its own large children.
+    #[error(transparent)]
+    Parse(#[from] Box<MarkdownError>),
+    /// A YAML load/convert failure (CLI sequence YAML path).
+    #[error(transparent)]
+    Yaml(#[from] biscuit_file::YamlError),
+}
+
+/// Heterogeneous lower-layer cause of an external sequence-file load failure.
+///
+/// Carried as the typed `#[source]` of
+/// [`CompositionError::SequenceExternalLoad`] so a programmatic handler can
+/// recover the concrete lower-layer type via [`std::error::Error::source`]
+/// instead of inspecting a flattened string.
+#[derive(Error, Debug)]
+pub enum SequenceLoadCause {
+    /// A file-reference resolution failure.
+    #[error(transparent)]
+    Reference(#[from] biscuit_file::FileReferenceError),
+    /// A YAML load/convert failure.
+    #[error(transparent)]
+    Yaml(#[from] biscuit_file::YamlError),
+    /// The reference resolved but no file exists at the resolved path.
+    #[error("file not found")]
+    NotFound,
+    /// `~` expansion failed because no home directory is known.
+    #[error("unable to resolve home directory")]
+    HomeDir,
 }
 
 /// A single required schema property that is missing from frontmatter.
@@ -958,7 +1301,7 @@ pub enum CompositionError {
 /// type label, optional description) without holding a Darkmatter schema
 /// reference. Constructed by the validation layer after consulting the
 /// effective SimplifiedSchema.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MissingProperty {
     /// Property name as it appears in the schema.
     pub name: String,
@@ -981,19 +1324,31 @@ pub struct MissingProperty {
 /// [`SimplifiedType`][darkmatter::markdown::schemas::SimplifiedType] plus
 /// any enum members. The CLI layer chooses the concrete `biscuit-tui`
 /// widget from this enum.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum InteractiveShape {
-    /// Plain text input (string, date, datetime, time, url, email, file).
+    /// Plain text input (string, date, datetime, time, url, email).
     Text {
         /// Hint about the expected text format. Used for placeholder /
         /// help text only — Darkmatter handles validation post-submission.
         format: TextFormat,
+        /// Optional minimum string length (Unicode code points) from the
+        /// SimplifiedSchema `min` constraint.
+        min_len: Option<usize>,
+        /// Optional maximum string length (Unicode code points) from the
+        /// SimplifiedSchema `max` constraint.
+        max_len: Option<usize>,
     },
     /// Numeric input with parse-and-retry validation.
     Number {
         /// `true` when the property is constrained to integer values
         /// (via the SimplifiedSchema `integer` constraint).
         integer: bool,
+        /// Optional inclusive minimum from the SimplifiedSchema `min`
+        /// constraint.
+        min: Option<f64>,
+        /// Optional inclusive maximum from the SimplifiedSchema `max`
+        /// constraint.
+        max: Option<f64>,
     },
     /// Boolean on/off toggle (covers both `boolean` and `boolish`).
     Boolean,
@@ -1006,6 +1361,14 @@ pub enum InteractiveShape {
     EnumMany {
         /// Enum member names in declaration order.
         members: Vec<String>,
+    },
+    /// File reference chooser.
+    File {
+        /// `true` when the property is declared as `file[]`.
+        is_array: bool,
+        /// Glob patterns from `match(...)`, empty for a bare `file`/`file[]`
+        /// property (uses the default glob).
+        patterns: Vec<String>,
     },
 }
 
@@ -1128,7 +1491,7 @@ fn format_missing_names(missing: &[MissingProperty]) -> String {
 ///
 /// Carries the same fields as a single-step [`CompositionError::MissingProperties`]
 /// so the CLI can render each step's report without having to re-validate.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SequenceMissingPropertiesStep {
     /// 1-based step number.
     pub step: usize,
@@ -1159,6 +1522,82 @@ pub struct SequenceSelectionFailure {
 }
 
 impl CompositionError {
+    /// Build a [`Self::LifecycleEvaluationError`] from the raised lifecycle
+    /// error snapshot.
+    ///
+    /// `event` is the lifecycle event whose stack raised (e.g. `success`); the
+    /// offending surface and message are lifted from `info` so a single
+    /// snapshot constructed at the executor layer renders consistently
+    /// regardless of which orchestrator caught it.
+    pub fn lifecycle_evaluation(
+        event: impl Into<String>,
+        source_path: impl Into<PathBuf>,
+        info: &super::lifecycle_context::LifecycleErrorInfo,
+    ) -> Self {
+        Self::LifecycleEvaluationError {
+            source_path: source_path.into(),
+            event: event.into(),
+            surface: info.variant.clone(),
+            message: info.msg.clone(),
+        }
+    }
+
+    /// Surface the evaluation error that halts the run after the catch events
+    /// (`failure` and/or `finalize`) ran for an earlier raise.
+    ///
+    /// Precedence: a raise inside `finalize` beats a raise inside `failure`
+    /// beats the original error — the user sees the *latest* lifecycle crash,
+    /// not the one that triggered the catch. The callers are responsible for
+    /// threading the active error into `finalize` (a `failure` raise becomes
+    /// the `err` carried into `finalize`); this helper only decides which
+    /// outcome surfaces.
+    ///
+    /// `failure_outcome`/`finalize_outcome` are `None` when the corresponding
+    /// catch event did not run (e.g. a terminal-phase catch skips `failure`).
+    pub fn catch_evaluation_error(
+        source_path: &Path,
+        original_event: &str,
+        original_info: &super::lifecycle_context::LifecycleErrorInfo,
+        failure_outcome: Option<&super::lifecycle_executor::LifecycleEventOutcome>,
+        finalize_outcome: Option<&super::lifecycle_executor::LifecycleEventOutcome>,
+    ) -> Self {
+        if let Some(fin) = finalize_outcome
+            && let Some(fin_info) = fin.evaluation_error.as_ref()
+        {
+            return Self::lifecycle_evaluation("finalize", source_path, fin_info);
+        }
+        if let Some(fail) = failure_outcome
+            && let Some(fail_info) = fail.evaluation_error.as_ref()
+        {
+            return Self::lifecycle_evaluation("failure", source_path, fail_info);
+        }
+        Self::lifecycle_evaluation(original_event, source_path, original_info)
+    }
+
+    /// Mark this evaluation error as already styled-emitted to stderr at its
+    /// catch point (Decision #2).
+    ///
+    /// Wraps `self` in [`Self::LifecycleEvaluationAlreadyEmitted`] so the outer
+    /// CLI renderer suppresses the duplicate styled block while preserving the
+    /// non-zero exit. Idempotent: an already-marked error is returned as-is.
+    /// `self` is expected to be a [`Self::LifecycleEvaluationError`]; any other
+    /// variant is wrapped unchanged (suppression is keyed on the wrapper, not
+    /// the inner shape).
+    pub fn already_emitted(self) -> Self {
+        if matches!(self, CompositionError::LifecycleEvaluationAlreadyEmitted { .. }) {
+            return self;
+        }
+        CompositionError::LifecycleEvaluationAlreadyEmitted {
+            inner: Box::new(self),
+        }
+    }
+
+    /// Whether this error was already styled-emitted at its catch point, so the
+    /// outer renderer must not re-render it.
+    pub fn is_already_emitted(&self) -> bool {
+        matches!(self, CompositionError::LifecycleEvaluationAlreadyEmitted { .. })
+    }
+
     /// Attach a captured frontmatter excerpt to a frontmatter-rooted error.
     ///
     /// Called at the render boundary — after all control-flow `match`es on the
@@ -1171,14 +1610,41 @@ impl CompositionError {
         source: &ResolvedCompositionSource,
         stderr_is_tty: bool,
     ) -> Self {
+        self.enrich_frontmatter_text(&source.original_text, stderr_is_tty)
+    }
+
+    /// Attach a captured frontmatter excerpt from raw source text.
+    ///
+    /// This is used for source-load failures where parsing failed before a
+    /// [`ResolvedCompositionSource`] could be built.
+    pub fn enrich_frontmatter_text(self, source_text: &str, stderr_is_tty: bool) -> Self {
         if matches!(self, CompositionError::WithFrontmatter { .. }) {
             return self;
         }
-        let Some(property) = self.frontmatter_block_spec() else {
+        let Some(spec) = self.frontmatter_block_spec() else {
             return self;
         };
-        match FrontmatterExcerpt::capture(&source.original_text, property.as_deref(), stderr_is_tty)
-        {
+        let excerpt = match spec {
+            FrontmatterHighlight::Line(line) => {
+                FrontmatterExcerpt::capture_line(source_text, line, stderr_is_tty)
+            }
+            FrontmatterHighlight::Property(property) => {
+                FrontmatterExcerpt::capture(source_text, Some(&property), stderr_is_tty)
+            }
+            FrontmatterHighlight::SchemaSpan {
+                property,
+                span_start,
+            } => FrontmatterExcerpt::capture_schema_span(
+                source_text,
+                property.as_deref(),
+                span_start,
+                stderr_is_tty,
+            ),
+            FrontmatterHighlight::BlockOnly => {
+                FrontmatterExcerpt::capture(source_text, None, stderr_is_tty)
+            }
+        };
+        match excerpt {
             Some(excerpt) => CompositionError::WithFrontmatter {
                 inner: Box::new(self),
                 excerpt,
@@ -1195,82 +1661,146 @@ impl CompositionError {
         }
     }
 
-    /// Whether this error should carry a frontmatter excerpt, and the dotted
-    /// property to highlight within it.
-    ///
-    /// Returns `None` to skip the excerpt entirely; `Some(None)` to show the
-    /// block with no highlighted line; `Some(Some(prop))` to highlight the
-    /// `prop` key. Body-composition errors (`ComposeFailed`,
-    /// `ShellExpansionFailed`) show the frontmatter as context with no
-    /// highlight, since their anchor is in the body.
-    fn frontmatter_block_spec(&self) -> Option<Option<String>> {
+    /// How a frontmatter-rooted error should be excerpted.
+    fn frontmatter_block_spec(&self) -> Option<FrontmatterHighlight> {
         match self {
+            CompositionError::FrontmatterParse(md_err) => match md_err {
+                MarkdownError::FrontmatterFenceMismatch { line, .. } => {
+                    Some(FrontmatterHighlight::Line(*line))
+                }
+                _ => Some(FrontmatterHighlight::BlockOnly),
+            },
             CompositionError::LifecycleInterpolationLeak { property, .. }
             | CompositionError::LifecycleUndefinedVariable { property, .. }
             | CompositionError::LifecycleInvalid { property, .. }
             | CompositionError::LifecycleStackInvalidShape { property, .. }
             | CompositionError::LifecycleActionInvalidShortForm { property, .. }
             | CompositionError::LifecycleActionInvalidLongForm { property, .. }
+            | CompositionError::LifecycleUnknownVerb { property, .. }
+            | CompositionError::LifecycleStackAmbiguous { property, .. }
+            | CompositionError::LifecycleObjectDataThroughInterpolationPositional { property, .. }
+            | CompositionError::LifecycleObjectDataThroughInterpolationParameter { property, .. }
+            | CompositionError::LifecycleWrongArity { property, .. }
+            | CompositionError::LifecycleShortFormRemoved { property, .. }
             | CompositionError::LifecycleActionPlacement { property, .. }
             | CompositionError::LifecycleMultipleLifecycleActions { property, .. }
             | CompositionError::LifecycleActionOrder { property, .. }
             | CompositionError::LifecycleInvalidArgs { property, .. }
             | CompositionError::LifecycleErrNotAvailable { property, .. } => {
-                Some(Some(property.clone()))
+                Some(FrontmatterHighlight::Property(property.clone()))
             }
             CompositionError::LifecycleSayConflict(property)
-            | CompositionError::LifecycleUnknownEffect(property, _) => Some(Some(property.clone())),
-            CompositionError::RemovedValidationKey { key, .. } => Some(Some(key.clone())),
-            CompositionError::PromptPropertyMissing
-            | CompositionError::PromptPropertyWrongType(_) => Some(Some("prompt".to_string())),
-            CompositionError::AgentHintWrongType(_)
-            | CompositionError::AgentResolutionFailed { .. } => Some(Some("agent".to_string())),
-            CompositionError::ModelHintWrongType(_) => Some(Some("model".to_string())),
-            CompositionError::InteractiveHintWrongType(_) => {
-                Some(Some("interactive".to_string()))
+            | CompositionError::LifecycleUnknownEffect(property, _) => {
+                Some(FrontmatterHighlight::Property(property.clone()))
             }
-            CompositionError::SchemaLoad { .. } => Some(Some("$schema".to_string())),
-            CompositionError::InlineHashMalformed(_) => Some(Some("hash".to_string())),
+            CompositionError::RemovedValidationKey { key, .. } => {
+                Some(FrontmatterHighlight::Property(key.clone()))
+            }
+            CompositionError::PromptPropertyMissing
+            | CompositionError::PromptPropertyWrongType(_) => {
+                Some(FrontmatterHighlight::Property("prompt".to_string()))
+            }
+            CompositionError::AgentHintWrongType(_)
+            | CompositionError::AgentResolutionFailed { .. } => {
+                Some(FrontmatterHighlight::Property("agent".to_string()))
+            }
+            CompositionError::ModelHintWrongType(_) => {
+                Some(FrontmatterHighlight::Property("model".to_string()))
+            }
+            CompositionError::InteractiveHintWrongType(_) => {
+                Some(FrontmatterHighlight::Property("interactive".to_string()))
+            }
+            CompositionError::SchemaLoad { .. } => {
+                Some(FrontmatterHighlight::Property("$schema".to_string()))
+            }
+            CompositionError::SchemaParse {
+                property, span, ..
+            } => match span {
+                // A grammar `span` lets the excerpt land on the exact line of a
+                // multi-line schema value; the property name scopes it to the
+                // right `$schema.<prop>` entry (or the `$schema` parent when the
+                // failure is structural and carries no real property name).
+                Some(range) => Some(FrontmatterHighlight::SchemaSpan {
+                    property: property
+                        .as_deref()
+                        .map(|prop| format!("$schema.{prop}")),
+                    span_start: range.start,
+                }),
+                // Convert / shape failures carry no span; highlight the property
+                // line when named, else the `$schema` parent.
+                None => match property {
+                    Some(prop) => Some(FrontmatterHighlight::Property(format!("$schema.{prop}"))),
+                    None => Some(FrontmatterHighlight::Property("$schema".to_string())),
+                },
+            },
+            CompositionError::InlineHashMalformed(_) => {
+                Some(FrontmatterHighlight::Property("hash".to_string()))
+            }
             CompositionError::UnsupportedInteractiveSchema { property, .. } => {
-                Some(Some(property.clone()))
+                Some(FrontmatterHighlight::Property(property.clone()))
             }
             CompositionError::MissingProperties {
                 missing,
                 pointer_paths,
                 ..
             } => match (missing.split_first(), pointer_paths.split_first()) {
-                (Some((only, [])), _) => Some(Some(only.name.clone())),
-                (_, Some((only, []))) => Some(Some(pointer_to_dotted(only))),
-                _ => Some(None),
+                (Some((only, [])), _) => Some(FrontmatterHighlight::Property(only.name.clone())),
+                (_, Some((only, []))) => {
+                    Some(FrontmatterHighlight::Property(pointer_to_dotted(only)))
+                }
+                _ => Some(FrontmatterHighlight::BlockOnly),
             },
             CompositionError::SchemaValidation { problems, .. } => match problems.split_first() {
-                Some((only, [])) => Some(Some(pointer_to_dotted(only))),
-                _ => Some(None),
+                Some((only, [])) => Some(FrontmatterHighlight::Property(pointer_to_dotted(only))),
+                _ => Some(FrontmatterHighlight::BlockOnly),
             },
+            // A whole-value frontmatter interpolation failure names its receiving
+            // key — focus the excerpt on that line rather than dumping the whole
+            // block. Body interpolation (key `None`) falls through to BlockOnly.
+            CompositionError::ComposeFailed(MarkdownError::Interpolation {
+                key: Some(key),
+                ..
+            }) => Some(FrontmatterHighlight::Property(key.clone())),
             CompositionError::InlineComposeSequenceMismatch { .. }
             | CompositionError::ComposeFailed(_)
-            | CompositionError::ShellExpansionFailed { .. } => Some(None),
+            | CompositionError::ShellExpansionFailed { .. } => Some(FrontmatterHighlight::BlockOnly),
             _ => None,
         }
     }
+}
+
+/// How a frontmatter-rooted error should be highlighted in the captured excerpt.
+enum FrontmatterHighlight {
+    /// Highlight a dotted frontmatter property key.
+    Property(String),
+    /// Highlight a 1-based document line (used for delimiter-level errors).
+    Line(usize),
+    /// Highlight a schema property whose type-and-constraint string failed to
+    /// parse, using the grammar `span` to land on the right line of a multi-line
+    /// value. `property` is the dotted key (`None` for whole-shape failures);
+    /// `span_start` is the byte offset into the property's type string.
+    SchemaSpan {
+        property: Option<String>,
+        span_start: usize,
+    },
+    /// Show the frontmatter block with no line highlighted.
+    BlockOnly,
 }
 
 impl BlockError for CompositionError {
     fn status_block(&self, term: &Terminal) -> StatusBlock {
         match self {
             CompositionError::WithFrontmatter { inner, .. } => inner.status_block(term),
+            CompositionError::LifecycleEvaluationAlreadyEmitted { inner } => {
+                inner.status_block(term)
+            }
             CompositionError::LifecycleInvalid {
                 property,
+                message,
                 source_file,
                 unknown_field,
                 expected_fields,
-                ..
             } => {
-                let dotted_property = match unknown_field {
-                    Some(field) => format!("{property}.{field}"),
-                    None => property.clone(),
-                };
-
                 let file_display = source_file.display().to_string();
                 let escaped = escape_prose_path(&file_display);
                 let file_link = format!(
@@ -1281,14 +1811,52 @@ impl BlockError for CompositionError {
                     ))
                 );
 
-                let mut body =
-                    format!("Unknown property <cyan>`{dotted_property}`</cyan> in {file_link}");
-                if !expected_fields.is_empty() {
-                    body.push_str("\n\n<b>Expected one of:</b>");
-                    for field in expected_fields {
-                        body.push_str(&format!("\n- <cyan>`{field}`</cyan>"));
+                // An unknown-field error carries a field catalog; render the
+                // "Unknown property / Expected one of" form. Any other serde
+                // error (e.g. `invalid type: map, expected a sequence` when
+                // `stack:` is a map instead of a list) renders its raw message
+                // verbatim — fabricating an "Unknown property" diagnostic with
+                // the comm-field list would be actively misleading.
+                let is_unknown_field = unknown_field.is_some() || !expected_fields.is_empty();
+
+                let (body, hint) = if is_unknown_field {
+                    let dotted_property = match unknown_field {
+                        Some(field) => format!("{property}.{field}"),
+                        None => property.clone(),
+                    };
+                    let mut body = format!(
+                        "Unknown property <cyan>`{dotted_property}`</cyan> in {file_link}"
+                    );
+                    if !expected_fields.is_empty() {
+                        body.push_str("\n\n<b>Expected one of:</b>");
+                        for field in expected_fields {
+                            body.push_str(&format!("\n- <cyan>`{field}`</cyan>"));
+                        }
                     }
-                }
+                    (
+                        body,
+                        "Check the lifecycle frontmatter section in your prompt file."
+                            .to_string(),
+                    )
+                } else {
+                    let body = format!(
+                        "Invalid value for lifecycle property <cyan>`{property}`</cyan> in \
+                         {file_link}\n\n{}",
+                        escape_prose_path(message)
+                    );
+                    // The only sequence-typed field on a lifecycle event block
+                    // is `stack`, so a "expected a sequence" mismatch almost
+                    // always means `stack:` was authored as a map.
+                    let hint = if message.contains("expected a sequence") {
+                        "The `stack:` property must be a YAML list of stack items \
+                         (each item begins with `-`)."
+                            .to_string()
+                    } else {
+                        "Check the lifecycle frontmatter section in your prompt file."
+                            .to_string()
+                    };
+                    (body, hint)
+                };
 
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new(
@@ -1296,7 +1864,7 @@ impl BlockError for CompositionError {
                         "invalid lifecycle property",
                     ))
                     .body(body)
-                    .hint("Check the lifecycle frontmatter section in your prompt file.")
+                    .hint(hint)
             }
             CompositionError::LifecycleInterpolationLeak {
                 source_path,
@@ -1349,6 +1917,33 @@ impl BlockError for CompositionError {
                     .hint(
                         "Define the variable in frontmatter, prefix a runtime value with \
                          `ctx.`/`env.`, or supply a fallback (`{{ var || 'default' }}`).",
+                    )
+            }
+            CompositionError::LifecycleEvaluationError {
+                source_path,
+                event,
+                surface,
+                message,
+            } => {
+                let file_link = render_file_link(source_path);
+                let surface_label = lifecycle_evaluation_surface_label(surface);
+                let body = format!(
+                    "A late-binding expression raised while the <cyan>`{event}`</cyan> \
+                     lifecycle event was firing, in {surface_label} ({file_link}).\n\n\
+                     <b>Reason:</b> {}",
+                    escape_prose_path(message)
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "lifecycle evaluation error",
+                    ))
+                    .body(body)
+                    .hint(
+                        "This is a crashed expression, not a clean `false` guard: the run \
+                         halts and exits non-zero. Fix the expression (resolve the missing \
+                         path or variable, correct the function call) or guard it with a \
+                         fallback so it evaluates instead of raising.",
                     )
             }
             CompositionError::RemovedValidationKey {
@@ -1438,6 +2033,135 @@ impl BlockError for CompositionError {
                         "invalid lifecycle action",
                     ))
                     .body(body)
+            }
+            CompositionError::LifecycleUnknownVerb {
+                source_path,
+                property,
+                verb,
+                rewrite,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Unknown lifecycle action <cyan>`{verb}`</cyan> in <cyan>`{property}`</cyan> \
+                     in {file_link}.\n\n{rewrite}"
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "unknown lifecycle action",
+                    ))
+                    .body(body)
+                    .hint(
+                        "Lifecycle actions must use positional form (`verb: value`) or key/value \
+                         form (`{ action: verb, ... }`).",
+                    )
+            }
+            CompositionError::LifecycleStackAmbiguous {
+                source_path,
+                property,
+                message,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Ambiguous lifecycle stack item in <cyan>`{property}`</cyan> in {file_link}.\
+                     \n\n{message}"
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "ambiguous lifecycle stack item",
+                    ))
+                    .body(body)
+                    .hint(
+                        "Use positional form (`verb: value`) with exactly one key, or key/value \
+                         form (`{ action: verb, ... }`).",
+                    )
+            }
+            CompositionError::LifecycleObjectDataThroughInterpolationPositional {
+                source_path,
+                property,
+                verb,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Lifecycle action <cyan>`{verb}`</cyan> in <cyan>`{property}`</cyan> in \
+                     {file_link} received an object value where a scalar or array was expected."
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "object value not allowed here",
+                    ))
+                    .body(body)
+                    .hint(
+                        "Pass object data through a whole-value `{{ ... }}` interpolation, or use \
+                         key/value form with a scalar parameter.",
+                    )
+            }
+            CompositionError::LifecycleObjectDataThroughInterpolationParameter {
+                source_path,
+                property,
+                verb,
+                param,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Lifecycle action <cyan>`{verb}`</cyan> parameter <cyan>`{param}`</cyan> in \
+                     <cyan>`{property}`</cyan> in {file_link} received an object value where a \
+                     scalar was expected."
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "object value not allowed here",
+                    ))
+                    .body(body)
+                    .hint(
+                        "Pass object data through a whole-value `{{ ... }}` interpolation.",
+                    )
+            }
+            CompositionError::LifecycleWrongArity {
+                source_path,
+                property,
+                verb,
+                message,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Lifecycle action <cyan>`{verb}`</cyan> in <cyan>`{property}`</cyan> in \
+                     {file_link} has the wrong number of arguments.\n\n{message}"
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "wrong action arity",
+                    ))
+                    .body(body)
+            }
+            CompositionError::LifecycleShortFormRemoved {
+                source_path,
+                property,
+                raw,
+                rewrite,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = format!(
+                    "Short-form lifecycle action <cyan>`{}`</cyan> in <cyan>`{property}`</cyan> \
+                     in {file_link} has been removed.\n\n\
+                     <b>Rewrite to positional form:</b> <cyan>`{}`</cyan>",
+                    escape_prose_path(raw),
+                    escape_prose_path(rewrite)
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "short-form action removed",
+                    ))
+                    .body(body)
+                    .hint(
+                        "Use positional form (`verb: value`) or key/value form \
+                         (`{ action: verb, ... }`). `verb(args)` is no longer accepted.",
+                    )
             }
             CompositionError::LifecycleActionPlacement {
                 source_path,
@@ -1585,6 +2309,41 @@ impl BlockError for CompositionError {
                          directory. Remote `http://` / `https://` references are not supported.",
                     )
             }
+            CompositionError::SchemaParse {
+                source_path,
+                property,
+                message,
+                // The span drives the appended frontmatter excerpt's highlight
+                // line (see `frontmatter_block_spec` → `SchemaSpan`), not the
+                // block body; the body names the property and the typed message
+                // and OSC8-links the prompt file via `render_file_link`.
+                span: _,
+            } => {
+                let file_link = render_file_link(source_path);
+                // A property-scoped failure is a type-and-constraint syntax error
+                // (Grammar/Convert); a property-less one is a wrong-shape `$schema`
+                // value. Each gets the remediation that actually applies.
+                let (scope, hint) = match property {
+                    Some(prop) => (
+                        format!(" for property <cyan>`{}`</cyan>", Prose::escape_text(prop)),
+                        "Check the SimplifiedSchema type-and-constraint syntax. Constraints are \
+                         separated by `;` and a constraint's arguments by `,` — e.g. \
+                         `file(required; match(**/*.md))`.",
+                    ),
+                    None => (
+                        String::new(),
+                        "The `$schema` value must be a file reference, an inline SimplifiedSchema \
+                         mapping, or a JSON Schema object.",
+                    ),
+                };
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("CompositionError", "invalid schema"))
+                    .body(format!(
+                        "The `$schema` declared in {file_link} is not a valid schema{scope}.\n\n\
+                         {message}"
+                    ))
+                    .hint(hint)
+            }
             CompositionError::SchemaValidation {
                 source_path,
                 message,
@@ -1713,6 +2472,38 @@ impl BlockError for CompositionError {
                          conditional block.",
                     )
             }
+            CompositionError::AutocompleteNoMatches { query } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "no autocomplete matches"))
+                .body(format!(
+                    "No files matched autocomplete query <cyan>`{}`</cyan>.",
+                    escape_prose_path(query)
+                ))
+                .hint("Check the query token or run without a query to see all candidates."),
+            CompositionError::AutocompleteOverCap { query, cap } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "too many matches"))
+                .body(format!(
+                    "More than <cyan>{cap}</cyan> files matched autocomplete query \
+                     <cyan>`{}`</cyan>.",
+                    escape_prose_path(query)
+                ))
+                .hint("Type more characters to narrow the query."),
+            CompositionError::AutocompleteNotInteractive => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "autocomplete not available",
+                ))
+                .body("Autocomplete requires an interactive terminal.".to_string())
+                .hint("Run in a terminal, or supply an explicit file path or reference."),
+            CompositionError::AutocompleteCancelled { query } => StatusBlock::new(StatusState::Warning)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "autocomplete cancelled",
+                ))
+                .body(format!(
+                    "Autocomplete for query <cyan>`{}`</cyan> was cancelled.",
+                    escape_prose_path(query)
+                ))
+                .hint("Supply an explicit file path or reference, or run the command again."),
             CompositionError::ShellExpansionFailed { error, .. } => {
                 // Delegate to the structured shell-expansion block so the
                 // linked source path, source excerpt, composed frontmatter
@@ -1768,6 +2559,21 @@ fn pointer_to_dotted(pointer: &str) -> String {
             .join(".")
     } else {
         trimmed.to_string()
+    }
+}
+
+/// Human-readable label for the late-binding surface that raised a
+/// [`CompositionError::LifecycleEvaluationError`].
+///
+/// `surface` is the raised
+/// [`LifecycleErrorInfo::variant`](super::lifecycle_context::LifecycleErrorInfo::variant):
+/// `when` for a guard, `interpolation` for a communication/action string, or an
+/// action verb (`shell`, `set_frontmatter`, …) for a side-effect argument.
+fn lifecycle_evaluation_surface_label(surface: &str) -> String {
+    match surface {
+        "when" => "the `when:` guard".to_string(),
+        "interpolation" => "an interpolated string".to_string(),
+        verb => format!("the `{verb}` action value"),
     }
 }
 
@@ -1981,6 +2787,287 @@ fn escape_prose_path(input: &str) -> String {
     out
 }
 
+/// Map a `ComposeFailed`'s inner [`MarkdownError`] to a composition code,
+/// delegating an interpolation failure to its deepest typed cause (design §9:
+/// the code follows the same deepest-meaningful-cause walk as rendering).
+fn compose_failed_code(md: &MarkdownError) -> &'static str {
+    match md {
+        MarkdownError::Interpolation { cause, .. } => match cause.as_ref() {
+            ExpressionError::FileReference(_) => "composition.invalid_file_reference",
+            ExpressionError::UnknownFunction { .. } => "composition.unknown_function",
+            _ => "composition.expression_invalid",
+        },
+        MarkdownError::FrontmatterParse { .. } | MarkdownError::FrontmatterFenceMismatch { .. } => {
+            "composition.frontmatter_parse"
+        }
+        MarkdownError::ShellExpansion(_) => "composition.shell_expansion",
+        MarkdownError::SchemaValidationFailed { .. } => "composition.schema_validation",
+        _ => "composition.failed",
+    }
+}
+
+/// Build the `composition.invalid_file_reference` `detail` payload from a
+/// [`FileReferenceDiagnostic`].
+///
+/// Emits exactly the field set the registry declares (`reference`, `kind`,
+/// `base_dir`, `suggestions`, `fallback_dir`). `kind` is the catalog snake_case
+/// slug, never the `Debug` form. `suggestions` reuses the **same** render-time
+/// did-you-mean computation as the interpolation block (a missing reference,
+/// `base_dir`-joined, ranked against its siblings) so `err.detail.suggestions`
+/// is byte-for-byte what the human report shows. `fallback_dir` is omitted (it
+/// projects to `null`) when the resolution context carried none.
+fn file_reference_detail(diagnostic: &FileReferenceDiagnostic) -> Value {
+    // Mirror the render gate (errors/blocks.rs): suggestions are computed only
+    // for a *missing* reference — a malformed/remote reference has no sibling
+    // hint, so the array stays empty rather than fabricating one.
+    let suggestions = if matches!(diagnostic.kind, FileRefFailure::NotFound) {
+        let expected = diagnostic.base_dir.join(&diagnostic.reference);
+        suggest_sibling_files(&expected, DEFAULT_MAX_SUGGESTIONS)
+    } else {
+        Vec::new()
+    };
+    json!({
+        "reference": diagnostic.reference,
+        "kind": diagnostic.kind.as_str(),
+        "base_dir": diagnostic.base_dir.to_string_lossy(),
+        "suggestions": suggestions,
+        "fallback_dir": diagnostic
+            .fallback_dir
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned()),
+    })
+}
+
+impl Diagnostic for CompositionError {
+    fn code(&self) -> &'static str {
+        match self {
+            // Transparent wrapper: classify by the cause it carries (§6).
+            CompositionError::WithFrontmatter { inner, .. } => inner.code(),
+            CompositionError::ComposeFailed(md) => compose_failed_code(md),
+            CompositionError::InvalidReference { .. } | CompositionError::FileNotFound { .. } => {
+                "composition.invalid_file_reference"
+            }
+            CompositionError::SchemaLoad { .. } => "composition.schema_load",
+            CompositionError::SchemaParse { .. } => "composition.schema_parse",
+            CompositionError::SchemaValidation { .. } => "composition.schema_validation",
+            CompositionError::MissingProperties { .. }
+            | CompositionError::SequenceMissingProperties { .. } => "composition.missing_properties",
+            CompositionError::FrontmatterParse(_) => "composition.frontmatter_parse",
+            CompositionError::ShellExpansionFailed { .. } => "composition.shell_expansion",
+            CompositionError::AtomicWriteFailed { .. } => "io.write_failed",
+            // The lifecycle-stack family shares one authoring-error code; the
+            // `variant` facet still distinguishes them for finer handlers.
+            CompositionError::LifecycleInvalid { .. }
+            | CompositionError::LifecycleSayConflict(_)
+            | CompositionError::LifecycleUnknownEffect(..)
+            | CompositionError::LifecycleInterpolationLeak { .. }
+            | CompositionError::LifecycleUndefinedVariable { .. }
+            | CompositionError::LifecycleStackInvalidShape { .. }
+            | CompositionError::LifecycleActionInvalidShortForm { .. }
+            | CompositionError::LifecycleActionInvalidLongForm { .. }
+            | CompositionError::LifecycleUnknownVerb { .. }
+            | CompositionError::LifecycleStackAmbiguous { .. }
+            | CompositionError::LifecycleWrongArity { .. }
+            | CompositionError::LifecycleActionPlacement { .. }
+            | CompositionError::LifecycleActionOrder { .. }
+            | CompositionError::LifecycleMultipleLifecycleActions { .. }
+            | CompositionError::LifecycleInvalidArgs { .. }
+            | CompositionError::LifecycleErrNotAvailable { .. }
+            | CompositionError::LifecycleEvaluationError { .. } => "composition.lifecycle_invalid",
+            // Everything else is a composition failure without a finer code yet.
+            _ => "composition.failed",
+        }
+    }
+
+    fn category(&self) -> Category {
+        code_spec(self.code())
+            .map(|spec| spec.category)
+            .unwrap_or(Category::Composition)
+    }
+
+    fn disposition(&self) -> Disposition {
+        code_spec(self.code())
+            .map(|spec| spec.disposition)
+            .unwrap_or(Disposition::Correctable)
+    }
+
+    fn origin(&self) -> Origin {
+        code_spec(self.code())
+            .map(|spec| spec.origin)
+            .unwrap_or(Origin::Author)
+    }
+
+    fn detail(&self) -> Value {
+        // Seed every key the mapped code declares to `null` so an unavailable
+        // optional still projects its key (error-catalog §2.5). Explicit arms
+        // overwrite the keys they can populate; variants with no extractable
+        // specifics keep the all-`null` base.
+        let mut base = null_detail_for(self.code());
+
+        match self {
+            CompositionError::WithFrontmatter { inner, .. } => return inner.detail(),
+            CompositionError::ComposeFailed(MarkdownError::Interpolation {
+                cause,
+                expression,
+                ..
+            }) => match cause.as_ref() {
+                ExpressionError::FileReference(diagnostic) => {
+                    return file_reference_detail(diagnostic);
+                }
+                // `composition.unknown_function` declares `name`, `suggestions`.
+                // The interpolation cause carries no sibling-name ranking, so
+                // `suggestions` stays the seeded empty array.
+                ExpressionError::UnknownFunction { name } => {
+                    base["name"] = json!(name);
+                    base["suggestions"] = json!([]);
+                }
+                other => {
+                    base["expression"] = json!(expression);
+                    base["message"] = json!(other.to_string());
+                }
+            },
+            // The remaining `composition.invalid_file_reference` constructors
+            // (the typed-source and resolved-not-found variants) carry no
+            // `FileReferenceDiagnostic`, so only `reference` is recoverable.
+            CompositionError::InvalidReference { reference, .. } => {
+                base["reference"] = json!(reference);
+            }
+            CompositionError::FileNotFound(reference) => {
+                base["reference"] = json!(reference);
+            }
+            CompositionError::SchemaParse {
+                source_path,
+                property,
+                message,
+                ..
+            } => {
+                base["source_path"] = json!(source_path.to_string_lossy());
+                base["property"] = json!(property);
+                base["message"] = json!(message);
+            }
+            CompositionError::SchemaLoad {
+                source_path,
+                message,
+            } => {
+                base["source_path"] = json!(source_path.to_string_lossy());
+                base["message"] = json!(message);
+            }
+            // `composition.schema_validation` declares `source_path`,
+            // `problems`, `pointer_paths`.
+            CompositionError::SchemaValidation {
+                source_path,
+                problems,
+                ..
+            } => {
+                base["source_path"] = json!(source_path.to_string_lossy());
+                base["problems"] = json!(problems);
+                base["pointer_paths"] = json!([]);
+            }
+            // `composition.missing_properties` declares `missing`,
+            // `pointer_paths`.
+            CompositionError::MissingProperties {
+                missing,
+                pointer_paths,
+                ..
+            } => {
+                base["missing"] =
+                    json!(missing.iter().map(|p| p.name.clone()).collect::<Vec<_>>());
+                base["pointer_paths"] = json!(pointer_paths);
+            }
+            // `composition.shell_expansion` declares `command`: the failed
+            // authored shell command, NOT the Markdown source path. Most
+            // `ShellExpansionError` variants carry it; the command-less variants
+            // (`ParseDirective`, `PolicyIo`, `Preflight`) leave the seeded
+            // `null` in place rather than substitute the file path.
+            CompositionError::ShellExpansionFailed { error, .. } => {
+                if let Some(command) = error.command() {
+                    base["command"] = json!(command);
+                }
+            }
+            // `io.write_failed` declares `path`.
+            CompositionError::AtomicWriteFailed { path, .. } => {
+                base["path"] = json!(path.to_string_lossy());
+            }
+            // `composition.lifecycle_invalid` declares `property`, `message`.
+            // The lifecycle family threads a `property` (and usually a
+            // `message`); project both where the variant carries them.
+            CompositionError::LifecycleInvalid {
+                property, message, ..
+            } => {
+                base["property"] = json!(property);
+                base["message"] = json!(message);
+            }
+            CompositionError::LifecycleStackInvalidShape {
+                property, message, ..
+            }
+            | CompositionError::LifecycleStackAmbiguous {
+                property, message, ..
+            } => {
+                base["property"] = json!(property);
+                base["message"] = json!(message);
+            }
+            CompositionError::LifecycleActionInvalidShortForm {
+                property, message, ..
+            }
+            | CompositionError::LifecycleActionInvalidLongForm {
+                property, message, ..
+            }
+            | CompositionError::LifecycleWrongArity {
+                property, message, ..
+            }
+            | CompositionError::LifecycleInvalidArgs {
+                property, message, ..
+            } => {
+                base["property"] = json!(property);
+                base["message"] = json!(message);
+            }
+            CompositionError::LifecycleUnknownVerb {
+                property, verb, ..
+            } => {
+                base["property"] = json!(property);
+                base["message"] = json!(format!("unknown lifecycle action `{verb}`"));
+            }
+            CompositionError::LifecycleActionPlacement {
+                property, action, ..
+            } => {
+                base["property"] = json!(property);
+                base["message"] = json!(format!("action `{action}` is not valid here"));
+            }
+            CompositionError::LifecycleErrNotAvailable {
+                property, event, ..
+            } => {
+                base["property"] = json!(property);
+                base["message"] = json!(format!("`err` is not available in the `{event}` event"));
+            }
+            CompositionError::LifecycleEvaluationError {
+                event, message, ..
+            } => {
+                base["property"] = json!(event);
+                base["message"] = json!(message);
+            }
+            CompositionError::LifecycleSayConflict(property)
+            | CompositionError::LifecycleUnknownEffect(property, _)
+            | CompositionError::LifecycleInterpolationLeak { property, .. }
+            | CompositionError::LifecycleUndefinedVariable { property, .. }
+            // These two cardinality errors carry no dedicated `message` field,
+            // so synthesize one from the `#[error]` rendering like the other
+            // message-less lifecycle variants above.
+            | CompositionError::LifecycleActionOrder { property, .. }
+            | CompositionError::LifecycleMultipleLifecycleActions { property, .. } => {
+                base["property"] = json!(property);
+                base["message"] = json!(self.to_string());
+            }
+            // Every other variant maps to a code (`composition.failed`,
+            // `composition.frontmatter_parse`, …) whose declared keys it cannot
+            // populate from extractable instance data; the all-`null` base
+            // already satisfies the registry key set.
+            _ => {}
+        }
+
+        base
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2021,6 +3108,32 @@ mod tests {
     }
 
     #[test]
+    fn already_emitted_wraps_once_and_delegates_display() {
+        let err = CompositionError::LifecycleEvaluationError {
+            source_path: PathBuf::from("review.md"),
+            event: "success".to_string(),
+            surface: "when".to_string(),
+            message: "boom".to_string(),
+        };
+        let display = err.to_string();
+        let marked = err.already_emitted();
+        assert!(marked.is_already_emitted());
+        // Display still delegates to the inner evaluation error.
+        assert_eq!(marked.to_string(), display);
+        // Idempotent: re-marking does not double-wrap.
+        let again = marked.already_emitted();
+        match &again {
+            CompositionError::LifecycleEvaluationAlreadyEmitted { inner } => {
+                assert!(
+                    !inner.is_already_emitted(),
+                    "must not nest the already-emitted wrapper"
+                );
+            }
+            other => panic!("expected LifecycleEvaluationAlreadyEmitted, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn enrich_is_idempotent() {
         let source = source_from("---\ntitle: x\n---\nbody\n");
         let err = CompositionError::PromptPropertyMissing
@@ -2033,6 +3146,194 @@ mod tests {
             }
             other => panic!("expected WithFrontmatter, got: {other:?}"),
         }
+    }
+
+    #[test]
+    fn enrich_frontmatter_fence_mismatch_attaches_excerpt() {
+        let source = source_from(
+            "----\nname: cross-platform\ndescription: near-miss fence\n----\n# Body\n",
+        );
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            PathBuf::from("review.md"),
+            PathBuf::from("review.md"),
+            source.original_text.clone(),
+        );
+        let md_err = MarkdownError::FrontmatterFenceMismatch {
+            ctx,
+            found: "----".to_string(),
+            line: 1,
+        };
+        let err = CompositionError::FrontmatterParse(md_err).enrich_frontmatter(&source, true);
+
+        assert!(
+            matches!(err, CompositionError::WithFrontmatter { .. }),
+            "expected WithFrontmatter wrapper, got: {err:?}"
+        );
+        assert!(err.frontmatter_excerpt().is_some(), "expected excerpt attached");
+    }
+
+    #[test]
+    fn enrich_frontmatter_fence_mismatch_highlights_line_one() {
+        let source = source_from(
+            "----\nname: cross-platform\ndescription: near-miss fence\n----\n# Body\n",
+        );
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            PathBuf::from("review.md"),
+            PathBuf::from("review.md"),
+            source.original_text.clone(),
+        );
+        let md_err = MarkdownError::FrontmatterFenceMismatch {
+            ctx,
+            found: "----".to_string(),
+            line: 1,
+        };
+        let err = CompositionError::FrontmatterParse(md_err).enrich_frontmatter(&source, true);
+        let excerpt = err.frontmatter_excerpt().expect("excerpt attached");
+        assert_eq!(
+            excerpt.highlight_line(),
+            Some(1),
+            "line 1 should be highlighted"
+        );
+    }
+
+    #[test]
+    fn enrich_frontmatter_parse_regular_error_gets_block_only_excerpt() {
+        let source = source_from("---\nprompt: |-\n    four spaces\n   three spaces\n---\nbody\n");
+        let yaml_err: biscuit_file::YamlParseError =
+            biscuit_file::serde_yaml_ng::from_str::<biscuit_file::serde_yaml_ng::Value>(
+                "prompt: |-\n    four spaces\n   three spaces\n",
+            )
+            .expect_err("malformed YAML should fail to parse");
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            PathBuf::from("review.md"),
+            PathBuf::from("review.md"),
+            source.original_text.clone(),
+        );
+        let md_err = MarkdownError::FrontmatterParse {
+            ctx,
+            source: yaml_err,
+        };
+        let err = CompositionError::FrontmatterParse(md_err).enrich_frontmatter(&source, true);
+
+        assert!(
+            matches!(err, CompositionError::WithFrontmatter { .. }),
+            "expected WithFrontmatter wrapper, got: {err:?}"
+        );
+        assert!(err.frontmatter_excerpt().is_some(), "expected excerpt attached");
+    }
+
+    #[test]
+    fn enrich_frontmatter_interpolation_focuses_on_receiving_key() {
+        use darkmatter::markdown::SourceRef;
+        use darkmatter::markdown::compose::expression::ExpressionError;
+
+        // A whole-value interpolation failure naming a receiving key must focus
+        // the excerpt on that key's line, not dump the whole frontmatter block.
+        let source = source_from(
+            "---\n$schema:\n    spec: file(match(**/*spec*.md))\niteration: \"{{ frontmatter(spec, 'x') }}\"\n---\nbody\n",
+        );
+        let md_err = MarkdownError::Interpolation {
+            key: Some("iteration".to_string()),
+            expression: "frontmatter(spec, 'x')".to_string(),
+            source: Box::new(SourceRef::Effective {
+                rendered: "frontmatter(spec, 'x')".to_string(),
+                origin_key: Some("iteration".to_string()),
+            }),
+            cause: Box::new(ExpressionError::Parse("boom".to_string())),
+        };
+        let err = CompositionError::ComposeFailed(md_err);
+        assert!(
+            matches!(
+                err.frontmatter_block_spec(),
+                Some(FrontmatterHighlight::Property(ref p)) if p == "iteration"
+            ),
+            "interpolation error must focus the excerpt on its receiving key"
+        );
+
+        let enriched = err.enrich_frontmatter(&source, true);
+        assert!(
+            enriched.frontmatter_excerpt().is_some(),
+            "a focused excerpt must be attached"
+        );
+    }
+
+    #[test]
+    fn enrich_schema_parse_highlights_offending_property_line() {
+        // A grammar failure attributed to `spec` (bad `,` separator) must focus
+        // the excerpt on the `$schema.spec` type-string line (line 3), not the
+        // top-level `spec` value on line 4 and not the whole block.
+        let source = source_from(
+            "---\n$schema:\n    spec: file(required, match(**/*spec*.md))\nspec: \"x\"\n---\nbody\n",
+        );
+        let err = CompositionError::SchemaParse {
+            source_path: PathBuf::from("review.md"),
+            property: Some("spec".to_string()),
+            message: "expected `;` between constraints".to_string(),
+            span: Some(14..15),
+        }
+        .enrich_frontmatter(&source, true);
+
+        let excerpt = err.frontmatter_excerpt().expect("excerpt must attach");
+        assert_eq!(
+            excerpt.highlight_line(),
+            Some(3),
+            "must highlight the `$schema.spec` type-string line"
+        );
+        assert_ne!(
+            excerpt.highlight_line(),
+            Some(4),
+            "must not highlight the unrelated top-level `spec` value line"
+        );
+    }
+
+    #[test]
+    fn enrich_schema_parse_shape_falls_back_to_schema_parent_line() {
+        // A whole-shape failure (no property, no span) highlights the `$schema`
+        // parent line (line 2).
+        let source = source_from("---\n$schema: 42\n---\nbody\n");
+        let err = CompositionError::SchemaParse {
+            source_path: PathBuf::from("review.md"),
+            property: None,
+            message: "expected mapping, got integer".to_string(),
+            span: None,
+        }
+        .enrich_frontmatter(&source, true);
+
+        let excerpt = err.frontmatter_excerpt().expect("excerpt must attach");
+        assert_eq!(excerpt.highlight_line(), Some(2));
+    }
+
+    #[test]
+    fn schema_parse_block_links_prompt_file_and_strips_when_no_color() {
+        // The rendered body OSC8-links the prompt file when color is available,
+        // and strips all escapes (no raw OSC8) at `ColorDepth::None`.
+        let err = CompositionError::SchemaParse {
+            source_path: PathBuf::from("review.md"),
+            property: Some("spec".to_string()),
+            message: "expected `;` between constraints".to_string(),
+            span: Some(14..15),
+        };
+
+        let color_term = Terminal::new_optimistic(80);
+        let linked = err.report_block_error(&color_term);
+        assert!(
+            linked.contains("\x1b]8;;"),
+            "color render must carry an OSC8 link; got: {linked:?}"
+        );
+
+        let plain_term = Terminal::builder()
+            .width(80)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+            .build();
+        let plain = err.report_block_error(&plain_term);
+        assert!(
+            !plain.contains('\x1b'),
+            "no-color render must strip escapes; got: {plain:?}"
+        );
+        assert!(
+            plain.contains("review.md"),
+            "plain render must still name the prompt file; got: {plain}"
+        );
     }
 
     #[test]
@@ -2690,6 +3991,8 @@ mod tests {
             perf_enabled: false,
             source_repo_root: None,
             shell_working_directory: None,
+            prepared_context: None,
+            file_ref_fallback_dir: None,
         };
 
         let err = prepare_direct(&source, options).unwrap_err();
@@ -2711,6 +4014,457 @@ mod tests {
         assert!(
             rendered.contains("title:") || rendered.contains("---"),
             "expected frontmatter block in diagnostic: {rendered}"
+        );
+    }
+
+    #[test]
+    fn shell_expansion_detail_command_is_the_failed_command_not_source_path() {
+        // `composition.shell_expansion` declares `command`. A handler reading
+        // `detail["command"]` must get the authored shell command, never the
+        // Markdown source path. `shell_expansion_failed_err` carries
+        // `command: "cmd-that-fails"` and `source_path: "prompts/test.md"`.
+        let detail = shell_expansion_failed_err().detail();
+        assert_eq!(
+            detail["command"],
+            json!("cmd-that-fails"),
+            "command must project the failed command, got: {detail}"
+        );
+    }
+
+    #[test]
+    fn shell_expansion_detail_command_is_null_for_command_less_variant() {
+        // `ParseDirective` carries no command, so `command` stays the seeded
+        // JSON null rather than falling back to the source path.
+        use darkmatter::markdown::compose::ShellCommandOrigin;
+
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            PathBuf::from("/repo/prompts/test.md"),
+            PathBuf::from("prompts/test.md"),
+            "---\ntitle: Test\n---\n",
+        );
+        let err = CompositionError::ShellExpansionFailed {
+            source_path: PathBuf::from("prompts/test.md"),
+            error: Box::new(ShellExpansionError::ParseDirective {
+                ctx: Box::new(ctx),
+                origin: ShellCommandOrigin::Body { line: 1 },
+                message: "bad directive".to_string(),
+            }),
+        };
+        let detail = err.detail();
+        assert_eq!(
+            detail["command"],
+            Value::Null,
+            "command-less variant must leave `command` as JSON null, got: {detail}"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // New lifecycle action form errors (Phase 2)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn lifecycle_short_form_removed_display_includes_rewrite() {
+        let err = CompositionError::LifecycleShortFormRemoved {
+            source_path: PathBuf::from("prompts/plan.md"),
+            property: "success".to_string(),
+            raw: "success(\"x\")".to_string(),
+            rewrite: "success: \"x\"".to_string(),
+        };
+        let rendered = err.to_string();
+        assert!(rendered.contains("short-form lifecycle action"), "got: {rendered}");
+        assert!(rendered.contains("success(\"x\")"), "got: {rendered}");
+        assert!(rendered.contains("success: \"x\""), "got: {rendered}");
+        assert!(rendered.contains("prompts/plan.md"), "got: {rendered}");
+    }
+
+    #[test]
+    fn lifecycle_short_form_removed_status_block_is_escape_free_at_none() {
+        use biscuit_terminal::discovery::detection::ColorDepth;
+        use biscuit_terminal::terminal::Terminal;
+        let err = CompositionError::LifecycleShortFormRemoved {
+            source_path: PathBuf::from("prompts/plan.md"),
+            property: "success".to_string(),
+            raw: "success(\"x\")".to_string(),
+            rewrite: "success: \"x\"".to_string(),
+        };
+        let term = Terminal {
+            color_depth: ColorDepth::None,
+            ..Terminal::new_optimistic(80)
+        };
+        let rendered = err.report_block_error(&term);
+        assert!(
+            !rendered.contains('\x1b'),
+            "expected no escape codes at ColorDepth::None: {rendered}"
+        );
+        assert!(rendered.contains("short-form action removed"), "got: {rendered}");
+        assert!(
+            rendered.contains("Rewrite to positional form:"),
+            "got: {rendered}"
+        );
+        assert!(rendered.contains("success:"), "got: {rendered}");
+        assert!(rendered.contains("\\\"x\\\""), "got: {rendered}");
+    }
+
+    #[test]
+    fn lifecycle_unknown_verb_display_includes_rewrite() {
+        let err = CompositionError::LifecycleUnknownVerb {
+            source_path: PathBuf::from("prompts/plan.md"),
+            property: "success".to_string(),
+            verb: "sucess".to_string(),
+            rewrite: "did you mean `success`?".to_string(),
+        };
+        let rendered = err.to_string();
+        assert!(rendered.contains("unknown lifecycle action"), "got: {rendered}");
+        assert!(rendered.contains("sucess"), "got: {rendered}");
+        assert!(rendered.contains("did you mean `success`?"), "got: {rendered}");
+    }
+
+    #[test]
+    fn lifecycle_wrong_arity_display_includes_message() {
+        let err = CompositionError::LifecycleWrongArity {
+            source_path: PathBuf::from("prompts/plan.md"),
+            property: "success".to_string(),
+            verb: "set_frontmatter".to_string(),
+            message: "expected 3 arguments [file, prop, value], got 1".to_string(),
+        };
+        let rendered = err.to_string();
+        assert!(rendered.contains("set_frontmatter"), "got: {rendered}");
+        assert!(rendered.contains("expected 3 arguments"), "got: {rendered}");
+    }
+
+    #[test]
+    fn lifecycle_multiple_actions_code_is_lifecycle_invalid() {
+        // Regression: this cardinality variant used to fall through code()'s
+        // catch-all to `composition.failed`, diverging from its sibling
+        // `LifecycleActionOrder` which already mapped to the lifecycle family.
+        let err = CompositionError::LifecycleMultipleLifecycleActions {
+            source_path: PathBuf::from("prompts/plan.md"),
+            property: "start".to_string(),
+        };
+        assert_eq!(err.code(), "composition.lifecycle_invalid");
+    }
+
+    #[test]
+    fn lifecycle_multiple_actions_detail_projects_property_and_message() {
+        let err = CompositionError::LifecycleMultipleLifecycleActions {
+            source_path: PathBuf::from("prompts/plan.md"),
+            property: "start".to_string(),
+        };
+        let detail = err.detail();
+        assert_eq!(
+            detail["property"],
+            json!("start"),
+            "property must project the offending event name, got: {detail}"
+        );
+        // No dedicated `message` field on this variant, so the synthesized
+        // value must be a present, non-null string.
+        assert!(
+            detail["message"].is_string(),
+            "message must be a present non-null string, got: {detail}"
+        );
+    }
+
+    #[test]
+    fn lifecycle_action_order_detail_projects_property_and_message() {
+        // The named counterpart in the review: it too lacked an explicit
+        // detail() arm and only got `property: null`. Guard it per-variant.
+        let err = CompositionError::LifecycleActionOrder {
+            source_path: PathBuf::from("prompts/plan.md"),
+            property: "start".to_string(),
+        };
+        assert_eq!(err.code(), "composition.lifecycle_invalid");
+        let detail = err.detail();
+        assert_eq!(detail["property"], json!("start"), "got: {detail}");
+        assert!(detail["message"].is_string(), "got: {detail}");
+    }
+
+    #[test]
+    fn lifecycle_object_data_positional_display_mentions_interpolation() {
+        let err = CompositionError::LifecycleObjectDataThroughInterpolationPositional {
+            source_path: PathBuf::from("prompts/plan.md"),
+            property: "success".to_string(),
+            verb: "merge_frontmatter".to_string(),
+        };
+        let rendered = err.to_string();
+        assert!(rendered.contains("merge_frontmatter"), "got: {rendered}");
+        assert!(rendered.contains("whole-value"), "got: {rendered}");
+        assert!(rendered.contains("{{ ... }}"), "got: {rendered}");
+    }
+
+    #[test]
+    fn lifecycle_object_data_parameter_display_mentions_param() {
+        let err = CompositionError::LifecycleObjectDataThroughInterpolationParameter {
+            source_path: PathBuf::from("prompts/plan.md"),
+            property: "success".to_string(),
+            verb: "set_frontmatter".to_string(),
+            param: "value".to_string(),
+        };
+        let rendered = err.to_string();
+        assert!(rendered.contains("set_frontmatter"), "got: {rendered}");
+        assert!(rendered.contains("parameter `value`"), "got: {rendered}");
+    }
+
+    #[test]
+    fn lifecycle_stack_ambiguous_display_includes_message() {
+        let err = CompositionError::LifecycleStackAmbiguous {
+            source_path: PathBuf::from("prompts/plan.md"),
+            property: "success".to_string(),
+            message: "did you mean `success: ...` or `{ action: success, ... }`?".to_string(),
+        };
+        let rendered = err.to_string();
+        assert!(rendered.contains("ambiguous lifecycle stack item"), "got: {rendered}");
+        assert!(rendered.contains("did you mean"), "got: {rendered}");
+    }
+
+    #[test]
+    fn new_lifecycle_errors_get_frontmatter_excerpt() {
+        let source = source_from(
+            "---\nsuccess:\n    sucess: \"x\"\n---\nbody\n",
+        );
+        let err = CompositionError::LifecycleUnknownVerb {
+            source_path: PathBuf::from("review.md"),
+            property: "success".to_string(),
+            verb: "sucess".to_string(),
+            rewrite: "did you mean `success`?".to_string(),
+        }
+        .enrich_frontmatter(&source, true);
+
+        assert!(matches!(err, CompositionError::WithFrontmatter { .. }));
+        assert!(err.frontmatter_excerpt().is_some());
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 1 autocomplete error variants
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn autocomplete_no_matches_display_includes_query() {
+        let err = CompositionError::AutocompleteNoMatches {
+            query: "foo".to_string(),
+        };
+        let rendered = err.to_string();
+        assert!(rendered.contains("foo"), "got: {rendered}");
+        assert!(rendered.contains("no files matched"), "got: {rendered}");
+    }
+
+    #[test]
+    fn autocomplete_over_cap_display_includes_query_and_cap() {
+        let err = CompositionError::AutocompleteOverCap {
+            query: "bar".to_string(),
+            cap: 500,
+        };
+        let rendered = err.to_string();
+        assert!(rendered.contains("bar"), "got: {rendered}");
+        assert!(rendered.contains("500"), "got: {rendered}");
+        assert!(rendered.contains("narrow your query"), "got: {rendered}");
+    }
+
+    #[test]
+    fn autocomplete_not_interactive_display_is_actionable() {
+        let err = CompositionError::AutocompleteNotInteractive;
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("interactive terminal"),
+            "got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn autocomplete_errors_do_not_get_frontmatter_excerpt() {
+        let source = source_from("---\ntitle: x\n---\nbody\n");
+        let err = CompositionError::AutocompleteNoMatches {
+            query: "q".to_string(),
+        }
+        .enrich_frontmatter(&source, true);
+        assert!(
+            matches!(err, CompositionError::AutocompleteNoMatches { .. }),
+            "expected no wrapping, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn autocomplete_over_cap_status_block_names_query() {
+        use biscuit_terminal::prelude::TerminalRenderable;
+        use biscuit_terminal::terminal::Terminal;
+
+        let err = CompositionError::AutocompleteOverCap {
+            query: "plan".to_string(),
+            cap: 500,
+        };
+        let rendered = err.status_block(&Terminal::default()).render(&Terminal::default());
+        assert!(rendered.contains("plan"), "got: {rendered}");
+        assert!(rendered.contains("500"), "got: {rendered}");
+        assert!(rendered.contains("narrow"), "got: {rendered}");
+    }
+
+    /// Wrap a [`FileReferenceDiagnostic`] in the same `ComposeFailed` /
+    /// `Interpolation` shape the live compose path produces, so `detail()`
+    /// exercises the real projection.
+    fn file_ref_compose_error(diagnostic: FileReferenceDiagnostic) -> CompositionError {
+        use darkmatter::markdown::SourceRef;
+        CompositionError::ComposeFailed(MarkdownError::Interpolation {
+            key: Some("spec".to_string()),
+            expression: "frontmatter('features/spec.md')".to_string(),
+            source: Box::new(SourceRef::Effective {
+                rendered: "frontmatter('features/spec.md')".to_string(),
+                origin_key: Some("spec".to_string()),
+            }),
+            cause: Box::new(ExpressionError::FileReference(diagnostic)),
+        })
+    }
+
+    #[test]
+    fn file_reference_detail_serializes_kind_as_snake_case() {
+        // `kind` must be the catalog snake_case slug, never the Debug form.
+        for (kind, expected) in [
+            (FileRefFailure::NotFound, "not_found"),
+            (FileRefFailure::Malformed, "malformed"),
+            (FileRefFailure::FoundElsewhere, "found_elsewhere"),
+            (FileRefFailure::RemoteNotEnabled, "remote_not_enabled"),
+        ] {
+            let err = file_ref_compose_error(FileReferenceDiagnostic {
+                function: "frontmatter",
+                reference: "features/spec.md".to_string(),
+                kind,
+                base_dir: PathBuf::from("/repo"),
+                fallback_dir: None,
+                source: None,
+            });
+            let detail = err.detail();
+            assert_eq!(
+                detail["kind"],
+                json!(expected),
+                "kind must serialize snake_case, not Debug: {detail}"
+            );
+            assert_ne!(detail["kind"], json!(format!("{kind:?}")));
+        }
+    }
+
+    #[test]
+    fn file_reference_detail_emits_full_registry_field_set() {
+        let err = file_ref_compose_error(FileReferenceDiagnostic {
+            function: "frontmatter",
+            reference: "features/spec.md".to_string(),
+            kind: FileRefFailure::Malformed,
+            base_dir: PathBuf::from("/repo/area"),
+            fallback_dir: None,
+            source: None,
+        });
+        let detail = err.detail();
+        // Every field the registry declares for the code is present.
+        for field in ["reference", "kind", "base_dir", "suggestions", "fallback_dir"] {
+            assert!(
+                detail.get(field).is_some(),
+                "detail missing registry field `{field}`: {detail}"
+            );
+        }
+        assert_eq!(detail["reference"], json!("features/spec.md"));
+        assert_eq!(detail["base_dir"], json!("/repo/area"));
+        // No fallback_dir set → projects to null (the optional sentinel).
+        assert_eq!(detail["fallback_dir"], Value::Null);
+        // Malformed reference offers no sibling suggestions.
+        assert_eq!(detail["suggestions"], json!([]));
+    }
+
+    #[test]
+    fn file_reference_detail_carries_fallback_dir_when_set() {
+        let err = file_ref_compose_error(FileReferenceDiagnostic {
+            function: "frontmatter",
+            reference: "features/spec.md".to_string(),
+            kind: FileRefFailure::NotFound,
+            base_dir: PathBuf::from("/repo/area"),
+            fallback_dir: Some(PathBuf::from("/launch/area")),
+            source: None,
+        });
+        let detail = err.detail();
+        assert_eq!(detail["fallback_dir"], json!("/launch/area"));
+    }
+
+    #[test]
+    fn file_reference_detail_suggestions_match_rendered_did_you_mean() {
+        // A missing `specs.md` next to a real `spec.md`: the detail
+        // `suggestions` must equal the exact render-time computation.
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("spec.md"), b"x").unwrap();
+
+        let diagnostic = FileReferenceDiagnostic {
+            function: "frontmatter",
+            reference: "specs.md".to_string(),
+            kind: FileRefFailure::NotFound,
+            base_dir: dir.path().to_path_buf(),
+            fallback_dir: None,
+            source: None,
+        };
+        let err = file_ref_compose_error(diagnostic.clone());
+        let detail = err.detail();
+
+        // The same computation the renderer runs (errors/blocks.rs).
+        let expected_path = diagnostic.base_dir.join(&diagnostic.reference);
+        let rendered = suggest_sibling_files(&expected_path, DEFAULT_MAX_SUGGESTIONS);
+
+        assert_eq!(rendered, vec!["spec.md".to_string()], "fixture sanity");
+        assert_eq!(
+            detail["suggestions"],
+            json!(rendered),
+            "err.detail.suggestions must equal the rendered did-you-mean set"
+        );
+    }
+
+    #[test]
+    fn file_reference_detail_suggestions_match_rendered_for_stale_directory() {
+        // Stale-directory case (the motivating real-errors failure): the
+        // reference's parent directory does not exist, so the suggestion logic
+        // walks up to the nearest existing ancestor and ranks sibling
+        // directories that contain the leaf file. The detail `suggestions`
+        // must be NON-empty and carry the suggested relative path
+        // (sibling_dir/leaf), matching the render-time computation byte-for-byte.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let features = dir.path().join("features");
+        std::fs::create_dir_all(features.join("2026-06-28-real-errors")).unwrap();
+        std::fs::write(
+            features.join("2026-06-28-real-errors").join("spec.md"),
+            b"x",
+        )
+        .unwrap();
+
+        let diagnostic = FileReferenceDiagnostic {
+            function: "frontmatter",
+            reference: "features/2026-06-21-opencode-log-fix/spec.md".to_string(),
+            kind: FileRefFailure::NotFound,
+            base_dir: dir.path().to_path_buf(),
+            fallback_dir: None,
+            source: None,
+        };
+        let err = file_ref_compose_error(diagnostic.clone());
+        let detail = err.detail();
+
+        // The same computation the renderer runs (errors/blocks.rs).
+        let expected_path = diagnostic.base_dir.join(&diagnostic.reference);
+        let rendered = suggest_sibling_files(&expected_path, DEFAULT_MAX_SUGGESTIONS);
+
+        assert_eq!(
+            rendered,
+            vec!["2026-06-28-real-errors/spec.md".to_string()],
+            "fixture sanity: stale-directory arm must surface the real sibling path"
+        );
+        assert_eq!(
+            detail["suggestions"],
+            json!(rendered),
+            "err.detail.suggestions must equal the rendered did-you-mean set for the stale-directory case"
+        );
+        // Non-empty + carries the suggested relative path explicitly.
+        let suggestions = detail["suggestions"]
+            .as_array()
+            .expect("suggestions is an array");
+        assert!(
+            !suggestions.is_empty(),
+            "stale-directory case must surface at least one suggestion"
+        );
+        assert!(
+            suggestions.iter().any(|v| v
+                .as_str()
+                .is_some_and(|s| s.contains("2026-06-28-real-errors/spec.md"))),
+            "stale-directory suggestion must carry the sibling/leaf relative path: {suggestions:?}"
         );
     }
 }

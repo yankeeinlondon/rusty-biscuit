@@ -111,18 +111,18 @@ fn two_char_curated_match_finds_multiple_files_by_substring() {
 
     let got = run_complete_trailing(root, &["compose", "@pr"]);
 
-    // The new engine strips the `@` sigil on selection (spec §5.5).
-    // Matching is fuzzy-subsequence on the filename stem.
+    // Magic mode keeps the `@` and inserts the filename only; matching is
+    // fuzzy-subsequence on the filename stem.
     assert!(
-        got.iter().any(|c| c == "prompts/with-prompt.md"),
+        got.iter().any(|c| c == "@with-prompt.md"),
         "@pr should match `with-prompt.md`; got: {got:?}",
     );
     assert!(
-        got.iter().any(|c| c == "prompts/suppress.md"),
+        got.iter().any(|c| c == "@suppress.md"),
         "@pr should match `suppress.md` (subsequence); got: {got:?}",
     );
     assert!(
-        got.iter().any(|c| c == "prompts/my-prompt.md"),
+        got.iter().any(|c| c == "@my-prompt.md"),
         "@pr should match `my-prompt.md` (subsequence); got: {got:?}",
     );
     // `plain.md` and `seq.md` filenames do NOT have `p` before `r`; they
@@ -324,14 +324,14 @@ fn gitignored_files_excluded_from_curated_scan() {
 
     let got = run_complete_trailing(root, &["compose", "@"]);
 
-    // `@` with empty active segment — new engine strips `@` and emits
-    // relative paths.
+    // `@` with empty active segment — magic mode keeps `@` and emits
+    // `@<basename>` candidates.
     assert!(
-        got.iter().any(|c| c == "prompts/kept.md"),
+        got.iter().any(|c| c == "@kept.md"),
         "non-ignored curated match must surface: {got:?}"
     );
     assert!(
-        !got.iter().any(|c| c.contains("ignored/secret.md")),
+        !got.iter().any(|c| c.contains("secret")),
         "gitignored curated file must NOT appear: {got:?}"
     );
 }
@@ -351,10 +351,10 @@ fn mid_filename_substring_match_fires() {
 
     let got = run_complete_trailing(root, &["compose", "@omp"]);
 
-    // New engine strips `@` on selection; fuzzy-subsequence matching on
-    // the stem matches `omp` against `prompt`.
+    // Magic mode keeps `@` and inserts the filename; fuzzy-subsequence
+    // matching on the stem matches `omp` against `prompt`.
     assert!(
-        got.iter().any(|c| c == "prompts/prompt.md"),
+        got.iter().any(|c| c == "@prompt.md"),
         "mid-filename subsequence match failed: {got:?}"
     );
 }

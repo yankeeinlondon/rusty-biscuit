@@ -74,6 +74,9 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
 
     let schemas = {
         let mut builder = DarkmatterSchemas::new();
+        if let Some(fallback) = options.file_ref_fallback_dir.clone() {
+            builder = builder.with_file_ref_fallback_dir(fallback);
+        }
         if let Some(baseline) = options.baseline_schema.clone() {
             builder = builder.with_baseline(baseline).map_err(|err| {
                 MarkdownError::SchemaValidationFailed {
@@ -114,6 +117,13 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
                 // if the two diverge, compose and validate would coerce against
                 // different instances.
                 if key == "$schema" {
+                    continue;
+                }
+                // DM1b: deferred (excluded) keys are Claudine control keys, not
+                // user data. They need event-time interpolation and are validated
+                // by the caller's own subtree parser/guards, so skip them from
+                // user schema value validation entirely.
+                if options.exclude_keys.contains(key) {
                     continue;
                 }
                 if value_pending_composition(Some(value)) {
@@ -179,6 +189,13 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
         .problems
         .iter()
         .filter(|p| {
+            // DM1b: problems referencing a deferred (excluded) key are not
+            // user-schema violations — the caller owns those keys' validation.
+            if let Some(name) = top_level_pointer_segment(&p.path)
+                && options.exclude_keys.contains(&name)
+            {
+                return false;
+            }
             if !defer_shell_pending {
                 return true;
             }
@@ -939,5 +956,158 @@ mod tests {
             md.frontmatter().as_map()["count"],
             serde_json::json!("42")
         );
+    }
+
+    // ── Motivating case: lazy `file` output + eager `file` input ──────
+
+    #[test]
+    fn motivating_lazy_plan_composes_while_eager_review_present() {
+        // Mirrors `sniff/prompts/plan-review-implementation.md` post-migration:
+        // `review` is an eager INPUT that must exist; `plan` is a lazy OUTPUT
+        // path this run is about to create. With the review file present and
+        // `plan` naming a not-yet-existing path, schema validation must pass —
+        // lazy `file` never checks existence, while eager `review` resolves
+        // document-first to the present review file.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("design-review.md"), b"# review\n").unwrap();
+        let doc_path = dir.path().join("prompt.md");
+        let mut md = md_with_schema_and_source(
+            "$schema:\n\
+             \x20 review: 'file(eager; required; match(**/*review*.md))'\n\
+             \x20 plan: 'file'\n\
+             \x20 iteration: 'number'\n\
+             review: design-review.md\n\
+             plan: plan-1.md\n\
+             iteration: 1\n",
+            &doc_path,
+        );
+        let options = ComposeOptions::new().with_source_file(&doc_path);
+        assert!(
+            run(&mut md, &options).is_ok(),
+            "lazy `plan` output path must compose even though it does not exist \
+             yet, while eager `review` resolves to the present review file",
+        );
+    }
+
+    #[test]
+    fn motivating_missing_eager_review_still_fails() {
+        // The companion: with the eager `review` input absent from disk, schema
+        // validation still fails on `/review` — `eager` restores the existence
+        // check the default lazy `file` no longer performs. `plan` remains a
+        // lazy output and is not the cause of the failure.
+        let dir = tempfile::tempdir().unwrap();
+        let doc_path = dir.path().join("prompt.md");
+        let mut md = md_with_schema_and_source(
+            "$schema:\n\
+             \x20 review: 'file(eager; required; match(**/*review*.md))'\n\
+             \x20 plan: 'file'\n\
+             \x20 iteration: 'number'\n\
+             review: missing-review.md\n\
+             plan: plan-1.md\n\
+             iteration: 1\n",
+            &doc_path,
+        );
+        let options = ComposeOptions::new().with_source_file(&doc_path);
+        let err = run(&mut md, &options).unwrap_err();
+        match err {
+            MarkdownError::SchemaValidationFailed { problems, .. } => {
+                assert!(
+                    problems.iter().any(|p| p.path == "/review"),
+                    "expected an existence problem on /review, got {problems:?}",
+                );
+                assert!(
+                    !problems.iter().any(|p| p.path == "/plan"),
+                    "lazy `plan` must not contribute a problem, got {problems:?}",
+                );
+            }
+            other => panic!("expected SchemaValidationFailed, got {other:?}"),
+        }
+    }
+
+    // ── DM1b: deferred keys excluded from user schema validation ─────
+
+    fn baseline_two_string_properties(
+        required: &str,
+        optional: &str,
+    ) -> SimplifiedSchema {
+        let mut properties = IndexMap::new();
+        properties.insert(
+            required.into(),
+            PropertyDef::Single(PropertyAtom {
+                ty: TypeExpr::Primitive(SimplifiedType::String),
+                is_array: false,
+                constraints: vec![Constraint::Required],
+                array_constraints: vec![],
+                description: None,
+            }),
+        );
+        properties.insert(
+            optional.into(),
+            PropertyDef::Single(PropertyAtom {
+                ty: TypeExpr::Primitive(SimplifiedType::String),
+                is_array: false,
+                constraints: vec![],
+                array_constraints: vec![],
+                description: None,
+            }),
+        );
+        SimplifiedSchema::Single(SchemaShape { properties })
+    }
+
+    #[test]
+    fn deferred_key_with_lifecycle_syntax_not_rejected_by_user_schema() {
+        // A deferred lifecycle key containing `{{err.msg}}` would fail a string
+        // schema check if validated, but DM1b skips it.
+        let mut md = md_with_schema(
+            "name: my-prompt\n\
+             failure:\n\
+             \x20 message: \"{{err.msg}}\"\n",
+        );
+        let options = ComposeOptions::new()
+            .with_baseline_schema(baseline_two_string_properties("name", "failure"))
+            .with_exclude_keys(["failure"]);
+        let result = run(&mut md, &options);
+        assert!(
+            result.is_ok(),
+            "deferred key should not be schema-validated: {:?}",
+            result.err()
+        );
+        // The ordinary `name` key still validates fine.
+    }
+
+    #[test]
+    fn ordinary_schema_validation_runs_alongside_deferred_key() {
+        // `name` is required by the baseline schema but missing from the
+        // document; `failure` is deferred. The missing-required violation on
+        // the non-deferred key must still be reported.
+        let mut md = md_with_schema(
+            "failure:\n\
+             \x20 message: \"{{err.msg}}\"\n",
+        );
+        let options = ComposeOptions::new()
+            .with_baseline_schema(baseline_two_string_properties("name", "failure"))
+            .with_exclude_keys(["failure"]);
+        let result = run(&mut md, &options);
+        assert!(
+            result.is_err(),
+            "missing required 'name' must still be reported alongside a deferred key"
+        );
+    }
+
+    #[test]
+    fn deferred_key_not_coerced_by_schema() {
+        // A deferred key's value must not be coerced — it stays raw.
+        let mut md = md_with_schema(
+            "failure:\n\
+             \x20 flag: \"true\"\n",
+        );
+        let options = ComposeOptions::new()
+            .with_baseline_schema(baseline_required_string("failure"))
+            .with_exclude_keys(["failure"]);
+        let _ = run(&mut md, &options);
+        // The deferred key's nested "flag" stays as the string "true",
+        // not coerced to a boolean.
+        let failure = md.frontmatter().as_map().get("failure").expect("present");
+        assert_eq!(failure.get("flag"), Some(&serde_json::json!("true")));
     }
 }

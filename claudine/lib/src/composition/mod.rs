@@ -14,6 +14,7 @@
 pub mod agent_message;
 pub mod closure;
 mod error;
+pub mod file_detail;
 pub mod frontmatter_excerpt;
 mod guardrails;
 pub mod launch_workspace;
@@ -39,16 +40,17 @@ pub use agent_message::{agent_state_breakdown, invalid_agent_message};
 pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
 pub use error::{
     CompositionError, DroppedOptional, DroppedOptionalSource, DroppedOptionalStage,
-    InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE, MissingProperty,
-    SequenceMissingPropertiesStep, SequenceSelectionFailure, TextFormat,
+    InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE, MarkdownLoadCause, MissingProperty,
+    SequenceLoadCause, SequenceMissingPropertiesStep, SequenceSelectionFailure, TextFormat,
 };
+pub use file_detail::{FileDetail, extract_markdown_detail, extract_yaml_sequence_detail};
 pub use frontmatter_excerpt::FrontmatterExcerpt;
 pub use launch_workspace::{LaunchWorkspaceContext, PackageContext};
 #[allow(deprecated)]
 pub use lifecycle::{
-    DefaultLifecycleEmitter, LifecycleConfig, LifecycleEmitter, LifecycleNotification,
-    LifecycleRunGuard, LifecycleRuntimeContext, LifecycleRuntimeState, LifecycleSignal,
-    emit_lifecycle_signal, parse_lifecycle_config,
+    DefaultLifecycleEmitter, LIFECYCLE_EVENT_KEYS, LifecycleConfig, LifecycleEmitter,
+    LifecycleNotification, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleRuntimeState,
+    LifecycleSignal, emit_lifecycle_signal, parse_lifecycle_config,
 };
 pub use lifecycle_actions::{
     CommunicationAction, CommunicationChannel, ExpressionFunctionAction, LifecycleAction,
@@ -56,7 +58,7 @@ pub use lifecycle_actions::{
     SideEffectAction, is_known_side_effect, side_effect_signature,
 };
 pub use lifecycle_context::{
-    LifecycleCurrent, LifecycleErrorInfo, LifecycleLookup, LifecycleTiming,
+    LifecycleCurrent, LifecycleErrorInfo, LifecycleTiming, lifecycle_injected_globals,
 };
 pub use lifecycle_control::{
     ControlDispatch, MAX_PROXY_HOPS, compute_backoff_delay, control_budget_for, decide_control,
@@ -81,7 +83,9 @@ pub use prepare::{
     PrepareOptions, bind_agent_workspace, parse_interactive_hint,
     parse_selection_hints_from_frontmatter, prepare_direct, prepare_inline,
 };
-pub use resolve::{resolve_composition_source, validate_file_permissions};
+pub use resolve::{
+    enrich_composition_source_load_error, resolve_composition_source, validate_file_permissions,
+};
 pub use schema_validation::{
     InteractiveSchemaOptions, PreValidatedSchema, PropertyState, PropertyStatus,
     SchemaStatusReport, build_schema_status_report, drop_invalid_optionals,

@@ -69,6 +69,8 @@ let input = ChoiceInput::new("colour", "Pick a colour")
 let state = ChooseOneState::new(input);
 ```
 
+Active-item accessors read the **highlighted** row (distinct from the submitted `selected_value()`): `active_option()`, `active_value()`, and `active_description(&id_to_desc_map)` (sugar over `active_option().id → map`; `ChoiceOption` is unchanged). They return the option as-is — including a `disabled` one — and `None` when the list is empty. These are the entry point for a SplitPane master/detail pane that derives its content from the active highlight each frame.
+
 #### ChooseMany
 Multi-selection with `min_selections` / `max_selections`, `Ctrl+A` select all, `Ctrl+D` clear. Enter submits the current selection exactly as-is; Space toggles the active item.
 
@@ -101,6 +103,21 @@ let frame = FrameChrome::from_config(BooleanSwitch::new(), &config);
 
 See `docs/components/frame_chrome.md` for the full `BorderStyle` variant list (14 styles).
 
+#### SplitPane
+Geometry-only two-pane layout primitive — a container/layout primitive like `FrameChrome`, **not** an input (it captures no value and handles no input). Divides a `Rect` into two child `Rect`s along one axis via `SplitPane::split(area) -> (Rect, Rect)`; the caller renders each child with its own `render_stateful_widget`. Defaults to 50/50 with `Auto` direction (resolved from the area's shape each split). Nest `split()` calls for N-way layouts.
+
+```rust
+use biscuit_tui::core::{SplitDirection, SplitPane, SplitRatio};
+
+// 30% sidebar | 70% main, side by side.
+let (sidebar, main) = SplitPane::new()
+    .with_direction(SplitDirection::Horizontal)
+    .with_ratio(SplitRatio::Percent(30))
+    .split(frame.area());
+```
+
+`ResolvedAxis` (the concrete axis after `Auto` resolution) is crate-private. v1 ships geometry only — no render wrapper, no `question` CLI command. Ratios clamp on construction (`Percent` to `1..=99`, `*Fixed` to `>= 1`) so no pane is voluntarily starved.
+
 #### InputTable
 2D grid of heterogeneous cells. Supports: `StaticText`, `BooleanSwitch`, `TextInput`, `TextAreaInput`, `ChooseOne`, `ChooseMany`.
 
@@ -130,6 +147,7 @@ let state = InputTableState::new(columns, vec![]);
 | `KeyBindings` | Configurable bindings (vim `h`/`j`/`k`/`l` by default) |
 | `ComponentTheme` | Visual constants (glyphs, colors, styles) |
 | `FrameChrome` / `FrameChromeConfig` | Container widget for borders, margins, and titles |
+| `SplitPane` / `SplitDirection` / `SplitRatio` | Geometry-only two-pane layout primitive (`split(area) -> (Rect, Rect)`); container/layout like `FrameChrome`, not an input. `Auto` direction resolved from area shape, 50/50 default; ratios clamp on construction |
 | `BorderStyle` | 14 border glyph styles (None, Rounded, Sharp, Bold, Double, Block, ThinBlock, Horizontal, Vertical, Line, Top, Bottom, Left, Right) |
 | `Margin` | Four-sided margin outside the border |
 | `HeightSpec` | Parsed `--height` flag (cells or percent). Treated as a maximum (clamps to live terminal); `Percent` re-resolves on resize so the inline viewport tracks the requested fraction mid-prompt |
@@ -256,6 +274,7 @@ lib/src/
 │   ├── validation.rs   # ValidationState
 │   ├── label.rs        # Label, LabelPosition, render_with_label
 │   ├── sort.rs         # SortOrder, OptionSort
+│   ├── split_pane.rs   # SplitPane, SplitDirection, SplitRatio (geometry-only 2-pane layout; ResolvedAxis crate-private)
 │   └── terminal_style.rs # TerminalStyle, TerminalBackground, NerdFontStatus
 ├── components/
 │   ├── choice_state.rs     # Shared ChooseOne/ChooseMany runtime state and hotkey helpers

@@ -84,10 +84,11 @@ pub(crate) fn execute_sequence(
         .fail_fast_override
         .unwrap_or(plan.document_fail_fast);
 
-    // `--step-timeout` applies to every step in the sequence. Early
-    // validation happens in the CLI entry point; the raw string is
-    // resolved per-step by the composition executor.
+    // `--step-timeout` / `--stall-timeout` apply to every step in the
+    // sequence. Early validation happens in the CLI entry point; the raw
+    // string is resolved per-step by the composition executor.
     let _ = shared.step_timeout_secs()?;
+    let _ = shared.stall_timeout_secs()?;
 
     let total_steps = plan.steps.len();
 
@@ -409,6 +410,7 @@ pub(crate) fn execute_sequence(
         &user_set_overrides,
         source_repo_root.as_deref(),
         &prep_context.launch_workspace.child_cwd,
+        Some(prep_context.launch_workspace.launch_cwd.as_path()),
         shared,
         effective_fail_fast,
         inline_mode,

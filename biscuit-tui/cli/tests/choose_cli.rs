@@ -823,7 +823,7 @@ mod pty {
     }
 
     fn spawn_question(args: &[&str]) -> OsSession {
-        let binary = assert_cmd::cargo::cargo_bin("question");
+        let binary = assert_cmd::cargo::cargo_bin!("question");
         let mut command = Command::new(binary);
         command.args(args);
         let mut p = Session::spawn(command).expect("spawn question under PTY");

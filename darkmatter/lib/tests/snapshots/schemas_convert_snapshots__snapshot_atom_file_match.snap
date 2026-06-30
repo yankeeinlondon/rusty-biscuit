@@ -16,12 +16,8 @@ expression: "convert_atom(\"file(match('*.md', '!_*.md'))\")"
           "const": ""
         },
         {
-          "format": "darkmatter-file",
-          "type": "string",
-          "x-darkmatter-match": [
-            "*.md",
-            "!_*.md"
-          ]
+          "format": "darkmatter-file-reference",
+          "type": "string"
         }
       ]
     }

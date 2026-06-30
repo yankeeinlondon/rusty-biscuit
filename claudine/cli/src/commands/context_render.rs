@@ -64,6 +64,35 @@ pub fn report_column(header: impl Into<String>) -> TableColumn {
     TableColumn::new(header.into()).with_word_wrap(report_wrap())
 }
 
+/// Middle-elide a single-token value (e.g. a filesystem path) to fit `budget`
+/// visible columns, inserting `…` so both the head and the meaningful tail
+/// survive: `/Users/ken/.claudine/worktrees/rusty-biscuit/claudine` →
+/// `/Users/ken/…/rusty-biscuit/claudine`.
+///
+/// This is the values-report defense against a wrapped path reading as a
+/// complete (parent) path: the report-content column *must* keep path-separator
+/// break characters so tables still render at the minimum supported width, but
+/// breaking a path at `/` produces a line ending in `/` that looks like a real
+/// directory. Pre-eliding a path that would otherwise wrap keeps it on one line
+/// and unambiguous. `budget` should be the resolved content-column width; values
+/// at or under it are returned unchanged.
+#[allow(dead_code)]
+pub fn middle_elide(value: &str, budget: usize) -> String {
+    let width = visible_width(value) as usize;
+    if budget < 3 || width <= budget {
+        return value.to_string();
+    }
+    let chars: Vec<char> = value.chars().collect();
+    // Reserve one column for the ellipsis; split the remainder head/tail,
+    // biasing the tail (the distinctive leaf) one char larger on odd budgets.
+    let keep = budget - 1;
+    let head_len = keep / 2;
+    let tail_len = keep - head_len;
+    let head: String = chars[..head_len].iter().collect();
+    let tail: String = chars[chars.len() - tail_len..].iter().collect();
+    format!("{head}…{tail}")
+}
+
 /// Inline-code helper: convert backtick-delimited spans in `input` to
 /// `<inverse>…</inverse>` for styled output, preserving surrounding prose.
 ///
@@ -295,6 +324,26 @@ mod tests {
 
     fn styled_term(width: u32) -> Terminal {
         Terminal::new_optimistic(width)
+    }
+
+    #[test]
+    fn middle_elide_keeps_head_and_tail_and_inserts_ellipsis() {
+        let path = "/Users/ken/.claudine/worktrees/rusty-biscuit/claudine";
+        let out = middle_elide(path, 24);
+        assert_eq!(visible_width(&out) as usize, 24, "elided to exact budget: {out:?}");
+        assert!(out.contains('…'), "has ellipsis: {out:?}");
+        assert!(out.starts_with("/Users/"), "keeps head: {out:?}");
+        assert!(out.ends_with("claudine"), "keeps the leaf: {out:?}");
+        // The deceptive failure mode is a value that reads as a complete path;
+        // the ellipsis guarantees it cannot.
+        assert!(!out.ends_with('/'), "never ends in a bare separator: {out:?}");
+    }
+
+    #[test]
+    fn middle_elide_returns_short_values_unchanged() {
+        assert_eq!(middle_elide("/tmp/x", 24), "/tmp/x");
+        // Degenerate budgets are a no-op rather than a panic.
+        assert_eq!(middle_elide("/a/very/long/path", 2), "/a/very/long/path");
     }
 
     fn plain_term(width: u32) -> Terminal {

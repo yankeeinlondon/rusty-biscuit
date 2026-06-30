@@ -77,9 +77,9 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
     },
     SchemaTypeDescriptor {
         keyword: "file",
-        description: "A path-like file reference. Use `match(...)` to restrict accepted paths.",
-        accepted_constraints: "match(glob, ...), default, required",
-        json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-file\" } plus x-darkmatter-match when `match(...)` is set",
+        description: "A path-like file reference. Lazy by default (syntax-only); add `eager` to require the file to exist. Use `match(...)` to suggest accepted paths.",
+        accepted_constraints: "eager, match(glob, ...), default, required",
+        json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-file-reference\" } (lazy); `file(eager)` emits `format: darkmatter-file` (eager existence check). `match(...)` is suggestion metadata only and is not emitted.",
     },
     SchemaTypeDescriptor {
         keyword: "enum",
@@ -197,13 +197,22 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
     },
     // ── file ───────────────────────────────────────────────────────────
     SchemaConstraintDescriptor {
+        name: "eager",
+        keyword: "eager",
+        form: "eager",
+        target_types: "file",
+        argument_arity: "0",
+        description: "Require the referenced file to exist at validation time. Without it, `file` is lazy (syntax-only).",
+        json_schema_effect: "emits `format: darkmatter-file` (eager) instead of the lazy `darkmatter-file-reference`",
+    },
+    SchemaConstraintDescriptor {
         name: "match",
         keyword: "match",
         form: "match(glob, ...)",
         target_types: "file",
         argument_arity: "1+",
-        description: "Glob patterns the file path must match. Patterns starting with `!` exclude.",
-        json_schema_effect: "x-darkmatter-match set to the glob list",
+        description: "Glob patterns that shape file path suggestions (completion). Patterns starting with `!` exclude. Suggestion metadata only — not validated.",
+        json_schema_effect: "none (suggestion metadata; never lowered into the compiled JSON Schema)",
     },
     // ── url ────────────────────────────────────────────────────────────
     SchemaConstraintDescriptor {
@@ -388,8 +397,8 @@ pub const VALIDATION_BEHAVIOR_DESCRIPTORS: &[ValidationBehaviorDescriptor] = &[
     },
     ValidationBehaviorDescriptor {
         name: "File references",
-        rule: "`file` values resolve through biscuit-file.",
-        description: "Relative file paths are resolved from the current document context.",
+        rule: "`file` is lazy (syntax-only); `file(eager)` checks existence.",
+        description: "Bare `file` only validates that the value parses as a biscuit-file reference. Add `eager` to require the resolved file to exist; relative paths resolve from the current document context.",
     },
     ValidationBehaviorDescriptor {
         name: "Schema detection",
@@ -589,6 +598,7 @@ mod tests {
             Constraint::NotEmpty,
             Constraint::Pattern(String::new()),
             Constraint::Members(Vec::new()),
+            Constraint::Eager,
             Constraint::Match(Vec::new()),
             Constraint::Scheme(Vec::new()),
             Constraint::Unique,

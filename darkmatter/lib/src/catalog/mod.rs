@@ -89,6 +89,37 @@ pub fn suggest<'a, D: Described>(catalog: &'a [D], key: &str, max: usize) -> Vec
     scored.into_iter().take(max).map(|(_, _, d)| d).collect()
 }
 
+/// Fuzzy nearest-match suggestion over runtime strings.
+///
+/// The string sibling of [`suggest`]: it ranks plain `candidates` (e.g. sibling
+/// filenames listed at render time) against `key` and returns up to `max` of
+/// them, closest first. [`suggest`] cannot be reused for this because
+/// [`Described::key`] is `&'static str` while filenames are runtime values.
+///
+/// The **same quality gate** as [`suggest`] applies — candidates whose distance
+/// to `key` exceeds `max(2, key_char_len / 3)` are dropped — so the returned
+/// list may be shorter than `max`, including empty when nothing is close enough.
+/// Comparison is case-insensitive so a casing slip (`Spec.md` for `spec.md`)
+/// still surfaces its near match. Ties break alphabetically for determinism
+/// (runtime strings carry no [`Described::order`] to tie-break on).
+pub fn suggest_strings<'a>(candidates: &'a [String], key: &str, max: usize) -> Vec<&'a str> {
+    if max == 0 {
+        return Vec::new();
+    }
+
+    let query = key.to_lowercase();
+    let threshold = (query.chars().count() / 3).max(2);
+
+    let mut scored: Vec<(usize, &'a str)> = candidates
+        .iter()
+        .map(|c| (levenshtein(&query, &c.to_lowercase()), c.as_str()))
+        .filter(|(distance, _)| *distance <= threshold)
+        .collect();
+
+    scored.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1)));
+    scored.into_iter().take(max).map(|(_, c)| c).collect()
+}
+
 /// Plain-text formatter for error enrichment.
 ///
 /// The output is plain text; terminal styling is the caller's responsibility.
@@ -291,6 +322,59 @@ mod tests {
         assert_eq!(with_prefix.len(), 1);
         assert_eq!(without_prefix.len(), 1);
         assert_eq!(with_prefix[0].key, without_prefix[0].key);
+    }
+
+    #[test]
+    fn suggest_strings_ranks_by_distance() {
+        let candidates = vec![
+            "spec.md".to_string(),
+            "specs.md".to_string(),
+            "readme.md".to_string(),
+        ];
+        // "spec.md" (7 chars) -> threshold max(2, 7/3) = 2. The exact match has
+        // distance 0 and ranks first; "specs.md" (distance 1) clears the gate;
+        // "readme.md" (distance 5) is filtered out.
+        let results = suggest_strings(&candidates, "spec.md", 3);
+        assert_eq!(results, vec!["spec.md", "specs.md"]);
+    }
+
+    #[test]
+    fn suggest_strings_near_name_passes_gate() {
+        // The calibration case from the design: a missing `specs.md` next to a
+        // real `spec.md` (distance 1) must surface the near match.
+        let candidates = vec!["spec.md".to_string(), "plan.md".to_string()];
+        let results = suggest_strings(&candidates, "specs.md", 1);
+        assert_eq!(results, vec!["spec.md"]);
+    }
+
+    #[test]
+    fn suggest_strings_is_case_insensitive() {
+        let candidates = vec!["Spec.md".to_string()];
+        let results = suggest_strings(&candidates, "spec.md", 1);
+        assert_eq!(results, vec!["Spec.md"]);
+    }
+
+    #[test]
+    fn suggest_strings_omits_unrelated() {
+        let candidates = vec!["completely-different-name.txt".to_string()];
+        let results = suggest_strings(&candidates, "spec.md", 3);
+        assert!(results.is_empty(), "unrelated candidate must not be suggested");
+    }
+
+    #[test]
+    fn suggest_strings_tie_breaks_alphabetically() {
+        // "abc.md" and "bbc.md" are both distance 1 from "xbc.md"; with no
+        // `order` to consult, the alphabetical tie-break decides.
+        let candidates = vec!["bbc.md".to_string(), "abc.md".to_string()];
+        let results = suggest_strings(&candidates, "xbc.md", 2);
+        assert_eq!(results, vec!["abc.md", "bbc.md"]);
+    }
+
+    #[test]
+    fn suggest_strings_max_zero_and_empty_candidates() {
+        let candidates = vec!["spec.md".to_string()];
+        assert!(suggest_strings(&candidates, "spec.md", 0).is_empty());
+        assert!(suggest_strings(&[], "spec.md", 3).is_empty());
     }
 
     #[test]

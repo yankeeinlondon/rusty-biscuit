@@ -79,6 +79,7 @@ pub(crate) mod parse_utils;
 pub(crate) mod perf;
 pub(crate) mod pipeline;
 mod schema_validation;
+pub mod subtree;
 mod util;
 
 #[cfg(test)]

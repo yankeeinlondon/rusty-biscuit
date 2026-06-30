@@ -13,9 +13,9 @@
 //!   on the classifier's internal state.
 //! - The value is classified by its first non-quote character. `@`
 //!   triggers file completion against the `docs/`, `features/`, `fixes/`,
-//!   and `reviews/` subdirectories at repo root, package-area, and
-//!   package levels. Any other leading character returns zero candidates
-//!   so the shell's default completion takes over.
+//!   and `reviews/` subdirectories under the invoking `cwd` (the launch
+//!   area). Any other leading character returns zero candidates so the
+//!   shell's default completion takes over.
 //! - Leading `"` and `'` quotes are stripped for classification; the
 //!   emitted candidate always wraps the value in `'...'`. A user-typed
 //!   opening `"` is effectively normalized to `'` (spec §5.4).
@@ -26,11 +26,12 @@
 //!
 //! ## Rendering
 //!
-//! Matched files are rendered as paths relative to the repo root (when a
-//! repo is detected via `sniff` or a `.git` ancestor) or the current
-//! working directory otherwise. This matches the mental model of a doc
-//! path typed into a frontmatter override: it should resolve the same
-//! way whether the user typed it by hand or selected it from completion.
+//! Matched files are rendered as paths relative to the invoking `cwd` (the
+//! launch area). This matches the mental model of a doc path typed into a
+//! frontmatter override: a frontmatter file reference resolves at runtime
+//! against the launch area, so completion offers exactly those `cwd`-relative
+//! paths the runtime resolver will accept — whether the user typed them by
+//! hand or selected them from completion.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -129,7 +130,7 @@ fn strip_leading_quote(value: &str) -> (&str, Option<char>) {
 fn gather_value_candidates(active: &str, ctx: &ScopeContext) -> Vec<String> {
     let partial_len = PartialLen::classify(active.chars().count());
     let scopes = resolve_setter_scopes(ctx);
-    let base = repo_or_cwd(ctx);
+    let base = scopes::property_value_root(ctx).to_path_buf();
 
     let mut out: Vec<(u8, String)> = Vec::new();
     let mut seen_entries: HashSet<PathBuf> = HashSet::new();
@@ -185,70 +186,26 @@ fn gather_value_candidates(active: &str, ctx: &ScopeContext) -> Vec<String> {
 
 /// Resolve the ordered scope list for setter-value `@` completion.
 ///
-/// Scopes are emitted in priority order: repo root, package-area root,
-/// package root — each crossed with [`SETTER_VALUE_SUBDIRS`]. The
-/// walker tolerates missing directories, so non-existent roots are
-/// returned as-is and silently ignored at walk time.
+/// Each [`SETTER_VALUE_SUBDIRS`] entry is joined under the invoking `cwd`
+/// (the launch area; see [`scopes::property_value_root`]) — the same anchor
+/// the runtime read-side resolver uses for frontmatter file references, so a
+/// selected candidate resolves at launch exactly as it was offered. The
+/// walker tolerates missing directories, so non-existent subdirs are returned
+/// as-is and silently ignored at walk time.
 ///
 /// Symlinks are always followed — none of these scopes are agent-skill
 /// peer directories where Claudine's linker produces cross-provider
 /// duplicates.
 fn resolve_setter_scopes(ctx: &ScopeContext) -> Vec<Scope> {
-    let mut scopes: Vec<Scope> = Vec::new();
-
-    let repo_root = scopes::effective_repo_root(ctx);
-
-    let area_root: Option<PathBuf> = ctx.repo_info.as_ref().and_then(|info| {
-        let area = info.package_area_for_dir(&ctx.cwd)?;
-        if area == "root" {
-            return None;
-        }
-        Some(info.root.join(area))
-    });
-
-    let pkg_root: Option<PathBuf> = ctx
-        .repo_info
-        .as_ref()
-        .and_then(|info| info.package_for_dir(&ctx.cwd).map(|pkg| pkg.path.clone()));
-
-    let push_scopes = |scopes: &mut Vec<Scope>, base: &Path| {
-        for sub in SETTER_VALUE_SUBDIRS {
-            scopes.push(Scope {
-                kind: ScopeKind::RepoDocs,
-                path: base.join(sub),
-                follow_links: true,
-            });
-        }
-    };
-
-    if let Some(root) = repo_root {
-        push_scopes(&mut scopes, root);
-    }
-    if let Some(root) = area_root.as_deref() {
-        push_scopes(&mut scopes, root);
-    }
-    if let Some(root) = pkg_root.as_deref() {
-        push_scopes(&mut scopes, root);
-    }
-
-    // When cwd is at the repo root, the area_root / pkg_root branches
-    // resolve to the same path as the repo branch, so the same
-    // subdirectories would be enumerated twice. Dedup on exact path
-    // keeps the walker's work bounded and eliminates double-ranked
-    // candidates in `finalize()`.
-    let mut seen: HashSet<PathBuf> = HashSet::new();
-    scopes.retain(|scope| seen.insert(scope.path.clone()));
-    scopes
-}
-
-/// Pick the repo root (from `sniff` or git fallback) for rendering.
-/// Falls back to the cwd when neither is available — the completer is
-/// still useful in a standalone directory, the rendered paths just
-/// reflect the cwd's view of the filesystem.
-fn repo_or_cwd(ctx: &ScopeContext) -> PathBuf {
-    scopes::effective_repo_root(ctx)
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| ctx.cwd.clone())
+    let base = scopes::property_value_root(ctx);
+    SETTER_VALUE_SUBDIRS
+        .iter()
+        .map(|sub| Scope {
+            kind: ScopeKind::RepoDocs,
+            path: base.join(sub),
+            follow_links: true,
+        })
+        .collect()
 }
 
 /// Render `entry` as a path relative to `base`. Returns `None` when
@@ -519,36 +476,59 @@ mod tests {
     }
 
     #[test]
-    fn run_cwd_inside_package_area_uses_area_scope() {
+    fn run_cwd_inside_package_area_renders_relative_to_cwd() {
         let tmp = TempDir::new().unwrap();
         seed_cargo_workspace(tmp.path(), &["claudine/lib"]);
-        // Area-level feature doc.
+        // Feature doc under the area directory (the cwd).
         let area_feat = tmp.path().join("claudine").join("features");
         write(&area_feat.join("plan.md"), "# p\n");
 
-        // cwd is the area directory itself.
+        // cwd is the area directory itself; candidates anchor on it.
         let ctx = ScopeContext::discover_from(&tmp.path().join("claudine"));
         let got = run("spec=@p", &ctx);
         assert!(
-            got.iter().any(|c| c == "spec='claudine/features/plan.md'"),
-            "expected area-scope plan: {got:?}"
+            got.iter().any(|c| c == "spec='features/plan.md'"),
+            "expected cwd-relative plan: {got:?}"
         );
     }
 
     #[test]
-    fn run_cwd_inside_package_uses_package_scope() {
+    fn run_cwd_inside_package_renders_relative_to_cwd() {
         let tmp = TempDir::new().unwrap();
         seed_cargo_workspace(tmp.path(), &["claudine/lib"]);
-        // Package-level doc.
+        // Doc under the package directory (the cwd).
         let pkg_docs = tmp.path().join("claudine").join("lib").join("docs");
         write(&pkg_docs.join("pkg.md"), "# x\n");
 
-        // cwd is the package directory.
+        // cwd is the package directory; candidates anchor on it.
         let ctx = ScopeContext::discover_from(&tmp.path().join("claudine").join("lib"));
         let got = run("ref=@pk", &ctx);
         assert!(
-            got.iter().any(|c| c == "ref='claudine/lib/docs/pkg.md'"),
-            "expected package-scope doc: {got:?}"
+            got.iter().any(|c| c == "ref='docs/pkg.md'"),
+            "expected cwd-relative doc: {got:?}"
+        );
+    }
+
+    #[test]
+    fn run_only_surfaces_files_under_cwd_not_repo_root() {
+        // Regression: setter-value `@` completion walked the repo root, so a
+        // user typing in a package area saw docs from the whole repo. It must
+        // anchor on the launch `cwd` and surface only files beneath it.
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["claudine/lib"]);
+        // Repo-root-level doc (ABOVE the cwd) and a cwd-local doc.
+        write(&tmp.path().join("docs").join("plan.md"), "# repo\n");
+        write(
+            &tmp.path().join("claudine").join("docs").join("plan.md"),
+            "# area\n",
+        );
+
+        let ctx = ScopeContext::discover_from(&tmp.path().join("claudine"));
+        let got = run("spec=@p", &ctx);
+        assert_eq!(
+            got,
+            vec!["spec='docs/plan.md'".to_string()],
+            "only the cwd-local docs/plan.md must surface, repo-root doc excluded: {got:?}"
         );
     }
 
@@ -693,32 +673,29 @@ mod tests {
     }
 
     #[test]
-    fn run_multi_scope_orders_repo_before_area() {
+    fn run_orders_subdirs_then_path_within_cwd() {
+        // With a single cwd anchor, candidates sort by subdir scope rank
+        // (docs before features) then by relative path.
         let tmp = TempDir::new().unwrap();
         seed_cargo_workspace(tmp.path(), &["claudine/lib"]);
-        write(&tmp.path().join("docs").join("plan.md"), "# p\n");
-        write(
-            &tmp.path().join("claudine").join("docs").join("plan.md"),
-            "# p2\n",
-        );
+        write(&tmp.path().join("docs").join("plan.md"), "# d\n");
+        write(&tmp.path().join("features").join("plan.md"), "# f\n");
 
-        let ctx = ScopeContext::discover_from(&tmp.path().join("claudine").join("lib"));
+        let ctx = ScopeContext::discover_from(tmp.path());
         let got = run("spec=@p", &ctx);
-        // Both files should appear; repo-scope first (rank 0), package-
-        // area and package-scope after.
         assert!(got.iter().any(|c| c == "spec='docs/plan.md'"), "{got:?}");
         assert!(
-            got.iter().any(|c| c == "spec='claudine/docs/plan.md'"),
+            got.iter().any(|c| c == "spec='features/plan.md'"),
             "{got:?}"
         );
-        let idx_repo = got.iter().position(|c| c == "spec='docs/plan.md'").unwrap();
-        let idx_area = got
+        let idx_docs = got.iter().position(|c| c == "spec='docs/plan.md'").unwrap();
+        let idx_feat = got
             .iter()
-            .position(|c| c == "spec='claudine/docs/plan.md'")
+            .position(|c| c == "spec='features/plan.md'")
             .unwrap();
         assert!(
-            idx_repo < idx_area,
-            "repo scope must sort before area scope: {got:?}"
+            idx_docs < idx_feat,
+            "docs subdir must sort before features subdir: {got:?}"
         );
     }
 

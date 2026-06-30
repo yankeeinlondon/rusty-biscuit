@@ -339,9 +339,9 @@ Spans `composition_postprocess`.
 |---|------|-------|
 | F3.1 | **Validate closure plan** [M] | Closure markers present in agent response. |
 | F3.2 | **`split_frontmatter_and_body`** [M] | Pull the new body out of the response. |
-| F3.3 | **Update `last_updated` frontmatter** [M] | |
-| F3.4 | **Atomic write of target file** [M] | |
-| F3.5 | **`cleanup_inline_output`** [M] | Strips closure markers, normalizes whitespace. |
+| F3.3 | **Markdown cleanup of new body** [M] | `cleanup_content` runs inside `apply_inline_closure` so the cleaned body is hashed and written. |
+| F3.4 | **Update `last_updated` frontmatter** [M] | |
+| F3.5 | **Atomic write of target file** [M] | Single write; the stamped `hash:` describes the cleaned body. |
 | F3.6 | **Deferred `emit_composition_summary`** [M] | Emitted *after* closure validation messages so the section separator does not split the block. |
 
 ### F4. Lifecycle terminal signal

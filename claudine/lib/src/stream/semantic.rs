@@ -15,12 +15,14 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::token_usage::NormalizedTokenUsage;
 use crate::provider_id::Provider;
+use crate::stream::logs::opencode::reasoning::StalledGenerationProgress;
 
 /// Typed classification of an error surfaced through [`SemanticEvent::Error`].
 ///
@@ -198,6 +200,36 @@ impl SemanticEvent {
                 | SemanticEvent::ProviderExtension { .. }
         )
     }
+
+    /// Whether this event is **progress-class** for the OpenCode
+    /// stalled-generation backstop — genuine forward motion that resets the
+    /// progress-silence clock and generation churn counter.
+    ///
+    /// Deliberately narrower than [`Self::is_activity`]: the live-but-dead guard
+    /// keys on forward *progress*, not liveness. `Info`/`Warning`/`Error`
+    /// diagnostics (which include OpenCode's repeated `llm_call_start` heartbeat)
+    /// and the session/turn envelope are liveness-only and must **not** reset the
+    /// guard, otherwise the noisy-but-dead retry loop would refresh its own
+    /// silence clock forever. This is a separate predicate so it can be tightened
+    /// without perturbing `step_timeout`'s `is_activity` silence rule.
+    ///
+    /// Matches the spec's stdout reset taxonomy: new model output
+    /// (`OutputText`, `Reasoning`), tool lifecycle (`ToolCall`, `ToolResult`),
+    /// subagent lifecycle (`SubagentStart`, `SubagentStop`), and artifact motion
+    /// (`FileChange`, `PlanUpdate`).
+    pub fn is_stdout_progress_class(&self) -> bool {
+        matches!(
+            self,
+            SemanticEvent::OutputText { .. }
+                | SemanticEvent::Reasoning { .. }
+                | SemanticEvent::ToolCall { .. }
+                | SemanticEvent::ToolResult { .. }
+                | SemanticEvent::SubagentStart { .. }
+                | SemanticEvent::SubagentStop { .. }
+                | SemanticEvent::FileChange { .. }
+                | SemanticEvent::PlanUpdate { .. }
+        )
+    }
 }
 
 /// Sink interface for stream parsers.
@@ -297,6 +329,54 @@ impl<S: SemanticEventSink> ObservedSemanticSink<S> {
 impl<S: SemanticEventSink> SemanticEventSink for ObservedSemanticSink<S> {
     fn on_semantic_event(&mut self, event: SemanticEvent) {
         self.stdout_event_seen.store(true, Ordering::SeqCst);
+        self.inner.on_semantic_event(event);
+    }
+}
+
+/// Sink wrapper that resets the OpenCode stalled-generation progress clocks
+/// whenever a progress-class stdout semantic event is forwarded.
+///
+/// The live-but-dead guard's counters live in the stderr
+/// [`OpenCodeLogBridge`](crate::stream::logs::opencode::OpenCodeLogBridge), but
+/// genuine forward progress also arrives on stdout (`OutputText`, `ToolCall`,
+/// …) on a different thread. Without resetting from the stdout side, a run that
+/// makes real stdout progress and then emits another `llm_call_start` could
+/// trip the guard even though it was progressing. This observer closes that gap:
+/// built from the bridge's shared progress cell, it calls
+/// [`StalledGenerationProgress::mark_progress`] for each progress-class event
+/// (per [`SemanticEvent::is_stdout_progress_class`]) before forwarding it.
+///
+/// Liveness-only stdout events (`Info`/`Warning`/`Error`, the session/turn
+/// envelope) are forwarded untouched, so the guard still only resets on real
+/// progress. The progress lock is dropped before forwarding, so it never nests
+/// with the downstream semantic-sink lock.
+pub struct StalledProgressObserverSink<S: SemanticEventSink> {
+    inner: S,
+    progress: Arc<Mutex<StalledGenerationProgress>>,
+}
+
+impl<S: SemanticEventSink> StalledProgressObserverSink<S> {
+    /// Wrap `sink` so progress-class stdout events reset the shared
+    /// stalled-generation progress cell before they are forwarded downstream.
+    pub fn new(sink: S, progress: Arc<Mutex<StalledGenerationProgress>>) -> Self {
+        Self {
+            inner: sink,
+            progress,
+        }
+    }
+}
+
+impl<S: SemanticEventSink> SemanticEventSink for StalledProgressObserverSink<S> {
+    fn on_semantic_event(&mut self, event: SemanticEvent) {
+        if event.is_stdout_progress_class() {
+            // Short critical section: stamp progress, then release before any
+            // downstream sink call so this lock never nests with the shared
+            // semantic-sink mutex.
+            self.progress
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .mark_progress(Instant::now());
+        }
         self.inner.on_semantic_event(event);
     }
 }

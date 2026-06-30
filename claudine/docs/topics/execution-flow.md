@@ -7,8 +7,8 @@ prompt: |-
   - identify what CLI switches or prompt frontmatter has an impact on each step and what that impact is
 
   After fully documenting the flows add a section called `## Future Improvements` and add any improvements you think could be made to the current flow
-last_updated: 2026-04-27
-hash: 7738d51f4cfa73e2-df885c4261e55f67
+last_updated: 2026-06-28
+hash: 7738d51f4cfa73e2-aed7bc2afc2e5d25
 ---
 Let me explore the composition-related source code and documentation to trace the exact execution flows.Now let me read the existing composition topic doc and the key source files for precision:Now let me read the critical execution pipeline files:Now let me read the remaining portions of the composition executor to get the full execution pipeline:Now I have a comprehensive understanding of all three flows. Let me compose the complete Markdown body.Now I have all the details needed. Let me produce the comprehensive Markdown body content:Now I have all the details. Let me compose the full Markdown document body:
 
@@ -90,8 +90,12 @@ every `<TAB>`. The supplement engine applies these rules in order:
 - **Case-insensitive substring matching** on the filename with `.md`
     stripped for matching only. `@omp<TAB>` matches `prompt.md`.
 
-- **`KEY=<TAB>` setters** return zero candidates so shell default
-    behavior kicks in.
+- **`KEY=<TAB>` setters** offer schema-aware completion when the prompt
+    declares `$schema` (property names before `=`; enum members and
+    `file`-glob paths after `=`). Without a schema, the value slot still
+    supports `@`-gated file completion; plain string/number values yield
+    no candidates so shell default behavior kicks in. See
+    [Shell Completions](shell-completions.md).
 
 Install with `claudine completions <shell>` — regenerate and reinstall
 after a Claudine upgrade that changes the callback wiring. The hidden
@@ -519,9 +523,11 @@ After the provider completes, the inline closure pipeline rewrites the target fi
 
 `closure::apply_inline_closure(plan, body, path, today, post_run_fm)`:
 
-1. Validates replacement body is non-empty and the **body segment** of the Simple hash differs from the original
-2. Compares frontmatter to detect new and modified properties
-3. Calls `rewrite_inline_document()`:
+1. Validates replacement body is non-empty
+2. Runs `darkmatter::markdown::cleanup::cleanup_content()` on the body so the cleaned body is what is hashed, stamped, and written (one atomic write; `result.body_cleaned` records whether cleanup changed anything)
+3. Rejects when the **body segment** of the Simple hash of the *cleaned* body matches the original
+4. Compares frontmatter to detect new and modified properties
+5. Calls `rewrite_inline_document()`:
 
     - Splits frontmatter from source text (preserving byte-for-byte layout including block scalars)
     - Updates `last_updated` to today's date (local time, `YYYY-MM-DD`)
@@ -529,17 +535,9 @@ After the provider completes, the inline closure pipeline rewrites the target fi
     - Merges new frontmatter properties from agent (inserted before `last_updated`)
     - Preserves original frontmatter values (reverts agent modifications with a warning)
 
-4. Writes atomically via `atomic_write()`
+6. Writes atomically via `atomic_write()`
 
-##### 9d. Markdown Cleanup
-
-`cleanup_inline_output(resolved_path)`:
-
-1. Splits frontmatter from body
-2. Runs `darkmatter::markdown::cleanup::cleanup_content()` on body only
-3. Writes back only if content changed
-
-##### 9e. Summary Emission
+##### 9d. Summary Emission
 
 Summary is deferred until after closure validation messages (unlike compose which emits immediately), so the section separator does not split the validation block.
 

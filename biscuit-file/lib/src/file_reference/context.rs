@@ -53,7 +53,7 @@ impl ResolutionContext {
 /// Find the git repository root starting from `from`.
 ///
 /// Returns `Ok(None)` if no git repository is found.
-pub(crate) fn find_git_root(from: &Path) -> Result<Option<PathBuf>, FileReferenceError> {
+pub fn find_git_root(from: &Path) -> Result<Option<PathBuf>, FileReferenceError> {
     use gix::discover::upwards::Error as Up;
     trace!(?from, "searching for git root");
     match gix::discover(from) {
@@ -86,7 +86,7 @@ pub(crate) fn find_git_root(from: &Path) -> Result<Option<PathBuf>, FileReferenc
 /// component under the workspace root).
 ///
 /// For a single-crate repo (no workspace members), returns `None`.
-pub(crate) fn find_package_area(
+pub fn find_package_area(
     repo_root: &Path,
     cwd: &Path,
 ) -> Result<Option<PathBuf>, FileReferenceError> {
@@ -154,7 +154,7 @@ pub(crate) fn find_package_area(
 }
 
 /// Get the user's home directory.
-pub(crate) fn home_dir() -> Option<PathBuf> {
+pub fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 

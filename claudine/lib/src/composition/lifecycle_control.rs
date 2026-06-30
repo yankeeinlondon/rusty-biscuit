@@ -229,25 +229,25 @@ pub fn proxy_handoff_allowed(chain: &[std::path::PathBuf], target: &std::path::P
 ///
 /// ## Errors
 ///
-/// Returns an error string when the reference cannot be resolved (e.g. an
-/// `@`-prefixed reference with no `repo_root`) or when the resolved path is
-/// not an existing file.
+/// Returns a [`crate::harness::HarnessError`] when the reference cannot be
+/// resolved (e.g. an `@`-prefixed reference with no `repo_root`, propagated
+/// directly from [`crate::harness::resolve_harness_path`]) or when the resolved
+/// path is not an existing file.
 pub fn resolve_proxy_target(
     target: &str,
     source_path: &std::path::Path,
     repo_root: Option<&std::path::Path>,
-) -> Result<std::path::PathBuf, String> {
+) -> Result<std::path::PathBuf, crate::harness::HarnessError> {
     let ctx = crate::harness::HarnessResolutionContext {
         source_path,
         repo_root,
     };
-    let resolved =
-        crate::harness::resolve_harness_path(target, &ctx).map_err(|e| e.to_string())?;
+    let resolved = crate::harness::resolve_harness_path(target, &ctx)?;
     if !resolved.is_file() {
-        return Err(format!(
-            "proxy target does not exist: {}",
-            resolved.display()
-        ));
+        return Err(crate::harness::HarnessError::PathResolutionFailed {
+            raw: target.to_string(),
+            detail: format!("proxy target does not exist: {}", resolved.display()),
+        });
     }
     Ok(resolved)
 }
@@ -568,6 +568,13 @@ mod tests {
         std::fs::write(&source, "---\n---\n").unwrap();
 
         let err = resolve_proxy_target("nope.md", &source, None).unwrap_err();
-        assert!(err.contains("does not exist"), "unexpected: {err}");
+        assert!(
+            matches!(err, crate::harness::HarnessError::PathResolutionFailed { .. }),
+            "unexpected variant: {err:?}"
+        );
+        assert!(
+            err.to_string().contains("does not exist"),
+            "unexpected: {err}"
+        );
     }
 }

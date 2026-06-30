@@ -4,7 +4,7 @@
 //! real tmux pane (the L2 resource) with a fake provider on `PATH`, and asserts
 //! the **externally observable** ordered side-effect log the lifecycle stacks
 //! wrote. Each lifecycle event's `stack` ends in
-//! `append_line('events.log', '<event-name>')`, so the file records the exact
+//! `{append_line: ["events.log", "<event-name>"]}`, so the file records the exact
 //! firing order without depending on stderr interleaving (which scrolls off a
 //! capped pane and collapses under SGR re-emission).
 //!
@@ -234,7 +234,7 @@ fn event_lines(staged: &Staged) -> Vec<String> {
 
 /// A lifecycle event block whose stack appends the event name to `events.log`.
 fn marker(event: &str) -> String {
-    format!("{event}:\n  stack:\n    - action: \"append_line('events.log', '{event}')\"\n")
+    format!("{event}:\n  stack:\n    - action: {{append_line: [\"events.log\", \"{event}\"]}}\n")
 }
 
 /// A lifecycle event block whose stack appends, for each `field` in `fields`,
@@ -246,13 +246,13 @@ fn marker(event: &str) -> String {
 ///
 /// The literal prefix and `err.<field>` are joined with `+`, which
 /// Darkmatter treats as string concatenation when either operand is a
-/// string. `append_line` itself is strictly 2-arg (`append_line(file,
-/// text)`), so the 3-arg form would not parse.
+/// string. `append_line` itself is strictly 2-arg (`append_line: [file, text]`),
+/// so the 3-arg form would not parse.
 fn err_marker(event: &str, fields: &[&str]) -> String {
     let actions: String = fields
         .iter()
         .map(|f| {
-            format!("    - action: \"append_line('events.log', 'err-{f}=' + err.{f})\"\n")
+            format!("    - action: {{append_line: [\"events.log\", \"{{{{ 'err-{f}=' + err.{f} }}}}\"]}}\n")
         })
         .collect();
     format!("{event}:\n  stack:\n{actions}")
@@ -368,7 +368,7 @@ fn level2_lifecycle_blocked_preflight_shell_audit_fires_blocked_and_finalize_sta
     // before `start` itself fires. `blocked.stack` and `finalize.stack`
     // each append their event name to `events.log`, proving the typed
     // stacks fire (not just the legacy top-level communication surface).
-    let start = "start:\n  stack:\n    - action: \"shell('rm -rf /tmp/nonexistent')\"\n";
+    let start = "start:\n  stack:\n    - action: {shell: \"rm -rf /tmp/nonexistent\"}\n";
     let doc = format!(
         "---\ntitle: lifecycle preflight blocked (shell audit)\n\
          {init}{start}{success}{blocked}{failure}{finalize}---\nBody\n",
@@ -416,7 +416,7 @@ fn level2_lifecycle_blocked_preflight_shell_audit_fires_blocked_and_finalize_sta
 fn level2_lifecycle_blocked_preflight_dry_run_shell_audit_fires_blocked_and_finalize_stacks() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let start = "start:\n  stack:\n    - action: \"shell('rm -rf /tmp/nonexistent')\"\n";
+    let start = "start:\n  stack:\n    - action: {shell: \"rm -rf /tmp/nonexistent\"}\n";
     let doc = format!(
         "---\ntitle: lifecycle preflight blocked (dry-run shell audit)\n\
          {init}{start}{success}{blocked}{failure}{finalize}---\nBody\n",
@@ -461,7 +461,7 @@ fn level2_lifecycle_success_top_level_fires_with_stack() {
 
     // `success` carries a top-level `info:` AND a stack side effect.
     let success = "success:\n  info: \"SUCCESS_TOPLEVEL_MARK\"\n  \
-        stack:\n    - action: \"append_line('events.log', 'success')\"\n";
+        stack:\n    - action: {append_line: [\"events.log\", \"success\"]}\n";
     let doc = format!(
         "---\ntitle: lifecycle success top-level\n{init}{start}{success}{finalize}---\nBody\n",
         init = marker("initialize"),
@@ -489,9 +489,9 @@ fn level2_lifecycle_success_top_level_fires_with_stack() {
     );
 }
 
-/// Downgrade path for `success.stack` ending in `error(...)`: the top-level
+/// Downgrade path for `success.stack` ending in `{error: "..."}`: the top-level
 /// `info:` communication STILL fires (top-level fires before stack processing,
-/// per the spec), then the stack's `error()` downgrades the run to `failure` —
+/// per the spec), then the stack's `{error: "..."}` downgrades the run to `failure` —
 /// the `failure` event fires and `finalize` fires. Proven by the ordered
 /// `events.log` (`success`-stack → `failure`-stack → `finalize`) plus the
 /// success top-level line captured in the pane.
@@ -501,10 +501,10 @@ fn level2_lifecycle_success_stack_error_downgrades_keeps_success_comm() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
     // `success` has a top-level `info:` and a stack whose final action is
-    // `error('bad')`, downgrading the run to `failure`.
+    // `{error: "bad"}`, downgrading the run to `failure`.
     let success = "success:\n  info: \"SUCCESS_TOPLEVEL_MARK\"\n  stack:\n    \
-        - action:\n        - \"append_line('events.log', 'success')\"\n        \
-        - \"error('bad')\"\n";
+        - action:\n        - {append_line: [\"events.log\", \"success\"]}\n        \
+        - {error: \"bad\"}\n";
     let doc = format!(
         "---\ntitle: lifecycle success downgrade\n{init}{start}{success}{failure}{finalize}---\nBody\n",
         init = marker("initialize"),
@@ -513,7 +513,7 @@ fn level2_lifecycle_success_stack_error_downgrades_keeps_success_comm() {
         failure = marker("failure"),
         finalize = marker("finalize"),
     );
-    // Provider exits 0 so the run reaches `success`; the stack's `error()` then
+    // Provider exits 0 so the run reaches `success`; the stack's `{error: "bad"}` then
     // downgrades it to `failure`.
     let staged = stage(&doc, 0);
     let pane = run_compose_in_tmux(&staged, "finalize");
@@ -525,7 +525,7 @@ fn level2_lifecycle_success_stack_error_downgrades_keeps_success_comm() {
     assert_eq!(
         lifecycle,
         vec!["initialize", "start", "success", "failure", "finalize"],
-        "success.stack error('bad') must downgrade to failure then finalize; \
+        "success.stack {{error: \"bad\"}} must downgrade to failure then finalize; \
          events.log was {lines:?}; pane:\n{pane}"
     );
     // The success top-level `info` fired BEFORE the stack's downgrade and is
@@ -570,16 +570,21 @@ fn level2_lifecycle_failure_stack_observes_err_payload() {
     let pane = run_compose_in_tmux(&staged, "finalize");
 
     let lines = event_lines(&staged);
+    // `agent_failure` is a classifiable error_kind (→ `provider.exited`), so the
+    // deprecated `err.kind`/`err.variant` aliases now read as the faceted
+    // `err.category`/`err.code` values (`provider` / `provider.exited`), not the
+    // internal `LifecycleAction` / `agent_failure` labels.
     assert!(
-        lines.iter().any(|l| l == "err-kind=LifecycleAction"),
-        "err.kind must reach the failure stack as 'LifecycleAction'; \
+        lines.iter().any(|l| l == "err-kind=provider"),
+        "err.kind must reach the failure stack as 'provider' (alias of err.category); \
          events.log was {lines:?}; pane:\n{pane}"
     );
     assert!(
-        lines.iter().any(|l| l == "err-variant=agent_failure"),
-        "err.variant must reach the failure stack as 'agent_failure' \
-         (outcome.error_kind defaults to 'agent_failure' for a plain non-zero \
-         exit); events.log was {lines:?}; pane:\n{pane}"
+        lines.iter().any(|l| l == "err-variant=provider.exited"),
+        "err.variant must reach the failure stack as 'provider.exited' \
+         (alias of err.code; outcome.error_kind defaults to 'agent_failure' for a \
+         plain non-zero exit, which classifies to provider.exited); \
+         events.log was {lines:?}; pane:\n{pane}"
     );
     assert!(
         lines
@@ -604,7 +609,7 @@ fn level2_lifecycle_failure_stack_observes_err_payload() {
 fn level2_lifecycle_blocked_stack_observes_err_payload() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let start = "start:\n  stack:\n    - action: \"shell('rm -rf /tmp/nonexistent')\"\n";
+    let start = "start:\n  stack:\n    - action: {shell: \"rm -rf /tmp/nonexistent\"}\n";
     let blocked = err_marker("blocked", &["kind", "variant"]);
     let doc = format!(
         "---\ntitle: lifecycle blocked err payload\n\
@@ -656,12 +661,12 @@ fn level2_lifecycle_blocked_stack_observes_err_payload() {
 fn level2_lifecycle_finalize_stack_observes_err_after_blocked() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let start = "start:\n  stack:\n    - action: \"shell('rm -rf /tmp/nonexistent')\"\n";
+    let start = "start:\n  stack:\n    - action: {shell: \"rm -rf /tmp/nonexistent\"}\n";
     // `finalize.stack` guards an `err.variant` append with `when: "err"`, then
     // appends the trailing `finalize` marker the polling loop awaits.
     let finalize = "finalize:\n  stack:\n    \
-        - when: \"err\"\n      action: \"append_line('events.log', 'finalize-err-variant=' + err.variant)\"\n    \
-        - action: \"append_line('events.log', 'finalize')\"\n";
+        - when: \"err\"\n      action: {append_line: [\"events.log\", \"{{ 'finalize-err-variant=' + err.variant }}\"]}\n    \
+        - action: {append_line: [\"events.log\", \"finalize\"]}\n";
     let doc = format!(
         "---\ntitle: lifecycle finalize err after blocked\n\
          {init}{start}{success}{blocked}{failure}{finalize}---\nBody\n",
@@ -712,7 +717,7 @@ fn level2_lifecycle_finalize_stack_observes_err_after_blocked() {
 /// Before the production fix the failed-`finalize` runtime path carried
 /// `err: None`, so `when: "err"` resolved to `null` (falsy), the action
 /// was silently skipped, and no `finalize-err-msg=` line would land in
-/// `events.log`. The trailing `append_line('events.log', 'finalize')`
+/// `events.log`. The trailing `{append_line: ["events.log", "finalize"]}`
 /// action is the done-marker the polling loop awaits and also proves the
 /// stack continued past the `when: "err"` item.
 #[test]
@@ -723,8 +728,8 @@ fn level2_lifecycle_finalize_stack_observes_err_after_failure() {
     // `finalize.stack` guards an err.msg append with `when: "err"`, then
     // appends a trailing `finalize` marker the polling loop awaits.
     let finalize = "finalize:\n  stack:\n    \
-        - when: \"err\"\n      action: \"append_line('events.log', 'finalize-err-msg=' + err.msg)\"\n    \
-        - action: \"append_line('events.log', 'finalize')\"\n";
+        - when: \"err\"\n      action: {append_line: [\"events.log\", \"{{ 'finalize-err-msg=' + err.msg }}\"]}\n    \
+        - action: {append_line: [\"events.log\", \"finalize\"]}\n";
     let doc = format!(
         "---\ntitle: lifecycle finalize err payload\n\
          {init}{start}{success}{blocked}{failure}{finalize}---\nBody\n",
@@ -761,7 +766,7 @@ fn level2_lifecycle_finalize_stack_observes_err_after_failure() {
     );
 }
 
-/// Lifecycle `failure` recovery: a `failure.stack` ending in `retry(2)` re-enters
+/// Lifecycle `failure` recovery: a `failure.stack` ending in `{retry: 2}` re-enters
 /// the harness loop after the first provider failure. The provider fails on its
 /// first invocation (exit 99) and succeeds on the second (exit 0), proving the
 /// lifecycle recovery action replaced the removed handler DSL retry path.
@@ -771,8 +776,8 @@ fn level2_lifecycle_failure_retry_recovers_to_success() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
     let failure = "failure:\n  stack:\n    \
-        - action: \"append_line('events.log', 'failure')\"\n    \
-        - action: \"retry(2)\"\n";
+        - action: {append_line: [\"events.log\", \"failure\"]}\n    \
+        - action: {retry: 2}\n";
     let doc = format!(
         "---\ntitle: lifecycle failure retry\n\
          {init}{start}{success}{failure}{finalize}---\nBody\n",

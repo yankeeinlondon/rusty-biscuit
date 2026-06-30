@@ -71,6 +71,16 @@ pub(crate) fn parse_cli_timeouts(args: &WrapperArgs) -> Result<Option<std::time:
         }
     }
 
+    // Validate --stall-timeout on the direct-wrapper path. Mirrors the
+    // --step-timeout validation but accepts `0s` as the disable sentinel
+    // (`parse_timeout_allow_zero`), so a typo (`nope`, `5x`) FAILS here
+    // instead of silently falling through to the `10m` built-in during
+    // `resolve_stall_timeout`.
+    if let Some(raw) = args.stall_timeout.as_deref() {
+        claudine::harness::parse_timeout_allow_zero(raw, Path::new("<--stall-timeout>"))
+            .map_err(|e| eyre!("invalid --stall-timeout value: {e}"))?;
+    }
+
     Ok(cli_timeout_duration)
 }
 
@@ -99,6 +109,59 @@ pub(crate) fn resolve_opencode_model(
             std::process::exit(1);
         }
     }
+}
+
+/// Stage 10.5 — merge the YOLO permission overlay into `OPENCODE_CONFIG_CONTENT`.
+///
+/// `--dangerously-skip-permissions` only auto-approves the **parent** OpenCode
+/// session; subagent (Task) sessions fall back to the `"ask"` default and, with
+/// no TTY under `opencode run`, block forever. The durable fix is a config-level
+/// `permission` block, which OpenCode applies session-wide — parent and children
+/// alike. This runs **after** MCP (Stage 10) so it is the last Claudine overlay
+/// and cannot be weakened by the MCP or system-prompt writers; merging (never
+/// overwriting) keeps their `mcp` / `instructions` keys intact.
+///
+/// Gated on OpenCode + YOLO-took-effect + non-interactive. Off the gate it is a
+/// no-op, so no `permission` key appears for other providers, non-YOLO runs, or
+/// interactive sessions (where OpenCode YOLO is already `not_applied`).
+///
+/// ## Errors
+///
+/// Propagates [`claudine::opencode_config::merge_overlay`] failure when the
+/// existing `OPENCODE_CONFIG_CONTENT` is present but not valid UTF-8 or not a
+/// JSON object.
+pub(crate) fn apply_opencode_yolo_config_overlay(
+    provider: Provider,
+    yolo_enabled: bool,
+    non_interactive: bool,
+    env_plan: &mut env::EnvPlan,
+) -> Result<()> {
+    if provider != Provider::OpenCode || !yolo_enabled || !non_interactive {
+        return Ok(());
+    }
+
+    const KEY: &str = "OPENCODE_CONFIG_CONTENT";
+    let key = std::ffi::OsStr::new(KEY);
+    let current = env_plan.env.get(key).map(|v| v.as_os_str());
+    let merged = claudine::opencode_config::merge_overlay(
+        current,
+        claudine::opencode_config::yolo_permission_block(),
+    )
+    .map_err(|e| eyre!("failed to merge OPENCODE_CONFIG_CONTENT: {e}"))?;
+    env_plan
+        .env
+        .insert(key.to_os_string(), std::ffi::OsString::from(merged.clone()));
+
+    // Keep the dry-run / preflight env display authoritative. That display
+    // renders from `env_plan.added`, not `env_plan.env` (the child's actual
+    // env), so the merged value must replace any earlier OPENCODE_CONFIG_CONTENT
+    // entry the system-prompt fold contributed — otherwise `--dry-run` would
+    // show a stale config missing the permission block.
+    match env_plan.added.iter_mut().find(|(k, _)| k == KEY) {
+        Some(entry) => entry.1 = merged,
+        None => env_plan.added.push((KEY.to_string(), merged)),
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -434,6 +497,12 @@ pub(crate) fn run_execution_stage(
             term,
             source_path: &source_path_for_lifecycle,
             repo_root: env_plan.repo_root.as_deref(),
+            // This stage receives no `LaunchWorkspaceContext`; `ctx.*` capture
+            // falls back to the prompt/source directory.
+            launch_area: None,
+            // No prepared snapshot here; lifecycle falls back to demand-driven
+            // capture rooted at the source directory.
+            context: None,
         };
         let default_lifecycle_emitter = claudine::composition::DefaultLifecycleEmitter;
         let mut lifecycle_guard = claudine::composition::LifecycleRunGuard::new(
@@ -450,6 +519,7 @@ pub(crate) fn run_execution_stage(
             effective_non_interactive,
             args.timeout.clone(),
             cli_step_timeout.clone(),
+            args.stall_timeout.clone(),
             &harness_base_args,
             &env_plan.env,
             &mut prompt_state,
@@ -517,5 +587,193 @@ pub(crate) fn run_execution_stage(
             collector.set_agent_perf(result.telemetry.into_agent_perf(None));
         }
         Ok((result.data, None))
+    }
+}
+
+// Acceptance-criteria → test mapping (spec.md §"Acceptance criteria").
+// Each criterion is traceable to a passing test so reviewers can audit coverage:
+//   #1 subagent external path auto-allowed — `opencode_yolo_spawn_spec_*`
+//      (permission block present on the assembled child) + the permission-block
+//      presence tests below.
+//   #2 three `allow` keys under YOLO non-interactive —
+//      `opencode_yolo_non_interactive_adds_three_allow_keys`.
+//   #3 no `permission` key when not YOLO —
+//      `opencode_non_yolo_non_interactive_leaves_env_untouched`.
+//   #4 `instructions` + `mcp` + `permission` coexist —
+//      `yolo_merge_preserves_instructions_and_mcp` (here) +
+//      `opencode_merge_coexists_with_instructions` (mcp/inject.rs).
+//   #5 `--dangerously-skip-permissions` still on argv —
+//      `opencode_yolo_spawn_spec_has_argv_flag_and_config_permission`.
+//   #6 `doom_loop` auto-allowed — asserted in every permission-block test.
+//   #7 permission JSON byte-identical cross-platform —
+//      `yolo_permission_block_serializes_independent_of_insertion_order`
+//      (opencode_config.rs); the block carries no path content.
+//   #8 existing user config merged or redacted-rejected —
+//      `merge_overlay_*` (opencode_config.rs) +
+//      `opencode_merge_preserves_user_supplied_config` (mcp/inject.rs).
+//   #9 policy path emits no native `--yolo` —
+//      `opencode_one_shot_*` (permissions/providers/opencode.rs).
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+
+    /// Parse a `WrapperArgs` from a bare arg list via a clap probe so the
+    /// `--stall-timeout` validation can be exercised without constructing the
+    /// struct by hand.
+    fn wrapper_args_from(extra: &[&str]) -> WrapperArgs {
+        use clap::Parser;
+
+        // `WrapperArgs` declares its own `help` field, so the auto-generated
+        // `--help` must be disabled to avoid a duplicate-argument panic.
+        #[derive(Debug, clap::Parser)]
+        #[command(disable_help_flag = true)]
+        struct Probe {
+            #[command(flatten)]
+            args: WrapperArgs,
+        }
+
+        let mut argv = vec!["probe"];
+        argv.extend_from_slice(extra);
+        Probe::try_parse_from(argv)
+            .expect("probe must parse")
+            .args
+    }
+
+    #[test]
+    fn parse_cli_timeouts_rejects_invalid_stall_timeout() {
+        let args = wrapper_args_from(&["--stall-timeout", "nope"]);
+        let err = parse_cli_timeouts(&args).unwrap_err();
+        assert!(
+            err.to_string().contains("invalid --stall-timeout value"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_cli_timeouts_accepts_zero_and_valid_stall_timeout() {
+        for value in ["0s", "0.5s", "10m"] {
+            let args = wrapper_args_from(&["--stall-timeout", value]);
+            assert!(
+                parse_cli_timeouts(&args).is_ok(),
+                "--stall-timeout {value} should be accepted"
+            );
+        }
+    }
+
+    const KEY: &str = "OPENCODE_CONFIG_CONTENT";
+
+    fn env_plan_with(current: Option<&str>) -> env::EnvPlan {
+        let mut plan = env::EnvPlan::default();
+        if let Some(raw) = current {
+            plan.env
+                .insert(std::ffi::OsString::from(KEY), std::ffi::OsString::from(raw));
+        }
+        plan
+    }
+
+    fn config_value(plan: &env::EnvPlan) -> Option<Value> {
+        plan.env
+            .get(std::ffi::OsStr::new(KEY))
+            .and_then(|os| os.to_str())
+            .map(|raw| serde_json::from_str(raw).expect("config is valid JSON"))
+    }
+
+    #[test]
+    fn opencode_yolo_non_interactive_adds_three_allow_keys() {
+        let mut plan = env_plan_with(None);
+        apply_opencode_yolo_config_overlay(Provider::OpenCode, true, true, &mut plan).unwrap();
+
+        let config = config_value(&plan).expect("permission overlay was written");
+        let permission = config.get("permission").and_then(Value::as_object).unwrap();
+        assert_eq!(permission["*"], "allow");
+        assert_eq!(permission["external_directory"], "allow");
+        assert_eq!(permission["doom_loop"], "allow");
+    }
+
+    #[test]
+    fn opencode_yolo_interactive_adds_no_permission_key() {
+        let mut plan = env_plan_with(None);
+        // Interactive mirrors `YoloOutcome::not_applied`: the gate is closed.
+        apply_opencode_yolo_config_overlay(Provider::OpenCode, true, false, &mut plan).unwrap();
+        assert!(config_value(&plan).is_none());
+    }
+
+    #[test]
+    fn opencode_non_yolo_non_interactive_leaves_env_untouched() {
+        let existing = r#"{"instructions":["/tmp/sp.md"]}"#;
+        let mut plan = env_plan_with(Some(existing));
+        apply_opencode_yolo_config_overlay(Provider::OpenCode, false, true, &mut plan).unwrap();
+
+        let config = config_value(&plan).unwrap();
+        assert!(config.get("permission").is_none());
+        assert_eq!(config["instructions"], serde_json::json!(["/tmp/sp.md"]));
+    }
+
+    #[test]
+    fn non_opencode_provider_is_a_no_op() {
+        let mut plan = env_plan_with(None);
+        apply_opencode_yolo_config_overlay(Provider::Claude, true, true, &mut plan).unwrap();
+        assert!(config_value(&plan).is_none());
+    }
+
+    #[test]
+    fn yolo_merge_preserves_instructions_and_mcp() {
+        // Simulate Phase 2 output: both system-prompt and MCP writers ran.
+        let existing = r#"{"instructions":["/tmp/sp.md"],"mcp":{"srv":{}}}"#;
+        let mut plan = env_plan_with(Some(existing));
+        apply_opencode_yolo_config_overlay(Provider::OpenCode, true, true, &mut plan).unwrap();
+
+        let config = config_value(&plan).unwrap();
+        assert_eq!(config["instructions"], serde_json::json!(["/tmp/sp.md"]));
+        assert_eq!(config["mcp"], serde_json::json!({ "srv": {} }));
+        assert_eq!(config["permission"]["*"], "allow");
+        assert_eq!(config["permission"]["external_directory"], "allow");
+        assert_eq!(config["permission"]["doom_loop"], "allow");
+    }
+
+    /// Spawn-spec: a non-interactive YOLO OpenCode child carries
+    /// `--dangerously-skip-permissions` on argv (from the profile) **and** the
+    /// permission block in `OPENCODE_CONFIG_CONTENT` (from Stage 10.5).
+    #[test]
+    fn opencode_yolo_spawn_spec_has_argv_flag_and_config_permission() {
+        let opencode = profile::profile_for_provider(Provider::OpenCode).unwrap();
+        let mut argv = vec!["run".to_string()];
+        let mut env_overrides: Vec<(String, String)> = Vec::new();
+        let outcome = opencode
+            .apply_yolo_for_mode(&mut argv, &mut env_overrides, false)
+            .unwrap();
+        assert!(outcome.applied);
+        assert!(argv.iter().any(|a| a == "--dangerously-skip-permissions"));
+
+        let mut plan = env_plan_with(None);
+        apply_opencode_yolo_config_overlay(Provider::OpenCode, outcome.applied, true, &mut plan)
+            .unwrap();
+        let config = config_value(&plan).unwrap();
+        assert_eq!(config["permission"]["external_directory"], "allow");
+        assert_eq!(config["permission"]["doom_loop"], "allow");
+    }
+
+    /// Dry-run observable: `--dry-run` renders the env from `env_plan.added`
+    /// (not the child `env`), so the merged permission block must appear there
+    /// too — otherwise a dry-run would hide the YOLO config it is meant to show.
+    #[test]
+    fn opencode_yolo_overlay_is_visible_in_added_env() {
+        // Simulate the system-prompt fold having already recorded an entry in
+        // `added`; the overlay must replace it, not duplicate it.
+        let existing = r#"{"instructions":["/tmp/sp.md"]}"#;
+        let mut plan = env_plan_with(Some(existing));
+        plan.added.push((KEY.to_string(), existing.to_string()));
+
+        apply_opencode_yolo_config_overlay(Provider::OpenCode, true, true, &mut plan).unwrap();
+
+        let entries: Vec<&(String, String)> =
+            plan.added.iter().filter(|(k, _)| k == KEY).collect();
+        assert_eq!(entries.len(), 1, "no duplicate OPENCODE_CONFIG_CONTENT entry");
+        let shown: Value = serde_json::from_str(&entries[0].1).unwrap();
+        assert_eq!(shown["instructions"], serde_json::json!(["/tmp/sp.md"]));
+        assert_eq!(shown["permission"]["*"], "allow");
+        assert_eq!(shown["permission"]["external_directory"], "allow");
+        assert_eq!(shown["permission"]["doom_loop"], "allow");
     }
 }

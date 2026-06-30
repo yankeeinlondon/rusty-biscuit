@@ -53,6 +53,12 @@ pub struct InlineClosureResult {
     /// `hash` and `last_updated` are excluded from this comparison, so the
     /// stamp itself cannot pollute the signal.
     pub frontmatter_changed: bool,
+    /// Whether Darkmatter's markdown cleanup pass rewrote the replacement body.
+    ///
+    /// Cleanup runs inside the closure so the hashed-and-written body is the
+    /// cleaned body (one atomic write). The CLI surfaces this as the
+    /// "Cleaned up generated markdown formatting" status line.
+    pub body_cleaned: bool,
 }
 
 /// Validate the replacement body, reconstruct the document preserving
@@ -69,6 +75,15 @@ pub fn apply_inline_closure(
             "replacement body is empty".into(),
         ));
     }
+
+    // Clean the body up front so the body that is hashed (D2 unchanged check),
+    // stamped (D3), and atomically written is the final on-disk body. This
+    // keeps the stored `hash:` consistent with the post-cleanup document and
+    // preserves the single atomic write. `cleanup_content` operates on body
+    // text only; frontmatter is assembled separately below.
+    let cleaned_body = darkmatter::markdown::cleanup::cleanup_content(replacement_body);
+    let body_cleaned = cleaned_body != replacement_body;
+    let replacement_body = cleaned_body.as_str();
 
     let replacement_markdown: darkmatter::markdown::Markdown = replacement_body.to_string().into();
     let post_hash = replacement_markdown.compute_hash(MdHashKind::Simple, &inline_hash_options());
@@ -129,7 +144,10 @@ pub fn apply_inline_closure(
         .unwrap_or_else(|| md.as_string());
 
     crate::config::atomic::atomic_write(target_path, final_text.as_bytes())
-        .map_err(|e| CompositionError::AtomicWriteFailed(e.to_string()))?;
+        .map_err(|e| CompositionError::AtomicWriteFailed {
+            path: target_path.to_path_buf(),
+            source: Box::new(e),
+        })?;
 
     // Compute the post-write fm-segment-change signal for tooling that wants
     // to distinguish frontmatter drift from body drift. The `hash` and
@@ -143,6 +161,7 @@ pub fn apply_inline_closure(
         new_properties,
         reverted_properties,
         frontmatter_changed,
+        body_cleaned,
     })
 }
 
@@ -892,7 +911,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_closure_writes_dirty_body_for_downstream_cleanup() {
+    fn apply_closure_writes_cleaned_body_and_consistent_hash() {
         use tempfile::TempDir;
 
         let dir = TempDir::new().unwrap();
@@ -901,35 +920,68 @@ mod tests {
         std::fs::write(&file, original).unwrap();
 
         let original_markdown: darkmatter::markdown::Markdown = original.to_string().into();
-        let original_hash = original_markdown
-            .compute_hash(MdHashKind::Simple, &inline_hash_options());
+        let opts = inline_hash_options();
+        let original_hash = original_markdown.compute_hash(MdHashKind::Simple, &opts);
         let plan = InlineClosurePlan {
             original_document_text: original.to_string(),
             original_hash,
         };
 
-        let dirty_body = "# Generated\nNo blank line before paragraph\n";
-        apply_inline_closure(&plan, dirty_body, &file, "2026-04-02", None).unwrap();
+        // Dirty provider body: header with no following blank line.
+        let dirty_body = "# Generated Title\nParagraph without blank line\n";
+        let result = apply_inline_closure(&plan, dirty_body, &file, "2026-04-02", None).unwrap();
+        assert!(result.body_cleaned, "dirty body must report body_cleaned");
 
         let written = std::fs::read_to_string(&file).unwrap();
-        // apply_inline_closure writes the raw body — cleanup is the caller's job.
-        // Verify the dirty body IS present so the downstream cleanup test is meaningful.
+        // The cleaned body (blank line inserted) is the on-disk body, NOT the
+        // raw provider body.
         assert!(
-            written.contains("# Generated\nNo blank line before paragraph\n"),
-            "raw replacement body must be on disk for downstream cleanup; got:\n{written}"
-        );
-        // Now simulate the cleanup step that callers (inline_cleanup, try_inline_closure) perform
-        let (fm_prefix, body) = split_frontmatter(&written);
-        let cleaned = darkmatter::markdown::cleanup::cleanup_content(body);
-        assert_ne!(
-            cleaned, body,
-            "cleanup_content must transform the dirty body"
+            written.contains("# Generated Title\n\nParagraph without blank line"),
+            "on-disk body must be the cleaned body; got:\n{written}"
         );
         assert!(
-            cleaned.contains("# Generated\n\nNo blank line before paragraph"),
-            "cleaned body must insert blank line between header and paragraph; got:\n{cleaned}"
+            !written.contains("# Generated Title\nParagraph without blank line"),
+            "raw dirty body must not survive to disk; got:\n{written}"
         );
-        let _ = fm_prefix;
+
+        // The stored hash describes the FINAL document: `md hash --diff` would
+        // exit 0 (neither frontmatter nor body reported as changed).
+        let written_md: darkmatter::markdown::Markdown = written.clone().into();
+        let stored = parse_inline_stored_hash(&written_md, &opts)
+            .unwrap()
+            .expect("written file should carry a stored hash");
+        let comparison = written_md.compare_hash(&stored, &opts).unwrap();
+        assert!(
+            !comparison.frontmatter_changed && !comparison.body_changed,
+            "stored hash must match the cleaned on-disk document; got:\n{written}"
+        );
+    }
+
+    #[test]
+    fn apply_closure_body_cleaned_flag_reflects_cleanup() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let opts = inline_hash_options();
+
+        let run = |body: &str| {
+            let file = dir.path().join("flag.md");
+            let original = "---\nprompt: test\nlast_updated: 2026-01-01\n---\nOld body\n";
+            std::fs::write(&file, original).unwrap();
+            let original_md: darkmatter::markdown::Markdown = original.to_string().into();
+            let plan = InlineClosurePlan {
+                original_document_text: original.to_string(),
+                original_hash: original_md.compute_hash(MdHashKind::Simple, &opts),
+            };
+            apply_inline_closure(&plan, body, &file, "2026-04-02", None)
+                .unwrap()
+                .body_cleaned
+        };
+
+        // Dirty: header glued to paragraph → cleanup rewrites it.
+        assert!(run("# Title\nParagraph\n"));
+        // Already clean: cleanup is a no-op.
+        assert!(!run("# Title\n\nParagraph\n"));
     }
 
     #[test]
@@ -1278,24 +1330,5 @@ mod tests {
             !result.frontmatter_changed,
             "a body-only change should leave frontmatter_changed false"
         );
-    }
-
-    fn split_frontmatter(text: &str) -> (&str, &str) {
-        let mut lines = text.split_inclusive('\n');
-        let first = match lines.next() {
-            Some(l) => l,
-            None => return ("", text),
-        };
-        if first.trim_end_matches(['\r', '\n']) != "---" {
-            return ("", text);
-        }
-        let mut offset = first.len();
-        for line in lines {
-            offset += line.len();
-            if line.trim_end_matches(['\r', '\n']) == "---" {
-                return (&text[..offset], &text[offset..]);
-            }
-        }
-        ("", text)
     }
 }

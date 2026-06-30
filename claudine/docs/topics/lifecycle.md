@@ -18,6 +18,31 @@ Seven frontmatter properties control lifecycle behavior. Each accepts an object 
 
 Legacy prompts that only configure `start`, `success`, `blocked`, and `failure` continue to work unchanged.
 
+## Binding Time: Early vs Late
+
+Every frontmatter property of a lifecycle event interpolates **when that event fires**, not during the initial compose. This is what lets a lifecycle message report the state at the moment it runs — including the runtime globals (`err`, `timing`, `current`) that do not exist at compose time. So `failure.message: "❌️  {{err.code}}"` renders the real error's code, and a `failure` stack `message: "❌️  {{err.code}}"` does too.
+
+The variables a lifecycle `{{ … }}` span can read fall into two groups:
+
+- **Early-binding** (resolvable before the run): `doc.*` (frontmatter), `ctx.*`, `env.*`, and read-side functions (`parent_dir`, `dirname`, `frontmatter`, `file_exists`, …).
+- **Late-binding** (only exists at event-time): `err` (in `blocked`/`failure`/optional-error `finalize`), `timing`, `current`.
+
+A lifecycle property's interpolation resolves against the union of both, at event-time. Bare frontmatter references (`{{phase}}`, `{{artifact.path}}`) read the **current** effective document state at the moment the event fires — not a copy captured at the initial compose — so a `set_frontmatter` side effect that mutates `phase` between loop iterations is visible to the next iteration's lifecycle message.
+
+This is the consistent rule used everywhere else: a value is literal text and `{{ … }}` is how you opt into the expression engine. The document body and ordinary (non-lifecycle) frontmatter keys still interpolate at compose-time and are unchanged.
+
+## When Lifecycle Properties Interpolate
+
+Lifecycle strings keep their authored `{{ … }}` spans through the prepare stage — Darkmatter defers the seven lifecycle keys from compose-time resolution — and Claudine re-interpolates each property/action string through Darkmatter (the same composition engine, no second interpolator) just-in-time, immediately before it is used:
+
+- **Communication and action bodies** (`say`, `message`, `notify`, `stderr`, `info`, side-effect args, …) resolve at the instant the event fires, against the live document state plus the in-scope late-binding globals. Resolution is **just-in-time**, not a single snapshot: a `set_frontmatter` run by stack action #1 is visible to action #2 in the same event's stack.
+- **Resolution fails closed.** A malformed expression, an unknown function, an unknown root (a typo), or a late-binding global used outside its legal event fails the event with a typed error *before any side effect is dispatched* — a lifecycle string never silently renders empty for these cases. A *known* surface (a declared frontmatter key, `ctx`/`env`/`doc`, or an in-scope late-binding global) that resolves to `null`/empty still renders empty, as today. To tolerate an *unknown* optional name, opt in with explicit fallback syntax: `{{ maybe || '' }}`.
+- **An evaluation error halts the run on every phase.** This fail-closed raise is an *expression-layer* error (a crashed `when:` guard or interpolation), distinct from a side-effect dispatch failure (below). It is surfaced to stderr as a styled error **at the point of error — before the catch events (`failure`/`finalize`) fire — and exactly once**, so the original crash is visible ahead of any catch-event output rather than buried beneath it. The run exits non-zero. On terminal-phase events (`success`/`failure`/`finalize`/`loop`) it does **not** retroactively fire `failure` (the provider already ran) but does fire `finalize` once with the error exposed as the `err` global, so an author can catch it. If a catch event *itself* raises a new evaluation error, that later crash is the surfaced (and exit-determining) one. A raise inside `finalize` itself surfaces and halts without re-entering `finalize`. A `when:` that evaluates cleanly to `false` is *not* a raise — it just skips its item, unchanged.
+
+### The `shell` exception
+
+`shell` commands (positional `shell: "…"` and key/value `command:`) are the single early-binding exception. They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`doc.*`, `ctx.*`, `env.*`, read-side functions). The approved command is byte-identical to the executed command. A late-binding reference (`err`/`timing`/`current`) inside a shell command is rejected at prepare time with a typed error naming the property path — those values do not exist yet at pre-flight.
+
 ## Notification Fields
 
 Each lifecycle property is an object containing any of these fields:
@@ -53,56 +78,104 @@ A `stack` is an ordered list of conditional actions executed after the top-level
 
 - `when` — an optional Darkmatter condition expression. Omitted means the item always runs.
 - `action` — a single action or a list of actions.
-- `no_error` — when `true`, an errored action is logged but does not stop the stack or change the composition outcome.
+- `no_error` — when `true`, a side-effect **dispatch** failure (a channel/TTS/shell action that evaluated fine but whose effect failed) is logged but does not stop the stack or change the composition outcome. It does **not** suppress an expression-layer evaluation error (a crashed `when:` or interpolation) — those always halt.
 
 ```yaml
 success:
   stack:
     - when: "env.SEND_MESSAGE == 'true'"
-      action: message("Build passed on main")
-    - action: [say("Done"), effect("confirmation")]
+      action: { message: "Build passed on main" }
+    - action:
+        - say: "Done"
+        - effect: "confirmation"
 ```
 
 Actions run in order. The first lifecycle control action (`skip`, `stop`, `error`, etc.) terminates the stack for that event.
 
 ### Action Forms
 
-Actions can be written in short form or long form.
+An action is written in one of exactly two forms — **positional** or **key/value**. Both follow a single evaluation rule:
 
-**Short form:** `verb(args)`
+> **Every value in a lifecycle action is literal text. Use `{{ … }}` to inject a variable or expression. The only expression-evaluated keys in the entire lifecycle surface are the boolean predicates `when`, `until`, and `while`.**
 
-```yaml
-success:
-  stack:
-    - action: say('All done')
-    - action: effect('confirmation')
-    - action: shell('git tag release-{{version}}')
-```
-
-Arguments are Darkmatter expressions. Multi-word strings must be quoted:
+**Positional** — an object whose single key is a known verb; the value carries the argument(s):
 
 ```yaml
 success:
   stack:
-    - action: say('hello world')  # ok
-    # - action: say(hello world)  # ERROR: unquoted multi-word literal
+    - action:
+        - success: "review {{iteration}} is production ready"
+        - message: "✅ review #{{iteration}} completed"
+        - effect: "small-group-cheer"
 ```
 
-**Long form:** an object with an `action` verb key plus named parameters.
+- **Scalar value → one argument.** Scalars may be strings, numbers, or booleans (`message: "review {{iteration}} passed"`, `retry: 3`, `proxy: "other-prompt.md"`).
+- **Array value → positional arguments**, zipped against the verb's canonical signature:
+  ```yaml
+  - set_frontmatter: ["state.md", "status", "production ready"]
+  - append_line: ["log.md", "review {{iteration}} done"]
+  ```
+- **Null value, empty array, or bare verb-name string → zero arguments.** All three spellings are equivalent for no-arg (and all-optional-arg) verbs:
+  ```yaml
+  - stop:        # null value
+  - stop: []     # empty array
+  - stop         # bare verb-name string
+  ```
+
+Positional form covers a verb's canonical call signature only. Optional named parameters that have no positional slot (`route`, `on_error`, `no_error`, `backoff`, `delay`, `max_attempts`, …) require key/value form.
+
+**Key/value** — an object with an explicit `action` verb-discriminator key plus named parameters:
 
 ```yaml
 success:
   stack:
-    - action: shell
-      command: "git push origin HEAD"
-      on_error: "push failed"
-      no_error: true
-    - action: message
-      message: "Deployed {{version}}"
-      route: "deployments"
+    - action:
+        action: shell
+        command: "git push origin HEAD"
+        on_error: "push failed"
+        no_error: true
+    - action:
+        action: message
+        message: "Deployed {{version}}"
+        route: "deployments"
 ```
 
-When `action` is a scalar string, sibling keys are the action's parameters. When `action` is an array, each element is self-contained and sibling parameters are not allowed.
+Reach for key/value form when you want self-documenting parameter names or an optional named parameter. Key/value parameter values follow the same literal-default rule as positional values.
+
+A stack item's `action:` value may be a single positional map (`action: { success: "…" }`), a single key/value map, a bare verb-name string (`action: stop`), or an **array** mixing positional and key/value elements. A single action need not be wrapped in an array-of-one. The two forms are distinguished structurally: an object with an `action:` key is key/value; an object whose single key names a known verb is positional.
+
+#### Typed argument values
+
+A value whose trimmed content is exactly one `{{ expr }}` span resolves to the expression's **typed** value, matching Darkmatter's whole-value frontmatter rule — so `set_frontmatter: ["s.md", "ready", "{{ true }}"]` writes boolean `true`, `"{{ 3 }}"` writes number `3`, and `"3"` writes the string `"3"`. A bare token is always literal text, never a variable: `set_frontmatter: ["s.md", "status", "done"]` writes the literal string `done`.
+
+#### Object-valued arguments
+
+Some side-effect verbs take an object argument (`merge_frontmatter`, `append_jsonl`, key/value `http_post`). Direct nested YAML maps are **not** accepted inside action values. Place the object in frontmatter or context and pass it through a whole-value `{{ … }}` span:
+
+```yaml
+payload:
+  owner: ken
+  status: ready
+success:
+  stack:
+    - action: { merge_frontmatter: ["state.md", "{{ payload }}"] }
+    # key/value equivalent:
+    - action:
+        action: merge_frontmatter
+        file: "state.md"
+        obj: "{{ payload }}"
+```
+
+A literal nested map used directly as an action value (`merge_frontmatter: { owner: ken }`) is a typed object-data-through-interpolation error.
+
+#### Migration from short form
+
+The `verb(args)` **short form** (`say(All done)`, `shell(git push)`, `set_frontmatter('a','b','c')`) has been **removed**. A document still using it fails with a typed did-you-mean error that prints the positional rewrite (`success("x")` → `success: "x"`; `set_frontmatter('a','b','c')` → `set_frontmatter: ["a","b","c"]`). The error highlights the offending frontmatter line in TTY output and stays escape-free in non-color output. Two breaking changes to migrate:
+
+- **`verb(args)` is gone.** Rewrite each call to positional (`message: "…"`, `set_frontmatter: ["…", "…", "…"]`) or key/value form.
+- **Key/value string parameters are now literal by default.** `target: next_prompt` means the literal string `next_prompt`; write `target: "{{ next_prompt }}"` to evaluate it as an expression. Likewise `message: "ctx.area"` sends the text `ctx.area` while `message: "{{ ctx.area }}"` sends the context value.
+
+A bare verb-name string with no parentheses (`- stop`) is **not** short form — it survives as the zero-argument positional spelling.
 
 ### Flow Control Actions
 
@@ -112,15 +185,15 @@ Lifecycle flow control actions terminate the current event's stack and influence
 |--------|----------|--------|
 | `stop` | every event | End this event's stack cleanly; composition continues with the current outcome |
 | `skip` | `initialize` only | Whole-document opt-out: no provider invocation, no `finalize`, no `loop` |
-| `error("reason")` | every event | Mark this event as failed; at `success`/`finalize` it converts success to failure |
-| `proxy("@other.md")` | every event | Hand off to another prompt document, entering the target at its own `initialize` |
-| `retry(N)` | every event | Retry the current prompt N additional times (re-runs pre-flight pre-launch, re-invokes the agent post-launch) |
-| `resume("message")` | every event | Resume the agent session with a follow-up message. Needs a live session — pre-launch it surfaces a `ResumeWithoutSession` error |
-| `defer("5m")` | every event | Defer this prompt to **run again later** — a fresh scheduled run after the delay (not an in-place pause), via the rendezvous deferred-execution scheduler. **Not implemented yet:** `defer` parses and dispatches but currently surfaces a typed `LifecycleDeferNotImplemented` error until the rendezvous backend is ready. |
+| `error: "reason"` | every event | Mark this event as failed; at `success`/`finalize` it converts success to failure |
+| `proxy: "@other.md"` | every event | Hand off to another prompt document, entering the target at its own `initialize` |
+| `retry: 3` | every event | Retry the current prompt N additional times (re-runs pre-flight pre-launch, re-invokes the agent post-launch) |
+| `resume: "message"` | every event | Resume the agent session with a follow-up message. Needs a live session — pre-launch it surfaces a `ResumeWithoutSession` error |
+| `defer: "5m"` | every event | Defer this prompt to **run again later** — a fresh scheduled run after the delay (not an in-place pause), via the rendezvous deferred-execution scheduler. **Not implemented yet:** `defer` parses and dispatches but currently surfaces a typed `LifecycleDeferNotImplemented` error until the rendezvous backend is ready. |
 
 At most one flow-control action may appear in a stack item, and it must be the last action.
 
-**Flow control is universal.** Flow control reacts to **state** — an error, a missing file, an `env` value, frontmatter — and an error is just one kind of state. So `error`/`stop`/`retry`/`resume`/`defer`/`proxy` are valid in **every** event. The headline example: a `success` stack can `resume("you finished but never wrote abc.md — create it as instructed")` when the agent completed cleanly but an expected artifact is missing. The only placement rule is `skip` (`initialize`-only). Apparent event-specific behavior is **runtime capability**, not placement: `resume` needs a live session (pre-launch → `ResumeWithoutSession`) and `retry`'s re-entry point is derived from whether the provider had launched. This is enforced once, at parse time; at runtime every event's stack dispatches its control through the same event-agnostic path. The iteration `loop:` (while/until) is a separate mechanism and is never coupled to handler dispatch.
+**Flow control is universal.** Flow control reacts to **state** — an error, a missing file, an `env` value, frontmatter — and an error is just one kind of state. So `error`/`stop`/`retry`/`resume`/`defer`/`proxy` are valid in **every** event. The headline example: a `success` stack can `resume: "you finished but never wrote abc.md — create it as instructed"` when the agent completed cleanly but an expected artifact is missing. The only placement rule is `skip` (`initialize`-only). Apparent event-specific behavior is **runtime capability**, not placement: `resume` needs a live session (pre-launch → `ResumeWithoutSession`) and `retry`'s re-entry point is derived from whether the provider had launched. This is enforced once, at parse time; at runtime every event's stack dispatches its control through the same event-agnostic path. The iteration `loop:` (while/until) is a separate mechanism and is never coupled to handler dispatch.
 
 The provider run-loop events — `start`, `success`, `failure`, `finalize` — dispatch `retry`/`resume`/`proxy` fully (this is where `success` + `resume` lives). The events that sit *outside* that loop — `initialize`, a compose pre-flight `blocked`, and the `loop` gate — handle `error`/`stop` (and `proxy`/`skip` at `initialize`) directly, but `retry`/`proxy` from those events have no re-entry loop to act on yet, so they surface a clear typed error (`LifecycleSetupPhaseRecoveryUnsupported`) rather than a silent no-op. Put recovery on a post-launch event, or use `initialize` `proxy` for pre-launch routing. `defer` (deferred re-execution) is **not implemented in any event yet** — it always surfaces `LifecycleDeferNotImplemented` until its rendezvous backend lands.
 
@@ -131,9 +204,10 @@ The `shell` action runs an approved shell command. Commands are collected during
 ```yaml
 start:
   stack:
-    - action: shell
-      command: "npm run typecheck"
-      on_error: "typecheck failed"
+    - action:
+        action: shell
+        command: "npm run typecheck"
+        on_error: "typecheck failed"
 ```
 
 A non-zero exit code is an action error unless `no_error: true` is set.
@@ -145,10 +219,10 @@ Any Darkmatter side-effect verb can be invoked by name:
 ```yaml
 start:
   stack:
-    - action: set_frontmatter('state.md', 'status', 'in-progress')
+    - action: { set_frontmatter: ["state.md", "status", "in-progress"] }
 success:
   stack:
-    - action: set_frontmatter('state.md', 'status', 'done')
+    - action: { set_frontmatter: ["state.md", "status", "done"] }
 ```
 
 Long-form side-effect actions accept named parameters that are reordered into the verb's positional signature:
@@ -156,9 +230,10 @@ Long-form side-effect actions accept named parameters that are reordered into th
 ```yaml
 success:
   stack:
-    - action: http_post
-      url: "https://example.com/hook"
-      body: "{{payload}}"
+    - action:
+        action: http_post
+        url: "https://example.com/hook"
+        body: "{{payload}}"
 ```
 
 ### Expression-Function Actions
@@ -168,20 +243,21 @@ Any Darkmatter read-only expression function can be invoked for its result. The 
 ```yaml
 start:
   stack:
-    - action: file_exists('@docs/plan.md')
+    - action: { file_exists: "@docs/plan.md" }
 ```
 
 ### `no_error`
 
-The `no_error` flag can be set on any action category. When `true`, an unintentional action error is logged but does not stop the stack or change the composition outcome.
+The `no_error` flag can be set on any action category. When `true`, an unintentional side-effect **dispatch** failure is logged but does not stop the stack or change the composition outcome. Its scope is the side-effect layer only: an expression-layer evaluation error (a crashed `when:` guard or a `{{ … }}` interpolation that raised) always halts and is never suppressed by `no_error`.
 
 ```yaml
 start:
   stack:
-    - action: shell
-      command: "git status --short"
-      no_error: true
-    - action: info('continuing')
+    - action:
+        action: shell
+        command: "git status --short"
+        no_error: true
+    - action: { info: "continuing" }
 ```
 
 ## Lifecycle Context
@@ -190,18 +266,51 @@ Stack expressions have access to three lifecycle-only globals in addition to fro
 
 | Global | Available in | Fields |
 |--------|--------------|--------|
-| `err` | `blocked`, `failure`, `finalize` | `kind`, `variant`, `msg` |
+| `err` | `blocked`, `failure`, `finalize` | faceted fields below (`code`, `category`, `disposition`, `origin`, `detail.*`, plus promoted conveniences) |
 | `timing` | every event | `document_ms`, `total_ms`, `step_ms` (all optional) |
 | `current` | every event | `current.ctx.*`, `current.env.*` (lazy snapshots at event time) |
 
 `err` is only meaningful in events that can carry an error. Using bare `err` (or `err.*`) in `initialize`, `start`, `success`, or `loop` is rejected at parse time.
 
+### `err` Fields
+
+Match handlers on these **faceted** fields — a stable, versioned contract (see the [error catalog](../../features/2026-06-28-real-errors/error-catalog.md)). Matching on these instead of human prose is what makes a lifecycle handler portable across providers and codes.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `err.code` | string | Stable dotted code, e.g. `composition.invalid_file_reference`, `cap.plan_limit`, `timeout.step_silence`. The most specific handle. |
+| `err.category` | string | Coarse domain — the dotted prefix of `code` (`composition`, `cap`, `timeout`, `provider`, `document`, `vcs`, `io`, `config`, `usage`, `runaway`, `auth`, `internal`). |
+| `err.disposition` | string | Generic remediation strategy: `transient`, `throttled`, `correctable`, `needs_input`, or `unrecoverable`. |
+| `err.origin` | string | Who remediates: `provider`, `author`, `caller`, `environment`, or `internal`. |
+| `err.severity` | string | Operator-facing severity: `info`, `warning`, or `error`. Defaulted from `disposition` (`transient`/`throttled`/`needs_input` → `warning`, `correctable`/`unrecoverable` → `error`) and overridable per code. |
+| `err.detail.*` | typed | Per-instance payload — the fields that vary per occurrence (`err.detail.reference`, `err.detail.property`, `err.detail.reset_at`, …). Shape depends on `code`; an absent field reads as `null`. |
+
+Promoted conveniences (sugar over the canonical fields, present only when the error is classifiable):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `err.is_transient` / `err.is_throttled` / `err.is_correctable` | bool | Predicate sugar derived from `err.disposition`. |
+| `err.reset_at` | string | RFC 3339 timestamp lifted from `err.detail.reset_at` (cap codes); `null` otherwise. |
+| `err.retry_after_ms` | number | Suggested wait lifted from `err.detail.retry_after_ms` (cap codes); `null` otherwise. |
+
 ```yaml
 failure:
   stack:
-    - when: "err.variant == 'ShellCommandDenied'"
-      action: notify("Shell command was denied")
+    - when: "err.code == 'composition.shell_expansion'"
+      action: { notify: "Shell command was denied" }
 ```
+
+#### Deprecated aliases
+
+The original `err` fields remain available for backward compatibility but are **deprecated** — new documents should match the faceted fields above.
+
+`err.kind` and `err.variant` are the deprecated *spellings* of `err.category` and `err.code`: for a classifiable error they carry exactly those facet values, so prefer the faceted names directly. They fall back to Claudine's internal Rust error labels **only** for a facet-less action failure (a generic `shell`/`set_frontmatter` verb that maps to no diagnostic code), where there is no faceted equivalent — those residual values describe the internal shape, drift, and are not portable.
+
+| Deprecated field | Type | Description |
+|------------------|------|-------------|
+| `err.kind` | string | Deprecated alias of `err.category`. Mirrors the category for a classifiable error; falls back to the internal Rust error *type* name (`ClaudineError`, `HarnessError`, `CompositionError`) only for a facet-less action failure. |
+| `err.variant` | string | Deprecated alias of `err.code`. Mirrors the code for a classifiable error; falls back to the internal Rust enum *arm* name (`Io`, `ShellCommandDenied`, `SchemaLoad`) only for a facet-less action failure. |
+| `err.msg` | string | The human-readable `Display` rendering of the error. Prose; matching on it is discouraged. |
 
 ### `doc.err` Escape Hatch
 
@@ -211,7 +320,7 @@ A frontmatter property literally named `err` can still be reached through the `d
 err: "user-configured reason"
 start:
   stack:
-    - action: stderr('{{doc.err}}')
+    - action: { stderr: "{{doc.err}}" }
 ```
 
 ## Loop Gate Concerns
@@ -225,7 +334,7 @@ loop:
     - increment(iteration)
   stderr: "checking loop condition"
   stack:
-    - action: info('loop gate reached')
+    - action: { info: "loop gate reached" }
 ```
 
 Loop execution runs `initialize` once at the start, then re-enters each iteration at `start` without re-running `initialize`, schema validation, or shell pre-flight. `success`, `failure`, and `finalize` fire once per iteration. The loop condition is evaluated **after** lifecycle concerns and **before** per-iteration mutations are applied.
@@ -280,20 +389,22 @@ finalize:
 ---
 failure:
   stack:
-    - when: "err.kind == 'CompositionError'"
-      action: notify("Composition failed")
-    - action: say('Something went wrong')
+    - when: "err.category == 'composition'"
+      action: { notify: "Composition failed" }
+    - action: { say: "Something went wrong" }
 ---
 ```
 
-### Short-form expression arguments
+### Positional actions with interpolation
+
+Action values are literal text; `{{ … }}` interpolates a value:
 
 ```yaml
 ---
 start:
   stack:
-    - action: info('running {{agent}}')
-    - action: shell('git fetch origin {{branch}}')
+    - action: { info: "running {{agent}}" }
+    - action: { shell: "git fetch origin {{branch}}" }
 ---
 ```
 
@@ -303,10 +414,11 @@ start:
 ---
 start:
   stack:
-    - action: shell
-      command: "which optional-tool"
-      no_error: true
-    - action: info('continuing')
+    - action:
+        action: shell
+        command: "which optional-tool"
+        no_error: true
+    - action: { info: "continuing" }
 ---
 ```
 
@@ -322,13 +434,13 @@ loop:
     - increment(iteration)
   stderr: "loop gate"
   stack:
-    - action: info('iteration {{_loop_count}}')
+    - action: { info: "iteration {{_loop_count}}" }
 ---
 ```
 
 ### Recover from a usage cap by switching providers
 
-When a provider hits a usage cap or rate limit, the failure surfaces in the `failure` event with that classification in `err.variant` — the provider's raw `error_kind` (e.g. `usage_limit_reached`, `quota_exceeded`, `rate_limit`). There is no in-place "switch provider" action; instead `proxy` hands the same task off to a sibling prompt that pins a different agent.
+When a provider hits a usage cap or rate limit, the failure surfaces in the `failure` event classified into the locked `cap.*` codes — `cap.rate_limit`, `cap.plan_limit`, or `cap.billing`. The classifier folds each provider's raw label into one of these, so the guard matches the **contract**, not provider-specific strings. There is no in-place "switch provider" action; instead `proxy` hands the same task off to a sibling prompt that pins a different agent.
 
 ```yaml
 ---
@@ -336,14 +448,14 @@ agent: claude
 prompt: "Implement the feature described in @spec.md"
 failure:
   stack:
-    - when: "err.variant == 'usage_limit_reached' || err.variant == 'quota_exceeded' || err.variant == 'rate_limit'"
+    - when: "err.category == 'cap'"
       action:
-        - warn('Claude usage cap reached — handing off to Codex')
-        - proxy('@prompts/feature-codex.md')
+        - warn: "Claude usage cap reached — handing off to Codex"
+        - proxy: "@prompts/feature-codex.md"
 ---
 ```
 
-`@prompts/feature-codex.md` is the same task with `agent: codex` in its frontmatter; `proxy` starts it fresh at its own `initialize`. Because `err.variant` carries the provider's raw `error_kind`, widen the guard to match the kinds your provider emits — run the prompt once to observe the value, or read it off the session badge.
+`@prompts/feature-codex.md` is the same task with `agent: codex` in its frontmatter; `proxy` starts it fresh at its own `initialize`. Matching `err.category == 'cap'` catches every cap — rate limit, plan/usage quota, and billing stop. To react only to the *waitable* caps (rate limit and plan/usage quota, which auto-lift) and not a hard billing stop, match `err.is_throttled` instead; to target one code, use `err.code == 'cap.rate_limit'`.
 
 ### Verify an artifact on success, then retry once from `finalize`
 
@@ -356,21 +468,21 @@ success:
   stack:
     # The agentic loop returned cleanly — confirm the file really exists.
     - when: "!file_exists('@output/RELEASE.md')"
-      action: error('agent reported success but @output/RELEASE.md was never written')
+      action: { error: "agent reported success but @output/RELEASE.md was never written" }
 finalize:
   stack:
     # `finalize` carries `err` after the success-side downgrade. Retry the
     # whole run exactly once; the retried attempt re-enters at `start`.
     - when: "err"
-      action: retry(1)
+      action: { retry: 1 }
 ---
 ```
 
-On the retried attempt the agent runs again and `success` re-verifies the file. With `retry(1)` the budget allows exactly one extra attempt; if the file is still missing after it, `finalize` carries `err` once more, the retry budget is spent, and the run ends in failure. To announce that terminal case, add a guarded `warn` ahead of the `retry` item (the first matching control action ends the stack, so order the `warn` before the `retry`).
+On the retried attempt the agent runs again and `success` re-verifies the file. With `retry: 1` the budget allows exactly one extra attempt; if the file is still missing after it, `finalize` carries `err` once more, the retry budget is spent, and the run ends in failure. To announce that terminal case, add a guarded `warn` ahead of the `retry` item (the first matching control action ends the stack, so order the `warn` before the `retry`).
 
 ### Resume after a timeout
 
-Both the wall-clock `timeout` and the step-silence `step_timeout` surface in the `failure` event with `err.variant` of `timeout` or `step_timeout`. `resume` continues the **same** agent session — context intact — with a follow-up message, which is usually better than `retry` for a timeout (retry re-runs the invocation from scratch).
+Both the wall-clock `timeout` and the step-silence `step_timeout` surface in the `failure` event under the locked `timeout.*` codes — `timeout.wall_clock` and `timeout.step_silence`. `resume` continues the **same** agent session — context intact — with a follow-up message, which is usually better than `retry` for a timeout (retry re-runs the invocation from scratch).
 
 ```yaml
 ---
@@ -379,10 +491,12 @@ timeout: 20m
 step_timeout: 5m
 failure:
   stack:
-    - when: "err.variant == 'timeout' || err.variant == 'step_timeout'"
-      action: resume('You were stopped by a timeout. Continue from where you left off and finish the task.')
+    - when: "err.category == 'timeout'"
+      action: { resume: "You were stopped by a timeout. Continue from where you left off and finish the task." }
 ---
 ```
+
+`err.category == 'timeout'` matches both kinds; to distinguish them, match `err.code == 'timeout.wall_clock'` or `err.code == 'timeout.step_silence'`.
 
 `resume` is valid only in `failure` and defaults to a single attempt (`max_attempts: 1`). Its string argument binds to the required `message:` parameter.
 
@@ -468,30 +582,25 @@ start:
 
 ### `LifecycleInterpolationLeak`
 
-A rendered lifecycle string still contains a `{{ … }}` span after composition. This guards against unresolved template syntax reaching user-visible side effects.
-
-```yaml
-success:
-  stderr: "Done: {{missing_var}}"  # ERROR: interpolation leaked
-```
+Because lifecycle strings are interpolated at event-time (see [When Lifecycle Properties Interpolate](#when-lifecycle-properties-interpolate)), their authored `{{ … }}` spans are **not** prepare-time leaks — they are deferred by design. This guard runs **after** the event-time resolution, immediately before dispatch: a side-effect string that still contains a `{{ … }}` span at that point (e.g. a frontmatter value that is itself raw template text) is a typed error and the side effect is not sent. For non-lifecycle surfaces the guard still runs at prepare time.
 
 ### `LifecycleUndefinedVariable`
 
-A lifecycle string references a bare variable that is undefined after composition. Darkmatter resolves unknown bare variables to an empty string silently, so this guard inspects raw lifecycle strings before composition.
+A reference to a genuinely-unknown root — a typo such as `{{spec_fil}}` for `{{spec_file}}` — fails the event closed at event-time via Darkmatter's strict mode. A *known* root that resolves to empty (`{{spec_file}}` when the key is legitimately absent) renders empty and does not error. To tolerate an unknown optional name, use explicit fallback syntax: `{{ maybe || '' }}`.
 
 ```yaml
 success:
-  stderr: "Done: {{undefined_key}}"  # ERROR: undefined variable
+  stderr: "Done: {{undefined_kee}}"  # ERROR at event-time: unknown root (typo)
 ```
 
 ### `LifecycleErrNotAvailable`
 
-A bare `err` reference appears in an event that never carries an error (`initialize`, `start`, `success`, `loop`).
+`err` is referenced in an event that never carries an error (`initialize`, `start`, `success`, `loop`). The scan walks the `{{ … }}` spans inside communication/action strings **and** the whole `when:` expression, and rejects at parse time. `timing`/`current` are allowed everywhere; `doc.err` remains the escape hatch.
 
 ```yaml
 start:
   stack:
-    - action: stderr('{{err.msg}}')  # ERROR: err not available in start
+    - action: { stderr: "{{err.code}}" }  # ERROR: err not available in start
 ```
 
 ### Empty String Normalization

@@ -13,11 +13,14 @@ pub(crate) fn materialized_harness_prompt_from_prepared(
         claudine::composition::CompositionClosurePlan::Direct => None,
     };
 
+    let live_frontmatter =
+        MaterializedHarnessPrompt::live_cell_from(&prepared.effective_frontmatter);
     MaterializedHarnessPrompt {
         frontmatter: prepared.effective_frontmatter.clone(),
         prompt: prepared.prompt.clone(),
         env_overrides: Vec::new(),
         inline_closure_plan,
+        live_frontmatter,
     }
 }
 
@@ -69,6 +72,11 @@ pub(crate) fn materialize_harness_prompt(
                 darkmatter::markdown::compose::ComposeOptions::new(),
                 &state.source_path,
                 Some(child_cwd),
+            )
+            .with_exclude_keys(
+                claudine::composition::LIFECYCLE_EVENT_KEYS
+                    .iter()
+                    .copied(),
             );
             let (composed, _report) = effective_markdown.compose_with(options)?;
             let prompt = state.base_prompt.clone().ok_or_else(|| {
@@ -85,10 +93,21 @@ pub(crate) fn materialize_harness_prompt(
             )
         }
         HarnessPromptMode::Compose => {
+            // Defer the seven lifecycle event subtrees so their authored `{{ }}`
+            // spans survive raw in the materialized frontmatter for event-time
+            // interpolation — mirroring the prep-time seed (`prepare.rs`). This
+            // is the re-materialization path (retries and proxy hand-offs);
+            // without the deferral a proxy target's lifecycle `{{ err.* }}`
+            // spans resolve here, before the run, and bake to empty.
             let options = claudine::composition::bind_agent_workspace(
                 darkmatter::markdown::compose::ComposeOptions::new(),
                 &state.source_path,
                 Some(child_cwd),
+            )
+            .with_exclude_keys(
+                claudine::composition::LIFECYCLE_EVENT_KEYS
+                    .iter()
+                    .copied(),
             );
             let (composed, _report) = effective_markdown.compose_with(options)?;
             let body = composed.content().to_string();
@@ -136,10 +155,12 @@ pub(crate) fn materialize_harness_prompt(
         }
     }
 
+    let live_frontmatter = MaterializedHarnessPrompt::live_cell_from(&frontmatter);
     Ok(MaterializedHarnessPrompt {
         frontmatter,
         prompt,
         env_overrides,
         inline_closure_plan,
+        live_frontmatter,
     })
 }
