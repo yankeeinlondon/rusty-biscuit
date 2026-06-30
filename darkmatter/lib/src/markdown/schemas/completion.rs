@@ -34,7 +34,8 @@
 
 use super::EffectiveSchema;
 use super::simplified::{
-    Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
+    Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType,
+    TypeExpr,
 };
 
 /// Completion data derived from a single property.
@@ -69,46 +70,113 @@ pub enum CompletionKind {
 /// Returns the completion suggestion for `property` if its declared type is
 /// in the completable set, otherwise `None`.
 ///
-/// For property-level unions, the first atom whose type is completable wins.
-/// This matches the spec's intent of "treat the property as that type for
-/// the purpose of completion" without trying to merge competing arms.
+/// For a property-level union, the first atom whose type is completable wins —
+/// the spec's intent of "treat the property as that type for the purpose of
+/// completion" without merging competing arms.
+///
+/// For a **root-level union**, `property` is gathered from every inline arm
+/// that declares it. When every contributing arm is a `file`, their
+/// `match(...)` globs are combined (deduplicated) so the union offers the union
+/// of its arms' candidates; otherwise the first completable arm wins. See
+/// [`suggestion_from_union`].
 pub fn for_property(effective: &EffectiveSchema, property: &str) -> Option<CompletionSuggestion> {
-    let simplified = effective.simplified.as_ref()?;
-    let shape = single_shape(simplified)?;
-    let def = shape.properties.get(property)?;
-    suggestion_from_def(property, def)
+    match effective.simplified.as_ref()? {
+        SimplifiedSchema::Single(shape) => {
+            let def = shape.properties.get(property)?;
+            suggestion_from_def(property, def)
+        }
+        SimplifiedSchema::Union(arms) => suggestion_from_union(property, arms),
+    }
 }
 
 /// Returns the list of properties in `effective` that have a completable
 /// type. Order matches the SimplifiedSchema's declaration order.
 ///
-/// Returns an empty vector when the effective schema is a root union or was
-/// supplied as raw JSON Schema (no SimplifiedSchema projection is available).
+/// For a root-level union, the union of every inline arm's completable
+/// properties is returned, deduplicated in first-seen order. Returns an empty
+/// vector when the effective schema was supplied as raw JSON Schema (no
+/// SimplifiedSchema projection is available).
 pub fn completable_properties(effective: &EffectiveSchema) -> Vec<String> {
     let Some(simplified) = effective.simplified.as_ref() else {
         return Vec::new();
     };
-    let Some(shape) = single_shape(simplified) else {
-        return Vec::new();
-    };
+    match simplified {
+        SimplifiedSchema::Single(shape) => completable_in_shape(shape),
+        SimplifiedSchema::Union(arms) => {
+            let mut out: Vec<String> = Vec::new();
+            for arm in arms {
+                if let SchemaArm::Inline(shape) = arm {
+                    for name in completable_in_shape(shape) {
+                        if !out.contains(&name) {
+                            out.push(name);
+                        }
+                    }
+                }
+            }
+            out
+        }
+    }
+}
+
+fn completable_in_shape(shape: &SchemaShape) -> Vec<String> {
     shape
         .properties
         .iter()
-        .filter_map(|(name, def)| {
-            if first_completable_atom(def).is_some() {
-                Some(name.clone())
-            } else {
-                None
-            }
-        })
+        .filter_map(|(name, def)| first_completable_atom(def).map(|_| name.clone()))
         .collect()
 }
 
-fn single_shape(schema: &SimplifiedSchema) -> Option<&SchemaShape> {
-    match schema {
-        SimplifiedSchema::Single(shape) => Some(shape),
-        SimplifiedSchema::Union(_) => None,
+/// Builds a completion suggestion for `property` across the inline arms of a
+/// root-level union.
+///
+/// Each arm that declares `property` contributes its first completable atom.
+/// When every contributing atom is a `file`, their `match(...)` globs are
+/// merged (deduplicated, first-seen order) so a union of file-typed arms
+/// offers the union of their candidates instead of only the first arm's.
+/// Otherwise the first contributing atom wins, matching the single-shape
+/// "first completable arm" rule. Unresolved [`SchemaArm::FileRef`] arms are
+/// skipped.
+fn suggestion_from_union(property: &str, arms: &[SchemaArm]) -> Option<CompletionSuggestion> {
+    let atoms: Vec<&PropertyAtom> = arms
+        .iter()
+        .filter_map(|arm| match arm {
+            SchemaArm::Inline(shape) => shape.properties.get(property),
+            SchemaArm::FileRef(_) => None,
+        })
+        .filter_map(first_completable_atom)
+        .collect();
+
+    let first = *atoms.first()?;
+    let all_file = atoms
+        .iter()
+        .all(|atom| matches!(&atom.ty, TypeExpr::Primitive(SimplifiedType::File)));
+    if all_file {
+        let mut patterns: Vec<String> = Vec::new();
+        for atom in &atoms {
+            for constraint in &atom.constraints {
+                if let Constraint::Match(arm_patterns) = constraint {
+                    for pattern in arm_patterns {
+                        if !patterns.contains(pattern) {
+                            patterns.push(pattern.clone());
+                        }
+                    }
+                }
+            }
+        }
+        return Some(CompletionSuggestion {
+            property: property.to_string(),
+            is_array: atoms.iter().any(|atom| atom.is_array),
+            description: first.description.clone(),
+            kind: CompletionKind::File { patterns },
+        });
     }
+
+    Some(CompletionSuggestion {
+        property: property.to_string(),
+        is_array: first.is_array,
+        description: first.description.clone(),
+        kind: kind_for_atom(first)?,
+    })
 }
 
 fn suggestion_from_def(property: &str, def: &PropertyDef) -> Option<CompletionSuggestion> {
@@ -317,6 +385,51 @@ mod tests {
         match suggestion.kind {
             CompletionKind::Hint { format } => assert!(format.contains("URL")),
             other => panic!("expected URL hint from first arm, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn root_union_offers_completable_properties_from_every_arm() {
+        let eff = effective(concat!(
+            "$schema:\n",
+            "  - spec: \"file(match('**/spec*.md'))\"\n",
+            "  - design: \"file(match('**/design*.md'))\"\n",
+        ));
+        let names = completable_properties(&eff);
+        assert_eq!(names, vec!["spec", "design"]);
+    }
+
+    #[test]
+    fn root_union_for_property_returns_per_arm_file_patterns() {
+        let eff = effective(concat!(
+            "$schema:\n",
+            "  - spec: \"file(match('**/spec*.md'))\"\n",
+            "  - design: \"file(match('**/design*.md'))\"\n",
+        ));
+        match for_property(&eff, "spec").expect("spec completable").kind {
+            CompletionKind::File { patterns } => assert_eq!(patterns, vec!["**/spec*.md"]),
+            other => panic!("expected File completion for spec, got {other:?}"),
+        }
+        match for_property(&eff, "design").expect("design completable").kind {
+            CompletionKind::File { patterns } => assert_eq!(patterns, vec!["**/design*.md"]),
+            other => panic!("expected File completion for design, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn root_union_combines_file_patterns_for_shared_property() {
+        // The same property in two file-typed arms must combine its match
+        // globs (deduped) instead of surfacing only the first arm's.
+        let eff = effective(concat!(
+            "$schema:\n",
+            "  - doc: \"file(match('**/spec*.md'))\"\n",
+            "  - doc: \"file(match('**/design*.md', '**/spec*.md'))\"\n",
+        ));
+        match for_property(&eff, "doc").expect("doc completable").kind {
+            CompletionKind::File { patterns } => {
+                assert_eq!(patterns, vec!["**/spec*.md", "**/design*.md"]);
+            }
+            other => panic!("expected combined File completion, got {other:?}"),
         }
     }
 }
