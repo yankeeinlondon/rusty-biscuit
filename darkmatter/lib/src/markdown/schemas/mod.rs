@@ -16,8 +16,10 @@
 //! - [`simplified::convert`] — [`to_json_schema`] lowers a parsed schema to
 //!   Draft 2020-12 JSON Schema.
 //! - [`simplified`] — YAML-shape layer over `serde_yaml_ng::Value`.
-//! - [`format`] — custom format validators (`darkmatter-file`) and keyword
-//!   validators (`x-darkmatter-match`, `x-darkmatter-url-scheme`).
+//! - [`format`] — custom format validators (`darkmatter-file` eager,
+//!   `darkmatter-file-reference` lazy) and the `x-darkmatter-url-scheme`
+//!   keyword validator. (`match(...)` is suggestion metadata only — never a
+//!   validation keyword.)
 //! - [`validate`] — `Validator` construction + LRU [`ValidatorCache`].
 //! - [`resolve`] — `$schema` resolution and baseline merge.
 //! - [`about`] — typed descriptor catalog that backs `md schema about`.
@@ -810,7 +812,7 @@ mod tests {
         std::fs::write(launch_dir.path().join("spec.md"), "# Spec\n").expect("write spec");
         let unrelated_dir = tempfile::tempdir().expect("tempdir");
 
-        let md = md_with_schema("$schema:\n  spec: 'file(required)'\nspec: spec.md\n");
+        let md = md_with_schema("$schema:\n  spec: 'file(eager; required)'\nspec: spec.md\n");
         let api = DarkmatterSchemas::new()
             .with_file_ref_fallback_dir(launch_dir.path().to_path_buf());
 
@@ -838,7 +840,7 @@ mod tests {
         // File exists under CWD but NOT under the prompt dir or the fallback dir.
         std::fs::write(cwd_dir.path().join("ambient.md"), "# Ambient\n").expect("write");
 
-        let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(required)'\nspec: ambient.md\n");
+        let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(eager; required)'\nspec: ambient.md\n");
         let api = DarkmatterSchemas::new()
             .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
 
@@ -952,7 +954,7 @@ mod tests {
         std::fs::write(prompt_dir.path().join("spec.md"), "# prompt copy\n").expect("write prompt spec");
         std::fs::write(fallback_dir.path().join("spec.md"), "# fallback copy\n").expect("write fallback spec");
 
-        let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(required)'\nspec: spec.md\n");
+        let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(eager; required)'\nspec: spec.md\n");
         let api = DarkmatterSchemas::new()
             .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
 
@@ -976,7 +978,7 @@ mod tests {
         let unrelated = tempfile::tempdir().expect("tempdir");
         std::fs::write(prompt_dir.path().join("local.md"), "# local\n").expect("write local");
 
-        let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(required)'\nspec: ./local.md\n");
+        let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(eager; required)'\nspec: ./local.md\n");
         let api = DarkmatterSchemas::new()
             .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
 
@@ -1000,7 +1002,7 @@ mod tests {
         let unrelated = tempfile::tempdir().expect("tempdir");
         std::fs::write(fallback_dir.path().join("caller.md"), "# caller\n").expect("write caller");
 
-        let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(required)'\nspec: caller.md\n");
+        let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(eager; required)'\nspec: caller.md\n");
         let api = DarkmatterSchemas::new()
             .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
 
@@ -1025,7 +1027,7 @@ mod tests {
         let cwd_dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(cwd_dir.path().join("ambient.md"), "# ambient\n").expect("write ambient");
 
-        let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(required)'\nspec: ambient.md\n");
+        let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(eager; required)'\nspec: ambient.md\n");
         let api = DarkmatterSchemas::new()
             .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
 

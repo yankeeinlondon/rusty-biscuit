@@ -12,9 +12,14 @@
 //!   arm onto the parent property. Arm-local constraints stay arm-local. A
 //!   `default(...)` that disagrees across arms is a hard conversion error.
 //! - **`x-darkmatter-*` extensions** are emitted as plain JSON Schema
-//!   annotation keys (`x-darkmatter-match` for `file(match(...))`,
-//!   `x-darkmatter-url-scheme` for `url(scheme(...))`); the custom format
-//!   validators consume them in Phase 3.
+//!   annotation keys (`x-darkmatter-url-scheme` for `url(scheme(...))`); the
+//!   custom format validators consume them. `file(match(...))` is the
+//!   exception: `match` is suggestion metadata only, so it is **not** emitted
+//!   into the compiled JSON Schema (completion reads the patterns from the
+//!   simplified-schema atom instead).
+//! - **`file` existence posture** is carried by the emitted `format`: bare
+//!   `file` lowers to the lazy `darkmatter-file-reference` (syntax-only),
+//!   `file(eager)` lowers to the eager `darkmatter-file` (resolve + exists).
 //! - **Root-level unions** with unresolved [`SchemaArm::FileRef`] arms fail
 //!   with [`SchemaError::Convert`] — Phase 3's resolver is expected to inline
 //!   them before invoking the converter.
@@ -30,6 +35,7 @@ use super::types::{
     TypeExpr,
 };
 use crate::markdown::schemas::errors::SchemaError;
+use crate::markdown::schemas::format::{DARKMATTER_FILE_FORMAT, DARKMATTER_FILE_REFERENCE_FORMAT};
 
 /// Draft 2020-12 schema URI emitted on every generated root schema.
 pub const DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
@@ -546,18 +552,29 @@ fn simple_typed_fragment(
 }
 
 fn file_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
+    // `eager` flips the emitted `format` so the build-time existence decision
+    // is legible to the (sibling-blind) jsonschema format closure: bare `file`
+    // lowers to the lazy `darkmatter-file-reference` (syntax-only), while
+    // `file(eager)` lowers to the eager `darkmatter-file` (resolve + exists).
+    let eager = constraints.iter().any(|c| matches!(c, Constraint::Eager));
+    let format = if eager {
+        DARKMATTER_FILE_FORMAT
+    } else {
+        DARKMATTER_FILE_REFERENCE_FORMAT
+    };
     let mut m = Map::new();
     m.insert("type".into(), Value::String("string".into()));
-    m.insert("format".into(), Value::String("darkmatter-file".into()));
+    m.insert("format".into(), Value::String(format.into()));
     for c in constraints {
         match c {
             Constraint::Required | Constraint::Default(_) => {}
-            Constraint::Match(globs) => {
-                m.insert(
-                    "x-darkmatter-match".into(),
-                    Value::Array(globs.iter().cloned().map(Value::String).collect()),
-                );
-            }
+            // Consumed above to pick the format; nothing further to emit.
+            Constraint::Eager => {}
+            // `match(...)` is suggestion metadata only — it shapes completion
+            // candidates via the simplified-schema atom (`Constraint::Match` →
+            // `CompletionKind::File`), never validation — so it is no longer
+            // emitted into the compiled JSON Schema.
+            Constraint::Match(_) => {}
             other => return Err(invalid_constraint(name, "file", other)),
         }
     }
@@ -790,36 +807,41 @@ mod tests {
     }
 
     #[test]
-    fn file_emits_format_and_match_extension() {
-        // An optional `file` field wraps the `darkmatter-file` fragment in an
-        // `anyOf` with an empty-string arm (Decision A); the file shape lives
-        // in the second arm.
+    fn bare_file_emits_reference_format_and_drops_match_extension() {
+        // Bare `file` is lazy: it lowers to `darkmatter-file-reference`. An
+        // optional `file` field wraps that fragment in an `anyOf` with an
+        // empty-string arm (Decision A); the file shape lives in the third
+        // arm. `match(...)` is suggestion metadata only and is no longer
+        // emitted into the compiled JSON Schema (completion reads it from the
+        // simplified-schema atom).
         let v = optional_atom_value("file(match('*.md', '!_*.md'))");
         let file_arm = &v["anyOf"][2];
         assert_eq!(file_arm["type"], "string");
-        assert_eq!(file_arm["format"], "darkmatter-file");
-        let globs = file_arm["x-darkmatter-match"].as_array().unwrap();
-        assert_eq!(globs[0], "*.md");
-        assert_eq!(globs[1], "!_*.md");
+        assert_eq!(file_arm["format"], "darkmatter-file-reference");
+        assert!(
+            file_arm.get("x-darkmatter-match").is_none(),
+            "match metadata must not reach the compiled JSON Schema: {file_arm}"
+        );
     }
 
     #[test]
     fn optional_file_wraps_empty_string_arm() {
         let v = optional_atom_value("file");
         // Arm 0 admits null, arm 1 admits the empty string ("absent"), and
-        // arm 2 is the file shape.
+        // arm 2 is the (lazy) file shape.
         assert_eq!(v["anyOf"][0]["type"], "null");
         assert_eq!(v["anyOf"][1]["const"], "");
-        assert_eq!(v["anyOf"][2]["format"], "darkmatter-file");
+        assert_eq!(v["anyOf"][2]["format"], "darkmatter-file-reference");
     }
 
     #[test]
     fn required_file_is_not_empty_wrapped() {
         // A required `file` field keeps the strict, unwrapped fragment so an
-        // empty string is still rejected.
+        // empty string is still rejected. Bare `file` is lazy, so the format
+        // is `darkmatter-file-reference`.
         let v = atom_value("file(required)");
         assert_eq!(v["type"], "string");
-        assert_eq!(v["format"], "darkmatter-file");
+        assert_eq!(v["format"], "darkmatter-file-reference");
         assert!(v.get("anyOf").is_none(), "required file must not be empty-wrapped");
     }
 
@@ -890,10 +912,29 @@ mod tests {
 
     #[test]
     fn file_array_with_min_items() {
+        // Bare `file[]` is lazy per item; array constraints stay on the
+        // wrapper. `match(...)` is no longer emitted into the compiled JSON
+        // Schema.
         let v = atom_value("file(match('*.png'))[](min(1))");
+        assert_eq!(v["type"], "array");
+        assert_eq!(v["items"]["format"], "darkmatter-file-reference");
+        assert!(v["items"].get("x-darkmatter-match").is_none());
+        assert_eq!(v["minItems"], 1);
+    }
+
+    #[test]
+    fn file_array_lowers_eager_per_item() {
+        // `eager` is an item-level constraint: `file(eager)[]` carries the
+        // eager `darkmatter-file` format on `items`, while array constraints
+        // (`min`, …) stay on the array wrapper. Bare `file[]` stays lazy per
+        // item.
+        let v = atom_value("file(eager)[](min(1))");
         assert_eq!(v["type"], "array");
         assert_eq!(v["items"]["format"], "darkmatter-file");
         assert_eq!(v["minItems"], 1);
+
+        let v = atom_value("file[]");
+        assert_eq!(v["items"]["format"], "darkmatter-file-reference");
     }
 
     #[test]
@@ -1052,6 +1093,144 @@ flag:
             }
             other => panic!("expected Convert, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn eager_is_accepted_on_file_and_emits_eager_format() {
+        // `eager` is a file-only constraint; on `file` it converts cleanly and
+        // flips the emitted format to the eager `darkmatter-file`.
+        let atom = parse_type_expr("test", "file(eager; required)").unwrap();
+        let v = atom_to_schema("test", &atom)
+            .expect("file(eager) must convert")
+            .0;
+        assert_eq!(v["format"], "darkmatter-file");
+    }
+
+    #[test]
+    fn eager_on_non_file_types_is_fatal() {
+        // D2: `eager` applied to any non-`file` type aborts schema preparation
+        // with a Convert error that names the offending type and constraint.
+        for input in ["string(eager)", "number(eager)"] {
+            let atom = parse_type_expr("test", input).unwrap();
+            let err = atom_to_schema("test", &atom).unwrap_err();
+            match err {
+                SchemaError::Convert { property, message } => {
+                    assert_eq!(property, "test");
+                    assert!(message.contains("eager"), "{input}: {message}");
+                    assert!(
+                        message.contains("string") || message.contains("number"),
+                        "{input}: error must name the offending type: {message}"
+                    );
+                }
+                other => panic!("expected Convert for {input}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn file_lazy_eager_required_matrix() {
+        // The full 4-cell matrix from the spec's semantics table. `eager` and
+        // `required` are orthogonal: `required` governs presence, `eager`
+        // governs existence. A present, syntactically valid but not-yet-
+        // existing path passes lazy declarations and fails eager ones.
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("exists.md"), b"x").unwrap();
+        let _cwd = FileFormatCwdGuard::enter(dir.path());
+
+        let present_missing = json!({ "p": "./missing.md" });
+        let present_existing = json!({ "p": "./exists.md" });
+        let absent = json!({});
+        let null = json!({ "p": null });
+
+        // (declaration, absent_ok, null_ok, present_missing_ok, present_existing_ok)
+        let cases: &[(&str, bool, bool, bool, bool)] = &[
+            // lazy + optional: presence not required, existence not checked.
+            ("p: file", true, true, true, true),
+            // lazy + required: must be present, existence still not checked.
+            ("p: 'file(required)'", false, false, true, true),
+            // eager + optional: absent OK; if present, must exist.
+            ("p: 'file(eager)'", true, true, false, true),
+            // eager + required: must be present AND exist.
+            ("p: 'file(eager; required)'", false, false, false, true),
+        ];
+
+        for (decl, absent_ok, null_ok, present_missing_ok, present_existing_ok) in cases {
+            let schema = convert(decl);
+            let v = crate::markdown::schemas::validate::build_validator(&schema, None, None).unwrap();
+            assert_eq!(v.is_valid(&absent), *absent_ok, "{decl}: absent");
+            assert_eq!(v.is_valid(&null), *null_ok, "{decl}: null");
+            assert_eq!(
+                v.is_valid(&present_missing),
+                *present_missing_ok,
+                "{decl}: present-but-missing"
+            );
+            assert_eq!(
+                v.is_valid(&present_existing),
+                *present_existing_ok,
+                "{decl}: present-and-existing"
+            );
+        }
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn file_malformed_reference_is_fatal_under_both_lazy_and_eager() {
+        // Laziness defers *existence*, not *syntax*: a malformed reference (the
+        // empty string, rejected at `FileReference` parse time) is rejected by
+        // both the lazy bare `file` and the eager `file(eager)` declarations.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let _cwd = FileFormatCwdGuard::enter(dir.path());
+        let malformed = json!({ "p": "" });
+
+        for decl in ["p: 'file(required)'", "p: 'file(eager; required)'"] {
+            let schema = convert(decl);
+            let v = crate::markdown::schemas::validate::build_validator(&schema, None, None).unwrap();
+            assert!(
+                !v.is_valid(&malformed),
+                "{decl}: malformed reference must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn file_array_lazy_accepts_missing_item_eager_rejects() {
+        // Per-item posture: `file[]` accepts an array whose item is a
+        // syntactically valid missing path, while `file(eager)[]` rejects the
+        // same missing item (and accepts an existing one).
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("exists.md"), b"x").unwrap();
+        let _cwd = FileFormatCwdGuard::enter(dir.path());
+
+        let missing_item = json!({ "p": ["./missing.md"] });
+        let existing_item = json!({ "p": ["./exists.md"] });
+
+        let lazy = crate::markdown::schemas::validate::build_validator(
+            &convert("p: 'file[]'"),
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(
+            lazy.is_valid(&missing_item),
+            "file[] must accept a missing syntactically valid item"
+        );
+
+        let eager = crate::markdown::schemas::validate::build_validator(
+            &convert("p: 'file(eager)[]'"),
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(
+            !eager.is_valid(&missing_item),
+            "file(eager)[] must reject a missing item"
+        );
+        assert!(
+            eager.is_valid(&existing_item),
+            "file(eager)[] must accept an existing item"
+        );
     }
 
     #[test]

@@ -4,10 +4,12 @@
 //! `serde_json::Value` and a `jsonschema::Validator` that can be exercised
 //! against frontmatter data. Two responsibilities live here:
 //!
-//! - **Validator construction** — wires up Darkmatter's custom format
-//!   ([`format::DARKMATTER_FILE_FORMAT`]) and keyword
-//!   ([`format::DARKMATTER_MATCH_KEYWORD`],
-//!   [`format::DARKMATTER_URL_SCHEME_KEYWORD`]) on top of Draft 2020-12.
+//! - **Validator construction** — wires up Darkmatter's custom formats
+//!   ([`format::DARKMATTER_FILE_FORMAT`],
+//!   [`format::DARKMATTER_FILE_REFERENCE_FORMAT`]) and the
+//!   [`format::DARKMATTER_URL_SCHEME_KEYWORD`] keyword on top of Draft
+//!   2020-12. (`match(...)` is suggestion metadata only and has no validation
+//!   keyword.)
 //! - **Caching** — compiling a `Validator` is several milliseconds of work;
 //!   the [`ValidatorCache`] hashes the canonicalised schema bytes and reuses
 //!   compiled validators across calls. The default bound (64 entries) is
@@ -239,10 +241,6 @@ pub(super) fn build_validator(
     )
         .should_validate_formats(true)
         .with_keyword(
-            format::DARKMATTER_MATCH_KEYWORD,
-            format::match_keyword_factory,
-        )
-        .with_keyword(
             format::DARKMATTER_URL_SCHEME_KEYWORD,
             format::url_scheme_keyword_factory,
         );
@@ -422,18 +420,27 @@ pub(super) struct FileRefAnchors<'a> {
     pub fallback: Option<&'a Path>,
 }
 
-/// Returns a substituted message for `format: darkmatter-file` failures so
-/// users see the targeted [`format::FileReferenceFailure`] diagnostic instead
-/// of the generic `"<value>" is not a "darkmatter-file"` text produced by
-/// `jsonschema`.
+/// Returns a substituted message for `format: darkmatter-file` (eager) and
+/// `format: darkmatter-file-reference` (lazy) failures so users see a targeted
+/// diagnostic instead of the generic `"<value>" is not a "<format>"` text
+/// produced by `jsonschema`.
 ///
-/// Re-runs [`format::resolve_file_reference`] against the failing instance
-/// string using the same `anchors` the validator was built with. The format
-/// validator already ran during `jsonschema` validation (returning `false` on
-/// failure), so any resolution outcome here reproduces the exact path that
-/// produced the `false`. Returns `None` for non-string instances,
-/// non-darkmatter-file formats, or any other error kind so the caller falls
-/// back to `err.to_string()`.
+/// The two formats fail for different reasons, so the substitution differs:
+///
+/// - **eager `darkmatter-file`** — re-runs [`format::resolve_file_reference`]
+///   against the failing instance string using the same `anchors` the
+///   validator was built with, reproducing the exact existence/resolution
+///   failure (invalid syntax, unresolvable context, or no matching file).
+/// - **lazy `darkmatter-file-reference`** — the lazy validator only fails on
+///   malformed syntax (it never resolves or checks existence), so the targeted
+///   diagnostic is purely the [`FileReference::new`] parse error. No
+///   resolution is attempted here, keeping the lazy contract intact.
+///
+/// The format validator already ran during `jsonschema` validation (returning
+/// `false` on failure), so the outcome here reproduces the exact path that
+/// produced the `false`. Returns `None` for non-string instances, unrelated
+/// formats, or any other error kind so the caller falls back to
+/// `err.to_string()`.
 fn darkmatter_file_format_message(
     err: &jsonschema::ValidationError<'_>,
     anchors: FileRefAnchors<'_>,
@@ -441,17 +448,26 @@ fn darkmatter_file_format_message(
     let ValidationErrorKind::Format { format } = err.kind() else {
         return None;
     };
-    if format != format::DARKMATTER_FILE_FORMAT {
-        return None;
-    }
     let instance = err.instance();
     let Value::String(value) = instance.as_ref() else {
         return None;
     };
-    match format::resolve_file_reference(value, anchors.base_dir, anchors.fallback) {
-        Ok(_) => None,
-        Err(failure) => Some(failure.to_string()),
+    if format == format::DARKMATTER_FILE_FORMAT {
+        return match format::resolve_file_reference(value, anchors.base_dir, anchors.fallback) {
+            Ok(_) => None,
+            Err(failure) => Some(failure.to_string()),
+        };
     }
+    if format == format::DARKMATTER_FILE_REFERENCE_FORMAT {
+        // Lazy: the only way to reach here is a malformed reference. Report the
+        // construction error verbatim, without resolving or touching the
+        // filesystem.
+        return match biscuit_file::FileReference::new(value) {
+            Ok(_) => None,
+            Err(err) => Some(format!("`{value}` is not a valid file reference: {err}")),
+        };
+    }
+    None
 }
 
 /// Maps a `jsonschema::ValidationErrorKind` onto the coarse
@@ -1182,60 +1198,17 @@ mod tests {
         );
     }
 
-    #[test]
-    fn x_darkmatter_match_without_darkmatter_file_format_fails_to_build() {
-        // Schema-build guard: pairing `x-darkmatter-match` with anything
-        // other than `format: darkmatter-file` must surface a build error so
-        // authors cannot silently produce a validator that runs the glob
-        // check without the parse-and-exists format check alongside it.
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "doc": {
-                    "type": "string",
-                    "x-darkmatter-match": ["*.md"]
-                }
-            }
-        });
-        let err = build_validator(&schema, None, None).expect_err("expected build failure");
-        let SchemaError::BuildValidator { message } = &err else {
-            panic!("expected BuildValidator, got {err:?}");
-        };
-        assert!(
-            message.contains("darkmatter-file"),
-            "expected error to name the required format, got: {message}",
-        );
-    }
-
-    #[test]
-    fn x_darkmatter_match_with_darkmatter_file_format_builds() {
-        // Sanity counterpart to the negative case above — the guard must
-        // not reject the legitimate combination emitted by the
-        // SimplifiedSchema converter.
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "doc": {
-                    "type": "string",
-                    "format": "darkmatter-file",
-                    "x-darkmatter-match": ["*.md"]
-                }
-            }
-        });
-        let v = build_validator(&schema, None, None).expect("expected build success");
-        // We don't need a real file for this smoke test — we only need the
-        // schema to compile and the validator to be a working object.
-        let _ = v.is_valid(&json!({}));
-    }
-
     fn darkmatter_file_match_schema() -> Value {
+        // `match(...)` is suggestion metadata only and is never lowered into
+        // the compiled JSON Schema, so the eager existence behavior here comes
+        // purely from `format: darkmatter-file`. The bare `x-darkmatter-match`
+        // annotation is an unknown keyword that JSON Schema ignores.
         json!({
             "type": "object",
             "properties": {
                 "doc": {
                     "type": "string",
-                    "format": "darkmatter-file",
-                    "x-darkmatter-match": ["*.md"]
+                    "format": "darkmatter-file"
                 }
             }
         })
@@ -1271,25 +1244,51 @@ mod tests {
 
     #[test]
     #[serial_test::serial(darkmatter_file_cwd)]
-    fn darkmatter_file_match_existing_mismatch_produces_one_glob_diagnostic() {
+    fn lazy_reference_format_missing_file_produces_no_diagnostic() {
+        // The lazy `darkmatter-file-reference` is syntax-only: a syntactically
+        // valid but not-yet-existing path validates, producing zero existence
+        // diagnostics (the eager case above produces one).
         let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("exists.txt");
-        std::fs::write(&path, b"x").unwrap();
         let _cwd = FileFormatCwdGuard::enter(dir.path());
-        let v = build_validator(&darkmatter_file_match_schema(), None, None).unwrap();
-        let instance = json!({ "doc": "./exists.txt" });
-        let problems = collect_problems(&v, &instance, &PositionMap::new());
-        assert_eq!(
-            problems.len(),
-            1,
-            "expected exactly one glob diagnostic, got: {problems:?}"
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "doc": { "type": "string", "format": "darkmatter-file-reference" }
+            }
+        });
+        let v = build_validator(&schema, None, None).unwrap();
+        let problems = collect_problems(&v, &json!({ "doc": "./does-not-exist.md" }), &PositionMap::new());
+        assert!(
+            problems.is_empty(),
+            "lazy reference of a missing file must not produce a diagnostic, got: {problems:?}"
         );
+    }
+
+    #[test]
+    fn lazy_reference_format_malformed_input_produces_syntax_diagnostic() {
+        // A malformed reference (empty string) is fatal even for the lazy
+        // format, and the substituted message is the syntax error — never an
+        // existence/resolution message, since the lazy validator does not
+        // resolve.
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "doc": { "type": "string", "format": "darkmatter-file-reference" }
+            }
+        });
+        let v = build_validator(&schema, None, None).unwrap();
+        let problems = collect_problems(&v, &json!({ "doc": "" }), &PositionMap::new());
+        assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
         let problem = &problems[0];
         assert_eq!(problem.path, "/doc");
-        assert_eq!(problem.kind, ValidationProblemKind::Invalid);
         assert!(
-            problem.message.contains("does not match the configured file globs"),
-            "expected glob mismatch message, got: {}",
+            problem.message.contains("is not a valid file reference"),
+            "expected syntax message, got: {}",
+            problem.message,
+        );
+        assert!(
+            !problem.message.contains("no existing file matched reference"),
+            "lazy diagnostic must not resolve or report existence, got: {}",
             problem.message,
         );
     }
