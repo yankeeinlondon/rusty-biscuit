@@ -3,6 +3,7 @@ sequence: ./style-guide.yaml
 context: |-
     We have started to build a TUI component library for [Ratatui](https://ratatui.rs/) and before we go any further we want to build up a "design language" / "style guide" that we can
     use both as a way to better describe our future needs as well as our current component library while hopefully aligning our design toward existing practices in the TUI space.
+style_guide: "@biscuit-tui/style-guide/style-guide.md"
 ---
 ::block when="state.name == "Design Language"
 
@@ -53,6 +54,37 @@ Deliver the style guide as a well‑structured document with sections, clear hea
 
 ::endblock
 
-::block when="example"
+::block when="component"
+## Context
+
+You are responsible for evaluating the "{{state.name}}" component in **biscuit-tui**. It is described as:
+
+{{state.desc}}
+
+And you can find more complete documentation for it at: {{state.documentation}}
+
+## Task
+
+Your task is to write the review document: 
+
+- @biscuit-tui/style-guide/reviews/{{state.name}}-review.md
+
+This document is meant to be a **review** of the current component. This review fits into two main components:
+
+1. Style Guide
+
+    How would we describe this component using the {{style_guide}} style guide?
+
+    - add this content under the H2 heading `## Style Guide Description and Review`
+    - look for a clear and concise summary description of this component using the vernacular found the style guide
+    - if there are aspects of this component which you feel don't have a good corollary in the style guide, then suggest how the style-guide might be updated to include language to describe it
+
+    Once done with this section, set the `style_suggestions` frontmatter to the review document to a boolean value indicating whether you have provided any suggestions for changes to the style guide.
+
+2. Component Suggestions
+
+    - add this content under the H2 heading `## Component Review`
+    - identify ways in which this implementation could be improved functionally, performance wise, or ergonomically
+    - look at the current test coverage and recommend ways to fill any identified gaps in coverage
 
 ::end-block

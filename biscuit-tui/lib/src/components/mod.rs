@@ -25,7 +25,8 @@ pub use choose::{
 pub use choose_many::{ChooseMany, ChooseManyState};
 pub use choose_one::{ChooseOne, ChooseOneState};
 pub use input_table::{
-    CellState, CellValue, InputTable, InputTableColumn, InputTableState, Row, RowCell,
+    CellState, CellValue, InputTable, InputTableColumn, InputTableError, InputTableState, Row,
+    RowCell,
 };
 pub use text_area_input::{TextAreaInput, TextAreaInputState};
 pub use text_input::{TextInput, TextInputState};

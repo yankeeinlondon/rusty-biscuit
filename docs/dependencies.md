@@ -806,6 +806,12 @@ This is a Rust workspace with the following modules:
 
     _Tags: graphics, gpu, macos_
 
+- [windows-sys](https://github.com/microsoft/windows-rs) _v0.61_ [📄](https://docs.rs/windows-sys)
+
+    _Raw Win32 console API bindings (`CreateFileW`, `GetStdHandle`, `SetStdHandle`, `CloseHandle`) used by `biscuit-tui` to redirect captured stdout to `CONOUT$` for interactive prompts on Windows. Console detection gates on `GetConsoleMode` via `std::io::IsTerminal`. Target-scoped to `[target.'cfg(windows)'.dependencies]`; Unix builds never pull it in._
+
+    _Tags: ffi, windows, platform_
+
 ### Proc-Macro Utilities
 
 - [proc-macro2](https://github.com/dtolnay/proc-macro2) _v1.0_ [📄](https://docs.rs/proc-macro2)
