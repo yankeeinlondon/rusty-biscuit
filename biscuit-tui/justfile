@@ -61,12 +61,31 @@ test-l2 *args="":
     @echo
     @just _test_l2 {{CLI}} {{args}}
 
-# Not applicable: biscuit-tui has no Level-3 (OS keyboard injection) tests.
-# Keyboard-driven behavior is verified headlessly at Level 2 by injecting the
-# equivalent terminal byte sequences into a tmux pane — focus-stealing
-# cliclick tests were retired in favour of that approach.
-test-l3:
-    @echo "test-l3: not applicable for biscuit-tui (keyboard input verified headlessly at Level 2)"
+# Level-3 OS-keyboard-injection tests for the CLI. Library has no L3 tests.
+#
+# The shared `_test_l3` recipe exports RUN_LEVEL3=1 so the `require_level!` gate
+# trips; each test also skips cleanly when its backend (WezTerm + cliclick,
+# macOS only) is absent. Covers physical Ctrl+Shift / Alt+Shift chord selection
+# for choose-one and choose-many (`level3_chord_select.rs`) — the always-on L2
+# byte-injection tests in `real_terminal_render.rs` remain the headless
+# contract; L3 is the opt-in physical-keypress proof. These steal desktop focus,
+# so they are intentionally NOT part of `test`/`all`.
+test-l3 *args="":
+    @just _test_l3 {{CLI}} {{args}}
+
+# Windows-host runtime gate for F2 captured-stdout parity. Runs the ignored,
+# deterministic console-boundary integration test by exact name; it must execute
+# on a Windows host with an attached console (the test injects Enter via
+# `WriteConsoleInputW`). The CI counterpart is
+# `.github/workflows/biscuit-tui-windows-captured-stdout.yml`.
+test-windows-captured-stdout:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "${OS:-}" != "Windows_NT" ]; then
+        echo "test-windows-captured-stdout must run on a Windows host with an attached console" >&2
+        exit 1
+    fi
+    cargo test -p {{CLI}} --test windows_captured_stdout -- --ignored captured_stdout_receives_only_value_no_tui_bytes
 
 # Not applicable: biscuit-tui has no browser-target tests.
 test-browser:
