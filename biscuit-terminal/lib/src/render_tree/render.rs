@@ -2907,7 +2907,7 @@ mod render_tree_tests {
         ] {
             let mut opts = opts(RenderStrictness::Warn);
             opts.context.color_depth = crate::discovery::detection::ColorDepth::TrueColor;
-            opts.context.color_mode = mode.clone();
+            opts.context.color_mode = mode;
             opts.context.code_theme = Some("one-half".to_string());
             opts.context.line_numbers = true;
             opts.code_renderer = Some(Rc::new(CaptureRenderer {
