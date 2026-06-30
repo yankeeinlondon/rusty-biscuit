@@ -167,6 +167,13 @@ for row in rows {
 }
 ```
 
+`InputTableState::new` panics on invalid input (row-shape mismatch,
+duplicate/unknown/missing column ids, or a typed cell mismatch). For rows
+sourced from user or config data, use the fallible
+`InputTableState::try_new`, which returns a typed `InputTableError`
+instead of panicking. `InputTableError` is re-exported from the crate
+root and prelude alongside the other public table types.
+
 ## Validation
 
 Two-tier validation model:
