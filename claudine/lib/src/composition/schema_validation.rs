@@ -2634,7 +2634,7 @@ mod tests {
             &doc_dir,
             "---\n\
              $schema:\n\
-             \x20 spec: 'file(required)'\n\
+             \x20 spec: 'file(eager; required)'\n\
              spec: spec.md\n\
              ---\n\
              result: {{file_exists(spec)}}\n",
@@ -2719,7 +2719,7 @@ mod tests {
 
         let source = make_source_in(
             doc_dir.path(),
-            "---\n$schema:\n  spec: 'file(required)'\nspec: spec.md\n---\nbody\n",
+            "---\n$schema:\n  spec: 'file(eager; required)'\nspec: spec.md\n---\nbody\n",
         );
 
         let _cwd = CwdGuard::enter(unrelated.path());
@@ -2743,7 +2743,7 @@ mod tests {
 
         let source = make_source_in(
             doc_dir.path(),
-            "---\n$schema:\n  spec: 'file(required)'\nspec: spec.md\n---\nbody\n",
+            "---\n$schema:\n  spec: 'file(eager; required)'\nspec: spec.md\n---\nbody\n",
         );
 
         let _cwd = CwdGuard::enter(unrelated.path());
@@ -2772,7 +2772,7 @@ mod tests {
 
         let source = make_source_in(
             doc_dir.path(),
-            "---\n$schema:\n  spec: 'file(required)'\nspec: spec.md\n---\nbody\n",
+            "---\n$schema:\n  spec: 'file(eager; required)'\nspec: spec.md\n---\nbody\n",
         );
 
         let _cwd = CwdGuard::enter(unrelated.path());
@@ -2795,7 +2795,7 @@ mod tests {
 
         let source = make_source_in(
             doc_dir.path(),
-            "---\n$schema:\n  notes: 'file'\nnotes: notes.md\n---\nbody\n",
+            "---\n$schema:\n  notes: 'file(eager)'\nnotes: notes.md\n---\nbody\n",
         );
 
         let _cwd = CwdGuard::enter(unrelated.path());
@@ -2830,7 +2830,7 @@ mod tests {
 
         let source = make_source_in(
             doc_dir.path(),
-            "---\n$schema:\n  notes: 'file'\nnotes: notes.md\n---\nbody\n",
+            "---\n$schema:\n  notes: 'file(eager)'\nnotes: notes.md\n---\nbody\n",
         );
 
         let _cwd = CwdGuard::enter(unrelated.path());
@@ -2869,7 +2869,7 @@ mod tests {
         // phase1c feeds `overlay.as_set_overrides(...)` into pre-validation.
         let source = make_source_in(
             doc_dir.path(),
-            "---\n$schema:\n  spec: 'file(required)'\n---\nbody\n",
+            "---\n$schema:\n  spec: 'file(eager; required)'\n---\nbody\n",
         );
         let step_overrides = serde_json::json!({ "spec": "step-spec.md" });
 
@@ -2892,7 +2892,7 @@ mod tests {
 
         let source = make_source_in(
             doc_dir.path(),
-            "---\n$schema:\n  spec: 'file(required)'\nspec: spec.md\n---\nbody\n",
+            "---\n$schema:\n  spec: 'file(eager; required)'\nspec: spec.md\n---\nbody\n",
         );
 
         let _cwd = CwdGuard::enter(unrelated.path());
