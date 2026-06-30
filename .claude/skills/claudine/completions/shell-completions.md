@@ -1,0 +1,1 @@
+../../../../claudine/docs/topics/completions/shell-completions.md

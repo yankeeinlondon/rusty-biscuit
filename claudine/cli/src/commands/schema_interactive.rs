@@ -515,8 +515,13 @@ fn collect_file(
         .into_iter()
         .map(|path| {
             let detail = extract_file_detail(&path);
+            // Display the repo/cwd-relative path (with extension), not
+            // `detail.name`: `match(...)` candidates routinely share a basename
+            // (every `**/*spec*.md` hit is `spec`), so the bare name leaves the
+            // choices indistinguishable. The path is both the option id and the
+            // visible label; the detail pane carries the rest.
             let label = path_label(&path, &ctx);
-            ChoiceOption::new(label, detail.name.clone(), detail)
+            ChoiceOption::new(label.clone(), label, detail)
         })
         .collect();
 

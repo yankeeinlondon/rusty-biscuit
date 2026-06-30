@@ -1961,9 +1961,18 @@ impl Writer<'_> {
             .attrs
             .table_terminal_hints_ref()
             .unwrap_or(&default_terminal_hints);
-        let table = Table::new()
+        let mut table = Table::new()
             .with_columns(columns.clone())
             .with_data(data.clone());
+
+        // Carry only the content-box `width` from the node's layout onto the
+        // planning input. Margins stay default here: the tree has already
+        // reduced `available_width` by the block's margins, so re-applying them
+        // would double-count. `width` (e.g. `width: 100%`) drives whether the
+        // planner fills to the available width or hugs its content.
+        if let Some(layout) = table_node.attrs.layout_ref() {
+            table.layout_mut().width = layout.width.clone();
+        }
 
         // ── Pass 1: width planning ─────────────────────────────────────────
         let available = self.opts.context.available_width.max(1);
@@ -4282,6 +4291,36 @@ mod render_tree_tests {
         .expect("render")
         .output;
         assert_eq!(lead_spaces_of_line_with(&out, "hi"), 30);
+    }
+
+    /// A `width: 50%` table fills half the available width — the table's column
+    /// fill must use the box the block-layout step already sized (40 of 80), not
+    /// re-resolve the 50% against that narrowed box (which would yield 25%, a
+    /// double-applied percentage).
+    #[test]
+    fn render_tree_table_fixed_percent_does_not_double_apply() {
+        use crate::components::renderable::TerminalRenderable;
+        use renderable::layout::{Length, TargetValue, Width};
+
+        let term = Terminal::new_optimistic(80);
+        let mut table = Table::new()
+            .with_columns(vec![TableColumn::new("A"), TableColumn::new("B")])
+            .with_data(vec![vec!["x".into(), "y".into()]]);
+        table.layout_mut().width =
+            Width::Fixed(TargetValue::universal(Length::Percent(50.0)));
+
+        let out = table.render(&term);
+        let border = out
+            .lines()
+            .map(visible_width)
+            .max()
+            .expect("table emits at least one line");
+        // The box is 40 (50% of 80); the table fills it. Double-application
+        // would collapse it to ~20. Allow a small tolerance for border glyphs.
+        assert!(
+            (38..=40).contains(&border),
+            "width:50% table must fill ~40 cells, got {border}; output:\n{out}"
+        );
     }
 
     #[test]
