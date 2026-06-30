@@ -1,7 +1,7 @@
 ---
 status: ready for planning and implementation
 reviewed: true
-review_iterations: 2
+review_iterations: 4
 source_review: biscuit-tui/reviews/2026-06-19-comprehensive/review.md
 package_area: biscuit-tui
 ---
