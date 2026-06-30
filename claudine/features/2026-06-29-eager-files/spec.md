@@ -1,6 +1,7 @@
 ---
 status: "ready for planning and implementation"
 reviewed: true
+review_iterations: 2
 ---
 
 # Lazy-by-default `file` references, with an opt-in `eager` constraint
