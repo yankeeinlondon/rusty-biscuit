@@ -14,8 +14,8 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use claudine::composition::sequence::build_step_overlay;
 use claudine::composition::{
-    self, CompositionError, MissingProperty, PrepareOptions, PreparedComposition,
-    ResolvedCompositionSource, SequenceMissingPropertiesStep, SequencePlan,
+    self, CompositionError, LIFECYCLE_EVENT_KEYS, MissingProperty, PrepareOptions,
+    PreparedComposition, ResolvedCompositionSource, SequenceMissingPropertiesStep, SequencePlan,
 };
 use claudine::harness::ShellApprovalOptions;
 use color_eyre::eyre::{Result, eyre};
@@ -470,7 +470,15 @@ fn build_template_preflight_options(
         ctx.env_mut().insert(key.clone(), value.clone());
     }
     let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
-        .with_source_file(source_path);
+        .with_source_file(source_path)
+        // Defer the lifecycle event keys (DM1), matching the main prepare pass.
+        // The preflight compose exists only to discover template `::shell`
+        // directives; without the exclusion it resolves the deferred lifecycle
+        // subtree at compose time, so a `success`/`failure` read-side file
+        // reference (a file a later event creates) trips the fatal file-ref
+        // check before that event fires. Lifecycle shell commands are audited
+        // separately via `collect_lifecycle_shell_commands`.
+        .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied());
     if let Some(launch_area) = launch_area {
         opts = opts.with_file_ref_fallback_dir(launch_area.to_path_buf());
     }
