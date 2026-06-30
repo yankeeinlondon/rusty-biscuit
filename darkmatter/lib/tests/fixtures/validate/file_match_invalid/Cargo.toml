@@ -1,9 +1,0 @@
-# Fixture manifest for the `file_match_invalid` validation case.
-#
-# The document references `./Cargo.toml` against `file(match(*.json))`. Under
-# the document-first file-reference resolution contract this resolves next to
-# `doc.md` (this file), so the file EXISTS and the single reported problem is
-# the genuine glob mismatch (a `.toml` does not match `*.json`) — the behavior
-# this fixture is meant to exercise — rather than a "missing file" diagnostic.
-[package]
-name = "fixture-only"

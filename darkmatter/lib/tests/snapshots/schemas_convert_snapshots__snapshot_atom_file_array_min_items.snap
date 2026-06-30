@@ -14,11 +14,8 @@ expression: "convert_atom(\"file(match('*.png'))[](min(1))\")"
         },
         {
           "items": {
-            "format": "darkmatter-file",
-            "type": "string",
-            "x-darkmatter-match": [
-              "*.png"
-            ]
+            "format": "darkmatter-file-reference",
+            "type": "string"
           },
           "minItems": 1,
           "type": "array"
