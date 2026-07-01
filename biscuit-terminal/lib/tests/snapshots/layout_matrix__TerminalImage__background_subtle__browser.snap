@@ -1,0 +1,5 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: html
+---
+<p style="margin-top:0;margin-bottom:0;margin-left:0;margin-right:0;padding-top:0;padding-bottom:0;padding-left:0;padding-right:0;white-space:nowrap;background-color:rgb(30, 30, 34)"><img src="tiny.png" alt="[Image: tiny.png]"></p>

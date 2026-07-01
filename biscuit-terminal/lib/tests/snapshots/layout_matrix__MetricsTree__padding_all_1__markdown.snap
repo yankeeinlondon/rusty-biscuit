@@ -1,0 +1,7 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: md
+---
+**Total    **  100.0ms  100%
+├─ parse    40.0ms   40%
+└─ render   60.0ms   60%
