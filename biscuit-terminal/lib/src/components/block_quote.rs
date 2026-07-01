@@ -117,6 +117,22 @@ fn left_border(color: Color) -> Border {
 /// assert!(result.contains("│"));
 /// assert!(result.contains("— Anonymous"));
 /// ```
+///
+/// ## Layout & Style Contract
+///
+/// `BlockQuote` is a block component that routes through the shared render-tree
+/// fold (spec C1). All applicable `Layout` properties (`margin`, `padding`,
+/// `width`, `max_width`, `alignment`, `word_wrap`) and `Style` properties
+/// (`color`, `background`, `emphasis`, `border`) are honored on Terminal and
+/// Browser; Markdown degrades layout/appearance attrs by Decision D1 and
+/// preserves only structural output.
+///
+/// The default left border (`│ `) is represented as a typed
+/// [`Border`](renderable::style::Border) on the projected node. A custom
+/// border prefix supplied through [`BlockQuote::with_border`] routes the
+/// terminal [`TerminalRenderable`] impl through a bespoke compatibility
+/// renderer because the render tree cannot express an arbitrary target-specific
+/// prefix string.
 #[derive(Debug, Clone)]
 pub struct BlockQuote {
     /// the content being wrapped in the block quote

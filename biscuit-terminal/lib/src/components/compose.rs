@@ -28,6 +28,26 @@ use crate::utils::layout::Layout;
 /// renderable components into one cohesive output for terminal display.
 /// Parts are rendered sequentially with no automatic spacing between them.
 ///
+/// ## Layout & Style Contract
+///
+/// `Compose` is a sequence container with a dual-mode contract (spec C1/C7):
+///
+/// - **Block-container mode** (the public component API, i.e. calling
+///   `render()` / `render_tree()` directly): the `Compose` root routes through
+///   the shared render-tree fold, so `Layout` box properties (`margin`,
+///   `padding`, `width`, `max_width`, `alignment`) and `Style` (`color`,
+///   `background`, `emphasis`, `border`) are honored via the fold (C1).
+/// - **Inline mode** (when `Compose` content is nested inside another
+///   component): the sequence itself carries no block box; the containing
+///   block owns the box. The concatenated parts are inline content, so
+///   inherited `color` / `emphasis` and inline `background` flow through
+///   (C7). `Compose::is_block_level` remains `false` because its public
+///   contract is inline concatenation, even though its own `Layout` is
+///   applied when it is the top-level rendered node.
+///
+/// `word_wrap` is seeded onto the root node and honored by nested
+/// prose-bearing parts.
+///
 /// ## Examples
 ///
 /// ```

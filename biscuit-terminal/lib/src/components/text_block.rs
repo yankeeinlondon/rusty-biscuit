@@ -69,6 +69,15 @@ use crate::{
 /// every stored field — when rendering through the canonical tree, all
 /// stored style fields now reach the terminal, Browser, and (for color slots
 /// only — Markdown ignores `Style` by contract) MarkdownPlus targets.
+///
+/// ## Layout & Style Contract
+///
+/// `TextBlock` is a block component that routes through the shared render-tree
+/// fold (spec C1). All applicable `Layout` properties (`margin`, `padding`,
+/// `width`, `max_width`, `alignment`, `word_wrap`) and `Style` properties
+/// (`color`, `background`, `emphasis`, `border`) are honored on Terminal and
+/// Browser; Markdown degrades layout/appearance attrs by Decision D1 and
+/// preserves the plain text content.
 #[derive(Debug)]
 pub struct TextBlock {
     content: String,

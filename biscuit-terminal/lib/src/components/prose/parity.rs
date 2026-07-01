@@ -112,7 +112,8 @@ fn terminal_bright_foreground_color() {
 
 #[test]
 fn terminal_named_background_color() {
-    // Web-named background colors lower to truecolor (48;2;…) SGR.
+    // Inline background paints the span content and resets; it does not add
+    // a padding-box background (spec C7).
     assert_eq!(
         term("<bg-coral>note</bg-coral>"),
         "\x1b[48;2;255;127;80mnote\x1b[0m"
@@ -125,6 +126,24 @@ fn terminal_rgb_foreground_color() {
         term("<rgb 1,2,3>c</rgb>"),
         "\x1b[38;2;1;2;3mc\x1b[0m"
     );
+}
+
+#[test]
+fn terminal_inherited_color_flows_to_nested_emphasis() {
+    // A colored outer span wraps a semantic Strong child; the strong child
+    // inherits the foreground color and emits its own bold SGR. This confirms
+    // inline color/emphasis inheritance flows through the tree fold.
+    let out = term("<red>plain <b>bold</b></red>");
+    assert!(
+        out.contains("\x1b[31m"),
+        "red foreground must be present: {out:?}"
+    );
+    assert!(
+        out.contains("\x1b[1m"),
+        "bold SGR must be present: {out:?}"
+    );
+    let stripped = crate::discovery::eval::strip_ansi_codes(&out);
+    assert_eq!(stripped, "plain bold");
 }
 
 #[test]

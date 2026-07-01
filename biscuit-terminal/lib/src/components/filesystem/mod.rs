@@ -74,6 +74,26 @@
 //!
 //! For CLI output, always use `render()` with a [`Terminal`] instance to get
 //! proper icon selection and ANSI styling based on terminal capabilities.
+//!
+//! ## Layout & Style Contract
+//!
+//! `FileSystem` is an internal-layout component (spec C2). The tree projection
+//! honors all applicable `Layout` properties (`margin`, `padding`, `width`,
+//! `max_width`, `alignment`, `word_wrap`) and `Style` properties (`color`,
+//! `background`, `emphasis`, `border`) via the shared render-tree fold (C1).
+//!
+//! - [`Width::Auto`](renderable::layout::Width::Auto) (default) and
+//!   [`Width::Fixed`](renderable::layout::Width::Fixed) fill the available
+//!   width; [`Width::FitContent`](renderable::layout::Width::FitContent) hugs
+//!   the tree's natural width.
+//! - **Slack sink** (spec D2): the entry-label region. Connector glyphs and
+//!   file/directory icons stay fixed across width modes.
+//! - The public [`TerminalRenderable::render`](crate::components::renderable::TerminalRenderable)
+//!   path remains deferred to the bespoke Nerd-Font renderer; the matrix and
+//!   parity coverage use the tree projection, which emits Unicode icons.
+//!
+//! Markdown degrades layout/appearance attrs by Decision D1 and preserves the
+//! structural file-tree syntax where the target renderer supports it.
 
 // Submodules
 pub mod error;

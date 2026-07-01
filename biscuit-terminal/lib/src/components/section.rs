@@ -132,6 +132,15 @@ pub(crate) fn heading_emphasis(depth: u8) -> TextEmphasis {
 /// assert!(output.contains("## Getting Started"));
 /// ```
 ///
+/// ## Layout & Style Contract
+///
+/// `Section` is a block component that routes through the shared render-tree
+/// fold (spec C1). All applicable `Layout` properties (`margin`, `padding`,
+/// `width`, `max_width`, `alignment`, `word_wrap`) and `Style` properties
+/// (`color`, `background`, `emphasis`, `border`) are honored on Terminal and
+/// Browser; Markdown degrades layout/appearance attrs by Decision D1 and
+/// preserves the Markdown heading structure and nested content.
+///
 /// ## Notes
 ///
 /// Content can be strings, [`Prose`][crate::components::prose::Prose],
