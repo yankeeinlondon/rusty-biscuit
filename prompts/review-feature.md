@@ -98,8 +98,8 @@ test is at the wrong level under "Findings" with severity at least "high".
 
 ## Closure
 
-- Save your review suggestions to "@{{review-file}}"
-- Save the following frontmatter properties on "@{{review-file}}.md":
+- Save your review suggestions to "@{{review_file}}"
+- Save the following frontmatter properties on "@{{review_file}}":
     - based on your review suggestions indicate whether you think this feature is **ready for production** by setting the `ready` frontmatter property to `true` or `false`
     - set the `agent` frontmatter property to "{{ctx.agent}}/{{ctx.model}}" 
     - set the `created` frontmatter property to "{{ctx.now}}"
