@@ -27,6 +27,8 @@ use thiserror::Error;
 use crate::components::renderable::TerminalRenderable;
 use crate::utils::layout::LayoutTerminalExt;
 
+use renderable::tree::{RenderNode, TreeRenderable};
+
 // Re-export types from biscuit-visualized
 pub use biscuit_visualized::mermaid::{MermaidConfig, MermaidTheme, QuadrantTheme};
 
@@ -650,6 +652,28 @@ impl super::renderable::TerminalRenderable for MermaidDiagram {
 
     fn layout_mut(&mut self) -> &mut crate::utils::layout::Layout {
         &mut self.layout
+    }
+}
+
+impl TreeRenderable for MermaidDiagram {
+    /// Projects the rendered diagram into a [`NodeKind::Paragraph`] wrapping
+    /// an inline [`NodeKind::Image`] and carrying the component's outer-box
+    /// layout (margin, alignment).
+    ///
+    /// The externally rendered Mermaid PNG is irreducible (spec C5/D5); the
+    /// structural image node carries placement and alt text with the Mermaid
+    /// source, so Browser/Markdown targets degrade to a readable placeholder.
+    /// The `url` is left empty because the rendered PNG is produced on demand
+    /// and has no stable address until rendered to cache.
+    ///
+    /// [`NodeKind::Image`]: renderable::tree::NodeKind::Image
+    /// [`NodeKind::Paragraph`]: renderable::tree::NodeKind::Paragraph
+    fn render_tree(&self) -> RenderNode {
+        let alt = self.fallback_code_block();
+        let image = RenderNode::image("", None, &alt);
+        let mut node = RenderNode::paragraph(vec![image]);
+        node.attrs.set_layout(&self.layout);
+        node
     }
 }
 

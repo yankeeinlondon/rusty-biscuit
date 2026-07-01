@@ -24,6 +24,9 @@ use crate::utils::color::TermColor;
 use crate::utils::layout::Layout;
 
 use self::browser::{parse_basic_color, parse_hex_color};
+use renderable::tree::{
+    HrAlignment, HrKind, HrWeight, RenderNode, ThematicBreakAttrs, TreeRenderable,
+};
 
 /// Default cell width (in pixels) used by `render_image_tier` and
 /// `resolve_width`'s `"NNpx"` branch when the terminal does not advertise a
@@ -202,6 +205,47 @@ impl TerminalRenderable for HorizontalRule {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+impl TreeRenderable for HorizontalRule {
+    /// Projects the rule into a [`NodeKind::ThematicBreak`] node carrying the
+    /// component's [`Layout`] and typed [`ThematicBreakAttrs`].
+    ///
+    /// The structural `ThematicBreak` semantics (spec C9) are preserved on
+    /// every target. The terminal renderer reconstructs a `HorizontalRule`
+    /// from the typed attrs, so the bespoke glyph/image core survives a
+    /// tree round-trip; Browser lowers to `<hr>` and Markdown to `---`.
+    ///
+    /// [`NodeKind::ThematicBreak`]: renderable::tree::NodeKind::ThematicBreak
+    fn render_tree(&self) -> RenderNode {
+        let mut node = RenderNode::thematic_break();
+        node.attrs.set_thematic_break(&ThematicBreakAttrs {
+            kind: Some(match self.style {
+                RuleStyle::Dashes => HrKind::Dashes,
+                RuleStyle::Dots => HrKind::Dots,
+                RuleStyle::Waves => HrKind::Waves,
+                RuleStyle::LineStar => HrKind::LineStar,
+                RuleStyle::LineCircle => HrKind::LineCircle,
+                RuleStyle::InsetLine => HrKind::InsetLine,
+                RuleStyle::CurtainRod => HrKind::CurtainRod,
+            }),
+            alignment: Some(match self.alignment {
+                RuleAlignment::Full => HrAlignment::Full,
+                RuleAlignment::Centered => HrAlignment::Center,
+                RuleAlignment::Left => HrAlignment::Left,
+                RuleAlignment::Right => HrAlignment::Right,
+            }),
+            weight: Some(match self.weight {
+                RuleWeight::Thin => HrWeight::Thin,
+                RuleWeight::Medium => HrWeight::Medium,
+                RuleWeight::Thick => HrWeight::Thick,
+            }),
+            width: self.width.clone(),
+            color: self.color.clone(),
+        });
+        node.attrs.set_layout(&self.layout);
+        node
     }
 }
 

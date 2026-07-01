@@ -22,6 +22,8 @@ use crate::components::renderable::TerminalRenderable;
 use crate::terminal::Terminal;
 use crate::utils::layout::Layout;
 
+use renderable::tree::{RenderNode, TreeRenderable};
+
 /// A single measured value attached to a [`MetricNode`].
 ///
 /// The value is split into a mantissa and a unit suffix at render time so the
@@ -597,6 +599,22 @@ impl TerminalRenderable for MetricsTree {
 
     fn is_block_level(&self) -> bool {
         true
+    }
+}
+
+impl TreeRenderable for MetricsTree {
+    /// Projects the metric tree through [`Prose`]'s tree projection so the
+    /// markup (`<b>`, `<dim>`, `<red>`) lowers to proper inline nodes.
+    ///
+    /// The outer [`Layout`] is propagated onto the inner `Prose`, matching
+    /// the terminal render path so both surfaces carry the same box model.
+    fn render_tree(&self) -> RenderNode {
+        // Render at a generous width so the markup text is not pre-truncated;
+        // the fold re-resolves the box against the real terminal width.
+        let markup = self.build_markup(true, 240);
+        let mut prose = Prose::new(markup);
+        *prose.layout_mut() = self.layout.clone();
+        prose.render_tree()
     }
 }
 

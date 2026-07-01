@@ -25,6 +25,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use renderable::browser::fragment::{BrowserFragment, Ready};
+use renderable::tree::{RenderNode, TreeRenderable};
 
 use crate::components::renderable::{BrowserRenderable, TerminalRenderable};
 use crate::components::terminal_image::{ImageWidth, TerminalImage};
@@ -421,6 +422,28 @@ impl TerminalRenderable for GraphExpression {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+}
+
+impl TreeRenderable for GraphExpression {
+    /// Projects the rendered graph into a [`NodeKind::Paragraph`] wrapping an
+    /// inline [`NodeKind::Image`] and carrying the component's outer-box
+    /// [`Layout`] (margin, alignment).
+    ///
+    /// The rasterized graph canvas is irreducible (spec C5/D5); the structural
+    /// image node carries placement and alt text describing the graph source,
+    /// so Browser/Markdown targets degrade to a readable placeholder. The
+    /// `url` is left empty because the rasterized PNG is produced on demand
+    /// and has no stable address until rendered to cache.
+    ///
+    /// [`NodeKind::Image`]: renderable::tree::NodeKind::Image
+    /// [`NodeKind::Paragraph`]: renderable::tree::NodeKind::Paragraph
+    fn render_tree(&self) -> RenderNode {
+        let alt = self.fallback_code_block();
+        let image = RenderNode::image("", None, &alt);
+        let mut node = RenderNode::paragraph(vec![image]);
+        node.attrs.set_layout(&self.layout);
+        node
     }
 }
 

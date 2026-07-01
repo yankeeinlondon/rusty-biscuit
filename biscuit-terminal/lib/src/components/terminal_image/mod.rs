@@ -34,6 +34,8 @@ use crate::{
     utils::layout::{Alignment, Layout, Length, TargetValue},
 };
 
+use renderable::tree::{RenderNode, TreeRenderable};
+
 mod cursor;
 mod iterm;
 mod kitty;
@@ -290,6 +292,35 @@ impl TerminalRenderable for TerminalImage {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+}
+
+impl TreeRenderable for TerminalImage {
+    /// Projects the image into a [`NodeKind::Paragraph`] wrapping an inline
+    /// [`NodeKind::Image`] and carrying the component's outer-box [`Layout`]
+    /// (margin, alignment).
+    ///
+    /// The Kitty/iTerm2 protocol bytes are irreducible (spec C5/D5); the
+    /// structural image node carries placement and degrades to alt text on
+    /// targets that cannot render inline images. The `url` carries the image's
+    /// basename so Browser/Markdown output is portable; `alt` falls back to
+    /// the generated alt-text label.
+    ///
+    /// [`NodeKind::Image`]: renderable::tree::NodeKind::Image
+    /// [`NodeKind::Paragraph`]: renderable::tree::NodeKind::Paragraph
+    fn render_tree(&self) -> RenderNode {
+        let alt = self.generate_alt_text();
+        // Use the basename so tree snapshots are portable across machines;
+        // the full filesystem path lives on the `filename` field for the
+        // bespoke protocol path.
+        let url = Path::new(&self.filename)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let image = RenderNode::image(&url, None, &alt);
+        let mut node = RenderNode::paragraph(vec![image]);
+        node.attrs.set_layout(&self.layout);
+        node
     }
 }
 
