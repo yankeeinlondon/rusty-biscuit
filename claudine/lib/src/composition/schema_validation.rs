@@ -781,6 +781,88 @@ fn is_required(shape: Option<&SchemaShape>, name: &str) -> bool {
     })
 }
 
+/// Classify a validation problem set as a
+/// [`CompositionError::UnresolvedFileReference`] when a **provided** value for
+/// a `file`/`file[]` property with non-empty `match(...)` patterns failed
+/// existence resolution (Darkmatter's `NoMatch` case).
+///
+/// This is the read-side twin of the missing-property classification: instead
+/// of the value being *absent*, the user supplied a value best interpreted as a
+/// **partial** — a substring to match against the property's `match(...)` glob
+/// candidates. The CLI catches this variant and drives a confirmation dialog
+/// (single match) or chooser (multiple), mirroring the missing-property loop.
+///
+/// Returns `None` when no problem qualifies, so the caller falls back to the
+/// generic [`CompositionError::SchemaValidation`]. Only the first qualifying
+/// property is surfaced; the interactive retry re-runs validation and picks up
+/// any remaining ones one at a time.
+fn classify_unresolved_file_reference(
+    source_path: &std::path::Path,
+    problems: &[ValidationProblem],
+    effective: Option<&EffectiveSchema>,
+    instance: &serde_json::Value,
+) -> Option<CompositionError> {
+    let shape = match effective?.simplified.as_ref()? {
+        SimplifiedSchema::Single(s) => s,
+        SimplifiedSchema::Union(_) => return None,
+    };
+    for problem in problems {
+        // Only Darkmatter's `NoMatch` ("no existing file matched reference")
+        // is a resolvable partial — a parse/resolution error is a genuinely
+        // bad value that a glob walk cannot rescue.
+        if !problem.message.contains("no existing file matched reference") {
+            continue;
+        }
+        let Some(name) = top_level_pointer_segment(&problem.path) else {
+            continue;
+        };
+        let Some(atom) = atom_for_property(shape, &name) else {
+            continue;
+        };
+        if !matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::File)) {
+            continue;
+        }
+        let patterns: Vec<String> = atom
+            .constraints
+            .iter()
+            .find_map(|c| match c {
+                Constraint::Match(p) => Some(p.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        // A bare `file` (no glob) has nothing to walk — leave it to the generic
+        // validation path.
+        if patterns.is_empty() {
+            continue;
+        }
+        let Some(provided) = provided_partial_value(instance.get(&name)) else {
+            continue;
+        };
+        return Some(CompositionError::UnresolvedFileReference {
+            source_path: source_path.to_path_buf(),
+            property: name,
+            provided,
+            patterns,
+            is_array: atom.is_array,
+            reason: problem.message.clone(),
+        });
+    }
+    None
+}
+
+/// Extract the user-provided partial from a frontmatter/override value.
+///
+/// Returns the string for a scalar `file` value (the substring to match against
+/// the `match(...)` glob candidates). A non-string value (array, object) has no
+/// single partial to filter on and is left to the generic schema-validation
+/// path.
+fn provided_partial_value(value: Option<&serde_json::Value>) -> Option<String> {
+    match value? {
+        serde_json::Value::String(s) if !s.trim().is_empty() => Some(s.clone()),
+        _ => None,
+    }
+}
+
 fn is_eager_file_problem(shape: Option<&SchemaShape>, problem: &ValidationProblem) -> bool {
     if !matches!(problem.kind, ValidationProblemKind::Invalid | ValidationProblemKind::Type) {
         return false;
@@ -1294,12 +1376,35 @@ pub fn pre_validate_schema(
 
     let categorized = categorize_problems(&composition_independent, Some(&effective));
     if !categorized.invalid_required.is_empty() {
+        // A provided `file(match)` partial that failed existence resolution is
+        // surfaced as the typed `UnresolvedFileReference` so the CLI can offer
+        // a glob+substring confirmation/chooser, rather than the generic
+        // wrong-type schema error.
+        if let Some(err) = classify_unresolved_file_reference(
+            &source.resolved_path,
+            &categorized.invalid_required,
+            Some(&effective),
+            &instance,
+        ) {
+            return Err(err);
+        }
         return Err(build_schema_validation_error(
             &source.resolved_path,
             &categorized.invalid_required,
         ));
     }
     if !categorized.invalid_optional.is_empty() {
+        // Eager-optional `file(match)` failures reach here too (they are kept,
+        // not dropped); offer the same interactive resolution for a provided
+        // partial before falling back to the generic schema error.
+        if let Some(err) = classify_unresolved_file_reference(
+            &source.resolved_path,
+            &categorized.invalid_optional,
+            Some(&effective),
+            &instance,
+        ) {
+            return Err(err);
+        }
         return Err(build_schema_validation_error(
             &source.resolved_path,
             &categorized.invalid_optional,
@@ -2515,6 +2620,63 @@ mod tests {
             }
             other => panic!("expected SchemaValidation, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn provided_file_match_partial_reports_unresolved_file_reference() {
+        // `spec=everywhere` is a provided partial for a required `file(match)`
+        // property with no literal `everywhere` file. Instead of the generic
+        // SchemaValidation, the layer surfaces the typed UnresolvedFileReference
+        // so the CLI can offer a glob+substring confirmation dialog.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            "---\n$schema:\n  spec: 'file(required;match(**/*spec*.md);eager)'\n---\nbody\n",
+        );
+        let overrides = serde_json::json!({ "spec": "everywhere" });
+
+        let err = pre_validate_schema(&source, Some(&overrides), None)
+            .expect_err("a provided file(match) partial with no literal match should surface a typed error");
+        match err {
+            CompositionError::UnresolvedFileReference {
+                property,
+                provided,
+                patterns,
+                is_array,
+                reason,
+                ..
+            } => {
+                assert_eq!(property, "spec");
+                assert_eq!(provided, "everywhere");
+                assert_eq!(patterns, vec!["**/*spec*.md".to_string()]);
+                assert!(!is_array);
+                assert!(
+                    reason.contains("no existing file matched reference"),
+                    "reason should preserve the original file-reference failure text: {reason}",
+                );
+            }
+            other => panic!("expected UnresolvedFileReference, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provided_file_without_match_stays_schema_validation() {
+        // A bare `file` (no `match(...)` glob) has nothing to walk, so a bad
+        // provided value stays the generic SchemaValidation error rather than
+        // the resolvable UnresolvedFileReference.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            "---\n$schema:\n  spec: 'file(required;eager)'\n---\nbody\n",
+        );
+        let overrides = serde_json::json!({ "spec": "missing/spec.md" });
+
+        let err = pre_validate_schema(&source, Some(&overrides), None)
+            .expect_err("a bare-file bad value should still fail validation");
+        assert!(
+            matches!(err, CompositionError::SchemaValidation { .. }),
+            "expected SchemaValidation for a bare file property, got {err:?}",
+        );
     }
 
     #[test]
