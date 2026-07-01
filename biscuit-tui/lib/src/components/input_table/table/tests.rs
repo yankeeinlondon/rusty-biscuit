@@ -3,6 +3,7 @@ use crate::components::choose::{ChoiceInput, ChoiceOption};
 use crate::components::input_table::column::{
     BooleanSwitchConfig, TextAreaInputConfig, TextInputConfig,
 };
+use crate::components::input_table::error::InputTableError;
 
 fn press(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
@@ -372,7 +373,7 @@ fn new_accepts_typed_row_vec() {
 }
 
 #[test]
-#[should_panic(expected = "row 0 has 1 cells, expected 2")]
+#[should_panic(expected = "InputTableState::new: invalid table shape")]
 fn new_panics_on_length_mismatch() {
     let columns = vec![
         InputTableColumn::StaticText {
@@ -504,7 +505,7 @@ fn submit_focuses_first_failing_cell_in_row_major_order() {
 }
 
 #[test]
-#[should_panic(expected = "unknown column id 'extra'")]
+#[should_panic(expected = "InputTableState::new: invalid table shape")]
 fn new_panics_on_unknown_column_id() {
     let columns = vec![InputTableColumn::TextInput {
         id: "name".into(),
@@ -682,4 +683,231 @@ fn render_static_text_stays_tight() {
         label.push_str(buf[(x as u16, 0)].symbol());
     }
     assert_eq!(label.trim_end(), "Label");
+}
+
+#[test]
+fn try_new_ok_on_valid_rows() {
+    let columns = vec![
+        InputTableColumn::StaticText {
+            id: "row".into(),
+            text: "1".into(),
+        },
+        InputTableColumn::TextInput {
+            id: "name".into(),
+            config: TextInputConfig::default(),
+        },
+        InputTableColumn::BooleanSwitch {
+            id: "active".into(),
+            config: BooleanSwitchConfig::default(),
+        },
+    ];
+    let initial_rows = vec![Row::new(vec![
+        RowCell::new("row", CellValue::StaticText("1".into())),
+        RowCell::new("name", CellValue::Text("Alice".into())),
+        RowCell::new("active", CellValue::Boolean(true)),
+    ])];
+    let state = InputTableState::try_new(columns, initial_rows).unwrap();
+    assert_eq!(state.row_count(), 1);
+    assert_eq!(state.value()[0].get_text("name"), Some("Alice"));
+    assert_eq!(state.value()[0].get_boolean("active"), Some(true));
+}
+
+#[test]
+fn try_new_returns_row_shape_mismatch_with_context() {
+    // An over-length row (3 cells for 2 columns) is a pure count error that
+    // no single id mismatch can explain, so it short-circuits to
+    // `RowShapeMismatch`. An under-length row instead reaches `validate_row`
+    // and yields `MissingColumnId` — see
+    // `try_new_returns_missing_column_id_with_context`.
+    let columns = vec![
+        InputTableColumn::StaticText {
+            id: "a".into(),
+            text: "A".into(),
+        },
+        InputTableColumn::StaticText {
+            id: "b".into(),
+            text: "B".into(),
+        },
+    ];
+    let initial_rows = vec![Row::new(vec![
+        RowCell::new("a", CellValue::StaticText("a".into())),
+        RowCell::new("b", CellValue::StaticText("b".into())),
+        RowCell::new("c", CellValue::StaticText("c".into())),
+    ])];
+    let err = InputTableState::try_new(columns, initial_rows).unwrap_err();
+    assert_eq!(
+        err,
+        InputTableError::RowShapeMismatch {
+            row: 0,
+            expected: 2,
+            found: 3
+        }
+    );
+}
+
+#[test]
+fn try_new_returns_duplicate_column_id_with_context() {
+    let columns = vec![
+        InputTableColumn::BooleanSwitch {
+            id: "active".into(),
+            config: BooleanSwitchConfig::default(),
+        },
+        InputTableColumn::TextInput {
+            id: "name".into(),
+            config: TextInputConfig::default(),
+        },
+    ];
+    let initial_rows = vec![Row::new(vec![
+        RowCell::new("active", CellValue::Boolean(true)),
+        RowCell::new("active", CellValue::Boolean(false)),
+    ])];
+    let err = InputTableState::try_new(columns, initial_rows).unwrap_err();
+    assert_eq!(
+        err,
+        InputTableError::DuplicateColumnId {
+            row: 0,
+            id: "active".into()
+        }
+    );
+}
+
+#[test]
+fn try_new_returns_unknown_column_id_with_context() {
+    let columns = vec![InputTableColumn::TextInput {
+        id: "name".into(),
+        config: TextInputConfig::default(),
+    }];
+    let initial_rows = vec![Row::new(vec![RowCell::new(
+        "extra",
+        CellValue::Text("alice".into()),
+    )])];
+    let err = InputTableState::try_new(columns, initial_rows).unwrap_err();
+    assert_eq!(
+        err,
+        InputTableError::UnknownColumnId {
+            row: 0,
+            id: "extra".into()
+        }
+    );
+}
+
+#[test]
+fn try_new_returns_missing_column_id_with_context() {
+    // An under-length row (only the `name` cell) has unique known ids, so the
+    // public `try_new` delegates past the over-length short-circuit to
+    // `validate_row`, which reports the absent `active` column.
+    let columns = vec![
+        InputTableColumn::TextInput {
+            id: "name".into(),
+            config: TextInputConfig::default(),
+        },
+        InputTableColumn::BooleanSwitch {
+            id: "active".into(),
+            config: BooleanSwitchConfig::default(),
+        },
+    ];
+    let initial_rows = vec![Row::new(vec![RowCell::new(
+        "name",
+        CellValue::Text("alice".into()),
+    )])];
+    let err = InputTableState::try_new(columns, initial_rows).unwrap_err();
+    assert_eq!(
+        err,
+        InputTableError::MissingColumnId {
+            row: 0,
+            id: "active".into()
+        }
+    );
+}
+
+#[test]
+fn try_new_returns_cell_type_mismatch_for_text_in_boolean_column() {
+    let columns = vec![InputTableColumn::BooleanSwitch {
+        id: "active".into(),
+        config: BooleanSwitchConfig::default(),
+    }];
+    let initial_rows = vec![Row::new(vec![RowCell::new(
+        "active",
+        CellValue::Text("true".into()),
+    )])];
+    let err = InputTableState::try_new(columns, initial_rows).unwrap_err();
+    assert_eq!(
+        err,
+        InputTableError::CellTypeMismatch {
+            row: 0,
+            id: "active".into(),
+            expected: "boolean",
+            found: "text",
+        }
+    );
+}
+
+#[test]
+fn try_new_returns_cell_type_mismatch_for_boolean_in_text_column() {
+    let columns = vec![InputTableColumn::TextInput {
+        id: "name".into(),
+        config: TextInputConfig::default(),
+    }];
+    let initial_rows = vec![Row::new(vec![RowCell::new(
+        "name",
+        CellValue::Boolean(true),
+    )])];
+    let err = InputTableState::try_new(columns, initial_rows).unwrap_err();
+    assert_eq!(
+        err,
+        InputTableError::CellTypeMismatch {
+            row: 0,
+            id: "name".into(),
+            expected: "text",
+            found: "boolean",
+        }
+    );
+}
+
+#[test]
+fn try_new_returns_cell_type_mismatch_for_chosen_many_in_choose_one() {
+    let input = ChoiceInput::new("c", "p").with_options(vec![ChoiceOption::new("a", "A", "alpha")]);
+    let columns = vec![InputTableColumn::ChooseOne(input)];
+    let initial_rows = vec![Row::new(vec![RowCell::new(
+        "c",
+        CellValue::ChosenMany(vec!["a".into()]),
+    )])];
+    let err = InputTableState::try_new(columns, initial_rows).unwrap_err();
+    assert_eq!(
+        err,
+        InputTableError::CellTypeMismatch {
+            row: 0,
+            id: "c".into(),
+            expected: "chosen-one",
+            found: "chosen-many",
+        }
+    );
+}
+
+#[test]
+fn try_new_accepts_chosen_one_none_for_optional_choice() {
+    let input = ChoiceInput::new("c", "p").with_options(vec![ChoiceOption::new("a", "A", "alpha")]);
+    let columns = vec![InputTableColumn::ChooseOne(input)];
+    let initial_rows = vec![Row::new(vec![RowCell::new(
+        "c",
+        CellValue::ChosenOne(None),
+    )])];
+    let state = InputTableState::try_new(columns, initial_rows).unwrap();
+    assert_eq!(state.row_count(), 1);
+}
+
+#[test]
+fn new_still_panics_on_cell_type_mismatch() {
+    let columns = vec![InputTableColumn::BooleanSwitch {
+        id: "active".into(),
+        config: BooleanSwitchConfig::default(),
+    }];
+    let initial_rows = vec![Row::new(vec![RowCell::new(
+        "active",
+        CellValue::Text("true".into()),
+    )])];
+    let result = std::panic::catch_unwind(|| {
+        InputTableState::new(columns, initial_rows);
+    });
+    assert!(result.is_err(), "new should panic on cell type mismatch");
 }

@@ -10,8 +10,26 @@ description: |-
         - native
         - WSL
 review: "@{{ctx.area}}/reviews/{{ctx.today}}-cross-platform/review-1.md"
+favorites: true
+start:
+    message: "🎛️ starting a **cross-platform** review in the **{{ctx.area}}** package area (_{{ctx.now}}_)"
+success:
+    stack:
+        - when: "frontmatter(review, 'ready') == true"
+          action:
+              - message: "✅ **cross-platform** review in **{{ctx.area}}** completed successfully (_all platforms are deemed to be in good shape_). Review took: {{timing.duration}}."
+              - effect: small-group-cheer
+        - when: "frontmatter(review, 'ready') != true"
+          action:
+              - message: "⚠️ **cross-platform** review completed successfully but was deemed to have code issues that need addressing: `{{review}}`"
+              - effect: phase-jump-3
+failure:
+    message: "💥 failed to complete the **cross-platform** review in **{{ctx.area}}**. Error: {{err.message}}."
+    effect: sad-trombone
 ---
 # Ensuring Cross Platform Support
+
+## Context
 
 Your task is to review the "{{ ctx.area }}" package area for signs that it is not upholding the requirement that this Rust code base work across:
 
@@ -21,13 +39,7 @@ Your task is to review the "{{ ctx.area }}" package area for signs that it is no
     - native
     - WSL
 
-Then write a review to {{review}}, including:
-
-- summary overview of what you found (add to a `## Summary` section)
-- recommendations on how this should be fixed/improved (add to a `## Suggestions` section)
-- assess whether this code base is acceptable based solely on its ability to support all of the target platforms
-
-You should save your review to: {{review}}
+> **Note:** you are running this review on host which is running the {{ctx.os}} OS. That doesn't mean you should focus more on that OS. All OS's are given equal weight and importance. Ironically it is likely that the code base is actually in better shape for the {{ctx.os}} OS simply because this host may be being used as the primary development and testing platform too.
 
 ## Key areas to examine
 
@@ -99,7 +111,13 @@ You should save your review to: {{review}}
 
 ## Task
 
-Review the Rust project for **cross‑platform compatibility issues**.  The project is intended to run on **macOS**, **Linux**, **native Windows**, and **Windows Subsystem for Linux (WSL)**.  When reviewing the code, please:
+Write a review to {{review}}, including:
+
+- summary overview of what you found (add to a `## Summary` section)
+- recommendations on how this should be fixed/improved (add to a `## Suggestions` section)
+- assess whether this code base is acceptable based solely on its ability to support all of the target platforms
+
+While performing the review review the Rust project for **cross‑platform compatibility issues**.  The project is intended to run on **macOS**, **Linux**, **native Windows**, and **Windows Subsystem for Linux (WSL)**.  When reviewing the code, please:
 
 1. **Search for platform-specific implementation code.** Include `std::os::*`, conditional compilation, raw FFI, OS-specific crates, build scripts, process spawning, filesystem behavior, dynamic library loading, sockets, and local IPC. Verify that every target platform has either a working implementation or a documented, intentional unsupported path.
 
@@ -109,4 +127,18 @@ Review the Rust project for **cross‑platform compatibility issues**.  The proj
 
 4. **Report with code references and remediation.** For each issue, reference the relevant file and line, name the affected target(s), explain the likely failure mode, and suggest the smallest practical fix. Examples include using `Path::join`, `split_paths`, target-specific dynamic-library naming, portable temp-file handling, unique socket names, loopback TCP, Windows named pipes, or a tested abstraction over platform-specific IPC.
 
-**Deliverable:** Save a structured report to {{review}}. Include `## Summary`, findings ordered by severity, `## Suggestions`, and a final assessment of whether the package area appears acceptable for macOS, Linux, native Windows, and WSL based only on cross-platform support.
+### **Deliverable:** 
+
+Save a structured report to {{review}}. 
+
+- Include `## Summary`, findings ordered by severity, `## Suggestions`, and a final assessment of whether the package area appears acceptable for macOS, Linux, native Windows, and WSL based only on cross-platform support.
+- Save to the review file's Frontmatter:
+    - `$schema` as `{ ready: boolean, macos_ready: boolean, windows_ready: boolean, linux_ready: boolean, agent: string, created: string }`
+    - `about` as 'A cross-platform review of the {{ctx.area}} package area on {{ctx.today}}'
+    - `author` as 'prompts/cross-platform.md'
+    - `created` as '{{ctx.now}}'
+    - `agent` as '{{ctx.agent}}/{{ctx.model}}'
+    - `ready` as a boolean flag which indicates whether this code "acceptable" based solely on its ability to support all target platforms
+    - `macos_ready` as a boolean flag which indicates whether the code base is "acceptable" based solely on its ability to support the **macOS** platform
+    - `windows_ready` as a boolean flag which indicates whether the code base is "acceptable" based solely on its ability to support the **windows** platform
+    - `linux_ready` as a boolean flag which indicates whether the code base is "acceptable" based solely on its ability to support the **linux** platform

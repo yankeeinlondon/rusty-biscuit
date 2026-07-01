@@ -269,3 +269,246 @@ fn run_returns_1_without_output_on_esc() {
     assert_eq!(status, 1);
     assert!(output.is_empty());
 }
+
+#[test]
+fn parse_columns_rejects_oversized_preferred_width() {
+    let json = r#"[{"type":"text-area-input","preferred_width":99999}]"#;
+    let err = parse_columns(json).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    let msg = err.to_string();
+    assert!(msg.contains("preferred_width"), "got {msg}");
+    assert!(msg.contains("overflows u16"), "got {msg}");
+}
+
+#[test]
+fn parse_columns_rejects_oversized_preferred_height() {
+    let json = r#"[{"type":"text-area-input","preferred_height":99999}]"#;
+    let err = parse_columns(json).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    let msg = err.to_string();
+    assert!(msg.contains("preferred_height"), "got {msg}");
+    assert!(msg.contains("overflows u16"), "got {msg}");
+}
+
+#[test]
+fn parse_columns_rejects_oversized_max_length() {
+    // usize matches u64 on 64-bit hosts, so the practical overflow case is a
+    // non-integer numeric (fractional or negative) — exercise that surface.
+    let json = r#"[{"type":"text-input","max_length":-1}]"#;
+    let err = parse_columns(json).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    let msg = err.to_string();
+    assert!(msg.contains("max_length"), "got {msg}");
+    assert!(msg.contains("non-negative integer"), "got {msg}");
+}
+
+#[test]
+fn parse_columns_rejects_string_preferred_width() {
+    let json = r#"[{"type":"text-area-input","preferred_width":"wide"}]"#;
+    let err = parse_columns(json).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    let msg = err.to_string();
+    assert!(msg.contains("preferred_width"), "got {msg}");
+    assert!(msg.contains("expected number"), "got {msg}");
+}
+
+#[test]
+fn parse_columns_rejects_wrong_type_initial_on_text_input() {
+    let json = r#"[{"type":"text-input","initial":42}]"#;
+    let err = parse_columns(json).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    let msg = err.to_string();
+    assert!(msg.contains("initial"), "got {msg}");
+    assert!(msg.contains("expected string"), "got {msg}");
+}
+
+#[test]
+fn parse_columns_rejects_wrong_type_required_on_choice() {
+    let json = r#"[{"type":"choose-one","options":["A"],"required":"yes"}]"#;
+    let err = parse_columns(json).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    let msg = err.to_string();
+    assert!(msg.contains("required"), "got {msg}");
+    assert!(msg.contains("expected boolean"), "got {msg}");
+}
+
+#[test]
+fn parse_columns_rejects_wrong_type_scrollbar_on_text_area() {
+    let json = r#"[{"type":"text-area-input","scrollbar":"false"}]"#;
+    let err = parse_columns(json).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    let msg = err.to_string();
+    assert!(msg.contains("scrollbar"), "got {msg}");
+    assert!(msg.contains("expected boolean"), "got {msg}");
+}
+
+#[test]
+fn parse_columns_rejects_non_string_element_in_text_area_initial() {
+    let json = r#"[{"type":"text-area-input","initial":["a",42]}]"#;
+    let err = parse_columns(json).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    let msg = err.to_string();
+    assert!(msg.contains("initial"), "got {msg}");
+    assert!(msg.contains("must be string"), "got {msg}");
+}
+
+#[test]
+fn parse_columns_rejects_wrong_type_initial_on_text_area() {
+    let json = r#"[{"type":"text-area-input","initial":"single-string"}]"#;
+    let err = parse_columns(json).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    let msg = err.to_string();
+    assert!(msg.contains("initial"), "got {msg}");
+    assert!(msg.contains("expected array of strings"), "got {msg}");
+}
+
+#[test]
+fn parse_rows_typed_rejects_non_string_for_text_input_cell() {
+    let columns = vec![ColumnSpec::TextInput {
+        id: "name".into(),
+        config: TextInputConfig::default(),
+    }];
+    let err = parse_rows_typed(&columns, Some(r#"[[42]]"#)).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    let msg = err.to_string();
+    assert!(msg.contains("row 0 column 'name'"), "got {msg}");
+    assert!(msg.contains("expected string"), "got {msg}");
+}
+
+#[test]
+fn parse_rows_typed_rejects_invalid_boolean_string() {
+    let columns = vec![ColumnSpec::BooleanSwitch {
+        id: "active".into(),
+        config: BooleanSwitchConfig::default(),
+    }];
+    let err = parse_rows_typed(&columns, Some(r#"[["maybe"]]"#)).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    let msg = err.to_string();
+    assert!(msg.contains("row 0 column 'active'"), "got {msg}");
+    assert!(msg.contains("expected"), "got {msg}");
+}
+
+#[test]
+fn parse_rows_typed_rejects_object_for_boolean_cell() {
+    let columns = vec![ColumnSpec::BooleanSwitch {
+        id: "active".into(),
+        config: BooleanSwitchConfig::default(),
+    }];
+    let err = parse_rows_typed(&columns, Some(r#"[[{}]]"#)).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    let msg = err.to_string();
+    assert!(msg.contains("row 0 column 'active'"), "got {msg}");
+}
+
+#[test]
+fn parse_rows_typed_rejects_number_for_choose_one_cell() {
+    let columns = vec![ColumnSpec::ChooseOne {
+        id: "c".into(),
+        input: ChoiceInput::new("c", "p").with_options(vec![ChoiceOption::new("a", "A", "alpha")]),
+    }];
+    let err = parse_rows_typed(&columns, Some(r#"[[5]]"#)).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    let msg = err.to_string();
+    assert!(msg.contains("row 0 column 'c'"), "got {msg}");
+    assert!(msg.contains("expected string"), "got {msg}");
+}
+
+#[test]
+fn parse_rows_typed_rejects_number_for_text_area_cell() {
+    let columns = vec![ColumnSpec::TextAreaInput {
+        id: "notes".into(),
+        config: TextAreaInputConfig::default(),
+    }];
+    let err = parse_rows_typed(&columns, Some(r#"[[5]]"#)).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    let msg = err.to_string();
+    assert!(msg.contains("row 0 column 'notes'"), "got {msg}");
+}
+
+#[test]
+fn parse_rows_typed_rejects_object_for_choose_many_cell() {
+    let columns = vec![ColumnSpec::ChooseMany {
+        id: "tags".into(),
+        input: ChoiceInput::new("tags", "p").with_options(vec![]),
+    }];
+    let err = parse_rows_typed(&columns, Some(r#"[[{}]]"#)).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    let msg = err.to_string();
+    assert!(msg.contains("row 0 column 'tags'"), "got {msg}");
+}
+
+#[test]
+fn parse_rows_typed_includes_row_index_in_length_mismatch() {
+    let columns = vec![
+        ColumnSpec::TextInput {
+            id: "a".into(),
+            config: TextInputConfig::default(),
+        },
+        ColumnSpec::TextInput {
+            id: "b".into(),
+            config: TextInputConfig::default(),
+        },
+    ];
+    // First row valid (2 cells); second row under-length so the row index
+    // in the message is 1, not 0.
+    let err = parse_rows_typed(&columns, Some(r#"[["a","b"],["c"]]"#)).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    let msg = err.to_string();
+    assert!(msg.contains("row 1"), "got {msg}");
+    assert!(msg.contains("1 cells, expected 2"), "got {msg}");
+}
+
+#[test]
+fn run_with_writer_surfaces_try_new_failure_as_invalid_input() {
+    // Build a schema where two columns share the same id. parse_columns does
+    // not reject duplicate ids (the lib is the source of truth for that), so
+    // the resulting row carries the same id twice and try_new rejects it via
+    // InputTableError::DuplicateColumnId — surfaced as InvalidInput.
+    let args = InputTableArgs {
+        columns: r#"[{"type":"text-input","id":"dup"},{"type":"text-input","id":"dup"}]"#.into(),
+        rows: Some(r#"[["a","b"]]"#.into()),
+    };
+    let mut output = Vec::new();
+    let err = run_with_writer(
+        args,
+        OutputMode::Raw,
+        None,
+        &mut output,
+        |_state, _height| unreachable!("validation should reject before prompt runs"),
+    )
+    .unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    let msg = err.to_string();
+    assert!(msg.contains("duplicate column id"), "got {msg}");
+    assert!(msg.contains("'dup'"), "got {msg}");
+}
+
+#[test]
+fn run_with_writer_accepts_documented_permissive_paths() {
+    let args = InputTableArgs {
+        columns: r#"[{"type":"boolean-switch","id":"a"},{"type":"text-area-input","id":"b"},{"type":"choose-many","id":"c","options":["x","y"]}]"#.into(),
+        rows: Some(r#"[["on", "line1\nline2", "x, y"]]"#.into()),
+    };
+    let mut output = Vec::new();
+    let status = run_with_writer(
+        args,
+        OutputMode::Raw,
+        None,
+        &mut output,
+        |state, _height| {
+            let rows = state.value().to_vec();
+            assert_eq!(rows[0].get_boolean("a"), Some(true));
+            assert_eq!(
+                rows[0].get("b"),
+                Some(&CellValue::TextArea(vec!["line1".into(), "line2".into()]))
+            );
+            assert_eq!(
+                rows[0].get("c"),
+                Some(&CellValue::ChosenMany(vec!["x".into(), "y".into()]))
+            );
+            Ok(rows)
+        },
+    )
+    .unwrap();
+    assert_eq!(status, 0);
+}

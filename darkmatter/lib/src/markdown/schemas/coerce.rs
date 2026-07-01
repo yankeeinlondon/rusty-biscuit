@@ -1438,11 +1438,15 @@ mod tests {
 
     #[test]
     fn nullable_wrapper_file_yields_to_string() {
+        // Bare optional `file` lowers to the lazy `darkmatter-file-reference`
+        // inside the 3-arm nullable wrapper; coercion only cares that the file
+        // arm is a string, so the result is `ToString` regardless of which
+        // file format the arm carries.
         let frag = json!({
             "anyOf": [
                 {"type": "null"},
                 {"const": ""},
-                {"type": "string", "format": "darkmatter-file"}
+                {"type": "string", "format": "darkmatter-file-reference"}
             ]
         });
         assert_eq!(coercion_target(&frag), Some(CoercionTarget::ToString));
@@ -1562,7 +1566,7 @@ mod tests {
                     "anyOf": [
                         {"type": "null"},
                         {"const": ""},
-                        {"type": "string", "format": "darkmatter-file"}
+                        {"type": "string", "format": "darkmatter-file-reference"}
                     ]
                 }
             }

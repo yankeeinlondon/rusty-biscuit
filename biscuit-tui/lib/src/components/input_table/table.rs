@@ -41,6 +41,7 @@ use crate::core::{
 
 use super::cell::{CellState, CellValue, Row, RowCell};
 use super::column::InputTableColumn;
+use super::error::InputTableError;
 
 /// Mutable state for an [`InputTable`] widget.
 ///
@@ -67,10 +68,18 @@ impl InputTableState {
     /// column. Cells are matched by column id, then normalised into
     /// the table's column order.
     ///
+    /// Panics on invalid input (row-length mismatch, duplicate or
+    /// unknown column ids, typed cell mismatches). Use [`try_new`] for
+    /// caller-provided data so validation failures surface as
+    /// [`InputTableError`] instead of a panic.
+    ///
+    /// [`try_new`]: InputTableState::try_new
+    ///
     /// ## Panics
     ///
-    /// Panics with a clear message when any row's length does not
-    /// match `columns.len()`.
+    /// Panics when `initial_rows` contains any row whose shape, column
+    /// ids, or per-cell [`CellValue`] variant is incompatible with
+    /// `columns`.
     ///
     /// ## Examples
     ///
@@ -99,20 +108,47 @@ impl InputTableState {
     /// assert_eq!(state.row_count(), 2);
     /// ```
     pub fn new(columns: Vec<InputTableColumn>, initial_rows: Vec<Row>) -> Self {
+        Self::try_new(columns, initial_rows)
+            .expect("InputTableState::new: invalid table shape")
+    }
+
+    /// Fallible constructor that validates the supplied columns and rows
+    /// before building the table state.
+    ///
+    /// Performs shape (row length), column-id (duplicate, unknown,
+    /// missing), and typed-cell compatibility validation, returning
+    /// [`InputTableError`] instead of panicking. Preferred over [`new`]
+    /// whenever `initial_rows` originate from user, config, or other
+    /// untrusted input.
+    ///
+    /// An over-length row (more cells than columns) is a pure count
+    /// error that no single id mismatch can explain, so it short-circuits
+    /// to [`InputTableError::RowShapeMismatch`]. Every other shape
+    /// problem — including an under-length row with unique known ids — is
+    /// delegated to [`validate_row`], which surfaces the more specific
+    /// [`InputTableError::MissingColumnId`], `DuplicateColumnId`,
+    /// `UnknownColumnId`, or `CellTypeMismatch`.
+    ///
+    /// [`new`]: InputTableState::new
+    pub fn try_new(
+        columns: Vec<InputTableColumn>,
+        initial_rows: Vec<Row>,
+    ) -> Result<Self, InputTableError> {
         let col_count = columns.len();
         for (row_idx, row) in initial_rows.iter().enumerate() {
-            if row.cells.len() != col_count {
-                panic!(
-                    "InputTableState::new: row {row_idx} has {} cells, expected {col_count}",
-                    row.cells.len()
-                );
+            if row.cells.len() > col_count {
+                return Err(InputTableError::RowShapeMismatch {
+                    row: row_idx,
+                    expected: col_count,
+                    found: row.cells.len(),
+                });
             }
+            validate_row(row_idx, row, &columns)?;
         }
 
         let typed_rows: Vec<Row> = initial_rows
             .iter()
-            .enumerate()
-            .map(|(row_idx, row)| normalize_row(row_idx, row, &columns))
+            .map(|row| normalize_row(row, &columns))
             .collect();
 
         let rows: Vec<Vec<CellState>> = typed_rows
@@ -131,7 +167,7 @@ impl InputTableState {
             .collect();
 
         let (focus_row, focus_col) = first_focusable_cell(&rows).unwrap_or((0, 0));
-        Self {
+        Ok(Self {
             columns,
             rows,
             typed_rows,
@@ -147,7 +183,7 @@ impl InputTableState {
                 ..KeyBindings::default()
             },
             validation_error: None,
-        }
+        })
     }
 
     /// Creates a new state with `row_count` blank rows.
@@ -727,31 +763,13 @@ fn apply_cell_value(cell: &mut CellState, value: &CellValue) {
             let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
             *state = state.clone().with_initial_selection(&id_refs);
         }
-        _ => {
-            // Type mismatch: silently no-op. The panic in `new()` already
-            // guards row length; mismatched types within a row are the
-            // caller's responsibility. We default to the column's seed value.
-        }
+        // Unreachable on the validated `try_new` path; kept as a defensive
+        // no-op so future callers cannot introduce UB by skipping validation.
+        _ => {}
     }
 }
 
-fn normalize_row(row_idx: usize, row: &Row, columns: &[InputTableColumn]) -> Row {
-    let mut seen = HashSet::with_capacity(row.cells.len());
-    for cell in &row.cells {
-        if !seen.insert(cell.column_id.as_str()) {
-            panic!(
-                "InputTableState::new: row {row_idx} has duplicate column id '{}'",
-                cell.column_id
-            );
-        }
-        if !columns.iter().any(|column| column.id() == cell.column_id) {
-            panic!(
-                "InputTableState::new: row {row_idx} has unknown column id '{}'",
-                cell.column_id
-            );
-        }
-    }
-
+fn normalize_row(row: &Row, columns: &[InputTableColumn]) -> Row {
     Row::new(
         columns
             .iter()
@@ -760,16 +778,95 @@ fn normalize_row(row_idx: usize, row: &Row, columns: &[InputTableColumn]) -> Row
                     .cells
                     .iter()
                     .find(|cell| cell.column_id == column.id())
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "InputTableState::new: row {row_idx} is missing column '{}'",
-                            column.id()
-                        )
-                    });
+                    .expect("row shape and ids validated before normalization");
                 RowCell::new(column.id(), cell.value.clone())
             })
             .collect(),
     )
+}
+
+/// Validates row shape (duplicate ids, unknown ids, missing ids) and per-cell
+/// [`CellValue`] compatibility against the column schema.
+///
+/// Called by [`InputTableState::try_new`] (after that constructor rejects
+/// over-length rows) before any state is constructed, so that validation
+/// failures surface as [`InputTableError`] instead of a panic. An under-length
+/// row with unique known ids reaches the missing-columns check here and yields
+/// [`InputTableError::MissingColumnId`].
+fn validate_row(row_idx: usize, row: &Row, columns: &[InputTableColumn]) -> Result<(), InputTableError> {
+    let mut seen = HashSet::with_capacity(row.cells.len());
+    for cell in &row.cells {
+        if !seen.insert(cell.column_id.as_str()) {
+            return Err(InputTableError::DuplicateColumnId {
+                row: row_idx,
+                id: cell.column_id.clone(),
+            });
+        }
+        if !columns.iter().any(|column| column.id() == cell.column_id) {
+            return Err(InputTableError::UnknownColumnId {
+                row: row_idx,
+                id: cell.column_id.clone(),
+            });
+        }
+    }
+    for column in columns {
+        if !row.cells.iter().any(|cell| cell.column_id == column.id()) {
+            return Err(InputTableError::MissingColumnId {
+                row: row_idx,
+                id: column.id().to_string(),
+            });
+        }
+    }
+    for cell in &row.cells {
+        let column = columns
+            .iter()
+            .find(|c| c.id() == cell.column_id)
+            .expect("unknown ids rejected above");
+        let seed = CellState::from_column(column);
+        if !cell_value_compatible(&seed, &cell.value) {
+            return Err(InputTableError::CellTypeMismatch {
+                row: row_idx,
+                id: cell.column_id.clone(),
+                expected: cell_state_kind(&seed),
+                found: cell_value_kind(&cell.value),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn cell_value_compatible(cell: &CellState, value: &CellValue) -> bool {
+    matches!(
+        (cell, value),
+        (CellState::StaticText(_), CellValue::StaticText(_))
+            | (CellState::BooleanSwitch(_), CellValue::Boolean(_))
+            | (CellState::TextInput(_), CellValue::Text(_))
+            | (CellState::TextAreaInput(_), CellValue::TextArea(_))
+            | (CellState::ChooseOne(_), CellValue::ChosenOne(_))
+            | (CellState::ChooseMany(_), CellValue::ChosenMany(_))
+    )
+}
+
+fn cell_state_kind(cell: &CellState) -> &'static str {
+    match cell {
+        CellState::StaticText(_) => "static-text",
+        CellState::BooleanSwitch(_) => "boolean",
+        CellState::TextInput(_) => "text",
+        CellState::TextAreaInput(_) => "text-area",
+        CellState::ChooseOne(_) => "chosen-one",
+        CellState::ChooseMany(_) => "chosen-many",
+    }
+}
+
+fn cell_value_kind(value: &CellValue) -> &'static str {
+    match value {
+        CellValue::StaticText(_) => "static-text",
+        CellValue::Boolean(_) => "boolean",
+        CellValue::Text(_) => "text",
+        CellValue::TextArea(_) => "text-area",
+        CellValue::ChosenOne(_) => "chosen-one",
+        CellValue::ChosenMany(_) => "chosen-many",
+    }
 }
 
 fn typed_row_from_cells(columns: &[InputTableColumn], row: &[CellState]) -> Row {

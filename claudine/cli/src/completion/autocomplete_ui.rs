@@ -130,15 +130,36 @@ fn read_confirm_key() -> io::Result<bool> {
 /// Drive a two-pane single-select chooser and return the selected file
 /// detail, or `None` if the user cancelled.
 pub fn choose_one_file(options: Vec<ChoiceOption<FileDetail>>) -> io::Result<Option<FileDetail>> {
+    let height = Some(chooser_height(options.len()));
     let state = ChooseOneState::from_options(options);
-    run_standalone(FileChooser, state, None)
+    run_standalone(FileChooser, state, height)
 }
 
 /// Drive a two-pane multi-select chooser and return the selected file
 /// details, or an error if the user cancelled.
 pub fn choose_many_files(options: Vec<ChoiceOption<FileDetail>>) -> io::Result<Vec<FileDetail>> {
+    let height = Some(chooser_height(options.len()));
     let state = ChooseManyState::from_options(options);
-    run_standalone(MultiFileChooser, state, None)
+    run_standalone(MultiFileChooser, state, height)
+}
+
+/// Inline viewport height for the two-pane file chooser.
+///
+/// Passing `None` to [`run_standalone`] runs the prompt fullscreen (alternate
+/// screen), which is what made the chooser consume the whole terminal. Instead
+/// the chooser claims only the rows it needs: one per option for the list pane,
+/// floored at [`DETAIL_ROWS`] so the side-by-side detail pane (badge/name,
+/// description, schema block) is not truncated, and bounded by
+/// [`MAX_LIST_ROWS`] so a large candidate set scrolls rather than filling the
+/// screen. One extra row hosts the help-hint overlay. `HeightSpec::Cells`
+/// further clamps the result to the live terminal height.
+fn chooser_height(option_count: usize) -> HeightSpec {
+    /// Floor that keeps the detail pane readable.
+    const DETAIL_ROWS: u16 = 10;
+    /// Ceiling on the list pane before it scrolls.
+    const MAX_LIST_ROWS: u16 = 20;
+    let list_rows = option_count.min(MAX_LIST_ROWS as usize) as u16;
+    HeightSpec::Cells(list_rows.max(DETAIL_ROWS).saturating_add(1))
 }
 
 /// Wrapper widget that renders a [`ChooseOne`] list beside a live detail

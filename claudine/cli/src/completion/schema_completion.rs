@@ -27,7 +27,7 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::schemas::{
     CompletionKind, Constraint, DarkmatterSchemas, EffectiveSchema, PropertyAtom, PropertyDef,
-    SchemaShape, SimplifiedSchema, completion as dm_completion,
+    SchemaArm, SimplifiedSchema, completion as dm_completion,
 };
 
 use super::default_glob;
@@ -110,13 +110,14 @@ pub(crate) fn property_names(
     supplied: &HashSet<String>,
     declared_order: &[String],
 ) -> Vec<String> {
-    let Some(shape) = single_shape(effective) else {
+    let defs = collect_property_defs(effective);
+    if defs.is_empty() {
         return Vec::new();
-    };
+    }
 
     let mut required: Vec<(usize, String)> = Vec::new();
     let mut optional: Vec<(usize, String)> = Vec::new();
-    for (iter_idx, (name, def)) in shape.properties.iter().enumerate() {
+    for (iter_idx, (name, def)) in defs.into_iter().enumerate() {
         if supplied.contains(name) {
             continue;
         }
@@ -169,8 +170,9 @@ fn declaration_rank(declared_order: &[String], name: &str, iter_idx: usize) -> u
 /// - **String file reference** → loads the referenced file (YAML or JSON) and
 ///   returns the property-names from its `$schema` mapping (or its root
 ///   `properties` object for raw JSON Schema files).
-/// - **Sequence (root union)** → returns an empty `Vec`; root unions have no
-///   single property set so completion already declines them.
+/// - **Sequence (root union)** → returns an empty `Vec`; a root union has no
+///   single authored property order, so callers fall back to the arm-merge
+///   order that [`collect_property_defs`] produces (first-seen across arms).
 ///
 /// Returns an empty `Vec` on any failure (file missing, frontmatter not
 /// parseable, no `$schema`, unsupported shape). Callers treat the empty
@@ -298,9 +300,9 @@ fn yaml_root_property_keys(value: &YamlValue) -> Vec<String> {
 /// - `enum` → enum members matching `value_partial` (prefix-insensitive when
 ///   `value_partial` is non-empty; all members for an empty partial).
 /// - `file` → filesystem paths matching the property's `match(...)` globs.
-///   Walks the filesystem starting from the effective repo root (or cwd when
-///   no repo). Empty `match` patterns return no candidates — fall back to
-///   shell-native file completion.
+///   Walks the filesystem starting from the invoking `cwd` (the launch area;
+///   see [`scopes::property_value_root`]). Empty `match` patterns return no
+///   candidates — fall back to shell-native file completion.
 ///
 /// Each candidate is rendered as the **full** `name='value'` token so the
 /// shell can replace the entire setter under the cursor (matches the
@@ -371,10 +373,34 @@ fn name_matches(name: &str, partial: &str) -> bool {
     fuzzy::fuzzy_match(name, partial)
 }
 
-fn single_shape(effective: &EffectiveSchema) -> Option<&SchemaShape> {
-    match effective.simplified.as_ref()? {
-        SimplifiedSchema::Single(shape) => Some(shape),
-        SimplifiedSchema::Union(_) => None,
+/// Collect every property `(name, def)` a schema exposes for setter-name
+/// completion.
+///
+/// A [`SimplifiedSchema::Single`] yields its shape's properties in declaration
+/// order. A [`SimplifiedSchema::Union`] (root-level union) yields the union of
+/// every inline arm's properties, deduplicated by name in first-seen (arm)
+/// order, so a `spec`-or-`design` root union offers both names. Unresolved
+/// [`SchemaArm::FileRef`] arms are skipped.
+fn collect_property_defs(effective: &EffectiveSchema) -> Vec<(&String, &PropertyDef)> {
+    let Some(simplified) = effective.simplified.as_ref() else {
+        return Vec::new();
+    };
+    match simplified {
+        SimplifiedSchema::Single(shape) => shape.properties.iter().collect(),
+        SimplifiedSchema::Union(arms) => {
+            let mut out: Vec<(&String, &PropertyDef)> = Vec::new();
+            let mut seen: HashSet<&str> = HashSet::new();
+            for arm in arms {
+                if let SchemaArm::Inline(shape) = arm {
+                    for (name, def) in shape.properties.iter() {
+                        if seen.insert(name.as_str()) {
+                            out.push((name, def));
+                        }
+                    }
+                }
+            }
+            out
+        }
     }
 }
 
@@ -406,9 +432,7 @@ fn file_candidates(
     is_array: bool,
     ctx: &ScopeContext,
 ) -> Vec<String> {
-    let base: PathBuf = scopes::effective_repo_root(ctx)
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| ctx.cwd.clone());
+    let base: PathBuf = scopes::property_value_root(ctx).to_path_buf();
 
     let (active, prefix_segments) = if is_array {
         parse_array_file_value(value_partial)
@@ -503,16 +527,15 @@ fn file_candidates(
 ///
 /// - `patterns` empty → delegates to [`default_glob::default_markdown_candidates`]
 ///   (bare `file`/`file[]` fallback).
-/// - `patterns` non-empty → walks from the effective repo root (or cwd)
-///   and returns every file that satisfies the `match(...)` globs.
+/// - `patterns` non-empty → walks from the invoking `cwd` (the launch area;
+///   see [`scopes::property_value_root`]) and returns every file that
+///   satisfies the `match(...)` globs.
 ///
 /// Used by the ENTER-path missing-property chooser. TAB completion uses
 /// [`file_candidates`] instead because it needs formatted setter tokens and
 /// array-continuation exclusion.
 pub(crate) fn file_candidate_paths(patterns: &[String], ctx: &ScopeContext) -> Vec<PathBuf> {
-    let base: PathBuf = scopes::effective_repo_root(ctx)
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| ctx.cwd.clone());
+    let base: PathBuf = scopes::property_value_root(ctx).to_path_buf();
 
     if patterns.is_empty() {
         return default_glob::default_markdown_candidates(ctx);
@@ -648,17 +671,19 @@ fn format_array_candidate(property: &str, prefix_segments: &[String], selected: 
 /// Compiled positive + negative globset pair for a Darkmatter
 /// `file(match(...))` constraint.
 ///
-/// Mirrors Darkmatter's `x-darkmatter-match` keyword semantics: a path is
-/// accepted iff (a) at least one positive pattern matches AND (b) no
+/// Implements `file(match(...))` glob semantics for completion filtering: a
+/// path is accepted iff (a) at least one positive pattern matches AND (b) no
 /// negative pattern matches. When the constraint contains only negative
 /// patterns, every non-rejected path is accepted (`positive: None`).
+///
+/// `match(...)` is suggestion metadata only — Darkmatter no longer validates
+/// against it — so these globs shape completion candidates, not validation.
 ///
 /// Each pattern is added to the globset twice — once with its raw shape
 /// (which may contain path separators like `src/**/*.rs`) and once as a
 /// `**/`-anchored variant so filename-only patterns like `*.png` continue
-/// to match files in subdirectories. This matches Darkmatter's
-/// multi-candidate validator: `*.md` accepts `docs/api.md` because the
-/// resolved filename `api.md` is one of the views the validator tests.
+/// to match files in subdirectories: `*.md` accepts `docs/api.md` because the
+/// resolved filename `api.md` is one of the views tested.
 struct MatchGlobs {
     positive: Option<GlobSet>,
     negative: GlobSet,
@@ -825,6 +850,50 @@ mod tests {
                 "description=".to_string(),
             ],
         );
+    }
+
+    #[test]
+    fn property_names_offers_root_union_arm_properties() {
+        // A root union (`$schema:` sequence) where each arm declares a single
+        // file-typed property must offer every arm's property name, in arm
+        // order. Regression: `single_shape` returned None for unions so the
+        // setter-name slot produced nothing.
+        let effective = effective_from_doc(concat!(
+            "---\n",
+            "$schema:\n",
+            "  - spec: \"file(match('**/spec*.md'))\"\n",
+            "  - design: \"file(match('**/design*.md'))\"\n",
+            "---\nbody\n",
+        ));
+        let got = property_names(&effective, "", &HashSet::new(), &[]);
+        assert_eq!(got, vec!["spec=".to_string(), "design=".to_string()]);
+    }
+
+    #[test]
+    fn property_value_offers_files_for_root_union_arm() {
+        // The value slot for a root-union arm's file property must surface the
+        // arm's `match(...)` candidates.
+        let effective = effective_from_doc(concat!(
+            "---\n",
+            "$schema:\n",
+            "  - spec: \"file(match('**/spec*.md'))\"\n",
+            "  - design: \"file(match('**/design*.md'))\"\n",
+            "---\nbody\n",
+        ));
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        write(&tmp.path().join("features").join("a").join("spec.md"), "# s\n");
+        write(
+            &tmp.path().join("features").join("b").join("design.md"),
+            "# d\n",
+        );
+        let ctx = ScopeContext::discover_from(tmp.path());
+
+        let spec = property_value(&effective, "spec", "", &ctx);
+        assert_eq!(spec, vec!["spec='features/a/spec.md'".to_string()]);
+
+        let design = property_value(&effective, "design", "", &ctx);
+        assert_eq!(design, vec!["design='features/b/design.md'".to_string()]);
     }
 
     #[test]
@@ -1068,6 +1137,41 @@ mod tests {
 
         // A fragment matching no path returns nothing.
         assert!(property_value(&effective, "spec", "zzz", &ctx).is_empty());
+    }
+
+    #[test]
+    fn property_value_match_pattern_anchors_on_cwd_not_repo_root() {
+        // Regression: a `file(match(...))` property walked the effective repo
+        // root, so a user completing inside a package area saw matches from
+        // the whole repo — and the offered repo-relative path did not resolve
+        // at runtime (read-side refs anchor on the launch `cwd`). The walk
+        // must start at `cwd` and surface only files beneath it, rendered
+        // cwd-relative.
+        let effective = effective_from_doc(concat!(
+            "---\n",
+            "$schema:\n",
+            "  review: \"file(match('**/*.md'))\"\n",
+            "---\nbody\n",
+        ));
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        // A doc above the cwd (repo root) and one under the cwd (package area).
+        write(&tmp.path().join("docs").join("top.md"), "# top\n");
+        write(
+            &tmp.path().join("claudine").join("docs").join("area.md"),
+            "# area\n",
+        );
+
+        let ctx = ScopeContext::discover_from(&tmp.path().join("claudine"));
+        let got = property_value(&effective, "review", "", &ctx);
+        assert!(
+            got.iter().any(|c| c == "review='docs/area.md'"),
+            "cwd-local doc must surface, rendered cwd-relative: {got:?}"
+        );
+        assert!(
+            !got.iter().any(|c| c.contains("top.md")),
+            "repo-root doc above the cwd must NOT surface: {got:?}"
+        );
     }
 
     #[test]

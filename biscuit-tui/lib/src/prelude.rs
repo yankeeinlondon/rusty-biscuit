@@ -11,8 +11,8 @@
 pub use crate::components::{
     ActiveChoiceColor, BooleanSwitch, BooleanSwitchState, CellState, CellValue, ChoiceInput,
     ChoiceOption, ChooseMany, ChooseManyState, ChooseOne, ChooseOneState, HotkeyDisplayMode,
-    HotkeySpec, InputTable, InputTableColumn, InputTableState, Orientation, Row, RowCell,
-    SelectionMode, TextAreaInput, TextAreaInputState, TextInput, TextInputState,
+    HotkeySpec, InputTable, InputTableColumn, InputTableError, InputTableState, Orientation, Row,
+    RowCell, SelectionMode, TextAreaInput, TextAreaInputState, TextInput, TextInputState,
 };
 pub use crate::core::{
     ABORTED_KIND, BorderStyle, CANCELLED_KIND, ComponentTheme, EventOutcome, FrameChrome,

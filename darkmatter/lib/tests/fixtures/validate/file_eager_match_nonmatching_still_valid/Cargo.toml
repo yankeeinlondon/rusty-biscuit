@@ -1,0 +1,12 @@
+# Fixture manifest for the `file_eager_match_nonmatching_still_valid` case.
+#
+# The document references `./Cargo.toml` against `file(eager; match(*.json))`.
+# Under the document-first file-reference resolution contract this resolves
+# next to `doc.md` (this file), so the file EXISTS and the eager existence
+# check passes. `match(...)` is suggestion metadata only — never validation —
+# so a present, existing reference that does NOT match the configured globs (a
+# `.toml` vs `*.json`) still validates with zero problems. This is the eager
+# companion to `file_match_nonmatching_still_valid` (which exercises the lazy
+# default).
+[package]
+name = "fixture-only"

@@ -94,7 +94,7 @@ $schema:
 | `boolean`    | Any JSON boolean.                                                                                      | Constraints: `default`, `required`.                                                                                                                                             |
 | `boolish`    | A JSON boolean **or** the strings `"true"` / `"false"` (any case).                                     | Compiles to `anyOf: [boolean, enum]`. A `"true"` / `"false"` value is **normalized** to a real boolean (see [Type Coercion](#type-coercion)).                                  |
 | `object`     | Any YAML/JSON object.                                                                                  | No nested-schema authoring in v1 — `object` accepts any shape. Reference an external file for deeper typing.                                                                    |
-| `file`       | A file reference resolved via `biscuit-file::FileReference`. Single or array form.                     | Constraints: `match(glob, ...)`, `required`. Resolved **from the CWD** at validation time. See [Files](#files).                                                                  |
+| `file`       | A file reference parsed via `biscuit-file::FileReference`. Single or array form.                       | Constraints: `eager`, `match(glob, ...)`, `required`. **Lazy by default** (syntax-only); `file(eager)` resolves & checks existence **document-first, then launch-area fallback**. See [Files](#files).        |
 | `enum`       | A value from an explicit set.                                                                          | Constraints required — the members are the constraint. See [Enumerations](#enumerations).                                                                                       |
 | `url`        | A string parseable as an absolute URL.                                                                 | Constraints: `scheme(...)`, `default`, `required`.                                                                                                                              |
 | `email`      | A string in `addr-spec` form.                                                                          | JSON Schema `format: email`.                                                                                                                                                    |
@@ -151,22 +151,39 @@ $schema:
 
 ### Files
 
-The `file` type wraps a `FileReference` string. Validity requires:
+The `file` type wraps a `FileReference` string and is **lazy by default**. A bare
+`file` value is valid as long as it **parses as a `FileReference`** — the reference
+is never resolved against the filesystem, so a syntactically valid path to a
+not-yet-created output file passes. This is the right default for prompt authoring,
+where a property often names a file the run is about to *produce*.
+
+Add `eager` to opt into existence checking. `file(eager)` requires that:
 
 1. The string parses as a `FileReference`.
 2. The reference resolves to an existing filesystem entry **at validation time**.
-3. When `match(globs)` is present, the resolved path matches at least one positive glob and is not excluded by a `!`-prefixed negative glob.
 
-Relative paths are resolved from the **current working directory** at validation time, in contrast to `$schema` file references, which resolve from the document's parent directory.
+Relative paths in an eager check resolve **document-first**: the prompt document's
+directory is tried first, then the captured launch area as a fallback. This is the
+same order `$schema` file references and the expression path (`file_exists`/
+`frontmatter`) use. Only a legacy caller that configures no anchor falls back to the
+ambient current working directory.
+
+`match(globs)` is **suggestion metadata only** — it shapes path completion (which
+candidates a tool offers) but never rejects a value. An existing file that matches no
+configured glob still validates.
 
 ```yaml
 $schema:
-    doc:         "file(match('*.doc', '*.pdf', '*.md', '*.txt'))"
+    review:      "file(eager; required; match('**/*review*.md'))"   # must exist
+    plan:        "file"                                              # lazy: may be a future output path
+    doc:         "file(match('*.doc', '*.pdf', '*.md', '*.txt'))"   # lazy + completion hints
     source_code: "file(match('src/**/*.rs', '!src/**/test_*.rs'))"
-    images:      "file(match('*.png', '*.jpg'))[](min(1))"
+    images:      "file(eager; match('*.png', '*.jpg'))[](min(1))"   # each item must exist
 ```
 
-The array form `file[]` adds the standard constraints on the array itself (`min`, `max`, `unique`).
+`eager` is file-only; `string(eager)` and the like are a fatal schema-preparation
+error. The array form `file[]` adds the standard constraints on the array itself
+(`min`, `max`, `unique`), while `eager` and `match(...)` apply **per item**.
 
 ### URLs
 

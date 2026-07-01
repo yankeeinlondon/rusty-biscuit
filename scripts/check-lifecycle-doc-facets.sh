@@ -113,4 +113,4 @@ if [[ ${violations} -gt 0 ]]; then
     exit 1
 fi
 
-echo "lifecycle-doc-facets guard: lifecycle docs use the faceted err.* contract."
+echo "✅ lifecycle-doc-facets guard: lifecycle docs use the faceted err.* contract."

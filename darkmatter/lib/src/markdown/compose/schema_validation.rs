@@ -958,6 +958,72 @@ mod tests {
         );
     }
 
+    // ── Motivating case: lazy `file` output + eager `file` input ──────
+
+    #[test]
+    fn motivating_lazy_plan_composes_while_eager_review_present() {
+        // Mirrors `sniff/prompts/plan-review-implementation.md` post-migration:
+        // `review` is an eager INPUT that must exist; `plan` is a lazy OUTPUT
+        // path this run is about to create. With the review file present and
+        // `plan` naming a not-yet-existing path, schema validation must pass —
+        // lazy `file` never checks existence, while eager `review` resolves
+        // document-first to the present review file.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("design-review.md"), b"# review\n").unwrap();
+        let doc_path = dir.path().join("prompt.md");
+        let mut md = md_with_schema_and_source(
+            "$schema:\n\
+             \x20 review: 'file(eager; required; match(**/*review*.md))'\n\
+             \x20 plan: 'file'\n\
+             \x20 iteration: 'number'\n\
+             review: design-review.md\n\
+             plan: plan-1.md\n\
+             iteration: 1\n",
+            &doc_path,
+        );
+        let options = ComposeOptions::new().with_source_file(&doc_path);
+        assert!(
+            run(&mut md, &options).is_ok(),
+            "lazy `plan` output path must compose even though it does not exist \
+             yet, while eager `review` resolves to the present review file",
+        );
+    }
+
+    #[test]
+    fn motivating_missing_eager_review_still_fails() {
+        // The companion: with the eager `review` input absent from disk, schema
+        // validation still fails on `/review` — `eager` restores the existence
+        // check the default lazy `file` no longer performs. `plan` remains a
+        // lazy output and is not the cause of the failure.
+        let dir = tempfile::tempdir().unwrap();
+        let doc_path = dir.path().join("prompt.md");
+        let mut md = md_with_schema_and_source(
+            "$schema:\n\
+             \x20 review: 'file(eager; required; match(**/*review*.md))'\n\
+             \x20 plan: 'file'\n\
+             \x20 iteration: 'number'\n\
+             review: missing-review.md\n\
+             plan: plan-1.md\n\
+             iteration: 1\n",
+            &doc_path,
+        );
+        let options = ComposeOptions::new().with_source_file(&doc_path);
+        let err = run(&mut md, &options).unwrap_err();
+        match err {
+            MarkdownError::SchemaValidationFailed { problems, .. } => {
+                assert!(
+                    problems.iter().any(|p| p.path == "/review"),
+                    "expected an existence problem on /review, got {problems:?}",
+                );
+                assert!(
+                    !problems.iter().any(|p| p.path == "/plan"),
+                    "lazy `plan` must not contribute a problem, got {problems:?}",
+                );
+            }
+            other => panic!("expected SchemaValidationFailed, got {other:?}"),
+        }
+    }
+
     // ── DM1b: deferred keys excluded from user schema validation ─────
 
     fn baseline_two_string_properties(

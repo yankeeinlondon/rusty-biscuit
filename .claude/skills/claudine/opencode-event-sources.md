@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-07c437d227c79e76
-last_updated: 2026-06-27
+hash: ef46db3751d8e999-c9e931c385aa9451
+last_updated: 2026-06-30
 ---
 
 # OpenCode Event Sources
@@ -38,7 +38,7 @@ the renderer report progress while NDJSON is silent.
   heartbeat protects the silence watchdog but does not feed semantic
   rendering. Stderr fills that semantic gap.
 
-See [timeouts.md](../../../claudine/docs/topics/timeouts.md) for the full
+See [timeouts.md](timeouts.md) for the full
 silence-rule story and the per-step `provider_status` grace.
 
 ## Configuration
@@ -182,7 +182,7 @@ fully independent: `LlmCall` churn never clears `consecutive_stream_errors`,
 and a `stream error` never clears `generation_count_since_progress`. Both
 share the bridge's single `fire_early_termination` idempotency, so at most one
 terminal abort is emitted per bridge. See
-[timeouts.md — OpenCode stalled-generation backstop](../../../claudine/docs/topics/timeouts.md#opencode-stalled-generation-backstop)
+[timeouts.md — OpenCode stalled-generation backstop](timeouts.md#opencode-stalled-generation-backstop)
 and the [spec](../../../claudine/features/2026-06-22-live-but-dead/spec.md).
 
 ### The `kimi-for-coding` gap
@@ -246,5 +246,5 @@ NDJSON omits it.
 - [`claudine/lib/src/stream/logs/opencode/errors.rs`](../../../claudine/lib/src/stream/logs/opencode/errors.rs) — `classify` / `classify_lifecycle` / failure classifiers.
 - [`claudine/lib/src/stream/logs/opencode/reasoning.rs`](../../../claudine/lib/src/stream/logs/opencode/reasoning.rs) — `OpenCodeLogBridge` and `merge_stderr_state_into_summary`.
 - [`claudine/lib/src/stream/providers/opencode.rs`](../../../claudine/lib/src/stream/providers/opencode.rs) — NDJSON parser; no longer synthesizes `SubagentStart`/`SubagentStop` from `task` tool_use.
-- [`claudine/docs/topics/timeouts.md`](../../../claudine/docs/topics/timeouts.md) — `step_timeout`, byte heartbeat, per-step grace.
+- [`timeouts.md`](timeouts.md) — `step_timeout`, byte heartbeat, per-step grace.
 - [`claudine/docs/research/agent-cli/opencode.md`](../../../claudine/docs/research/agent-cli/opencode.md) — research source for the stderr schema.

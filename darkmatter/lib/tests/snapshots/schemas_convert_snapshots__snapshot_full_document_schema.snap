@@ -31,12 +31,8 @@ expression: convert_yaml(yaml)
           "const": ""
         },
         {
-          "format": "darkmatter-file",
-          "type": "string",
-          "x-darkmatter-match": [
-            "*.png",
-            "*.jpg"
-          ]
+          "format": "darkmatter-file-reference",
+          "type": "string"
         }
       ]
     },

@@ -1,7 +1,10 @@
 use super::inline_viewport::maybe_recompute_inline_height;
+use super::terminal_lifecycle::{PrepareGuard, prepare_terminal_inner};
 use super::*;
 use crossterm::event::ModifierKeyCode;
 use ratatui::{backend::TestBackend, buffer::Buffer, layout::Rect, style::Style};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Minimal widget used for Phase 1 integration tests.
 ///
@@ -807,4 +810,401 @@ fn drive_event_loop_with_chrome_renders_help_hint_inside_bottom_border() {
         !corner.chars().any(|c| c.is_ascii_alphanumeric()),
         "expected a border glyph at the bottom-left corner; got {corner:?}",
     );
+}
+
+// --- F1: transactional terminal preparation ----------------------------
+
+/// Counting teardown closures shared between a `PrepareGuard`/test run
+/// and its assertions, mirroring how production wires in the crossterm
+/// calls but without touching the real terminal.
+fn counting_teardowns() -> (
+    Arc<AtomicUsize>,
+    Arc<AtomicUsize>,
+    impl FnMut(),
+    impl FnMut(),
+) {
+    let disable = Arc::new(AtomicUsize::new(0));
+    let leave = Arc::new(AtomicUsize::new(0));
+    let disable_for_closure = disable.clone();
+    let leave_for_closure = leave.clone();
+    let leave_fn = move || {
+        leave_for_closure.fetch_add(1, Ordering::SeqCst);
+    };
+    let disable_fn = move || {
+        disable_for_closure.fetch_add(1, Ordering::SeqCst);
+    };
+    (disable, leave, leave_fn, disable_fn)
+}
+
+#[test]
+fn prepare_terminal_unwinds_raw_mode_when_alt_screen_step_fails() {
+    // Regression test for F1: if EnterAlternateScreen fails after raw
+    // mode is enabled, raw mode MUST be disabled and LeaveAlternateScreen
+    // MUST NOT be emitted (the screen was never entered). This test
+    // fails if the PrepareGuard is removed — the disable counter stays
+    // at zero, proving the guard is load-bearing.
+    let (disable_calls, leave_calls, leave_fn, disable_fn) = counting_teardowns();
+
+    let result = prepare_terminal_inner(
+        true,
+        || Ok(()),
+        |_out| Err(io::Error::other("injected alt-screen failure")),
+        |_out| true,
+        leave_fn,
+        disable_fn,
+    );
+
+    assert!(
+        result.is_err(),
+        "faulted alt-screen step must propagate the error",
+    );
+    assert_eq!(
+        disable_calls.load(Ordering::SeqCst),
+        1,
+        "raw mode must be disabled when prepare fails after enable_raw_mode",
+    );
+    assert_eq!(
+        leave_calls.load(Ordering::SeqCst),
+        0,
+        "no LeaveAlternateScreen may be emitted for a screen never entered",
+    );
+}
+
+#[test]
+fn prepare_terminal_happy_path_returns_kbd_flag_without_teardown() {
+    // F1 success contract: the guard is dismissed on the happy path so
+    // the caller's TerminalGuard owns teardown; kbd_pushed flows through
+    // byte-for-byte unchanged. Mirrors the existing
+    // `prepare_terminal(true)` happy path.
+    let (disable_calls, leave_calls, leave_fn, disable_fn) = counting_teardowns();
+
+    let kbd_pushed = prepare_terminal_inner(
+        true,
+        || Ok(()),
+        |_out| Ok(()),
+        |_out| true,
+        leave_fn,
+        disable_fn,
+    )
+    .expect("happy path");
+
+    assert!(
+        kbd_pushed,
+        "kbd_pushed flag must flow through unchanged on the happy path",
+    );
+    assert_eq!(
+        disable_calls.load(Ordering::SeqCst),
+        0,
+        "success dismisses the guard; the caller's TerminalGuard owns teardown",
+    );
+    assert_eq!(leave_calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn prepare_terminal_inline_happy_path_propagates_kbd_flag_false() {
+    // Non-fullscreen path never enters the alt screen; a `false`
+    // kbd-push result must propagate verbatim (TerminalGuard::new still
+    // receives the same values as before F1).
+    let kbd_pushed = prepare_terminal_inner(
+        false,
+        || Ok(()),
+        |_out| Ok(()),
+        |_out| false,
+        || {},
+        || {},
+    )
+    .expect("happy path");
+    assert!(!kbd_pushed);
+}
+
+#[test]
+fn prepare_guard_drop_leaves_alt_screen_when_entered() {
+    // Documents the guard contract for a future fallible step added
+    // between alt-screen entry and dismiss: if alt-screen was marked
+    // entered and the guard is NOT dismissed, Drop leaves the alt
+    // screen AND disables raw mode.
+    let (disable_calls, leave_calls, leave_fn, disable_fn) = counting_teardowns();
+    {
+        let mut guard = PrepareGuard::arm(leave_fn, disable_fn);
+        guard.note_alt_screen_entered();
+    }
+    assert_eq!(leave_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(disable_calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn prepare_guard_dismiss_suppresses_all_teardown() {
+    // On the success path the guard is dismissed, so neither teardown
+    // runs even when the alt screen was entered.
+    let (disable_calls, leave_calls, leave_fn, disable_fn) = counting_teardowns();
+    {
+        let mut guard = PrepareGuard::arm(leave_fn, disable_fn);
+        guard.note_alt_screen_entered();
+        guard.dismiss();
+    }
+    assert_eq!(leave_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(disable_calls.load(Ordering::SeqCst), 0);
+}
+
+// --- F2: Windows console redirect (CI-only; macOS host compiles-skip) ---
+//
+// The reviewing host is macOS, so these run only on the Windows CI runner.
+// They prove the handle strategy the Windows `StdoutTtyRedirect` relies on:
+// CONOUT$ is openable as a real console, and SetStdHandle is honored by
+// GetStdHandle (the function Rust's io::stdout() and crossterm use to
+// resolve the active output handle dynamically), so redirecting the std
+// handle really reroutes stdout writes onto the console.
+
+#[cfg(windows)]
+mod windows_redirect {
+    use super::*;
+    use crate::core::standalone::terminal_lifecycle::CONOUT;
+    use std::io::{IsTerminal, Read, Write};
+    use std::os::windows::io::FromRawHandle;
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+    };
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, GetFileType, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TYPE_CHAR, FILE_TYPE_PIPE,
+        OPEN_EXISTING,
+    };
+    use windows_sys::Win32::System::Console::{
+        GetConsoleMode, GetStdHandle, SetStdHandle, STD_OUTPUT_HANDLE,
+    };
+    use windows_sys::Win32::System::Pipes::CreatePipe;
+
+    fn open_conout() -> windows_sys::Win32::Foundation::HANDLE {
+        // SAFETY: CONOUT is a static NUL-terminated UTF-16 device path;
+        // access mode and disposition are the documented console values.
+        unsafe {
+            CreateFileW(
+                CONOUT.as_ptr(),
+                GENERIC_READ | GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                core::ptr::null(),
+                OPEN_EXISTING,
+                0,
+                core::ptr::null_mut(),
+            )
+        }
+    }
+
+    #[test]
+    fn conout_is_openable_console_handle() {
+        // Prove the core of the redirect: CONOUT$ opens even when this
+        // process's own std handles are whatever the CI runner supplied,
+        // and the result is a genuine console screen buffer (GetConsoleMode
+        // succeeds only for console handles — the robust check).
+        let conout = open_conout();
+        assert_ne!(
+            conout, INVALID_HANDLE_VALUE,
+            "CreateFileW(CONOUT$) must succeed under a CI console",
+        );
+        let mut mode = 0u32;
+        // SAFETY: conout is a valid open handle from CreateFileW; mode is a
+        // valid out-pointer.
+        let is_console = unsafe { GetConsoleMode(conout, &mut mode) } != 0;
+        assert!(
+            is_console,
+            "CONOUT$ handle must be a real console screen buffer",
+        );
+        // SAFETY: conout is the handle we opened and have not closed yet.
+        unsafe { CloseHandle(conout) };
+    }
+
+    #[test]
+    fn set_std_handle_round_trip_restores_original_stdout() {
+        // Prove SetStdHandle is honored by GetStdHandle — the exact
+        // mechanism the redirect relies on. crossterm's output writes and
+        // Rust's io::stdout() resolve STD_OUTPUT_HANDLE dynamically via
+        // GetStdHandle, so a save→redirect→restore cycle reroutes stdout
+        // and then puts the original handle back exactly.
+        // SAFETY: STD_OUTPUT_HANDLE is a valid std-handle identifier.
+        let original = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+
+        let conout = open_conout();
+        assert_ne!(conout, INVALID_HANDLE_VALUE);
+
+        // SAFETY: STD_OUTPUT_HANDLE is valid; conout is open.
+        assert_ne!(
+            unsafe { SetStdHandle(STD_OUTPUT_HANDLE, conout) },
+            0,
+            "SetStdHandle must succeed",
+        );
+        // SAFETY: STD_OUTPUT_HANDLE is valid.
+        let after_redirect = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+        assert_eq!(
+            after_redirect, conout,
+            "GetStdHandle must reflect the redirected handle — this is what \
+             makes io::stdout() reroute to CONOUT$",
+        );
+
+        // SAFETY: restore the original handle.
+        assert_ne!(unsafe { SetStdHandle(STD_OUTPUT_HANDLE, original) }, 0);
+        // SAFETY: STD_OUTPUT_HANDLE is valid.
+        let restored = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+        assert_eq!(
+            restored, original,
+            "restore must put the original stdout handle back exactly",
+        );
+
+        // SAFETY: conout is our owned handle; std handle already restored.
+        unsafe { CloseHandle(conout) };
+    }
+
+    #[test]
+    fn redirect_guard_is_inactive_when_stdout_is_a_console() {
+        // Gating: when stdout is already a console (the normal CI cargo-test
+        // shape), activate_if_piped returns an inactive guard and Drop is a
+        // clean no-op that leaves the stdout handle untouched. This is the
+        // Windows mirror of the Unix no-op-when-tty contract.
+        if !io::stdout().is_terminal() {
+            // stdout captured in this particular run — the active path is
+            // covered by the handle-strategy tests above; skip the gating
+            // assertion rather than spawning a console-less edge case.
+            return;
+        }
+        // SAFETY: STD_OUTPUT_HANDLE is valid.
+        let before = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+        {
+            let _guard = StdoutTtyRedirect::activate_if_piped();
+        }
+        // SAFETY: STD_OUTPUT_HANDLE is valid.
+        let after = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+        assert_eq!(
+            before, after,
+            "inactive guard must not perturb the stdout handle",
+        );
+    }
+
+    #[test]
+    fn active_redirect_routes_stdout_to_console_and_pipe_gets_only_submitted_value() {
+        // The user-facing F2 contract, exercised in-process and
+        // deterministically: synthesize the `FOO=$(question ...)` shape by
+        // pointing STD_OUTPUT_HANDLE at a pipe while stderr stays a console,
+        // then prove that after StdoutTtyRedirect::activate_if_piped() the
+        // process's stdout writes land on the console (CONOUT$), and the
+        // captured pipe receives ONLY the value the CLI emits *after* the
+        // redirect drops — never the prompt's TUI bytes. A subprocess is not
+        // needed: SetStdHandle alone reproduces the captured-stdout shape
+        // because Rust's io::stdout() resolves the std handle dynamically.
+        const PROMPT_SENTINEL: &str = "<<PROMPT-TUI-BYTES-MUST-NOT-LEAK>>";
+        const SUBMITTED_SENTINEL: &str = "<<SUBMITTED-VALUE-MUST-REACH-PIPE>>";
+
+        // The active path requires stderr to be a real console. Under nextest
+        // stderr is captured, so skip rather than assert against a shape this
+        // run cannot produce — mirrors the gating test above.
+        if !io::stderr().is_terminal() {
+            return;
+        }
+
+        // SAFETY: STD_OUTPUT_HANDLE is a valid std-handle identifier; the
+        // returned handle is borrowed (never closed here).
+        let original_stdout = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+
+        let mut read_end: HANDLE = core::ptr::null_mut();
+        let mut write_end: HANDLE = core::ptr::null_mut();
+        // SAFETY: both out-pointers are valid; a null SECURITY_ATTRIBUTES and
+        // 0 size request the default anonymous-pipe behavior. Return value is
+        // checked before either handle is used.
+        let created = unsafe {
+            CreatePipe(
+                &mut read_end,
+                &mut write_end,
+                core::ptr::null(),
+                0,
+            )
+        };
+        assert_ne!(created, 0, "CreatePipe must succeed");
+
+        // Point the process's stdout at the pipe's write end. This is what
+        // makes io::stdout().is_terminal() return false inside
+        // activate_if_piped, synthesizing the captured-stdout shape.
+        // SAFETY: STD_OUTPUT_HANDLE is valid; write_end is the open pipe
+        // handle from CreatePipe.
+        assert_ne!(
+            unsafe { SetStdHandle(STD_OUTPUT_HANDLE, write_end) },
+            0,
+            "SetStdHandle(pipe) must succeed",
+        );
+
+        // SAFETY: handles just established are valid for GetFileType.
+        assert_eq!(
+            unsafe { GetFileType(GetStdHandle(STD_OUTPUT_HANDLE)) },
+            FILE_TYPE_PIPE,
+            "precondition: stdout now resolves to the pipe",
+        );
+
+        {
+            let guard = StdoutTtyRedirect::activate_if_piped();
+
+            // Behavioral proof of the redirect: with stdout=pipe and
+            // stderr=console, the guard must have rerouted stdout to CONOUT$.
+            // FILE_TYPE_CHAR is the console; FILE_TYPE_PIPE would mean writes
+            // still hit the captured pipe (the bug F2 fixes).
+            // SAFETY: STD_OUTPUT_HANDLE is valid post-activation.
+            assert_eq!(
+                unsafe { GetFileType(GetStdHandle(STD_OUTPUT_HANDLE)) },
+                FILE_TYPE_CHAR,
+                "active redirect must point stdout at the console, not the pipe",
+            );
+
+            // Emit the "prompt" while the guard is active. It goes to the
+            // console (acceptable) and must NOT reach the captured pipe.
+            let mut out = io::stdout();
+            let _ = out.write_all(PROMPT_SENTINEL.as_bytes());
+            let _ = out.flush();
+
+            drop(guard);
+
+            // Drop restores the captured stdout exactly, so subsequent writes
+            // reach the pipe again — this is what lets the CLI's result
+            // println! land in the caller's `$(...)` capture.
+            // SAFETY: STD_OUTPUT_HANDLE is valid post-restore.
+            assert_eq!(
+                unsafe { GetStdHandle(STD_OUTPUT_HANDLE) },
+                write_end,
+                "drop must restore the handle that was current at activation",
+            );
+            // SAFETY: STD_OUTPUT_HANDLE is valid post-restore.
+            assert_eq!(
+                unsafe { GetFileType(GetStdHandle(STD_OUTPUT_HANDLE)) },
+                FILE_TYPE_PIPE,
+                "post-drop stdout must resolve to the pipe again",
+            );
+        }
+
+        // The CLI prints the submitted value after the redirect drops; it
+        // must reach the captured pipe.
+        let mut out = io::stdout();
+        let _ = out.write_all(SUBMITTED_SENTINEL.as_bytes());
+        let _ = out.flush();
+
+        // Restore the real stdout before reading, then close the write end so
+        // the read does not block waiting for more data.
+        // SAFETY: STD_OUTPUT_HANDLE is valid; original_stdout was captured
+        // from GetStdHandle at entry. It is restored, never closed (borrowed).
+        unsafe { SetStdHandle(STD_OUTPUT_HANDLE, original_stdout) };
+        // SAFETY: write_end is the pipe handle we created and have not closed;
+        // closing it once flushes EOF to the read end.
+        unsafe { CloseHandle(write_end) };
+
+        // Drain the pipe via a std File wrapper, which owns and closes the
+        // read end on drop (so we do not CloseHandle(read_end) ourselves).
+        // SAFETY: read_end is the valid, still-open pipe read handle from
+        // CreatePipe; ownership is transferred to the File exactly once.
+        let mut reader = unsafe { std::fs::File::from_raw_handle(read_end as _) };
+        let mut captured = Vec::new();
+        let _ = reader.read_to_end(&mut captured);
+        let captured = String::from_utf8_lossy(&captured);
+
+        assert!(
+            captured.contains(SUBMITTED_SENTINEL),
+            "captured pipe must receive the submitted value emitted after drop",
+        );
+        assert!(
+            !captured.contains(PROMPT_SENTINEL),
+            "captured pipe must NOT receive the prompt's TUI bytes (they went to the console)",
+        );
+    }
 }

@@ -579,26 +579,29 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseMany<V> {
             return EventOutcome::Consumed;
         }
 
-        match event.modifiers {
-            KeyModifiers::CONTROL => {
-                if let KeyCode::Char(c) = event.code
-                    && let Some(&idx) = state.ctrl_hotkeys.get(&c.to_ascii_lowercase())
-                {
-                    jump_to(state, idx);
-                    toggle_at(state, idx);
-                    return EventOutcome::Consumed;
-                }
+        // Ctrl/Alt hotkeys toggle the matching option. Modifier matching
+        // uses `.contains(...)` so a benign extra bit (e.g. SHIFT on an
+        // uppercase chord) does not suppress an otherwise valid hotkey.
+        // WHY CONTROL|ALT falls through: on some layouts AltGr-style
+        // chords report CONTROL|ALT and must not be hijacked as a
+        // hotkey, so when both are present neither map matches.
+        let modifiers = event.modifiers;
+        if modifiers.contains(KeyModifiers::CONTROL) && !modifiers.contains(KeyModifiers::ALT) {
+            if let KeyCode::Char(c) = event.code
+                && let Some(&idx) = state.ctrl_hotkeys.get(&c.to_ascii_lowercase())
+            {
+                jump_to(state, idx);
+                toggle_at(state, idx);
+                return EventOutcome::Consumed;
             }
-            KeyModifiers::ALT => {
-                if let KeyCode::Char(c) = event.code
-                    && let Some(&idx) = state.alt_hotkeys.get(&c.to_ascii_lowercase())
-                {
-                    jump_to(state, idx);
-                    toggle_at(state, idx);
-                    return EventOutcome::Consumed;
-                }
-            }
-            _ => {}
+        } else if modifiers.contains(KeyModifiers::ALT)
+            && !modifiers.contains(KeyModifiers::CONTROL)
+            && let KeyCode::Char(c) = event.code
+            && let Some(&idx) = state.alt_hotkeys.get(&c.to_ascii_lowercase())
+        {
+            jump_to(state, idx);
+            toggle_at(state, idx);
+            return EventOutcome::Consumed;
         }
 
         // Home/End/vim-style jumps + hotkey/filter-open, only when the

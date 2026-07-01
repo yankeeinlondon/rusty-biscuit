@@ -248,6 +248,10 @@ pub enum Constraint {
     /// exclude.
     Match(Vec<String>),
 
+    /// Opt in to eager existence validation: a present `file` value must
+    /// resolve to an existing file. `file`-only; bare `file` is lazy.
+    Eager,
+
     // ── url ──────────────────────────────────────────────────────────────
     /// Allowed URL schemes (lowercased).
     Scheme(Vec<String>),
@@ -278,6 +282,7 @@ impl Constraint {
             Constraint::Pattern(_) => "pattern",
             Constraint::Members(_) => "<members>",
             Constraint::Match(_) => "match",
+            Constraint::Eager => "eager",
             Constraint::Scheme(_) => "scheme",
             Constraint::Unique => "unique",
             Constraint::MinItems(_) => "min",

@@ -20,9 +20,9 @@ use std::sync::{Arc, Mutex};
 
 use claudine::composition::{
     CompositionError, CompositionExecutionRequest, CompositionMode, DefaultLifecycleEmitter,
-    LifecycleRuntimeContext, LoopExecutionOptions, LoopExecutionResult, PrepareOptions,
-    PreparedComposition, ResolvedCompositionSource, ResolvedExecutionTarget, SharedApprovalCache,
-    SystemShellRunner, build_loop_seed_with_lifecycle, resolve_loop_config,
+    LIFECYCLE_EVENT_KEYS, LifecycleRuntimeContext, LoopExecutionOptions, LoopExecutionResult,
+    PrepareOptions, PreparedComposition, ResolvedCompositionSource, ResolvedExecutionTarget,
+    SharedApprovalCache, SystemShellRunner, build_loop_seed_with_lifecycle, resolve_loop_config,
 };
 use claudine::system_prompt::SystemPromptArgs;
 use color_eyre::eyre::{Result, eyre};
@@ -263,6 +263,16 @@ pub(crate) fn run_composition_inner(
         }
         let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
             .with_source_file(&source.resolved_path)
+            // Defer the lifecycle event keys (DM1), exactly as the main prepare
+            // passes do. The preflight runs a full compose pipeline purely to
+            // discover template `::shell` directives; without the exclusion it
+            // also resolves the deferred lifecycle subtree at compose time, so a
+            // `success`/`failure` event's read-side file reference (e.g.
+            // `frontmatter(plan, …)` over a plan this very run is about to
+            // create) trips the now-fatal file-ref check before the event that
+            // would make the file exist ever fires. Lifecycle shell commands are
+            // audited separately via `collect_lifecycle_shell_commands`.
+            .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied())
             // Anchor `file`-typed schema validation on the launch area so a
             // caller-supplied area-relative path resolves here document-first
             // then launch-area — exactly as the main prepare pass and the

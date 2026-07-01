@@ -1,7 +1,8 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(feature = "async")]
@@ -451,6 +452,59 @@ fn cleanup_stale_temp_files() {
     }
 }
 
+/// Monotonic per-process counter that disambiguates concurrent temp writers.
+static TEMP_WRITER_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Build a process-unique writer path for `hash` inside `dir`.
+///
+/// The deterministic `{hash}.audio` cache path is shared by every writer of the
+/// same bytes, so writers must stage into distinct files first: the pid keeps
+/// separate processes apart, the monotonic counter keeps concurrent writers in
+/// one process apart, and the nanosecond stamp guards against pid reuse leaving
+/// a stale temp behind. Without this, two concurrent writers of identical bytes
+/// would interleave on one `{hash}.tmp` and a reader could see a half-written
+/// file.
+fn unique_temp_path(dir: &Path, hash: u64) -> PathBuf {
+    let seq = TEMP_WRITER_SEQ.fetch_add(1, Ordering::Relaxed);
+    let pid = std::process::id();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    dir.join(format!("{:016x}.{}.{}.{}.tmp", hash, pid, seq, nanos))
+}
+
+/// Publish a fully-written `tmp_path` to the deterministic cache `path`.
+///
+/// Publication is idempotent under races: if another writer already published
+/// the same content, `tmp_path` is removed and the existing cache path is
+/// returned without overwriting it. On any publish failure the stray temp file
+/// is removed so it cannot leak. A valid existing `{hash}.audio` is never
+/// deleted.
+fn publish_temp_audio(tmp_path: &Path, path: &Path) -> Result<PathBuf, PlaybackError> {
+    // A competing writer beat us to it — drop our temp and use theirs.
+    if path.exists() {
+        let _ = std::fs::remove_file(tmp_path);
+        return Ok(path.to_path_buf());
+    }
+
+    match std::fs::rename(tmp_path, path) {
+        Ok(()) => Ok(path.to_path_buf()),
+        // Windows `rename` errors when the destination already exists; on Unix
+        // it overwrites atomically. Either way, re-check: if the cache file now
+        // exists a racing writer published identical bytes, so treat it as a
+        // win for them rather than an error.
+        Err(_) if path.exists() => {
+            let _ = std::fs::remove_file(tmp_path);
+            Ok(path.to_path_buf())
+        }
+        Err(err) => {
+            let _ = std::fs::remove_file(tmp_path);
+            Err(err.into())
+        }
+    }
+}
+
 fn write_temp_audio(bytes: &[u8], speed: Option<f32>) -> Result<PathBuf, PlaybackError> {
     cleanup_stale_temp_files();
 
@@ -458,18 +512,44 @@ fn write_temp_audio(bytes: &[u8], speed: Option<f32>) -> Result<PathBuf, Playbac
     std::fs::create_dir_all(&dir)?;
 
     let hash = temp_audio_hash(bytes, speed);
-    let filename = format!("{:016x}.audio", hash);
-    let path = dir.join(filename);
+    let path = dir.join(format!("{:016x}.audio", hash));
 
     if path.exists() {
         return Ok(path);
     }
 
-    let tmp_path = dir.join(format!("{:016x}.tmp", hash));
-    std::fs::write(&tmp_path, bytes)?;
-    std::fs::rename(&tmp_path, &path)?;
+    // Stage into a process-unique file, flush it to disk, and close it before
+    // publishing so host players never observe a partially written cache file.
+    let tmp_path = unique_temp_path(&dir, hash);
+    {
+        use std::io::Write as _;
+        let mut file = std::fs::File::create(&tmp_path)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+    }
 
-    Ok(path)
+    publish_temp_audio(&tmp_path, &path)
+}
+
+/// Async counterpart of [`publish_temp_audio`] with identical race semantics.
+#[cfg(feature = "async")]
+async fn publish_temp_audio_async(tmp_path: &Path, path: &Path) -> Result<PathBuf, PlaybackError> {
+    if tokio::fs::try_exists(path).await.unwrap_or(false) {
+        let _ = tokio::fs::remove_file(tmp_path).await;
+        return Ok(path.to_path_buf());
+    }
+
+    match tokio::fs::rename(tmp_path, path).await {
+        Ok(()) => Ok(path.to_path_buf()),
+        Err(_) if tokio::fs::try_exists(path).await.unwrap_or(false) => {
+            let _ = tokio::fs::remove_file(tmp_path).await;
+            Ok(path.to_path_buf())
+        }
+        Err(err) => {
+            let _ = tokio::fs::remove_file(tmp_path).await;
+            Err(err.into())
+        }
+    }
 }
 
 #[cfg(feature = "async")]
@@ -483,18 +563,23 @@ async fn write_temp_audio_async(
     tokio::fs::create_dir_all(&dir).await?;
 
     let hash = temp_audio_hash(bytes, speed);
-    let filename = format!("{:016x}.audio", hash);
-    let path = dir.join(filename);
+    let path = dir.join(format!("{:016x}.audio", hash));
 
     if tokio::fs::try_exists(&path).await.unwrap_or(false) {
         return Ok(path);
     }
 
-    let tmp_path = dir.join(format!("{:016x}.tmp", hash));
-    tokio::fs::write(&tmp_path, bytes).await?;
-    tokio::fs::rename(&tmp_path, &path).await?;
+    // Stage into a process-unique file, flush it to disk, and close it before
+    // publishing so host players never observe a partially written cache file.
+    let tmp_path = unique_temp_path(&dir, hash);
+    {
+        use tokio::io::AsyncWriteExt as _;
+        let mut file = tokio::fs::File::create(&tmp_path).await?;
+        file.write_all(bytes).await?;
+        file.sync_all().await?;
+    }
 
-    Ok(path)
+    publish_temp_audio_async(&tmp_path, &path).await
 }
 
 #[cfg(feature = "async")]
@@ -685,8 +770,22 @@ mod tests {
     #[cfg(feature = "async")]
     use std::ffi::OsString;
 
+    /// Platform-shaped source path for command-construction tests.
+    ///
+    /// Always contains a space so assertions prove the source survives as a
+    /// single argument boundary rather than being split on whitespace. On
+    /// Windows a drive prefix exercises native separator spelling; on Unix a
+    /// backslash is included as an ordinary filename character.
+    fn mock_source_path() -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from(r"C:\Users\Example\audio file.wav")
+        } else {
+            PathBuf::from("/tmp/playa test/back\\slash file.wav")
+        }
+    }
+
     fn mock_source() -> ResolvedSource {
-        ResolvedSource::Path(PathBuf::from("/tmp/test.wav"))
+        ResolvedSource::Path(mock_source_path())
     }
 
     fn get_metadata(player: AudioPlayer) -> &'static crate::player::Player {
@@ -770,8 +869,9 @@ mod tests {
         assert!(args.contains(&OsStr::new("-v")));
         assert!(args.contains(&OsStr::new("0.8")));
         // Speed effect should come after the source file
+        let expected = mock_source_path();
         let speed_pos = args.iter().position(|a| *a == OsStr::new("speed"));
-        let source_pos = args.iter().position(|a| *a == OsStr::new("/tmp/test.wav"));
+        let source_pos = args.iter().position(|a| *a == expected.as_os_str());
         assert!(
             speed_pos.unwrap() > source_pos.unwrap(),
             "speed effect should come after source"
@@ -863,7 +963,8 @@ mod tests {
                 .unwrap();
 
         let args: Vec<_> = command.get_args().collect();
-        assert!(args.contains(&OsStr::new("/tmp/test.wav")));
+        let expected = mock_source_path();
+        assert!(args.iter().any(|a| *a == expected.as_os_str()));
     }
 
     #[test]
@@ -889,7 +990,8 @@ mod tests {
             build_player_command(AudioPlayer::Pipewire, metadata, &source, &options).unwrap();
 
         let args: Vec<_> = command.get_args().collect();
-        assert!(args.contains(&OsStr::new("/tmp/test.wav")));
+        let expected = mock_source_path();
+        assert!(args.iter().any(|a| *a == expected.as_os_str()));
     }
 
     #[test]
@@ -949,7 +1051,8 @@ mod tests {
             build_player_command(AudioPlayer::MacOsAfplay, metadata, &source, &options).unwrap();
 
         let args: Vec<_> = command.get_args().collect();
-        assert!(args.contains(&OsStr::new("/tmp/test.wav")));
+        let expected = mock_source_path();
+        assert!(args.iter().any(|a| *a == expected.as_os_str()));
     }
 
     #[test]
@@ -992,7 +1095,47 @@ mod tests {
 
         // pacat takes file path directly, no special flags
         let args: Vec<_> = command.get_args().collect();
-        assert!(args.contains(&OsStr::new("/tmp/test.wav")));
+        let expected = mock_source_path();
+        assert!(args.iter().any(|a| *a == expected.as_os_str()));
+    }
+
+    /// Build an mpv command for `path` and assert the source survives as
+    /// exactly one argument, byte-for-byte at the `OsStr` level. mpv appends
+    /// the source as a plain argument, so this isolates argument-boundary
+    /// behavior from separator spelling.
+    fn assert_source_is_single_argument(path: &std::path::Path) {
+        let metadata = get_metadata(AudioPlayer::Mpv);
+        let source = ResolvedSource::Path(path.to_path_buf());
+        let options = PlaybackOptions::default();
+        let command = build_player_command(AudioPlayer::Mpv, metadata, &source, &options).unwrap();
+
+        let args: Vec<_> = command.get_args().collect();
+        let matches = args.iter().filter(|a| **a == path.as_os_str()).count();
+        assert_eq!(
+            matches, 1,
+            "source path must be passed as a single, unmodified argument"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn build_command_preserves_windows_drive_path_with_spaces() {
+        assert_source_is_single_argument(std::path::Path::new(r"C:\Users\Example\audio file.wav"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn build_command_preserves_windows_unc_path_with_spaces() {
+        assert_source_is_single_argument(std::path::Path::new(r"\\server\share\audio file.wav"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_command_preserves_unix_path_with_spaces_and_backslashes() {
+        // On Unix a backslash is an ordinary filename character, not a separator.
+        assert_source_is_single_argument(std::path::Path::new(
+            "/tmp/playa test/back\\slash file.wav",
+        ));
     }
 
     #[test]
@@ -1034,6 +1177,55 @@ mod tests {
 
         let _ = std::fs::remove_file(&path1);
         let _ = std::fs::remove_file(&path3);
+    }
+
+    #[test]
+    fn write_temp_audio_concurrent_writers_all_get_readable_cache() {
+        let bytes = b"phase1 concurrent identical bytes sync".to_vec();
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let b = bytes.clone();
+            handles.push(std::thread::spawn(move || {
+                write_temp_audio(&b, Some(1.0)).unwrap()
+            }));
+        }
+
+        let mut final_path = None;
+        for handle in handles {
+            let path = handle.join().unwrap();
+            assert!(path.exists(), "every caller must receive an existing file");
+            let content = std::fs::read(&path).unwrap();
+            assert_eq!(content, bytes, "cache file must hold the input bytes");
+            final_path = Some(path);
+        }
+
+        // All writers hash identical content+speed to one cache path.
+        let _ = std::fs::remove_file(final_path.unwrap());
+    }
+
+    #[test]
+    fn publish_temp_audio_loser_cleans_up_and_keeps_existing() {
+        let dir = temp_audio_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let hash = temp_audio_hash(b"phase1 publish loss", Some(1.0));
+        let dest = dir.join(format!("{:016x}.audio", hash));
+        std::fs::write(&dest, b"winner content").unwrap();
+
+        let tmp = unique_temp_path(&dir, hash);
+        std::fs::write(&tmp, b"loser content").unwrap();
+
+        let returned = publish_temp_audio(&tmp, &dest).unwrap();
+
+        assert_eq!(returned, dest, "loser returns the existing cache path");
+        assert!(!tmp.exists(), "loser's unique temp file is cleaned up");
+        assert_eq!(
+            std::fs::read(&dest).unwrap(),
+            b"winner content",
+            "existing cache file is not overwritten by the loser"
+        );
+
+        let _ = std::fs::remove_file(&dest);
     }
 
     // Async variant tests (feature-gated)
@@ -1097,10 +1289,11 @@ mod tests {
             assert!(args.contains(&OsString::from("-v")));
 
             // Speed effect should come after the source file
+            let expected = mock_source_path();
             let speed_pos = args.iter().position(|a| a.to_str() == Some("speed"));
             let source_pos = args
                 .iter()
-                .position(|a| a.to_str() == Some("/tmp/test.wav"));
+                .position(|a| a.as_os_str() == expected.as_os_str());
             assert!(
                 speed_pos.unwrap() > source_pos.unwrap(),
                 "speed effect should come after source"
@@ -1131,6 +1324,29 @@ mod tests {
 
             let _ = tokio::fs::remove_file(&path1).await;
             let _ = tokio::fs::remove_file(&path3).await;
+        }
+
+        #[tokio::test]
+        async fn write_temp_audio_async_concurrent_writers_all_get_readable_cache() {
+            let bytes = b"phase1 concurrent identical bytes async".to_vec();
+            let mut handles = Vec::new();
+            for _ in 0..8 {
+                let b = bytes.clone();
+                handles.push(tokio::spawn(async move {
+                    write_temp_audio_async(&b, Some(1.0)).await.unwrap()
+                }));
+            }
+
+            let mut final_path = None;
+            for handle in handles {
+                let path = handle.await.unwrap();
+                assert!(tokio::fs::try_exists(&path).await.unwrap());
+                let content = tokio::fs::read(&path).await.unwrap();
+                assert_eq!(content, bytes, "cache file must hold the input bytes");
+                final_path = Some(path);
+            }
+
+            let _ = tokio::fs::remove_file(final_path.unwrap()).await;
         }
     }
 }

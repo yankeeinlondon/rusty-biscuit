@@ -95,7 +95,7 @@ every `<TAB>`. The supplement engine applies these rules in order:
     `file`-glob paths after `=`). Without a schema, the value slot still
     supports `@`-gated file completion; plain string/number values yield
     no candidates so shell default behavior kicks in. See
-    [Shell Completions](shell-completions.md).
+    [Shell Completions](completions/shell-completions.md).
 
 Install with `claudine completions <shell>` — regenerate and reinstall
 after a Claudine upgrade that changes the callback wiring. The hidden
@@ -104,7 +104,7 @@ the completion candidates themselves never go stale. PowerShell and
 Elvish retain the legacy one-line `COMPLETE=<shell>` bootstrap; users
 who installed an older `COMPLETE=<shell>` snippet continue to reach the
 legacy completion path on every shell until they regenerate. See
-[shell-completions.md](../shell-completions.md) for the full install
+[completions/shell-completions.md](completions/shell-completions.md) for the full install
 matrix, supported token shapes, and the open-questions list.
 
 ## Execution Flows

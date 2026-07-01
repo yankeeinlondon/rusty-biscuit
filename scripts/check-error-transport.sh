@@ -97,4 +97,4 @@ if [[ ${violations} -gt 0 ]]; then
     exit 1
 fi
 
-echo "error-transport guard: no un-allowlisted typed-error→String collapses."
+echo "✅ error-transport guard: no un-allowlisted typed-error→String collapses."

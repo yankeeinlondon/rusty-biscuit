@@ -1,14 +1,17 @@
 ---
 $schema:
-    phase: number(required)
+    phase: number(required;default(1))
     total_phases: number(required)
-    plan: file(required)
-    spec: file
+    plan: file(eager; required)
+    spec: file(eager)
 description: |-
-    Provide either `plan` or `spec` filepath as a parameter and this
+    Provide either a `plan` or `spec` filepath as a parameter and this
     prompt will detect the number of phases in the plan and then implement
     the project phase by phase.
-plan: "{{ file_exists(spec) ? dirname(spec) + '/plan.md'  : null }}"
+
+    > **Note:** it makes no difference if the plan is for a _specification_ implementation
+    > versus it being for a technical review's findings.
+plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
 phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || 1 : null }}"
 area: "{{ ctx.area }}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
@@ -30,6 +33,7 @@ blocked:
 failure:
     say: "Phase {{phase}} of a plan in the {{area}} package area, ran into problems!"
     message: "❌️  phase **{{phase}}** (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}` ({{area}}, {{ctx.agent}}/{{ctx.model}}: {{err.message}})"
+    effect: sad-trombone
 loop:
     until: "phase >= total_phases"
     action: "increment(phase)"

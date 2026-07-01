@@ -24,7 +24,7 @@ success:
     effect: bong
 failure:
     message: "❌ implementation of the review #{{iteration}} suggestions from **{{ parent_dir(review) }}** failed to complete ({{err.message}})!"
-    effect: phase-jump-3
+    effect: sad-trombone
 ---
 
 # Implement Review Suggestions for {{title_case(without_date(parent_dir(spec)))}}

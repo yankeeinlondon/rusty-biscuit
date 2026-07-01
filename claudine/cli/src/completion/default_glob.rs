@@ -26,9 +26,9 @@ use super::walker::{self, MAX_CANDIDATES};
 
 /// Gather markdown candidates from the default glob.
 ///
-/// Walks the effective repo root (or `cwd` when no repo is detected),
-/// honoring git ignore files and excluding prompt directories. Returns
-/// absolute paths; callers relativize as needed.
+/// Walks the invoking `cwd` (the launch area; see
+/// [`scopes::property_value_root`]), honoring git ignore files and excluding
+/// prompt directories. Returns absolute paths; callers relativize as needed.
 pub(crate) fn default_markdown_candidates(ctx: &ScopeContext) -> Vec<PathBuf> {
     default_markdown_candidates_filtered(ctx, |_| true)
 }
@@ -45,9 +45,7 @@ pub(crate) fn default_markdown_candidates_filtered<P>(
 where
     P: Fn(&Path) -> bool,
 {
-    let base = scopes::effective_repo_root(ctx)
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| ctx.cwd.clone());
+    let base = scopes::property_value_root(ctx).to_path_buf();
     let excluded = prompt_dirs(ctx);
     let excluded_for_filter = excluded.clone();
 

@@ -506,6 +506,49 @@ mod tests {
         assert_eq!(result.user_approved, 0);
     }
 
+    /// Regression: the template `::shell` preflight runs a full compose
+    /// pipeline. A `success` (lifecycle) frontmatter key that reads a file the
+    /// run is about to create (`frontmatter(<missing>, …)`) must NOT be
+    /// resolved at compose time — its `{{ … }}` spans are late-bound and fire
+    /// only when the event does. The CLI defers the lifecycle keys by passing
+    /// `with_exclude_keys(LIFECYCLE_EVENT_KEYS)` into the preflight options;
+    /// without it, the now-fatal file-reference check aborts preflight before
+    /// the event that would make the file exist ever runs.
+    #[test]
+    fn lifecycle_key_with_missing_file_ref_is_deferred_in_preflight() {
+        let doc = "---\n\
+status: \"{{ frontmatter('does-not-exist.md', 'ready') }}\"\n\
+---\nbody\n";
+        let md: Markdown = doc.into();
+
+        // Without the exclusion, the file-ref read on a missing file is fatal.
+        let no_exclude = ComposeOptions::new();
+        let unguarded = resolve_shell_approvals(
+            Some(&md),
+            Some(&no_exclude),
+            &ShellApprovalOptions::default(),
+            None,
+            None,
+        );
+        assert!(
+            unguarded.is_err(),
+            "a compose-time read of a missing file must be fatal when not deferred"
+        );
+
+        // With the lifecycle key excluded (DM1), the key survives raw and
+        // preflight succeeds — mirroring the CLI's preflight option builders.
+        let excluded = ComposeOptions::new().with_exclude_keys(["status"]);
+        let guarded = resolve_shell_approvals(
+            Some(&md),
+            Some(&excluded),
+            &ShellApprovalOptions::default(),
+            None,
+            None,
+        )
+        .expect("excluding the lifecycle key must defer its file-ref read past preflight");
+        assert!(guarded.approved_commands.is_empty());
+    }
+
     #[test]
     fn dry_run_no_handler_emits_cannot_dry_run_message() {
         // Non-TTY dry-run gate: an unapproved command with no approval

@@ -7,7 +7,7 @@ description: "Reviews a _feature specification_ to make sure that the specificat
 initialize: 
     info: "spec [{{spec}}]: {{file_exists(spec)}}"
 
-dir: "{{dirname(spec || design)}}"
+dir: "{{dirname(spec)}}"
 design: "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}"
 iteration: "{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1  : 1   }}"
 review_file: "{{dir}}/review-{{iteration}}.md"
