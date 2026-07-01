@@ -1,3 +1,7 @@
+---
+review_iterations: 1
+---
+
 ![choosing a prompt TUI](./choose-prompt.png)
 
 I ran `claudine compose plan spec=everywhere`:
