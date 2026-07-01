@@ -2793,9 +2793,11 @@ mod tests {
     // `file_ref_fallback_dir`. The regressions below switch the process CWD
     // to an unrelated directory to prove resolution is CWD-independent: a
     // `file`-typed value that exists only under the fallback must be accepted
-    // (`pre_validate_schema`) or kept (`drop_invalid_optionals`), and a
-    // value that exists only under the document dir must win over a
-    // same-named fallback file (prompt-dir precedence).
+    // (`pre_validate_schema`) or kept (`drop_invalid_optionals`). Without the
+    // fallback, required values surface as validation errors while optional
+    // eager file values remain visible for the later schema error path instead
+    // of being pre-dropped. A value that exists only under the document dir
+    // must win over a same-named fallback file (prompt-dir precedence).
 
     /// RAII guard that captures the process CWD on construction, switches to
     /// the requested directory, and restores the captured CWD on drop —
@@ -2941,13 +2943,14 @@ mod tests {
         );
     }
 
-    /// Companion negative: WITHOUT the fallback, the same optional `file`
-    /// value is unresolvable from the unrelated CWD and IS dropped. Confirms
-    /// the keep above is due to the fallback, not because the file happens to
-    /// be reachable.
+    /// Companion negative: WITHOUT the fallback, the same optional eager
+    /// `file` value is unresolvable from the unrelated CWD. It must still be
+    /// kept by the pre-preflight scrubber because optional eager file failures
+    /// intentionally remain visible for the later schema error path instead of
+    /// being silently dropped.
     #[test]
     #[serial_test::serial(schema_validation_cwd)]
-    fn drop_invalid_optionals_drops_file_when_no_fallback() {
+    fn drop_invalid_optionals_keeps_unresolved_eager_file_when_no_fallback() {
         let doc_dir = TempDir::new().unwrap();
         let fallback_dir = TempDir::new().unwrap();
         let unrelated = TempDir::new().unwrap();
@@ -2962,16 +2965,16 @@ mod tests {
         let (scrubbed, _overrides, dropped) = drop_invalid_optionals(source, None, None);
 
         assert!(
-            !scrubbed
+            scrubbed
                 .markdown
                 .frontmatter()
                 .as_map()
                 .contains_key("notes"),
-            "without the fallback, an unresolvable optional file value is dropped",
+            "unresolvable optional eager file values must remain visible for schema validation",
         );
         assert!(
-            dropped.iter().any(|d| d.property == "notes"),
-            "expected a drop diagnostic for the unresolvable optional file value",
+            dropped.iter().all(|d| d.property != "notes"),
+            "no drop diagnostic should be emitted for an optional eager file value",
         );
     }
 
