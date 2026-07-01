@@ -3,6 +3,7 @@ status: ready for planning and implementation
 reviewed: true
 date: 2026-06-30
 owner: ken
+review_iterations: 1
 origin: biscuit-terminal Table width:auto/fill gap (tables ignored layout.width; fractional Fixed double-applied)
 depends-on:
   - renderable/features/_completed/2026-04-17-layout-and-style/layout-spec.md
