@@ -856,6 +856,10 @@ let metadata = provider.get_repo_metadata("rust-lang", "cargo").await?;
 - Audio device detection uses platform-specific APIs (Core Audio, PulseAudio/ALSA, PowerShell)
 - Network interface detection requires appropriate permissions
 - Git operations require valid repository
+- **WSL** is treated as the Linux compile and runtime path: under WSL, sniff
+  uses the same `/proc`-backed detectors as native Linux, and `HostCapabilities`
+  surfaces an `is_wsl` flag. No detector crosses into native Windows behavior
+  when running inside WSL.
 
 ## Dependencies
 
