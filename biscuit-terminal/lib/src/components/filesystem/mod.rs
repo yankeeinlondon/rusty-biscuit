@@ -199,6 +199,39 @@ impl RootIconKind {
 /// - The tree is built lazily on first render or explicit call
 /// - Symlinks are shown but not followed (prevents infinite loops)
 /// - Permission errors create error-marked nodes instead of failing
+///
+/// ## Layout & Style Contract
+///
+/// `FileSystem` is an internal-layout component (spec C2) **on the tree
+/// path**: the canonical projection sets the configured [`Layout`] on the
+/// root `List` node, and the shared render-tree fold resolves the outer box.
+/// Tree connectors are forced to [`WordWrap::None`] so the connector
+/// geometry is never wrapped.
+///
+/// - [`Width::Auto`] (default), [`Width::Fixed`], and [`Width::FitContent`]
+///   resolve the outer box; the filesystem tree renders inside that box.
+/// - **Slack sink** (spec D2): the entry-label region. The connector columns
+///   (`├── ` / `└── ` / `│   `) and the icon columns stay fixed; only the
+///   entry labels absorb slack by truncating inside the resolved content
+///   width.
+/// - A fractional `Fixed(50%)` is resolved exactly once by the fold; the
+///   tree never re-resolves the raw percentage against its own narrowed box.
+///
+/// ### Terminal render gap (deferred flip)
+///
+/// The bespoke [`TerminalRenderable::render`] path remains the production
+/// terminal renderer because the target-agnostic projection emits Unicode
+/// fallback icons (📂 / 📄) that cannot reproduce the bespoke Nerd Font
+/// icons the terminal path chooses based on the live terminal's font
+/// support. The tree path's box-model contract is honored today
+/// (`margin` / `alignment` / `max_width` / `width`), and the bespoke
+/// terminal path applies the same [`Layout`] via `apply_block_layout`. A
+/// future flip will route the terminal target through the tree path once
+/// icon parity is achieved.
+///
+/// [`Width::Auto`]: renderable::layout::Width::Auto
+/// [`Width::Fixed`]: renderable::layout::Width::Fixed
+/// [`Width::FitContent`]: renderable::layout::Width::FitContent
 #[derive(Debug, Clone)]
 pub struct FileSystem {
     /// The root directory path to display.

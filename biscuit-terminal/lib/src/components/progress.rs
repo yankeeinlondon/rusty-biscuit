@@ -87,6 +87,35 @@ impl Default for ProgressStyle {
 /// let output = bar.render_optimistic(Some(40));
 /// assert!(output.contains("75%"));
 /// ```
+///
+/// ## Layout & Style Contract
+///
+/// `Progress` is an internal-layout component (spec C2). It projects to a
+/// [`Paragraph`](renderable::tree::NodeKind::Paragraph) carrying
+/// [`ProgressHints`] and the configured [`Layout`]; the shared render-tree
+/// fold resolves the outer box, and the bar renders inside it:
+///
+/// - [`Width::Auto`] (default) and [`Width::Fixed`] resolve the outer box
+///   (margin / alignment / width-cap); the bar itself renders at its explicit
+///   [`bar_width`](Self::with_bar_width) (default 20). [`Width::FitContent`]
+///   hugs the bar's natural width (`label + brackets + bar_width +
+///   percentage`) rather than padding to the available width.
+/// - **Slack sink** (spec D2): the bar track. When the outer box is too
+///   narrow for the natural `label + brackets + bar_width + percentage`
+///   width, the rendered output clamps inside the box; the label, brackets,
+///   and percentage are fixed-width, so the bar is the conceptual slack
+///   absorber. When the box is wider than the natural width, alignment
+///   positions the bar within the available area.
+/// - A fractional `Fixed(50%)` is resolved exactly once by the fold; the bar
+///   still renders at its full `bar_width` and never re-resolves the raw
+///   percentage (the `Fixed(50%) → 25%` double-application bug).
+/// - The projected [`ProgressHints`] round-trip carries the [`Layout`] onto
+///   the paragraph node (C4), so the box contract survives a second render
+///   pass.
+///
+/// [`Width::Auto`]: renderable::layout::Width::Auto
+/// [`Width::Fixed`]: renderable::layout::Width::Fixed
+/// [`Width::FitContent`]: renderable::layout::Width::FitContent
 #[derive(Debug, Clone)]
 pub struct Progress {
     /// Value between 0.0 and 1.0

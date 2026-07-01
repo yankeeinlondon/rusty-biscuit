@@ -191,6 +191,32 @@ pub enum TerminalImageError {
 ///
 /// The `TerminalImage` type validates paths to prevent path traversal attacks.
 /// Use `TerminalImageOptions` with a `base_path` to restrict file access.
+///
+/// ## Layout & Style Contract
+///
+/// `TerminalImage` is a bespoke image-protocol component (spec C5/D5). The
+/// Kitty / iTerm2 / Sixel escape sequences are irreducible — no render-tree
+/// `NodeKind` can represent an inline image protocol — so the component
+/// emits the protocol bytes directly through `TerminalRenderable::render`.
+/// The fold-style box model does not apply.
+///
+/// The honored subset (spec C5: minimum bar) is the outer placement:
+///
+/// | Property | Status | Rationale |
+/// |----------|--------|-----------|
+/// | `Layout::margin` | **Honored** | Reduces `available_width` and seeds `x_offset` via `resolve_dimensions`. |
+/// | `Layout::alignment` | **Honored** | Selects left / center / right placement of the image canvas within the slack. |
+/// | `Layout::max_width` | **N/A** | The image canvas is sized by `ImageWidth` (the explicit contract for this component). `Layout::width` and `Layout::max_width` are not read by the resolver — `ImageWidth::Fill` / `Percent` / `Characters` is the sole width control. This is the documented TerminalImage-specific carve-out, not a silent no-op. |
+/// | `Layout::width` | **N/A** | See `max_width` above — `ImageWidth` is the explicit contract. |
+/// | `Layout::padding` | **N/A** | The image protocol has no "padding box"; padding cannot paint protocol bytes. |
+/// | `Layout::word_wrap` | **N/A** | An image protocol escape cannot wrap. |
+/// | `Style::color` / `emphasis` | **N/A** | The image bytes are not text the SGR can recolor. |
+/// | `Style::background` | **N/A** | A block background would have to paint cells *around* the protocol bytes; the protocol owns the cells it covers. |
+/// | `Style::border` | **N/A** | Box-drawing glyphs cannot frame an image-protocol escape without corrupting the protocol's cell coverage. |
+///
+/// Parity for the honored subset is pinned in `terminal_image_parity.rs`
+/// via `TerminalImage::resolve_dimensions_for` — the single width/margin
+/// calculator both `TerminalImage` and `GraphExpression` share.
 #[derive(Debug)]
 pub struct TerminalImage {
     /// Fully qualified filename (absolute path).

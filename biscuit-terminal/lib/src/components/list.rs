@@ -83,6 +83,32 @@ fn force_component_hanging_indent(content: &mut RenderableTerminalContent, hangi
 /// let list = OrderedList::new(vec!["Parent item"])
 ///     .with_indent_children(8);  // 8 spaces for nested content
 /// ```
+///
+/// ## Layout & Style Contract
+///
+/// `OrderedList` is an internal-layout component (spec C2). It projects to a
+/// [`List`](renderable::tree::NodeKind::List) node carrying
+/// [`ListRenderHints`] and the configured [`Layout`]; the shared render-tree
+/// fold resolves the outer box, and the list renderer fills the resolved
+/// content width:
+///
+/// - [`Width::Auto`] (default) and [`Width::Fixed`] **fill** the available
+///   width by wrapping the item body; [`Width::FitContent`] hugs the widest
+///   item (short items stay short).
+/// - **Slack sink** (spec D2): the item body text column. The numeric marker
+///   (`"1. "`) and the hanging indent stay fixed across width modes, so a
+///   narrower or wider box only reflows the body text.
+/// - A fractional `Fixed(50%)` is resolved exactly once by the fold; the
+///   list renderer wraps the body to the resolved content width and never
+///   re-resolves the raw percentage (the `Fixed(50%) → 25%`
+///   double-application bug).
+/// - The projected [`ListRenderHints`] round-trip carries the [`Layout`] onto
+///   the list node (C4), so the wrapping policy and hanging-indent contract
+///   survive a second render pass.
+///
+/// [`Width::Auto`]: renderable::layout::Width::Auto
+/// [`Width::Fixed`]: renderable::layout::Width::Fixed
+/// [`Width::FitContent`]: renderable::layout::Width::FitContent
 #[derive(Debug)]
 pub struct OrderedList {
     items: Vec<RenderableTerminalContent>,
@@ -496,6 +522,32 @@ fn project_list_items(
 /// - **Custom bullets**: Use any character or string as the bullet marker
 /// - **Nested content**: Block-level children are indented without bullets
 /// - **Mixed content**: Supports both string items and renderable components
+///
+/// ## Layout & Style Contract
+///
+/// `UnorderedList` is an internal-layout component (spec C2). It projects to
+/// a [`List`](renderable::tree::NodeKind::List) node carrying
+/// [`ListRenderHints`] and the configured [`Layout`]; the shared render-tree
+/// fold resolves the outer box, and the list renderer fills the resolved
+/// content width:
+///
+/// - [`Width::Auto`] (default) and [`Width::Fixed`] **fill** the available
+///   width by wrapping the item body; [`Width::FitContent`] hugs the widest
+///   item (short items stay short).
+/// - **Slack sink** (spec D2): the item body text column. The bullet (`"- "`)
+///   and the hanging indent stay fixed across width modes, so a narrower or
+///   wider box only reflows the body text.
+/// - A fractional `Fixed(50%)` is resolved exactly once by the fold; the
+///   list renderer wraps the body to the resolved content width and never
+///   re-resolves the raw percentage (the `Fixed(50%) → 25%`
+///   double-application bug).
+/// - The projected [`ListRenderHints`] round-trip carries the [`Layout`] onto
+///   the list node (C4), so the wrapping policy and hanging-indent contract
+///   survive a second render pass.
+///
+/// [`Width::Auto`]: renderable::layout::Width::Auto
+/// [`Width::Fixed`]: renderable::layout::Width::Fixed
+/// [`Width::FitContent`]: renderable::layout::Width::FitContent
 #[derive(Debug)]
 pub struct UnorderedList {
     items: Vec<RenderableTerminalContent>,

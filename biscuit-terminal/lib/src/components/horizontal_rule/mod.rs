@@ -36,6 +36,32 @@ pub(crate) const DEFAULT_CELL_WIDTH: u32 = 8;
 pub(crate) const DEFAULT_CELL_HEIGHT: u32 = 16;
 
 /// A horizontal rule component for terminal and browser rendering.
+///
+/// ## Layout & Style Contract
+///
+/// `HorizontalRule` is a bespoke component (spec C5/D5) with two render
+/// tiers: the **image tier** (Kitty graphics protocol, active on capable
+/// TTYs) and the **text tier** (Unicode or ASCII glyphs). The drawn glyph
+/// / image core is irreducible — no render-tree `NodeKind` can represent
+/// either — so the component emits those bytes directly. The structural
+/// `ThematicBreak` semantics (spec C9) are preserved on every target.
+///
+/// The honored subset (spec C5: minimum bar) is the outer placement,
+/// applied to both tiers:
+///
+/// | Property | Status | Rationale |
+/// |----------|--------|-----------|
+/// | `Layout::margin` | **Honored** | Outer placement is target-agnostic; the rule is positioned within the available width after margins. |
+/// | `Layout::alignment` | **Honored** | `RuleAlignment::Centered` / `Left` / `Right` already mirror this contract on the text tier; `Layout::alignment` is reserved for the outer block box. |
+/// | `Layout::max_width` | **Honored** | Caps the rule's outer width. |
+/// | `Layout::width` | **Honored** (via the rule's own `width()` builder) | The HR has its own CSS-like width specification (`"50%"` / `"20ch"` / `"200px"`) that drives `resolve_width`. Setting `Layout::width` itself is honored on the same outer box. |
+/// | `Layout::padding` | **N/A** | Padding cannot paint the glyph/image core; there is no padding box. |
+/// | `Layout::word_wrap` | **N/A** | A horizontal rule cannot wrap. |
+/// | `Style::color` / `emphasis` | **N/A** | The HR has its own `color()` builder (CSS color string) routed through `apply_terminal_color`. `Style::color` / `Style::emphasis` are not lowered onto the glyph core. |
+/// | `Style::background` | **N/A** | A block background would have to paint cells *around* the glyph/image bytes; the protocol/glyph owns the cells it covers. |
+/// | `Style::border` | **N/A** | Box-drawing glyphs cannot frame an HR glyph/image without disrupting the rule itself. |
+///
+/// Parity for the honored subset is pinned in `horizontal_rule_parity.rs`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HorizontalRule {
     style: RuleStyle,

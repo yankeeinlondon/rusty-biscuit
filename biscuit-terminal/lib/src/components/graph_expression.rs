@@ -70,6 +70,42 @@ pub enum GraphRenderError {
 ///
 /// # Ok::<(), biscuit_terminal::components::graph_expression::GraphRenderError>(())
 /// ```
+///
+/// ## Layout & Style Contract
+///
+/// `GraphExpression` is a bespoke image component (spec C5): the rendered
+/// graph is rasterized by `biscuit-visualized` and emitted through a
+/// terminal image protocol (Kitty / iTerm2 / Sixel). It does not project to
+/// a `RenderNode`; the [`TerminalRenderable`] impl applies the configured
+/// [`Layout`] via `apply_block_layout` and the inner
+/// [`TerminalImage`] resolves image dimensions from [`ImageWidth`].
+///
+/// - **Slack sink** (spec D2): the rendered graph canvas. The image
+///   dimensions are resolved by [`TerminalImage::resolve_dimensions_for`]
+///   from [`ImageWidth`] (Fill / Percent / Characters):
+///   - `Fill` ⇒ the image canvas absorbs **all** the slack.
+///   - `Percent(p)` ⇒ the image canvas is `p * term_width` (basis matches
+///     `Length::Percent` semantics), then clamped under the available width.
+///   - `Characters(n)` ⇒ an explicit cell count, clamped under the
+///     available width.
+/// - [`Layout::margin`] is honored: it reduces the available width before
+///   the image width is resolved, so a wider margin shrinks the image
+///   canvas.
+/// - [`Layout::alignment`] is honored: the image's horizontal offset
+///   reflects left / center / right alignment against the slack.
+/// - `Layout::width` is **N/A** for the image canvas: [`ImageWidth`] is the
+///   explicit contract that selects Fill / Percent / Characters, and
+///   reusing `Layout::width` would create two competing width controls.
+///   This is the documented GraphExpression-specific carve-out — it is not
+///   a silent no-op because `Layout::width` is never read by the image
+///   resolver, and `Layout::margin` / `Layout::alignment` ARE honored.
+/// - A fractional `ImageWidth::Percent(p)` is resolved exactly once against
+///   `term_width` and then clamped under the available width; it never
+///   re-resolves the percentage against the margin-narrowed width (the
+///   double-application bug).
+///
+/// [`Layout::margin`]: crate::utils::layout::Layout::margin
+/// [`Layout::alignment`]: crate::utils::layout::Layout::alignment
 pub struct GraphExpression {
     /// The inner diagram from biscuit-visualized
     diagram: biscuit_visualized::graph::GraphDiagram,

@@ -117,6 +117,25 @@ use crate::discovery::detection::{ColorDepth, ColorMode};
 ///         ],
 ///     ]);
 /// ```
+///
+/// ## Layout & Style Contract
+///
+/// `Table` is an internal-layout component (spec C2/C3/C4). The shared
+/// render-tree fold resolves the outer box; `Table`'s width-planning pass
+/// fills the *resolved* widths it receives and never re-resolves a raw
+/// percentage. The slack sink is the last visible flexible column (spec
+/// D2). All applicable `Layout` and `Style` properties route through the
+/// fold on every target (C1).
+///
+/// The `prefer_cursor_alignment` knob (spec C5/C6) keeps a bespoke
+/// terminal-only escape hatch: ANSI cursor moves (`CSI N G`) cannot be
+/// represented in the render tree, so the cursor core is irreducible. The
+/// honored subset for that bespoke path is `margin` / `alignment` /
+/// `max_width` (outer-box placement, target-agnostic). Cursor moves
+/// replace inter-cell space padding only — they do not change the visible
+/// cell text or the outer box position. `render_bespoke` and
+/// `render_via_tree` agree on the honored subset after cursor escapes are
+/// stripped; parity is pinned in `table_parity.rs`.
 #[derive(Debug, Default, Clone)]
 pub struct Table {
     title: Option<String>,
