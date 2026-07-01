@@ -47,7 +47,7 @@ jobs:
         run: just all
 
   sniff-cross-platform:
-    name: Sniff cross-platform
+    name: Sniff cross-platform (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -73,8 +73,28 @@ jobs:
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
 
-      - name: Run sniff library tests
+      # Compile guard: the cross-platform fixes in this plan are about test
+      # *code* compiling everywhere. `--all-targets` builds the test, bench, and
+      # example targets so a Unix-only import or a macOS-only helper fails here
+      # even when the offending test never runs on this OS.
+      - name: Check sniff library (all targets)
+        run: cargo check --color=never -p sniff --all-targets
+
+      - name: Check sniff CLI (all targets)
+        run: cargo check --color=never -p sniff-cli --all-targets
+
+      # `just test` is the repository's existing nextest setup: it runs
+      # `cargo nextest run` for both `sniff` and `sniff-cli` with the canonical
+      # filter that excludes the L2/L3/browser/real/slow tiers. This is the
+      # sniff-cli nextest decision (plan Phase 4): the host-independent
+      # (L1) CLI tests run in the full macOS/Linux/Windows matrix here.
+      - name: Run sniff library and CLI tests
         run: cd sniff && just test
 
-      - name: Run sniff CLI tests
+      # The sniff-cli real-terminal (L2) tier needs a tmux/WezTerm harness that
+      # the Windows runner image does not provide, so it stays on the Unix legs.
+      # `require_level!` already skips it cleanly where the harness is absent;
+      # gating the step keeps the Windows leg focused on portable coverage.
+      - name: Run sniff CLI real-terminal (L2) tests
+        if: runner.os != 'Windows'
         run: cd sniff && just test-l2
