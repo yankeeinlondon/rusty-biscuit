@@ -15,7 +15,7 @@ use crate::system_prompt::{
 
 use super::formatting::{prompt_body_width, render_markdown_for_terminal, system_prompt_blockquote_styled};
 use super::tokens::estimate_system_prompt_tokens;
-use super::truncation::truncate_front_back;
+use super::truncation::{truncate_front_back, truncate_head};
 use super::{ReportMode, TruncationMode};
 
 /// Nerd Font git icon used as the in-repo hyperlink label when the terminal
@@ -115,18 +115,14 @@ fn render_system_prompt_body(
     match mode {
         ReportMode::Summary => String::new(),
         ReportMode::Partial { truncation } => {
-            let truncated = match truncation {
-                TruncationMode::FrontBack => truncate_front_back(text, 20, 10),
-                TruncationMode::Truncate => {
-                    let lines: Vec<&str> = text.lines().collect();
-                    if lines.len() <= 20 {
-                        text.to_string()
-                    } else {
-                        lines[..20].join("\n")
-                    }
-                }
-            };
-            render_markdown_for_terminal(&truncated, term, width)
+            // Render first, then truncate the rendered rows — see the note in
+            // `user_prompt::render_user_prompt_body`. Truncating Markdown source
+            // by line can orphan indented content into a phantom code block.
+            let rendered = render_markdown_for_terminal(text, term, width);
+            match truncation {
+                TruncationMode::FrontBack => truncate_front_back(&rendered, 20, 10),
+                TruncationMode::Truncate => truncate_head(&rendered, 20),
+            }
         }
         ReportMode::Full => render_markdown_for_terminal(text, term, width),
         ReportMode::Silent => String::new(),
@@ -546,7 +542,7 @@ mod tests {
     #[test]
     fn partial_format_truncates_long_text() {
         let text: String = (1..=50)
-            .map(|i| format!("Line {i}"))
+            .map(|i| format!("- Line {i}"))
             .collect::<Vec<_>>()
             .join("\n");
         let term = test_terminal();
@@ -638,7 +634,7 @@ mod tests {
     #[test]
     fn report_partial_renders_truncated_body() {
         let text: String = (1..=50)
-            .map(|i| format!("Line {i}"))
+            .map(|i| format!("- Line {i}"))
             .collect::<Vec<_>>()
             .join("\n");
         let term = test_terminal();

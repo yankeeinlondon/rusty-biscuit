@@ -121,7 +121,17 @@ fn style_system_prompt_blockquote(mut quote: BlockQuote) -> BlockQuote {
 /// from markdown content.
 pub(super) fn create_user_prompt_blockquote(content: &str, term: &Terminal) -> BlockQuote {
     let rendered = render_markdown_for_terminal(content, term, prompt_body_width(term));
-    let mut quote = BlockQuote::from(rendered)
+    user_prompt_blockquote_styled(&rendered)
+}
+
+/// Wraps already-rendered (ANSI) content in the green user-prompt
+/// [`BlockQuote`] without re-running the Markdown renderer.
+///
+/// Used by the truncation path, which renders the complete document first and
+/// then slices rendered rows — feeding those rows back through the Markdown
+/// renderer would re-parse a split fragment and mis-detect indented code.
+pub(super) fn user_prompt_blockquote_styled(rendered_content: &str) -> BlockQuote {
+    let mut quote = BlockQuote::from(rendered_content.to_string())
         .with_left_block_color(Color::Tailwind(Tailwind::Green500))
         .with_border(PROMPT_BORDER);
     quote.layout_mut().margin = Edges::x(Length::ch(PROMPT_LEFT_MARGIN));

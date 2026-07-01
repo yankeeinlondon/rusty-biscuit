@@ -144,11 +144,13 @@ fn system_prompt_long_paragraph() -> String {
     format!("# Wrap Test\n\n{words}\n")
 }
 
-/// `n` newline-separated `LineNNN` rows — a deterministic, contiguous-token
-/// body for exercising front/back truncation.
+/// `n` `LineNNN` list items — a deterministic body for exercising front/back
+/// truncation. List items (not a bare paragraph) each render on their own row;
+/// consecutive non-blank paragraph lines would reflow into a single row and
+/// never exceed the front/back row budget.
 fn numbered_lines(n: usize) -> String {
     (1..=n)
-        .map(|i| format!("Line{i:03}"))
+        .map(|i| format!("- Line{i:03}"))
         .collect::<Vec<_>>()
         .join("\n")
 }

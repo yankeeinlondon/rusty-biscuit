@@ -260,12 +260,15 @@ exit 0
     );
 
     // Create a user prompt with >40 lines
+    // List items (not a bare paragraph): consecutive non-blank Markdown lines
+    // reflow into a single rendered row, but each list item renders on its own
+    // row — which is what front/back row truncation operates on.
     let long_prompt: String = (1..=50)
-        .map(|i| format!("Line {i}"))
+        .map(|i| format!("- Line {i}"))
         .collect::<Vec<_>>()
         .join("\n");
     let md_file = workspace.path().join("prompt.md");
-    fs::write(&md_file, format!("# Long Prompt\n{long_prompt}\n")).unwrap();
+    fs::write(&md_file, format!("# Long Prompt\n\n{long_prompt}\n")).unwrap();
 
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
@@ -502,8 +505,10 @@ exit 0
 "#,
     );
 
+    // List items so each renders on its own row (a bare paragraph would
+    // reflow into a single row and never exceed the front/back row budget).
     let body: String = (1..=41)
-        .map(|i| format!("Line{i:03}"))
+        .map(|i| format!("- Line{i:03}"))
         .collect::<Vec<_>>()
         .join("\n");
     let md_file = workspace.path().join("prompt.md");

@@ -7,8 +7,11 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 
-use super::formatting::create_user_prompt_blockquote;
-use super::truncation::{strip_leading_whitespace, truncate_front_back};
+use super::formatting::{
+    create_user_prompt_blockquote, prompt_body_width, render_markdown_for_terminal,
+    user_prompt_blockquote_styled,
+};
+use super::truncation::{strip_leading_whitespace, truncate_front_back, truncate_head};
 use super::{ReportMode, TruncationMode};
 
 /// Render the user-prompt header line.
@@ -31,25 +34,21 @@ fn render_user_prompt_body(
     match mode {
         ReportMode::Summary | ReportMode::Silent => String::new(),
         ReportMode::Partial { truncation } => {
+            // Render the COMPLETE document before truncating. Slicing Markdown
+            // *source* by line can orphan an indented list continuation (or
+            // split a fenced block), and the parser then re-reads the orphan as
+            // an indented code block — the spurious "text" fences. Rendering
+            // first guarantees the parser always sees a syntactically complete
+            // document; truncation then only drops already-rendered rows.
+            let rendered =
+                render_markdown_for_terminal(&stripped, term, prompt_body_width(term));
             let truncated = match truncation {
-                TruncationMode::FrontBack => truncate_front_back(&stripped, 20, 10),
-                TruncationMode::Truncate => {
-                    // Show first 20 lines
-                    let lines: Vec<&str> = stripped.lines().collect();
-                    if lines.len() <= 20 {
-                        stripped
-                    } else {
-                        lines[..20].join("\n")
-                    }
-                }
+                TruncationMode::FrontBack => truncate_front_back(&rendered, 20, 10),
+                TruncationMode::Truncate => truncate_head(&rendered, 20),
             };
-            let quote = create_user_prompt_blockquote(&truncated, term);
-            quote.render(term)
+            user_prompt_blockquote_styled(&truncated).render(term)
         }
-        ReportMode::Full => {
-            let quote = create_user_prompt_blockquote(&stripped, term);
-            quote.render(term)
-        }
+        ReportMode::Full => create_user_prompt_blockquote(&stripped, term).render(term),
     }
 }
 
@@ -178,7 +177,7 @@ mod tests {
     #[test]
     fn partial_format_truncates_long_text() {
         let text: String = (1..=50)
-            .map(|i| format!("Line {i}"))
+            .map(|i| format!("- Line {i}"))
             .collect::<Vec<_>>()
             .join("\n");
         let term = test_terminal();
@@ -224,7 +223,7 @@ mod tests {
     fn partial_format_uses_20_10_for_long_text() {
         // Create text with more than 30 lines to trigger truncation with 20/10
         let text: String = (1..=50)
-            .map(|i| format!("Line {i}"))
+            .map(|i| format!("- Line {i}"))
             .collect::<Vec<_>>()
             .join("\n");
         let term = test_terminal();
@@ -292,7 +291,7 @@ mod tests {
     #[test]
     fn agent_report_partial_renders_truncated_body() {
         let text: String = (1..=50)
-            .map(|i| format!("Line {i}"))
+            .map(|i| format!("- Line {i}"))
             .collect::<Vec<_>>()
             .join("\n");
         let term = test_terminal();

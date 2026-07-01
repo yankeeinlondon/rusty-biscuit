@@ -57,9 +57,9 @@ pub fn truncate_front_back(text: &str, front_count: usize, back_count: usize) ->
         result.push_str(line);
         result.push('\n');
     }
-    // Surround `---` with blank lines. Without leading blank, CommonMark
-    // interprets "<text>\n---" as a setext h2 heading; the blank line
-    // forces it to parse as a thematic break (`HorizontalRule`) instead.
+    // The `---` marker is surrounded by blank lines so it reads as a visual
+    // separator between the front and back sections. This runs on already
+    // rendered rows, so the marker is literal text, not a re-parsed break.
     result.push_str("\n---\n\n");
     for line in back {
         result.push_str(line);
@@ -72,6 +72,17 @@ pub fn truncate_front_back(text: &str, front_count: usize, back_count: usize) ->
     }
 
     result
+}
+
+/// Returns the first `count` lines of `text`, or all of `text` when it has
+/// `count` or fewer lines.
+pub fn truncate_head(text: &str, count: usize) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.len() <= count {
+        text.to_string()
+    } else {
+        lines[..count].join("\n")
+    }
 }
 
 /// Removes the common leading-whitespace prefix shared by every non-blank
