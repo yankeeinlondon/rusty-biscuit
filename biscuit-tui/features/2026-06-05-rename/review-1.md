@@ -1,37 +1,38 @@
 ---
 ready: false
-agent: codex
-model: ""
+agent: codex/default
+created: 2026-06-30T15:13:38
 ---
 
 # Review: Rename `biscuit-tui` to `biscuit-tui`
 
 ## Findings
 
-### High: Required residual-reference verification is not reproducible as written
+### High: residual-reference verification cannot pass as written
 
-The spec makes the residual-reference command a success criterion: it must return no unexpected matches, with historical records and the rename specification intentionally excluded ([spec.md:68](spec.md:68)). The command in the spec does not do that because its exclusion uses `2026-06-5-rename` instead of the actual `2026-06-05-rename` path ([spec.md:260](spec.md:260)). The implementation also added `biscuit-tui/features/2026-06-05-rename/plan.md`, which intentionally contains old names and is not excluded by the spec command.
+The spec makes the residual-reference command a success criterion: it must return no unexpected matches after excluding historical records and this feature's own records ([spec.md:68](spec.md:68)). The command currently searches for `biscuit-tui|tui_chrome` ([spec.md:254](spec.md:254)), but `biscuit-tui` is the new, intended package/area name and is expected to remain throughout live manifests, docs, workflows, and source comments.
 
-Running the spec command exactly reports the rename spec and plan as matches. That means Phase 5 is marked complete even though the published verification command cannot pass without manual correction ([plan.md:196](plan.md:196)). Fix the date typo and exclude the plan, or update the spec to make the intended corrected command authoritative.
+Running the command as written reports hundreds of live, expected `biscuit-tui` matches, including root workspace members, package manifests, docs, tests, release-plz config, and the biscuit-tui skill. This makes the plan's completed Phase 5 claim unreproducible ([plan.md:197](plan.md:197)). The stale Rust import path itself appears clean: a targeted live search for `tui_chrome|tui-chrome`, excluding completed/historical records and this feature's own files, produced no matches. Fix the residual command so it only searches stale identifiers, or explicitly separate "old package name" checks from expected new-name references.
 
-### Medium: Plan status contradicts the completed implementation
+### High: validation scope misses a live external caller
 
-Phase 4 is still unchecked for the README, component docs, theming docs, skill, and active inventory updates ([plan.md:169](plan.md:169)), but Phase 5 is marked complete and claims the area and `claudine` verification passed ([plan.md:197](plan.md:197)). The files themselves appear updated, so this is plan/documentation drift rather than a code defect. It still matters because this feature uses the plan as its auditable implementation record.
+The spec says `claudine` is the only external workspace member that depends on the library and asks implementation to re-run that scan rather than treating the statement as permanently exhaustive ([spec.md:136](spec.md:136), [spec.md:139](spec.md:139)). The current metadata scan shows three packages depending on `biscuit-tui`: `biscuit-tui-cli`, `claudine-cli`, and `biscuit-icon-cli`. `biscuit-icon-cli` has a live dependency on the renamed library at [biscuit-icon/cli/Cargo.toml:24](../../../biscuit-icon/cli/Cargo.toml:24).
+
+The implementation plan's package list and final validation only include `biscuit-tui/lib`, `biscuit-tui/cli`, and `claudine/cli` ([plan.md:86](plan.md:86), [plan.md:198](plan.md:198), [plan.md:199](plan.md:199)). Even though `biscuit-icon-cli` already uses the new dependency key, this rename is a compile-time package identity change, so every live dependent package must be in the validation set. Add `biscuit-icon-cli` to the caller inventory and run at least its build/test path, or update the spec with an explicit reason it is out of scope.
 
 ## Test Rigor
 
-This rename has no intended user-observable TUI behavior change: the `question` binary name, flags, output formats, and exit codes are specified as unchanged. The requirements are compile-time package identity, Rust import paths, docs, and repo metadata. Level 1 verification is the appropriate minimum; Level 2 and Level 3 are not required for the rename itself.
+This rename does not specify a user-observable TUI behavior change: the `question` binary name, flags, output formats, exit codes, and widget behavior are unchanged. The relevant requirements are compile-time package identity, Rust import paths, docs, and repo metadata. Level 1 compile/test/doctest/lint verification is the appropriate minimum. Level 2 and Level 3 tests are not required for this feature because no terminal rendering, input encoder, keybinding, paste, mouse, or modifier-press behavior is changing.
 
-Observed verification:
+Verified during this review:
 
 - `cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name' | rg '^(biscuit-tui|biscuit-tui-cli)$'` prints `biscuit-tui` and `biscuit-tui-cli`.
 - `sniff repo packages --package-area biscuit-tui --list` prints `biscuit-tui-cli` and `biscuit-tui`.
-- Corrected residual search excluding both the spec and plan returns no live old-name references.
-- `just build`, `just test`, `just doctest`, and `just lint` pass from `biscuit-tui/`.
-- `cargo check --manifest-path claudine/cli/Cargo.toml --color=never` passes for the external caller.
+- Targeted stale-reference search for `tui_chrome|tui-chrome` outside historical records returned no live matches.
+- Dependency scan for packages depending on `biscuit-tui` prints `biscuit-icon-cli`, `claudine-cli`, and `biscuit-tui-cli`.
 
-I did not rerun the full `claudine/` `just build|test|doctest|lint` suite during review.
+I did not rerun the full `just build|test|doctest|lint` matrix for `biscuit-tui`, `claudine`, or `biscuit-icon` as part of this review.
 
-## Readiness
+## Production Readiness
 
-Not ready for production as recorded because one of the spec's explicit success criteria is not reproducible from the committed instructions. The code rename itself looks complete once the residual search is corrected.
+Not ready for production as recorded. The code rename itself appears largely complete for stale `tui_chrome` references, but one explicit success criterion is impossible to reproduce as written, and the documented validation scope omits a current live workspace caller.
