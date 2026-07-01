@@ -927,3 +927,51 @@ fn width_fit_content_matches_auto_on_terminal() {
         "terminal FitContent == Auto: the box pads to fill the handed width"
     );
 }
+
+#[test]
+fn width_fixed_full_fills_available_at_80() {
+    // Width::Fixed(100%) is the explicit "fill the parent's available width"
+    // contract (spec C2). The columns pad so the widest visible line is the
+    // full handed width, and the right column absorbs the slack.
+    let layout = Layout {
+        width: Width::Fixed(TargetValue::universal(Length::Percent(100.0))),
+        ..Layout::default()
+    };
+    let cols =
+        TwoColumn::new("Left column content.", "Right column content.").with_layout(layout);
+    let node = cols.render_tree_node().expect("tree node");
+    let out = render_tree(&node, 80);
+    assert_eq!(
+        widest_visible_line(&out),
+        80,
+        "Width::Fixed(100%) must fill the full handed width"
+    );
+}
+
+#[test]
+fn right_column_is_the_slack_sink() {
+    // D2 slack sink: after honoring explicit/fractional left width and gap,
+    // the RIGHT column absorbs the slack. With a fixed `left_width` of 10 and
+    // a default gap, the right column grows to fill the remaining width.
+    use biscuit_terminal::components::two_column::ColumnWidth;
+    let cols = TwoColumn::new("L", "R")
+        .with_left_width(ColumnWidth::Fixed(10))
+        .with_gap(2);
+    let node = cols.render_tree_node().expect("tree node");
+    let out = render_tree(&node, 80);
+
+    // The first 10 columns hold the left content; the gutter occupies columns
+    // 11–12; the right column spans columns 13..80 (the slack sink).
+    let stripped = strip_ansi(&out);
+    let line = stripped.lines().next().expect("at least one rendered line");
+    assert!(
+        line.chars().count() == 80,
+        "line must fill the full 80-column handed width: {line:?}"
+    );
+    let left_cell: String = line.chars().take(10).collect();
+    assert_eq!(
+        left_cell.trim(),
+        "L",
+        "left column is fixed at 10 cells: {left_cell:?}"
+    );
+}

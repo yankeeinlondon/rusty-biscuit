@@ -452,6 +452,68 @@ fn width_fit_content_hugs_short_content() {
     );
 }
 
+#[test]
+fn width_fixed_full_wraps_body_to_available() {
+    // Width::Fixed(100%) is the explicit "fill the parent's available width"
+    // contract (spec C2). The list body wraps within the resolved content
+    // width; the marker / hanging indent stays fixed (D2 slack sink).
+    use biscuit_terminal::utils::layout::{Length, TargetValue, Width};
+
+    let layout = biscuit_terminal::utils::layout::Layout {
+        width: Width::Fixed(TargetValue::universal(Length::Percent(100.0))),
+        ..Default::default()
+    };
+    let list = OrderedList::new(vec![LONG_ITEM]).with_layout(layout);
+    let node = list.render_tree();
+    let rendered = render_tree(&node, 80);
+    let widest = widest_visible_line(&rendered);
+    assert!(
+        widest <= 80,
+        "Fixed(100%) wraps the body within width 80: widest={widest}"
+    );
+    let line_count = strip_ansi(&rendered)
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .count();
+    assert!(
+        line_count > 1,
+        "Fixed(100%) must use the full width so the long item wraps: {rendered:?}"
+    );
+}
+
+#[test]
+fn marker_and_hanging_indent_stay_fixed_under_width_modes() {
+    // D2 slack sink: the marker ("1. ") and the hanging indent are fixed, so
+    // they keep their geometry across width modes. Only the item body text
+    // column absorbs slack by wrapping.
+    use biscuit_terminal::utils::layout::Width;
+
+    for layout in [
+        biscuit_terminal::utils::layout::Layout::default(),
+        biscuit_terminal::utils::layout::Layout {
+            width: Width::Fixed(biscuit_terminal::utils::layout::TargetValue::universal(
+                biscuit_terminal::utils::layout::Length::Percent(50.0),
+            )),
+            ..Default::default()
+        },
+    ] {
+        let list =
+            OrderedList::new(vec!["Body line that is wide enough to wrap under narrow widths."])
+                .with_layout(layout);
+        let node = list.render_tree();
+        let rendered = render_tree(&node, 80);
+        let stripped = strip_ansi(&rendered);
+        let first = stripped
+            .lines()
+            .next()
+            .expect("at least one rendered line");
+        assert!(
+            first.starts_with("1. "),
+            "marker is fixed at \"1. \" under any width mode: {first:?}"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Optimistic render parity
 // ---------------------------------------------------------------------------
