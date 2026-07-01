@@ -1,0 +1,5 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: html
+---
+<div class="status-block status-block--error" style="box-sizing:content-box;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0;padding-top:1lh;padding-bottom:1lh;padding-left:1ch;padding-right:1ch;white-space:nowrap"><p class="status-block__header" style="color:rgb(251, 44, 54)">⤫ Shell Expansion Failed</p><blockquote class="status-block__body" style="box-sizing:content-box;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0;padding-top:0;padding-bottom:0;padding-left:1ch;padding-right:0;white-space:nowrap;border-left-width:3px;border-left-style:solid;border-left-color:rgb(251, 44, 54)"><p></p><p>Missing closing brace in template directive.</p><p></p><p class="status-block__hint"><em>Check the template syntax and retry.</em></p></blockquote></div>

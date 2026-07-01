@@ -49,6 +49,7 @@ use crate::style::schema::CommonStyle;
 /// `Event::Text` bytes (the paragraph body), excluding any trailing newline
 /// `pulldown-cmark` may include in the `End(Paragraph)` range.
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum BlockExtensionEvent<'a> {
     /// Pass-through event with its parser byte range.
     Standard(Event<'a>, Range<usize>),

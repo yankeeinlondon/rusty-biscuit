@@ -1131,6 +1131,40 @@ pub enum CompositionError {
         shape: String,
     },
 
+    /// A **provided** `file`/`file[]` value with non-empty `match(...)`
+    /// patterns did not resolve to an existing path.
+    ///
+    /// Distinct from [`Self::MissingProperties`] (the value was *absent*) and
+    /// from the generic [`Self::SchemaValidation`] (a wrong-type value): the
+    /// user supplied a value that is best interpreted as a **partial** — a
+    /// substring to match against the property's `match(...)` glob candidates.
+    /// The CLI catches this variant and, when interactive, offers a
+    /// confirmation dialog (single glob+substring match) or chooser (multiple).
+    /// Zero matches / non-interactive re-surface this error unchanged, whose
+    /// `reason` preserves the original file-reference failure text.
+    #[error(
+        "unresolved file reference for `{property}` in {}: {reason}",
+        source_path.display()
+    )]
+    UnresolvedFileReference {
+        /// The prompt file whose schema declares the property.
+        source_path: PathBuf,
+        /// Property name as declared in the schema.
+        property: String,
+        /// The value the user provided (frontmatter or `key=value`/`--set`),
+        /// used as a case-insensitive path substring against the candidates.
+        provided: String,
+        /// Glob patterns from the property's `match(...)` constraint. Always
+        /// non-empty for this variant (a bare `file` has no glob to walk).
+        patterns: Vec<String>,
+        /// `true` when the property is declared `file[]`.
+        is_array: bool,
+        /// The original file-reference failure message (e.g. `no existing file
+        /// matched reference …`), preserved so the non-interactive / zero-match
+        /// fall-through shows the same actionable text as before.
+        reason: String,
+    },
+
     /// A loop iteration completed but reported a provider rate limit, and
     /// either the configured `on_rate_limit` policy was `abort` or no
     /// `reset_at` was available to safely pause.
@@ -1754,6 +1788,9 @@ impl CompositionError {
                 Some((only, [])) => Some(FrontmatterHighlight::Property(pointer_to_dotted(only))),
                 _ => Some(FrontmatterHighlight::BlockOnly),
             },
+            CompositionError::UnresolvedFileReference { property, .. } => {
+                Some(FrontmatterHighlight::Property(property.clone()))
+            }
             // A whole-value frontmatter interpolation failure names its receiving
             // key — focus the excerpt on that line rather than dumping the whole
             // block. Body interpolation (key `None`) falls through to BlockOnly.
@@ -2849,7 +2886,8 @@ impl Diagnostic for CompositionError {
             }
             CompositionError::SchemaLoad { .. } => "composition.schema_load",
             CompositionError::SchemaParse { .. } => "composition.schema_parse",
-            CompositionError::SchemaValidation { .. } => "composition.schema_validation",
+            CompositionError::SchemaValidation { .. }
+            | CompositionError::UnresolvedFileReference { .. } => "composition.schema_validation",
             CompositionError::MissingProperties { .. }
             | CompositionError::SequenceMissingProperties { .. } => "composition.missing_properties",
             CompositionError::FrontmatterParse(_) => "composition.frontmatter_parse",
@@ -2961,6 +2999,17 @@ impl Diagnostic for CompositionError {
             } => {
                 base["source_path"] = json!(source_path.to_string_lossy());
                 base["problems"] = json!(problems);
+                base["pointer_paths"] = json!([]);
+            }
+            // Shares the `composition.schema_validation` code; project the
+            // property pointer as its single problem.
+            CompositionError::UnresolvedFileReference {
+                source_path,
+                property,
+                ..
+            } => {
+                base["source_path"] = json!(source_path.to_string_lossy());
+                base["problems"] = json!([format!("/{property}")]);
                 base["pointer_paths"] = json!([]);
             }
             // `composition.missing_properties` declares `missing`,

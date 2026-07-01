@@ -1,6 +1,6 @@
 name: claudine-tests
 
-# Path-filtered test workflow for the Claudine library and CLI.
+# Path-filtered test workflow for the Claudine library, contract adapter, and CLI.
 # Runs whenever files under `claudine/` or workspace-level Cargo
 # manifests change.
 
@@ -37,9 +37,22 @@ concurrency:
 
 jobs:
   test:
-    name: Claudine tests
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Claudine library
+            recipe: test-library
+            cache-key: claudine
+          - name: Claudine contract
+            recipe: test-contract
+            cache-key: claudine-contract
+          - name: Claudine CLI
+            recipe: test-cli
+            cache-key: claudine-cli
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -58,12 +71,16 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
-          shared-key: claudine-tests
+          shared-key: claudine-tests-${{ matrix.cache-key }}
 
       - name: Install just
         uses: extractions/setup-just@v2
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Install AI-CLI provider stubs
+        if: matrix.cache-key == 'claudine-cli'
         # Several claudine-cli integration tests (`argv_normalization` etc.)
         # call the real `claudine compose ... --dry-run` binary, which
         # enumerates installed AI provider CLIs via `sniff` and refuses to
@@ -89,4 +106,5 @@ jobs:
           echo "$stubdir" >>"$GITHUB_PATH"
 
       - name: Run Claudine tests
-        run: just test claudine
+        working-directory: claudine
+        run: just ${{ matrix.recipe }}

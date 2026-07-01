@@ -74,7 +74,7 @@ fn gather_candidates(
 
     for scope in scope_set.iter_scopes() {
         let outcome = walker::walk_scope_filtered(scope, MAX_CANDIDATES + 1, |path| {
-            path_matches_query(path, &query_lower) && frontmatter::valid_for_mode(path, mode)
+            scopes::path_matches_query(path, &query_lower) && frontmatter::valid_for_mode(path, mode)
         });
         match outcome {
             WalkOutcome::Complete(paths) => {
@@ -96,10 +96,28 @@ fn gather_candidates(
         }
     }
 
-    let mut seen: HashSet<PathBuf> = HashSet::new();
+    // Two-key dedup, applied *before* the alphabetical sort so the
+    // priority order of `iter_scopes` (repo → area → package →
+    // repo_claudine → user_claudine → extras) still decides which
+    // same-named prompt survives: the first (most-local) one wins.
+    //
+    //  1. drop exact canonical-path duplicates (a scope symlinked into
+    //     another surfaces the same file twice), and
+    //  2. drop later candidates whose lowercased file stem was already
+    //     seen from an earlier, more-local scope — this suppresses the
+    //     stale global `~/.claudine/prompts/plan.md` when the repo's own
+    //     `prompts/plan.md` is present.
+    let mut seen_canonical: HashSet<PathBuf> = HashSet::new();
+    let mut seen_stems: HashSet<String> = HashSet::new();
     collected.retain(|path| {
         let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
-        seen.insert(canonical)
+        if !seen_canonical.insert(canonical) {
+            return false;
+        }
+        match path.file_stem().and_then(|s| s.to_str()) {
+            Some(stem) => seen_stems.insert(stem.to_ascii_lowercase()),
+            None => true,
+        }
     });
 
     collected.sort_by_key(|a| a.display().to_string());
@@ -154,15 +172,6 @@ fn present_and_select(
 
 fn is_interactive() -> bool {
     std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
-}
-
-fn path_matches_query(path: &Path, query_lower: &str) -> bool {
-    if query_lower.is_empty() {
-        return true;
-    }
-    path.to_str()
-        .map(|s| s.to_ascii_lowercase().contains(query_lower))
-        .unwrap_or(false)
 }
 
 fn badge_for_mode(mode: ComposeMode) -> &'static str {
@@ -420,6 +429,39 @@ mod tests {
             CompositionError::AutocompleteOverCap { query, cap }
             if query == "plan" && cap == MAX_CANDIDATES
         ));
+    }
+
+    #[test]
+    fn gather_candidates_dedups_same_stem_most_local_wins() {
+        // Repo `prompts/plan.md` and a stale user-global
+        // `~/.claudine/prompts/plan.md` both match the query. The repo
+        // (most-local) copy must win; the global copy is suppressed.
+        let repo = TempDir::new().unwrap();
+        seed_repo(repo.path());
+        write(
+            &repo.path().join("prompts").join("plan.md"),
+            "---\ntitle: Repo\n---\nRepo body\n",
+        );
+
+        let user_home = TempDir::new().unwrap();
+        write(
+            &user_home
+                .path()
+                .join(".claudine")
+                .join("prompts")
+                .join("plan.md"),
+            "---\ntitle: Global\n---\nGlobal body\n",
+        );
+
+        let mut ctx = ScopeContext::discover_from(repo.path());
+        ctx.home = Some(user_home.path().to_path_buf());
+
+        let got = gather_candidates("plan", ComposeMode::Compose, &ctx).unwrap();
+        assert_eq!(got.len(), 1, "same-stem prompts must collapse to one: {got:?}");
+        assert!(
+            got[0].starts_with(repo.path()),
+            "the repo (most-local) plan.md must win: {got:?}"
+        );
     }
 
     #[test]

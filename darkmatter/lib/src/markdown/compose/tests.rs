@@ -1953,6 +1953,66 @@ fn test_frontmatter_interpolation_with_set_overrides() {
 }
 
 #[test]
+fn compose_reports_eager_spec_path_before_derived_nulls_mask_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt_dir = dir.path().join("prompts");
+    let feature_dir = dir.path().join("features/2026-06-30-replace-expression");
+    std::fs::create_dir_all(&prompt_dir).unwrap();
+    std::fs::create_dir_all(&feature_dir).unwrap();
+    std::fs::write(feature_dir.join("spec.md"), "---\ntitle: Real Spec\n---\n").unwrap();
+    std::fs::write(
+        feature_dir.join("plan.md"),
+        "---\nstart_phase: 1\ntotal_phases: 2\n---\n",
+    )
+    .unwrap();
+
+    let prompt_path = prompt_dir.join("implement-plan.md");
+    std::fs::write(
+        &prompt_path,
+        "---\n\
+         $schema:\n\
+         \x20 phase: number(required)\n\
+         \x20 total_phases: number(required)\n\
+         \x20 plan: file(eager; required)\n\
+         \x20 spec: file(eager)\n\
+         plan: \"{{ spec ? dirname(spec) + '/plan.md' : null }}\"\n\
+         phase: \"{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || 1 : null }}\"\n\
+         total_phases: \"{{ file_exists(plan) ? frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') : 0 }}\"\n\
+         spec: \"{{ file_exists(plan) ? file_exists(dirname(plan) + '/spec.md') ? dirname(plan) + '/spec.md' : null : null }}\"\n\
+         ---\n\
+         Body\n",
+    )
+    .unwrap();
+
+    let md = Markdown::try_from_content(std::fs::read_to_string(&prompt_path).unwrap()).unwrap();
+    let err = md
+        .compose_with(
+            ComposeOptions::new()
+                .with_source_file(&prompt_path)
+                .with_file_ref_fallback_dir(dir.path())
+                .with_set_overrides(serde_json::json!({
+                    "spec": "reviews/2026-06-30-replace-expression/spec.md",
+                })),
+        )
+        .expect_err("the stale reviews/ spec path should fail schema validation");
+
+    match err {
+        MarkdownError::SchemaValidationFailed { problems, .. } => {
+            assert!(
+                problems.iter().any(|problem| {
+                    problem.path == "/spec"
+                        && problem
+                            .message
+                            .contains("reviews/2026-06-30-replace-expression/spec.md")
+                }),
+                "expected the stale spec path to be reported directly, got {problems:?}",
+            );
+        }
+        other => panic!("expected SchemaValidationFailed, got {other:?}"),
+    }
+}
+
+#[test]
 fn test_frontmatter_interpolation_arrays_and_objects() {
     let content = "---\nbase: /root\npaths:\n  - \"{{base}}/a\"\n  - \"{{base}}/b\"\nmeta:\n  home: \"{{base}}/home\"\n---\n";
     let md: Markdown = content.into();

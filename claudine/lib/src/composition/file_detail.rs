@@ -56,7 +56,10 @@ pub fn extract_markdown_detail(path: &Path, badge: impl Into<String>) -> FileDet
             let has_custom_name = custom_name.is_some();
             let name = custom_name.unwrap_or(fallback_name);
             let description = string_from_map(map, "description");
-            let schema_lines = schema_lines_from_map(map);
+            // Prefer the raw frontmatter source for `$schema` so authored key
+            // order survives the serde_json::Value round-trip (which sorts
+            // objects unless the `preserve_order` feature is enabled).
+            let schema_lines = schema_lines_from_markdown(&markdown);
             FileDetail {
                 badge,
                 name,
@@ -146,6 +149,27 @@ fn string_from_map(map: &IndexMap<String, Value>, key: &str) -> Option<String> {
 
 fn schema_lines_from_map(map: &IndexMap<String, Value>) -> Vec<String> {
     map.get("$schema").map(yaml_lines_from_json).unwrap_or_default()
+}
+
+/// Extract `$schema` YAML lines from a Markdown document, preserving the
+/// authored key order by parsing the raw frontmatter source with
+/// `serde_yaml_ng` rather than round-tripping through `serde_json::Value`.
+///
+/// Falls back to [`schema_lines_from_map`] when the raw source is unavailable
+/// or fails to parse.
+fn schema_lines_from_markdown(markdown: &Markdown) -> Vec<String> {
+    let Some(raw) = markdown.frontmatter().raw_source() else {
+        return schema_lines_from_map(markdown.frontmatter().as_map());
+    };
+    let Ok(yaml) = biscuit_file::serde_yaml_ng::from_str::<biscuit_file::serde_yaml_ng::Value>(raw)
+    else {
+        return schema_lines_from_map(markdown.frontmatter().as_map());
+    };
+    let Some(schema) = yaml.get(biscuit_file::serde_yaml_ng::Value::String("$schema".to_string()))
+    else {
+        return schema_lines_from_map(markdown.frontmatter().as_map());
+    };
+    yaml_lines(schema)
 }
 
 fn string_from_yaml_map(
@@ -291,5 +315,36 @@ mod tests {
         assert_eq!(detail.name, "list");
         assert!(detail.description.is_none());
         assert!(detail.schema_lines.is_empty());
+    }
+
+    #[test]
+    fn markdown_detail_preserves_schema_property_order() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("plan.md");
+        write(
+            &path,
+            r#"---
+name: 'Plan'
+description: 'Creates a multi-phase, high confidence plan from a _feature_ or _plan_'
+$schema:
+  spec: 'file(required;match(**/*spec*.md);eager)'
+  design: 'file(match(**/*design*.md))'
+  plan: 'file'
+---
+# Plan
+"#,
+        );
+
+        let detail = extract_markdown_detail(&path, "COMPOSE");
+        assert_eq!(detail.name, "Plan");
+        assert!(detail.description.as_deref().unwrap().contains("_feature_"));
+        assert_eq!(
+            detail.schema_lines,
+            vec![
+                "spec: file(required;match(**/*spec*.md);eager)",
+                "design: file(match(**/*design*.md))",
+                "plan: file",
+            ]
+        );
     }
 }

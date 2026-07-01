@@ -1141,6 +1141,9 @@ mod tests {
             "without_date(string)",
             "ensure_leading(var, prefix)",
             "ensure_trailing(var, postfix)",
+            "replace(x, find, replacement)",
+            "replace_first(x, find, replacement)",
+            "replace_last(x, find, replacement)",
             "terminal(string)",
             // Phase 4 — filesystem functions
             "is_indexed_file(file)",

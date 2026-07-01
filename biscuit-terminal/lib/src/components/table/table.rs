@@ -117,6 +117,25 @@ use crate::discovery::detection::{ColorDepth, ColorMode};
 ///         ],
 ///     ]);
 /// ```
+///
+/// ## Layout & Style Contract
+///
+/// `Table` is an internal-layout component (spec C2/C3/C4). The shared
+/// render-tree fold resolves the outer box; `Table`'s width-planning pass
+/// fills the *resolved* widths it receives and never re-resolves a raw
+/// percentage. The slack sink is the last visible flexible column (spec
+/// D2). All applicable `Layout` and `Style` properties route through the
+/// fold on every target (C1).
+///
+/// The `prefer_cursor_alignment` knob (spec C5/C6) keeps a bespoke
+/// terminal-only escape hatch: ANSI cursor moves (`CSI N G`) cannot be
+/// represented in the render tree, so the cursor core is irreducible. The
+/// honored subset for that bespoke path is `margin` / `alignment` /
+/// `max_width` (outer-box placement, target-agnostic). Cursor moves
+/// replace inter-cell space padding only — they do not change the visible
+/// cell text or the outer box position. `render_bespoke` and
+/// `render_via_tree` agree on the honored subset after cursor escapes are
+/// stripped; parity is pinned in `table_parity.rs`.
 #[derive(Debug, Default, Clone)]
 pub struct Table {
     title: Option<String>,
@@ -130,6 +149,9 @@ pub struct Table {
     /// Typed style slot for row striping — the migrated home of the former
     /// `alternate_background_color` / `alternate_text_color` boolean fields.
     style: TableStyle,
+    /// Caller-supplied block appearance (color/background/emphasis/border)
+    /// overlaid onto the projected table node so both render paths carry it.
+    block_style: Style,
 }
 
 impl Table {
@@ -296,6 +318,7 @@ impl Table {
             layout: self.layout.clone(),
             prefer_cursor_alignment: self.prefer_cursor_alignment,
             style: self.style.clone(),
+            block_style: self.block_style.clone(),
         })
     }
 
@@ -1609,6 +1632,7 @@ impl Table {
             node.attrs.set_table_title(title);
         }
 
+        crate::components::renderable::overlay_style_onto_node(&mut node, &self.block_style);
         node
     }
 
@@ -1788,6 +1812,14 @@ impl TerminalRenderable for Table {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+
+    fn style(&self) -> Style {
+        self.block_style.clone()
+    }
+
+    fn style_mut(&mut self) -> Option<&mut Style> {
+        Some(&mut self.block_style)
     }
 
     fn is_block_level(&self) -> bool {

@@ -50,6 +50,24 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 filter = 'test(=sequence_perf_with_fail_fast_still_renders_partial_report)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# Same sequence perf path, but successful: it still launches the claudine CLI
+# once per sequence step and can approach the default 30s termination window
+# under full-suite contention on macOS debug builds.
+[[profile.default.overrides]]
+filter = 'test(=sequence_perf_renders_single_aggregated_report)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
+# These stdout parity tests launch the claudine CLI twice (perf and non-perf).
+# They are below the default timeout isolated, but can exceed 30s under
+# full-suite contention on macOS debug builds.
+[[profile.default.overrides]]
+filter = 'test(=compose_perf_stdout_matches_non_perf)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
+[[profile.default.overrides]]
+filter = 'test(=inline_compose_perf_stdout_matches_non_perf)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
 # This integration test shells out to the CLI multiple times; it is below the
 # default timeout isolated, but can exceed 30s under full-suite contention.
 [[profile.default.overrides]]
@@ -151,6 +169,18 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 
 [[profile.ci.overrides]]
 filter = 'test(=sequence_perf_with_fail_fast_still_renders_partial_report)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
+[[profile.ci.overrides]]
+filter = 'test(=sequence_perf_renders_single_aggregated_report)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
+[[profile.ci.overrides]]
+filter = 'test(=compose_perf_stdout_matches_non_perf)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
+[[profile.ci.overrides]]
+filter = 'test(=inline_compose_perf_stdout_matches_non_perf)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 [[profile.ci.overrides]]

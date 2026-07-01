@@ -104,6 +104,22 @@ pub(crate) fn property_value_root(ctx: &ScopeContext) -> &Path {
     &ctx.cwd
 }
 
+/// Case-insensitive substring match of a candidate path against a query.
+///
+/// `query_lower` must already be lowercased by the caller (it is compared
+/// against the lowercased full path string). An empty query matches every
+/// path. Shared by the ENTER-path operation-file autocomplete and the
+/// provided-partial `file(match)` resolver so both apply the exact same
+/// substring predicate.
+pub(crate) fn path_matches_query(path: &Path, query_lower: &str) -> bool {
+    if query_lower.is_empty() {
+        return true;
+    }
+    path.to_str()
+        .map(|s| s.to_ascii_lowercase().contains(query_lower))
+        .unwrap_or(false)
+}
+
 /// Ordered scope set for a composition command.
 ///
 /// Iteration order matches the priority ordering used when rendering

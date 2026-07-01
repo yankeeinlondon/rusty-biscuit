@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-e01ab31eb77bb5a0
-last_updated: 2026-06-19
+hash: 87f17662fa397abe-13cb5bd473770411
+last_updated: 2026-06-30
 ---
 
 # darkmatter
@@ -85,7 +85,7 @@ not a regression.
 ## `style:` Frontmatter Status
 
 The active style-frontmatter wiring phase is
-`darkmatter::style::parse::ACTIVE_STYLE_WIRING_SUB_SPEC = 7`.
+`darkmatter::style::parse::ACTIVE_STYLE_WIRING_SUB_SPEC = 8`.
 
 Implemented:
 
@@ -102,9 +102,17 @@ Implemented:
   for `{ kind: ... }`; `apply_hr_style` wires `style.hr.*` onto `DarkmatterPage`
 - sub-spec #7 bespoke knobs: `page.stylesheet`, `page.meta`, `page.code.theme`,
   hyperlink/image local-style behavior; `apply_bespoke_style` wired into the
-  CLI render pipeline; `ACTIVE_STYLE_WIRING_SUB_SPEC` advanced to `7`
+  CLI render pipeline
+- sub-spec #8 `style.disclosure.*` disclosure blocks
+- sub-spec #9 (Style Everywhere): the schema recognizes expanded per-component
+  layout/appearance keys (`margin`, `padding`, `border`, `emphasis`, `word-wrap`)
+  and explicit `width` mode keywords (`auto`, `fit-content`, lengths). The
+  applicator lowers these values to `ComponentPolicy`. See the
+  [Style Everywhere matrix](../../../renderable/features/2026-06-30-style-everywhere/matrix.md)
+  for the per-component support contract.
 
-No valid v1 schema keys remain unwired.
+No valid v1 schema keys are silently ignored: each is either honored,
+rejected, or reported via `KnownButInactive`.
 
 CLI flags win over frontmatter field-by-field. For implementation details, read
 `darkmatter/lib/src/style/{parse.rs,apply.rs,cli_claims.rs}` and
@@ -208,7 +216,7 @@ The compose pipeline runs in four phases:
 **Inline Pre** (serial):
 
 1. **Frontmatter Interpolation (pass 1)** - Resolve `{{ variable }}` in frontmatter values against seed values, `doc.*`, `ctx.*`, `env.*`. Defers keys that reference a whole-value `$(...)`.
-2. **Schema Validation** (pre-operation stage) - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Coerces** schema-recognized top-level scalars to their declared types (default-on, e.g. the string `"true"` → real boolean) and writes the coerced values back into frontmatter, skipping `$(...)`-pending values. Problems on fields still holding `$(...)` are deferred to downstream re-validation only when frontmatter shell expansion is enabled; when it is disabled they fail fast.
+2. **Schema Validation** (pre-operation stage) - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Coerces** schema-recognized top-level scalars to their declared types (default-on, e.g. the string `"true"` → real boolean) and writes the coerced values back into frontmatter, skipping `$(...)`-pending values. On validation success also **rewrites eager `file(eager)` values** to their resolved repo-relative path (the same projection `relative(value)`/`dirname(value)` produce); bare/lazy `file`, `string`, remote URLs, and pending values are left verbatim. Problems on fields still holding `$(...)` are deferred to downstream re-validation only when frontmatter shell expansion is enabled; when it is disabled they fail fast.
 3. **Frontmatter Shell Expansion** - Execute top-level `$(cmd)` frontmatter values. Tokens in executed position follow the [`$()` token-resolution ladder](compose.md): literal → `name(...)` safe function → executable → frontmatter property → null.
 4. **Frontmatter Interpolation (pass 2)** - Resolve the keys deferred in pass 1 against the now-concrete shell-expanded values.
 5. **Text Replacement** - Replace literal strings from `replace:` map.
@@ -250,7 +258,7 @@ Darkmatter defines, detects, and evaluates schemas for Markdown frontmatter via 
 - `$schema` frontmatter property (inline, file reference, or root-level union).
 - `md schema validate`, `md schema detect`, and `md schema about` CLI subcommands.
 - `DarkmatterSchemas` library API with baseline merging and LRU validator cache.
-- Always-on compose pipeline stage (after `--set`/`--state` and interpolation, before shell expansion) that also **coerces** schema-recognized scalars to their declared types and writes them back (default-on; `$(...)`-pending values are skipped and coerced at post-shell re-validation).
+- Always-on compose pipeline stage (after `--set`/`--state` and interpolation, before shell expansion) that also **coerces** schema-recognized scalars to their declared types and writes them back (default-on; `$(...)`-pending values are skipped and coerced at post-shell re-validation). On validation success, the same stage **rewrites eager `file(eager)` values** to their resolved repo-relative path via `EffectiveSchema::normalize_frontmatter` (bare/lazy `file`, `string`, remote URLs, and pending values are left verbatim; validation-only APIs stay read-only).
 - `ComposeOptions::with_baseline_schema(...)` for programmatic baseline injection.
 - Typed schema-language descriptor catalog (`schema_type_descriptors()`, `schema_constraint_descriptors()`, `schema_shape_descriptors()`, `inline_object_rule_descriptors()`, `coercion_rule_descriptors()`, `validation_behavior_descriptors()`) — the authoritative source for `md schema about` and the same surface library callers render their own reports from.
 

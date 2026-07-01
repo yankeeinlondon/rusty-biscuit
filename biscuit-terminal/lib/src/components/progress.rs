@@ -16,6 +16,7 @@ use renderable::tree::render::{
     render_markdown_node,
 };
 use renderable::tree::{ProgressHints, RenderNode, RenderStrictness, TreeRenderable};
+use renderable::style::Style as RStyle;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 
@@ -87,6 +88,35 @@ impl Default for ProgressStyle {
 /// let output = bar.render_optimistic(Some(40));
 /// assert!(output.contains("75%"));
 /// ```
+///
+/// ## Layout & Style Contract
+///
+/// `Progress` is an internal-layout component (spec C2). It projects to a
+/// [`Paragraph`](renderable::tree::NodeKind::Paragraph) carrying
+/// [`ProgressHints`] and the configured [`Layout`]; the shared render-tree
+/// fold resolves the outer box, and the bar renders inside it:
+///
+/// - [`Width::Auto`] (default) and [`Width::Fixed`] resolve the outer box
+///   (margin / alignment / width-cap); the bar itself renders at its explicit
+///   [`bar_width`](Self::with_bar_width) (default 20). [`Width::FitContent`]
+///   hugs the bar's natural width (`label + brackets + bar_width +
+///   percentage`) rather than padding to the available width.
+/// - **Slack sink** (spec D2): the bar track. When the outer box is too
+///   narrow for the natural `label + brackets + bar_width + percentage`
+///   width, the rendered output clamps inside the box; the label, brackets,
+///   and percentage are fixed-width, so the bar is the conceptual slack
+///   absorber. When the box is wider than the natural width, alignment
+///   positions the bar within the available area.
+/// - A fractional `Fixed(50%)` is resolved exactly once by the fold; the bar
+///   still renders at its full `bar_width` and never re-resolves the raw
+///   percentage (the `Fixed(50%) → 25%` double-application bug).
+/// - The projected [`ProgressHints`] round-trip carries the [`Layout`] onto
+///   the paragraph node (C4), so the box contract survives a second render
+///   pass.
+///
+/// [`Width::Auto`]: renderable::layout::Width::Auto
+/// [`Width::Fixed`]: renderable::layout::Width::Fixed
+/// [`Width::FitContent`]: renderable::layout::Width::FitContent
 #[derive(Debug, Clone)]
 pub struct Progress {
     /// Value between 0.0 and 1.0
@@ -99,6 +129,9 @@ pub struct Progress {
     style: ProgressStyle,
     /// Layout configuration
     layout: Layout,
+    /// Caller-supplied block appearance (color/background/emphasis/border)
+    /// overlaid onto the projected node so both render paths carry it.
+    block_style: RStyle,
 }
 
 impl Progress {
@@ -110,6 +143,7 @@ impl Progress {
             bar_width: 20,
             style: ProgressStyle::default(),
             layout: Layout::default(),
+            block_style: RStyle::default(),
         }
     }
 
@@ -221,6 +255,7 @@ impl Progress {
         if self.layout != Layout::default() {
             node.attrs.set_layout(&self.layout);
         }
+        crate::components::renderable::overlay_style_onto_node(&mut node, &self.block_style);
         node
     }
 
@@ -289,6 +324,14 @@ impl TerminalRenderable for Progress {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+
+    fn style(&self) -> RStyle {
+        self.block_style.clone()
+    }
+
+    fn style_mut(&mut self) -> Option<&mut RStyle> {
+        Some(&mut self.block_style)
     }
 
     fn as_any(&self) -> &dyn Any {

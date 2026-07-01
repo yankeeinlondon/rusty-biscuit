@@ -1,5 +1,6 @@
 ---
 description: Target-agnostic layout configuration in the renderable library — Layout, TargetValue, Length, Edges, Width, and Alignment.
+hash: 5aebd30fe1ddb962-385386ef1295d3c9
 ---
 
 # Layout Module
@@ -12,9 +13,9 @@ painted inner gutter is `padding` (geometry, here) + `Style.background` (paint).
 
 The layout rides on render-tree nodes via `NodeAttrs::set_layout` and is
 consumed by the Browser renderer (lowered to inline CSS) and the Terminal
-renderer (margins resolved to cells, plus block alignment). The Markdown
-renderer deliberately ignores it. `max_width` is a Browser-only property —
-the Terminal renderer does not apply it.
+renderer (margins resolved to cells, block alignment, and `max_width` cap).
+The Markdown renderer deliberately ignores it. `max_width` is honored on both
+Terminal and Browser.
 
 Terminal ANSI-width application lives in `biscuit-terminal` as the
 `LayoutTerminalExt` extension trait.

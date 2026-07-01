@@ -1,0 +1,7 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: html
+---
+<div style="margin-top:0;margin-bottom:0;margin-left:10%;margin-right:0;padding-top:0;padding-bottom:0;padding-left:0;padding-right:0;white-space:nowrap"><p><strong>Total    </strong>  100.0<span style="opacity:0.6">ms</span>  100%
+├─ parse    40.0<span style="opacity:0.6">ms</span>   40%
+└─ render   60.0<span style="opacity:0.6">ms</span>   60%</p></div>

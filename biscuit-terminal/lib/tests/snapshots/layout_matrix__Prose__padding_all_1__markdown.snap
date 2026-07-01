@@ -1,0 +1,5 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: md
+---
+The shared render-tree fold resolves the full Layout and Style surface for a plain block node.
