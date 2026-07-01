@@ -5,7 +5,7 @@ $schema:
     plan: file
 description: Reviews how well the _implementation_ of a certain set of review findings addressed the underlying problems which were raised.
 
-plan: "{{ basename(review) }}"
+plan: "{{ basename(review) + '/' + }}"
 
 start:
     message: "🥸 reviewing the _implementation_ of the findings in `{{parent_dir(review)}}`"

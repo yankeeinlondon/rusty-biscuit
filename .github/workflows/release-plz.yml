@@ -29,6 +29,13 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # Backstop for the vendored protoc in rendezvous-core's build.rs:
+      # a system protoc if the vendored binary is ever unavailable.
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Run release-plz
         uses: release-plz/action@v0.5
         with:
@@ -48,6 +55,13 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
+      # Backstop for the vendored protoc in rendezvous-core's build.rs:
+      # a system protoc if the vendored binary is ever unavailable.
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run release-plz
         uses: release-plz/action@v0.5

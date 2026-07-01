@@ -21,3 +21,11 @@
 - `dirs` resolves the per-user config directory for the fallback file.
 - `thiserror` is used by the CLI's internal enqueue error type so the typed
   composition error can preserve a clear, source-aware failure message.
+
+## Build Dependencies
+
+- `rendezvous-core` compiles `proto/rendezvous.proto` at build time via
+  `tonic-prost-build`, which shells out to `protoc`. To avoid requiring a
+  system-installed protobuf compiler, its `build.rs` uses `protoc-bin-vendored`
+  to supply a bundled `protoc` on macOS, Windows, and Linux. CI workflows also
+  install `protoc` (`arduino/setup-protoc`) as a backstop.
