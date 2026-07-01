@@ -1,3 +1,49 @@
+---
+total_phases: 4
+phase: 4
+source_files_during_phase_1:
+  - claudine/cli/src/completion/operation_file.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - claudine/cli/src/completion/autocomplete_ui.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/lib/src/composition/error.rs
+  - claudine/lib/src/composition/schema_validation.rs
+  - claudine/cli/src/commands/schema_interactive.rs
+  - claudine/cli/src/completion/operation_file.rs
+  - claudine/cli/src/completion/scopes.rs
+  - claudine/cli/tests/level2_provided_partial_file_pty.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+  - claudine/docs/topics/composition.md
+  - claudine/docs/topics/completions/auto-complete.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/claudine/composition.md
+source_code:
+  - claudine/cli/src/completion/operation_file.rs
+  - claudine/cli/src/completion/autocomplete_ui.rs
+  - claudine/cli/src/completion/scopes.rs
+  - claudine/cli/src/commands/schema_interactive.rs
+  - claudine/lib/src/composition/error.rs
+  - claudine/lib/src/composition/schema_validation.rs
+  - claudine/cli/tests/level2_provided_partial_file_pty.rs
+documentation:
+  - claudine/docs/topics/composition.md
+  - claudine/docs/topics/completions/auto-complete.md
+packages:
+  - claudine
+  - claudine-cli
+---
+
 # Plan — Completion / Compose Resolution Failures (`compose plan spec=everywhere`)
 
 Fixes the four distinct defects observed when running
@@ -251,19 +297,32 @@ file work to the CLI.
 
 ## Phase 4 — Integration verification & docs
 
-- **End-to-end manual check** (interactive shell, since compose drives a TTY):
-  from `renderable/renderable`, run `claudine compose plan spec=everywhere` and
-  confirm: one `plan` candidate (Phase 1), faithful description + YAML schema
-  code block in the detail/confirm view (Phase 2), and a single-match
-  confirmation dialog resolving to the style-everywhere spec (Phase 3).
-- **Drift maintenance** (per repo `CLAUDE.md`): update the claudine skill's
-  composition/completion notes if the provided-partial `file(match)` resolution
-  changes the documented contract (schema-validation section of
-  `.claude/skills/claudine/composition.md` and the auto-complete spec). Record
-  that `file(match)` value resolution now consults the glob for provided
-  partials, anchored at the launch area (offered == accepted).
-- Add a `MEMORY.md` pointer summarizing: "doubled launch-area path is correct;
-  Bug-3 schema drop was presentational (faithful data + serde preserve_order)."
+- [x] **End-to-end verification** — the interactive manual check cannot run in
+  this non-interactive session (compose drives a TTY and cannot accept keypress
+  input). Substituted by the automated real-TTY L2 coverage added in Phase 3:
+  `level2_pty_provided_partial_single_match_confirms_and_launches` (reaches the
+  confirmation dialog and, on `y`, proceeds) and
+  `level2_pty_provided_partial_zero_match_preserves_error` (unchanged error) —
+  both **pass**. Full unit suite (1864 tests) and lint are green.
+  - Note: three **pre-existing** L2 detail-pane layout tests
+    (`level2_tmux_chooser_detail_right_in_wide_terminal`,
+    `level2_tmux_operation_file_chooser_detail_above_in_tall_terminal`,
+    `level2_tmux_sequence_yaml_chooser_detail_above_in_tall_terminal`) fail
+    **identically on clean HEAD** on this host — a host-specific tmux-capture
+    layout mismatch, **not** a regression from this fix (verified via `git
+    stash`).
+- [x] **Drift maintenance** (per repo `CLAUDE.md`): documented the
+  provided-partial `file(match)` resolution contract. Added a "Provided Partial
+  File References" subsection to the schema-validation section of
+  `claudine/docs/topics/composition.md` (symlinked into the claudine skill) and
+  a "Completing Setter Values" section to
+  `claudine/docs/topics/completions/auto-complete.md`. Both record that
+  `file(match)` value resolution now consults the glob for provided partials,
+  anchored at the launch area (offered == accepted). Regenerated the
+  composition.md `hash:` frontmatter.
+- [x] Added the `MEMORY.md` pointer summarizing: "doubled launch-area path is
+  correct; Bug-3 schema drop was presentational (faithful data + serde
+  preserve_order)" (`project_claudine_completion_failures_fix.md`).
 
 ---
 
