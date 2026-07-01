@@ -74,6 +74,26 @@
 //!
 //! For CLI output, always use `render()` with a [`Terminal`] instance to get
 //! proper icon selection and ANSI styling based on terminal capabilities.
+//!
+//! ## Layout & Style Contract
+//!
+//! `FileSystem` is an internal-layout component (spec C2). The tree projection
+//! honors all applicable `Layout` properties (`margin`, `padding`, `width`,
+//! `max_width`, `alignment`, `word_wrap`) and `Style` properties (`color`,
+//! `background`, `emphasis`, `border`) via the shared render-tree fold (C1).
+//!
+//! - [`Width::Auto`](renderable::layout::Width::Auto) (default) and
+//!   [`Width::Fixed`](renderable::layout::Width::Fixed) fill the available
+//!   width; [`Width::FitContent`](renderable::layout::Width::FitContent) hugs
+//!   the tree's natural width.
+//! - **Slack sink** (spec D2): the entry-label region. Connector glyphs and
+//!   file/directory icons stay fixed across width modes.
+//! - The public [`TerminalRenderable::render`](crate::components::renderable::TerminalRenderable)
+//!   path remains deferred to the bespoke Nerd-Font renderer; the matrix and
+//!   parity coverage use the tree projection, which emits Unicode icons.
+//!
+//! Markdown degrades layout/appearance attrs by Decision D1 and preserves the
+//! structural file-tree syntax where the target renderer supports it.
 
 // Submodules
 pub mod error;
@@ -199,6 +219,39 @@ impl RootIconKind {
 /// - The tree is built lazily on first render or explicit call
 /// - Symlinks are shown but not followed (prevents infinite loops)
 /// - Permission errors create error-marked nodes instead of failing
+///
+/// ## Layout & Style Contract
+///
+/// `FileSystem` is an internal-layout component (spec C2) **on the tree
+/// path**: the canonical projection sets the configured [`Layout`] on the
+/// root `List` node, and the shared render-tree fold resolves the outer box.
+/// Tree connectors are forced to [`WordWrap::None`] so the connector
+/// geometry is never wrapped.
+///
+/// - [`Width::Auto`] (default), [`Width::Fixed`], and [`Width::FitContent`]
+///   resolve the outer box; the filesystem tree renders inside that box.
+/// - **Slack sink** (spec D2): the entry-label region. The connector columns
+///   (`├── ` / `└── ` / `│   `) and the icon columns stay fixed; only the
+///   entry labels absorb slack by truncating inside the resolved content
+///   width.
+/// - A fractional `Fixed(50%)` is resolved exactly once by the fold; the
+///   tree never re-resolves the raw percentage against its own narrowed box.
+///
+/// ### Terminal render gap (deferred flip)
+///
+/// The bespoke [`TerminalRenderable::render`] path remains the production
+/// terminal renderer because the target-agnostic projection emits Unicode
+/// fallback icons (📂 / 📄) that cannot reproduce the bespoke Nerd Font
+/// icons the terminal path chooses based on the live terminal's font
+/// support. The tree path's box-model contract is honored today
+/// (`margin` / `alignment` / `max_width` / `width`), and the bespoke
+/// terminal path applies the same [`Layout`] via `apply_block_layout`. A
+/// future flip will route the terminal target through the tree path once
+/// icon parity is achieved.
+///
+/// [`Width::Auto`]: renderable::layout::Width::Auto
+/// [`Width::Fixed`]: renderable::layout::Width::Fixed
+/// [`Width::FitContent`]: renderable::layout::Width::FitContent
 #[derive(Debug, Clone)]
 pub struct FileSystem {
     /// The root directory path to display.

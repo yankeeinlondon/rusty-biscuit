@@ -82,6 +82,15 @@ pub struct DisclosureStyleHints {
     /// Optional background color override.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bg_color: Option<crate::style::PaintColor>,
+    /// Optional text emphasis override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emphasis: Option<crate::style::TextEmphasis>,
+    /// Optional border override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub border: Option<crate::style::Border>,
+    /// Optional word-wrap override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub word_wrap: Option<crate::wrap_policy::WordWrap>,
 }
 
 /// How a sequence of children is joined when rendered.

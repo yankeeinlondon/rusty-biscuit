@@ -1,0 +1,13 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: block
+---
+VIA_RENDER
+                            Total      100.0ms  100%
+                            ├─ parse    40.0ms   40%
+                            └─ render   60.0ms   60%
+---
+VIA_TREE_DIRECT
+                            Total      100.0ms  100%
+                            ├─ parse    40.0ms   40%
+                            └─ render   60.0ms   60%

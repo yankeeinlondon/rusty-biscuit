@@ -189,6 +189,7 @@ pub(crate) fn apply_node_policy(node: &mut RenderNode, ctx: &TreeBuildContext) {
         // Layout is block-only; inline nodes (Image) must not carry it.
         if !matches!(node.kind, NodeKind::Image { .. }) {
             apply_component_layout(node, ctx, component);
+            apply_component_style_attrs(node, ctx, component);
         }
         apply_component_color(node, ctx, component);
     } else if let Some(()) = lone_image_alt(&node.kind) {
@@ -243,6 +244,42 @@ fn apply_component_layout(
     let default = Layout::default();
     if policy.layout != default {
         node.attrs.set_layout(&policy.layout);
+    }
+}
+
+/// Writes the component's [`ComponentPolicy`] emphasis, border, and word-wrap
+/// onto the node.
+fn apply_component_style_attrs(
+    node: &mut RenderNode,
+    ctx: &TreeBuildContext,
+    component: PageComponent,
+) {
+    let Some(policy) = ctx.component_policies.get(&component) else {
+        return;
+    };
+
+    if policy.emphasis.is_some() || policy.border.is_some() {
+        let style = node.attrs.style_mut_or_default();
+        if let Some(emphasis) = policy.emphasis {
+            style.emphasis = emphasis;
+        }
+        if let Some(border) = policy.border.clone() {
+            style.border = Some(border);
+        }
+        node.attrs.retain_non_default_style();
+    }
+
+    if let Some(word_wrap) = policy.word_wrap.clone() {
+        if let Some(mut layout) = node.attrs.layout() {
+            layout.word_wrap = word_wrap;
+            node.attrs.set_layout(&layout);
+        } else {
+            let layout = Layout {
+                word_wrap,
+                ..Default::default()
+            };
+            node.attrs.set_layout(&layout);
+        }
     }
 }
 
@@ -311,6 +348,25 @@ fn apply_disclosure_policy(node: &mut RenderNode, ctx: &TreeBuildContext) {
         let mut style = node.attrs.style().unwrap_or_default();
         set_style_colors(&mut style, fg.as_ref(), bg.as_ref());
         node.attrs.set_style(&style);
+    }
+
+    // Inline border / emphasis / word-wrap (Phase 5).
+    if let Some(inline) = inline.as_ref() {
+        if inline.border.is_some() || inline.emphasis.is_some() {
+            let mut style = node.attrs.style().unwrap_or_default();
+            if let Some(border) = inline.border.clone() {
+                style.border = Some(border);
+            }
+            if let Some(emphasis) = inline.emphasis {
+                style.emphasis = emphasis;
+            }
+            node.attrs.set_style(&style);
+        }
+    if let Some(word_wrap) = inline.word_wrap.clone() {
+        let mut layout = node.attrs.layout().unwrap_or_default();
+        layout.word_wrap = word_wrap;
+        node.attrs.set_layout(&layout);
+    }
     }
 }
 
@@ -478,7 +534,13 @@ fn set_style_colors(style: &mut Style, fg: Option<&PaintColor>, bg: Option<&Pain
 fn attach_text_layout(node: &mut RenderNode, common: &CommonStyle) {
     use renderable::tree::TextLayoutHints;
 
-    let width = common.width.clone().map(TargetValue::universal);
+    let width = common.width.as_ref().and_then(|w| match w.as_width() {
+        Width::Fixed(tv) => match tv {
+            TargetValue::Universal(len) => Some(TargetValue::universal(len.clone())),
+            TargetValue::PerTarget(_) => None,
+        },
+        _ => None,
+    });
     let max_width = common.max_width.clone().map(TargetValue::universal);
 
     if width.is_none() && max_width.is_none() {
@@ -1224,11 +1286,11 @@ mod structural_tests {
 
     #[test]
     fn context_fold_attaches_text_layout_from_hyperlink_style() {
-        use crate::style::schema::CommonStyle;
-        use renderable::layout::Length;
+        use crate::style::schema::{CommonStyle, WidthOrMode};
+        use renderable::layout::{Length, TargetValue, Width};
 
         let common = CommonStyle {
-            width: Some(Length::Ch(20)),
+            width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(20))))),
             ..Default::default()
         };
         let policies = empty_policies();

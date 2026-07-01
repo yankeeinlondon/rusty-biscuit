@@ -10,8 +10,11 @@ pub mod inline;
 pub mod lists;
 pub mod page;
 
-pub use common::CommonStyle;
-pub use components::{BlockQuoteStyle, DisclosureStyle, TableStyle};
+pub use common::{
+    CommonStyle, ComponentBorder, ComponentEdges, ComponentEmphasis, ComponentWordWrap,
+    WidthOrMode,
+};
+pub use components::{BlockQuoteStyle, CodeBlockStyle, DisclosureStyle, TableStyle};
 pub use hr::HrStyle;
 pub use inline::{HyperlinkStyle, ImageStyle};
 pub use lists::{LiStyle, OlStyle, UlStyle};
@@ -35,6 +38,8 @@ pub struct StyleFrontmatter {
     #[serde(alias = "block_quote")]
     pub block_quote: Option<BlockQuoteStyle>,
     pub disclosure: Option<DisclosureStyle>,
+    #[serde(alias = "code_block")]
+    pub code_block: Option<CodeBlockStyle>,
 }
 
 #[cfg(test)]
@@ -62,6 +67,7 @@ mod tests {
         assert!(s.images.is_none());
         assert!(s.block_quote.is_none());
         assert!(s.disclosure.is_none());
+        assert!(s.code_block.is_none());
 
         let page = s.page.unwrap();
         assert_eq!(page.left_margin, Some(Length::Ch(2)));
@@ -79,5 +85,19 @@ mod tests {
         let json = r#"{"block_quote": {"max-width": "50%"}}"#;
         let s: StyleFrontmatter = serde_json::from_str(json).unwrap();
         assert!(s.block_quote.is_some());
+    }
+
+    #[test]
+    fn code_block_canonical_kebab_works() {
+        let json = r#"{"code-block": {"margin": "2ch"}}"#;
+        let s: StyleFrontmatter = serde_json::from_str(json).unwrap();
+        assert!(s.code_block.is_some());
+    }
+
+    #[test]
+    fn code_block_snake_case_alias_works() {
+        let json = r#"{"code_block": {"padding": "1ch"}}"#;
+        let s: StyleFrontmatter = serde_json::from_str(json).unwrap();
+        assert!(s.code_block.is_some());
     }
 }

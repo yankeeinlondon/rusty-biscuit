@@ -133,6 +133,7 @@ fn validate_leaf(
 ) -> Result<(), StyleParseError> {
     match leaf.leaf_type {
         LeafType::HorizontalLength => validate_horizontal_length(value, canonical_path),
+        LeafType::WidthOrMode => validate_width_or_mode(value, canonical_path),
         LeafType::RowCount => validate_row_count(value, canonical_path),
         LeafType::Color => validate_color(value, canonical_path),
         // Alignment, BackgroundEnum, StringValue, OpaqueValue — let serde
@@ -144,7 +145,20 @@ fn validate_leaf(
         | LeafType::OpaqueValue
         | LeafType::HrKind
         | LeafType::HrWeight
-        | LeafType::HrAlignment => Ok(()),
+        | LeafType::HrAlignment
+        | LeafType::CompoundStyle
+        | LeafType::WordWrap => Ok(()),
+    }
+}
+
+fn validate_width_or_mode(value: &Value, canonical_path: &str) -> Result<(), StyleParseError> {
+    match value {
+        Value::Null => Ok(()),
+        Value::String(s) => match s.trim().to_ascii_lowercase().as_str() {
+            "auto" | "fit-content" | "fit_content" => Ok(()),
+            _ => validate_horizontal_length(value, canonical_path),
+        },
+        _ => validate_horizontal_length(value, canonical_path),
     }
 }
 

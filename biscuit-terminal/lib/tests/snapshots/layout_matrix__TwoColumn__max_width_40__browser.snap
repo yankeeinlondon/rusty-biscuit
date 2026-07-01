@@ -1,0 +1,5 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: html
+---
+<div class="columns" style="display:flex;gap:3ch;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0;padding-top:0;padding-bottom:0;padding-left:0;padding-right:0;max-width:40ch;white-space:nowrap"><div class="column" style="flex:0 0 50%"><p>Left column content.</p></div><div class="column" style="flex:1 1 0"><p>Right column content.</p></div></div>

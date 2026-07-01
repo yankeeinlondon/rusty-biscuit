@@ -27,6 +27,8 @@ use thiserror::Error;
 use crate::components::renderable::TerminalRenderable;
 use crate::utils::layout::LayoutTerminalExt;
 
+use renderable::tree::{RenderNode, TreeRenderable};
+
 // Re-export types from biscuit-visualized
 pub use biscuit_visualized::mermaid::{MermaidConfig, MermaidTheme, QuadrantTheme};
 
@@ -391,10 +393,35 @@ impl From<&str> for MermaidRenderer {
 ///     .with_title("My Flow")
 ///     .with_width(ImageWidth::Percent(0.6));
 ///
-/// // Use in any TerminalRenderable context
+/// /// Use in any TerminalRenderable context
 /// let term = biscuit_terminal::terminal::Terminal::default();
 /// let output = diagram.render(&term);
 /// ```
+///
+/// ## Layout & Style Contract
+///
+/// `MermaidDiagram` is a bespoke image-protocol component (spec C5/D5). The
+/// external Mermaid → PNG rendering is irreducible — no render-tree
+/// `NodeKind` can represent a rasterized diagram — so the component emits
+/// the rendered image through `TerminalImage` and the underlying image
+/// protocol (Kitty / iTerm2 / Sixel). The fold-style box model does not
+/// apply to the rendered image itself; the box placement is shared.
+///
+/// The honored subset (spec C5: minimum bar) is the outer placement,
+/// resolved by `TerminalImage::resolve_dimensions_for`:
+///
+/// | Property | Status | Rationale |
+/// |----------|--------|-----------|
+/// | `Layout::margin` | **Honored** | Reduces `available_width` before the image width is resolved, so a wider margin shrinks the rendered canvas. |
+/// | `Layout::alignment` | **Honored** | Selects left / center / right placement of the rendered image within the slack (applied via `apply_block_layout`). |
+/// | `Layout::width`, `Layout::max_width` | **N/A** | The rendered canvas is sized by `ImageWidth` (the explicit contract for this component). Reusing `Layout::width` would create two competing width controls. This is the documented MermaidDiagram-specific carve-out, not a silent no-op. |
+/// | `Layout::padding` | **N/A** | The rendered image has no padding box. |
+/// | `Layout::word_wrap` | **N/A** | A rasterized diagram cannot wrap. |
+/// | `Style::color` / `emphasis` | **N/A** | The diagram is rasterized pixels, not text the SGR can recolor. Theme selection happens via `MermaidTheme`. |
+/// | `Style::background` | **N/A** | A block background would have to paint cells *around* the protocol bytes; the protocol owns the cells it covers. Use `with_transparent_background(false)` to control the rasterizer's own background. |
+/// | `Style::border` | **N/A** | Box-drawing glyphs cannot frame an image-protocol escape without corrupting the protocol's cell coverage. |
+///
+/// Parity for the honored subset is pinned in `mermaid_parity.rs`.
 #[derive(Debug, Clone)]
 pub struct MermaidDiagram {
     renderer: MermaidRenderer,
@@ -625,6 +652,28 @@ impl super::renderable::TerminalRenderable for MermaidDiagram {
 
     fn layout_mut(&mut self) -> &mut crate::utils::layout::Layout {
         &mut self.layout
+    }
+}
+
+impl TreeRenderable for MermaidDiagram {
+    /// Projects the rendered diagram into a [`NodeKind::Paragraph`] wrapping
+    /// an inline [`NodeKind::Image`] and carrying the component's outer-box
+    /// layout (margin, alignment).
+    ///
+    /// The externally rendered Mermaid PNG is irreducible (spec C5/D5); the
+    /// structural image node carries placement and alt text with the Mermaid
+    /// source, so Browser/Markdown targets degrade to a readable placeholder.
+    /// The `url` is left empty because the rendered PNG is produced on demand
+    /// and has no stable address until rendered to cache.
+    ///
+    /// [`NodeKind::Image`]: renderable::tree::NodeKind::Image
+    /// [`NodeKind::Paragraph`]: renderable::tree::NodeKind::Paragraph
+    fn render_tree(&self) -> RenderNode {
+        let alt = self.fallback_code_block();
+        let image = RenderNode::image("", None, &alt);
+        let mut node = RenderNode::paragraph(vec![image]);
+        node.attrs.set_layout(&self.layout);
+        node
     }
 }
 

@@ -22,6 +22,8 @@ use crate::components::renderable::TerminalRenderable;
 use crate::terminal::Terminal;
 use crate::utils::layout::Layout;
 
+use renderable::tree::{RenderNode, TreeRenderable};
+
 /// A single measured value attached to a [`MetricNode`].
 ///
 /// The value is split into a mantissa and a unit suffix at render time so the
@@ -220,6 +222,34 @@ impl MetricNode {
 /// assert!(rendered.contains("100%"));
 /// assert!(rendered.contains("├─"));
 /// ```
+///
+/// ## Layout & Style Contract
+///
+/// `MetricsTree` is a structured-text component whose output composes Prose
+/// markup (column-aligned rows with `<b>` / `<dim>` / `<red>` tags). Per
+/// spec D5 / Task 3.5 the preferred path is a tree projection; MetricsTree
+/// achieves this by **delegating to `Prose`**, which is a `TreeRenderable`
+/// whose projection is lowered through the shared render-tree fold. The
+/// outer `Layout` (`margin`, `alignment`, `max_width`, `word_wrap`) is
+/// propagated onto the inner `Prose` so the fold applies the box model
+/// (spec C1). The intra-row column math (label / value / share alignment)
+/// is computed against the available width before the markup is built, so
+/// the row geometry stays inside the box the fold hands it.
+///
+/// The honored subset is therefore the full block surface:
+///
+/// | Property | Status | Rationale |
+/// |----------|--------|-----------|
+/// | `Layout::margin` | **Honored** | Propagated to the inner `Prose`; the fold applies it. |
+/// | `Layout::alignment` | **Honored** | Propagated to the inner `Prose`. |
+/// | `Layout::max_width` | **Honored** | Propagated to the inner `Prose`; caps the row width. |
+/// | `Layout::width` | **Honored** | Propagated to the inner `Prose`. |
+/// | `Layout::word_wrap` | **Honored** | Propagated to the inner `Prose`; long labels are truncated by `build_markup` before wrapping is needed. |
+/// | `Style::color` / `emphasis` | **Honored via Prose markup** | The `<red>` / `<b>` / `<dim>` tags in the built markup are lowered to `Style::emphasis` / `Style::color` by Prose. |
+/// | `Style::background` | **N/A** | A metrics tree has no padding-box background; per-row coloring is done via the `<red>` / `<dim>` markup tags. |
+/// | `Style::border` | **N/A** | The connector glyphs (`├─`, `└─`) are themselves structural drawing; a CSS-style border cannot frame them without disrupting the tree. |
+///
+/// Parity for the honored subset is pinned in `metrics_tree_parity.rs`.
 #[derive(Debug, Clone)]
 pub struct MetricsTree {
     root: MetricNode,
@@ -537,12 +567,22 @@ fn truncate_to_width(label: &str, max: usize, unicode: bool) -> String {
 impl TerminalRenderable for MetricsTree {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80) as usize;
-        Prose::new(self.build_markup(true, width)).render_optimistic(term_width)
+        // Propagate the outer `Layout` onto the inner `Prose` so the shared
+        // render-tree fold honors `margin` / `alignment` / `max_width` /
+        // `word_wrap` (spec C1/C5). The markup text is identical; only the
+        // outer box placement is delegated.
+        let mut prose = Prose::new(self.build_markup(true, width));
+        *prose.layout_mut() = self.layout.clone();
+        prose.render_optimistic(term_width)
     }
 
     fn render(&self, term: &Terminal) -> String {
         let width = term.width() as usize;
-        Prose::new(self.build_markup(term.supports_unicode, width)).render(term)
+        // See `render_optimistic`: propagate the outer Layout so the fold
+        // applies the box model.
+        let mut prose = Prose::new(self.build_markup(term.supports_unicode, width));
+        *prose.layout_mut() = self.layout.clone();
+        prose.render(term)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -559,6 +599,22 @@ impl TerminalRenderable for MetricsTree {
 
     fn is_block_level(&self) -> bool {
         true
+    }
+}
+
+impl TreeRenderable for MetricsTree {
+    /// Projects the metric tree through [`Prose`]'s tree projection so the
+    /// markup (`<b>`, `<dim>`, `<red>`) lowers to proper inline nodes.
+    ///
+    /// The outer [`Layout`] is propagated onto the inner `Prose`, matching
+    /// the terminal render path so both surfaces carry the same box model.
+    fn render_tree(&self) -> RenderNode {
+        // Render at a generous width so the markup text is not pre-truncated;
+        // the fold re-resolves the box against the real terminal width.
+        let markup = self.build_markup(true, 240);
+        let mut prose = Prose::new(markup);
+        *prose.layout_mut() = self.layout.clone();
+        prose.render_tree()
     }
 }
 

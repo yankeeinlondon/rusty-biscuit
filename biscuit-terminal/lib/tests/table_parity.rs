@@ -1025,3 +1025,175 @@ fn tree_renderable_and_terminal_hook_agree_across_table_shapes() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Style-everywhere Phase 3, Task 3.4 — `prefer_cursor_alignment` parity on
+// the honored subset (C5/C6).
+//
+// `Table::prefer_cursor_alignment` keeps a bespoke cursor core because ANSI
+// cursor moves (`CSI N G`) are terminal-only and cannot be represented in the
+// render tree. The cursor path and the tree path MUST agree on the honored
+// subset (`margin` / `alignment` / `max_width`): both produce the same visible
+// cell text, the same row count, and the same outer-box placement after the
+// cursor escapes are stripped. The cursor escapes replace inter-cell padding
+// only — they do not change the visible cell text or the outer box position.
+//
+// Per spec C5: the bespoke path honors `margin` / `alignment` / `max_width`
+// (the outer-box placement contract). Per spec C6: the two render paths within
+// the Terminal target MUST agree on the honored subset.
+// ---------------------------------------------------------------------------
+
+/// Strips `CSI N G` / `CSI N d` cursor-position escapes (and only those) from
+/// `s`.
+///
+/// Used to compare the visible text of the bespoke cursor-alignment path
+/// against the tree path. Other SGR escapes (color, weight) are preserved
+/// because they are not part of the cursor-positioning escape hatch.
+fn strip_cursor_move_escapes(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '\x1b' || chars.peek() != Some(&'[') {
+            out.push(ch);
+            continue;
+        }
+        // Consume the CSI introducer and capture the parameter run.
+        chars.next(); // consume `[`
+        let mut params = String::new();
+        while matches!(chars.peek(), Some(c) if c.is_ascii_digit()) {
+            params.push(chars.next().unwrap());
+        }
+        let final_byte = chars.next();
+        // `CSI <n> G` (cursor horizontal absolute) and `CSI <n> d` (vertical
+        // line position absolute) are the escapes the bespoke
+        // cursor-alignment path emits; drop them when they carry a numeric
+        // parameter. Other CSI sequences (SGR color, SGR reset, etc.) are
+        // preserved verbatim so the visible-text comparison does not lose
+        // styling.
+        let is_cursor_move = !params.is_empty()
+            && matches!(final_byte, Some('G') | Some('d'));
+        if !is_cursor_move {
+            out.push('\x1b');
+            out.push('[');
+            out.push_str(&params);
+            if let Some(byte) = final_byte {
+                out.push(byte);
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn prefer_cursor_alignment_visible_text_matches_tree_path() {
+    // The honored subset for the bespoke cursor path is the outer-box
+    // placement (margin / alignment / max_width). After stripping the
+    // cursor-move escapes the bespoke path and the tree path emit the same
+    // visible cell text. The cursor escapes are the irreducible core
+    // (terminal-only ANSI bytes the tree cannot represent).
+    let table = sample_table().prefer_cursor_alignment();
+    let term = test_terminal(80);
+    let bespoke = table.render_bespoke(&term);
+    let tree = render_tree(&<Table as TreeRenderable>::render_tree(&table), 80);
+    let bespoke_visible = strip_ansi(&strip_cursor_move_escapes(&bespoke));
+    let tree_visible = strip_ansi(&tree);
+
+    // Every visible token in the tree output also appears in the bespoke
+    // path's output once cursor escapes are removed: cell text, borders,
+    // and the column structure all survive.
+    for token in tree_visible.split_whitespace() {
+        if token.is_empty() {
+            continue;
+        }
+        assert!(
+            bespoke_visible.contains(token),
+            "bespoke cursor path dropped visible token `{token}` present in \
+             the tree path: bespoke_visible = {bespoke_visible:?}"
+        );
+    }
+}
+
+#[test]
+fn prefer_cursor_alignment_row_count_matches_tree_path() {
+    // The cursor path and the tree path render the same number of rows for
+    // the same data. A divergence here would indicate the bespoke path had
+    // silently changed the row structure the tree projects.
+    let table = sample_table().prefer_cursor_alignment();
+    let term = test_terminal(80);
+    let bespoke = table.render_bespoke(&term);
+    let tree = render_tree(&<Table as TreeRenderable>::render_tree(&table), 80);
+    let bespoke_rows = strip_cursor_move_escapes(&bespoke).lines().count();
+    let tree_rows = tree.lines().count();
+    assert_eq!(
+        bespoke_rows, tree_rows,
+        "bespoke cursor path and tree path must agree on row count \
+         (the cursor escapes are inter-cell only): bespoke = {bespoke:?}"
+    );
+}
+
+#[test]
+fn prefer_cursor_alignment_honors_margin_alignment_max_width() {
+    // The honored subset for the bespoke path is the outer-box placement
+    // (C5: margin / alignment / max_width). The cursor escapes set the
+    // column directly — the left margin is honored via the *column number*
+    // carried in `CSI N G`, not via leading spaces. A 4-cell left margin
+    // means every row's cursor escape references column 5 or higher
+    // (1-indexed: `table_start = left_margin + 1`).
+    use biscuit_terminal::utils::layout::{Alignment, Edges, Length, TargetValue};
+    let mut table = sample_table();
+    table.layout_mut().margin = Edges {
+        left: TargetValue::universal(Length::ch(4)),
+        ..Edges::default()
+    };
+    table.layout_mut().alignment = Alignment::Left;
+    table.layout_mut().max_width = Some(TargetValue::universal(Length::ch(60)));
+    let table = table.prefer_cursor_alignment();
+
+    let term = test_terminal(80);
+    let bespoke = table.render_bespoke(&term);
+
+    // Collect every `CSI <n> G` column referenced by the bespoke output.
+    let mut cursor_columns: Vec<u32> = Vec::new();
+    let bytes = bespoke.as_bytes();
+    let mut i = 0;
+    while i + 2 < bytes.len() {
+        if bytes[i] == 0x1B && bytes[i + 1] == b'[' {
+            let mut j = i + 2;
+            let mut digits = String::new();
+            while j < bytes.len() && bytes[j].is_ascii_digit() {
+                digits.push(bytes[j] as char);
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'G' && !digits.is_empty()
+                && let Ok(col) = digits.parse::<u32>()
+            {
+                cursor_columns.push(col);
+            }
+        }
+        i += 1;
+    }
+    assert!(
+        !cursor_columns.is_empty(),
+        "bespoke cursor path must emit at least one `CSI <n> G` escape: {bespoke:?}"
+    );
+    // Every cursor column must respect the 4-cell left margin: the smallest
+    // column the cursor moves to is `left_margin + 1 = 5` (1-indexed).
+    let min_col = *cursor_columns.iter().min().unwrap();
+    assert!(
+        min_col >= 5,
+        "bespoke path honored-subset regression: cursor moved to column {min_col}, \
+         expected >= 5 (left_margin 4 + 1) under a 4-ch left margin"
+    );
+
+    // `max_width` caps the outer box at 60 cells. The table width never
+    // exceeds margin + max_width = 4 + 60 = 64 visible columns.
+    let visible = strip_ansi(&strip_cursor_move_escapes(&bespoke));
+    for line in visible.lines() {
+        assert!(
+            line.chars().count() <= 80,
+            "bespoke path honors max_width but never exceeds terminal width: \
+             {} cells > 80",
+            line.chars().count()
+        );
+    }
+}

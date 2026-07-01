@@ -1,10 +1,7 @@
 use crate::{
     components::renderable::{RenderableTerminalContent, TerminalRenderable},
     terminal::Terminal,
-    utils::{
-        block_constraint::visible_width,
-        layout::{Layout, LayoutTerminalExt},
-    },
+    utils::{block_constraint::visible_width, layout::Layout},
 };
 
 /// Pads content on the left with spaces to guarantee a minimum width.
@@ -12,6 +9,16 @@ use crate::{
 /// `PadLeft` right-aligns the content within the padded region: spaces
 /// are added **before** the content so that short strings appear
 /// flush-right inside the field.
+///
+/// ## Layout & Style Contract
+///
+/// `PadLeft` is an inline padding utility (spec C7). The `min_width`
+/// argument is its explicit contract and is always honored. `Layout` box
+/// properties (`margin`, `padding`, `width`, `max_width`, `alignment`) are
+/// **N/A** — the containing block owns the box. `Style::color` and
+/// `Style::emphasis` flow through when `content` is a styled component such
+/// as [`Prose`]. `Style::background` and `Style::border` are N/A for the
+/// pad utility itself.
 ///
 /// ## Examples
 ///
@@ -81,9 +88,7 @@ impl TerminalRenderable for PadLeft {
             RenderableTerminalContent::String(s) => s.clone(),
             RenderableTerminalContent::Component(c) => c.render_optimistic(term_width),
         };
-        let padded = self.pad_content(&rendered);
-        let width = term_width.unwrap_or(80);
-        self.layout.apply_layout(&padded, width)
+        self.pad_content(&rendered)
     }
 
     fn render(&self, term: &Terminal) -> String {
@@ -91,8 +96,7 @@ impl TerminalRenderable for PadLeft {
             RenderableTerminalContent::String(s) => s.clone(),
             RenderableTerminalContent::Component(c) => c.render(term),
         };
-        let padded = self.pad_content(&rendered);
-        self.layout.apply_layout(&padded, term.width())
+        self.pad_content(&rendered)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -113,6 +117,16 @@ impl TerminalRenderable for PadLeft {
 /// `PadRight` left-aligns the content within the padded region: spaces
 /// are added **after** the content so that short strings appear
 /// flush-left inside the field.
+///
+/// ## Layout & Style Contract
+///
+/// `PadRight` is an inline padding utility (spec C7). The `min_width`
+/// argument is its explicit contract and is always honored. `Layout` box
+/// properties (`margin`, `padding`, `width`, `max_width`, `alignment`) are
+/// **N/A** — the containing block owns the box. `Style::color` and
+/// `Style::emphasis` flow through when `content` is a styled component such
+/// as [`Prose`]. `Style::background` and `Style::border` are N/A for the
+/// pad utility itself.
 ///
 /// ## Examples
 ///
@@ -182,9 +196,7 @@ impl TerminalRenderable for PadRight {
             RenderableTerminalContent::String(s) => s.clone(),
             RenderableTerminalContent::Component(c) => c.render_optimistic(term_width),
         };
-        let padded = self.pad_content(&rendered);
-        let width = term_width.unwrap_or(80);
-        self.layout.apply_layout(&padded, width)
+        self.pad_content(&rendered)
     }
 
     fn render(&self, term: &Terminal) -> String {
@@ -192,8 +204,7 @@ impl TerminalRenderable for PadRight {
             RenderableTerminalContent::String(s) => s.clone(),
             RenderableTerminalContent::Component(c) => c.render(term),
         };
-        let padded = self.pad_content(&rendered);
-        self.layout.apply_layout(&padded, term.width())
+        self.pad_content(&rendered)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
