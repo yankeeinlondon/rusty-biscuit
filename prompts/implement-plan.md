@@ -1,14 +1,14 @@
 ---
 $schema:
-    phase: number(required)
+    phase: number(required;default(1))
     total_phases: number(required)
-    plan: file(required)
-    spec: file
+    plan: file(eager; required)
+    spec: file(eager)
 description: |-
-    Provide either `plan` or `spec` filepath as a parameter and this
+    Provide either a `plan` or `spec` filepath as a parameter and this
     prompt will detect the number of phases in the plan and then implement
     the project phase by phase.
-plan: "{{ file_exists(spec) ? dirname(spec) + '/plan.md'  : null }}"
+plan: "{{ file_exists(spec) ? replace(spec, 'spec','plan')  : null }}"
 phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || 1 : null }}"
 area: "{{ ctx.area }}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"

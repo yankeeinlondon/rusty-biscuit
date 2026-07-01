@@ -1,3 +1,7 @@
+---
+clarified: "claude/claude-opus-4-8[1m]"
+---
+
 # Spec: Terminal App Configuration & Environment Metadata
 
 **Status:** Draft
@@ -38,8 +42,8 @@ The `app-profiles` spec already argues for a single `&'static`
 and *config file location* among the facts to centralize — but it remains
 unscheduled and unimplemented. **This spec defines the config + environment
 slice of that profile concretely and ships it, with a CLI surface (`bt about`)
-to expose it.** Whether it lands as part of `TerminalAppProfile` or as a
-sibling struct the profile re-exports is an integration detail (§11).
+to expose it.** It ships as a standalone `app_metadata` module now, designed to
+nest into `TerminalAppProfile` later (decided — see §5.7).
 
 ## 2. Goals
 
@@ -84,8 +88,10 @@ sibling struct the profile re-exports is an integration detail (§11).
 
 ## 5. Library design
 
-All types live under a new module, proposed `discovery::app_metadata` (final home
-TBD per §11). Sketches below are illustrative, not final signatures.
+All types live under a new standalone module, `discovery::app_metadata`
+(**decided**: ship standalone now, designed to nest into the future
+`TerminalAppProfile` — see §5.7). Sketches below are illustrative, not final
+signatures.
 
 ### 5.1 OS target resolution
 
@@ -125,9 +131,10 @@ pub enum ConfigFormat {
     Yaml,        // contour, legacy alacritty.yml
     Lua,         // wezterm — not statically parseable (locator-only)
     Plist,       // iTerm2, Apple Terminal (xml or binary)
-    Json,        // Windows Terminal, VS Code
+    Json,        // Windows Terminal
+    Json5,       // VS Code (JSONC/JSON5-tolerant settings)
     Dconf,       // GNOME Terminal / gsettings (no flat file)
-    None,        // app has no user-editable flat config (e.g. Warp)
+    None,        // no parseable file AND outside the coverage floor (§5.7); not Warp — see §8
 }
 
 pub struct OsConfigLocations {
@@ -169,8 +176,27 @@ impl TerminalApp {
 
     /// The config file THIS host is actually using, or None.
     pub fn get_config_file(&self) -> Option<PathBuf>;
+
+    /// As `get_config_file`, but also reports WHY this path resolved
+    /// (which env var, or which candidate index matched).
+    pub fn get_config_file_resolved(&self) -> Option<ResolvedConfig>;
+}
+
+pub struct ResolvedConfig {
+    pub path: PathBuf,
+    pub source: ConfigSource,
+}
+
+pub enum ConfigSource {
+    EnvVar(&'static str),  // e.g. EnvVar("KITTY_CONFIG_DIRECTORY")
+    Candidate(usize),      // e.g. Candidate(0) — index into the OS target's list
 }
 ```
+
+`get_config_file()` stays the simple API (just the `PathBuf`);
+`get_config_file_resolved()` is the sibling that carries provenance for richer
+`about` output and debugging. The former is a thin projection of the latter
+(`.map(|r| r.path)`).
 
 Algorithm:
 1. For each `location_env` var in order: if set and non-empty, expand. `File`
@@ -195,7 +221,7 @@ format. The locator is a **dot path** interpreted against `ConfigFormat`:
 
 | Format | Dot path `font.size` means | Example app |
 |--------|----------------------------|-------------|
-| `Toml` / `Json` / `Yaml` | nested table/object key `font` → `size` | alacritty, Windows Terminal |
+| `Toml` / `Json` / `Json5` / `Yaml` | nested table/object key `font` → `size` | alacritty, Windows Terminal, VS Code |
 | `Plist` | nested dict keys (via plist crate) | iTerm2 |
 | `KittyConf` / `KeyValue` | a **flat** key; dots are literal/decorative — the metadata gives the real flat key (e.g. `font_size`) | kitty, ghostty |
 | `Lua` | logical pointer only (`config.font_size`); value extraction not attempted (§6) | wezterm |
@@ -236,9 +262,18 @@ pub struct SettingLocator {
 }
 ```
 
-**"What else?" — proposed beyond the required 6.** The extended set above covers
-the settings most consistently present across emulators and most useful in an
-`about` report. Deferred (lower value / very app-specific): keybindings,
+**Setting scope for v1 (decided).** Keep **all** locator fields defined on
+`SettingLocators` — they are cheap `&'static` pointers and keeping them keeps the
+type forward-compatible. But v1 only **guarantees** the 6 core locators (`ipc`,
+`font`, `font_size`, `theme`, `background_color`, `opacity`) are populated and
+extracted for supported apps. The extended locators are populated
+**opportunistically** where the physical location is already known, and are
+`None` otherwise — there is **no** v1 requirement to research all 14 extended
+settings × every app. An extended locator being `None` is not a coverage gap.
+
+**"What else?" — the extended set beyond the required 6.** The extended set above
+covers the settings most consistently present across emulators and most useful in
+an `about` report. Deferred (lower value / very app-specific): keybindings,
 ligatures/font-features, tab-bar style, bell, blink rate, cursor blink, window
 decorations, working-directory inheritance. `Option<…>` means a setting that an
 app simply does not expose is `None`, not an error.
@@ -285,9 +320,54 @@ terminal; `bt about` flags this in output rather than implying otherwise.
   expanded candidate templates; `_path` returns the first. Behavior for existing
   callers is preserved (default path, no existence check).
 - New surface: `TerminalApp::metadata()`, `::config_metadata()`,
-  `::get_config_file()`, `current_config_os_target()`, `resolve_env_fact()`.
-- Seed data: a `const`/`LazyLock` table keyed by `TerminalApp`, one entry per
-  supported app. `Other(_)` → `None`.
+  `::get_config_file()`, `::get_config_file_resolved()`,
+  `current_config_os_target()`, `resolve_env_fact()`.
+- **Probe-target accessors (sniff-free).** The `app_metadata` library stays
+  sniff-free but declares, per app, the probe target the CLI's install detection
+  needs: a binary name and/or a macOS bundle id (e.g. `bin_name()` /
+  `bundle_id()` accessors, or carry them as fields on the metadata). The library
+  only *declares* these strings; it does **not** perform detection. The CLI maps
+  the queried app to that probe target and calls sniff (§7.1, §10).
+
+**Metadata keying — keyed directly by `TerminalApp` (decided).** The seed table
+is resolved by `match self` over `TerminalApp` variants — no separate
+`MetadataKey` type and no stringly-typed `Other(_)` lookup. This requires a
+first-class enum variant for every app the metadata represents. Concretely it
+adds a **new `TerminalApp::WindowsTerminal` variant**: today `get_terminal_app()`
+returns `TerminalApp::Other("Windows Terminal")` for the `WT_SESSION` env var, so
+that detector must change to emit the new `WindowsTerminal` variant. That is a
+behavior change in detection and gets its own test (assert `WT_SESSION` →
+`WindowsTerminal`, not `Other(_)`).
+
+> **Resolved contradiction.** The §8 seed table already lists a Windows Terminal
+> row, but under "keyed by `TerminalApp`, `Other(_)` → `None`" that row was
+> *unreachable* — no `WindowsTerminal` variant existed, and the detector only ever
+> produced `Other("Windows Terminal")`, which keyed to `None`. Adding the variant
+> (and re-pointing the detector at it) is what makes the seed row reachable.
+
+**App-coverage floor (acceptance gate).** The metadata seed table must cover
+**every app for which the pre-existing `get_terminal_config_path` returns
+`Some`**. Today that set includes `VsCode`, `Konsole`, `Foot`, and `Contour`,
+none of which yet appear in the §8 seed table — they must be added. The gate is
+explicit and testable: assert that **no app regresses `Some -> None`** versus the
+pre-existing `get_terminal_config_path` (i.e. for every `TerminalApp` the old
+resolver answered `Some` for, the new `get_terminal_config_path` wrapper backed by
+the seed table must also answer `Some`). This makes the "thin back-compat wrapper,
+behavior preserved" promise above verifiable rather than aspirational.
+
+> **`format: None` is floor-reserved.** Because the floor forbids `Some -> None`,
+> `format: None` is reserved for apps that **both** have no parseable file **and**
+> are not in the coverage floor (i.e. the legacy resolver already answered `None`
+> for them). An app the floor covers must contribute at least one candidate and
+> therefore cannot be `None`. This is why Warp is reclassified away from `None`
+> below (§8) — it has a real candidate path and is reachable through the wrapper.
+>
+> **Variants outside the seed table.** Keying by `match self` means any
+> `TerminalApp` variant the seed table does not cover (e.g. `Wast`,
+> `GnomeTerminal`) simply maps to `None` metadata. That is fine for the floor *as
+> long as the legacy resolver also returned `None`* for them — which it does:
+> `GnomeTerminal` and `Wast` already resolve to `None` from
+> `get_terminal_config_path`, so neither is bound by the floor.
 
 ## 6. Value extraction (resolved configuration)
 
@@ -296,11 +376,52 @@ When `get_config_file()` finds a file, `bt about` reads the settings declared in
 
 | Format | v1 extraction | Crate / approach |
 |--------|---------------|------------------|
-| Toml / Yaml / Json | full (dot path → value) | `toml`, `serde_yaml_ng`, `serde_json` |
+| Toml / Yaml / Json / Json5 | full (dot path → value) | **`biscuit-file`** (normalizes each to `serde_json::Value`) |
 | Plist | full | `plist` crate (xml + binary) |
 | KittyConf / KeyValue | full (line scan for the flat key; last wins, includes-aware best-effort) | small in-house parser |
 | Lua | **locator-only** (report path + note "Lua config; value not extracted") | none in v1 |
 | Dconf / None | not applicable (report "no flat config / managed by <system>") | — |
+
+**Structured formats parse via `biscuit-file` (decided).** TOML, YAML, JSON, and
+JSON5 are parsed through the in-repo `biscuit-file` crate (path dependency,
+`features = ["toml","yaml","json5"]`) — **not** by adding `toml` /
+`serde_yaml_ng` / `json-five` directly to biscuit-terminal. `biscuit-file`
+re-exports those parsers and normalizes every structured format to a single
+`serde_json::Value` (its `Toml` / `Yaml` / `Json5` types each expose
+`.as_json_value()` / `.as_json()`). `biscuit-file` is lower-level and does **not**
+depend on biscuit-terminal, so there is no dependency cycle.
+
+**Architectural consequence — one shared resolver.** Because every structured
+format collapses to one `serde_json::Value`, value extraction over them is a
+**single dot-path resolver over `serde_json::Value`**, shared across
+TOML/YAML/JSON/JSON5. The per-format extraction logic the old §6 table implied for
+these formats collapses into that one resolver. This directly serves the §5.4 goal
+(one logical key → a different physical location per format): the *locator* differs
+per format, but the *reader* is uniform once the file is normalized to JSON.
+
+**Flat formats stay in-house.** `KittyConf` / `KeyValue` (Kitty, Ghostty, foot)
+are not data formats `biscuit-file` handles; they keep the small in-house flat-key
+line scanner (no new dependency).
+
+**Plist gets the `plist` crate (sign-off granted).** iTerm2 and Apple Terminal use
+the `plist` crate for full extraction (xml + binary). `plist` is the **only
+net-new crate added directly to biscuit-terminal**; adding it is a drift task that
+must update `docs/dependencies.md` (and any per-area dependencies doc). See the
+§10 `cfprefsd` caching note — a freshly-changed value can lag the on-disk file;
+surface that as a note in `bt about` output rather than fighting it.
+
+**`serde_json` is already a biscuit-terminal dependency**, so the shared resolver
+adds nothing new; structured-format *parsing* arrives entirely via the
+`biscuit-file` path dep.
+
+**Value normalization — v1 returns RAW values.** v1 reports the extracted value as
+it appears: the literal string for flat formats, or the `serde_json::Value` leaf
+rendered as-is for structured formats. There is **no** Color / Enum / Path
+normalization in v1. Accordingly, `SettingLocator.value_kind` is **advisory
+metadata, not a parsing contract** — it hints at the expected shape for display
+but does not coerce or validate the extracted value. (This is what makes §9's
+"assert extracted values" testable: the assertion is `extracted == the literal
+fixture value`.) Typed normalization is a documented future increment (§12).
 
 This is the central honesty of the spec: **metadata is always reportable; value
 extraction is best-effort and format-bounded.** A locator with no extractable
@@ -324,11 +445,22 @@ bt about [APP] [--json] [--plain] [-v]
 ### 7.1 Report sections (default / terminal output)
 
 1. **Identity** — display name; is this the current terminal?; installed?
-   (binary on `PATH` via `which`); detected version (from env/`--version` is out
-   of scope — env only in v1).
+   (determined by **sniff** — `find_program_with_source`, covering binary on
+   `PATH` **plus** macOS `.app` bundle scan (`/Applications` + `~/Applications`)
+   **plus** the Windows App Paths registry / install-root walk; reported as
+   installed true/false, with the resolved `ExecutableSource` kind available if
+   useful); detected version (from env/`--version` is out of scope — env only in
+   v1).
+
+   The plain `which`/`PATH` check is insufficient for macOS GUI bundles (iTerm2,
+   Apple Terminal, Warp have no reliable PATH binary), which is why install
+   detection is delegated to sniff. This is a **CLI-only** concern — see §10 for
+   why the sniff dependency lives in `biscuit-terminal/cli` and not the library.
 2. **Config files** — a `Table`: per OS target, the ordered candidate templates,
    with the **active** host's OS target marked; the `location_env` overrides; and
-   the **resolved active file** from `get_config_file()` (or "none found").
+   the **resolved active file** from `get_config_file_resolved()` (or "none
+   found"), shown **with its provenance** — e.g. "resolved via
+   `$KITTY_CONFIG_DIRECTORY`" or "candidate #1".
 3. **Settings** — a `Table` of `Setting | Dot path | Value`. `Value` is the
    extracted host value when the file was found and the format is parseable; else
    `—` with a short reason (e.g. "Lua", "no config file").
@@ -354,6 +486,7 @@ Single JSON object on STDOUT, e.g.:
     "location_env": [{ "var": "KITTY_CONFIG_DIRECTORY", "kind": "dir" }],
     "candidates": { "macos": ["~/.config/kitty/kitty.conf"], "linux": ["..."], "...": [] },
     "resolved_file": "/Users/ken/.config/kitty/kitty.conf",
+    "resolved_source": { "candidate": 0 },
     "settings": { "font_size": { "path": "font_size", "value": "13.0" },
                   "ipc":       { "path": "allow_remote_control", "value": "no" },
                   "opacity":   { "path": "background_opacity", "value": null } }
@@ -366,15 +499,42 @@ Single JSON object on STDOUT, e.g.:
 `null` value = locator known but no host value (absent key, or non-current app).
 STDOUT is JSON-only in this mode; diagnostics to STDERR.
 
-### 7.3 `--plain` (new global flag)
+### 7.3 `--plain` (new global flag) and styling unification
 
 Add `--plain` alongside the existing global `--json` on `Args`. It forces
 `ColorDepth::None` so every renderable component emits no SGR/OSC escapes —
 required because `bt about` is the first reporting subcommand whose output is
-likely piped to `grep`/`diff`. Honors `NO_COLOR`; `FORCE_COLOR=1` overrides TTY
-detection for the default colored path. `--plain` + `--json` is allowed
-(`--json` already escape-free; `--plain` is a no-op there). `--plain` applies to
-all subcommands, not just `about`.
+likely piped to `grep`/`diff`. `--plain` applies to all subcommands, not just
+`about`.
+
+**Styling unification is in scope (decided).** The CLI today has **two
+independent styling systems**: the render-tree / `ColorDepth` path used by
+components, **and** a legacy `CliStyles` struct (`cli/src/types.rs`) of
+hardcoded raw ANSI literals emitted directly via `println!`. `CliStyles::detect()`
+is consumed at **5 sites** — `output.rs` (both `print_pretty`/content-analysis and
+the default terminal-metadata dump), `commands/graph.rs`, `commands/mermaid.rs`,
+and `commands/shared.rs`. As originally specified ("`--plain` = force
+`ColorDepth::None`"), `--plain` would **not** suppress escapes on those 5 legacy
+paths, because they never consult `ColorDepth`.
+
+Therefore this spec's scope now **includes migrating all 5 `CliStyles` call sites
+to render-tree components and deleting the `CliStyles` struct entirely**, leaving a
+single `ColorDepth`-governed styling path. Consequences:
+
+- `--plain` forces `ColorDepth::None` and is now correct for **all** subcommands
+  (default report, graph, mermaid, content-analysis, about), because there is only
+  one styling path to govern.
+- **Precedence.** `--plain` suppresses color **unconditionally**, overriding
+  `FORCE_COLOR`. Absent `--plain`, the existing `NO_COLOR` / `FORCE_COLOR` /
+  TTY-detection logic stands (continue to honor `NO_COLOR`).
+- `--plain` + `--json` is allowed (`--json` is already escape-free; `--plain` is a
+  no-op there).
+
+**Tension with surgical-change discipline, acknowledged.** Retiring `CliStyles` is
+a deliberate, in-scope refactor for this feature rather than incidental cleanup. It
+is justified because `--plain` cannot be globally honest while two styling systems
+coexist — a partial migration would leave `--plain` silently lying on the legacy
+paths.
 
 ## 8. Seed data (representative, not exhaustive)
 
@@ -387,8 +547,39 @@ all subcommands, not just `about`.
 | iTerm2 | Plist | `~/Library/Preferences/com.googlecode.iterm2.plist` | n/a | — |
 | Apple Terminal | Plist | `~/Library/Preferences/com.apple.Terminal.plist` | n/a | — |
 | Windows Terminal | Json | n/a | n/a (windows/wsl) | — |
-| Warp | None | (cloud/managed; no flat file) | (same) | — |
-| GNOME Terminal | Dconf | n/a | dconf/gsettings (no file) | — |
+| Warp | (real on-disk format — see note) | `warp_config_path(&home, os)` | same | — |
+| GNOME Terminal | Dconf | n/a | none — managed by dconf/gsettings; **empty candidate list** | — |
+| VS Code | Json | `~/Library/Application Support/Code/User/settings.json` | `$XDG_CONFIG_HOME/Code/User/settings.json` | — |
+| Konsole | KeyValue | n/a | `$XDG_CONFIG_HOME/konsolerc` (+ profiles) | — |
+| Foot | KeyValue | n/a | `$XDG_CONFIG_HOME/foot/foot.ini` | — |
+| Contour | Yaml | `~/.config/contour/contour.yml` | `$XDG_CONFIG_HOME/contour/contour.yml` | — |
+
+The four rows above (`VS Code`, `Konsole`, `Foot`, `Contour`) are required by the
+app-coverage floor in §5.7: each already returns `Some` from the pre-existing
+`get_terminal_config_path`, so each must be present in the seed table.
+
+**IMPLEMENTATION NOTE — GNOME Terminal (Dconf, metadata-only).** GNOME Terminal is
+modeled as `format: Dconf` carrying env/locator metadata but **no config-file
+extraction**: its candidate list is deliberately **empty**, so `get_config_file()`
+returns `None` and `bt about` reports "config managed by dconf/gsettings (no flat
+file)". This does not violate the coverage floor (§5.7) because the pre-existing
+`get_terminal_config_path` already returns `None` for `GnomeTerminal` — it is not
+floor-bound, so the empty candidate list is legal. This is the v1 use of the
+`Dconf` `ConfigFormat` variant (i.e. `Dconf` is a USED variant, not reserved).
+Konsole is unaffected: it stays `KeyValue` (`konsolerc`) with a real candidate.
+
+**IMPLEMENTATION NOTE — Warp.** The pre-existing `get_terminal_config_path`
+already returns `Some(warp_config_path(&home, os))` for `Warp`
+(`config_paths.rs`), so the app-coverage floor (§5.7) binds Warp: it must keep a
+candidate so the seed-table-backed wrapper still answers `Some` — **no carve-out,
+the floor stays absolute.** Warp therefore keeps that candidate path in the seed
+table and is **reclassified from `format: None` to its real on-disk format.** The
+implementer must confirm what `warp_config_path(&home, os)` actually points at and
+whether that file is parseable, then pick the matching `ConfigFormat`. If it turns
+out genuinely unparseable, it degrades to **locator-only** per §6 — but it must
+still contribute a candidate so the floor holds. (This supersedes the earlier
+"cloud/managed; no flat file" framing, which is incorrect given the resolver
+already hands back a path.)
 
 Windows Terminal (windows + wsl1/wsl2 targets) candidate:
 `$LOCALAPPDATA\Packages\Microsoft.WindowsTerminal_*\LocalState\settings.json`;
@@ -402,15 +593,36 @@ is a candidate-expansion concern (first match wins).
   / `XDG_CONFIG_HOME` / `APPDATA` and an injected `ConfigOsTarget` + a temp dir
   containing (or not) candidate files: env-override-wins, first-existing-wins,
   none-found, WSL `/mnt/c` mapping. Use `EnvGuard` + `#[serial]` for env mutation.
-- **L1 value extraction.** Fixture config files per format (kitty.conf, TOML,
-  plist, key=value) → assert extracted values; Lua fixture → assert locator-only
-  with the documented note.
+- **L1 value extraction.** Fixture config files per format (kitty.conf, TOML, YAML,
+  JSON/JSON5, plist, key=value) → assert each extracted value **equals the literal
+  fixture value** (v1 returns RAW values; `value_kind` is advisory, so there is no
+  type-coercion to assert). Lua fixture → assert locator-only with the documented
+  note. Structured formats route through `biscuit-file` → shared
+  `serde_json::Value` dot-path resolver, so one resolver test covers
+  TOML/YAML/JSON/JSON5.
+- **Detection behavior change.** Assert `WT_SESSION` now yields
+  `TerminalApp::WindowsTerminal` (not `Other("Windows Terminal")`).
+- **App-coverage floor.** Assert no app regresses `Some -> None`: for every
+  `TerminalApp` the pre-existing `get_terminal_config_path` answered `Some`
+  (includes `VsCode`, `Konsole`, `Foot`, `Contour`), the seed-table-backed wrapper
+  also answers `Some`.
 - **CLI integration (`assert_cmd` + `insta`).** `bt about kitty --plain` snapshot
   (escape-free), `--json` schema/round-trip, fuzzy match, invalid app → exit 2,
   default-to-current behavior (env-driven). `NO_COLOR=1` for stable snapshots.
-- No L2/terminal harness needed — this feature reads files/env, it does not drive
-  a live terminal. `--plain`'s escape-stripping is asserted at L1 via
-  `ColorDepth::None`.
+- **`--plain` must cover a previously-`CliStyles`-rendered path.** The escape-free
+  assertion must target output that was legacy-styled before this feature — e.g.
+  the **default `bt` metadata report** and/or content-analysis — not only a
+  renderable-component path, otherwise the test validates the wrong half of the
+  migration. Migrating `output.rs` will churn existing L2/snapshot expectations for
+  the default report; those snapshots must be regenerated/updated as part of this
+  feature.
+- **Install detection (CLI concern).** Install detection lives in the CLI via
+  sniff, so it is exercised there, not in the library. A light test suffices —
+  e.g. a known-present binary resolves (non-`NotFound` `ExecutableSource`) and a
+  bogus name resolves to `NotFound`. It does **not** require the terminal harness.
+- No L2/terminal harness needed for the new resolution logic — this feature reads
+  files/env, it does not drive a live terminal. `--plain`'s escape-stripping is
+  asserted at L1 via `ColorDepth::None`.
 - Must compile and resolve correctly on macOS, Windows, Linux (CI matrix);
   WSL paths are unit-tested via injected target since CI lacks WSL.
 
@@ -423,32 +635,83 @@ is a candidate-expansion concern (first match wins).
 - **Plist.** macOS `defaults`-managed plists may be binary; the `plist` crate
   reads both. Preference caching (`cfprefsd`) means a freshly-changed value can
   lag the on-disk file — note in output, do not fight it.
-- **No new heavy deps without sign-off** — `plist` and `toml` are the likely
-  additions; confirm against `docs/dependencies.md` before adding (§11).
+- **Dependencies (decided).** The only net-new crate added **directly** to
+  biscuit-terminal is `plist` (sign-off granted) for binary/xml plist extraction.
+  Structured-format parsing (TOML/YAML/JSON/JSON5) arrives via a **path dependency
+  on the in-repo `biscuit-file`** crate (`features = ["toml","yaml","json5"]`),
+  which re-exports the underlying parsers and normalizes to `serde_json::Value`;
+  no `toml` / `serde_yaml_ng` / `json-five` is added to biscuit-terminal directly.
+  `serde_json` is already a biscuit-terminal dependency. Adding `plist` and the
+  `biscuit-file` path dep is a drift task: update `docs/dependencies.md` and the
+  per-area dependencies doc alongside the code change.
+- **Install detection (CLI-only sniff dep).** `bt about`'s "installed?" signal is
+  determined by `sniff::programs::find_program_with_source(name) ->
+  ExecutableSource` (`Path | MacOsBundle | WindowsAppPaths | WindowsInstallRoot |
+  NotFound`), covering PATH, the macOS `/Applications` + `~/Applications` bundle
+  scan, and the Windows App Paths registry + install-root walk. The `sniff` path
+  dependency (on `sniff/lib`) is added to **`biscuit-terminal/cli` ONLY — never to
+  `biscuit-terminal/lib`.** Rationale: `sniff/lib` pulls a heavy tree (gix, rayon,
+  sysinfo, windows, git2, core-foundation); "installed?" is a report concern, and
+  loading that tree into the rendering library would violate the heavy-dep
+  discipline. Binaries can afford the weight; the library cannot. There is no
+  dependency cycle — `sniff/lib` does not depend on biscuit-terminal (only
+  `sniff/cli` does). Adding the `sniff` path dep to `biscuit-terminal/cli` is a
+  drift task: update `docs/dependencies.md` and the per-area dependencies doc
+  alongside the code change.
+- **Integration detail — two distinct `TerminalApp` enums.** `sniff::programs`
+  has its **own** `TerminalApp` enum, separate from biscuit-terminal's
+  `TerminalApp`; they are not the same type. The CLI bridges by binary name (the
+  library-declared probe target, §5.7) or by mapping between the two enums — do
+  not assume they unify.
 
-## 11. Open questions (need Ken's input)
+## 11. Resolved questions (ledger)
 
-1. **Home of the metadata.** Fold into the unscheduled `TerminalAppProfile`
-   (schedule that first), or ship as a standalone `app_metadata` module the
-   profile later re-exports? Recommendation: standalone now, designed to nest.
-2. **Setting set scope for v1.** Confirm the 6 required + which of the proposed
-   extended set (§5.5) ship in v1 vs deferred.
-3. **Lua / wezterm value extraction.** Locator-only in v1 (recommended), or
-   invest in `wezterm show-config` shell-out / a Lua sandbox now?
-4. **Dconf/gsettings & Warp.** Model GNOME Terminal/Konsole (dconf) and Warp
-   (no file) as `format: Dconf/None` metadata-only, or exclude from v1?
-5. **`bt about` with no arg.** Default to the current terminal (recommended) or
-   require an explicit app?
-6. **New dependencies.** OK to add `plist` (+ confirm `toml`/`serde_yaml_ng`
-   already present) for value extraction?
-7. **Should `get_config_file()` also expose the *reason* it resolved** (which env
-   var or which candidate index) for richer `about` output and debugging?
+**All open questions are resolved** — none remain. Each former question has been
+folded into the body; this section is a pure ledger of the decisions.
+
+Resolved in this revision (folded into the body):
+
+- **Dconf/gsettings modeling** → GNOME Terminal is modeled as `format: Dconf`,
+  metadata-only with an **empty candidate list** (`get_config_file()` → `None`,
+  reported as "config managed by dconf/gsettings (no flat file)"); it is not
+  floor-bound since the legacy resolver already returned `None` for it. This makes
+  `Dconf` a USED v1 variant. Konsole stays `KeyValue` (`konsolerc`) unchanged
+  (§6, §8).
+- **`bt about` with no arg** → **decided: default to the current terminal** via
+  `get_terminal_app()` (§2 / §7). An invalid *explicit* app remains a usage error
+  (exit 2) listing valid names. No longer a recommendation — settled.
+- **Resolution provenance** → **decided: expose it.** `get_config_file()` stays the
+  simple `Option<PathBuf>` API; a sibling `get_config_file_resolved() ->
+  Option<ResolvedConfig>` adds the resolved path plus a `ConfigSource` discriminator
+  (`EnvVar(name)` or `Candidate(index)`). Surfaced in the §7.1 "Config files"
+  section and the §7.2 `--json` `resolved_source` field (§5.3, §7).
+- **Home of the metadata** → standalone `app_metadata` module now, designed to nest
+  into `TerminalAppProfile` later; keyed directly by `TerminalApp` (§5, §5.7).
+- **Setting set scope for v1** → all locator fields kept on the type; only the 6
+  core locators guaranteed populated/extracted, extended set opportunistic (§5.5).
+- **Lua / wezterm value extraction** → locator-only in v1; `wezterm show-config` /
+  Lua sandbox deferred (§6, §12).
+- **New dependencies** → `plist` added directly (sign-off granted); structured
+  formats via the `biscuit-file` path dep; no `toml`/`serde_yaml_ng`/`json-five`
+  added to biscuit-terminal directly (§6, §10).
+- **Warp vs the app-coverage floor** → Warp keeps its existing
+  `warp_config_path` candidate so the floor stays absolute (no carve-out), and is
+  reclassified off `format: None` to its real on-disk format; `format: None` is
+  now reserved for apps that are both unparseable and outside the floor (§5.7, §8).
+- **Installed-detection** → determined by `sniff` (`find_program_with_source`,
+  covering PATH + macOS bundle + Windows registry), with the `sniff` dependency in
+  `biscuit-terminal/cli` only — the library stays sniff-free and merely declares
+  per-app probe targets (§5.7, §7.1, §9, §10).
 
 ## 12. Out of scope / future
 
 - Writing/patching config files.
 - Live IPC drive (`kitty @`, `wezterm cli`) — only declaration/exposure is modeled.
-- Lua config evaluation; `defaults`/`cfprefsd` write-through.
+- **Lua / wezterm value extraction** (`wezterm show-config` shell-out or a Lua
+  sandbox); v1 is locator-only (§6). `defaults`/`cfprefsd` write-through.
+- **Typed value normalization.** v1 returns RAW extracted values; coercing values
+  into `Color` / `Enum` / `Path` per `SettingLocator.value_kind` (today advisory
+  only) is a deferred increment (§6).
 - Capability facets (graphics protocol, OSC8, rounding) — owned by the broader
   `TerminalAppProfile`.
 - A `bt about --all` cross-app matrix (natural follow-up once per-app works).

@@ -2,14 +2,14 @@
 description: |-
         Runs an interactive session to clarify the passed in spec or design file.
 $schema:
-    - spec: file(required; match(**/*spec*.md)) -> pass in a specification file for clarification
-    - design: file(required; match(**/*design*.md)) -> pass in a design document for clarification
+    spec: file(required; match(**/*spec*.md)) -> pass in a specification file for clarification
+    # - design: file(required; match(**/*design*.md)) -> pass in a design document for clarification
 doc: "{{spec || design}}"
 interactive: true
 initialize:
     stack:
-        when: "spec && design"
-        action:
+        - when: "spec && design"
+          action:
             - warn: "The {{ link(prompts/clarify.md) }} prompt expects _either_ a `spec` or `design` document to be passed in but not both!"
             - stop
 start:
