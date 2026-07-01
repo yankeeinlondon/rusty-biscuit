@@ -17,8 +17,8 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 
 use super::{
-    ExpressionError, FileRefFailure, FileReferenceDiagnostic, json_number, scalar_string,
-    to_number, to_number_coerce,
+    ExpressionError, FileRefFailure, FileReferenceDiagnostic, json_number, make_portable_relative,
+    make_relative, scalar_string, to_number, to_number_coerce,
 };
 use super::resolve_ctx::{
     ResolutionContext, is_remote_url, normalize_path_arg, resolve_file_ref_with_fallback,
@@ -1138,25 +1138,6 @@ pub fn file_exists_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, 
     Ok(Value::Bool(exists))
 }
 
-/// Best-effort relative rendering: repo-root relative when inside the repo,
-/// else base_dir-relative, else `~`-aliased home path, else the absolute path.
-fn make_relative(abs: &Path, base_dir: &Path) -> String {
-    if let Some(repo) = crate::markdown::compose::find_git_root_from(base_dir)
-        && let Ok(stripped) = abs.strip_prefix(&repo)
-    {
-        return stripped.to_string_lossy().to_string();
-    }
-    if let Ok(stripped) = abs.strip_prefix(base_dir) {
-        return stripped.to_string_lossy().to_string();
-    }
-    if let Some(home) = dirs::home_dir()
-        && let Ok(stripped) = abs.strip_prefix(&home)
-    {
-        return format!("~/{}", stripped.to_string_lossy());
-    }
-    abs.to_string_lossy().to_string()
-}
-
 /// `relative(file) -> file | Error::InvalidFilePath`
 pub fn relative_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     require_args_expr("relative", args, 1)?;
@@ -1282,7 +1263,7 @@ fn format_indexed_stem(base: &str, index: u64, width: usize) -> String {
 /// repo-root relative, base-dir relative, `~`-aliased, or absolute. Components
 /// are returned with `/` separators in mind.
 fn path_display_components(path: &Path, base_dir: &Path) -> (Vec<String>, String) {
-    let rel = make_relative(path, base_dir).replace('\\', "/");
+    let rel = make_portable_relative(path, base_dir);
     let trimmed = rel.strip_prefix('/').unwrap_or(&rel).to_string();
     match trimmed.rfind('/') {
         Some(pos) => {
@@ -1352,7 +1333,7 @@ pub fn increment_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
         .parent()
         .map(|p| p.join(&new_base))
         .unwrap_or_else(|| PathBuf::from(&new_base));
-    Ok(Value::String(make_relative(&out, &ctx.base_dir).replace('\\', "/")))
+    Ok(Value::String(make_portable_relative(&out, &ctx.base_dir)))
 }
 
 /// `decrement_file_index(file) -> string` — decrements the numeric suffix,
@@ -1381,7 +1362,7 @@ pub fn decrement_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
         .parent()
         .map(|p| p.join(&new_base))
         .unwrap_or_else(|| PathBuf::from(&new_base));
-    Ok(Value::String(make_relative(&out, &ctx.base_dir).replace('\\', "/")))
+    Ok(Value::String(make_portable_relative(&out, &ctx.base_dir)))
 }
 
 /// `basename(file) -> string` — the final path component including extension.
@@ -1510,7 +1491,7 @@ pub fn join_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Express
     let joined_str = joined.to_string_lossy().to_string();
     let validated = resolve_path_shape("join", &joined_str, ctx)?;
     Ok(Value::String(
-        make_relative(&validated, &ctx.base_dir).replace('\\', "/"),
+        make_portable_relative(&validated, &ctx.base_dir),
     ))
 }
 
@@ -1568,7 +1549,7 @@ pub fn link_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Express
                 ));
             }
             let path = resolve_path_arg("link", &args[0], ctx)?;
-            let desc = make_relative(&path, &ctx.base_dir).replace('\\', "/");
+            let desc = make_portable_relative(&path, &ctx.base_dir);
             let dest = path.to_string_lossy().replace('\\', "/");
             Ok(Value::String(format_markdown_link(&desc, &dest)))
         }
