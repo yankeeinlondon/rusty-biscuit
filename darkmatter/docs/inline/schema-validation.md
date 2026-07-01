@@ -234,6 +234,28 @@ Coercion also never *parses into* a constrained string type: a number landing in
 
 For root unions, Darkmatter coerces against each arm in order and commits the first arm that validates post-coercion.
 
+### Eager-`file` value normalization
+
+Coercion has a sibling write-back pass that fires only on the **eager** `file` type. When a property is declared `file(eager)` (the eager marker is the compiled-schema `format: darkmatter-file`) and its value validates, the stored value is **rewritten to its resolved, repo-relative path** — the same projection `relative(value)` / `dirname(value)` already produce. After the rewrite, the document state is uniformly resolved: `spec` and `dirname(spec)` agree by construction, so an author never needs to hand-prepend `{{ctx.area}}` to make a derived path match.
+
+The rewrite runs at the same two surfaces as coercion (the explicit library API and the compose stage's write-back) and is **idempotent**: re-validating an already-rewritten value is a fixpoint, so compose → re-compose never drifts.
+
+**Triggered on:**
+
+- a present, non-null string value under `file(eager)` / `format: darkmatter-file` — including top-level properties, inline-object sub-properties, array-of-`file(eager)` elements, and the committed arm of a root or property union.
+
+**Left verbatim (never rewritten):**
+
+- `string`-typed properties, even when their value looks path-shaped — `string` is the literal-text contract.
+- bare (lazy) `file` properties — `format: darkmatter-file-reference` is syntax-only and may legitimately name a file that does not exist yet (e.g. a `review_file` this run is about to produce).
+- a value that resolves to a remote URL — there is no local path to project.
+- an absent or `null` optional `file(eager)` property.
+- a value still holding a `$(...)` shell expression or unresolved `{{ ... }}` template — the post-shell re-validation handles it once it expands.
+
+**Read-only validation contract.** Library callers that use `validate` / `validate_with_positions` keep their current contract: validation coerces on a working copy and **does not mutate** the caller's `serde_json::Value`. The eager-`file` rewrite is opt-in via the explicit [`EffectiveSchema::normalize_frontmatter`](../../lib/src/markdown/schemas/mod.rs) API; compose calls it on its accepted effective schema so the normalized values are what downstream interpolation, lifecycle events, and `inline-compose` see.
+
+Stored values use `/` path separators on every OS, so a committed eager-`file` reference is portable across macOS, Linux, and Windows.
+
 ## Interaction With `--set` and `--state`
 
 Because the compose stage validates the *effective* frontmatter, overrides participate fully:
