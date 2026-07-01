@@ -1253,14 +1253,21 @@ fn find_list_marker(source: &str) -> Option<char> {
     None
 }
 
-/// Restores original list markers in the output.
+/// Restores original list markers in the cleanup output.
 ///
-/// The pulldown-cmark-to-cmark library normalizes all unordered list markers to '*'.
-/// This function replaces them with the original markers from the source.
+/// `pulldown-cmark-to-cmark` normalizes every unordered list marker to `*`,
+/// including items rendered inside a blockquote. This function walks the
+/// rendered output line-by-line and rewrites each normalized `* ` body back to
+/// the next authored marker recorded by `extract_list_markers`, preserving the
+/// surrounding blockquote prefix and indentation verbatim.
 ///
-/// Since `extract_list_markers` produces one marker per unordered list item (in
-/// document order), and cmark produces exactly one `* ` line per item, this is a
-/// simple sequential 1:1 replacement.
+/// Each visited unordered-list item — top-level or blockquoted — advances the
+/// marker cursor by one, restoring the 1:1 correspondence between extracted
+/// markers and rendered `* ` bodies even in mixed-marker documents.
+///
+/// Apparent bullets inside fenced code blocks (top-level or nested inside a
+/// blockquote) are protected: fence state is tracked against the post-prefix
+/// line body, and both backtick and tilde fences are recognized.
 fn restore_list_markers(output: &mut String, markers: &[char]) {
     if markers.is_empty() {
         return;
@@ -1269,14 +1276,29 @@ fn restore_list_markers(output: &mut String, markers: &[char]) {
     let mut result = String::with_capacity(output.len());
     let mut lines = output.lines().peekable();
     let mut marker_idx = 0;
-    let mut in_code_block = false;
+    // Open fence character (`` ` `` or `~`) when currently inside a fenced
+    // code block; `None` outside.
+    let mut open_fence: Option<char> = None;
 
     while let Some(line) = lines.next() {
-        let trimmed = line.trim_start();
+        let (prefix, body) = split_rendered_line(line);
 
-        // Track code blocks to avoid modifying markers inside them
-        if trimmed.starts_with("```") {
-            in_code_block = !in_code_block;
+        // Fence detection runs against the post-prefix body so blockquoted
+        // fences protect their contents. A fence line is three or more
+        // repeated backtick or tilde characters.
+        let body_fence_char = match body.chars().next() {
+            Some('`') if body.starts_with("```") => Some('`'),
+            Some('~') if body.starts_with("~~~") => Some('~'),
+            _ => None,
+        };
+
+        if let Some(fc) = body_fence_char
+            && (open_fence.is_none() || open_fence == Some(fc))
+        {
+            // Open the fence when outside, close it when the same character
+            // reappears. A different fence character inside an open fence is
+            // treated as code content below.
+            open_fence = if open_fence == Some(fc) { None } else { Some(fc) };
             result.push_str(line);
             if lines.peek().is_some() {
                 result.push('\n');
@@ -1284,7 +1306,8 @@ fn restore_list_markers(output: &mut String, markers: &[char]) {
             continue;
         }
 
-        if in_code_block {
+        if open_fence.is_some() {
+            // Inside a fenced code block: emit verbatim.
             result.push_str(line);
             if lines.peek().is_some() {
                 result.push('\n');
@@ -1292,14 +1315,15 @@ fn restore_list_markers(output: &mut String, markers: &[char]) {
             continue;
         }
 
-        if trimmed.starts_with("* ") {
-            let indent = line.len() - trimmed.len();
+        if body.starts_with("* ") {
             let marker = markers.get(marker_idx).copied().unwrap_or('*');
             marker_idx += 1;
 
-            result.push_str(&" ".repeat(indent));
+            result.push_str(prefix);
             result.push(marker);
-            result.push_str(&trimmed[1..]); // Skip the '*', keep the rest (including space)
+            // Skip the normalized `*` byte and keep the rest of the body
+            // (including the trailing space) verbatim.
+            result.push_str(&body[1..]);
         } else {
             result.push_str(line);
         }
@@ -1315,6 +1339,47 @@ fn restore_list_markers(output: &mut String, markers: &[char]) {
     }
 
     *output = result;
+}
+
+/// Splits a rendered cleanup-output line into `(prefix, body)` for marker
+/// restoration.
+///
+/// `restore_list_markers` runs after `fix_blockquote_formatting`, so any
+/// blockquote prefix has already been normalized to the canonical `>` + space
+/// shape. For a blockquote line, the returned `prefix` carries the exact bytes
+/// needed to rebuild the line verbatim — leading indentation, every normalized
+/// `>` segment, and the whitespace run between the final `>` and the body — so
+/// the restored marker can drop straight into the body. For a non-blockquote
+/// line, the helper returns the prior top-level shape: leading whitespace as
+/// `prefix` and the first non-whitespace byte as the start of `body`.
+fn split_rendered_line(line: &str) -> (&str, &str) {
+    let bytes = line.as_bytes();
+    let mut idx = 0;
+
+    // Skip leading indentation (also folds the up-to-three-space CommonMark
+    // blockquote indent that `fix_blockquote_formatting` may have left behind).
+    while idx < bytes.len() && bytes[idx] == b' ' {
+        idx += 1;
+    }
+
+    // Only treat the line as a blockquote when a `>` follows the leading
+    // whitespace; otherwise return the top-level (whitespace) prefix.
+    if bytes.get(idx) != Some(&b'>') {
+        return (&line[..idx], &line[idx..]);
+    }
+
+    // Walk every normalized `>` segment. `fix_blockquote_formatting` emits
+    // each `>` followed by exactly one space; consuming the full whitespace
+    // run after each `>` is defensive but stays byte-exact for the canonical
+    // shape and tolerates a stray double space without splitting short.
+    while idx < bytes.len() && bytes[idx] == b'>' {
+        idx += 1;
+        while idx < bytes.len() && bytes[idx] == b' ' {
+            idx += 1;
+        }
+    }
+
+    (&line[..idx], &line[idx..])
 }
 
 /// Fixes blockquote formatting issues introduced by pulldown-cmark-to-cmark v18.
@@ -3274,6 +3339,196 @@ mod tests {
             cleaned.contains("+ More code"),
             "Plus in code should not change, got:\n{}",
             cleaned
+        );
+    }
+
+    // ==================== Blockquote List Marker Preservation Tests ====================
+    //
+    // These tests lock down the fix for the bug where `pulldown-cmark-to-cmark`
+    // normalizes every unordered bullet to `*` and `restore_list_markers` only
+    // matched bare `* ` lines, missing items inside a `> ` blockquote prefix.
+    // See `fixes/2026-06-20-unordered-and-quoted/` for the spec.
+
+    #[test]
+    fn cleanup_preserves_dash_marker_for_blockquoted_list_item() {
+        // `> - item` MUST round-trip with the authored `-` marker.
+        let content = "> - dash item";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("> - dash item"),
+            "Blockquoted `-` marker should be preserved, got:\n{}",
+            cleaned
+        );
+        assert!(
+            !cleaned.contains("> * dash item"),
+            "Blockquoted `-` marker should not be normalized to `*`, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn cleanup_preserves_star_marker_for_blockquoted_list_item() {
+        // `> * item` keeps its authored `*` marker (no regression for the one
+        // shape that already matched by accident).
+        let content = "> * star item";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("> * star item"),
+            "Blockquoted `*` marker should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn cleanup_preserves_plus_marker_for_blockquoted_list_item() {
+        // `> + item` MUST round-trip with the authored `+` marker.
+        let content = "> + plus item";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("> + plus item"),
+            "Blockquoted `+` marker should be preserved, got:\n{}",
+            cleaned
+        );
+        assert!(
+            !cleaned.contains("> * plus item"),
+            "Blockquoted `+` marker should not be normalized to `*`, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn cleanup_preserves_authored_markers_for_mixed_blockquote_and_top_level_lists() {
+        // Locks down the latent alignment defect: `extract_list_markers` already
+        // records blockquote items, but `restore_list_markers` skipped those
+        // lines and let top-level items consume the wrong marker slots. Using
+        // different markers on each list makes the mis-alignment observable.
+        //
+        // The blank `>` line inside the blockquote keeps the items as separate
+        // list entries (otherwise `strip_incidental_newlines` would join them).
+        let content = "> - bq one\n>\n> - bq two\n\n+ top one\n+ top two";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("> - bq one"),
+            "Blockquote list should keep its authored `-` marker, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("> - bq two"),
+            "Blockquote list should keep its authored `-` marker for every item, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("+ top one"),
+            "Top-level list should keep its authored `+` marker, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("+ top two"),
+            "Top-level list should keep its authored `+` marker for every item, got:\n{}",
+            cleaned
+        );
+        assert!(
+            !cleaned.contains("> * bq"),
+            "Blockquote items must not leak the cmark-normalized `*` marker, got:\n{}",
+            cleaned
+        );
+        assert!(
+            !cleaned.contains("\n- top"),
+            "Top-level items must not inherit the blockquote's `-` marker, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn cleanup_preserves_marker_for_nested_blockquoted_list_item() {
+        // `> > - item` keeps `-` after cleanup's existing `> > ` normalization.
+        let content = "> > - nested";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("> > - nested"),
+            "Nested blockquote should keep its authored `-` marker, got:\n{}",
+            cleaned
+        );
+        assert!(
+            !cleaned.contains("> > * nested"),
+            "Nested blockquote should not be normalized to `*`, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn cleanup_preserves_marker_for_compact_blockquoted_list_item() {
+        // Compact input `>> - item` is normalized to `> > - item` by
+        // `fix_blockquote_formatting`; restoration MUST still preserve `-`.
+        let content = ">> - compact";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("> > - compact"),
+            "Compact blockquote prefix should normalize and keep `-`, got:\n{}",
+            cleaned
+        );
+        assert!(
+            !cleaned.contains("> > * compact"),
+            "Compact blockquote should not be normalized to `*`, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn cleanup_preserves_marker_for_indented_blockquoted_list_item() {
+        // Up to three leading spaces are valid CommonMark blockquote indentation;
+        // cleanup strips that indent while preserving the authored `-`.
+        let content = "   > - indented";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("> - indented"),
+            "Indented blockquote should keep its authored `-` marker, got:\n{}",
+            cleaned
+        );
+        assert!(
+            !cleaned.contains("> * indented"),
+            "Indented blockquote should not be normalized to `*`, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn restore_list_markers_protects_blockquoted_backtick_fence_content() {
+        // `restore_list_markers` MUST NOT rewrite apparent bullets inside a
+        // fenced code block nested inside a blockquote. We exercise the helper
+        // directly with synthetic post-cmark output because `strip_incidental_newlines`
+        // collapses single-line blockquoted fences before they reach cmark, so
+        // the protection is not observable through `cleanup_content`.
+        let input = "> ```\n> * this is code\n> ```\n";
+        let mut buffer = input.to_string();
+        restore_list_markers(&mut buffer, &['-']);
+
+        assert_eq!(
+            buffer, input,
+            "Bullet inside a blockquoted backtick fence must not be restored, got:\n{}",
+            buffer
+        );
+    }
+
+    #[test]
+    fn restore_list_markers_protects_blockquoted_tilde_fence_content() {
+        // Same protection as the backtick case but for tilde fences, which
+        // CommonMark accepts and which the cmark pipeline can emit.
+        let input = "> ~~~\n> * this is code\n> ~~~\n";
+        let mut buffer = input.to_string();
+        restore_list_markers(&mut buffer, &['-']);
+
+        assert_eq!(
+            buffer, input,
+            "Bullet inside a blockquoted tilde fence must not be restored, got:\n{}",
+            buffer
         );
     }
 
