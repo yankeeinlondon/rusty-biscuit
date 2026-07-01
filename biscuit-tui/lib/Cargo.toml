@@ -4,6 +4,14 @@ version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
 
+[features]
+# Bridge biscuit-terminal / darkmatter `TerminalRenderable` components
+# (CodeBlock, Table, Prose, ...) into ratatui `Text` via `TuiRenderable`.
+# Off by default: biscuit-terminal carries heavy transitive weight (syntect,
+# and resvg via biscuit-visualized) that pure input-widget consumers should
+# not pay for.
+renderables = ["dep:biscuit-terminal", "dep:ansi-to-tui"]
+
 [dependencies]
 ratatui = "0.30"
 crossterm = "0.29"
@@ -16,6 +24,11 @@ unicode-width = "0.2"
 serde_yaml_ng = "0.10"
 rand = "0.9"
 nucleo-matcher = "0.3"
+
+# `renderables` feature only — see [features] above. `ansi-to-tui` 8 tracks
+# ratatui 0.30 (same pairing claudine/cli already ships).
+biscuit-terminal = { path = "../../biscuit-terminal/lib", optional = true }
+ansi-to-tui = { version = "8", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

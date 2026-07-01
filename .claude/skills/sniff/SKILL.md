@@ -1,13 +1,26 @@
 ---
 name: sniff
 description: Expert knowledge for sniff-lib and sniff-cli, a cross-platform system detection library and CLI for Rust. Use when detecting OS/hardware/network/filesystem info, program detection, service detection, adding new detection capabilities, or optimizing detection performance.
-hash: 3cd50ffff2b8b5db-07a77a2a7523fdf0
-last_updated: 2026-06-17
+hash: 3cd50ffff2b8b5db-27ba1c39db009879
+last_updated: 2026-06-29
 ---
 
 # sniff
 
 Cross-platform system detection library and CLI for Rust.
+
+## Platform Support
+
+Supported targets are **macOS**, **Linux**, and **Windows**. **WSL** is treated as
+the Linux compile and runtime path: under WSL, sniff uses the same `/proc`-backed
+detectors as native Linux (`HostCapabilities` exposes an `is_wsl` flag) and no
+detector crosses into native Windows behavior. CI enforces this matrix in
+`.github/workflows/test.yml` via the `sniff-cross-platform` job, which runs
+`cargo check --all-targets` plus the nextest tiers on all three OSes. Windows
+audio detection uses a PowerShell `Get-CimInstance` probe (not `wmic`). Keep
+test code portable — gate Unix-only imports (`std::os::unix`) and macOS-only
+helpers behind `cfg`, and build `PATH` with `std::env::join_paths` rather than
+literal `:`/`;` separators.
 
 ## Capabilities
 

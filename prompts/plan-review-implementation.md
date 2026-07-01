@@ -11,11 +11,11 @@ success:
     stack: 
         - when: "frontmatter(review, 'ready') == true"
           action:
-              - message: "🤪 the review {{link(review)}} was deemed **ready** and so no plan is needed for implementing suggestions!"
+              - message: "🤪 the review `{{review}}` was deemed **ready** and so no plan is needed for implementing suggestions!"
               - effect: crowd-laugh
         - when: "frontmatter(review, 'ready') != true"
           action:
-              - message: "🎉 the plan {{link(plan)}} has been created for the `{{ parent_dir(review) }}` review!"
+              - message: "🎉 the plan `{{plan}}` has been created for the `{{ parent_dir(review) }}` review!"
               - success: "the plan {{link(plan)}} has been created for the `{{ parent_dir(review) }}` review! The plan is composed of {{frontmatter(plan, 'total_phases')}} phases."
               - effect: crowd-laugh
 failure:

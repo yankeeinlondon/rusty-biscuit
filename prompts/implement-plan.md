@@ -8,10 +8,7 @@ description: |-
     Provide either a `plan` or `spec` filepath as a parameter and this
     prompt will detect the number of phases in the plan and then implement
     the project phase by phase.
-
-    > **Note:** it makes no difference if the plan is for a _specification_ implementation
-    > versus it being for a technical review's findings.
-plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
+plan: "{{ file_exists(spec) ? replace(spec, 'spec','plan')  : null }}"
 phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || 1 : null }}"
 area: "{{ ctx.area }}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
