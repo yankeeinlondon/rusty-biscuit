@@ -39,6 +39,7 @@ fn build_at(dotted_path: &str, value: Value) -> Value {
 fn sample_for(kind: LeafType) -> Value {
     match kind {
         LeafType::HorizontalLength => json!("10ch"),
+        LeafType::WidthOrMode => json!("fit-content"),
         LeafType::RowCount => json!(1),
         LeafType::Alignment => json!("left"),
         LeafType::Color => json!("red-500"),
