@@ -115,6 +115,41 @@ fn layout_matrix_snapshots() {
     }
 }
 
+// ── Render-path parity (review-1, Finding 1) ──
+//
+// The spec requires `VIA_RENDER == VIA_TREE_DIRECT` for every matrix cell.
+// The snapshot test above records both columns but never asserts equality;
+// this test closes that gap. Style scenarios now flow through the component
+// (via `TerminalRenderable::with_style`) so the public `render(&term)` path
+// and the `render_tree` fold path carry the same appearance, and every cell
+// must agree after ANSI stripping.
+//
+// - `dual!` components route `render(&term)` through the same projection the
+//   tree folds, so the two columns agree by construction.
+// - `tree_only!` components (Prose, FileSystem) use the folded tree for both
+//   columns, so they agree by construction.
+// - `terminal_only!` components return the same rendered string for both
+//   columns, so they agree by construction.
+
+#[test]
+fn render_path_parity_for_every_matrix_cell() {
+    for case in component_cases() {
+        for scenario in scenarios() {
+            let (via_render, via_tree_direct) = (case.render)(&scenario);
+            let render_stripped = strip_escape_codes(&via_render);
+            let tree_stripped = strip_escape_codes(&via_tree_direct);
+            assert_eq!(
+                render_stripped.trim(),
+                tree_stripped.trim(),
+                "{} / {}: VIA_RENDER must equal VIA_TREE_DIRECT \
+                 (ANSI-stripped and trimmed)",
+                case.name,
+                scenario.name,
+            );
+        }
+    }
+}
+
 // ── Browser + Markdown snapshots per matrix cell (Phase 6, Task 6.3) ──
 
 #[test]

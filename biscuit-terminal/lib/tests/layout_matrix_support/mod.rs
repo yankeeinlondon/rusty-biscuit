@@ -17,13 +17,13 @@ pub struct Scenario {
     /// The `Style` exercised by this scenario.
     ///
     /// Empty (`Style::default()`) for the layout-only scenarios. When
-    /// non-empty it is injected onto the render-tree node before folding — the
-    /// fold surface this feature audits — so a property such as `background`
-    /// visibly takes effect in the `VIA_TREE_DIRECT` column. It is *not* pushed
-    /// into the bespoke `render(&term)` path, so a style scenario's
-    /// `VIA_RENDER` column shows the pre-migration output until a later phase
-    /// routes that component through the fold. This asymmetry is intentional:
-    /// the baseline pins where the two public surfaces currently diverge.
+    /// non-empty it is applied to the component via
+    /// [`TerminalRenderable::with_style`] before either render path runs, so
+    /// the public `render(&term)` surface and the `render_tree` fold surface
+    /// both carry it. Components that route `render(&term)` through the
+    /// canonical tree (the IR-flipped block components) project the stored
+    /// style onto their root node, so the two columns agree; the fold is the
+    /// audited surface that lowers the style to SGR, borders, and backgrounds.
     pub style: Style,
     /// Terminal width, in columns, the component renders at.
     pub width: u32,
@@ -370,10 +370,13 @@ fn render_tree_string(node: &RenderNode, width: u32) -> String {
 /// for the left column and through `TreeRenderable::render_tree` +
 /// `render_terminal_node` for the right column. ANSI is retained.
 ///
-/// A non-empty `style` (a style scenario such as `background_subtle`) is merged
-/// onto the projected render-tree node before folding, so the property takes
-/// effect only in the tree column — the fold surface this feature audits. The
-/// bespoke `render(&term)` column is left untouched (see [`Scenario::style`]).
+/// Style parity is established upstream: each `component_cases` build closure
+/// applies the scenario style to the component via `.with_style(...)`, and the
+/// IR-flipped components project that stored style onto their root node, so
+/// `render(&term)` (which routes through the same projection) carries it too.
+/// The merge below is a defensive fallback for components that do not yet
+/// store appearance (for example the `tree_only` rows); it overlays the
+/// scenario style onto the projected node so the fold still lowers it.
 fn render_and_tree<C>(component: &C, scenario: &Scenario) -> (String, String, RenderNode)
 where
     C: TerminalRenderable + TreeRenderable,
@@ -414,6 +417,20 @@ fn merge_scenario_style(node: &mut RenderNode, style: &Style) {
         border: style.border.clone().or(base.border),
     };
     node.attrs.set_style(&merged);
+}
+
+/// Projects `component` into a render-tree node and merges the scenario's
+/// `Style` onto it — the tree half of [`render_and_tree`] without computing
+/// the bespoke `render(&term)` output.
+fn project_tree_only<C>(component: &C, scenario: &Scenario) -> RenderNode
+where
+    C: TreeRenderable,
+{
+    let mut node = component.render_tree();
+    if !scenario.style.is_empty() {
+        merge_scenario_style(&mut node, &scenario.style);
+    }
+    node
 }
 
 /// The full set of block components exercised by the layout matrix.
@@ -459,12 +476,21 @@ pub fn component_cases() -> Vec<ComponentCase> {
         };
     }
 
-    macro_rules! terminal_only {
-        ($name:expr, $render:expr, $notes:expr) => {
+    // A bespoke terminal component that also carries a tree projection.
+    // The `render` closure produces the bespoke terminal output for both
+    // columns (the tree fold may rasterize on image-capable terminals, so
+    // the bespoke path keeps snapshots readable). The `build` closure
+    // constructs the component for the tree projection consumed by the
+    // Browser/Markdown snapshot tests.
+    macro_rules! bespoke_with_tree {
+        ($name:expr, $render:expr, $build:expr, $notes:expr) => {
             ComponentCase {
                 name: $name,
                 render: Box::new($render),
-                project_tree: None,
+                project_tree: Some(Box::new(|s| {
+                    let component = $build(s);
+                    project_tree_only(&component, s)
+                })),
                 notes: $notes,
             }
         };
@@ -478,6 +504,7 @@ pub fn component_cases() -> Vec<ComponentCase> {
                 Some("Alan Kay"),
             )
             .with_layout(s.layout.clone())
+            .with_style(s.style.clone())
         }),
         dual!("Compose", |s: &Scenario| {
             Compose::new(vec![
@@ -485,15 +512,18 @@ pub fn component_cases() -> Vec<ComponentCase> {
                 RenderableTerminalContent::from("Second line of composed output."),
             ])
             .with_layout(s.layout.clone())
+            .with_style(s.style.clone())
         }),
         dual!("OrderedList", |s: &Scenario| {
             OrderedList::new(vec!["First item", "Second item", "Third item"])
                 .with_layout(s.layout.clone())
+                .with_style(s.style.clone())
         }),
         dual!("Progress", |s: &Scenario| {
             Progress::new(0.75)
                 .with_label("Loading")
                 .with_layout(s.layout.clone())
+                .with_style(s.style.clone())
         }),
         tree_only!(
             "Prose",
@@ -503,6 +533,7 @@ pub fn component_cases() -> Vec<ComponentCase> {
                      surface for a plain block node.",
                 )
                 .with_layout(s.layout.clone())
+                .with_style(s.style.clone())
             },
             "component render path defers block layout; matrix shows the canonical tree projection"
         ),
@@ -511,7 +542,9 @@ pub fn component_cases() -> Vec<ComponentCase> {
             section
                 .push("Welcome to the tutorial.")
                 .push("Let's begin with installation.");
-            section.with_layout(s.layout.clone())
+            section
+                .with_layout(s.layout.clone())
+                .with_style(s.style.clone())
         }),
         dual!("StatusBlock", |s: &Scenario| {
             StatusBlock::new(StatusState::Error)
@@ -519,6 +552,7 @@ pub fn component_cases() -> Vec<ComponentCase> {
                 .body("Missing closing brace in template directive.")
                 .hint("Check the template syntax and retry.")
                 .with_layout(s.layout.clone())
+                .with_style(s.style.clone())
         }),
         dual!("Table", |s: &Scenario| {
             Table::new()
@@ -534,25 +568,30 @@ pub fn component_cases() -> Vec<ComponentCase> {
                     ],
                 ])
                 .with_layout(s.layout.clone())
+                .with_style(s.style.clone())
         }),
         dual!("TextBlock", |s: &Scenario| {
             TextBlock::new(
                 "TextBlock applies uniform block styling to a single piece of content.",
             )
             .with_layout(s.layout.clone())
+            .with_style(s.style.clone())
         }),
         dual!("Todo", |s: &Scenario| {
             Todo::new("Review pull request #42")
                 .with_state(TodoState::InProgress)
                 .with_layout(s.layout.clone())
+                .with_style(s.style.clone())
         }),
         dual!("TwoColumn", |s: &Scenario| {
             TwoColumn::new("Left column content.", "Right column content.")
                 .with_layout(s.layout.clone())
+                .with_style(s.style.clone())
         }),
         dual!("UnorderedList", |s: &Scenario| {
             UnorderedList::new(vec!["First item", "Second item", "Third item"])
                 .with_layout(s.layout.clone())
+                .with_style(s.style.clone())
         }),
         tree_only!(
             "FileSystem",
@@ -572,13 +611,16 @@ pub fn component_cases() -> Vec<ComponentCase> {
                     .show_root(false)
                     .layout(s.layout.clone());
                 fs.ensure_tree_built();
-                fs
+                fs.with_style(s.style.clone())
             },
             "terminal render uses Nerd Font icons; matrix shows the canonical tree projection"
         ),
-        terminal_only!(
+        bespoke_with_tree!(
             "HorizontalRule",
             |s: &Scenario| {
+                // Force the text tier so the snapshot stays readable Unicode
+                // glyphs; the tree fold would rasterize on a Kitty-capable
+                // optimistic terminal.
                 let term = Terminal::builder()
                     .width(s.width)
                     .image_support(ImageSupport::None)
@@ -588,13 +630,21 @@ pub fn component_cases() -> Vec<ComponentCase> {
                 let hr = HorizontalRule::new()
                     .style(RuleStyle::Dashes)
                     .width("20")
-                    .with_layout(s.layout.clone());
+                    .with_layout(s.layout.clone())
+                    .with_style(s.style.clone());
                 let out = hr.render(&term);
                 (out.clone(), out)
             },
+            |s: &Scenario| {
+                HorizontalRule::new()
+                    .style(RuleStyle::Dashes)
+                    .width("20")
+                    .with_layout(s.layout.clone())
+                    .with_style(s.style.clone())
+            },
             "bespoke glyph/image core; outer placement parity is in horizontal_rule_parity.rs"
         ),
-        terminal_only!(
+        tree_only!(
             "MetricsTree",
             |s: &Scenario| {
                 use std::time::Duration;
@@ -616,23 +666,21 @@ pub fn component_cases() -> Vec<ComponentCase> {
                     ],
                 )
                 .emphasized();
-                let tree = MetricsTree::new(root).with_layout(s.layout.clone());
-                let term = Terminal::new_optimistic(s.width);
-                let out = tree.render(&term);
-                (out.clone(), out)
+                MetricsTree::new(root)
+                    .with_layout(s.layout.clone())
+                    .with_style(s.style.clone())
             },
-            "delegates to Prose; no public tree projection yet"
+            "terminal render delegates to Prose; tree projection carries structured text and layout"
         ),
-        terminal_only!(
+        tree_only!(
             "TerminalImage",
             |s: &Scenario| {
                 let img_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                     .join("../cli/tests/fixtures/tiny.png");
-                let img = TerminalImage::new(&img_path)
+                TerminalImage::new(&img_path)
                     .expect("load tiny.png")
-                    .with_layout(s.layout.clone());
-                let out = img.render_optimistic(Some(s.width));
-                (out.clone(), out)
+                    .with_layout(s.layout.clone())
+                    .with_style(s.style.clone())
             },
             "bespoke image protocol; outer placement parity is in terminal_image_parity.rs"
         ),
@@ -640,25 +688,22 @@ pub fn component_cases() -> Vec<ComponentCase> {
 
     #[cfg(feature = "image")]
     {
-        cases.push(terminal_only!(
+        cases.push(tree_only!(
             "GraphExpression",
             |s: &Scenario| {
-                let graph = GraphExpression::parse("a -> b -> c", GraphInputSyntax::Auto)
+                GraphExpression::parse("a -> b -> c", GraphInputSyntax::Auto)
                     .expect("parse graph")
-                    .with_layout(s.layout.clone());
-                let term = Terminal::new_optimistic(s.width);
-                let out = graph.render(&term);
-                (out.clone(), out)
+                    .with_layout(s.layout.clone())
+                    .with_style(s.style.clone())
             },
             "bespoke rasterized graph; outer placement parity is in graph_expression_parity.rs"
         ));
-        cases.push(terminal_only!(
+        cases.push(tree_only!(
             "MermaidDiagram",
             |s: &Scenario| {
-                let diagram = MermaidDiagram::new("flowchart LR\n    A --> B --> C")
-                    .with_layout(s.layout.clone());
-                let out = diagram.render_optimistic(Some(s.width));
-                (out.clone(), out)
+                MermaidDiagram::new("flowchart LR\n    A --> B --> C")
+                    .with_layout(s.layout.clone())
+                    .with_style(s.style.clone())
             },
             "bespoke external render; outer placement parity is in mermaid_parity.rs"
         ));
