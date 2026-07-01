@@ -1164,10 +1164,10 @@ fn prefer_cursor_alignment_honors_margin_alignment_max_width() {
                 digits.push(bytes[j] as char);
                 j += 1;
             }
-            if j < bytes.len() && bytes[j] == b'G' && !digits.is_empty() {
-                if let Ok(col) = digits.parse::<u32>() {
-                    cursor_columns.push(col);
-                }
+            if j < bytes.len() && bytes[j] == b'G' && !digits.is_empty()
+                && let Ok(col) = digits.parse::<u32>()
+            {
+                cursor_columns.push(col);
             }
         }
         i += 1;

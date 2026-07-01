@@ -84,10 +84,10 @@ fn layout_left_margin_indents_rule_text_tier() {
 
 #[test]
 fn layout_left_margin_indents_rule_image_tier() {
-    // The image tier must honor the same margin contract. Under the Kitty
-    // graphics protocol the image escape is wrapped in cursor save/restore
-    // and prefixed with a column-shift escape; the test asserts the prefix
-    // references a column at or beyond the left margin.
+    // The image tier must honor the same margin contract. After the change
+    // that routes both tiers through `apply_block_layout`, the outer margin
+    // is applied as leading spaces before the image escape sequence. The
+    // test asserts the leading spaces match the configured left margin.
     let hr = HorizontalRule::new()
         .style(RuleStyle::Dashes)
         .alignment(RuleAlignment::Left)
@@ -104,52 +104,12 @@ fn layout_left_margin_indents_rule_image_tier() {
         .image_support(ImageSupport::Kitty)
         .build();
     let out = hr.render(&term);
-    // The image tier emits a `\x1b[<n>C` column-forward escape to advance
-    // past the left margin before painting the rule. Look for at least one
-    // such sequence carrying a value >= 8. (When no Kitty support is
-    // compiled in the test falls back to asserting the text-tier margin
-    // via the same render call.)
-    if !out.contains("\x1b_G") && !out.contains("\x1b]1337") {
-        // Host has no Kitty image support; fall back to text tier.
-        let plain = strip_ansi(&out);
-        for line in plain.lines() {
-            if line.trim().is_empty() {
-                continue;
-            }
-            assert!(
-                line.starts_with("        "),
-                "image-tier fallback must still honor the 8-ch left margin: {line:?}"
-            );
-        }
-        return;
-    }
-    // Image tier active: confirm the column-forward escape shifts by ≥ 8.
-    let mut found_shift = false;
-    let bytes = out.as_bytes();
-    let mut i = 0;
-    while i + 2 < bytes.len() {
-        if bytes[i] == 0x1B && bytes[i + 1] == b'[' {
-            let mut j = i + 2;
-            let mut digits = String::new();
-            while j < bytes.len() && bytes[j].is_ascii_digit() {
-                digits.push(bytes[j] as char);
-                j += 1;
-            }
-            if j < bytes.len() && bytes[j] == b'C' {
-                if let Ok(n) = digits.parse::<u32>() {
-                    if n >= 8 {
-                        found_shift = true;
-                        break;
-                    }
-                }
-            }
-        }
-        i += 1;
-    }
+    // Whether the host supports Kitty or falls back to the text tier, the
+    // output must begin with the 8-cell left margin (applied by
+    // `apply_block_layout`).
     assert!(
-        found_shift,
-        "image tier must shift the cursor by ≥ 8 columns under an 8-ch \
-         left margin: {out:?}"
+        out.starts_with("        "),
+        "image/text tier must apply the 8-ch left margin as leading spaces: {out:?}"
     );
 }
 

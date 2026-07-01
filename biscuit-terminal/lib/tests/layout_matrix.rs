@@ -64,11 +64,23 @@ fn side_by_side_includes_title_and_both_columns() {
     assert!(out.contains("left") && out.contains("right"));
 }
 
+use biscuit_terminal::prelude::strip_escape_codes;
+use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
 use layout_matrix_support::component_cases;
+use renderable::tree::{
+    BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, RenderStrictness,
+    render_browser_node, render_markdown_node,
+};
 
 #[test]
-fn component_case_count_is_eleven() {
-    assert_eq!(component_cases().len(), 11);
+fn component_case_count_is_sixteen_without_image_feature() {
+    // 11 original dual-path components + Prose, FileSystem, HorizontalRule,
+    // MetricsTree, TerminalImage. When the `image` feature is enabled two more
+    // bespoke components (GraphExpression, MermaidDiagram) are included.
+    #[cfg(feature = "image")]
+    assert_eq!(component_cases().len(), 18);
+    #[cfg(not(feature = "image"))]
+    assert_eq!(component_cases().len(), 16);
 }
 
 #[test]
@@ -103,18 +115,166 @@ fn layout_matrix_snapshots() {
     }
 }
 
-// ── Baseline reference: the shared fold honors the full surface (Scope §1) ──
-//
-// A single `Paragraph` node carrying every applicable `Layout`
-// (`margin`, `padding`, `width` Fixed, `max_width`, `alignment`, `word_wrap`)
-// and `Style` (`color`, `background`, `emphasis`, `border`) field is folded to
-// each target at a fixed available width. These tests are the reference output
-// every later phase validates against: each field must visibly take effect on
-// Terminal (SGR / column geometry) and Browser (CSS declarations), and Markdown
-// must degrade to structure-only (decision D1).
+// ── Browser + Markdown snapshots per matrix cell (Phase 6, Task 6.3) ──
 
-use biscuit_terminal::prelude::strip_escape_codes;
-use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
+#[test]
+fn layout_matrix_browser_snapshots() {
+    for case in component_cases() {
+        let Some(project_tree) = case.project_tree.as_ref() else {
+            continue;
+        };
+        for scenario in scenarios() {
+            let node = (project_tree)(&scenario);
+            let html = render_browser_node(&node, &BrowserRenderOptions::default())
+                .expect("browser fold")
+                .output
+                .render();
+            insta::assert_snapshot!(
+                format!("{}__{}__browser", case.name, scenario.name),
+                html
+            );
+        }
+    }
+}
+
+#[test]
+fn layout_matrix_markdown_snapshots() {
+    for case in component_cases() {
+        let Some(project_tree) = case.project_tree.as_ref() else {
+            continue;
+        };
+        for scenario in scenarios() {
+            let node = (project_tree)(&scenario);
+            let md = render_markdown_node(
+                &node,
+                &MarkdownRenderOptions {
+                    dialect: MarkdownDialect::Markdown,
+                    strictness: RenderStrictness::Warn,
+                    ..MarkdownRenderOptions::default()
+                },
+            )
+            .expect("markdown fold")
+            .output;
+            insta::assert_snapshot!(
+                format!("{}__{}__markdown", case.name, scenario.name),
+                md
+            );
+        }
+    }
+}
+
+// ── No-silent-noop guard (Phase 6, Task 6.5) ──
+//
+// Every matrix cell with a tree projection must either visibly change when a
+// property is exercised or be explicitly marked N/A. This meta-test enforces
+// that rule:
+//
+// - Layout scenarios are covered by the terminal/browser/markdown snapshots
+//   above; the render_comparison test additionally requires `render(&term)`
+//   and `render_tree` to agree for layout-only inputs.
+// - Style scenarios must change the rendered tree output vs. the baseline, or
+//   the component must be listed in the N/A ledger with a rationale.
+// - Markdown output must never leak ANSI, CSS, or raw styling HTML (D1).
+// - Terminal-only components must carry a non-empty notes rationale.
+
+#[test]
+fn no_silent_noop_guard() {
+    let markdown_opts = MarkdownRenderOptions {
+        dialect: MarkdownDialect::Markdown,
+        strictness: RenderStrictness::Warn,
+        ..MarkdownRenderOptions::default()
+    };
+
+    for case in component_cases() {
+        // Every terminal-only row must document why it has no tree projection.
+        if case.project_tree.is_none() {
+            assert!(
+                !case.notes.is_empty(),
+                "{}: terminal-only matrix row must carry a notes rationale",
+                case.name
+            );
+            continue;
+        }
+
+        let project_tree = case.project_tree.as_ref().unwrap();
+
+        for scenario in scenarios() {
+            if scenario.name == "baseline" {
+                continue;
+            }
+            let node = (project_tree)(&scenario);
+
+            // D1 guard: Markdown never leaks appearance markup.
+            let md = render_markdown_node(&node, &markdown_opts)
+                .expect("markdown fold")
+                .output;
+            assert!(
+                !md.contains('\u{1b}'),
+                "{} / {}: ANSI escape leaked into Markdown",
+                case.name,
+                scenario.name
+            );
+            assert!(
+                !md.contains("style=")
+                    && !md.contains("background-color")
+                    && !md.contains("border-left"),
+                "{} / {}: CSS styling leaked into Markdown: {md:?}",
+                case.name,
+                scenario.name
+            );
+
+            // Style scenarios must leave a detectable artifact in the tree path.
+            if !scenario.style.is_empty() {
+                let tree = render_terminal_node(
+                    &node,
+                    &TerminalRenderOptions::new(
+                        &Terminal::new_optimistic(scenario.width),
+                        RenderStrictness::Warn,
+                    ),
+                )
+                .expect("tree render")
+                .output;
+                match scenario.name {
+                    "background_subtle" => {
+                        assert!(
+                            tree.contains("\u{1b}[48;"),
+                            "{} / {}: background_subtle did not lower to a background SGR",
+                            case.name,
+                            scenario.name
+                        );
+                    }
+                    "border_thin_left" => {
+                        assert!(
+                            tree.contains('│'),
+                            "{} / {}: border_thin_left did not lower to a left border glyph",
+                            case.name,
+                            scenario.name
+                        );
+                    }
+                    "emphasis_bold_italic" => {
+                        assert!(
+                            tree.contains("\u{1b}[1m") && tree.contains("\u{1b}[3m"),
+                            "{} / {}: emphasis_bold_italic did not lower to bold+italic SGR",
+                            case.name,
+                            scenario.name
+                        );
+                    }
+                    other => panic!("unknown style scenario: {other}"),
+                }
+            }
+        }
+    }
+}
+
+// ── C9 guard: semantic nodes stay structural under Markdown degradation ──
+//
+// Decision D1 drops appearance/layout attrs for Markdown, but existing
+// semantic nodes must remain semantic — they must not be replaced by `Style`
+// appearance attrs. This regression builds a tree carrying every common
+// semantic inline and block node plus a GFM task checkbox, renders it to
+// Markdown, and asserts that structural Markdown syntax survives and no
+// ANSI/CSS/raw styling HTML leaks.
+
 use biscuit_terminal::terminal::Terminal;
 use renderable::color::{Color, Tailwind};
 use renderable::layout::{
@@ -123,10 +283,101 @@ use renderable::layout::{
 use renderable::style::{
     Background, Border, BorderSides, PerMode, Style, TextEmphasis,
 };
-use renderable::tree::{
-    BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, RenderNode, RenderStrictness,
-    render_browser_node, render_markdown_node,
-};
+use renderable::tree::RenderNode;
+
+#[test]
+fn semantic_nodes_preserved_under_markdown_d1_degradation() {
+    let paragraph = RenderNode::paragraph(vec![
+        RenderNode::strong(vec![RenderNode::text("strong")]),
+        RenderNode::text(" "),
+        RenderNode::emphasis(vec![RenderNode::text("emphasis")]),
+        RenderNode::text(" "),
+        RenderNode::delete(vec![RenderNode::text("delete")]),
+        RenderNode::text(" "),
+        RenderNode::link("https://example.com", None, vec![RenderNode::text("link")]),
+        RenderNode::text(" "),
+        RenderNode::image("img.png", None, "alt"),
+    ]);
+    let list_item = RenderNode::list_item(
+        Some(true),
+        vec![RenderNode::paragraph(vec![RenderNode::text("task item")])],
+    );
+    let list = RenderNode::list(false, None, vec![list_item]);
+    let quote = RenderNode::block_quote(vec![RenderNode::paragraph(vec![RenderNode::text(
+        "quoted",
+    )])]);
+
+    let mut root = RenderNode::root(vec![paragraph, list, quote]);
+    // Attach a style and layout to the root. D1 must drop the appearance
+    // attributes without collapsing the semantic children into plain text or
+    // raw styling HTML.
+    root.attrs.set_layout(&Layout {
+        margin: Edges {
+            left: TargetValue::universal(Length::ch(4)),
+            ..Edges::default()
+        },
+        padding: Edges::all(Length::ch(1)),
+        width: Width::Fixed(TargetValue::universal(Length::ch(60))),
+        max_width: Some(TargetValue::universal(Length::ch(70))),
+        alignment: Alignment::Center,
+        word_wrap: WordWrap::WrapProse(None, None),
+    });
+    root.attrs.set_style(&Style {
+        color: Some(TargetValue::universal(PerMode::universal(Color::Tailwind(
+            Tailwind::Blue500,
+        )))),
+        background: Some(Background::subtle()),
+        emphasis: TextEmphasis {
+            bold: true,
+            ..Default::default()
+        },
+        border: Some(Border {
+            sides: BorderSides::Sides {
+                top: false,
+                right: false,
+                bottom: false,
+                left: true,
+            },
+            ..Border::default()
+        }),
+    });
+
+    let md = render_markdown_node(
+        &root,
+        &MarkdownRenderOptions {
+            dialect: MarkdownDialect::Markdown,
+            strictness: RenderStrictness::Warn,
+            ..MarkdownRenderOptions::default()
+        },
+    )
+    .expect("markdown fold")
+    .output;
+
+    // Structural Markdown syntax survives.
+    assert!(md.contains("**strong**"), "Strong must render as Markdown: {md:?}");
+    assert!(md.contains("_emphasis_"), "Emphasis must render as Markdown: {md:?}");
+    assert!(md.contains("~~delete~~"), "Delete must render as Markdown: {md:?}");
+    assert!(
+        md.contains("[link](https://example.com)"),
+        "Link must render as Markdown: {md:?}"
+    );
+    assert!(md.contains("![alt](img.png)"), "Image must render as Markdown: {md:?}");
+    assert!(md.contains("- [x] task item"), "Task checkbox must render as Markdown: {md:?}");
+    assert!(md.contains("> quoted"), "Block quote must render as Markdown: {md:?}");
+
+    // No appearance leakage of any kind.
+    assert!(!md.contains('\x1b'), "ANSI escape leaked into Markdown: {md:?}");
+    assert!(!md.contains("style="), "inline CSS leaked into Markdown: {md:?}");
+    assert!(
+        !md.contains("background-color") && !md.contains("border-left"),
+        "CSS declaration leaked into Markdown: {md:?}"
+    );
+    assert!(
+        !md.contains("<span") && !md.contains("<div") && !md.contains("<strong"),
+        "raw styling HTML leaked into Markdown: {md:?}"
+    );
+}
+
 
 /// The available width the baseline reference renders at.
 const BASELINE_WIDTH: u32 = 80;

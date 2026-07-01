@@ -291,21 +291,34 @@ pub fn stacked_stripped(via_render: &str, tree: &str) -> String {
     )
 }
 
+use std::path::PathBuf;
+
 use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::compose::Compose;
+use biscuit_terminal::components::filesystem::FileSystem;
+use biscuit_terminal::components::horizontal_rule::{HorizontalRule, RuleStyle};
 use biscuit_terminal::components::list::{OrderedList, UnorderedList};
+use biscuit_terminal::components::metrics_tree::{MetricNode, MetricShare, MetricValue, MetricsTree};
 use biscuit_terminal::components::progress::Progress;
+use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::components::section::{HeadingLevel, Section};
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::components::status_block::StatusBlock;
 use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
+use biscuit_terminal::components::terminal_image::TerminalImage;
 use biscuit_terminal::components::text_block::TextBlock;
 use biscuit_terminal::components::todo::{Todo, TodoState};
 use biscuit_terminal::components::two_column::TwoColumn;
+use biscuit_terminal::discovery::detection::{ColorDepth, ImageSupport};
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
 use biscuit_terminal::terminal::Terminal;
 use renderable::tree::{RenderNode, RenderStrictness, TreeRenderable};
+
+#[cfg(feature = "image")]
+use biscuit_terminal::components::graph_expression::{GraphExpression, GraphInputSyntax};
+#[cfg(feature = "image")]
+use biscuit_terminal::components::mermaid::MermaidDiagram;
 
 /// A boxed closure that builds a component under a [`Scenario`] and renders
 /// it both ways, returning `(via_render_output, via_tree_direct_output)`.
@@ -319,6 +332,12 @@ use renderable::tree::{RenderNode, RenderStrictness, TreeRenderable};
 /// needing a separate harness.
 type RenderFn = Box<dyn Fn(&Scenario) -> (String, String)>;
 
+/// A boxed closure that projects the component to a canonical [`RenderNode`]
+/// under a [`Scenario`]. When `None`, the component has no tree projection
+/// (it is a bespoke/terminal-only component) and cross-target parity tests
+/// skip it.
+type TreeFn = Box<dyn Fn(&Scenario) -> RenderNode>;
+
 /// A named component with a closure that builds it under a scenario and
 /// renders both `render(&term)` (the public `TerminalRenderable` entry
 /// point) and an explicit `TreeRenderable::render_tree` fold.
@@ -328,6 +347,13 @@ pub struct ComponentCase {
     /// Returns `(via_render_output, via_tree_direct_output)`, both with ANSI
     /// retained.
     pub render: RenderFn,
+    /// When present, returns the render-tree node used for the right column
+    /// and for Browser/Markdown snapshots. When absent, the component is
+    /// terminal-only and those targets are skipped.
+    pub project_tree: Option<TreeFn>,
+    /// Free-form note explaining any terminal-only / bespoke limitation for
+    /// this matrix row. Keep empty for normal dual-path components.
+    pub notes: &'static str,
 }
 
 /// Folds a `RenderNode` into terminal output at the given width.
@@ -348,17 +374,27 @@ fn render_tree_string(node: &RenderNode, width: u32) -> String {
 /// onto the projected render-tree node before folding, so the property takes
 /// effect only in the tree column — the fold surface this feature audits. The
 /// bespoke `render(&term)` column is left untouched (see [`Scenario::style`]).
-fn render_both<C>(component: &C, width: u32, style: &Style) -> (String, String)
+fn render_and_tree<C>(component: &C, scenario: &Scenario) -> (String, String, RenderNode)
 where
     C: TerminalRenderable + TreeRenderable,
 {
-    let term = Terminal::new_optimistic(width);
+    let term = Terminal::new_optimistic(scenario.width);
     let via_render = component.render(&term);
     let mut node = component.render_tree();
-    if !style.is_empty() {
-        merge_scenario_style(&mut node, style);
+    if !scenario.style.is_empty() {
+        merge_scenario_style(&mut node, &scenario.style);
     }
-    let via_tree_direct = render_tree_string(&node, width);
+    let via_tree_direct = render_tree_string(&node, scenario.width);
+    (via_render, via_tree_direct, node)
+}
+
+/// Convenience wrapper for dual-path components: returns the terminal pair and
+/// discards the tree node.
+fn render_both<C>(component: &C, scenario: &Scenario) -> (String, String)
+where
+    C: TerminalRenderable + TreeRenderable,
+{
+    let (via_render, via_tree_direct, _) = render_and_tree(component, scenario);
     (via_render, via_tree_direct)
 }
 
@@ -380,130 +416,253 @@ fn merge_scenario_style(node: &mut RenderNode, style: &Style) {
     node.attrs.set_style(&merged);
 }
 
-/// The eleven default-case biscuit-terminal components on the render-tree
-/// architecture.
+/// The full set of block components exercised by the layout matrix.
 ///
-/// Each component is exercised in its default configuration only — escape-hatch
-/// knobs (`BlockQuote::with_border(arbitrary)`, `StatusBlock::border(arbitrary)`,
-/// `Table::prefer_cursor_alignment`, `TwoColumn` with `TerminalImage` content)
-/// and `FileSystem::render` are deliberately excluded; those paths are
-/// covered by dedicated parity fixtures, not this matrix.
+/// Components that project to the canonical render tree are rendered through
+/// both public entry points (`render(&term)` and `TreeRenderable::render_tree`
+/// folded through `render_terminal_node`). Bespoke terminal-only components
+/// (image protocols, deferred-render components) are rendered once and marked
+/// with a note; their parity contract lives in dedicated `*_parity.rs` tests.
 pub fn component_cases() -> Vec<ComponentCase> {
-    vec![
-        ComponentCase {
-            name: "BlockQuote",
-            render: Box::new(|s| {
-                let quote = BlockQuote::new(
-                    "The best way to predict the future is to invent it.".into(),
-                    Some("Alan Kay"),
+    macro_rules! dual {
+        ($name:expr, $build:expr) => {
+            ComponentCase {
+                name: $name,
+                render: Box::new(|s| {
+                    let component = $build(s);
+                    render_both(&component, s)
+                }),
+                project_tree: Some(Box::new(|s| {
+                    let component = $build(s);
+                    render_and_tree(&component, s).2
+                })),
+                notes: "",
+            }
+        };
+    }
+
+    macro_rules! tree_only {
+        ($name:expr, $build:expr, $notes:expr) => {
+            ComponentCase {
+                name: $name,
+                render: Box::new(|s| {
+                    let component = $build(s);
+                    let (_, tree, _) = render_and_tree(&component, s);
+                    (tree.clone(), tree)
+                }),
+                project_tree: Some(Box::new(|s| {
+                    let component = $build(s);
+                    render_and_tree(&component, s).2
+                })),
+                notes: $notes,
+            }
+        };
+    }
+
+    macro_rules! terminal_only {
+        ($name:expr, $render:expr, $notes:expr) => {
+            ComponentCase {
+                name: $name,
+                render: Box::new($render),
+                project_tree: None,
+                notes: $notes,
+            }
+        };
+    }
+
+    #[allow(unused_mut)]
+    let mut cases = vec![
+        dual!("BlockQuote", |s: &Scenario| {
+            BlockQuote::new(
+                "The best way to predict the future is to invent it.".into(),
+                Some("Alan Kay"),
+            )
+            .with_layout(s.layout.clone())
+        }),
+        dual!("Compose", |s: &Scenario| {
+            Compose::new(vec![
+                RenderableTerminalContent::from("First line of composed output."),
+                RenderableTerminalContent::from("Second line of composed output."),
+            ])
+            .with_layout(s.layout.clone())
+        }),
+        dual!("OrderedList", |s: &Scenario| {
+            OrderedList::new(vec!["First item", "Second item", "Third item"])
+                .with_layout(s.layout.clone())
+        }),
+        dual!("Progress", |s: &Scenario| {
+            Progress::new(0.75)
+                .with_label("Loading")
+                .with_layout(s.layout.clone())
+        }),
+        tree_only!(
+            "Prose",
+            |s: &Scenario| {
+                Prose::new(
+                    "The shared render-tree fold resolves the full Layout and Style \
+                     surface for a plain block node.",
                 )
-                .with_layout(s.layout.clone());
-                render_both(&quote, s.width, &s.style)
-            }),
-        },
-        ComponentCase {
-            name: "Compose",
-            render: Box::new(|s| {
-                let compose = Compose::new(vec![
-                    RenderableTerminalContent::from("First line of composed output."),
-                    RenderableTerminalContent::from("Second line of composed output."),
+                .with_layout(s.layout.clone())
+            },
+            "component render path defers block layout; matrix shows the canonical tree projection"
+        ),
+        dual!("Section", |s: &Scenario| {
+            let mut section = Section::new(HeadingLevel::h2, "Getting Started");
+            section
+                .push("Welcome to the tutorial.")
+                .push("Let's begin with installation.");
+            section.with_layout(s.layout.clone())
+        }),
+        dual!("StatusBlock", |s: &Scenario| {
+            StatusBlock::new(StatusState::Error)
+                .header("Shell Expansion Failed")
+                .body("Missing closing brace in template directive.")
+                .hint("Check the template syntax and retry.")
+                .with_layout(s.layout.clone())
+        }),
+        dual!("Table", |s: &Scenario| {
+            Table::new()
+                .with_columns(vec![TableColumn::new("Name"), TableColumn::new("Score")])
+                .with_data(vec![
+                    vec![
+                        TableCellContent::Text("Ann".into()),
+                        TableCellContent::Integer(42),
+                    ],
+                    vec![
+                        TableCellContent::Text("Bob".into()),
+                        TableCellContent::Integer(17),
+                    ],
                 ])
-                .with_layout(s.layout.clone());
-                render_both(&compose, s.width, &s.style)
-            }),
-        },
-        ComponentCase {
-            name: "OrderedList",
-            render: Box::new(|s| {
-                let list = OrderedList::new(vec!["First item", "Second item", "Third item"])
+                .with_layout(s.layout.clone())
+        }),
+        dual!("TextBlock", |s: &Scenario| {
+            TextBlock::new(
+                "TextBlock applies uniform block styling to a single piece of content.",
+            )
+            .with_layout(s.layout.clone())
+        }),
+        dual!("Todo", |s: &Scenario| {
+            Todo::new("Review pull request #42")
+                .with_state(TodoState::InProgress)
+                .with_layout(s.layout.clone())
+        }),
+        dual!("TwoColumn", |s: &Scenario| {
+            TwoColumn::new("Left column content.", "Right column content.")
+                .with_layout(s.layout.clone())
+        }),
+        dual!("UnorderedList", |s: &Scenario| {
+            UnorderedList::new(vec!["First item", "Second item", "Third item"])
+                .with_layout(s.layout.clone())
+        }),
+        tree_only!(
+            "FileSystem",
+            |s: &Scenario| {
+                let dir = tempfile::tempdir().expect("create tempdir");
+                let root = dir.path().to_path_buf();
+                std::fs::write(root.join("a.txt"), "alpha").expect("a.txt");
+                std::fs::write(root.join("b.txt"), "beta").expect("b.txt");
+                std::fs::create_dir(root.join("sub")).expect("sub");
+                std::fs::write(root.join("sub/c.txt"), "gamma").expect("c.txt");
+                // `FileSystem` owns the tempdir via path only; keep the guard
+                // alive for the lifetime of this render by leaking it. Tests
+                // are short-lived and the directory is cleaned on process exit.
+                let _ = Box::leak(Box::new(dir));
+                let mut fs = FileSystem::new(&root)
+                    .expect("build FileSystem")
+                    .show_root(false)
+                    .layout(s.layout.clone());
+                fs.ensure_tree_built();
+                fs
+            },
+            "terminal render uses Nerd Font icons; matrix shows the canonical tree projection"
+        ),
+        terminal_only!(
+            "HorizontalRule",
+            |s: &Scenario| {
+                let term = Terminal::builder()
+                    .width(s.width)
+                    .image_support(ImageSupport::None)
+                    .color_depth(ColorDepth::TrueColor)
+                    .supports_unicode(true)
+                    .build();
+                let hr = HorizontalRule::new()
+                    .style(RuleStyle::Dashes)
+                    .width("20")
                     .with_layout(s.layout.clone());
-                render_both(&list, s.width, &s.style)
-            }),
-        },
-        ComponentCase {
-            name: "Progress",
-            render: Box::new(|s| {
-                let progress = Progress::new(0.75)
-                    .with_label("Loading")
-                    .with_layout(s.layout.clone());
-                render_both(&progress, s.width, &s.style)
-            }),
-        },
-        ComponentCase {
-            name: "Section",
-            render: Box::new(|s| {
-                let mut section = Section::new(HeadingLevel::h2, "Getting Started");
-                section
-                    .push("Welcome to the tutorial.")
-                    .push("Let's begin with installation.");
-                let section = section.with_layout(s.layout.clone());
-                render_both(&section, s.width, &s.style)
-            }),
-        },
-        ComponentCase {
-            name: "StatusBlock",
-            render: Box::new(|s| {
-                let block = StatusBlock::new(StatusState::Error)
-                    .header("Shell Expansion Failed")
-                    .body("Missing closing brace in template directive.")
-                    .hint("Check the template syntax and retry.")
-                    .with_layout(s.layout.clone());
-                render_both(&block, s.width, &s.style)
-            }),
-        },
-        ComponentCase {
-            name: "Table",
-            render: Box::new(|s| {
-                let table = Table::new()
-                    .with_columns(vec![TableColumn::new("Name"), TableColumn::new("Score")])
-                    .with_data(vec![
-                        vec![
-                            TableCellContent::Text("Ann".into()),
-                            TableCellContent::Integer(42),
-                        ],
-                        vec![
-                            TableCellContent::Text("Bob".into()),
-                            TableCellContent::Integer(17),
-                        ],
-                    ])
-                    .with_layout(s.layout.clone());
-                render_both(&table, s.width, &s.style)
-            }),
-        },
-        ComponentCase {
-            name: "TextBlock",
-            render: Box::new(|s| {
-                let block = TextBlock::new(
-                    "TextBlock applies uniform block styling to a single piece of content.",
+                let out = hr.render(&term);
+                (out.clone(), out)
+            },
+            "bespoke glyph/image core; outer placement parity is in horizontal_rule_parity.rs"
+        ),
+        terminal_only!(
+            "MetricsTree",
+            |s: &Scenario| {
+                use std::time::Duration;
+                let root = MetricNode::branch(
+                    "Total",
+                    MetricValue::Duration(Duration::from_millis(100)),
+                    MetricShare::Full,
+                    vec![
+                        MetricNode::leaf(
+                            "parse",
+                            MetricValue::Duration(Duration::from_millis(40)),
+                            MetricShare::Of(0.4),
+                        ),
+                        MetricNode::leaf(
+                            "render",
+                            MetricValue::Duration(Duration::from_millis(60)),
+                            MetricShare::Of(0.6),
+                        ),
+                    ],
                 )
-                .with_layout(s.layout.clone());
-                render_both(&block, s.width, &s.style)
-            }),
-        },
-        ComponentCase {
-            name: "Todo",
-            render: Box::new(|s| {
-                let todo = Todo::new("Review pull request #42")
-                    .with_state(TodoState::InProgress)
+                .emphasized();
+                let tree = MetricsTree::new(root).with_layout(s.layout.clone());
+                let term = Terminal::new_optimistic(s.width);
+                let out = tree.render(&term);
+                (out.clone(), out)
+            },
+            "delegates to Prose; no public tree projection yet"
+        ),
+        terminal_only!(
+            "TerminalImage",
+            |s: &Scenario| {
+                let img_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../cli/tests/fixtures/tiny.png");
+                let img = TerminalImage::new(&img_path)
+                    .expect("load tiny.png")
                     .with_layout(s.layout.clone());
-                render_both(&todo, s.width, &s.style)
-            }),
-        },
-        ComponentCase {
-            name: "TwoColumn",
-            render: Box::new(|s| {
-                let columns = TwoColumn::new("Left column content.", "Right column content.")
+                let out = img.render_optimistic(Some(s.width));
+                (out.clone(), out)
+            },
+            "bespoke image protocol; outer placement parity is in terminal_image_parity.rs"
+        ),
+    ];
+
+    #[cfg(feature = "image")]
+    {
+        cases.push(terminal_only!(
+            "GraphExpression",
+            |s: &Scenario| {
+                let graph = GraphExpression::parse("a -> b -> c", GraphInputSyntax::Auto)
+                    .expect("parse graph")
                     .with_layout(s.layout.clone());
-                render_both(&columns, s.width, &s.style)
-            }),
-        },
-        ComponentCase {
-            name: "UnorderedList",
-            render: Box::new(|s| {
-                let list = UnorderedList::new(vec!["First item", "Second item", "Third item"])
+                let term = Terminal::new_optimistic(s.width);
+                let out = graph.render(&term);
+                (out.clone(), out)
+            },
+            "bespoke rasterized graph; outer placement parity is in graph_expression_parity.rs"
+        ));
+        cases.push(terminal_only!(
+            "MermaidDiagram",
+            |s: &Scenario| {
+                let diagram = MermaidDiagram::new("flowchart LR\n    A --> B --> C")
                     .with_layout(s.layout.clone());
-                render_both(&list, s.width, &s.style)
-            }),
-        },
-    ]
+                let out = diagram.render_optimistic(Some(s.width));
+                (out.clone(), out)
+            },
+            "bespoke external render; outer placement parity is in mermaid_parity.rs"
+        ));
+    }
+
+    cases
 }

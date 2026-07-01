@@ -1,0 +1,5 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: html
+---
+<blockquote style="box-sizing:content-box;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0;padding-top:0;padding-bottom:0;padding-left:1ch;padding-right:0;white-space:nowrap;border-left-width:1px;border-left-style:solid;border-left-color:rgb(106, 114, 130)"><p>The best way to predict the future is to invent it.</p><p>— Alan Kay</p></blockquote>
