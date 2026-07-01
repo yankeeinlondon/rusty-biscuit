@@ -316,6 +316,36 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         example: Some(Example { invocation: "ensure_trailing(\"hello\", \" world\")", result: "hello world", verification: ExampleVerification::Executable }),
 
     },
+    ExpressionFunctionDescriptor {
+
+        signature: "replace(x, find, replacement)",
+        description: "Replaces every literal occurrence of a substring; empty find is a no-op.",
+        category: "String Mutations",
+        order: 12,
+
+        example: Some(Example { invocation: "replace(\"a.b.c\", \".\", \"/\")", result: "a/b/c", verification: ExampleVerification::Executable }),
+
+    },
+    ExpressionFunctionDescriptor {
+
+        signature: "replace_first(x, find, replacement)",
+        description: "Replaces the first literal occurrence of a substring; empty find is a no-op.",
+        category: "String Mutations",
+        order: 13,
+
+        example: Some(Example { invocation: "replace_first(\"a.b.c\", \".\", \"/\")", result: "a/b.c", verification: ExampleVerification::Executable }),
+
+    },
+    ExpressionFunctionDescriptor {
+
+        signature: "replace_last(x, find, replacement)",
+        description: "Replaces the last literal occurrence of a substring; empty find is a no-op.",
+        category: "String Mutations",
+        order: 14,
+
+        example: Some(Example { invocation: "replace_last(\"a.b.c\", \".\", \"/\")", result: "a.b/c", verification: ExampleVerification::Executable }),
+
+    },
     // ── Rendering ───────────────────────────────────────────────────
     ExpressionFunctionDescriptor {
 
@@ -1111,6 +1141,9 @@ mod tests {
             "without_date(string)",
             "ensure_leading(var, prefix)",
             "ensure_trailing(var, postfix)",
+            "replace(x, find, replacement)",
+            "replace_first(x, find, replacement)",
+            "replace_last(x, find, replacement)",
             "terminal(string)",
             // Phase 4 — filesystem functions
             "is_indexed_file(file)",
