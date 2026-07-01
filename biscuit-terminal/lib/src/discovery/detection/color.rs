@@ -331,7 +331,7 @@ mod tests {
     #[test]
     fn color_mode_conversion_round_trip() {
         for mode in [ColorMode::Light, ColorMode::Dark, ColorMode::Unknown] {
-            let render: RenderColorMode = mode.clone().into();
+            let render: RenderColorMode = mode.into();
             let render_ref: RenderColorMode = (&mode).into();
             assert_eq!(render, render_ref);
         }

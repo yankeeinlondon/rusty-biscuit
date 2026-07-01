@@ -464,6 +464,15 @@ impl TwoColumn {
     /// render-tree representation. Callers must detect this and fall back to
     /// the bespoke terminal path; Browser and MarkdownPlus surface the
     /// standard unsupported behavior according to strictness.
+    ///
+    /// ## Notes
+    ///
+    /// The fold resolves the outer box from [`Layout::width`], then pads both
+    /// columns to fill the resolved content width. The RIGHT column is the
+    /// documented slack sink for `Width::Auto` and `Width::Fixed` fill
+    /// (spec decision D2). On the terminal target, `Width::FitContent` is
+    /// observationally identical to `Width::Auto`: the box always pads to fill
+    /// the handed width, so terminal FitContent does not hug.
     fn to_render_node(&self) -> RenderNode {
         if content_is_terminal_image(&self.left) || content_is_terminal_image(&self.right) {
             return RenderNode::unsupported("two-column terminal image");

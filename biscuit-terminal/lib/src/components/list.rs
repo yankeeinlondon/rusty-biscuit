@@ -309,6 +309,15 @@ impl TreeRenderable for OrderedList {
     /// per source item. A non-default [`Layout`] is recorded on the root
     /// node's attributes; typed [`ListRenderHints`] carry `hanging_indent` and
     /// `indent_children` so the renderers can lower the list correctly.
+    ///
+    /// ## Notes
+    ///
+    /// When `Layout.width` resolves the outer list box, the terminal fold
+    /// narrows `available_width`; the **item body text column** is the
+    /// documented slack sink (spec decision D2) — the number marker and its
+    /// hanging indent stay fixed while only the body text reflows to the
+    /// narrowed width. `Layout.word_wrap` is a default fed to item text only
+    /// where a per-item wrap policy is absent (spec decision D4).
     fn render_tree(&self) -> RenderNode {
         self.to_render_tree_node()
     }
@@ -796,6 +805,15 @@ impl TreeRenderable for UnorderedList {
     /// Note that the bullet hint is a **terminal-rendering concern only**.
     /// The Markdown and Browser renderers ignore it — Markdown always emits
     /// standard `- ` markers and Browser always emits `<ul>`/`<li>`.
+    ///
+    /// ## Notes
+    ///
+    /// When `Layout.width` resolves the outer list box, the terminal fold
+    /// narrows `available_width`; the **item body text column** is the
+    /// documented slack sink (spec decision D2) — the bullet and its hanging
+    /// indent stay fixed while only the body text reflows to the narrowed
+    /// width. `Layout.word_wrap` is a default fed to item text only where a
+    /// per-item wrap policy is absent (spec decision D4).
     fn render_tree(&self) -> RenderNode {
         self.to_render_tree_node()
     }

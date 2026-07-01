@@ -9,8 +9,10 @@ mod layout_matrix_support;
 use layout_matrix_support::scenarios;
 
 #[test]
-fn scenario_count_is_twelve() {
-    assert_eq!(scenarios().len(), 12);
+fn scenario_count_is_nineteen() {
+    // Twelve original layout scenarios plus the seven properties this feature
+    // adds (four width/padding modes and three style properties).
+    assert_eq!(scenarios().len(), 19);
 }
 
 #[test]
@@ -99,4 +101,192 @@ fn layout_matrix_snapshots() {
             insta::assert_snapshot!(format!("{}__{}", case.name, scenario.name), block);
         }
     }
+}
+
+// ── Baseline reference: the shared fold honors the full surface (Scope §1) ──
+//
+// A single `Paragraph` node carrying every applicable `Layout`
+// (`margin`, `padding`, `width` Fixed, `max_width`, `alignment`, `word_wrap`)
+// and `Style` (`color`, `background`, `emphasis`, `border`) field is folded to
+// each target at a fixed available width. These tests are the reference output
+// every later phase validates against: each field must visibly take effect on
+// Terminal (SGR / column geometry) and Browser (CSS declarations), and Markdown
+// must degrade to structure-only (decision D1).
+
+use biscuit_terminal::prelude::strip_escape_codes;
+use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
+use biscuit_terminal::terminal::Terminal;
+use renderable::color::{Color, Tailwind};
+use renderable::layout::{
+    Alignment, Edges, Layout, Length, TargetValue, Width, WordWrap,
+};
+use renderable::style::{
+    Background, Border, BorderSides, PerMode, Style, TextEmphasis,
+};
+use renderable::tree::{
+    BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, RenderNode, RenderStrictness,
+    render_browser_node, render_markdown_node,
+};
+
+/// The available width the baseline reference renders at.
+const BASELINE_WIDTH: u32 = 80;
+
+/// A plain paragraph carrying the full applicable `Layout`/`Style` surface,
+/// one value per field.
+fn baseline_node() -> RenderNode {
+    let layout = Layout {
+        margin: Edges {
+            left: TargetValue::universal(Length::ch(4)),
+            ..Edges::default()
+        },
+        padding: Edges::all(Length::ch(1)),
+        width: Width::Fixed(TargetValue::universal(Length::ch(40))),
+        max_width: Some(TargetValue::universal(Length::ch(60))),
+        alignment: Alignment::Center,
+        word_wrap: WordWrap::WrapProse(None, None),
+    };
+    let style = Style {
+        color: Some(TargetValue::universal(PerMode::universal(Color::Tailwind(
+            Tailwind::Blue500,
+        )))),
+        background: Some(Background::subtle()),
+        emphasis: TextEmphasis {
+            bold: true,
+            italic: true,
+            ..TextEmphasis::default()
+        },
+        border: Some(Border {
+            sides: BorderSides::Sides {
+                top: false,
+                right: false,
+                bottom: false,
+                left: true,
+            },
+            ..Border::default()
+        }),
+    };
+    let mut node = RenderNode::paragraph(vec![RenderNode::text(
+        "The shared render-tree fold resolves the full Layout and Style surface \
+         for a plain block node so every later phase can validate against it.",
+    )]);
+    node.attrs.set_layout(&layout);
+    node.attrs.set_style(&style);
+    node
+}
+
+#[test]
+fn baseline_fold_terminal_honors_every_field() {
+    let term = Terminal::new_optimistic(BASELINE_WIDTH);
+    let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+    // Prose wrapping is gated by the context toggle the darkmatter document
+    // pipeline sets; enable it so the paragraph flows to the resolved content
+    // box rather than emitting one long unwrapped line.
+    opts.context.wrap_prose = true;
+    let out = render_terminal_node(&baseline_node(), &opts)
+        .expect("terminal fold")
+        .output;
+
+    // `emphasis` — bold and italic each emit their SGR run.
+    assert!(out.contains("\x1b[1m"), "bold SGR missing: {out:?}");
+    assert!(out.contains("\x1b[3m"), "italic SGR missing: {out:?}");
+    // `border` (thin, left) — the fold paints a single-weight vertical edge.
+    assert!(out.contains('│'), "left border glyph missing: {out:?}");
+    // `margin`/`alignment` — content lines are pushed right by the left margin
+    // plus the centering offset, so at least one line has leading spaces.
+    let stripped = strip_escape_codes(&out);
+    let content_lines: Vec<&str> = stripped
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .collect();
+    assert!(
+        content_lines.iter().any(|l| l.starts_with("     ")),
+        "no leading offset from margin/alignment: {content_lines:?}"
+    );
+    // `width` Fixed(40) + `max_width`(60) — the content box is capped well
+    // below the 80-column available width, so every visible line fits inside it.
+    let widest = content_lines
+        .iter()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0);
+    assert!(
+        widest <= BASELINE_WIDTH as usize,
+        "content exceeded available width ({widest} > {BASELINE_WIDTH})"
+    );
+    // `word_wrap` — the long paragraph wrapped onto more than one visible line
+    // rather than overflowing a single line.
+    assert!(
+        content_lines.len() > 1,
+        "content did not wrap: {content_lines:?}"
+    );
+}
+
+#[test]
+fn baseline_fold_browser_honors_every_field() {
+    let html = render_browser_node(&baseline_node(), &BrowserRenderOptions::default())
+        .expect("browser fold")
+        .output
+        .render();
+
+    // `emphasis` — a block node's own emphasis lowers to CSS on the block
+    // (semantic `<strong>`/`<em>` tags are reserved for inline emphasis nodes).
+    assert!(
+        html.contains("font-weight:bold"),
+        "bold declaration missing: {html}"
+    );
+    assert!(
+        html.contains("font-style:italic"),
+        "italic declaration missing: {html}"
+    );
+    // `color` and `background` lower to inline CSS.
+    assert!(html.contains("color:"), "color declaration missing: {html}");
+    assert!(
+        html.contains("background-color:"),
+        "background declaration missing: {html}"
+    );
+    // `margin` / `padding` (box model) lower to per-side CSS.
+    assert!(html.contains("margin-left:"), "margin-left missing: {html}");
+    assert!(html.contains("padding-left:"), "padding-left missing: {html}");
+    // `width` Fixed lowers to an explicit `width`.
+    assert!(html.contains("width:"), "width declaration missing: {html}");
+    // `border` (thin, left) lowers to per-side border CSS.
+    assert!(
+        html.contains("border-left-style:") || html.contains("border-left-width:"),
+        "left border CSS missing: {html}"
+    );
+}
+
+#[test]
+fn baseline_fold_markdown_degrades_to_structure_only() {
+    // Decision D1: Markdown is the single documented degradation. It preserves
+    // structure (the paragraph text) and emits NO appearance or layout markup —
+    // no ANSI escapes, no CSS, no raw styling HTML — for the same node the
+    // Terminal and Browser folds style richly.
+    let md = render_markdown_node(
+        &baseline_node(),
+        &MarkdownRenderOptions {
+            dialect: MarkdownDialect::Markdown,
+            strictness: RenderStrictness::Warn,
+            ..MarkdownRenderOptions::default()
+        },
+    )
+    .expect("markdown fold")
+    .output;
+
+    // Structure survives: the paragraph text is present.
+    assert!(
+        md.contains("shared render-tree fold"),
+        "paragraph text missing: {md:?}"
+    );
+    // No appearance leakage of any kind.
+    assert!(!md.contains('\x1b'), "ANSI escape leaked into Markdown: {md:?}");
+    assert!(!md.contains("style="), "inline CSS leaked into Markdown: {md:?}");
+    assert!(
+        !md.contains("background-color") && !md.contains("border-left"),
+        "CSS declaration leaked into Markdown: {md:?}"
+    );
+    assert!(
+        !md.contains("<div") && !md.contains("<span") && !md.contains("<strong"),
+        "raw styling HTML leaked into Markdown: {md:?}"
+    );
 }
