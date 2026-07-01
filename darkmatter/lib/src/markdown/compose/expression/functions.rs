@@ -406,67 +406,6 @@ pub fn ends_with(args: &[Value]) -> Result<Value, String> {
     Ok(Value::Bool(haystack.ends_with(needle)))
 }
 
-/// `replace(x, find, replacement)` — replaces every non-overlapping occurrence
-/// of the literal substring `find` in `x` with `replacement`.
-///
-/// An empty `find` is a no-op that returns `x` unchanged, deliberately
-/// rejecting `str::replace`'s boundary-insertion behavior. Matching is literal
-/// and case-sensitive. Null-propagates; non-string arguments error.
-pub fn replace(args: &[Value]) -> Result<Value, String> {
-    require_args("replace", args, 3)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let x = require_string("replace", &args[0])?;
-    let find = require_string("replace", &args[1])?;
-    let replacement = require_string("replace", &args[2])?;
-    if find.is_empty() {
-        return Ok(Value::String(x.to_string()));
-    }
-    Ok(Value::String(x.replace(find, replacement)))
-}
-
-/// `replace_first(x, find, replacement)` — replaces only the first occurrence
-/// of the literal substring `find`.
-pub fn replace_first(args: &[Value]) -> Result<Value, String> {
-    require_args("replace_first", args, 3)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let x = require_string("replace_first", &args[0])?;
-    let find = require_string("replace_first", &args[1])?;
-    let replacement = require_string("replace_first", &args[2])?;
-    if find.is_empty() {
-        return Ok(Value::String(x.to_string()));
-    }
-    Ok(Value::String(x.replacen(find, replacement, 1)))
-}
-
-/// `replace_last(x, find, replacement)` — replaces only the last occurrence of
-/// the literal substring `find`.
-pub fn replace_last(args: &[Value]) -> Result<Value, String> {
-    require_args("replace_last", args, 3)?;
-    if any_null(args) {
-        return Ok(Value::Null);
-    }
-    let x = require_string("replace_last", &args[0])?;
-    let find = require_string("replace_last", &args[1])?;
-    let replacement = require_string("replace_last", &args[2])?;
-    if find.is_empty() {
-        return Ok(Value::String(x.to_string()));
-    }
-    match x.rfind(find) {
-        Some(pos) => {
-            let mut out = String::with_capacity(x.len() - find.len() + replacement.len());
-            out.push_str(&x[..pos]);
-            out.push_str(replacement);
-            out.push_str(&x[pos + find.len()..]);
-            Ok(Value::String(out))
-        }
-        None => Ok(Value::String(x.to_string())),
-    }
-}
-
 fn string_mutation<F>(name: &str, args: &[Value], f: F) -> Result<Value, String>
 where
     F: Fn(&str) -> String,
@@ -2218,10 +2157,6 @@ mod tests {
         vec![a, b]
     }
 
-    fn vvv(a: Value, b: Value, c: Value) -> Vec<Value> {
-        vec![a, b, c]
-    }
-
     mod fn_type_predicates {
         use super::*;
 
@@ -3131,126 +3066,6 @@ mod tests {
             assert_eq!(without_date(&v(json!(null))).unwrap(), json!(null));
             assert!(without_date(&v(json!(123))).is_err());
             assert!(without_date(&v(json!([1, 2]))).is_err());
-        }
-
-        #[test]
-        fn replace_core_behavior() {
-            assert_eq!(
-                replace(&vvv(json!("a.b.c"), json!("."), json!("/"))).unwrap(),
-                json!("a/b/c")
-            );
-            assert_eq!(
-                replace_first(&vvv(json!("a.b.c"), json!("."), json!("/"))).unwrap(),
-                json!("a/b.c")
-            );
-            assert_eq!(
-                replace_last(&vvv(json!("a.b.c"), json!("."), json!("/"))).unwrap(),
-                json!("a.b/c")
-            );
-            assert_eq!(
-                replace(&vvv(json!("aaa"), json!("a"), json!("bb"))).unwrap(),
-                json!("bbbbbb")
-            );
-            assert_eq!(
-                replace_first(&vvv(json!("foofoo"), json!("foo"), json!("bar"))).unwrap(),
-                json!("barfoo")
-            );
-            assert_eq!(
-                replace_last(&vvv(json!("foofoo"), json!("foo"), json!("bar"))).unwrap(),
-                json!("foobar")
-            );
-        }
-
-        #[test]
-        fn replace_empty_find_is_noop() {
-            assert_eq!(
-                replace(&vvv(json!("abc"), json!(""), json!("X"))).unwrap(),
-                json!("abc")
-            );
-            assert_eq!(
-                replace_first(&vvv(json!("abc"), json!(""), json!("X"))).unwrap(),
-                json!("abc")
-            );
-            assert_eq!(
-                replace_last(&vvv(json!("abc"), json!(""), json!("X"))).unwrap(),
-                json!("abc")
-            );
-        }
-
-        #[test]
-        fn replace_no_match_is_noop() {
-            assert_eq!(
-                replace(&vvv(json!("hello"), json!("z"), json!("Q"))).unwrap(),
-                json!("hello")
-            );
-            assert_eq!(
-                replace_first(&vvv(json!("hello"), json!("z"), json!("Q"))).unwrap(),
-                json!("hello")
-            );
-            assert_eq!(
-                replace_last(&vvv(json!("hello"), json!("z"), json!("Q"))).unwrap(),
-                json!("hello")
-            );
-        }
-
-        #[test]
-        fn replace_is_case_sensitive_and_literal() {
-            assert_eq!(
-                replace(&vvv(json!("ABCabc"), json!("abc"), json!("X"))).unwrap(),
-                json!("ABCX")
-            );
-            assert_eq!(
-                replace(&vvv(json!("a.b(c)"), json!("."), json!("*"))).unwrap(),
-                json!("a*b(c)")
-            );
-            assert_eq!(
-                replace(&vvv(json!("a(b)(c)"), json!("("), json!("["))).unwrap(),
-                json!("a[b)[c)")
-            );
-            assert_eq!(
-                replace_last(&vvv(json!("a.b.c"), json!("."), json!("[.]"))).unwrap(),
-                json!("a.b[.]c")
-            );
-        }
-
-        #[test]
-        fn replace_null_propagates_in_every_position() {
-            for f in [replace, replace_first, replace_last] {
-                assert_eq!(f(&vvv(json!(null), json!("."), json!("/"))).unwrap(), json!(null));
-                assert_eq!(f(&vvv(json!("a.b"), json!(null), json!("/"))).unwrap(), json!(null));
-                assert_eq!(f(&vvv(json!("a.b"), json!("."), json!(null))).unwrap(), json!(null));
-            }
-        }
-
-        #[test]
-        fn replace_type_mismatch_errors_in_every_position() {
-            for f in [replace, replace_first, replace_last] {
-                assert!(f(&vvv(json!(5), json!("."), json!("/"))).is_err());
-                assert!(f(&vvv(json!("a"), json!(1), json!("/"))).is_err());
-                assert!(f(&vvv(json!("a"), json!("."), json!(true))).is_err());
-            }
-        }
-
-        #[test]
-        fn replace_arity_errors() {
-            for f in [replace, replace_first, replace_last] {
-                assert!(f(&vv(json!("a"), json!("."))).is_err());
-                assert!(f(&[json!("a"), json!("."), json!("/"), json!("extra")]).is_err());
-            }
-        }
-
-        #[test]
-        fn replace_dispatches_by_canonical_name_and_alias() {
-            let call = |name: &str| {
-                dispatch(name, &vvv(json!("a.b.c"), json!("."), json!("/")))
-                    .unwrap()
-                    .unwrap()
-            };
-            assert_eq!(call("replace"), json!("a/b/c"));
-            assert_eq!(call("replace_first"), json!("a/b.c"));
-            assert_eq!(call("replacefirst"), json!("a/b.c"));
-            assert_eq!(call("replace_last"), json!("a.b/c"));
-            assert_eq!(call("replacelast"), json!("a.b/c"));
         }
 
         #[test]
