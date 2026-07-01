@@ -503,10 +503,7 @@ mod tests {
         }
 
         let mut env = ScopedEnv::new();
-        let original_path = std::env::var_os("PATH").unwrap_or_default();
-        let mut new_path = std::ffi::OsString::from(dir.path());
-        new_path.push(":");
-        new_path.push(&original_path);
+        let new_path = crate::test_helpers::prepend_to_path([dir.path()]);
         env.set_os("PATH", &new_path);
 
         let index = ExecutableIndex::build();
@@ -533,10 +530,7 @@ mod tests {
         fs::set_permissions(&exec, fs::Permissions::from_mode(0o755)).unwrap();
 
         let mut env = ScopedEnv::new();
-        let original_path = std::env::var_os("PATH").unwrap_or_default();
-        let mut new_path = std::ffi::OsString::from(dir.path());
-        new_path.push(":");
-        new_path.push(&original_path);
+        let new_path = crate::test_helpers::prepend_to_path([dir.path()]);
         env.set_os("PATH", &new_path);
 
         let index = ExecutableIndex::build();
@@ -570,10 +564,7 @@ mod tests {
         }
 
         let mut env = ScopedEnv::new();
-        let original_path = std::env::var_os("PATH").unwrap_or_default();
-        let mut new_path = std::ffi::OsString::from(dir.path());
-        new_path.push(":");
-        new_path.push(&original_path);
+        let new_path = crate::test_helpers::prepend_to_path([dir.path()]);
         env.set_os("PATH", &new_path);
 
         let eager_path = scan_path_executables();
@@ -639,9 +630,8 @@ mod tests {
         }
 
         let mut env = ScopedEnv::new();
-        let mut new_path = std::ffi::OsString::from(dir_first.path());
-        new_path.push(":");
-        new_path.push(dir_second.path());
+        let new_path = std::env::join_paths([dir_first.path(), dir_second.path()])
+            .expect("join PATH dirs");
         env.set_os("PATH", &new_path);
 
         let eager_path = scan_path_executables();
@@ -682,9 +672,7 @@ mod tests {
         fs::set_permissions(&exec, fs::Permissions::from_mode(0o755)).unwrap();
 
         let mut env = ScopedEnv::new();
-        let mut new_path = std::ffi::OsString::from(dir.path());
-        new_path.push(":");
-        new_path.push(std::env::var_os("PATH").unwrap_or_default());
+        let new_path = crate::test_helpers::prepend_to_path([dir.path()]);
         env.set_os("PATH", &new_path);
 
         let eager_path = scan_path_executables();

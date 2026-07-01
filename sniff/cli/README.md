@@ -942,6 +942,14 @@ COMPLETE=fish sniff | source
 
 Completions include subcommand names, flag values, package names, and program names.
 
+## Platform Support
+
+`sniff` supports **macOS**, **Linux**, and **Windows**. **WSL** is treated as the
+Linux compile and runtime path — under WSL, sniff uses the same `/proc`-backed
+detectors as native Linux and never crosses into native Windows behavior. See the
+[library README](../lib/README.md#platform-support) for the per-detector support
+matrix.
+
 ## Limitations
 
 - **Network detection** requires appropriate permissions (may fail on restricted systems)

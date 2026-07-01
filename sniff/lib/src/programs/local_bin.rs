@@ -283,17 +283,8 @@ fn is_executable(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_helpers::ScopedEnv;
+    use crate::test_helpers::{ScopedEnv, make_executable_fixture};
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
-
-    fn make_executable(path: &Path) {
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, b"#!/bin/sh\nexit 0\n").unwrap();
-        let mut perms = fs::metadata(path).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(path, perms).unwrap();
-    }
 
     fn temp_root() -> tempfile::TempDir {
         tempfile::tempdir().expect("temp dir")
@@ -317,13 +308,13 @@ mod tests {
         fs::create_dir_all(&subdir).unwrap();
 
         let bin_dir = project.join("node_modules").join(".bin");
-        make_executable(&bin_dir.join("vitest"));
+        let expected = make_executable_fixture(&bin_dir.join("vitest"));
 
         let index = LocalBinIndex::new(subdir);
         let (path, root) = index
             .find(TestRunnerEcosystem::Node, "vitest")
             .expect("hoisted vitest should resolve");
-        assert_eq!(path, bin_dir.join("vitest"));
+        assert_eq!(path, expected);
         assert_eq!(root, project);
     }
 
@@ -336,7 +327,7 @@ mod tests {
 
         // vendor/bin at project root, but cwd is project/src.
         let top_bin = project.join("vendor").join("bin");
-        make_executable(&top_bin.join("phpunit"));
+        let expected = make_executable_fixture(&top_bin.join("phpunit"));
 
         // The PHP root only probes the start dir.
         let index = LocalBinIndex::new(subdir);
@@ -347,7 +338,7 @@ mod tests {
         let (path, root) = index
             .find(TestRunnerEcosystem::Php, "phpunit")
             .expect("phpunit should resolve from project root");
-        assert_eq!(path, top_bin.join("phpunit"));
+        assert_eq!(path, expected);
         assert_eq!(root, project);
     }
 
@@ -362,7 +353,7 @@ mod tests {
         } else {
             venv_tmp.path().join("bin")
         };
-        make_executable(&bin_dir.join("pytest"));
+        let expected = make_executable_fixture(&bin_dir.join("pytest"));
 
         // Use a different start dir to prove VIRTUAL_ENV wins regardless of cwd.
         let elsewhere = temp_root();
@@ -370,7 +361,7 @@ mod tests {
         let (path, root) = index
             .find(TestRunnerEcosystem::Python, "pytest")
             .expect("VIRTUAL_ENV should provide pytest");
-        assert_eq!(path, bin_dir.join("pytest"));
+        assert_eq!(path, expected);
         assert_eq!(root, venv_tmp.path());
     }
 
@@ -402,13 +393,13 @@ mod tests {
         let project = tmp.path().join("ruby-proj");
         fs::create_dir_all(&project).unwrap();
         let bin_dir = project.join("bin");
-        make_executable(&bin_dir.join("rspec"));
+        let expected = make_executable_fixture(&bin_dir.join("rspec"));
 
         let index = LocalBinIndex::new(project.clone());
         let (path, root) = index
             .find(TestRunnerEcosystem::Ruby, "rspec")
             .expect("binstub rspec should resolve");
-        assert_eq!(path, bin_dir.join("rspec"));
+        assert_eq!(path, expected);
         assert_eq!(root, project);
     }
 }

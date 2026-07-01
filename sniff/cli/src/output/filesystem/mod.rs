@@ -586,24 +586,57 @@ fn worktree_path_link_absolute(path: &std::path::Path) -> String {
 /// home directory itself.
 fn alias_path(path: &Path) -> String {
     let vars: Vec<(std::ffi::OsString, std::ffi::OsString)> = std::env::vars_os().collect();
-    let home = std::env::var_os("HOME").map(PathBuf::from);
+    // `dirs::home_dir()` resolves the platform home directory (USERPROFILE /
+    // known-folder on Windows), not just `$HOME`, so the `~` form works there.
+    let home = dirs::home_dir();
     alias_path_with(path, &vars, home.as_deref())
 }
 
-/// Environment variables whose values are absolute paths but denote *transient
-/// shell position* (the current / previous directory) rather than a stable
-/// named root. Offsetting against them yields a label that changes on every
-/// `cd`, so they are skipped. Variables whose values are not absolute paths
+/// Environment variables whose values are absolute paths that must never be
+/// surfaced as a `${VAR}` alias.
+///
+/// `PWD` / `OLDPWD` denote *transient shell position* (the current / previous
+/// directory): offsetting against them yields a label that changes on every
+/// `cd`. On Windows, `USERPROFILE` mirrors the home directory (already rendered
+/// as `~` via [`dirs::home_dir`]) and `HOMEDRIVE` / `HOMEPATH` are bare or
+/// partial roots (`C:\`, `\Users\ken`) that would alias almost every path to a
+/// confusing `${HOMEDRIVE}\...`. Variables whose values are not absolute paths
 /// (`TERM`, `LANG`, `SHLVL`, ...) are already filtered by the `is_absolute`
 /// check below and need no entry here.
-const POSITIONAL_PATH_VARS: &[&str] = &["PWD", "OLDPWD"];
+const SKIP_ALIAS_VARS: &[&str] = &["PWD", "OLDPWD", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"];
+
+/// Compares two environment variable names for equality.
+///
+/// Windows treats environment variable names case-insensitively, so matching is
+/// ASCII-case-insensitive there; Unix-like hosts keep exact, case-sensitive
+/// matching. The flag is passed explicitly rather than read from `cfg!` so
+/// Windows behavior is exercisable in tests on any host.
+fn env_name_eq(a: &str, b: &str, case_insensitive: bool) -> bool {
+    if case_insensitive {
+        a.eq_ignore_ascii_case(b)
+    } else {
+        a == b
+    }
+}
 
 /// Pure core of [`alias_path`], with the environment supplied explicitly so it
-/// can be tested without mutating global process state.
+/// can be tested without mutating global process state. Env-var-name case
+/// sensitivity follows the host: case-insensitive on Windows, exact elsewhere.
 fn alias_path_with(
     path: &Path,
     vars: &[(std::ffi::OsString, std::ffi::OsString)],
     home: Option<&Path>,
+) -> String {
+    alias_path_with_case(path, vars, home, cfg!(windows))
+}
+
+/// Pure core of [`alias_path_with`] with env-var-name case sensitivity supplied
+/// explicitly so Windows behavior is testable on any host.
+fn alias_path_with_case(
+    path: &Path,
+    vars: &[(std::ffi::OsString, std::ffi::OsString)],
+    home: Option<&Path>,
+    case_insensitive_names: bool,
 ) -> String {
     // "Longest prefix" is measured in path components, not bytes, so a trailing
     // slash in an env value can't spuriously outrank a real ancestor.
@@ -612,7 +645,10 @@ fn alias_path_with(
     let mut best: Option<(String, PathBuf, usize)> = None;
     for (name, value) in vars {
         let name = name.to_string_lossy();
-        if POSITIONAL_PATH_VARS.contains(&name.as_ref()) {
+        if SKIP_ALIAS_VARS
+            .iter()
+            .any(|v| env_name_eq(name.as_ref(), v, case_insensitive_names))
+        {
             continue;
         }
         let value = PathBuf::from(value);
@@ -1944,6 +1980,64 @@ mod tests {
             assert_eq!(
                 alias_path_with(&path, &vars, Some(Path::new("/home/other"))),
                 "/opt/tool/bin"
+            );
+        }
+
+        // The Windows-shaped tests below simulate drive letters with a leading
+        // `/c/` or `/d/` component so the prefix logic is exercised identically
+        // on Unix and Windows hosts (`std::path` separators are host-specific,
+        // but the component-prefix comparisons are not). Case sensitivity is
+        // passed explicitly via `alias_path_with_case` so the Windows branch is
+        // testable on this macOS host.
+
+        #[test]
+        fn alias_path_windows_drive_letter_path_uses_home_tilde() {
+            let path = PathBuf::from("/c/Users/ken/project");
+            assert_eq!(
+                alias_path_with_case(&path, &[], Some(Path::new("/c/Users/ken")), true),
+                "~/project"
+            );
+        }
+
+        #[test]
+        fn alias_path_windows_skips_userprofile_alias() {
+            // USERPROFILE mirrors the home dir; even with home unknown it must
+            // not surface as `${USERPROFILE}`, falling back to the absolute path.
+            let path = PathBuf::from("/c/Users/ken/project");
+            let vars = env(&[("USERPROFILE", "/c/Users/ken")]);
+            assert_eq!(
+                alias_path_with_case(&path, &vars, None, true),
+                "/c/Users/ken/project"
+            );
+        }
+
+        #[test]
+        fn alias_path_windows_env_var_names_are_case_insensitive() {
+            // On Windows `oldpwd` and `OLDPWD` name the same variable, so the
+            // lowercase spelling must be skipped too, yielding `~` rather than
+            // `${oldpwd}`. The same input is case-sensitive on Unix.
+            let path = PathBuf::from("/c/Users/ken/wt/proj");
+            let vars = env(&[("oldpwd", "/c/Users/ken/wt/proj")]);
+            assert_eq!(
+                alias_path_with_case(&path, &vars, Some(Path::new("/c/Users/ken")), true),
+                "~/wt/proj"
+            );
+            // Case-sensitive (Unix) host: `oldpwd` is a distinct, longer prefix
+            // than home, so it offsets as `${oldpwd}`.
+            assert_eq!(
+                alias_path_with_case(&path, &vars, Some(Path::new("/c/Users/ken")), false),
+                "${oldpwd}"
+            );
+        }
+
+        #[test]
+        fn alias_path_windows_does_not_alias_across_drives() {
+            // Home on the D: drive must not alias a path on the C: drive.
+            let path = PathBuf::from("/c/projects/app");
+            let vars = env(&[("PROJ", "/d/projects")]);
+            assert_eq!(
+                alias_path_with_case(&path, &vars, Some(Path::new("/d/Users/ken")), true),
+                "/c/projects/app"
             );
         }
 

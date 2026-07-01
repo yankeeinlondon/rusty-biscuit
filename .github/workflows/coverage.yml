@@ -31,6 +31,13 @@ jobs:
         with:
           components: llvm-tools-preview
 
+      # Backstop for the vendored protoc in rendezvous-core's build.rs:
+      # a system protoc if the vendored binary is ever unavailable.
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
         with:

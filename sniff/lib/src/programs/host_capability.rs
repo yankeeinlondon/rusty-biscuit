@@ -454,19 +454,21 @@ fn detect_is_wsl() -> bool {
     if !cfg!(target_os = "linux") {
         return false;
     }
-    if let Ok(version) = std::fs::read_to_string("/proc/version") {
-        let lower = version.to_lowercase();
-        if lower.contains("microsoft") || lower.contains("wsl") {
-            return true;
-        }
-    }
-    if let Ok(osrelease) = std::fs::read_to_string("/proc/sys/kernel/osrelease") {
-        let lower = osrelease.to_lowercase();
-        if lower.contains("microsoft") || lower.contains("wsl") {
-            return true;
-        }
-    }
-    false
+    let version = std::fs::read_to_string("/proc/version").unwrap_or_default();
+    let osrelease = std::fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default();
+    proc_markers_indicate_wsl(&version, &osrelease)
+}
+
+/// Pure decision over the WSL marker files' contents.
+///
+/// Empty strings stand in for a missing or unreadable `/proc/version` or
+/// `/proc/sys/kernel/osrelease`, so an absent `/proc` yields `false` — the
+/// non-WSL (native Linux) fallback.
+fn proc_markers_indicate_wsl(version: &str, osrelease: &str) -> bool {
+    [version, osrelease].iter().any(|contents| {
+        let lower = contents.to_lowercase();
+        lower.contains("microsoft") || lower.contains("wsl")
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -680,6 +682,29 @@ mod tests {
         let after = Utc::now();
         assert!(host.detected_at >= before);
         assert!(host.detected_at <= after);
+    }
+
+    #[test]
+    fn proc_markers_indicate_wsl_matches_microsoft_and_wsl_tokens() {
+        // Representative WSL2 /proc/version and a WSL osrelease.
+        assert!(proc_markers_indicate_wsl(
+            "Linux version 5.15.0-microsoft-standard-WSL2 (oe-user@oe-host)",
+            ""
+        ));
+        assert!(proc_markers_indicate_wsl("", "5.15.90.1-microsoft-standard-WSL2"));
+        // Marker can live in either file; matching is case-insensitive.
+        assert!(proc_markers_indicate_wsl("WSL", ""));
+    }
+
+    #[test]
+    fn proc_markers_indicate_wsl_false_for_native_linux_or_missing_proc() {
+        // A stock Linux kernel string carries no WSL marker.
+        assert!(!proc_markers_indicate_wsl(
+            "Linux version 6.8.0-generic (builder@host)",
+            "6.8.0-generic"
+        ));
+        // Empty strings stand in for missing /proc files -> native Linux fallback.
+        assert!(!proc_markers_indicate_wsl("", ""));
     }
 }
 

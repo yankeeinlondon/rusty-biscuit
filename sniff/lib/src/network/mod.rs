@@ -1796,6 +1796,21 @@ eth0\t00000000\t0100A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0";
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
+    fn test_parse_linux_proc_default_route_interface_no_default_route() {
+        // A table with only the header (or only non-default destinations) yields
+        // no interface — the same observable result as a missing /proc/net/route,
+        // which `read_to_string(...).ok()` maps to `None` in the caller.
+        let header_only =
+            "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT";
+        assert_eq!(
+            parse_linux_proc_default_route_interface(header_only),
+            None
+        );
+        assert_eq!(parse_linux_proc_default_route_interface(""), None);
+    }
+
+    #[test]
     fn test_parse_windows_default_route_single_route() {
         let output = "\
 ===========================================================================
