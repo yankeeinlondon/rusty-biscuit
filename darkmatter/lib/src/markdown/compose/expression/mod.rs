@@ -72,6 +72,7 @@ pub mod error;
 pub mod file_suggestions;
 pub mod functions;
 pub mod lexer;
+pub(crate) mod path_projection;
 pub mod parser;
 pub mod resolve_ctx;
 pub mod semantics;
@@ -84,6 +85,7 @@ pub use catalog::{
 pub use ctx::CtxLookup;
 pub use error::{ArityBound, ExpressionError, FileRefFailure, FileReferenceDiagnostic};
 pub use file_suggestions::{collect_sibling_candidates, suggest_sibling_files};
+pub(crate) use path_projection::{make_portable_relative, make_relative};
 pub use resolve_ctx::ResolutionContext;
 pub use lexer::{
     ComparisonOp, ExpressionFinder, ExpressionLocation, Lexer, LexerError, ParseMode, Token,
