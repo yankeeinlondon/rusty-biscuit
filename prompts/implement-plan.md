@@ -1,11 +1,11 @@
 ---
 $schema:
-    phase: number(required)
+    phase: number(required;default(1))
     total_phases: number(required)
     plan: file(eager; required; match(**/*plan*.md))
     spec: file(eager; match(**/*spec*.md))
 description: |-
-    Provide either `plan` or `spec` filepath as a parameter and this
+    Provide either a `plan` or `spec` filepath as a parameter and this
     prompt will detect the number of phases in the plan and then implement
     the project phase by phase.
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"

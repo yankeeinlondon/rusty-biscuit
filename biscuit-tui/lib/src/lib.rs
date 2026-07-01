@@ -21,4 +21,10 @@ pub mod core;
 pub mod helpers;
 pub mod prelude;
 
+#[cfg(feature = "renderables")]
+pub mod renderable;
+
 pub use prelude::*;
+
+#[cfg(feature = "renderables")]
+pub use renderable::TuiRenderable;

@@ -118,6 +118,39 @@ let (sidebar, main) = SplitPane::new()
 
 `ResolvedAxis` (the concrete axis after `Auto` resolution) is crate-private. v1 ships geometry only — no render wrapper, no `question` CLI command. Ratios clamp on construction (`Percent` to `1..=99`, `*Fixed` to `>= 1`) so no pane is voluntarily starved.
 
+##### One border around both panes (compose with `FrameChrome`)
+
+`SplitPane` is geometry-only, so you **cannot** pass it to `FrameChrome` directly (`FrameChrome` requires its inner to be a `StatefulWidget`; `SplitPane` is not a widget). To draw a single border around both panes, wrap the two panes in a small zero-sized composite `StatefulWidget` and hand *that* to `FrameChrome` — the split runs inside `FrameChrome`'s already-bordered/padded inner rect, so the full `FrameChromeConfig` path (`border_label`, style, padding) keeps working unchanged:
+
+```rust
+use biscuit_tui::core::{FrameChrome, FrameChromeConfig, SplitDirection, SplitPane, SplitRatio};
+use ratatui::{buffer::Buffer, layout::Rect, widgets::StatefulWidget};
+
+// Zero-sized composite, like every other widget here. Its `render` receives
+// FrameChrome's inner rect (after margin + border + padding) and splits it.
+struct TwoPane;
+
+impl StatefulWidget for TwoPane {
+    type State = (LeftState, RightState);
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        let (left, right) = SplitPane::new()
+            .with_direction(SplitDirection::Horizontal)
+            .with_ratio(SplitRatio::Percent(30))
+            .split(area);
+        LeftWidget.render(left, buf, &mut state.0);
+        RightWidget.render(right, buf, &mut state.1);
+    }
+}
+
+let config = FrameChromeConfig {
+    border_label: Some("Panes".into()),
+    ..Default::default()
+};
+let frame = FrameChrome::from_config(TwoPane, &config); // one border around both
+```
+
+This wraps the *whole* layout in one border. A border around **each** pane is a separate, deferred feature — see `features/_unscheduled/per-pane-borders.md`.
+
 #### InputTable
 2D grid of heterogeneous cells. Supports: `StaticText`, `BooleanSwitch`, `TextInput`, `TextAreaInput`, `ChooseOne`, `ChooseMany`.
 
@@ -178,6 +211,91 @@ The underlying canonical parsers are also public:
 
 The `question` CLI source resolver reuses these helpers for CSV,
 markdown-list, and dictionary compatibility sources.
+
+## Rendering Bridge (`TuiRenderable`)
+
+Behind the off-by-default **`renderables`** feature, `biscuit-tui` renders any
+biscuit-terminal / darkmatter `TerminalRenderable` component (`CodeBlock`,
+`Table`, `Prose`, lists, ...) as native ratatui `Text` via one method:
+
+```rust
+fn to_tui_text(&self, width: u16) -> ratatui::text::Text<'static>;
+```
+
+Lives in `lib/src/renderable.rs`; the trait is here (not in `renderable`)
+because `renderable` is intentionally ratatui-free. **Tier 0** (shipped) is one
+blanket `impl<T: TerminalRenderable> TuiRenderable`: render the component to
+ANSI via `render_optimistic(width)`, parse with `ansi-to-tui`, reuse
+biscuit-terminal's layout + syntect highlighting. Static/read-only; covers the
+whole catalog for free. **Tier 1** (native `RenderNode` → `Text` fold) and
+**Tier 2** (interactive `StatefulWidget`s) are future work behind the unchanged
+`to_tui_text` seam — see `docs/tui-renderable.md` for the design and the
+when-to-graduate decision heuristic.
+
+### Implementing Tier 0 in a caller
+
+**1. Enable the feature, and depend on the component's home crate.** The
+`renderables` feature gives you `to_tui_text`, but the *component types* come
+from their own crates, which the caller must add directly: `darkmatter` for
+`CodeBlock`, `biscuit-terminal` for `Table` / `Prose` / lists.
+
+```toml
+[dependencies]
+biscuit-tui = { path = "...", features = ["renderables"] }
+darkmatter  = { path = "..." }   # for CodeBlock
+# biscuit-terminal = { path = "..." }  # for Table / Prose / lists
+```
+
+**2. Build the component once (cheap to keep in app state), render per frame.**
+Pass the *target area's width* each draw so layout tracks resizes:
+
+```rust
+use biscuit_tui::TuiRenderable;                 // brings `to_tui_text` into scope
+use darkmatter::markdown::code_block::CodeBlock;
+use ratatui::widgets::{Block, Borders, Paragraph};
+
+let code = CodeBlock::rust(source);             // ::rust / ::yaml / ::new(...).with_fence_language(...)
+
+terminal.draw(|frame| {
+    let area = frame.area();
+    let block = Block::default().borders(Borders::ALL);
+    let inner = block.inner(area);              // lay out to the *content* width, not the bordered outer width
+    let text = code.to_tui_text(inner.width);   // owned, fully-styled Text<'static>
+    frame.render_widget(
+        Paragraph::new(text)
+            .block(block)
+            .scroll((scroll_y, 0)),             // vertical scroll for free
+        area,
+    );
+})?;
+```
+
+`Table` / `Prose` work identically — `use biscuit_terminal::prelude::{Table, Prose};`,
+construct, then `.to_tui_text(width)`.
+
+**3. Wrap in `Paragraph` for scroll — but never `.wrap()` a `Table`.** The
+component already laid itself out at `width` (column planner, word wrap), so
+ratatui re-wrapping corrupts the columns. `Paragraph::scroll` is fine for any
+component; `Paragraph::wrap` is only safe for content the component did *not*
+pre-wrap.
+
+**4. Cache in a hot redraw loop.** `to_tui_text` re-renders (and, for code,
+re-runs syntect) every call. If you only redraw on events it is fine; in a
+high-FPS loop, memoize by `(content_hash, width)` and re-render only when either
+changes.
+
+**Width gotcha:** if the component renders inside a bordered/padded `Block`,
+pass the *inner* width, not the outer `area.width`, or the content overflows the
+border. Compute the inner rect first (`block.inner(area)`), then
+`to_tui_text(inner.width)`.
+
+Known Tier-0 limitations (ragged code-block background, no row-selection handle,
+links/images dropped) and their Tier-1 fixes are catalogued in
+`docs/tui-renderable.md`.
+
+The feature is off by default because biscuit-terminal carries heavy transitive
+weight (syntect, resvg via biscuit-visualized) that pure input-widget consumers
+should not pay for.
 
 ## CLI (`question`)
 
@@ -293,8 +411,9 @@ lib/src/
 │       ├── column.rs   # InputTableColumn, configs
 │       ├── table.rs    # InputTable, InputTableState
 │       └── table/      # InputTable tests
-└── helpers/
-    └── choice_builders.rs
+├── helpers/
+│   └── choice_builders.rs
+└── renderable.rs      # TuiRenderable (feature = "renderables"): TerminalRenderable -> ratatui Text
 
 cli/src/
 ├── main.rs              # Clap CLI, dispatch
@@ -371,3 +490,8 @@ just cli <args>  # run in dev mode
 - `thiserror` 2 — error types
 - `unicode-width` 0.2 — width calculations
 - `rand` 0.9 — option shuffling
+
+Optional (`renderables` feature only):
+
+- `biscuit-terminal` (path) — source of `TerminalRenderable` components
+- `ansi-to-tui` 8 — parses rendered ANSI into ratatui `Text` (tracks ratatui 0.30)

@@ -61,13 +61,17 @@ jobs:
         uses: bencherdev/bencher@main
 
       - name: Run benchmarks and push to Bencher.dev
+        # Non-fatal: benchmarks are the point, the Bencher upload is best-effort.
+        # Until the `darkmatter` project + BENCHER_API_KEY are provisioned the
+        # push 404s; don't let that red the nightly. Drop `--err` too so a
+        # regression alert reports without failing the job.
+        continue-on-error: true
         run: |
           bencher run \
             --project "${{ vars.BENCHER_PROJECT || 'darkmatter' }}" \
             --branch "${{ github.ref_name }}" \
             --testbed "ubuntu-latest" \
             --adapter rust_criterion \
-            --err \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
             just bench
         working-directory: darkmatter

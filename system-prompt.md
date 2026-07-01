@@ -38,6 +38,9 @@ mode: "append"
     - `{name}-cli` for the CLI
 - never run `cargo fmt` unless told explicitly to do so
 - never commit to **git** unless you are told to explicitly in the prompt (this will typically be done as a separate operation)
+- prioritize solving solutions in a strategic, long term focused manner versus tactical wins:
+    - this monorepo is a large code base and we need to guard against technical debt where possible
+    - this monorepo is also a new codebase without any established users so the cost of refactoring (to achieve a more design advantageous goal) is far lower than it would be if there were a large install base
 
 ## Hashing Content
 
