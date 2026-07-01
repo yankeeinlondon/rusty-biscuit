@@ -39,6 +39,9 @@ pub struct ComponentPolicy {
     pub layout: renderable::layout::Layout,
     pub color: Option<renderable::style::PaintColor>,
     pub bg_color: Option<renderable::style::PaintColor>,
+    pub emphasis: Option<renderable::style::TextEmphasis>,
+    pub border: Option<renderable::style::Border>,
+    pub word_wrap: Option<renderable::wrap_policy::WordWrap>,
 }
 
 /// A page-level layout primitive that owns layout state for darkmatter
@@ -2399,17 +2402,17 @@ mod tests {
             .into();
 
         let no_policy = DarkmatterPage::new(&term).render(&md).unwrap();
+        let mut matched_policy = max_width_policy(40);
+        matched_policy.layout.alignment = renderable::layout::Alignment::Center;
         let matched = DarkmatterPage::new(&term)
-            .with_component_policy(
-                PageComponent::Tables,
-                align_policy(renderable::layout::Alignment::Center),
-            )
+            .with_component_policy(PageComponent::Tables, matched_policy)
             .render(&md)
             .unwrap();
 
-        // Premise: the policy actually matched the table — centering shifts the
-        // table rows, so the two renders are not byte-identical. (A no-op policy
-        // would make the capability comparison below vacuous.)
+        // Premise: the policy actually matched the table — capping its width
+        // and centering it shifts the table rows, so the two renders are not
+        // byte-identical. (A no-op policy would make the capability comparison
+        // below vacuous.)
         assert_ne!(
             no_policy, matched,
             "test premise: the layout policy must match the table and change its rendering",

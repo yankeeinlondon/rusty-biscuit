@@ -48,6 +48,8 @@ fn sample_for(kind: LeafType) -> Value {
         LeafType::HrKind => json!("waves"),
         LeafType::HrWeight => json!("medium"),
         LeafType::HrAlignment => json!("center"),
+        LeafType::CompoundStyle => json!({"bold": true, "italic": true}),
+        LeafType::WordWrap => json!("wrap-prose"),
     }
 }
 
@@ -232,14 +234,14 @@ fn every_canonical_leaf_round_trips_without_unknown_key() {
 fn descriptor_entry_count_matches_expected() {
     const EXPECTED: usize =
         // page: 16
-        // table, ol, li: 5 each = 15
-        // block-quote: 5
-        // ul: 6
-        // hyperlinks: 5 outer + 5 local-style = 10
-        // images: 5 outer + 5 local-style = 10
-        // hr: 7
-        // disclosure: 5
-        16 + 5 + 5 + 5 + 5 + 6 + 10 + 10 + 7 + 5;
+        // table, block-quote, ol, li: 10 each = 40
+        // ul: 11
+        // hyperlinks: 5 outer + 10 local-style = 15
+        // images: 5 outer + 10 local-style = 15
+        // hr: 12
+        // disclosure: 10
+        // code-block: 10
+        16 + 40 + 11 + 15 + 15 + 12 + 10 + 10;
     assert_eq!(
         SCHEMA.len(),
         EXPECTED,

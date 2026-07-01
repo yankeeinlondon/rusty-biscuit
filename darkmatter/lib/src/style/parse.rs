@@ -144,7 +144,9 @@ fn validate_leaf(
         | LeafType::OpaqueValue
         | LeafType::HrKind
         | LeafType::HrWeight
-        | LeafType::HrAlignment => Ok(()),
+        | LeafType::HrAlignment
+        | LeafType::CompoundStyle
+        | LeafType::WordWrap => Ok(()),
     }
 }
 

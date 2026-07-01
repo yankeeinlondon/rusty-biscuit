@@ -7,12 +7,16 @@
 use std::path::Path;
 
 use biscuit_terminal::utils::{UnicodeWidthChar, UnicodeWidthStr};
-use renderable::layout::{Alignment, Length};
+use renderable::layout::{Alignment, Length, Width};
+#[cfg(test)]
+use renderable::layout::TargetValue;
 
 use crate::layout::{DarkmatterPage, PageRenderError};
 use crate::markdown::highlighting::ThemePair;
 use crate::style::apply::StyleApplyError;
 use crate::style::schema::{CommonStyle, StyleFrontmatter};
+#[cfg(test)]
+use crate::style::schema::WidthOrMode;
 
 /// A resolved page stylesheet, either inlined from disk or referenced remotely.
 #[derive(Debug, Clone, PartialEq)]
@@ -347,6 +351,11 @@ pub fn merge_common_style(base: &CommonStyle, local: &CommonStyle) -> CommonStyl
         alignment: local.alignment.or(base.alignment),
         color: local.color.clone().or_else(|| base.color.clone()),
         bg_color: local.bg_color.clone().or_else(|| base.bg_color.clone()),
+        margin: local.margin.clone().or_else(|| base.margin.clone()),
+        padding: local.padding.clone().or_else(|| base.padding.clone()),
+        border: local.border.clone().or_else(|| base.border.clone()),
+        emphasis: local.emphasis.clone().or_else(|| base.emphasis.clone()),
+        word_wrap: local.word_wrap.or(base.word_wrap),
     }
 }
 
@@ -379,7 +388,9 @@ fn check_inline_css(
     let Some(style) = style else {
         return Ok(());
     };
-    if matches!(style.width, Some(Length::Css(_))) {
+    if let Some(width) = style.width.as_ref()
+        && let Width::Fixed(renderable::layout::TargetValue::Universal(Length::Css(_))) = width.as_width()
+    {
         return Err(PageRenderError::InvalidInlineCssLength {
             bucket,
             field: "width",
@@ -439,7 +450,12 @@ pub fn apply_inline_text_layout(
 
     let visible = UnicodeWidthStr::width(text) as u16;
     let target_width = if let Some(width) = common.width.as_ref() {
-        length_to_cells(width, base_width)
+        match width.as_width() {
+            Width::Fixed(renderable::layout::TargetValue::Universal(len)) => {
+                length_to_cells(len, base_width)
+            }
+            _ => None,
+        }
     } else if let Some(max) = common.max_width.as_ref() {
         match length_to_cells(max, base_width) {
             Some(max_cells) if visible > max_cells => Some(max_cells),
@@ -948,7 +964,7 @@ mod tests {
         let style = StyleFrontmatter {
             hyperlinks: Some(HyperlinkStyle {
                 common: CommonStyle {
-                    width: Some(Length::Ch(40)),
+                    width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(40))))),
                     max_width: Some(Length::Percent(50.0)),
                     ..CommonStyle::default()
                 },
@@ -978,7 +994,7 @@ mod tests {
             hyperlinks: Some(HyperlinkStyle {
                 common: CommonStyle::default(),
                 local_style: Some(Box::new(CommonStyle {
-                    width: Some(Length::Ch(40)),
+                    width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(40))))),
                     max_width: Some(Length::Percent(50.0)),
                     ..CommonStyle::default()
                 })),
@@ -1009,7 +1025,7 @@ mod tests {
             hyperlinks: Some(HyperlinkStyle {
                 common: CommonStyle {
                     alignment: Some(Alignment::Center),
-                    width: Some(Length::Ch(40)),
+                    width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(40))))),
                     ..CommonStyle::default()
                 },
                 local_style: Some(Box::new(CommonStyle {
@@ -1276,7 +1292,7 @@ mod tests {
             images: Some(ImageStyle {
                 common: CommonStyle::default(),
                 local_style: Some(Box::new(CommonStyle {
-                    width: Some(Length::Ch(40)),
+                    width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(40))))),
                     max_width: Some(Length::Percent(50.0)),
                     ..CommonStyle::default()
                 })),
@@ -1311,7 +1327,7 @@ mod tests {
                 },
                 local_style: Some(Box::new(CommonStyle {
                     alignment: Some(Alignment::Right),
-                    width: Some(Length::Ch(40)),
+                    width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(40))))),
                     ..CommonStyle::default()
                 })),
             }),
@@ -1327,7 +1343,7 @@ mod tests {
         );
         assert_eq!(
             page.local_image_style().map(|s| s.width.clone()),
-            Some(Some(Length::Ch(40)))
+            Some(Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(40))))))
         );
     }
 
@@ -1460,7 +1476,7 @@ mod tests {
         let style = StyleFrontmatter {
             hyperlinks: Some(HyperlinkStyle {
                 common: CommonStyle {
-                    width: Some(Length::Ch(10)),
+                    width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(10))))),
                     alignment: Some(Alignment::Left),
                     ..CommonStyle::default()
                 },
@@ -1537,7 +1553,7 @@ mod tests {
         let style = StyleFrontmatter {
             hyperlinks: Some(HyperlinkStyle {
                 common: CommonStyle {
-                    width: Some(Length::Ch(8)),
+                    width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(8))))),
                     alignment: Some(Alignment::Center),
                     ..CommonStyle::default()
                 },
@@ -1574,7 +1590,7 @@ mod tests {
         let style = StyleFrontmatter {
             hyperlinks: Some(HyperlinkStyle {
                 common: CommonStyle {
-                    width: Some(Length::Css(CssSizing::px(320.0))),
+                    width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Css(CssSizing::px(320.0)))))),
                     ..CommonStyle::default()
                 },
                 local_style: None,
@@ -1644,7 +1660,7 @@ mod tests {
             images: Some(ImageStyle {
                 common: CommonStyle::default(),
                 local_style: Some(Box::new(CommonStyle {
-                    width: Some(Length::Ch(40)),
+                    width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(40))))),
                     alignment: Some(Alignment::Right),
                     ..CommonStyle::default()
                 })),
@@ -1694,7 +1710,7 @@ mod tests {
     fn apply_inline_text_layout_percent_width() {
         use renderable::layout::Length;
         let style = CommonStyle {
-            width: Some(Length::Percent(50.0)),
+            width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Percent(50.0))))),
             ..CommonStyle::default()
         };
         let out = apply_inline_text_layout("ab", Some(&style), 20);
