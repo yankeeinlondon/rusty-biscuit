@@ -332,16 +332,7 @@ pub fn detect_test_runners(index: Arc<ExecutableIndex>) -> InstalledTestRunners 
 mod tests {
     use super::*;
     use crate::executable_index::ExecutableIndex;
-    use std::fs;
-    use std::os::unix::fs::PermissionsExt;
-
-    fn make_executable(path: &std::path::Path) {
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, b"#!/bin/sh\nexit 0\n").unwrap();
-        let mut perms = fs::metadata(path).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(path, perms).unwrap();
-    }
+    use crate::test_helpers::make_executable_fixture;
 
     #[test]
     fn unavailable_runner_returns_not_found() {
@@ -359,7 +350,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let project = tmp.path().join("proj");
         let bin_dir = project.join("node_modules").join(".bin");
-        make_executable(&bin_dir.join("vitest"));
+        let expected = make_executable_fixture(&bin_dir.join("vitest"));
 
         let index = ExecutableIndex::build_path_only();
         let local = LocalBinIndex::new(project.clone());
@@ -367,7 +358,7 @@ mod tests {
         let entry = resolve_test_runner(TestRunner::Vitest, &index, &local);
         match entry.availability {
             Availability::Local { ref path, ref root } => {
-                assert_eq!(*path, bin_dir.join("vitest"));
+                assert_eq!(*path, expected);
                 assert_eq!(*root, project);
             }
             other => panic!("expected Local, got {:?}", other),
