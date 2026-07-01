@@ -231,7 +231,12 @@ fn collect_recursive(
     // "schema validation → approval → shell" ordering. Defer problems on
     // still-literal `$(...)` values: the terminal compose pass expands and
     // re-validates them, so they are not yet final violations here.
-    let mut inline_options = options.clone().only(&inline_ops);
+    let mut inline_exclude_keys = options.exclude_keys.clone();
+    inline_exclude_keys.insert("$schema".to_string());
+    let mut inline_options = options
+        .clone()
+        .only(&inline_ops)
+        .with_exclude_keys(inline_exclude_keys);
     inline_options.defer_shell_pending_schema_problems = true;
     let (prepared, _) = markdown.compose_with(inline_options)?;
     let line_offset = prepared.frontmatter_line_count();
@@ -503,6 +508,8 @@ fn scan_one_frontmatter(
 ) -> MarkdownResult<()> {
     let mut fm_clone = markdown.clone();
     let pre_interpolation_snapshot = prepare_frontmatter_for_compose(&mut fm_clone, options, true);
+    let mut preflight_exclude_keys = options.exclude_keys.clone();
+    preflight_exclude_keys.insert("$schema".to_string());
     if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
         // Defer templated keys that reference a shell-pending (`$(...)`) value.
         // Without this, a key like `review: "{{ dir + '/x' }}"` resolves against
@@ -511,24 +518,22 @@ fn scan_one_frontmatter(
         // as template text so only the real `$(...)` directive (`dir`) is scanned.
         //
         // Preflight only: shell-command discovery enumerates the reachable
-        // pipelines for the approval workflow; it never performs expression
-        // selection, so it stays context-free (no `ResolutionContext`). The real
-        // run supplies the context.
+        // pipelines for the approval workflow. It must use the same local
+        // read-side resolution context as the real frontmatter pass so
+        // launch-relative inputs supplied via set overrides (for example
+        // `spec=reviews/x/spec.md`) resolve during derived-key interpolation.
         //
-        // Best-effort: a context-free key that invokes a filesystem function
-        // (`frontmatter()`, `file_exists()`, …) errors here, and a non-resilient
-        // pass would abort before the fallback resolves a transitively-blocked
-        // shell-pending key (e.g. `dir: "$(dirname '{{ spec || design }}')"`).
-        // That left the command's `{{ … }}` template in the approval set while
-        // execution ran its resolved form, yielding a spurious "command not
-        // pre-approved" failure.
+        // Best-effort: a key that still cannot resolve is left for the real
+        // compose pass. This keeps command discovery resilient while avoiding a
+        // false schema failure when a required property is derived through
+        // `file_exists()`/`frontmatter()` and the launch-area fallback.
         let _ = interpolate_frontmatter_best_effort(
             fm_clone.frontmatter_mut(),
             options.context(),
             false,
             true,
-            None,
-            &options.exclude_keys,
+            Some(options.frontmatter_resolution_context()),
+            &preflight_exclude_keys,
         );
     }
 
@@ -550,7 +555,7 @@ fn scan_one_frontmatter(
         fm_clone.frontmatter(),
         pre_interpolation_snapshot.as_ref(),
         &scan_ctx,
-        &options.exclude_keys,
+        &preflight_exclude_keys,
     )?;
 
     for candidate in candidates {
@@ -857,6 +862,52 @@ iteration: \"{{ file_exists('design.md') ? 2 : 1 }}\"\n\
             "no template syntax should survive into the approval set: {:?}",
             entries[0].normalized
         );
+    }
+
+    #[test]
+    fn preflight_resolves_launch_relative_derived_required_file() {
+        let launch_dir = TempDir::new().unwrap();
+        std::fs::write(launch_dir.path().join(".git"), "gitdir: /tmp/fake\n").unwrap();
+        let prompt_dir = launch_dir.path().join("prompts");
+        std::fs::create_dir_all(&prompt_dir).unwrap();
+        let review_dir = launch_dir.path().join("reviews/2026-06-30-replace-expression");
+        std::fs::create_dir_all(&review_dir).unwrap();
+        std::fs::write(review_dir.join("spec.md"), "# Spec\n").unwrap();
+        std::fs::write(
+            review_dir.join("plan.md"),
+            "---\nstart_phase: 2\ntotal_phases: 3\n---\n# Plan\n",
+        )
+        .unwrap();
+
+        let prompt_path = prompt_dir.join("implement-plan.md");
+        let yaml = "\
+$schema:
+  phase: 'number(required)'
+  total_phases: 'number(required)'
+  plan: 'file(required)'
+  spec: file
+plan: \"{{ file_exists(spec) ? dirname(spec) + '/plan.md' : null }}\"
+phase: \"{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || 1 : null }}\"
+total_phases: \"{{ file_exists(plan) ? frontmatter(plan, 'total_phases') : 0 }}\"
+spec: \"{{ file_exists(plan) ? dirname(plan) + '/spec.md' : null }}\"
+";
+        let content = format!("---\n{yaml}---\nbody\n");
+        std::fs::write(&prompt_path, &content).unwrap();
+        let md = Markdown::try_from_content(content.to_string()).unwrap();
+        assert!(
+            md.frontmatter().as_map().get("$schema").is_some_and(|v| v.is_object()),
+            "fixture must parse $schema as an object, got {:?}",
+            md.frontmatter().as_map().get("$schema")
+        );
+        let options = ComposeOptions::new()
+            .with_source_file(&prompt_path)
+            .with_file_ref_fallback_dir(launch_dir.path())
+            .with_set_overrides(serde_json::json!({
+                "spec": "reviews/2026-06-30-replace-expression/spec.md",
+            }));
+
+        md.compose_preflight(&options)
+            .expect("preflight should resolve derived plan through the launch-area fallback");
     }
 
     /// Regression for the review-4 "approves the WRONG command" bug.
