@@ -853,12 +853,20 @@ fn classify_unresolved_file_reference(
 /// Extract the user-provided partial from a frontmatter/override value.
 ///
 /// Returns the string for a scalar `file` value (the substring to match against
-/// the `match(...)` glob candidates). A non-string value (array, object) has no
-/// single partial to filter on and is left to the generic schema-validation
-/// path.
+/// the `match(...)` glob candidates). For a `file[]` value, accepts an array of
+/// strings and uses the first non-empty string as the partial; a scalar string
+/// is treated as single-element intent for convenience. Non-string array
+/// elements or empty arrays are rejected and left to the generic
+/// schema-validation path.
 fn provided_partial_value(value: Option<&serde_json::Value>) -> Option<String> {
     match value? {
         serde_json::Value::String(s) if !s.trim().is_empty() => Some(s.clone()),
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .find_map(|v| match v {
+                serde_json::Value::String(s) if !s.trim().is_empty() => Some(s.clone()),
+                _ => None,
+            }),
         _ => None,
     }
 }
@@ -1335,7 +1343,8 @@ pub fn pre_validate_schema(
         Err(err) => return Err(err),
     };
 
-    let instance = build_effective_instance(&source, set_overrides.as_ref());
+    let mut instance = build_effective_instance(&source, set_overrides.as_ref());
+    normalize_file_array_values(&mut instance, Some(&effective));
     let report = effective.validate(&instance);
     if report.valid {
         return Ok(PreValidatedSchema {
@@ -1446,6 +1455,45 @@ fn build_effective_instance(
         }
     }
     serde_json::Value::Object(map)
+}
+
+/// Normalize scalar string values into single-element arrays for `file[]`
+/// schema properties.
+///
+/// This lets `attachments=everywhere` (parsed as a string) be treated as
+/// single-element intent for a `file[]` property, matching the shorthand
+/// behavior users expect and ensuring the value reaches the file-reference
+/// classifier instead of failing with a type error.
+fn normalize_file_array_values(
+    instance: &mut serde_json::Value,
+    effective: Option<&EffectiveSchema>,
+) {
+    let serde_json::Value::Object(map) = instance else {
+        return;
+    };
+    let shape = match effective {
+        Some(e) => match e.simplified.as_ref() {
+            Some(SimplifiedSchema::Single(s)) => Some(s),
+            _ => None,
+        },
+        _ => None,
+    };
+    let Some(shape) = shape else {
+        return;
+    };
+    for (name, _atom) in shape.properties.iter().filter_map(|(n, def)| {
+        match def {
+            PropertyDef::Single(a) if a.is_array && matches!(a.ty, TypeExpr::Primitive(SimplifiedType::File)) => Some((n, a)),
+            _ => None,
+        }
+    }) {
+        let Some(value) = map.get_mut(name) else {
+            continue;
+        };
+        if value.is_string() {
+            *value = serde_json::Value::Array(vec![value.take()]);
+        }
+    }
 }
 
 /// Pre-scrub helper that drops invalid optional values from raw
@@ -2623,6 +2671,39 @@ mod tests {
     }
 
     #[test]
+    fn scratch_dump_file_array_problems() {
+        for (label, override_val) in [
+            ("scalar-string", serde_json::json!({ "attachments": "everywhere" })),
+            ("array-of-one", serde_json::json!({ "attachments": ["everywhere"] })),
+            (
+                "array-of-two",
+                serde_json::json!({ "attachments": ["everywhere", "here"] }),
+            ),
+        ] {
+            let dir = TempDir::new().unwrap();
+            let source = make_source(
+                &dir,
+                "---\n$schema:\n  attachments: 'file(required;match(**/*spec*.md);eager)[]'\n---\nbody\n",
+            );
+            let effective = load_effective_schema(&source, None).unwrap().unwrap();
+            let instance = build_effective_instance(&source, Some(&override_val));
+            let report = effective.validate(&instance);
+            eprintln!("=== {label} valid={} ===", report.valid);
+            if let Some(SimplifiedSchema::Single(s)) = effective.simplified.as_ref()
+                && let Some(atom) = atom_for_property(s, "attachments")
+            {
+                eprintln!("  atom.is_array={} ty={:?}", atom.is_array, atom.ty);
+            }
+            for p in &report.problems {
+                eprintln!(
+                    "  problem: kind={:?} path={:?} msg={:?}",
+                    p.kind, p.path, p.message
+                );
+            }
+        }
+    }
+
+    #[test]
     fn provided_file_match_partial_reports_unresolved_file_reference() {
         // `spec=everywhere` is a provided partial for a required `file(match)`
         // property with no literal `everywhere` file. Instead of the generic
@@ -2657,6 +2738,116 @@ mod tests {
             }
             other => panic!("expected UnresolvedFileReference, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn provided_file_array_match_partial_reports_unresolved_file_reference() {
+        // `attachments=["everywhere"]` is a provided partial for a required
+        // `file[](match)` property with no literal match. The classifier must
+        // surface `is_array: true` so the CLI can resolve into an array value.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            "---\n$schema:\n  attachments: 'file(required;match(**/*spec*.md);eager)[]'\n---\nbody\n",
+        );
+        let overrides = serde_json::json!({ "attachments": ["everywhere"] });
+
+        let err = pre_validate_schema(&source, Some(&overrides), None)
+            .expect_err("a provided file[](match) partial with no literal match should surface a typed error");
+        match err {
+            CompositionError::UnresolvedFileReference {
+                property,
+                provided,
+                patterns,
+                is_array,
+                reason,
+                ..
+            } => {
+                assert_eq!(property, "attachments");
+                assert_eq!(provided, "everywhere");
+                assert_eq!(patterns, vec!["**/*spec*.md".to_string()]);
+                assert!(is_array, "file[] property must report is_array: true");
+                assert!(
+                    reason.contains("no existing file matched reference"),
+                    "reason should preserve the original file-reference failure text: {reason}",
+                );
+            }
+            other => panic!("expected UnresolvedFileReference, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provided_file_scalar_for_array_property_match_partial_reports_unresolved_file_reference() {
+        // A scalar string supplied for a `file[]` property is treated as
+        // single-element intent and should still classify as an unresolved
+        // file reference with `is_array: true`.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            "---\n$schema:\n  attachments: 'file(required;match(**/*spec*.md);eager)[]'\n---\nbody\n",
+        );
+        let overrides = serde_json::json!({ "attachments": "everywhere" });
+
+        let err = pre_validate_schema(&source, Some(&overrides), None)
+            .expect_err("a scalar partial for file[](match) should surface a typed error");
+        match err {
+            CompositionError::UnresolvedFileReference {
+                property,
+                provided,
+                is_array,
+                ..
+            } => {
+                assert_eq!(property, "attachments");
+                assert_eq!(provided, "everywhere");
+                assert!(is_array, "scalar provided to file[] property must still report is_array: true");
+            }
+            other => panic!("expected UnresolvedFileReference, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provided_partial_value_handles_scalar_and_array_for_file_array() {
+        assert_eq!(
+            provided_partial_value(Some(&serde_json::json!("everywhere"))),
+            Some("everywhere".to_string())
+        );
+        assert_eq!(
+            provided_partial_value(Some(&serde_json::json!(["everywhere"]))),
+            Some("everywhere".to_string())
+        );
+        assert_eq!(
+            provided_partial_value(Some(&serde_json::json!(["", "everywhere", "else"]))),
+            Some("everywhere".to_string())
+        );
+        assert_eq!(provided_partial_value(Some(&serde_json::json!([]))), None);
+        assert_eq!(
+            provided_partial_value(Some(&serde_json::json!(["", "  "]))),
+            None
+        );
+        assert_eq!(
+            provided_partial_value(Some(&serde_json::json!([42, true]))),
+            None
+        );
+        assert_eq!(provided_partial_value(Some(&serde_json::json!(42))), None);
+    }
+
+    #[test]
+    fn provided_file_array_with_non_string_elements_stays_schema_validation() {
+        // Non-string array elements are not valid file[] values and must not be
+        // misclassified as a partial.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            "---\n$schema:\n  attachments: 'file(required;match(**/*spec*.md);eager)[]'\n---\nbody\n",
+        );
+        let overrides = serde_json::json!({ "attachments": [42, true] });
+
+        let err = pre_validate_schema(&source, Some(&overrides), None)
+            .expect_err("non-string array elements should fail validation");
+        assert!(
+            matches!(err, CompositionError::SchemaValidation { .. }),
+            "expected SchemaValidation for non-string file[] elements, got {err:?}",
+        );
     }
 
     #[test]
