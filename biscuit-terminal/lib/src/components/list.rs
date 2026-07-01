@@ -9,6 +9,7 @@ use renderable::tree::render::{
     BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
     render_markdown_node,
 };
+use renderable::style::Style;
 use renderable::tree::{ListRenderHints, RenderNode, RenderStrictness, TreeRenderable};
 
 use crate::{
@@ -113,6 +114,7 @@ fn force_component_hanging_indent(content: &mut RenderableTerminalContent, hangi
 pub struct OrderedList {
     items: Vec<RenderableTerminalContent>,
     layout: Layout,
+    style: Style,
     indent_children: u32,
 }
 
@@ -121,6 +123,7 @@ impl Default for OrderedList {
         OrderedList {
             items: vec![],
             layout: Layout::default(),
+            style: Style::default(),
             indent_children: 4,
         }
     }
@@ -240,6 +243,7 @@ impl OrderedList {
         if self.layout != Layout::default() {
             node.attrs.set_layout(&self.layout);
         }
+        crate::components::renderable::overlay_style_onto_node(&mut node, &self.style);
         node
     }
 
@@ -303,6 +307,14 @@ impl TerminalRenderable for OrderedList {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+
+    fn style(&self) -> Style {
+        self.style.clone()
+    }
+
+    fn style_mut(&mut self) -> Option<&mut Style> {
+        Some(&mut self.style)
     }
 
     fn is_block_level(&self) -> bool {
@@ -554,6 +566,7 @@ pub struct UnorderedList {
     bullet: String,
     hanging_indent: bool,
     layout: Layout,
+    style: Style,
     indent_children: Option<u32>,
 }
 
@@ -564,6 +577,7 @@ impl Default for UnorderedList {
             bullet: "- ".to_string(),
             hanging_indent: true,
             layout: Layout::default(),
+            style: Style::default(),
             indent_children: None,
         }
     }
@@ -754,6 +768,7 @@ impl UnorderedList {
         if self.layout != Layout::default() {
             node.attrs.set_layout(&self.layout);
         }
+        crate::components::renderable::overlay_style_onto_node(&mut node, &self.style);
         node
     }
 
@@ -817,6 +832,14 @@ impl TerminalRenderable for UnorderedList {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+
+    fn style(&self) -> Style {
+        self.style.clone()
+    }
+
+    fn style_mut(&mut self) -> Option<&mut Style> {
+        Some(&mut self.style)
     }
 
     fn is_block_level(&self) -> bool {

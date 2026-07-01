@@ -151,6 +151,7 @@ pub struct Section {
     title: String,
     content: Vec<RenderableTerminalContent>,
     layout: Layout,
+    style: Style,
 }
 
 impl Section {
@@ -161,6 +162,7 @@ impl Section {
             title: title.into(),
             content: Vec::new(),
             layout: Layout::default(),
+            style: Style::default(),
         }
     }
 
@@ -237,6 +239,7 @@ impl Section {
         if self.layout != Layout::default() {
             node.attrs.set_layout(&self.layout);
         }
+        crate::components::renderable::overlay_style_onto_node(&mut node, &self.style);
         node
     }
 
@@ -294,6 +297,14 @@ impl TerminalRenderable for Section {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+
+    fn style(&self) -> Style {
+        self.style.clone()
+    }
+
+    fn style_mut(&mut self) -> Option<&mut Style> {
+        Some(&mut self.style)
     }
 
     fn is_block_level(&self) -> bool {

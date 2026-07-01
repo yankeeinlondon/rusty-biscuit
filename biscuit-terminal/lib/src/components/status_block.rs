@@ -102,6 +102,7 @@ pub struct StatusBlock {
     border_color: Option<Color>,
     border: String,
     layout: Layout,
+    style: Style,
 }
 
 impl StatusBlock {
@@ -122,6 +123,7 @@ impl StatusBlock {
                 word_wrap: WordWrap::WrapProse(Some(8), None),
                 ..Layout::default()
             },
+            style: Style::default(),
         }
     }
 
@@ -363,6 +365,7 @@ impl StatusBlock {
         // the node returned by `render_tree()` without applying the optional
         // `tree_layout()` hook.
         root.attrs.set_layout(&self.layout);
+        crate::components::renderable::overlay_style_onto_node(&mut root, &self.style);
         root
     }
 
@@ -501,6 +504,14 @@ impl TerminalRenderable for StatusBlock {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+
+    fn style(&self) -> Style {
+        self.style.clone()
+    }
+
+    fn style_mut(&mut self) -> Option<&mut Style> {
+        Some(&mut self.style)
     }
 
     fn is_block_level(&self) -> bool {

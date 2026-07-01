@@ -202,6 +202,8 @@ pub struct Todo {
     use_prose: bool,
     #[serde(skip)]
     layout: Layout,
+    #[serde(skip)]
+    style: RStyle,
 }
 
 impl PartialEq for Todo {
@@ -233,6 +235,7 @@ impl Default for Todo {
             last_updated: Utc::now(),
             use_prose: false,
             layout: Layout::default(),
+            style: RStyle::default(),
         }
     }
 }
@@ -419,6 +422,7 @@ impl Todo {
             list.attrs.set_layout(&self.layout);
         }
 
+        crate::components::renderable::overlay_style_onto_node(&mut list, &self.style);
         list
     }
 
@@ -473,6 +477,14 @@ impl TerminalRenderable for Todo {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+
+    fn style(&self) -> RStyle {
+        self.style.clone()
+    }
+
+    fn style_mut(&mut self) -> Option<&mut RStyle> {
+        Some(&mut self.style)
     }
 
     /// Projects this `Todo` into a `NodeKind::List` render-tree node.

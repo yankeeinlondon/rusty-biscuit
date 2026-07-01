@@ -448,6 +448,14 @@ impl TerminalRenderable for BlockQuote {
         &mut self.layout
     }
 
+    fn style(&self) -> Style {
+        self.style.clone()
+    }
+
+    fn style_mut(&mut self) -> Option<&mut Style> {
+        Some(&mut self.style)
+    }
+
     fn is_block_level(&self) -> bool {
         true
     }

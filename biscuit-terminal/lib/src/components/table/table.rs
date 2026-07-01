@@ -149,6 +149,9 @@ pub struct Table {
     /// Typed style slot for row striping — the migrated home of the former
     /// `alternate_background_color` / `alternate_text_color` boolean fields.
     style: TableStyle,
+    /// Caller-supplied block appearance (color/background/emphasis/border)
+    /// overlaid onto the projected table node so both render paths carry it.
+    block_style: Style,
 }
 
 impl Table {
@@ -315,6 +318,7 @@ impl Table {
             layout: self.layout.clone(),
             prefer_cursor_alignment: self.prefer_cursor_alignment,
             style: self.style.clone(),
+            block_style: self.block_style.clone(),
         })
     }
 
@@ -1628,6 +1632,7 @@ impl Table {
             node.attrs.set_table_title(title);
         }
 
+        crate::components::renderable::overlay_style_onto_node(&mut node, &self.block_style);
         node
     }
 
@@ -1807,6 +1812,14 @@ impl TerminalRenderable for Table {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+
+    fn style(&self) -> Style {
+        self.block_style.clone()
+    }
+
+    fn style_mut(&mut self) -> Option<&mut Style> {
+        Some(&mut self.block_style)
     }
 
     fn is_block_level(&self) -> bool {

@@ -8,6 +8,7 @@ use renderable::tree::render::{
     BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
     render_markdown_node,
 };
+use renderable::style::Style;
 use renderable::tree::{RenderNode, RenderStrictness, SequenceJoin, TreeRenderable};
 
 use crate::components::{
@@ -94,6 +95,7 @@ use crate::utils::layout::Layout;
 pub struct Compose {
     parts: Vec<RenderableTerminalContent>,
     layout: Layout,
+    style: Style,
 }
 
 impl Default for Compose {
@@ -107,6 +109,7 @@ impl From<String> for Compose {
         Compose {
             parts: vec![RenderableTerminalContent::String(value)],
             layout: Layout::default(),
+            style: Style::default(),
         }
     }
 }
@@ -116,6 +119,7 @@ impl From<&str> for Compose {
         Compose {
             parts: vec![RenderableTerminalContent::String(value.into())],
             layout: Layout::default(),
+            style: Style::default(),
         }
     }
 }
@@ -125,6 +129,7 @@ impl From<RenderableTerminalContent> for Compose {
         Compose {
             parts: vec![value],
             layout: Layout::default(),
+            style: Style::default(),
         }
     }
 }
@@ -134,6 +139,7 @@ impl From<Vec<RenderableTerminalContent>> for Compose {
         Compose {
             parts: items,
             layout: Layout::default(),
+            style: Style::default(),
         }
     }
 }
@@ -158,6 +164,14 @@ impl TerminalRenderable for Compose {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+
+    fn style(&self) -> Style {
+        self.style.clone()
+    }
+
+    fn style_mut(&mut self) -> Option<&mut Style> {
+        Some(&mut self.style)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -185,6 +199,7 @@ impl Compose {
         Compose {
             parts: items,
             layout: Layout::default(),
+            style: Style::default(),
         }
     }
 
@@ -356,6 +371,7 @@ impl Compose {
         if self.layout != Layout::default() {
             root.attrs.set_layout(&self.layout);
         }
+        crate::components::renderable::overlay_style_onto_node(&mut root, &self.style);
         root
     }
 }

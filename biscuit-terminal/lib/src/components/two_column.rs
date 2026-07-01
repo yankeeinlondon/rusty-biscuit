@@ -2,6 +2,7 @@ use renderable::browser::PageOptions;
 use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::html::HtmlPage;
 use renderable::markdown::MarkdownRenderable;
+use renderable::style::Style;
 use renderable::tree::render::{
     BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
     render_markdown_node,
@@ -184,6 +185,7 @@ pub struct TwoColumn {
     left_width: ColumnWidth,
     gap: u32,
     layout: Layout,
+    style: Style,
 }
 
 impl Default for TwoColumn {
@@ -194,6 +196,7 @@ impl Default for TwoColumn {
             left_width: ColumnWidth::Percent(0.5),
             gap: DEFAULT_GAP,
             layout: Layout::default(),
+            style: Style::default(),
         }
     }
 }
@@ -210,6 +213,7 @@ impl TwoColumn {
             left_width: ColumnWidth::Percent(0.5),
             gap: DEFAULT_GAP,
             layout: Layout::default(),
+            style: Style::default(),
         }
     }
 
@@ -519,6 +523,7 @@ impl TwoColumn {
         if self.layout != Layout::default() {
             container.attrs.set_layout(&self.layout);
         }
+        crate::components::renderable::overlay_style_onto_node(&mut container, &self.style);
         container
     }
 
@@ -672,6 +677,14 @@ impl TerminalRenderable for TwoColumn {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+
+    fn style(&self) -> Style {
+        self.style.clone()
+    }
+
+    fn style_mut(&mut self) -> Option<&mut Style> {
+        Some(&mut self.style)
     }
 
     /// Renders to a terminal string at an explicit width.

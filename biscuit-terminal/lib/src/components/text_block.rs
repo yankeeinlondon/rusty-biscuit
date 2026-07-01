@@ -91,6 +91,11 @@ pub struct TextBlock {
     blink: bool,
     underline: UnderliningRequest,
     layout: Layout,
+    /// Caller-supplied block appearance overlaid onto [`build_style`] so both
+    /// render paths carry it. [`build_style`] supplies the field-derived
+    /// defaults; this slot holds the override set via
+    /// [`TerminalRenderable::with_style`].
+    style: RStyle,
 }
 
 impl Default for TextBlock {
@@ -105,6 +110,7 @@ impl Default for TextBlock {
             blink: false,
             underline: UnderliningRequest::None,
             layout: Layout::default(),
+            style: RStyle::default(),
         }
     }
 }
@@ -214,7 +220,7 @@ impl TextBlock {
     /// producer.
     fn to_render_node(&self) -> RenderNode {
         let mut node = RenderNode::paragraph(vec![RenderNode::text(&self.content)]);
-        let style = self.build_style();
+        let style = self.style.overlay_onto(&self.build_style());
         if !style.is_empty() {
             node.attrs.set_style(&style);
         }
@@ -298,6 +304,14 @@ impl TerminalRenderable for TextBlock {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+
+    fn style(&self) -> RStyle {
+        self.style.overlay_onto(&self.build_style())
+    }
+
+    fn style_mut(&mut self) -> Option<&mut RStyle> {
+        Some(&mut self.style)
     }
 
     /// Projects this `TextBlock` into a `NodeKind::Paragraph` render-tree
