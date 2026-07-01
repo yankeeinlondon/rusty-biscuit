@@ -178,9 +178,10 @@ fn chooser_height(options: &[ChoiceOption<FileDetail>]) -> HeightSpec {
     /// Absolute floor that keeps a minimal detail pane readable.
     const MIN_DETAIL_ROWS: u16 = 12;
     /// Rows the detail pane needs beyond the schema lines themselves:
-    /// name, blank, blockquoted description, `Schema:` header, and the
-    /// code block's top/bottom fences and header row.
-    const DETAIL_CHROME_ROWS: u16 = 9;
+    /// name, blank, blockquoted description (up to two wrapped lines),
+    /// `Schema:` header, blank, the code block's top/bottom fences and header
+    /// row, plus the bottom help-hint row.
+    const DETAIL_CHROME_ROWS: u16 = 11;
     /// Ceiling on the list pane before it scrolls.
     const MAX_LIST_ROWS: u16 = 20;
     let list_rows = options.len().min(MAX_LIST_ROWS as usize) as u16;
