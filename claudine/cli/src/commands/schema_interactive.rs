@@ -35,9 +35,9 @@ use claudine::composition::{
 };
 use biscuit_tui::prelude::*;
 
-use crate::completion::autocomplete_ui::{choose_many_files, choose_one_file};
+use crate::completion::autocomplete_ui::{choose_many_files, choose_one_file, confirm_one_file};
 use crate::completion::schema_completion::file_candidate_paths;
-use crate::completion::scopes::ScopeContext;
+use crate::completion::scopes::{self, ScopeContext};
 use crate::log;
 
 /// Render the schema status report to stderr using `biscuit-terminal::Prose`.
@@ -205,6 +205,19 @@ pub fn pre_validate_with_interactive_collection(
         return first;
     };
 
+    // A provided `file(match)` partial that failed literal resolution is
+    // resolved via a glob+substring confirmation dialog / chooser, symmetric to
+    // the missing-property flow below.
+    if matches!(err, CompositionError::UnresolvedFileReference { .. }) {
+        return resolve_unresolved_file_reference(
+            source,
+            set_overrides,
+            interactive,
+            err,
+            file_ref_fallback_dir,
+        );
+    }
+
     let CompositionError::MissingProperties {
         ref missing,
         ref source_path,
@@ -243,6 +256,162 @@ pub fn pre_validate_with_interactive_collection(
 
     let merged = merge_overrides(set_overrides, collected);
     pre_validate_schema(source, Some(&serde_json::Value::Object(merged)), file_ref_fallback_dir)
+}
+
+/// Resolve a [`CompositionError::UnresolvedFileReference`] by treating the
+/// provided value as a partial: walk the property's `match(...)` glob from the
+/// launch area, filter by the provided substring, and drive a confirmation
+/// dialog (single match) or chooser (multiple). On selection, rewrite the
+/// property override and re-run [`pre_validate_schema`] once.
+///
+/// The original error is preserved unchanged when the session is not
+/// interactive, when zero candidates match the partial, or when the user
+/// declines / cancels — so the caller renders the actionable "no existing file
+/// matched reference" text just as before.
+fn resolve_unresolved_file_reference(
+    source: &ResolvedCompositionSource,
+    set_overrides: Option<&serde_json::Value>,
+    interactive: InteractiveSchemaOptions,
+    err: CompositionError,
+    file_ref_fallback_dir: Option<&std::path::Path>,
+) -> Result<PreValidatedSchema, CompositionError> {
+    let CompositionError::UnresolvedFileReference {
+        ref property,
+        ref provided,
+        ref patterns,
+        is_array,
+        ..
+    } = err
+    else {
+        return Err(err);
+    };
+
+    // Non-interactive → keep the pre-existing schema-validation surface so
+    // scripts / CI output stay byte-identical to before this feature.
+    if !interactive.allowed() {
+        return Err(downgrade_to_schema_validation(err));
+    }
+
+    let resolved = match resolve_provided_file_reference(property, provided, patterns, is_array) {
+        Ok(Some(value)) => value,
+        // Zero glob+substring matches, the user declined / cancelled, or the
+        // chooser failed → fall back to the original schema-validation error,
+        // preserving the actionable "no existing file matched reference" text.
+        Ok(None) | Err(_) => return Err(downgrade_to_schema_validation(err)),
+    };
+
+    let mut collected = serde_json::Map::new();
+    collected.insert(property.clone(), resolved);
+    let merged = merge_overrides(set_overrides, collected);
+    pre_validate_schema(
+        source,
+        Some(&serde_json::Value::Object(merged)),
+        file_ref_fallback_dir,
+    )
+}
+
+/// Convert an [`CompositionError::UnresolvedFileReference`] back to the
+/// equivalent [`CompositionError::SchemaValidation`] it was classified from.
+///
+/// `UnresolvedFileReference` is an internal signal that lets the CLI offer an
+/// interactive glob+substring resolution. When that resolution is unavailable
+/// (non-interactive) or unsuccessful (zero matches / declined), the user must
+/// see exactly the schema-validation surface they saw before this feature — the
+/// reconstruction mirrors the lib's `build_schema_validation_error` for a single
+/// problem (`"/{property}: {reason}"`).
+fn downgrade_to_schema_validation(err: CompositionError) -> CompositionError {
+    match err {
+        CompositionError::UnresolvedFileReference {
+            source_path,
+            property,
+            reason,
+            ..
+        } => {
+            let pointer = format!("/{property}");
+            CompositionError::SchemaValidation {
+                source_path,
+                message: format!("{pointer}: {reason}"),
+                problems: vec![pointer],
+            }
+        }
+        other => other,
+    }
+}
+
+/// Walk a `file(match)` property's glob candidates, filter by the provided
+/// partial, and drive the confirmation dialog / chooser.
+///
+/// Returns `Ok(None)` on zero matches or user cancellation/decline. The
+/// resolved value is an absolute path string, array-wrapped for `file[]`.
+fn resolve_provided_file_reference(
+    property: &str,
+    provided: &str,
+    patterns: &[String],
+    is_array: bool,
+) -> io::Result<Option<serde_json::Value>> {
+    let ctx = ScopeContext::discover();
+    let candidates = provided_partial_candidates(patterns, provided, &ctx);
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+
+    let options: Vec<ChoiceOption<FileDetail>> = candidates
+        .iter()
+        .map(|path| {
+            let detail = extract_file_detail(path);
+            // As in `collect_file`: `match(...)` candidates routinely share a
+            // basename, so the visible label is the cwd/repo-relative path.
+            let label = path_label(path, &ctx);
+            ChoiceOption::new(label.clone(), label, detail)
+        })
+        .collect();
+
+    let term = crate::log::terminal();
+    let intro = format!(
+        "The value provided for {property} did not match a file directly; \
+         resolving `{provided}` against the closest candidate:",
+    );
+    eprintln!("{}", Prose::new(intro).render(&term));
+
+    let selected = match options.len() {
+        1 => {
+            let detail = &options[0].value;
+            if confirm_one_file(detail)? {
+                Some(detail.clone())
+            } else {
+                None
+            }
+        }
+        _ => choose_one_file(options)?,
+    };
+
+    let Some(detail) = selected else {
+        return Ok(None);
+    };
+    let value = resolve_file_value(&detail.path)?;
+    if is_array {
+        Ok(Some(serde_json::Value::Array(vec![value])))
+    } else {
+        Ok(Some(value))
+    }
+}
+
+/// Glob candidates filtered by the provided partial substring.
+///
+/// The testable core of [`resolve_provided_file_reference`]: walks the
+/// `match(...)` patterns from the launch area
+/// ([`scopes::property_value_root`]) and retains candidates whose path contains
+/// `provided` (case-insensitive), sorted for stable ordering.
+fn provided_partial_candidates(
+    patterns: &[String],
+    provided: &str,
+    ctx: &ScopeContext,
+) -> Vec<std::path::PathBuf> {
+    let mut candidates = file_candidate_paths(patterns, ctx);
+    let needle = provided.to_ascii_lowercase();
+    candidates.retain(|path| scopes::path_matches_query(path, &needle));
+    candidates.sort();
+    candidates
 }
 
 fn merge_overrides(
@@ -772,6 +941,54 @@ mod tests {
         let line = render_optional_line(&status);
         assert!(line.contains("<dim>"));
         assert!(line.contains("<green>"));
+    }
+
+    fn seed_spec_tree(root: &Path) {
+        use std::fs;
+        fs::create_dir_all(root.join(".git")).unwrap();
+        let target = root.join("features/2026-06-30-style-everywhere/spec.md");
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::write(&target, "---\ntitle: Everywhere\n---\nbody\n").unwrap();
+        let other = root.join("features/2026-06-01-other/spec.md");
+        fs::create_dir_all(other.parent().unwrap()).unwrap();
+        fs::write(&other, "---\ntitle: Other\n---\nbody\n").unwrap();
+    }
+
+    #[test]
+    fn provided_partial_candidates_filters_to_single_substring_match() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        seed_spec_tree(tmp.path());
+
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let patterns = vec!["**/*spec*.md".to_string()];
+        let got = provided_partial_candidates(&patterns, "everywhere", &ctx);
+        assert_eq!(got.len(), 1, "expected exactly one substring match: {got:?}");
+        assert!(
+            got[0].ends_with("2026-06-30-style-everywhere/spec.md"),
+            "expected the style-everywhere spec, got {got:?}",
+        );
+    }
+
+    #[test]
+    fn provided_partial_candidates_is_case_insensitive() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        seed_spec_tree(tmp.path());
+
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let patterns = vec!["**/*spec*.md".to_string()];
+        let got = provided_partial_candidates(&patterns, "EVERYWHERE", &ctx);
+        assert_eq!(got.len(), 1, "case-insensitive substring match: {got:?}");
+    }
+
+    #[test]
+    fn provided_partial_candidates_zero_matches_returns_empty() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        seed_spec_tree(tmp.path());
+
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let patterns = vec!["**/*spec*.md".to_string()];
+        let got = provided_partial_candidates(&patterns, "no-such-partial", &ctx);
+        assert!(got.is_empty(), "expected zero matches: {got:?}");
     }
 
     #[test]

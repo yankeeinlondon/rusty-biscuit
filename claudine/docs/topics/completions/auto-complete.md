@@ -49,3 +49,22 @@ candidate for _completion_ in the **inline-compose** operation is completely dif
 
 - for details on the _rules_ for inline-compose see: [`inline-compose` prompt rules](./inline-compose-rules.md)
 - in summary though, all Markdown files under the _current working directory_ which define either a `prompt` or a `sections` Frontmatter property are candidates
+- outside of which documents are considered
+
+## Completing Setter Values
+
+The same "reward laziness, not recklessness" principle extends to the **setter values** you pass after the prompt (`spec=...`, `cover=...`), not just the prompt file itself.
+
+When a prompt's `$schema` declares a property as a `file` (or `file[]`) with a `match(...)` glob — for example `spec: 'file(required; match(**/*spec*.md))'` — a value you supply that does not resolve to an existing file is treated as a **partial** rather than an error:
+
+- imagine your only spec lives at `{launch-area}/features/2026-06-30-style-everywhere/spec.md`
+- you type `claudine compose plan spec=everywhere` and press ENTER
+- Claudine walks the `match(**/*spec*.md)` glob from the **launch area** (the same anchor completion suggestions use, so what is _offered_ is always what is _accepted_), then keeps only candidates whose path contains `everywhere` (case-insensitive)
+
+The resolution then follows the familiar pattern:
+
+- **one match** → a confirmation dialog ("Use this file?") before proceeding
+- **more than one match** → a chooser TUI to disambiguate
+- **zero matches**, a declined confirmation, or a non-interactive session → the original `no existing file matched reference` error is preserved unchanged
+
+The glob is only consulted _after_ a literal path fails, so valid explicit paths behave exactly as before.

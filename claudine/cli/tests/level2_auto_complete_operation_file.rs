@@ -545,6 +545,156 @@ fn run_tall_layout_test<H: KeySender>(harness: &mut H) {
 }
 
 // ----------------------------------------------------------------------
+// Plan schema detail capture
+// ----------------------------------------------------------------------
+
+/// Stage a workspace whose prompts carry the exact repo `plan.md`
+/// `$schema` shape and an emphasized `_feature_` / `_plan_` description.
+/// Both candidate files share the schema so the detail pane shows it
+/// regardless of which item is initially active.
+fn stage_plan_schema_workspace() -> TestWorkspace {
+    let ws = TestWorkspace::named("auto-complete-plan-schema-detail");
+    let bin_dir = ws.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let marker = ws.path().join("launched.flag");
+    let prompt_dump = ws.path().join("received.prompt");
+
+    stage_goose_stub(&bin_dir, &marker, &prompt_dump);
+    stage_default_config(ws.path());
+    init_git_repo(ws.path());
+
+    let prompts = ws.path().join("prompts");
+    fs::create_dir_all(&prompts).unwrap();
+
+    let plan_content = r#"---
+name: 'Plan'
+description: 'Creates a multi-phase, high confidence plan from a _feature_ or _plan_'
+$schema:
+  spec: 'file(required;match(**/*spec*.md);eager)'
+  design: 'file(match(**/*design*.md))'
+  plan: 'file'
+---
+# Plan
+"#;
+
+    fs::write(prompts.join("plan.md"), plan_content).unwrap();
+    fs::write(
+        prompts.join("planner.md"),
+        r#"---
+name: 'Planner'
+description: 'Creates a multi-phase, high confidence plan from a _feature_ or _plan_'
+$schema:
+  spec: 'file(required;match(**/*spec*.md);eager)'
+  design: 'file(match(**/*design*.md))'
+  plan: 'file'
+---
+# Planner
+"#,
+    )
+    .unwrap();
+
+    ws
+}
+
+/// Drive the multi-match chooser and wait for its detail pane to settle.
+fn drive_plan_schema_chooser<H: KeySender>(harness: &mut H, ws: &TestWorkspace) -> CapturedFrame {
+    send_compose_command(harness, ws);
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut frame = harness.capture().expect("initial capture");
+    while Instant::now() < deadline {
+        if frame.plain.contains(CHOOSER_HINT) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+        frame = harness.capture().expect("wait for chooser");
+    }
+    assert!(
+        frame.plain.contains(CHOOSER_HINT),
+        "chooser never rendered; plain:\n{}",
+        frame.plain
+    );
+
+    // Let the detail pane finish rendering before capturing.
+    std::thread::sleep(Duration::from_millis(200));
+    let captured = harness.capture().expect("capture plan schema chooser");
+
+    harness.send_esc().expect("send Esc to cancel");
+    let _ = wait_for_shell_return(harness, ws, Duration::from_secs(10));
+
+    captured
+}
+
+/// Assert the captured chooser detail pane preserves schema property order,
+/// keeps `match(...)` globs unmangled, and renders description emphasis
+/// through the real terminal capture path.
+fn assert_schema_detail_rendered(frame: &CapturedFrame) {
+    let plain = &frame.plain;
+    let raw = &frame.raw;
+
+    assert!(
+        plain.contains("spec:"),
+        "detail pane must contain 'spec:' property; plain:\n{plain}"
+    );
+    assert!(
+        plain.contains("design:"),
+        "detail pane must contain 'design:' property; plain:\n{plain}"
+    );
+    assert!(
+        plain.contains("plan:"),
+        "detail pane must contain 'plan:' property; plain:\n{plain}"
+    );
+
+    let spec_idx = plain.find("spec:").unwrap();
+    let design_idx = plain.find("design:").unwrap();
+    let plan_idx = plain.find("plan:").unwrap();
+    assert!(
+        spec_idx < design_idx && design_idx < plan_idx,
+        "schema properties must appear in authored order; plain:\n{plain}"
+    );
+
+    assert!(
+        plain.contains("match(**/*spec*.md)"),
+        "spec match glob must render unmangled; plain:\n{plain}"
+    );
+    assert!(
+        plain.contains("match(**/*design*.md)"),
+        "design match glob must render unmangled; plain:\n{plain}"
+    );
+
+    assert!(
+        plain.contains("multi-phase"),
+        "description must contain 'multi-phase'; plain:\n{plain}"
+    );
+    assert!(
+        plain.contains("feature"),
+        "description must contain the word 'feature'; plain:\n{plain}"
+    );
+    assert!(
+        plain.contains("plan"),
+        "description must contain the word 'plan'; plain:\n{plain}"
+    );
+    assert!(
+        !plain.contains("_feature_"),
+        "literal '_feature_' markup must not leak; plain:\n{plain}"
+    );
+    assert!(
+        !plain.contains("_plan_"),
+        "literal '_plan_' markup must not leak; plain:\n{plain}"
+    );
+    assert!(
+        raw.contains("\u{1b}[3m"),
+        "raw capture must contain italic SGR for emphasis; raw:\n{raw}"
+    );
+}
+
+fn run_schema_detail_test<H: KeySender>(harness: &mut H) {
+    let ws = stage_plan_schema_workspace();
+    let frame = drive_plan_schema_chooser(harness, &ws);
+    assert_schema_detail_rendered(&frame);
+}
+
+// ----------------------------------------------------------------------
 // tmux backend
 // ----------------------------------------------------------------------
 
@@ -634,6 +784,16 @@ fn level2_tmux_sequence_yaml_chooser_detail_above_in_tall_terminal() {
         .resize(TALL_COLUMNS, TALL_LINES)
         .expect("resize tmux pane tall");
     run_yaml_tall_layout_test(&mut harness);
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_tmux_operation_file_schema_detail_renders_faithfully() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let mut harness = TmuxHarness::new();
+    harness.spawn_shell().expect("tmux harness");
+    harness.resize(120, 50).expect("resize tmux pane large");
+    run_schema_detail_test(&mut harness);
 }
 
 // ----------------------------------------------------------------------

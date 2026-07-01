@@ -417,7 +417,7 @@ done
             "compose",
             "--opencode",
             "--timeout",
-            "5s",
+            "2s",
             md_file.to_str().unwrap(),
         ])
         .timeout(Duration::from_secs(120))

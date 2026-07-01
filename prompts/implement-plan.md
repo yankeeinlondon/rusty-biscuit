@@ -2,17 +2,17 @@
 $schema:
     phase: number(required;default(1))
     total_phases: number(required)
-    plan: file(eager; required)
-    spec: file(eager)
+    plan: file(eager; required; match(**/*plan*.md))
+    spec: file(eager; match(**/*spec*.md))
 description: |-
     Provide either a `plan` or `spec` filepath as a parameter and this
     prompt will detect the number of phases in the plan and then implement
     the project phase by phase.
-plan: "{{ file_exists(spec) ? replace(spec, 'spec','plan')  : null }}"
+plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
 phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || 1 : null }}"
 area: "{{ ctx.area }}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
-total_phases: "{{ file_exists(plan) ? frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') : 0 }}"
+total_phases: "{{ file_exists(plan) ? frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') || 1 : 0 }}"
 spec: "{{ file_exists(plan) ? file_exists(dirname(plan) + '/spec.md') ? dirname(plan) + '/spec.md'  :  null : null }}"
 # initialize:
 #     stack:

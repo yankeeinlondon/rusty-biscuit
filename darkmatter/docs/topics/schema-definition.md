@@ -94,7 +94,7 @@ $schema:
 | `boolean`    | Any JSON boolean.                                                                                      | Constraints: `default`, `required`.                                                                                                                                             |
 | `boolish`    | A JSON boolean **or** the strings `"true"` / `"false"` (any case).                                     | Compiles to `anyOf: [boolean, enum]`. A `"true"` / `"false"` value is **normalized** to a real boolean (see [Type Coercion](#type-coercion)).                                  |
 | `object`     | Any YAML/JSON object.                                                                                  | No nested-schema authoring in v1 — `object` accepts any shape. Reference an external file for deeper typing.                                                                    |
-| `file`       | A file reference parsed via `biscuit-file::FileReference`. Single or array form.                       | Constraints: `eager`, `match(glob, ...)`, `required`. **Lazy by default** (syntax-only); `file(eager)` resolves & checks existence **document-first, then launch-area fallback**. See [Files](#files).        |
+| `file`       | A file reference parsed via `biscuit-file::FileReference`. Single or array form.                       | Constraints: `eager`, `match(glob, ...)`, `required`. **Lazy by default** (syntax-only); `file(eager)` resolves & checks existence **document-first, then launch-area fallback**, and on validation success its stored value is **rewritten** to the repo-relative resolved path. Bare `file` is left verbatim. See [Files](#files).        |
 | `enum`       | A value from an explicit set.                                                                          | Constraints required — the members are the constraint. See [Enumerations](#enumerations).                                                                                       |
 | `url`        | A string parseable as an absolute URL.                                                                 | Constraints: `scheme(...)`, `default`, `required`.                                                                                                                              |
 | `email`      | A string in `addr-spec` form.                                                                          | JSON Schema `format: email`.                                                                                                                                                    |
@@ -171,6 +171,17 @@ ambient current working directory.
 `match(globs)` is **suggestion metadata only** — it shapes path completion (which
 candidates a tool offers) but never rejects a value. An existing file that matches no
 configured glob still validates.
+
+When an eager `file(eager)` value validates, its stored value is **rewritten to the
+resolved, repo-relative path** — the same projection `relative(value)` /
+`dirname(value)` already produce. A raw `./spec.md` becomes `area/spec.md` when the
+prompt lives in `area/` inside a repo, so `spec` and `dirname(spec)` agree by
+construction. Bare (lazy) `file` values, `string`-typed properties, remote URLs,
+absent/`null` optionals, and values still holding `$(...)` or unresolved `{{ ... }}`
+are left verbatim. The rewrite is idempotent and stores `/` separators on every OS,
+so a committed eager-`file` reference is portable across macOS, Linux, and Windows.
+See [Schema Validation — Eager-`file` value normalization](../inline/schema-validation.md#eager-file-value-normalization)
+for the full contract.
 
 ```yaml
 $schema:

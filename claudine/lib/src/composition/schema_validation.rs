@@ -293,6 +293,22 @@ fn translate_schema_failure(
     }
 
     if !categorized.invalid_optional.is_empty() {
+        let droppable =
+            filter_droppable_invalid_optionals(&categorized.invalid_optional, effective.as_ref());
+        if droppable.len() != categorized.invalid_optional.len() {
+            let hard: Vec<_> = categorized
+                .invalid_optional
+                .iter()
+                .filter(|problem| {
+                    !droppable.iter().any(|droppable_problem| {
+                        droppable_problem.path == problem.path
+                            && droppable_problem.message == problem.message
+                    })
+                })
+                .cloned()
+                .collect();
+            return Err(build_schema_validation_error(&source.resolved_path, &hard));
+        }
         // Drop invalid optionals from a clone of the source AND from the
         // run's `set_overrides` map. Source-only removal is not enough:
         // overrides land on top of frontmatter during compose, so a bad
@@ -300,10 +316,9 @@ fn translate_schema_failure(
         // Retry the prepare step exactly once. If composition still fails,
         // fall through to surface the residual problem (likely a missing
         // required property).
-        let (retry_source, source_drops) =
-            source_with_dropped_optionals(source, &categorized.invalid_optional);
+        let (retry_source, source_drops) = source_with_dropped_optionals(source, &droppable);
         let (retry_options, override_drops) =
-            options_with_dropped_optionals(options.clone(), &categorized.invalid_optional);
+            options_with_dropped_optionals(options.clone(), &droppable);
         dropped.extend(source_drops);
         dropped.extend(override_drops);
         return match run_prepare(&retry_source, retry_options, mode) {
@@ -430,6 +445,21 @@ fn post_shell_validate(
     }
 
     if !categorized.invalid_optional.is_empty() {
+        let droppable = filter_droppable_invalid_optionals(&categorized.invalid_optional, Some(&effective));
+        if droppable.len() != categorized.invalid_optional.len() {
+            let hard: Vec<_> = categorized
+                .invalid_optional
+                .iter()
+                .filter(|problem| {
+                    !droppable.iter().any(|droppable_problem| {
+                        droppable_problem.path == problem.path
+                            && droppable_problem.message == problem.message
+                    })
+                })
+                .cloned()
+                .collect();
+            return Err(build_schema_validation_error(&source.resolved_path, &hard));
+        }
         // Drop invalid optionals from the composed effective frontmatter
         // and revalidate. Track each as a post-shell drop so the CLI can
         // surface a warning to the user.
@@ -440,7 +470,7 @@ fn post_shell_validate(
                 return Ok(prepared);
             }
         };
-        for problem in &categorized.invalid_optional {
+        for problem in &droppable {
             let Some(name) = top_level_pointer_segment(&problem.path) else {
                 continue;
             };
@@ -631,6 +661,21 @@ fn options_with_dropped_optionals(
     (options, drops)
 }
 
+fn filter_droppable_invalid_optionals(
+    invalid_optional: &[ValidationProblem],
+    effective: Option<&EffectiveSchema>,
+) -> Vec<ValidationProblem> {
+    let shape: Option<&SchemaShape> = effective.and_then(|e| match e.simplified.as_ref() {
+        Some(SimplifiedSchema::Single(s)) => Some(s),
+        Some(SimplifiedSchema::Union(_)) | None => None,
+    });
+    invalid_optional
+        .iter()
+        .filter(|problem| !is_eager_file_problem(shape, problem))
+        .cloned()
+        .collect()
+}
+
 // -- categorization ---------------------------------------------------------
 
 struct CategorizedProblems {
@@ -733,6 +778,122 @@ fn is_required(shape: Option<&SchemaShape>, name: &str) -> bool {
         atom.constraints
             .iter()
             .any(|c| matches!(c, Constraint::Required))
+    })
+}
+
+/// Classify a validation problem set as a
+/// [`CompositionError::UnresolvedFileReference`] when a **provided** value for
+/// a `file`/`file[]` property with non-empty `match(...)` patterns failed
+/// existence resolution (Darkmatter's `NoMatch` case).
+///
+/// This is the read-side twin of the missing-property classification: instead
+/// of the value being *absent*, the user supplied a value best interpreted as a
+/// **partial** — a substring to match against the property's `match(...)` glob
+/// candidates. The CLI catches this variant and drives a confirmation dialog
+/// (single match) or chooser (multiple), mirroring the missing-property loop.
+///
+/// Returns `None` when no problem qualifies, so the caller falls back to the
+/// generic [`CompositionError::SchemaValidation`]. Only the first qualifying
+/// property is surfaced; the interactive retry re-runs validation and picks up
+/// any remaining ones one at a time.
+fn classify_unresolved_file_reference(
+    source_path: &std::path::Path,
+    problems: &[ValidationProblem],
+    effective: Option<&EffectiveSchema>,
+    instance: &serde_json::Value,
+) -> Option<CompositionError> {
+    let shape = match effective?.simplified.as_ref()? {
+        SimplifiedSchema::Single(s) => s,
+        SimplifiedSchema::Union(_) => return None,
+    };
+    for problem in problems {
+        // Only Darkmatter's `NoMatch` ("no existing file matched reference")
+        // is a resolvable partial — a parse/resolution error is a genuinely
+        // bad value that a glob walk cannot rescue.
+        if !problem.message.contains("no existing file matched reference") {
+            continue;
+        }
+        let Some(name) = top_level_pointer_segment(&problem.path) else {
+            continue;
+        };
+        let Some(atom) = atom_for_property(shape, &name) else {
+            continue;
+        };
+        if !matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::File)) {
+            continue;
+        }
+        let patterns: Vec<String> = atom
+            .constraints
+            .iter()
+            .find_map(|c| match c {
+                Constraint::Match(p) => Some(p.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        // A bare `file` (no glob) has nothing to walk — leave it to the generic
+        // validation path.
+        if patterns.is_empty() {
+            continue;
+        }
+        let Some(provided) = provided_partial_value(instance.get(&name)) else {
+            continue;
+        };
+        return Some(CompositionError::UnresolvedFileReference {
+            source_path: source_path.to_path_buf(),
+            property: name,
+            provided,
+            patterns,
+            is_array: atom.is_array,
+            reason: problem.message.clone(),
+        });
+    }
+    None
+}
+
+/// Extract the user-provided partial from a frontmatter/override value.
+///
+/// Returns the string for a scalar `file` value (the substring to match against
+/// the `match(...)` glob candidates). For a `file[]` value, accepts an array of
+/// strings and uses the first non-empty string as the partial; a scalar string
+/// is treated as single-element intent for convenience. Non-string array
+/// elements or empty arrays are rejected and left to the generic
+/// schema-validation path.
+fn provided_partial_value(value: Option<&serde_json::Value>) -> Option<String> {
+    match value? {
+        serde_json::Value::String(s) if !s.trim().is_empty() => Some(s.clone()),
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .find_map(|v| match v {
+                serde_json::Value::String(s) if !s.trim().is_empty() => Some(s.clone()),
+                _ => None,
+            }),
+        _ => None,
+    }
+}
+
+fn is_eager_file_problem(shape: Option<&SchemaShape>, problem: &ValidationProblem) -> bool {
+    if !matches!(problem.kind, ValidationProblemKind::Invalid | ValidationProblemKind::Type) {
+        return false;
+    }
+    let Some(name) = top_level_pointer_segment(&problem.path) else {
+        return false;
+    };
+    let Some(shape) = shape else {
+        return false;
+    };
+    let Some(def) = shape.properties.get(&name) else {
+        return false;
+    };
+    let atoms: Vec<&PropertyAtom> = match def {
+        PropertyDef::Single(atom) => vec![atom],
+        PropertyDef::Union(items) => items.iter().collect(),
+    };
+    atoms.iter().any(|atom| {
+        matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::File))
+            && atom
+                .constraints
+                .iter()
+                .any(|constraint| matches!(constraint, Constraint::Eager))
     })
 }
 
@@ -1182,7 +1343,8 @@ pub fn pre_validate_schema(
         Err(err) => return Err(err),
     };
 
-    let instance = build_effective_instance(&source, set_overrides.as_ref());
+    let mut instance = build_effective_instance(&source, set_overrides.as_ref());
+    normalize_file_array_values(&mut instance, Some(&effective));
     let report = effective.validate(&instance);
     if report.valid {
         return Ok(PreValidatedSchema {
@@ -1223,9 +1385,38 @@ pub fn pre_validate_schema(
 
     let categorized = categorize_problems(&composition_independent, Some(&effective));
     if !categorized.invalid_required.is_empty() {
+        // A provided `file(match)` partial that failed existence resolution is
+        // surfaced as the typed `UnresolvedFileReference` so the CLI can offer
+        // a glob+substring confirmation/chooser, rather than the generic
+        // wrong-type schema error.
+        if let Some(err) = classify_unresolved_file_reference(
+            &source.resolved_path,
+            &categorized.invalid_required,
+            Some(&effective),
+            &instance,
+        ) {
+            return Err(err);
+        }
         return Err(build_schema_validation_error(
             &source.resolved_path,
             &categorized.invalid_required,
+        ));
+    }
+    if !categorized.invalid_optional.is_empty() {
+        // Eager-optional `file(match)` failures reach here too (they are kept,
+        // not dropped); offer the same interactive resolution for a provided
+        // partial before falling back to the generic schema error.
+        if let Some(err) = classify_unresolved_file_reference(
+            &source.resolved_path,
+            &categorized.invalid_optional,
+            Some(&effective),
+            &instance,
+        ) {
+            return Err(err);
+        }
+        return Err(build_schema_validation_error(
+            &source.resolved_path,
+            &categorized.invalid_optional,
         ));
     }
     if !categorized.missing_required.is_empty() {
@@ -1264,6 +1455,45 @@ fn build_effective_instance(
         }
     }
     serde_json::Value::Object(map)
+}
+
+/// Normalize scalar string values into single-element arrays for `file[]`
+/// schema properties.
+///
+/// This lets `attachments=everywhere` (parsed as a string) be treated as
+/// single-element intent for a `file[]` property, matching the shorthand
+/// behavior users expect and ensuring the value reaches the file-reference
+/// classifier instead of failing with a type error.
+fn normalize_file_array_values(
+    instance: &mut serde_json::Value,
+    effective: Option<&EffectiveSchema>,
+) {
+    let serde_json::Value::Object(map) = instance else {
+        return;
+    };
+    let shape = match effective {
+        Some(e) => match e.simplified.as_ref() {
+            Some(SimplifiedSchema::Single(s)) => Some(s),
+            _ => None,
+        },
+        _ => None,
+    };
+    let Some(shape) = shape else {
+        return;
+    };
+    for (name, _atom) in shape.properties.iter().filter_map(|(n, def)| {
+        match def {
+            PropertyDef::Single(a) if a.is_array && matches!(a.ty, TypeExpr::Primitive(SimplifiedType::File)) => Some((n, a)),
+            _ => None,
+        }
+    }) {
+        let Some(value) = map.get_mut(name) else {
+            continue;
+        };
+        if value.is_string() {
+            *value = serde_json::Value::Array(vec![value.take()]);
+        }
+    }
 }
 
 /// Pre-scrub helper that drops invalid optional values from raw
@@ -1341,6 +1571,9 @@ pub fn drop_invalid_optionals(
                     continue;
                 };
                 if is_required(shape, &name) {
+                    continue;
+                }
+                if is_eager_file_problem(shape, problem) {
                     continue;
                 }
                 // Composition-tolerant: skip values that look templated,
@@ -2393,6 +2626,251 @@ mod tests {
     }
 
     #[test]
+    fn drop_invalid_optionals_keeps_optional_eager_file_failures() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            "---\n$schema:\n  spec: 'file(eager)'\nspec: missing/spec.md\n---\nbody\n",
+        );
+
+        let (scrubbed, _, dropped) = drop_invalid_optionals(source, None, None);
+        assert!(dropped.is_empty());
+        assert_eq!(
+            scrubbed.markdown.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!("missing/spec.md")),
+            "optional eager file failures must remain visible for the schema error",
+        );
+    }
+
+    #[test]
+    fn pre_validate_schema_reports_optional_eager_file_failures() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            "---\n$schema:\n  spec: 'file(eager)'\nspec: missing/spec.md\n---\nbody\n",
+        );
+
+        let err = pre_validate_schema(&source, None, None)
+            .expect_err("optional eager file failures should not be dropped");
+        match err {
+            CompositionError::SchemaValidation {
+                message, problems, ..
+            } => {
+                assert!(
+                    message.contains("missing/spec.md"),
+                    "schema validation should retain the invalid file reference: {message}",
+                );
+                assert!(
+                    message.contains("no existing file matched reference"),
+                    "schema validation should retain the targeted file-reference reason: {message}",
+                );
+                assert_eq!(problems, vec!["/spec".to_string()]);
+            }
+            other => panic!("expected SchemaValidation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scratch_dump_file_array_problems() {
+        for (label, override_val) in [
+            ("scalar-string", serde_json::json!({ "attachments": "everywhere" })),
+            ("array-of-one", serde_json::json!({ "attachments": ["everywhere"] })),
+            (
+                "array-of-two",
+                serde_json::json!({ "attachments": ["everywhere", "here"] }),
+            ),
+        ] {
+            let dir = TempDir::new().unwrap();
+            let source = make_source(
+                &dir,
+                "---\n$schema:\n  attachments: 'file(required;match(**/*spec*.md);eager)[]'\n---\nbody\n",
+            );
+            let effective = load_effective_schema(&source, None).unwrap().unwrap();
+            let instance = build_effective_instance(&source, Some(&override_val));
+            let report = effective.validate(&instance);
+            eprintln!("=== {label} valid={} ===", report.valid);
+            if let Some(SimplifiedSchema::Single(s)) = effective.simplified.as_ref()
+                && let Some(atom) = atom_for_property(s, "attachments")
+            {
+                eprintln!("  atom.is_array={} ty={:?}", atom.is_array, atom.ty);
+            }
+            for p in &report.problems {
+                eprintln!(
+                    "  problem: kind={:?} path={:?} msg={:?}",
+                    p.kind, p.path, p.message
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn provided_file_match_partial_reports_unresolved_file_reference() {
+        // `spec=everywhere` is a provided partial for a required `file(match)`
+        // property with no literal `everywhere` file. Instead of the generic
+        // SchemaValidation, the layer surfaces the typed UnresolvedFileReference
+        // so the CLI can offer a glob+substring confirmation dialog.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            "---\n$schema:\n  spec: 'file(required;match(**/*spec*.md);eager)'\n---\nbody\n",
+        );
+        let overrides = serde_json::json!({ "spec": "everywhere" });
+
+        let err = pre_validate_schema(&source, Some(&overrides), None)
+            .expect_err("a provided file(match) partial with no literal match should surface a typed error");
+        match err {
+            CompositionError::UnresolvedFileReference {
+                property,
+                provided,
+                patterns,
+                is_array,
+                reason,
+                ..
+            } => {
+                assert_eq!(property, "spec");
+                assert_eq!(provided, "everywhere");
+                assert_eq!(patterns, vec!["**/*spec*.md".to_string()]);
+                assert!(!is_array);
+                assert!(
+                    reason.contains("no existing file matched reference"),
+                    "reason should preserve the original file-reference failure text: {reason}",
+                );
+            }
+            other => panic!("expected UnresolvedFileReference, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provided_file_array_match_partial_reports_unresolved_file_reference() {
+        // `attachments=["everywhere"]` is a provided partial for a required
+        // `file[](match)` property with no literal match. The classifier must
+        // surface `is_array: true` so the CLI can resolve into an array value.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            "---\n$schema:\n  attachments: 'file(required;match(**/*spec*.md);eager)[]'\n---\nbody\n",
+        );
+        let overrides = serde_json::json!({ "attachments": ["everywhere"] });
+
+        let err = pre_validate_schema(&source, Some(&overrides), None)
+            .expect_err("a provided file[](match) partial with no literal match should surface a typed error");
+        match err {
+            CompositionError::UnresolvedFileReference {
+                property,
+                provided,
+                patterns,
+                is_array,
+                reason,
+                ..
+            } => {
+                assert_eq!(property, "attachments");
+                assert_eq!(provided, "everywhere");
+                assert_eq!(patterns, vec!["**/*spec*.md".to_string()]);
+                assert!(is_array, "file[] property must report is_array: true");
+                assert!(
+                    reason.contains("no existing file matched reference"),
+                    "reason should preserve the original file-reference failure text: {reason}",
+                );
+            }
+            other => panic!("expected UnresolvedFileReference, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provided_file_scalar_for_array_property_match_partial_reports_unresolved_file_reference() {
+        // A scalar string supplied for a `file[]` property is treated as
+        // single-element intent and should still classify as an unresolved
+        // file reference with `is_array: true`.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            "---\n$schema:\n  attachments: 'file(required;match(**/*spec*.md);eager)[]'\n---\nbody\n",
+        );
+        let overrides = serde_json::json!({ "attachments": "everywhere" });
+
+        let err = pre_validate_schema(&source, Some(&overrides), None)
+            .expect_err("a scalar partial for file[](match) should surface a typed error");
+        match err {
+            CompositionError::UnresolvedFileReference {
+                property,
+                provided,
+                is_array,
+                ..
+            } => {
+                assert_eq!(property, "attachments");
+                assert_eq!(provided, "everywhere");
+                assert!(is_array, "scalar provided to file[] property must still report is_array: true");
+            }
+            other => panic!("expected UnresolvedFileReference, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provided_partial_value_handles_scalar_and_array_for_file_array() {
+        assert_eq!(
+            provided_partial_value(Some(&serde_json::json!("everywhere"))),
+            Some("everywhere".to_string())
+        );
+        assert_eq!(
+            provided_partial_value(Some(&serde_json::json!(["everywhere"]))),
+            Some("everywhere".to_string())
+        );
+        assert_eq!(
+            provided_partial_value(Some(&serde_json::json!(["", "everywhere", "else"]))),
+            Some("everywhere".to_string())
+        );
+        assert_eq!(provided_partial_value(Some(&serde_json::json!([]))), None);
+        assert_eq!(
+            provided_partial_value(Some(&serde_json::json!(["", "  "]))),
+            None
+        );
+        assert_eq!(
+            provided_partial_value(Some(&serde_json::json!([42, true]))),
+            None
+        );
+        assert_eq!(provided_partial_value(Some(&serde_json::json!(42))), None);
+    }
+
+    #[test]
+    fn provided_file_array_with_non_string_elements_stays_schema_validation() {
+        // Non-string array elements are not valid file[] values and must not be
+        // misclassified as a partial.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            "---\n$schema:\n  attachments: 'file(required;match(**/*spec*.md);eager)[]'\n---\nbody\n",
+        );
+        let overrides = serde_json::json!({ "attachments": [42, true] });
+
+        let err = pre_validate_schema(&source, Some(&overrides), None)
+            .expect_err("non-string array elements should fail validation");
+        assert!(
+            matches!(err, CompositionError::SchemaValidation { .. }),
+            "expected SchemaValidation for non-string file[] elements, got {err:?}",
+        );
+    }
+
+    #[test]
+    fn provided_file_without_match_stays_schema_validation() {
+        // A bare `file` (no `match(...)` glob) has nothing to walk, so a bad
+        // provided value stays the generic SchemaValidation error rather than
+        // the resolvable UnresolvedFileReference.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            "---\n$schema:\n  spec: 'file(required;eager)'\n---\nbody\n",
+        );
+        let overrides = serde_json::json!({ "spec": "missing/spec.md" });
+
+        let err = pre_validate_schema(&source, Some(&overrides), None)
+            .expect_err("a bare-file bad value should still fail validation");
+        assert!(
+            matches!(err, CompositionError::SchemaValidation { .. }),
+            "expected SchemaValidation for a bare file property, got {err:?}",
+        );
+    }
+
+    #[test]
     fn value_needs_composition_detects_nested_templates() {
         assert!(value_needs_composition(Some(&serde_json::json!(
             "{{ env.X }}"
@@ -2668,9 +3146,11 @@ mod tests {
     // `file_ref_fallback_dir`. The regressions below switch the process CWD
     // to an unrelated directory to prove resolution is CWD-independent: a
     // `file`-typed value that exists only under the fallback must be accepted
-    // (`pre_validate_schema`) or kept (`drop_invalid_optionals`), and a
-    // value that exists only under the document dir must win over a
-    // same-named fallback file (prompt-dir precedence).
+    // (`pre_validate_schema`) or kept (`drop_invalid_optionals`). Without the
+    // fallback, required values surface as validation errors while optional
+    // eager file values remain visible for the later schema error path instead
+    // of being pre-dropped. A value that exists only under the document dir
+    // must win over a same-named fallback file (prompt-dir precedence).
 
     /// RAII guard that captures the process CWD on construction, switches to
     /// the requested directory, and restores the captured CWD on drop —
@@ -2816,13 +3296,14 @@ mod tests {
         );
     }
 
-    /// Companion negative: WITHOUT the fallback, the same optional `file`
-    /// value is unresolvable from the unrelated CWD and IS dropped. Confirms
-    /// the keep above is due to the fallback, not because the file happens to
-    /// be reachable.
+    /// Companion negative: WITHOUT the fallback, the same optional eager
+    /// `file` value is unresolvable from the unrelated CWD. It must still be
+    /// kept by the pre-preflight scrubber because optional eager file failures
+    /// intentionally remain visible for the later schema error path instead of
+    /// being silently dropped.
     #[test]
     #[serial_test::serial(schema_validation_cwd)]
-    fn drop_invalid_optionals_drops_file_when_no_fallback() {
+    fn drop_invalid_optionals_keeps_unresolved_eager_file_when_no_fallback() {
         let doc_dir = TempDir::new().unwrap();
         let fallback_dir = TempDir::new().unwrap();
         let unrelated = TempDir::new().unwrap();
@@ -2837,16 +3318,16 @@ mod tests {
         let (scrubbed, _overrides, dropped) = drop_invalid_optionals(source, None, None);
 
         assert!(
-            !scrubbed
+            scrubbed
                 .markdown
                 .frontmatter()
                 .as_map()
                 .contains_key("notes"),
-            "without the fallback, an unresolvable optional file value is dropped",
+            "unresolvable optional eager file values must remain visible for schema validation",
         );
         assert!(
-            dropped.iter().any(|d| d.property == "notes"),
-            "expected a drop diagnostic for the unresolvable optional file value",
+            dropped.iter().all(|d| d.property != "notes"),
+            "no drop diagnostic should be emitted for an optional eager file value",
         );
     }
 

@@ -91,11 +91,11 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
         builder
     };
 
-    // Coerce schema-recognized scalars to their declared types and write the
-    // coerced top-level properties back, so real types flow to every later
-    // stage and into the composed output. `effective_for` returns an owned
-    // schema, so no borrow of `markdown` persists into the mutation below.
-    if let Some(effective) = schemas.effective_for(markdown).map_err(|err| {
+    // Build the effective schema once; the same instance is reused for the
+    // eager-`file` rewrite pass after validation accepts the instance.
+    // `effective_for` returns an owned schema (no borrow of `markdown`), so it
+    // can outlive the frontmatter mutations below.
+    let effective = schemas.effective_for(markdown).map_err(|err| {
         MarkdownError::SchemaValidationFailed {
             path: path.clone(),
             problems: Vec::new(),
@@ -103,37 +103,13 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
             description: description.clone(),
             source: Some(Box::new(err)),
         }
-    })? {
-        // Build the validation instance and the shell-pending key set while
-        // holding only an immutable borrow; both are dropped before the write.
-        let (instance, composition_pending) = {
-            let fm_map = markdown.frontmatter().as_map();
-            let mut object = serde_json::Map::with_capacity(fm_map.len());
-            let mut composition_pending = std::collections::HashSet::new();
-            for (key, value) in fm_map {
-                // `$schema` is a Darkmatter control key, not document data. This
-                // exclusion must match `schemas::frontmatter_as_json`, which
-                // builds the instance the library validate path coerces against;
-                // if the two diverge, compose and validate would coerce against
-                // different instances.
-                if key == "$schema" {
-                    continue;
-                }
-                // DM1b: deferred (excluded) keys are Claudine control keys, not
-                // user data. They need event-time interpolation and are validated
-                // by the caller's own subtree parser/guards, so skip them from
-                // user schema value validation entirely.
-                if options.exclude_keys.contains(key) {
-                    continue;
-                }
-                if value_pending_composition(Some(value)) {
-                    composition_pending.insert(key.clone());
-                }
-                object.insert(key.clone(), value.clone());
-            }
-            (serde_json::Value::Object(object), composition_pending)
-        };
+    })?;
 
+    if let Some(effective) = effective.as_ref() {
+        // Coerce schema-recognized scalars to their declared types and write the
+        // coerced top-level properties back, so real types flow to every later
+        // stage and into the composed output.
+        let (instance, composition_pending) = build_validation_instance(markdown, options);
         let outcome =
             coerce_frontmatter_with_pending(&effective.json_schema, &instance, &composition_pending);
         if outcome.changed
@@ -219,6 +195,29 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
         });
     }
 
+    // Eager-`file` normalization (Decision #4: "a document with final
+    // validation problems is never rewritten"). We only reach here when the
+    // composition-independent gate passed, so it is safe to rewrite present
+    // eager-`file` values to their resolved repo-relative paths. The rewrite
+    // shares the same instance-construction loop as coercion, so `$schema`
+    // and `options.exclude_keys` stay outside the write-back; pending keys
+    // are skipped the same way.
+    if let Some(effective) = effective.as_ref() {
+        let (instance, composition_pending) = build_validation_instance(markdown, options);
+        let outcome = effective.normalize_frontmatter(&instance, &composition_pending);
+        if outcome.changed
+            && let serde_json::Value::Object(rewritten) = outcome.value
+        {
+            let fm_map = markdown.frontmatter_mut().as_map_mut();
+            for (key, value) in rewritten {
+                if composition_pending.contains(&key) {
+                    continue;
+                }
+                fm_map.insert(key, value);
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -242,6 +241,37 @@ fn value_pending_composition(value: Option<&serde_json::Value>) -> bool {
         serde_json::Value::Object(map) => map.values().any(|v| value_pending_composition(Some(v))),
         _ => false,
     }
+}
+
+/// Builds the validation instance and the composition-pending key set from
+/// the document's current frontmatter.
+///
+/// Excludes `$schema` (a Darkmatter control key, not document data — this
+/// must match `schemas::frontmatter_as_json`) and every key in
+/// `options.exclude_keys` (DM1b: caller-owned control keys). Both the
+/// coercion pass and the eager-`file` rewrite pass consume this same
+/// instance construction so the two never diverge on which keys are in
+/// scope.
+fn build_validation_instance(
+    markdown: &Markdown,
+    options: &ComposeOptions,
+) -> (serde_json::Value, std::collections::HashSet<String>) {
+    let fm_map = markdown.frontmatter().as_map();
+    let mut object = serde_json::Map::with_capacity(fm_map.len());
+    let mut composition_pending = std::collections::HashSet::new();
+    for (key, value) in fm_map {
+        if key == "$schema" {
+            continue;
+        }
+        if options.exclude_keys.contains(key) {
+            continue;
+        }
+        if value_pending_composition(Some(value)) {
+            composition_pending.insert(key.clone());
+        }
+        object.insert(key.clone(), value.clone());
+    }
+    (serde_json::Value::Object(object), composition_pending)
 }
 
 fn top_level_pointer_segment(pointer: &str) -> Option<String> {
@@ -1109,5 +1139,171 @@ mod tests {
         // not coerced to a boolean.
         let failure = md.frontmatter().as_map().get("failure").expect("present");
         assert_eq!(failure.get("flag"), Some(&serde_json::json!("true")));
+    }
+
+    // ── Phase 3: eager-`file` value normalization write-back ──────────
+
+    /// A repo fixture with a `.git` marker so the rewrite projects
+    /// git-root-relative. The prompt lives in `area/` and references a file
+    /// beside it; the rewrite must store the git-root-relative form.
+    #[test]
+    fn eager_file_value_rewritten_to_repo_relative_after_run() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        std::fs::create_dir_all(repo.path().join("area")).unwrap();
+        std::fs::write(repo.path().join("area/spec.md"), "# Spec\n").unwrap();
+        let doc_path = repo.path().join("area/prompt.md");
+        let mut md = md_with_schema_and_source(
+            "$schema:\n  spec: 'file(eager; required)'\nspec: ./spec.md\n",
+            &doc_path,
+        );
+        let options = ComposeOptions::new().with_source_file(&doc_path);
+        assert!(run(&mut md, &options).is_ok());
+        // The raw `./spec.md` is rewritten to the git-root-relative
+        // `area/spec.md`, matching `relative(spec)`/`dirname(spec)`.
+        assert_eq!(
+            md.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!("area/spec.md")),
+        );
+    }
+
+    /// Idempotence at the compose level (Decision #6): running the stage on
+    /// an already-rewritten value is a fixpoint — the stored value does not
+    /// drift across runs. The fallback (launch area) is the repo root, so the
+    /// git-root-relative rewritten value re-resolves on the second pass.
+    #[test]
+    fn eager_file_rewrite_is_idempotent_across_runs() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        std::fs::create_dir_all(repo.path().join("area")).unwrap();
+        std::fs::write(repo.path().join("area/spec.md"), "# Spec\n").unwrap();
+        let doc_path = repo.path().join("area/prompt.md");
+        let mut md = md_with_schema_and_source(
+            "$schema:\n  spec: 'file(eager; required)'\nspec: ./spec.md\n",
+            &doc_path,
+        );
+        let options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_ref_fallback_dir(repo.path().to_path_buf());
+        assert!(run(&mut md, &options).is_ok());
+        assert_eq!(
+            md.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!("area/spec.md")),
+        );
+        // Re-run on the persisted (rewritten) value — it must not change.
+        assert!(run(&mut md, &options).is_ok());
+        assert_eq!(
+            md.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!("area/spec.md")),
+            "re-running the stage on a rewritten value must be a fixpoint",
+        );
+    }
+
+    /// A `$(...)`-pending eager-`file` value is left verbatim by the rewrite
+    /// (Decision #4) — its literal form survives into shell expansion, where
+    /// the post-shell re-validation will handle it.
+    #[test]
+    fn eager_file_rewrite_skips_pending_value() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        std::fs::write(repo.path().join("spec.md"), "# Spec\n").unwrap();
+        let doc_path = repo.path().join("prompt.md");
+        let mut md = md_with_schema_and_source(
+            "$schema:\n  spec: 'file(eager; required)'\nspec: \"$(echo spec.md)\"\n",
+            &doc_path,
+        );
+        let options = ComposeOptions::new().with_source_file(&doc_path);
+        assert!(run(&mut md, &options).is_ok(), "pending value is deferred");
+        assert_eq!(
+            md.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!("$(echo spec.md)")),
+            "pending eager-file value must be left verbatim",
+        );
+    }
+
+    /// A lazy (bare) `file` property is never rewritten even when its value
+    /// happens to resolve to an existing file (Decision #1: only the eager
+    /// marker triggers).
+    #[test]
+    fn lazy_file_value_not_rewritten_by_compose() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        std::fs::write(repo.path().join("spec.md"), "# Spec\n").unwrap();
+        let doc_path = repo.path().join("prompt.md");
+        let mut md = md_with_schema_and_source(
+            "$schema:\n  spec: 'file'\nspec: ./spec.md\n",
+            &doc_path,
+        );
+        let options = ComposeOptions::new().with_source_file(&doc_path);
+        assert!(run(&mut md, &options).is_ok());
+        assert_eq!(
+            md.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!("./spec.md")),
+            "lazy `file` value must be left verbatim",
+        );
+    }
+
+    // ── Phase 4: CWD-independence of the eager-`file` rewrite ──────────
+    //
+    // The rewrite consumes the `ResolutionContext` carried by `EffectiveSchema`
+    // (base_dir + launch-area fallback) and must not introduce an ambient-CWD
+    // anchor (spec: "Implementation constraints"). With the process CWD
+    // mutated to an unrelated directory, compose must still produce the
+    // git-root-relative rewritten value. Mirrors the
+    // `#[serial_test::serial("darkmatter-file-cwd")]` convention already used
+    // in `schemas/format.rs` and `schemas/validate.rs`.
+
+    /// RAII guard that restores the process CWD on drop, even on panic.
+    struct CwdGuard {
+        prior: std::path::PathBuf,
+    }
+
+    impl CwdGuard {
+        fn enter(dir: &std::path::Path) -> Self {
+            let prior = std::env::current_dir().expect("read CWD");
+            std::env::set_current_dir(dir).expect("set CWD");
+            Self { prior }
+        }
+    }
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.prior);
+        }
+    }
+
+    /// With the process CWD mutated to an unrelated directory, compose's
+    /// eager-`file` rewrite still produces the git-root-relative value. The
+    /// rewrite resolves through `EffectiveSchema`'s anchors (prompt dir +
+    /// launch-area fallback), never the ambient CWD.
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn eager_file_rewrite_is_independent_of_process_cwd() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        std::fs::create_dir_all(repo.path().join("area")).unwrap();
+        std::fs::write(repo.path().join("area/spec.md"), "# Spec\n").unwrap();
+        let doc_path = repo.path().join("area/prompt.md");
+
+        let unrelated = tempfile::tempdir().unwrap();
+
+        let mut md = md_with_schema_and_source(
+            "$schema:\n  spec: 'file(eager; required)'\nspec: ./spec.md\n",
+            &doc_path,
+        );
+        // The launch-area fallback is the repo root, so the git-root-relative
+        // rewritten value (`area/spec.md`) re-resolves on a second pass —
+        // proving the rewrite does not depend on the ambient CWD.
+        let options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_ref_fallback_dir(repo.path().to_path_buf());
+
+        let _cwd = CwdGuard::enter(unrelated.path());
+        assert!(run(&mut md, &options).is_ok(), "compose must succeed from an unrelated CWD");
+        assert_eq!(
+            md.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!("area/spec.md")),
+            "rewrite must produce the git-root-relative value regardless of process CWD",
+        );
     }
 }

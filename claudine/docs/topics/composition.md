@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-ddc8a530571dc9a5
-last_updated: 2026-06-25
+hash: ef46db3751d8e999-178702e10af81bb0
+last_updated: 2026-06-30
 ---
 # Claudine Composition
 
@@ -466,6 +466,23 @@ When Interactive Mode is allowed, claudine first prints a per-property status re
 | `object`, `any`, property-level union, root-level union without projection | `UnsupportedInteractiveSchema` |
 
 Numeric inputs reprompt with an inline error on parse failure instead of aborting. Collected values feed back into the override set; composition re-runs with the new overrides before any provider session starts.
+
+### Provided Partial File References
+
+A `file`/`file[]` property declared with a `match(...)` glob accepts more than a literal path. When the user **provides** a value (via `key=value` or `--set`) that does not resolve to an existing file, that value is treated as a **partial** — a substring to match against the property's `match(...)` glob candidates — rather than an immediate hard abort.
+
+```yaml
+$schema:
+  spec: 'file(required; match(**/*spec*.md))'
+```
+
+`claudine compose plan spec=everywhere` (with no literal `everywhere` file) now:
+
+1. walks the `match(**/*spec*.md)` glob from the **launch area** (the same `property_value_root` anchor completion uses, so *offered == accepted*),
+2. filters candidates whose path contains `everywhere` (case-insensitive), and
+3. drives a **confirmation dialog** on a single match, a **chooser** on multiple, then rewrites the property override to the chosen path and re-validates once — mirroring the missing-property collection loop above.
+
+The `match(...)` glob is consulted **only after** literal path resolution fails, so valid explicit paths keep their existing behavior. Both required and `eager`-optional file properties reach this resolution. Zero glob+substring matches, a declined confirmation, or a cancelled chooser fall back to the original `no existing file matched reference` schema-validation error unchanged. When Interactive Mode is denied (not both stdin and stderr TTYs, `--silent`, etc.), the original error is preserved byte-for-byte so scripts and CI output are unaffected. The glob compile and walk live in `claudine-cli`; the library only classifies the failure into the typed `UnresolvedFileReference { property, provided, patterns }` signal and never gains a `globset`/`ignore` dependency.
 
 ### Schema Collection Independence
 

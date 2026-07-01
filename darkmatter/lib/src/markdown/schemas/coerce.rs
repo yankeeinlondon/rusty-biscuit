@@ -66,7 +66,7 @@ pub struct CoercionOutcome {
 /// The recognizer is exact and only matches the wrappers
 /// [`super::simplified::convert`] emits; unrelated `anyOf` schemas return
 /// `None`.
-fn unwrap_nullable_arm(schema: &Value) -> Option<&Value> {
+pub(super) fn unwrap_nullable_arm(schema: &Value) -> Option<&Value> {
     let obj = schema.as_object()?;
     let arms = obj.get("anyOf").and_then(Value::as_array)?;
 
