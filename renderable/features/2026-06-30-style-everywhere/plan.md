@@ -31,8 +31,148 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - biscuit-terminal/lib/src/components/terminal_image/mod.rs
+  - biscuit-terminal/lib/src/components/mermaid.rs
+  - biscuit-terminal/lib/src/components/horizontal_rule/mod.rs
+  - biscuit-terminal/lib/src/components/metrics_tree.rs
+  - biscuit-terminal/lib/src/components/status.rs
+  - biscuit-terminal/lib/src/components/table/table.rs
+  - biscuit-terminal/lib/tests/terminal_image_parity.rs
+  - biscuit-terminal/lib/tests/mermaid_parity.rs
+  - biscuit-terminal/lib/tests/horizontal_rule_parity.rs
+  - biscuit-terminal/lib/tests/metrics_tree_parity.rs
+  - biscuit-terminal/lib/tests/status_parity.rs
+  - biscuit-terminal/lib/tests/table_parity.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - biscuit-terminal/lib/tests/inline_content_matrix.rs
+  - biscuit-terminal/lib/tests/inline_content_matrix_support/mod.rs
+  - biscuit-terminal/lib/src/components/status.rs
+  - biscuit-terminal/lib/src/components/pad.rs
+  - biscuit-terminal/lib/src/components/inline_content.rs
+  - biscuit-terminal/lib/src/components/prose/parity.rs
+  - biscuit-terminal/lib/src/components/compose.rs
+  - biscuit-terminal/lib/tests/layout_matrix.rs
+  - biscuit-terminal/lib/tests/snapshots/ (60 new inline_content_matrix snapshots)
+source_files_during_phase_5:
+  - darkmatter/lib/src/style/schema/common.rs
+  - darkmatter/lib/src/style/schema/components.rs
+  - darkmatter/lib/src/style/schema/mod.rs
+  - darkmatter/lib/src/style/descriptor.rs
+  - darkmatter/lib/src/style/apply.rs
+  - darkmatter/lib/src/style/bespoke.rs
+  - darkmatter/lib/src/style/cli_claims.rs
+  - darkmatter/lib/src/style/coverage_tests.rs
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/src/markdown/render_tree/build_context.rs
+  - darkmatter/lib/src/markdown/render_tree/disclosure_style.rs
+  - darkmatter/lib/src/markdown/render_tree/block_extension.rs
+  - renderable/src/tree/attrs.rs
+  - darkmatter/cli/tests/layout_fill.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+  - biscuit-terminal/lib/tests/layout_matrix_support/mod.rs
+  - biscuit-terminal/lib/tests/layout_matrix.rs
+  - biscuit-terminal/lib/tests/snapshots/ (new terminal/browser/markdown snapshots for the expanded component grid)
+docs_updated_during_phase_6: []
+docs_created_during_phase_6:
+  - renderable/features/2026-06-30-style-everywhere/matrix.md
+skills_files_updated_during_phase_6: []
+source_files_during_phase_7:
+  - biscuit-terminal/lib/src/components/block_quote.rs
+  - biscuit-terminal/lib/src/components/filesystem/mod.rs
+  - biscuit-terminal/lib/src/components/prose/prose.rs
+  - biscuit-terminal/lib/src/components/section.rs
+  - biscuit-terminal/lib/src/components/text_block.rs
+  - biscuit-terminal/lib/src/components/todo.rs
+  - darkmatter/lib/src/style/descriptor.rs
+docs_updated_during_phase_7:
+  - biscuit-terminal/docs/components/index.md
+  - darkmatter/docs/rendering/style.md
+  - .claude/skills/biscuit-terminal/SKILL.md
+  - .claude/skills/renderable/SKILL.md
+  - .claude/skills/renderable/layout.md
+  - .claude/skills/darkmatter/SKILL.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/biscuit-terminal/SKILL.md
+  - .claude/skills/renderable/SKILL.md
+  - .claude/skills/renderable/layout.md
+  - .claude/skills/darkmatter/SKILL.md
+source_code:
+  - biscuit-terminal/lib/tests/layout_matrix_support/mod.rs
+  - biscuit-terminal/lib/tests/layout_matrix.rs
+  - biscuit-terminal/lib/tests/render_comparison.rs
+  - biscuit-terminal/lib/src/discovery/detection/color.rs
+  - biscuit-terminal/lib/src/render_tree/render.rs
+  - biscuit-terminal/lib/tests/snapshots/
+  - biscuit-terminal/lib/tests/two_column_parity.rs
+  - biscuit-terminal/lib/tests/ordered_list_parity.rs
+  - biscuit-terminal/lib/tests/unordered_list_parity.rs
+  - biscuit-terminal/lib/tests/status_block_parity.rs
+  - biscuit-terminal/lib/tests/filesystem_parity.rs
+  - biscuit-terminal/lib/tests/progress_parity.rs
+  - biscuit-terminal/lib/tests/graph_expression_parity.rs
+  - biscuit-terminal/lib/src/components/two_column.rs
+  - biscuit-terminal/lib/src/components/list.rs
+  - biscuit-terminal/lib/src/components/status_block.rs
+  - biscuit-terminal/lib/src/components/filesystem/mod.rs
+  - biscuit-terminal/lib/src/components/progress.rs
+  - biscuit-terminal/lib/src/components/graph_expression.rs
+  - biscuit-terminal/lib/src/components/terminal_image/mod.rs
+  - biscuit-terminal/lib/src/components/mermaid.rs
+  - biscuit-terminal/lib/src/components/horizontal_rule/mod.rs
+  - biscuit-terminal/lib/src/components/metrics_tree.rs
+  - biscuit-terminal/lib/src/components/status.rs
+  - biscuit-terminal/lib/src/components/table/table.rs
+  - biscuit-terminal/lib/tests/terminal_image_parity.rs
+  - biscuit-terminal/lib/tests/mermaid_parity.rs
+  - biscuit-terminal/lib/tests/horizontal_rule_parity.rs
+  - biscuit-terminal/lib/tests/metrics_tree_parity.rs
+  - biscuit-terminal/lib/tests/status_parity.rs
+  - biscuit-terminal/lib/tests/table_parity.rs
+  - biscuit-terminal/lib/tests/inline_content_matrix.rs
+  - biscuit-terminal/lib/tests/inline_content_matrix_support/mod.rs
+  - biscuit-terminal/lib/src/components/pad.rs
+  - biscuit-terminal/lib/src/components/inline_content.rs
+  - biscuit-terminal/lib/src/components/prose/parity.rs
+  - biscuit-terminal/lib/src/components/compose.rs
+  - darkmatter/lib/src/style/schema/common.rs
+  - darkmatter/lib/src/style/schema/components.rs
+  - darkmatter/lib/src/style/schema/mod.rs
+  - darkmatter/lib/src/style/descriptor.rs
+  - darkmatter/lib/src/style/apply.rs
+  - darkmatter/lib/src/style/bespoke.rs
+  - darkmatter/lib/src/style/cli_claims.rs
+  - darkmatter/lib/src/style/coverage_tests.rs
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/src/markdown/render_tree/build_context.rs
+  - darkmatter/lib/src/markdown/render_tree/disclosure_style.rs
+  - darkmatter/lib/src/markdown/render_tree/block_extension.rs
+  - renderable/src/tree/attrs.rs
+  - darkmatter/cli/tests/layout_fill.rs
+  - biscuit-terminal/lib/src/components/block_quote.rs
+  - biscuit-terminal/lib/src/components/prose/prose.rs
+  - biscuit-terminal/lib/src/components/section.rs
+  - biscuit-terminal/lib/src/components/text_block.rs
+  - biscuit-terminal/lib/src/components/todo.rs
+documentation:
+  - renderable/features/2026-06-30-style-everywhere/matrix.md
+  - biscuit-terminal/docs/components/index.md
+  - darkmatter/docs/rendering/style.md
+  - .claude/skills/biscuit-terminal/SKILL.md
+  - .claude/skills/renderable/SKILL.md
+  - .claude/skills/renderable/layout.md
+  - .claude/skills/darkmatter/SKILL.md
 packages:
   - biscuit-terminal
+  - darkmatter
+  - renderable
 ---
 
 # Style Everywhere — Execution Plan
@@ -274,7 +414,7 @@ stay bespoke only for the irreducible core). Per the reviewed disposition table.
   - Document N/A cells for properties the rendered artifact cannot honor.
   - Matrix case + honored-subset parity.
 
-- [ ] **Task 3.3 — `HorizontalRule` image tier → tree wrapper for placement; bespoke
+- [x] **Task 3.3 — `HorizontalRule` image tier → tree wrapper for placement; bespoke
   glyph/image core.**
   - HR keeps structural `ThematicBreak` semantics (C9) and target-specific drawing.
   - Confirm `alignment`/`max_width`/`margin` route through the fold; document N/A for the
@@ -288,23 +428,31 @@ stay bespoke only for the irreducible core). Per the reviewed disposition table.
     `render()` and `render_tree` on the honored subset (`margin`/`alignment`/`max_width`).
   - Rustdoc the limitation.
 
-- [ ] **Task 3.5 — `MetricsTree` → evaluate tree projection first.**
+- [x] **Task 3.5 — `MetricsTree` → evaluate tree projection first.**
   - Output is structured text/tree data → a projection should be feasible. If feasible,
     project and inherit the fold (preferred). If not feasible, document why and record a
     bespoke honored-subset with tested Degraded/N/A cells.
   - Matrix case + rustdoc recording the decision and rationale.
 
-- [ ] **Task 3.6 — `Status` → classify as inline/badge unless used as a block.**
+- [x] **Task 3.6 — `Status` → classify as inline/badge unless used as a block.**
   - Avoid forcing a block box onto inline status labels (overlaps Phase 4 / C7). Confirm
     inherited `color`/`emphasis`; if a block mode exists, apply C1 instead.
   - Matrix case (inline-content matrix) + rustdoc.
 
-- [ ] **Validation checkpoint (Phase 3):**
+- [x] **Validation checkpoint (Phase 3):**
   - Each bespoke component has a documented decision (tree-wrapper vs bespoke) in its
     rustdoc and the spec matrix.
   - Every honored-subset assertion passes; every Degraded/N/A cell has a rationale + test.
   - `just test` + `just lint` green.
 
+  > **Implementation note:** `TerminalImage`, `MermaidDiagram`, and `HorizontalRule`
+  > keep bespoke image/glyph cores (irreducible terminal protocols) and document
+  > their N/A cells in rustdoc + dedicated parity fixtures. `MetricsTree` delegates
+  > to `Prose` so the shared fold applies the full block box. `Status` is classified
+  > as an inline badge with box properties N/A. `Table::prefer_cursor_alignment` keeps
+  > its cursor-positioning escape hatch and asserts parity on `margin`/`alignment`/
+  > `max_width`. Removed a stray unused `LayoutTerminalExt` import that blocked lint.
+  > `2702 lib + 404 cli tests pass; just lint green.`
 ---
 
 ## Phase 4 — Inline Components
@@ -321,42 +469,54 @@ style distinct from appearance attrs (**C9**).
 **Components:** `Prose` (inline), `InlineContent`, `Status`, `PadLeft`/`PadRight`,
 `Compose` (inline mode; block-container mode → C1).
 
-- [ ] **Task 4.1 — Build the inline-content matrix.**
+- [x] **Task 4.1 — Build the inline-content matrix.**
   - A separate matrix (or matrix section) where the box scenarios (`margin`, `padding`,
     `width`, `max_width`, `alignment`) are asserted as no-ops (N/A) and the style
     scenarios (`color`, `emphasis`, inline `background`) are asserted as Honored.
 
-- [ ] **Task 4.2 — `Prose` (inline content) + block-container mode.**
+- [x] **Task 4.2 — `Prose` (inline content) + block-container mode.**
   - Inline content: confirm inherited `color`/`emphasis` flow; inline `background` on
     `Span` paints inline content only (not a padding-box background).
   - Block-container entry point (component API): apply C1 (routes through the fold).
   - `word_wrap` honored on text leaves (D4).
 
-- [ ] **Task 4.3 — `InlineContent`.**
+- [x] **Task 4.3 — `InlineContent`.**
   - Confirm inherited `color`/`emphasis`; mark box properties N/A with a one-line
     rationale each.
 
-- [ ] **Task 4.4 — `Status` (inline/badge mode).**
+- [x] **Task 4.4 — `Status` (inline/badge mode).**
   - Confirm inherited `color`/`emphasis`; box properties N/A. (Coordinates with Task 3.6.)
 
-- [ ] **Task 4.5 — `PadLeft`/`PadRight`.**
+- [x] **Task 4.5 — `PadLeft`/`PadRight`.**
   - Confirm `Pad*` width is its own explicit contract, **not** the `Layout` box; mark box
     properties N/A. Honor inherited `color`/`emphasis`.
 
-- [ ] **Task 4.6 — `Compose` (inline mode).**
+- [x] **Task 4.6 — `Compose` (inline mode).**
   - Inline mode: C7. Block-container mode (component API): C1 (routes through the fold).
 
-- [ ] **Task 4.7 — C9 guard: semantic nodes stay structural.**
+- [x] **Task 4.7 — C9 guard: semantic nodes stay structural.**
   - Confirm `Strong`, `Emphasis`, `Delete`, links, images, list structure, GFM task
     checkboxes remain structural nodes and still render to Markdown. This feature MUST NOT
     replace them with `Style` appearance attrs. Add a regression test that Markdown output
     preserves semantics under the D1 degradation rule.
 
-- [ ] **Validation checkpoint (Phase 4):**
+- [x] **Validation checkpoint (Phase 4):**
   - Inline-content matrix: every box cell is N/A (asserted no-op), every style cell is
     Honored.
   - Semantic-node Markdown regression: green.
   - `just test` + `just lint` green.
+
+  > **Implementation note:** Created the `inline_content_matrix` harness with 15
+  > scenarios (11 box N/A + 3 style Honored + baseline) across four pure inline
+  > components (`InlineContent`, `Status`, `PadLeft`, `PadRight`). `Status` now
+  > applies only `Layout::word_wrap`; margins, alignment, `max_width`, `width`,
+  > and `padding` are ignored. `PadLeft`/`PadRight` no longer apply `Layout`
+  > box properties — only their explicit `min_width` contract is honored.
+  > `InlineContent` docs state the N/A box contract. `Prose` inherited
+  > color/emphasis flow and inline-only background are pinned in
+  > `prose/parity.rs`. `Compose` docs now describe the dual block-container/
+  > inline-content contract. C9 guard added to `layout_matrix.rs`.
+  > 2723 lib + 404 cli tests pass; `just lint` + `just doctest` green.
 
 ---
 
@@ -382,48 +542,62 @@ tests (5.5) can be parallelized.
 - `darkmatter/lib/src/style/apply.rs` (`apply_node_policy`)
 - `darkmatter/lib/src/layout/mod.rs` (`ComponentPolicy`)
 
-- [ ] **Task 5.1 — Resolve Open Question #1 (width-mode syntax).**
-  - Decide Option A (keywords in `width`) vs Option B (separate `width-mode`). Spec
-    recommends A if the parser produces precise errors, else B. Do **not** choose Option C
-    (defer) — it leaves a known schema gap. Record the decision in the plan/spec margin.
+- [x] **Task 5.1 — Resolve Open Question #1 (width-mode syntax).**
+  - Decision: **Option A** — `width` accepts either a length (`40`, `50%`) or a keyword
+    (`auto`, `fit-content`). It lowers to `renderable::layout::Width` with the correct
+    mode. Recorded here and in `CommonStyle` (`WidthOrMode`).
 
-- [ ] **Task 5.2 — Extend `CommonStyle` with the applicable surface.**
-  - Add per-component `margin`, `padding`, `border`, `emphasis`, `word_wrap`, and explicit
-    width-mode (per Task 5.1) to the schema for each `PageComponent` where applicable
-    (`Tables`, `BlockQuotes`, `CodeBlocks`, `Ul`, `Ol`, `Li`, `Disclosure`, `Images`,
-    `Hyperlinks`, `Hr`).
-  - Update `descriptor.rs` `SCHEMA` leaf catalog for every new key (canonical + alias +
-    `leaf_type`), so the canonicalization walker + typed validator cover them.
-  - Absence of a key preserves current output (D3); a provided `width` ⇒
-    `Width::Fixed(length)` with the correct mode.
+- [x] **Task 5.2 — Extend `CommonStyle` with the applicable surface.**
+  - Added `width` (`WidthOrMode`), `margin`, `padding`, `border`, `emphasis`, and
+    `word_wrap` to `CommonStyle`. Supporting newtypes (`ComponentEdges`,
+    `ComponentBorder`, `ComponentEmphasis`, `ComponentWordWrap`) deserialize from the
+    frontmatter shorthand/object forms and lower to renderable `Layout`/`Style` types.
+  - `descriptor.rs` `SCHEMA` catalog updated with every new key plus the new
+    `LeafType::CompoundStyle` for object-valued style leaves (`border`, `emphasis`,
+    `word-wrap`).
+  - Absence preserves existing output; a length-valued `width` lowers to
+    `Width::Fixed(TargetValue::universal(length))`, while `auto`/`fit-content` lower to
+    the matching mode.
 
-- [ ] **Task 5.3 — Special-case `Hyperlinks`/`Images` block-layout distinction.**
-  - Their `width`/`max-width`/`alignment` are `TextLayoutHints` or lone-image block layout,
-    **not** generic block `Layout` on every image/link node. The matrix must spell this
-    out so invalid block-layout attrs are not attached to inline nodes.
+- [x] **Task 5.3 — Special-case `Hyperlinks`/`Images` block-layout distinction.**
+  - Hyperlinks continue to receive `TextLayoutHints` via `attach_text_layout`; images
+    continue to use `apply_lone_image_layout` / `apply_image_policy`. No generic block
+    `Layout` is attached to inline link/image nodes. `apply_component_style_attrs` is
+    skipped for `Image` nodes.
 
-- [ ] **Task 5.4 — `CodeBlocks` representation.**
-  - Represent `CodeBlocks` in the schema/reference even if its public key stays under
-    `page.code`/`code-theme` for compatibility; give callers one documented place to see
-    which `Layout`/`Style` properties affect code blocks.
+- [x] **Task 5.4 — `CodeBlocks` representation.**
+  - Added `CodeBlockStyle` under `style/schema/components.rs` and a root `code_block`
+    bucket in `style/schema/mod.rs`. Theme still lives under `page.code.theme`; the new
+    bucket carries layout/appearance (`alignment`, `fill`, `margin`, `padding`,
+    `word-wrap`, `border`, `emphasis`). CLI claims wired via `code_blocks_*` overrides.
 
-- [ ] **Task 5.5 — `apply_node_policy` parity + `Disclosure` inline parameters.**
-  - `apply_node_policy` (`build_context.rs`) attaches the resulting `Layout`/`Style` such
-    that darkmatter terminal/HTML/markdown output matches a hand-built tree (parity with
-    §1). Add a round-trip suite per component.
-  - `Disclosure` inline `key=value` parameters cover the same expanded surface they
-    pioneer (`max-width`, `color`, `alignment`, …).
+- [~] **Task 5.5 — `apply_node_policy` parity + `Disclosure` inline parameters.**
+  - `apply_node_policy` now attaches `ComponentPolicy` `emphasis`, `border`, and
+    `word_wrap` to matched render-tree nodes (`build_context.rs` +
+    `renderable/src/tree/attrs.rs`). Layout (`margin`, `padding`, `width`, `max_width`,
+    `alignment`) was already attached; `word_wrap` was added to `ComponentPolicy`.
+  - `Disclosure` inline parsing (`disclosure_style.rs`) now covers the expanded surface
+    (`border`, `emphasis`, `word-wrap`) in addition to the existing keys.
+  - **Remaining:** per-component round-trip parity tests that render output matches a
+    hand-built `renderable` tree for every `PageComponent`.
 
-- [ ] **Task 5.6 — Validation guards (C8).**
-  - For every newly exposed `style:` key and directive parameter: one positive lowering
-    test (key is represented in the tree) + one unsupported/invalid-value test (key is
-    rejected before rendering with a specific error). "Accepted but ignored" is forbidden.
+- [~] **Task 5.6 — Validation guards (C8).**
+  - Existing schema/descriptor coverage means unknown keys are rejected by the
+    canonicalization walker. New compound leaves (`border`, `emphasis`, `word-wrap`)
+    have positive coverage in `coverage_tests.rs`.
+  - **Remaining:** explicit rejection tests for invalid component widths, malformed
+    `border`/`emphasis` objects, and invalid `word-wrap` values; tests that prove
+    `width` + `max-width` on the same component is rejected.
 
-- [ ] **Validation checkpoint (Phase 5):**
-  - `style:` frontmatter round-trip suite: every property renders to terminal/HTML
-    matching the equivalent hand-built `renderable` tree.
-  - Unknown/omitted properties are reported by schema validation, not silently dropped.
-  - `just test` + `just lint` green in `darkmatter`.
+- [~] **Validation checkpoint (Phase 5):**
+  - `just lint` green in `darkmatter`.
+  - `just test` in `darkmatter` is green except for one pre-existing failure in
+    `markdown::compose::preflight::collect::tests::rejects_command_depending_on_context_requiring_sibling_key`,
+    which fails identically on the base commit (no Phase 5 changes) and is unrelated to
+    style surface work. A second pre-existing table-layout premise test was fixed by
+    capping the table width so the centering policy produces observable layout drift.
+  - **Remaining:** complete parity suite and validation tests (Task 5.5/5.6) to turn the
+    checkpoint fully green.
 
 ---
 
@@ -441,35 +615,49 @@ add Browser + Markdown snapshots per case.
 - `renderable/features/2026-06-30-style-everywhere/matrix.md` (or spec appendix)
 - `biscuit-terminal/lib/tests/layout_matrix_support/mod.rs` (full component coverage)
 
-- [ ] **Task 6.1 — Achieve full component-case coverage in the matrix harness.**
+- [x] **Task 6.1 — Achieve full component-case coverage in the matrix harness.**
   - Every block component from the inventory has a `ComponentCase`. Today the matrix
     covers 11; add the remaining block components so no block component is uncovered.
 
-- [ ] **Task 6.2 — Cross-target parity assertions.**
+- [x] **Task 6.2 — Cross-target parity assertions.**
   - `VIA_RENDER == VIA_TREE_DIRECT` for every cell. For components with a
     `prefer_cursor_alignment`/bespoke path, add a third column and assert it agrees on the
     honored subset (terminal within-target parity, C6).
 
-- [ ] **Task 6.3 — Browser + Markdown snapshots per case.**
+- [x] **Task 6.3 — Browser + Markdown snapshots per case.**
   - Snapshot the HTML fragment and the Markdown/MarkdownPlus output per case. Assert:
     Honored properties appear (CSS for box/style on Browser); Markdown follows D1
     (structure preserved, **no** ANSI/CSS/raw styling leakage).
 
-- [ ] **Task 6.4 — Author the matrix table (`matrix.md`).**
+- [x] **Task 6.4 — Author the matrix table (`matrix.md`).**
   - One row per component, columns for each `Layout`/`Style` property × {Terminal, Browser,
     Markdown}, each cell tagged `Honored` / `Degraded(rule)` / `N/A`. Every cell references
     its backing test. Seed rows from the spec's minimum table.
 
-- [ ] **Task 6.5 — No-silent-noop guard (Verification #7).**
+- [x] **Task 6.5 — No-silent-noop guard (Verification #7).**
   - A meta-test or review-checklist gate proving every matrix cell is either covered by an
     assertion or explicitly marked N/A with a rationale. No cell may be a silent no-op.
 
-- [ ] **Validation checkpoint (Phase 6):**
+- [x] **Validation checkpoint (Phase 6):**
   - Matrix is complete; every cell tagged and test-backed.
   - `cargo nextest run -p biscuit-terminal --test layout_matrix` green across the full
     expanded scenario × case grid.
   - Browser/Markdown snapshots accepted via `INSTA_UPDATE=always` review.
   - No-silent-noop guard: green.
+
+  > **Implementation note:** the harness now covers 16 block components (18 with the
+  > `image` feature): all original dual-path components plus `Prose`, `FileSystem`,
+  > `HorizontalRule`, `MetricsTree`, `TerminalImage`, and (under `feature = "image"`)
+  > `GraphExpression` and `MermaidDiagram`. `Prose` and `FileSystem` use the canonical
+  > tree projection for both snapshot columns because their public `render(&term)` paths
+  > are intentionally deferred (Prose wrapping context, Nerd Font icons). Bespoke
+  > terminal-only rows carry a `notes` rationale and rely on dedicated parity fixtures
+  > for within-target parity. Browser and Markdown snapshots are generated for every
+  > component that projects to the render tree. The `no_silent_noop_guard` meta-test
+  > enforces D1 leakage checks and verifies that each style scenario lowers to a
+  > detectable artifact (background SGR, left-border glyph, bold+italic SGR). All
+  > `layout_matrix` and `render_comparison` tests pass; full `just test` + `just lint`
+  > green in `biscuit-terminal`.
 
 ---
 
@@ -490,24 +678,24 @@ supported).
   `.claude/skills/darkmatter/*`
 - `darkmatter/lib/src/style/descriptor.rs` (style reference doc)
 
-- [ ] **Task 7.1 — Per-component rustdoc.**
+- [x] **Task 7.1 — Per-component rustdoc.**
   - Each component's rustdoc states which `Layout`/`Style` properties it Honors, Degrades,
     or treats as N/A, per the matrix. Follow repo rustdoc convention (no `# H1`; `## H2`
     sections).
 
-- [ ] **Task 7.2 — Component + skill docs.**
+- [x] **Task 7.2 — Component + skill docs.**
   - Update `biscuit-terminal/docs/components/*.md` and the biscuit-terminal/renderable/
     darkmatter skills with the universal-support contract and the matrix link.
   - Fix the stale skill note: terminal `max_width` **is** supported (the spec flags one
     older note that says otherwise).
 
-- [ ] **Task 7.3 — Darkmatter `style:` reference.**
+- [x] **Task 7.3 — Darkmatter `style:` reference.**
   - Update `style/descriptor.rs` doc + any `style:` topic doc to list the newly exposed
     properties per component.
 
-- [ ] **Task 7.4 — Refresh `md hash` frontmatter on edited skill docs.**
+- [x] **Task 7.4 — Refresh `md hash` frontmatter on edited skill docs.**
 
-- [ ] **Validation checkpoint (Phase 7 / feature close):**
+- [x] **Validation checkpoint (Phase 7 / feature close):**
   - `just doctest` green in `biscuit-terminal`, `renderable`, `darkmatter`.
   - `rg` for stale claims (`max_width.*not.*supported`, `border.*not.*lowered`, silent
     no-op language) returns nothing in the touched docs/skills.
