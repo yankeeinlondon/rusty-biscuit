@@ -3,7 +3,7 @@ source: biscuit-terminal/lib/tests/layout_matrix.rs
 expression: block
 ---
 VIA_RENDER
-Gq=2,f=100,a=T,t=d,c=40,m=0;iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAAD0lEQVR4AQEEAPv/AP8AAAMBAQCNHeWCAAAAAElFTkSuQmCC
+    [[Image: tiny.png]]
 ---
 VIA_TREE_DIRECT
-Gq=2,f=100,a=T,t=d,c=40,m=0;iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAAD0lEQVR4AQEEAPv/AP8AAAMBAQCNHeWCAAAAAElFTkSuQmCC
+    [[Image: tiny.png]]
