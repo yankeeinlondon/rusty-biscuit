@@ -136,7 +136,7 @@ fn stack_for(capability: &ModelCapability) -> Vec<ProviderModel> {
             anthropic(ProviderModelAnthropic::Claude__Haiku__4__5__20251001),
             groq(ProviderModelGroq::Llama__3_3__70b__Versatile),
             mistral(ProviderModelMistral::Mistral__Small__Latest),
-            xai(ProviderModelXai::Grok__3__Mini),
+            xai("grok-4.3"),
             zai(ProviderModelZai::Glm__4_7),
             openrouter(ProviderModelOpenRouter::Anthropic___Claude__Haiku__4_5),
             ollama("llama3.2"),
@@ -146,7 +146,7 @@ fn stack_for(capability: &ModelCapability) -> Vec<ProviderModel> {
             openai(ProviderModelOpenAi::Gpt__5_2),
             gemini(ProviderModelGemini::Gemini__2_5__Pro),
             mistral(ProviderModelMistral::Mistral__Large__Latest),
-            xai(ProviderModelXai::Grok__3),
+            xai("grok-4.3"),
             deepseek(ProviderModelDeepseek::Deepseek__V4__Pro),
             moonshotai(ProviderModelMoonshotAi::Kimi__K2_5),
             zai(ProviderModelZai::Glm__5),
@@ -160,7 +160,7 @@ fn stack_for(capability: &ModelCapability) -> Vec<ProviderModel> {
             mistral(ProviderModelMistral::Mistral__Small__Latest),
             zai(ProviderModelZai::Glm__4_7),
             anthropic(ProviderModelAnthropic::Claude__Haiku__4__5__20251001),
-            xai(ProviderModelXai::Grok__3__Mini),
+            xai("grok-4.3"),
             openrouter(ProviderModelOpenRouter::Openai___Gpt__5__Mini),
             deepseek(ProviderModelDeepseek::Deepseek__V4__Flash),
             moonshotai(ProviderModelMoonshotAi::Moonshot__V1__8k),
@@ -198,7 +198,7 @@ fn stack_for(capability: &ModelCapability) -> Vec<ProviderModel> {
             anthropic(ProviderModelAnthropic::Claude__Opus__4__5__20251101),
             openai(ProviderModelOpenAi::O3),
             gemini(ProviderModelGemini::Gemini__2_5__Pro),
-            xai(ProviderModelXai::Grok__4_3),
+            xai("grok-4.3"),
             mistral(ProviderModelMistral::Mistral__Large__Latest),
             deepseek(ProviderModelDeepseek::Deepseek__V4__Pro),
             moonshotai(ProviderModelMoonshotAi::Kimi__K2_5),
@@ -218,7 +218,7 @@ fn stack_for(capability: &ModelCapability) -> Vec<ProviderModel> {
             openai(ProviderModelOpenAi::O3),
             deepseek(ProviderModelDeepseek::Deepseek__V4__Pro),
             anthropic(ProviderModelAnthropic::Claude__Opus__4__5__20251101),
-            xai(ProviderModelXai::Grok__4__1__Fast__Reasoning),
+            xai("grok-4.20-0309-reasoning"),
             zai(ProviderModelZai::Glm__5_1),
             ollama("qwq"),
         ],
@@ -232,7 +232,7 @@ fn stack_for(capability: &ModelCapability) -> Vec<ProviderModel> {
             openai(ProviderModelOpenAi::O3),
             anthropic(ProviderModelAnthropic::Claude__Opus__4__5__20251101),
             deepseek(ProviderModelDeepseek::Deepseek__V4__Pro),
-            xai(ProviderModelXai::Grok__4_20__0309__Reasoning),
+            xai("grok-4.20-0309-reasoning"),
             ollama("qwq"),
         ],
         ModelCapability::SmartCheapUltrathink => vec![
@@ -283,8 +283,8 @@ fn openrouter(model: ProviderModelOpenRouter) -> ProviderModel {
     ProviderModel::OpenRouter(model)
 }
 
-fn xai(model: ProviderModelXai) -> ProviderModel {
-    ProviderModel::Xai(model)
+fn xai(model_id: &str) -> ProviderModel {
+    ProviderModel::Xai(ProviderModelXai::Bespoke(model_id.to_string()))
 }
 
 fn zai(model: ProviderModelZai) -> ProviderModel {
@@ -299,6 +299,48 @@ fn ollama(model_id: &str) -> ProviderModel {
 mod tests {
     use super::*;
     use crate::rigging::providers::Provider;
+
+    #[test]
+    fn test_xai_defaults_are_in_generated_catalog() {
+        let known: std::collections::HashSet<&str> = ProviderModelXai::ALL
+            .iter()
+            .map(ProviderModelXai::model_id)
+            .collect();
+        let capabilities = [
+            ModelCapability::FastCheap,
+            ModelCapability::Fast,
+            ModelCapability::Normal,
+            ModelCapability::NormalCheap,
+            ModelCapability::NormalThinking,
+            ModelCapability::NormalThinkingCheap,
+            ModelCapability::NormalUltrathink,
+            ModelCapability::NormalCheapUltrathink,
+            ModelCapability::Smart,
+            ModelCapability::SmartCheap,
+            ModelCapability::SmartThink,
+            ModelCapability::SmartCheapThink,
+            ModelCapability::SmartUltrathink,
+            ModelCapability::SmartCheapUltrathink,
+            ModelCapability::CreativeFast,
+            ModelCapability::CreativeNormal,
+            ModelCapability::CreativeSmart,
+            ModelCapability::LiteralFast,
+            ModelCapability::LiteralNormal,
+            ModelCapability::LiteralSmart,
+        ];
+
+        for capability in capabilities {
+            for model in stack_for(&capability) {
+                if let ProviderModel::Xai(model) = model {
+                    assert!(
+                        known.contains(model.model_id()),
+                        "{capability:?} selects xAI model `{}` missing from generated catalog",
+                        model.model_id()
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_resolver_prefers_first_runnable_model() {
