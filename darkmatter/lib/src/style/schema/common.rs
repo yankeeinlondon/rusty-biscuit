@@ -737,4 +737,15 @@ mod tests {
         let c: CommonStyle = serde_json::from_str(r#"{"word-wrap": "wrap"}"#).unwrap();
         assert_eq!(c.word_wrap, Some(ComponentWordWrap::Wrap));
     }
+
+    /// Validation guard (spec item 8): an unsupported `word-wrap` value is
+    /// rejected at deserialize time, never silently dropped.
+    #[test]
+    fn rejects_unknown_word_wrap() {
+        let err = serde_json::from_str::<CommonStyle>(r#"{"word-wrap": "diagonal"}"#).unwrap_err();
+        assert!(
+            err.to_string().contains("word-wrap must be"),
+            "unexpected error: {err}"
+        );
+    }
 }
