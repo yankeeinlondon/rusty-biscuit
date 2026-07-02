@@ -605,9 +605,18 @@ Ordered by leverage; several are prerequisites for codegen landing cleanly:
   `initialize` same-day skip + `success` verification stack), and all three fleets ran
   9/9 (27 schema-valid docs as of 2026-07-02; 18 flag `requires_claudine_update` with
   actionable reasons). Usage / agent-cli / non-interactive-sessions still need sidecars
-  authored. New wrapper backlog item from the runs: a **model-mismatch guard** (observed
-  `llm_call_start` model ≠ requested model should warn/abort — one OpenCode launch
-  silently substituted GLM for the requested k2p7);
+  authored. New wrapper backlog item from the runs: a **model-mismatch guard** — now diagnosed
+  (2026-07-02) and effectively mandatory for research reliability. Root cause: a
+  transient OpenCode-side window (likely server/provider-plugin warmup) in which a
+  plan-scoped model id (`kimi-for-coding/k2p7`) does not resolve, and OpenCode silently
+  substitutes the user-config default model. Claudine's own path is correct end-to-end
+  (dry-run resolves the model; the identical invocation succeeds minutes later; catalog
+  cache contains the exact id; `select.rs` step-4 validation passes). Three occurrences
+  observed. Danger case: when the substituted default is *healthy*, an entire fleet
+  silently researches on the wrong model — the guard must compare the first observed
+  `llm_call_start` model against the requested model and abort (fail-fast, like the
+  runaway guards) on mismatch. Related hardening: `select.rs` step-4 silently drops a
+  frontmatter model that fails catalog validation — that drop should at minimum warn;
   identity facts consolidate into `providers.yaml`; render-path inventory (rendering
   workstream milestone 1). **Spiked 2026-07-01 on the logging topic, promoted, and pilot-verified** — see
   [spike-logging/findings.md](spike-logging/findings.md); the validated schema lives at
