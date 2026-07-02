@@ -251,13 +251,15 @@ Two sources of new fields:
 | `allowed_env_keys` | wrapper overrides | pairs with the env-vars research topic |
 | `suppress_structured_stderr_on_success` | wrapper override | |
 | `model_required_in_non_tty` | hardcoded OpenCode check in `composition/select.rs` | |
+| `platform_kind` | *(new, 2026-07-02)* | `VendorPlatform` (Claude Code, Codex — predominantly own-vendor models) vs `AgentAggregator` (OpenCode, Pi, Goose — model-agnostic); predicts model-selection UX centrality and API-shim flexibility |
 
 **B. New, fed by research topics** (each topic's `target_schema` maps to a catalog section):
 
 | Catalog section | Research topic | Example fields |
 |------------------|---------------|----------------|
 | `logging` | agent-logging | log directory per OS, format, has-desktop-app, desktop-log parity, schema URL |
-| `models` | agent-models | catalog source, config schema, bespoke/local model support |
+| `models` | agent-models | **out-of-box focus**: default offerings (exact accepted strings + `catalog_id` mapping), selection mechanisms, precedence, dynamic listing |
+| `model_config` | *(authored 2026-07-02 — `docs/research/model-config/`, sidecar validated, dry-run clean ×9; fleet run pending)* | **user-extension focus**: config file/schema for adding models, API-standard (`openai_compatible`/`anthropic_compatible`/`bespoke`), adapter mechanism (e.g. OpenCode's `npm` key), base-URL delivery, metadata-override shape (cost/limit/modalities), merge-vs-shadow semantics against the built-in catalog, per-runner local-model support (ollama, oMLX, LM Studio, llama.cpp, vLLM) |
 | `permissions` | agent-permissions | permission CLI params, config file paths (user/repo), agent-scoped permissions, policy-engine fit |
 | `non_interactive` | non-interactive-sessions | output formats, schema URL/type, use-case detectability matrix (cap approaching/capped/no-funds/auth/…) |
 | `usage` | usage | usage-data acquisition strategy (api/cli/pty-scrape), dashboard URL |
@@ -416,6 +418,145 @@ topics the prompts additionally require:
   keep the prose context; the signals topic owns the machine-readable records.
 - **Unanswered ≠ omitted.** If research cannot establish a unit or zone, it must emit
   `unspecified` + `confidence: inferred` so the gap is tracked, never silently dropped.
+
+## Model Ground Truth (unchained-ai master catalog)
+
+**Decision direction (2026-07-02): adopt the unchained-ai model catalog as the
+ground-truth *model* layer for Claudine's modeling process.** Claudine already depends on
+it informally — `model_catalog/provider_sources.rs` documents that `static_models` lists
+are hand-derived from unchained-ai's generated enums. Formalizing replaces a silent,
+manual copy channel with a declared input.
+
+### The division of domains
+
+The two catalogs answer different questions and must not blur:
+
+| Layer | Owner | Answers |
+|-------|-------|---------|
+| **Models** (what a model IS) | unchained-ai master catalog | canonical id (`provider/model-id`), context window, max output, modalities, capabilities, pricing, default params, knowledge cutoff |
+| **Offerings/selection** (what a CLI ACCEPTS) | Claudine provider metadata | the exact strings/aliases each agentic CLI takes, selection mechanisms, precedence, dynamic-listing behavior |
+| **Mapping** (the join) | Claudine research (agent-models topic) | CLI model string → catalog wire id |
+
+Concretely: the agent-models topic's `default_models[]` records gain an optional
+`catalog_id` field carrying the unchained wire id (`"zai/glm-5.2"`); an unmappable entry
+is a tracked gap (either a missing catalog model or a CLI-only alias). The wire format
+already aligns — OpenCode's `provider/model` ids are the same shape as `ProviderModel`'s.
+
+### What Claudine gains
+
+- **Cost basis** for reporting/session summaries (pricing lives in the catalog, not in
+  any CLI's output).
+- **Context-window and capability awareness** for composition-time selection.
+- **Semantic depth for signals**: `model_resolved`/`model_fallback` detection can say
+  *what kind* of substitution happened (cheaper? smaller context?) instead of comparing
+  opaque strings — the observed GLM-for-k2p7 substitution becomes classifiable.
+- **A principled answer to dynamically-sourced catalogs.** Kimi fetches its catalog at
+  login, but the actual offering set is short, stable, and predictable (`kimi-k2` —
+  default, `kimi-k1.5`, `kimi-latest`, `moonshot-v1`). Sourcing mechanism ≠ stability of
+  contents: `static_models` should be read as **expected offerings** (compiled, curated),
+  with the `dynamic_source` acting as a *verification/drift channel* against them —
+  observed-but-unexpected or expected-but-missing offerings are reportable events, not
+  silent truth replacement.
+
+### Integration shape (proposed)
+
+**Data-level first, type-level later if earned.** Claudine should NOT take a dependency
+on the `unchained-ai` lib crate for this — it drags rig-core with heavy features
+(image/audio/pdf/rmcp). Options, preferred first:
+
+1. `gen-models` additionally emits a **JSON catalog artifact** that Claudine's generator
+   consumes like any other input (fits the committed-codegen pipeline; zero coupling).
+2. Extract the catalog (model enums + metadata + `model_id` macro) into a slim crate both
+   areas depend on (better if type-level integration proves valuable).
+
+### Out-of-box vs user-configured models
+
+Every agentic CLI ships an out-of-box model set **and** a user-config extension path —
+most users live entirely in the former, but the latter is how local models arrive
+(ollama, oMLX, LM Studio, …) and how brand-new cloud models get used before the CLI's
+own catalog absorbs them. The extension mechanism is near-universally one of two
+informal standards (**OpenAI-compatible** or **Anthropic-compatible** API), with
+provider-specific config shape on top (OpenCode adds an `npm` ai-sdk adapter key +
+`baseURL`; vendor platforms like Claude Code / Codex are expected to be
+single-standard and need no adapter key). These are different research questions from
+"what's in the box", so they get their own topic (`model_config`, table B) rather than
+overloading `agent-models`. One curation guideline the topic should encode: user config
+blocks are static while CLI catalogs self-update — prefer removing a manual model block
+once the CLI's own catalog covers that model (observed with a hand-added `glm-5.2`
+block that OpenCode's catalog later absorbed).
+
+Two identity consequences of local models: the *source* segment is a serving runtime
+(`ollama/`, `omlx/`), not a vendor or aggregator; and quantization/serving tags
+(`8bit`, `:26b`) are variant axes the identity grammar must tolerate — the same weights
+served by two runners are the same *model* but distinct *offerings* with potentially
+different behavior.
+
+### Model identity grammar (decided direction, 2026-07-02)
+
+Model naming decomposes predictably, and the catalog should parse it rather than store
+opaque strings:
+
+```
+offering  = [source /] vendor / model-id     # aggregators add the source segment
+model-id  = family + version [+ variant-tags] [+ date-pin]
+```
+
+Examples: `anthropic/claude-sonnet-4-5-20250929` (vendor + family `claude-sonnet` +
+version 4.5 + pin); `github-copilot/claude-opus-4.8-fast` (source + family + version +
+variant `fast`); `omlx/Qwen3.6-35B-A3B-8bit` (local-runner source + family + size +
+quantization variant); `kimi-k2.7-code-highspeed` (family `kimi-k2` + version + two
+variants). Observed live: the current Kimi CLI picker lists the same model as two
+offerings — `K2.7 Code (Kimi Code)` (subscription plan) and `kimi-k2.7-code (Moonshot AI
+Open Platform)` — and `opencode models` mixes `{vendor}/{id}` with `{source}/{id}` rows.
+
+**Family index + ordering.** unchained-ai's `ProviderModelMetadata` already carries
+`family: Option<String>`; the refinement is consistent population from the identity
+grammar plus an intra-family **ordering** (version compare, `created` date as
+tiebreaker) so "the latest `sonnet` is …?" is a catalog query.
+**Spike-validated 2026-07-02** ([spike-model-identity/findings.md](spike-model-identity/findings.md)):
+a ~300-line dependency-free prototype over the 687 real generated ids inferred family for
+**99.9%** (sole exception: `openrouter/openrouter/auto`, correctly identity-less), found
+130 cross-source duplicate-offering groups (~19% of the corpus), unified dot-vs-dash
+versions and Anthropic's era-dependent token order without special-casing, and answered
+latest-of-family correctly for sonnet/opus/kimi-k/gpt/glm against the corpus. Curation
+surface: three short tables (variant vocab ~30 tokens, vendor aliases 5 entries, serving
+tags). Staleness is a *correctness input* to "latest" (the 2026-05-07 catalog predates
+k2.7/glm-5.2/opus-4.8) — regeneration cadence / ContentPolicy applies to the catalog.
+Production home: `unchained-ai/gen` (populate identity fields, expose
+`latest_in_family`, include parsed identity in the JSON artifact). Rolling aliases
+(`kimi-latest`, `sonnet`, `kimi-k2`) then map to *family selectors* instead of being
+unmappable, and the signal layer can classify a model fallback as same-family-downgrade
+vs cross-vendor-substitution — very different severities.
+
+**Version-scoped offerings.** Expected offerings drift with the provider CLI's own
+version (the old `kimi` binary listed `kimi-k1.5`/`moonshot-v1`; the new `kimi-cli`
+lists `k2.5/k2.6/k2.7-code/…`) — so expected-offering records carry `since`/`until`
+provider-version bounds (same mechanism as signal detection records), observed evidence
+records which binary+version produced it, and even roster identity facts (`binary`,
+`cli_aliases`) can be version-scoped (`kimi` → `kimi-cli`).
+
+### Refinements needed before production-ready (both areas)
+
+1. **Model-vs-offering identity.** The same underlying model appears as many offerings:
+   direct API, aggregators (OpenRouter/ZenMux list overlapping ids), and the
+   subscription-plan endpoints agentic CLIs actually use (`zai-coding-plan/*`,
+   `kimi-for-coding/*`). Without a canonical cross-provider model identity the mapping is
+   many-to-many mush. This is the single most important refinement — the identity grammar
+   above is the proposed mechanism.
+2. **Alias/version normalization** — date-suffixed ids, bracket variants
+   (`claude-opus-4-6[1m]`), short aliases (`sonnet`), and **rolling family aliases**
+   (Kimi's `kimi-k2` = "latest K2 series", `kimi-latest`) need normalization rules. A
+   rolling alias is an offering whose catalog mapping targets a *family*, not a pinned
+   model — the mapping record needs to express that distinction (e.g.
+   `resolves: pinned | family_latest`), and signal/reporting consumers must expect the
+   concrete model behind such an offering to change between sessions.
+3. **Freshness** — generated enums/metadata need regeneration cadence + a generated-at
+   stamp (the planned `ContentPolicy` concept applies here too); Parsera is a third-party
+   data-quality dependency worth a validation pass.
+4. **Coverage of CLI-facing plan endpoints** — the catalog's 13 providers are model-API
+   providers; the subscription-plan offerings agentic CLIs route through are absent by
+   design and belong in the mapping layer, but the catalog should decide whether plan
+   offerings get first-class identity.
 
 ## Rendering Consistency
 

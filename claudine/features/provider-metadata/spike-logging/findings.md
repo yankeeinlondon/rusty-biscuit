@@ -213,8 +213,10 @@ resume run finished everything: **agent-models 9/9** (4 skipped via the initiali
 first production use, worked exactly as designed — 5 researched) and **agent-permissions
 9/9**. Combined with logging, all **27 documents across 3 topics are schema-valid**, and
 the `requires_claudine_update` reasons form a coherent work queue (18/27 true): e.g. Kimi
-populates its model catalog dynamically from `/models` at login (no static list —
-challenges `static_models`), Codex permissions are a dual-layer sandbox+approval model
+populates its model catalog dynamically from `/models` at login — though per Ken the
+actual offering set is short and stable (`kimi-k2`, `kimi-k1.5`, `kimi-latest`,
+`moonshot-v1`), so the right model is expected-offerings + drift-verification, not
+"no static list", Codex permissions are a dual-layer sandbox+approval model
 with Starlark execpolicy rules, OpenCode's last-rule-wins wildcard permission grammar
 doesn't map cleanly onto PolicyEngine's axes.
 
