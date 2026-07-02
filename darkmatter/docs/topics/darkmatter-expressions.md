@@ -383,7 +383,7 @@ The table below is generated from [`EXPRESSION_FUNCTION_DESCRIPTORS`](../../lib/
 | Filesystem | `join(left, right)` | Joins two path strings with normalized separators. | `join("sub", "note.md")` ⇒ `sub/note.md` |
 | Filesystem | `link(file)` | Creates a Markdown link to a local file, using its relative path as the link text. |  |
 | Filesystem | `link(target, desc)` | Creates a Markdown link to a local file or HTTP(S) URL with the given description. |  |
-| Filesystem | `has_command(cmd)` | Returns true when the command is found on PATH or is an existing executable path. |  |
+| Filesystem | `has_command(cmd)` | Returns true when the command is found on PATH or is an existing executable absolute path. |  |
 | Context | `has_skill(name)` | Returns true when a skill directory exists in a user-scoped or local-scoped skill root. |  |
 | Context | `has_local_skill(name)` | Returns true when a skill directory exists in a local-scoped skill root. |  |
 <!-- END GENERATED FUNCTION TABLE -->

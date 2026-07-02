@@ -1144,10 +1144,11 @@ pub fn file_exists_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, 
 /// argument shape produces an error beyond the arity guard: a null, non-string,
 /// or empty argument reads as `false`.
 ///
-/// All path semantics are delegated to `which`. Two consequences are
-/// intentional gaps: a leading `~` is **not** tilde-expanded, and a relative
-/// path is **not** resolved against the resolution context — both are passed to
-/// `which` verbatim.
+/// Only two input shapes can probe: a bare name (`PATH` search) and an
+/// absolute path (exists + executable, delegated to `which`). Any other
+/// path-shaped input — `./mytool`, `bin/mytool`, `~/bin/mytool`, or a Windows
+/// drive-relative `C:mytool` — reads as `false`: it is neither tilde-expanded
+/// nor resolved against the resolution context or the process CWD.
 pub fn has_command_fn(args: &[Value], _ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     require_args_expr("has_command", args, 1)?;
     if any_null(args) {
@@ -1158,6 +1159,15 @@ pub fn has_command_fn(args: &[Value], _ctx: &ResolutionContext) -> Result<Value,
         Err(_) => return Ok(Value::Bool(false)),
     };
     if raw.is_empty() {
+        return Ok(Value::Bool(false));
+    }
+    // `which::which` resolves relative paths against the process CWD, which
+    // would make document truth depend on where the composer was launched —
+    // reject them before probing. The multi-component test mirrors `which`'s
+    // own separator detection and also catches Windows drive-relative inputs
+    // (`C:mytool` parses as Prefix + Normal but is not absolute).
+    let path = std::path::Path::new(raw);
+    if !path.is_absolute() && path.components().count() > 1 {
         return Ok(Value::Bool(false));
     }
     Ok(Value::Bool(which::which(raw).is_ok()))
@@ -2963,6 +2973,45 @@ mod tests {
                 has_command_fn(&[json!("bin/mytool")], &ctx).unwrap(),
                 json!(false)
             );
+        }
+
+        #[test]
+        #[serial_test::serial]
+        fn has_command_relative_path_ignores_existing_cwd_executable() {
+            // Regression: `which::which` resolves relative paths against the
+            // process CWD, so a real executable at `./mytool` used to read as
+            // `true`. The spec pins relative paths to `false` regardless of
+            // what exists under the CWD.
+            #[cfg(windows)]
+            const TOOL: &str = "mytool.bat";
+            #[cfg(not(windows))]
+            const TOOL: &str = "mytool";
+
+            let dir = tempfile::TempDir::new().unwrap();
+            std::fs::create_dir(dir.path().join("bin")).unwrap();
+            for rel in [TOOL, &format!("bin/{TOOL}")] {
+                let path = dir.path().join(rel);
+                std::fs::write(&path, "#!/bin/sh\n").unwrap();
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(
+                        &path,
+                        std::fs::Permissions::from_mode(0o755),
+                    )
+                    .unwrap();
+                }
+            }
+            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+
+            let original = std::env::current_dir().unwrap();
+            std::env::set_current_dir(dir.path()).unwrap();
+            let dot_relative = has_command_fn(&[json!(format!("./{TOOL}"))], &ctx);
+            let bare_relative = has_command_fn(&[json!(format!("bin/{TOOL}"))], &ctx);
+            std::env::set_current_dir(&original).unwrap();
+
+            assert_eq!(dot_relative.unwrap(), json!(false));
+            assert_eq!(bare_relative.unwrap(), json!(false));
         }
 
         #[test]

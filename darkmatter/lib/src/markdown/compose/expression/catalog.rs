@@ -815,7 +815,7 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
     ExpressionFunctionDescriptor {
 
         signature: "has_command(cmd)",
-        description: "Returns true when the command is found on PATH or is an existing executable path.",
+        description: "Returns true when the command is found on PATH or is an existing executable absolute path.",
         category: "Filesystem",
         order: 24,
 
