@@ -47,6 +47,10 @@ enum Commands {
         /// Filter to a specific provider (e.g. openai, anthropic, gemini)
         #[arg(short, long)]
         provider: Option<String>,
+
+        /// Print one canonical provider/model identifier per line
+        #[arg(long)]
+        flat: bool,
     },
     /// Show detailed metadata for a specific model
     Model {
@@ -84,8 +88,8 @@ async fn main() -> Result<()> {
         Some(Commands::Limits { platform }) => {
             commands::limits::run(platform, cli.json).await?;
         }
-        Some(Commands::Models { provider }) => {
-            commands::models::run(provider, cli.json, cli.verbose > 0).await?;
+        Some(Commands::Models { provider, flat }) => {
+            commands::models::run(provider, cli.json, cli.verbose > 0, flat).await?;
         }
         Some(Commands::Model { model }) => {
             commands::model::run(model, cli.json).await?;

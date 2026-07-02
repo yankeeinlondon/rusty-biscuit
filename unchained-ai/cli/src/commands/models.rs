@@ -19,7 +19,12 @@ use unchained_ai::rigging::providers::models::{
 };
 
 /// Run the `models` subcommand.
-pub async fn run(provider_filter: Option<String>, json: bool, verbose: bool) -> Result<()> {
+pub async fn run(
+    provider_filter: Option<String>,
+    json: bool,
+    verbose: bool,
+    flat: bool,
+) -> Result<()> {
     let filter = match provider_filter.as_deref() {
         Some(name) => Some(parse_provider(name)?),
         None => None,
@@ -29,6 +34,8 @@ pub async fn run(provider_filter: Option<String>, json: bool, verbose: bool) -> 
 
     if json {
         render_json(&groups)?;
+    } else if flat {
+        render_flat_terminal(&groups);
     } else {
         render_terminal(&groups, verbose);
     }
@@ -306,6 +313,16 @@ fn render_terminal(groups: &[(Provider, Vec<ProviderModel>)], verbose: bool) {
 
         let list = build_provider_list(models, verbose);
         print!("{}", list.render(&term));
+    }
+}
+
+fn render_flat_terminal(groups: &[(Provider, Vec<ProviderModel>)]) {
+    let term = Terminal::default();
+
+    for (_provider, models) in groups {
+        for model in models {
+            println!("{}", Prose::new(model.wire_id()).render(&term));
+        }
     }
 }
 
