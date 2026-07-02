@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-05-07T02:07:03.873992+00:00
+//! Generated: 2026-07-02T21:18:37.062005+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: MoonshotAi
 //!
@@ -20,6 +20,10 @@ pub enum ProviderModelMoonshotAi {
     Kimi__K2_5,
     /// Model: `kimi-k2.6`
     Kimi__K2_6,
+    /// Model: `kimi-k2.7-code`
+    Kimi__K2_7__Code,
+    /// Model: `kimi-k2.7-code-highspeed`
+    Kimi__K2_7__Code__Highspeed,
     /// Model: `moonshot-v1-128k`
     Moonshot__V1__128k,
     /// Model: `moonshot-v1-128k-vision-preview`

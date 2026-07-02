@@ -9,18 +9,18 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 #[allow(unused_imports)]
-use crate::models::model_default_parameters::ModelDefaultParameters;
-#[allow(unused_imports)]
-use crate::models::model_metadata::{Modality, ModelMetadata, ModelModalities};
+use crate::models::model_metadata::{ModelMetadata, ModelModalities, Modality};
 #[allow(unused_imports)]
 use crate::models::model_pricing::ModelPricing;
+#[allow(unused_imports)]
+use crate::models::model_default_parameters::ModelDefaultParameters;
 
 /// Static lookup table mapping model IDs to their metadata.
 pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = LazyLock::new(|| {
-    let mut m = HashMap::with_capacity(587);
+    let mut m = HashMap::with_capacity(561);
     m.insert("ai21/jamba-large-1.7", ModelMetadata {
         display_name: Some("AI21: Jamba Large 1.7".to_string()),
-        family: None,
+        family: Some("jamba-large".to_string()),
         context_window: Some(256000),
         max_output_tokens: Some(4096),
         modalities: Some(ModelModalities {
@@ -50,7 +50,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("aion-labs/aion-1.0", ModelMetadata {
         display_name: Some("AionLabs: Aion-1.0".to_string()),
-        family: None,
+        family: Some("aion".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -78,7 +78,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("aion-labs/aion-1.0-mini", ModelMetadata {
         display_name: Some("AionLabs: Aion-1.0-Mini".to_string()),
-        family: None,
+        family: Some("aion-mini".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -106,7 +106,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("aion-labs/aion-2.0", ModelMetadata {
         display_name: Some("AionLabs: Aion-2.0".to_string()),
-        family: None,
+        family: Some("aion".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -134,7 +134,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("aion-labs/aion-rp-llama-3.1-8b", ModelMetadata {
         display_name: Some("AionLabs: Aion-RP 1.0 (8B)".to_string()),
-        family: None,
+        family: Some("aion-rp-llama".to_string()),
         context_window: Some(32768),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -158,82 +158,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2023-12-31".to_string()),
         created: Some(1738696718),
     });
-    m.insert("alfredpros/codellama-7b-instruct-solidity", ModelMetadata {
-        display_name: Some("AlfredPros: CodeLLaMa 7B Instruct Solidity".to_string()),
-        family: None,
-        context_window: Some(4096),
-        max_output_tokens: Some(4096),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("A finetuned 7 billion parameters Code LLaMA - Instruct model to generate Solidity smart contract using 4-bit QLoRA finetuning provided by PEFT library.".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000008_f64),
-            completion_per_token: Some(0.0000012_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "max_tokens".to_string(),
-            "min_p".to_string(),
-            "presence_penalty".to_string(),
-            "repetition_penalty".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "temperature".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2023-06-30".to_string()),
-        created: Some(1744641874),
-    });
-    m.insert("alibaba/tongyi-deepresearch-30b-a3b", ModelMetadata {
-        display_name: Some("Tongyi DeepResearch 30B A3B".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: Some(131072),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Tongyi DeepResearch is an agentic large language model developed by Tongyi Lab, with 30 billion total parameters activating only 3 billion per token. It's optimized for long-horizon, deep information-seeking tasks...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000009_f64),
-            completion_per_token: Some(0.00000045_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: Some(0.00000009_f64),
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "include_reasoning".to_string(),
-            "logit_bias".to_string(),
-            "max_tokens".to_string(),
-            "min_p".to_string(),
-            "presence_penalty".to_string(),
-            "reasoning".to_string(),
-            "repetition_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2025-03-31".to_string()),
-        created: Some(1758210804),
-    });
     m.insert("allenai/olmo-3-32b-think", ModelMetadata {
         display_name: Some("AllenAI: Olmo 3 32B Think".to_string()),
-        family: None,
+        family: Some("olmo-think".to_string()),
         context_window: Some(65536),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
@@ -274,47 +201,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1763758276),
     });
-    m.insert("alpindale/goliath-120b", ModelMetadata {
-        display_name: Some("Goliath 120B".to_string()),
-        family: None,
-        context_window: Some(6144),
-        max_output_tokens: Some(1024),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("A large LLM created by combining two fine-tuned Llama 70B models into one 120B model. Combines Xwin and Euryale. Credits to - [@chargoddard](https://huggingface.co/chargoddard) for developing the framework used to merge...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000375_f64),
-            completion_per_token: Some(0.0000075_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "logit_bias".to_string(),
-            "logprobs".to_string(),
-            "max_tokens".to_string(),
-            "min_p".to_string(),
-            "presence_penalty".to_string(),
-            "repetition_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "temperature".to_string(),
-            "top_a".to_string(),
-            "top_k".to_string(),
-            "top_logprobs".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2023-12-31".to_string()),
-        created: Some(1699574400),
-    });
     m.insert("amazon/nova-2-lite-v1", ModelMetadata {
         display_name: Some("Amazon: Nova 2 Lite".to_string()),
-        family: None,
+        family: Some("nova-lite-v".to_string()),
         context_window: Some(1000000),
         max_output_tokens: Some(65535),
         modalities: Some(ModelModalities {
@@ -346,7 +235,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("amazon/nova-lite-v1", ModelMetadata {
         display_name: Some("Amazon: Nova Lite 1.0".to_string()),
-        family: None,
+        family: Some("nova-lite-v".to_string()),
         context_window: Some(300000),
         max_output_tokens: Some(5120),
         modalities: Some(ModelModalities {
@@ -375,7 +264,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("amazon/nova-micro-v1", ModelMetadata {
         display_name: Some("Amazon: Nova Micro 1.0".to_string()),
-        family: None,
+        family: Some("nova-micro-v".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(5120),
         modalities: Some(ModelModalities {
@@ -404,7 +293,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("amazon/nova-premier-v1", ModelMetadata {
         display_name: Some("Amazon: Nova Premier 1.0".to_string()),
-        family: None,
+        family: Some("nova-premier-v".to_string()),
         context_window: Some(1000000),
         max_output_tokens: Some(32000),
         modalities: Some(ModelModalities {
@@ -433,7 +322,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("amazon/nova-pro-v1", ModelMetadata {
         display_name: Some("Amazon: Nova Pro 1.0".to_string()),
-        family: None,
+        family: Some("nova-pro-v".to_string()),
         context_window: Some(300000),
         max_output_tokens: Some(5120),
         modalities: Some(ModelModalities {
@@ -462,8 +351,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("anthracite-org/magnum-v4-72b", ModelMetadata {
         display_name: Some("Magnum v4 72B".to_string()),
-        family: None,
-        context_window: Some(16384),
+        family: Some("magnum-v".to_string()),
+        context_window: Some(32768),
         max_output_tokens: Some(2048),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
@@ -488,6 +377,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "response_format".to_string(),
             "seed".to_string(),
             "stop".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "top_a".to_string(),
             "top_k".to_string(),
@@ -500,7 +390,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("anthropic/claude-3-haiku", ModelMetadata {
         display_name: Some("Anthropic: Claude 3 Haiku".to_string()),
-        family: None,
+        family: Some("claude-haiku".to_string()),
         context_window: Some(200000),
         max_output_tokens: Some(4096),
         modalities: Some(ModelModalities {
@@ -512,7 +402,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0.00000025_f64),
             completion_per_token: Some(0.00000125_f64),
-            web_search_per_request: None,
+            web_search_per_request: Some(0.01_f64),
             input_cache_read_per_token: Some(0.00000003_f64),
         }),
         supported_parameters: Some(vec![
@@ -528,105 +418,46 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2023-08-31".to_string()),
         created: Some(1710288000),
     });
-    m.insert("anthropic/claude-3.5-haiku", ModelMetadata {
-        display_name: Some("Anthropic: Claude 3.5 Haiku".to_string()),
-        family: None,
-        context_window: Some(200000),
-        max_output_tokens: Some(8192),
+    m.insert("anthropic/claude-fable-5", ModelMetadata {
+        display_name: Some("Anthropic: Claude Fable 5".to_string()),
+        family: Some("claude-fable".to_string()),
+        context_window: Some(1000000),
+        max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text, Modality::Image],
             output: vec![Modality::Text],
         }),
         capabilities: vec![],
-        description: Some("Claude 3.5 Haiku features offers enhanced capabilities in speed, coding accuracy, and tool use. Engineered to excel in real-time applications, it delivers quick response times that are essential for dynamic...".to_string()),
+        description: Some("Claude Fable 5 is a Mythos-class model from Anthropic, built for autonomous knowledge work and coding. It supports text, image, and file inputs with text output, with reasoning support and...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000008_f64),
-            completion_per_token: Some(0.000004_f64),
+            prompt_per_token: Some(0.00001_f64),
+            completion_per_token: Some(0.00005_f64),
             web_search_per_request: Some(0.01_f64),
-            input_cache_read_per_token: Some(0.00000008_f64),
-        }),
-        supported_parameters: Some(vec![
-            "max_tokens".to_string(),
-            "stop".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2024-07-31".to_string()),
-        created: Some(1730678400),
-    });
-    m.insert("anthropic/claude-3.7-sonnet", ModelMetadata {
-        display_name: Some("Anthropic: Claude 3.7 Sonnet".to_string()),
-        family: None,
-        context_window: Some(200000),
-        max_output_tokens: Some(64000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text, Modality::Image],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Claude 3.7 Sonnet is an advanced large language model with improved reasoning, coding, and problem-solving capabilities. It introduces a hybrid reasoning approach, allowing users to choose between rapid responses and...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000003_f64),
-            completion_per_token: Some(0.000015_f64),
-            web_search_per_request: Some(0.01_f64),
-            input_cache_read_per_token: Some(0.0000003_f64),
+            input_cache_read_per_token: Some(0.000001_f64),
         }),
         supported_parameters: Some(vec![
             "include_reasoning".to_string(),
+            "max_completion_tokens".to_string(),
             "max_tokens".to_string(),
             "reasoning".to_string(),
+            "response_format".to_string(),
             "stop".to_string(),
-            "temperature".to_string(),
+            "structured_outputs".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
-            "top_p".to_string(),
+            "verbosity".to_string(),
         ]),
         default_parameters: None,
-        knowledge_cutoff: Some("2024-10-31".to_string()),
-        created: Some(1740422110),
-    });
-    m.insert("anthropic/claude-3.7-sonnet:thinking", ModelMetadata {
-        display_name: Some("Anthropic: Claude 3.7 Sonnet (thinking)".to_string()),
-        family: None,
-        context_window: Some(200000),
-        max_output_tokens: Some(64000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text, Modality::Image],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Claude 3.7 Sonnet is an advanced large language model with improved reasoning, coding, and problem-solving capabilities. It introduces a hybrid reasoning approach, allowing users to choose between rapid responses and...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000003_f64),
-            completion_per_token: Some(0.000015_f64),
-            web_search_per_request: Some(0.01_f64),
-            input_cache_read_per_token: Some(0.0000003_f64),
-        }),
-        supported_parameters: Some(vec![
-            "include_reasoning".to_string(),
-            "max_tokens".to_string(),
-            "reasoning".to_string(),
-            "stop".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2024-10-31".to_string()),
-        created: Some(1740422110),
+        knowledge_cutoff: None,
+        created: Some(1781007515),
     });
     m.insert("anthropic/claude-haiku-4.5", ModelMetadata {
         display_name: Some("Anthropic: Claude Haiku 4.5".to_string()),
-        family: None,
+        family: Some("claude-haiku".to_string()),
         context_window: Some(200000),
         max_output_tokens: Some(64000),
         modalities: Some(ModelModalities {
-            input: vec![Modality::Image, Modality::Text],
+            input: vec![Modality::Text, Modality::Image],
             output: vec![Modality::Text],
         }),
         capabilities: vec![],
@@ -656,7 +487,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("anthropic/claude-opus-4", ModelMetadata {
         display_name: Some("Anthropic: Claude Opus 4".to_string()),
-        family: None,
+        family: Some("claude-opus".to_string()),
         context_window: Some(200000),
         max_output_tokens: Some(32000),
         modalities: Some(ModelModalities {
@@ -679,7 +510,6 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
-            "top_k".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -688,7 +518,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("anthropic/claude-opus-4.1", ModelMetadata {
         display_name: Some("Anthropic: Claude Opus 4.1".to_string()),
-        family: None,
+        family: Some("claude-opus".to_string()),
         context_window: Some(200000),
         max_output_tokens: Some(32000),
         modalities: Some(ModelModalities {
@@ -722,7 +552,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("anthropic/claude-opus-4.5", ModelMetadata {
         display_name: Some("Anthropic: Claude Opus 4.5".to_string()),
-        family: None,
+        family: Some("claude-opus".to_string()),
         context_window: Some(200000),
         max_output_tokens: Some(64000),
         modalities: Some(ModelModalities {
@@ -756,7 +586,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("anthropic/claude-opus-4.6", ModelMetadata {
         display_name: Some("Anthropic: Claude Opus 4.6".to_string()),
-        family: None,
+        family: Some("claude-opus".to_string()),
         context_window: Some(1000000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -790,43 +620,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1770219050),
     });
-    m.insert("anthropic/claude-opus-4.6-fast", ModelMetadata {
-        display_name: Some("Anthropic: Claude Opus 4.6 (Fast)".to_string()),
-        family: None,
-        context_window: Some(1000000),
-        max_output_tokens: Some(128000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text, Modality::Image],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Fast-mode variant of [Opus 4.6](/anthropic/claude-opus-4.6) - identical capabilities with higher output speed at premium 6x pricing.\n\nLearn more in Anthropic's docs: https://platform.claude.com/docs/en/build-with-claude/fast-mode".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00003_f64),
-            completion_per_token: Some(0.00015_f64),
-            web_search_per_request: Some(0.01_f64),
-            input_cache_read_per_token: Some(0.000003_f64),
-        }),
-        supported_parameters: Some(vec![
-            "include_reasoning".to_string(),
-            "max_tokens".to_string(),
-            "reasoning".to_string(),
-            "response_format".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_p".to_string(),
-            "verbosity".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: Some(1775592472),
-    });
     m.insert("anthropic/claude-opus-4.7", ModelMetadata {
         display_name: Some("Anthropic: Claude Opus 4.7".to_string()),
-        family: None,
+        family: Some("claude-opus".to_string()),
         context_window: Some(1000000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -856,9 +652,105 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1776351100),
     });
+    m.insert("anthropic/claude-opus-4.7-fast", ModelMetadata {
+        display_name: Some("Anthropic: Claude Opus 4.7 (Fast)".to_string()),
+        family: Some("claude-opus".to_string()),
+        context_window: Some(1000000),
+        max_output_tokens: Some(128000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text, Modality::Image],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("Fast-mode variant of [Opus 4.7](/anthropic/claude-opus-4.7) - identical capabilities with higher output speed at premium 6x pricing.\n\nLearn more in Anthropic's docs: https://platform.claude.com/docs/en/build-with-claude/fast-mode".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.00003_f64),
+            completion_per_token: Some(0.00015_f64),
+            web_search_per_request: Some(0.01_f64),
+            input_cache_read_per_token: Some(0.000003_f64),
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "max_tokens".to_string(),
+            "reasoning".to_string(),
+            "response_format".to_string(),
+            "stop".to_string(),
+            "structured_outputs".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+            "verbosity".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: Some(1778613011),
+    });
+    m.insert("anthropic/claude-opus-4.8", ModelMetadata {
+        display_name: Some("Anthropic: Claude Opus 4.8".to_string()),
+        family: Some("claude-opus".to_string()),
+        context_window: Some(1000000),
+        max_output_tokens: Some(128000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text, Modality::Image],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("Claude Opus 4.8 is Anthropic's most capable generally available model in the Opus family. It supports text, image, and file inputs with text output, with reasoning support and a 1M-token...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.000005_f64),
+            completion_per_token: Some(0.000025_f64),
+            web_search_per_request: Some(0.01_f64),
+            input_cache_read_per_token: Some(0.0000005_f64),
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "max_tokens".to_string(),
+            "reasoning".to_string(),
+            "response_format".to_string(),
+            "stop".to_string(),
+            "structured_outputs".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+            "verbosity".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: Some(1779905091),
+    });
+    m.insert("anthropic/claude-opus-4.8-fast", ModelMetadata {
+        display_name: Some("Anthropic: Claude Opus 4.8 (Fast)".to_string()),
+        family: Some("claude-opus".to_string()),
+        context_window: Some(1000000),
+        max_output_tokens: Some(128000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text, Modality::Image],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("Fast-mode variant of [Opus 4.8](/anthropic/claude-opus-4.8) - identical capabilities with higher output speed at 2x pricing relative to regular Opus 4.8.\n\nLearn more in Anthropic's docs: https://platform.claude.com/docs/en/build-with-claude/fast-mode".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.00001_f64),
+            completion_per_token: Some(0.00005_f64),
+            web_search_per_request: Some(0.01_f64),
+            input_cache_read_per_token: Some(0.000001_f64),
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "max_tokens".to_string(),
+            "reasoning".to_string(),
+            "response_format".to_string(),
+            "stop".to_string(),
+            "structured_outputs".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+            "verbosity".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: Some(1779913703),
+    });
     m.insert("anthropic/claude-sonnet-4", ModelMetadata {
         display_name: Some("Anthropic: Claude Sonnet 4".to_string()),
-        family: None,
+        family: Some("claude-sonnet".to_string()),
         context_window: Some(1000000),
         max_output_tokens: Some(64000),
         modalities: Some(ModelModalities {
@@ -890,7 +782,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("anthropic/claude-sonnet-4.5", ModelMetadata {
         display_name: Some("Anthropic: Claude Sonnet 4.5".to_string()),
-        family: None,
+        family: Some("claude-sonnet".to_string()),
         context_window: Some(1000000),
         max_output_tokens: Some(64000),
         modalities: Some(ModelModalities {
@@ -930,7 +822,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("anthropic/claude-sonnet-4.6", ModelMetadata {
         display_name: Some("Anthropic: Claude Sonnet 4.6".to_string()),
-        family: None,
+        family: Some("claude-sonnet".to_string()),
         context_window: Some(1000000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -964,9 +856,42 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1771342990),
     });
+    m.insert("anthropic/claude-sonnet-5", ModelMetadata {
+        display_name: Some("Anthropic: Claude Sonnet 5".to_string()),
+        family: Some("claude-sonnet".to_string()),
+        context_window: Some(1000000),
+        max_output_tokens: Some(128000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text, Modality::Image],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("Sonnet 5 is Anthropic's most capable Sonnet-class model, with frontier performance across coding, agents, and professional work. It supports adaptive thinking with selectable reasoning effort levels (low, medium, high, max,...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.000002_f64),
+            completion_per_token: Some(0.00001_f64),
+            web_search_per_request: Some(0.01_f64),
+            input_cache_read_per_token: Some(0.0000002_f64),
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "max_completion_tokens".to_string(),
+            "max_tokens".to_string(),
+            "reasoning".to_string(),
+            "response_format".to_string(),
+            "stop".to_string(),
+            "structured_outputs".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+            "verbosity".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: Some(1782843083),
+    });
     m.insert("arcee-ai/coder-large", ModelMetadata {
         display_name: Some("Arcee AI: Coder Large".to_string()),
-        family: None,
+        family: Some("coder-large".to_string()),
         context_window: Some(32768),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -997,137 +922,27 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2025-03-31".to_string()),
         created: Some(1746478663),
     });
-    m.insert("arcee-ai/maestro-reasoning", ModelMetadata {
-        display_name: Some("Arcee AI: Maestro Reasoning".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: Some(32000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Maestro Reasoning is Arcee's flagship analysis model: a 32 B‑parameter derivative of Qwen 2.5‑32 B tuned with DPO and chain‑of‑thought RL for step‑by‑step logic. Compared to the earlier 7 B...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000009_f64),
-            completion_per_token: Some(0.0000033_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "logit_bias".to_string(),
-            "max_tokens".to_string(),
-            "min_p".to_string(),
-            "presence_penalty".to_string(),
-            "repetition_penalty".to_string(),
-            "stop".to_string(),
-            "temperature".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2025-03-31".to_string()),
-        created: Some(1746481269),
-    });
-    m.insert("arcee-ai/spotlight", ModelMetadata {
-        display_name: Some("Arcee AI: Spotlight".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: Some(65537),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Image, Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Spotlight is a 7‑billion‑parameter vision‑language model derived from Qwen 2.5‑VL and fine‑tuned by Arcee AI for tight image‑text grounding tasks. It offers a 32 k‑token context window, enabling rich multimodal...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000018_f64),
-            completion_per_token: Some(0.00000018_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "logit_bias".to_string(),
-            "max_tokens".to_string(),
-            "min_p".to_string(),
-            "presence_penalty".to_string(),
-            "repetition_penalty".to_string(),
-            "stop".to_string(),
-            "temperature".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2025-03-31".to_string()),
-        created: Some(1746481552),
-    });
-    m.insert("arcee-ai/trinity-large-preview", ModelMetadata {
-        display_name: Some("Arcee AI: Trinity Large Preview".to_string()),
-        family: None,
-        context_window: Some(131000),
-        max_output_tokens: None,
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Trinity-Large-Preview is a frontier-scale open-weight language model from Arcee, built as a 400B-parameter sparse Mixture-of-Experts with 13B active parameters per token using 4-of-256 expert routing. It excels in creative writing,...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000015_f64),
-            completion_per_token: Some(0.00000045_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "max_tokens".to_string(),
-            "response_format".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tools".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: Some(ModelDefaultParameters {
-            temperature: Some(0.8_f32),
-            top_p: Some(0.8_f32),
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-        }),
-        knowledge_cutoff: None,
-        created: Some(1769552670),
-    });
     m.insert("arcee-ai/trinity-large-thinking", ModelMetadata {
         display_name: Some("Arcee AI: Trinity Large Thinking".to_string()),
-        family: None,
+        family: Some("trinity-large".to_string()),
         context_window: Some(262144),
-        max_output_tokens: Some(262144),
+        max_output_tokens: Some(80000),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
         }),
         capabilities: vec![],
-        description: Some("Trinity Large Thinking is a powerful open source reasoning model from the team at Arcee AI. It shows strong performance in PinchBench, agentic workloads, and reasoning tasks. Launch video: https://youtu.be/Gc82AXLa0Rg?si=4RLn6WBz33qT--B7".to_string()),
+        description: Some("Trinity Large Thinking is a powerful open source reasoning model from the team at Arcee AI. It shows strong performance in PinchBench, agentic workloads, and reasoning tasks. Launch video: https://youtu.be/Gc82AXLa0Rg?si=4RLn6WBz33qT--B7...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000022_f64),
-            completion_per_token: Some(0.00000085_f64),
+            prompt_per_token: Some(0.00000025_f64),
+            completion_per_token: Some(0.0000008_f64),
             web_search_per_request: None,
             input_cache_read_per_token: Some(0.00000006_f64),
         }),
         supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
-            "logit_bias".to_string(),
             "max_tokens".to_string(),
-            "presence_penalty".to_string(),
             "reasoning".to_string(),
-            "repetition_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
@@ -1146,7 +961,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("arcee-ai/trinity-mini", ModelMetadata {
         display_name: Some("Arcee AI: Trinity Mini".to_string()),
-        family: None,
+        family: Some("trinity-mini".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(131072),
         modalities: Some(ModelModalities {
@@ -1163,6 +978,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         }),
         supported_parameters: Some(vec![
             "include_reasoning".to_string(),
+            "logprobs".to_string(),
             "max_completion_tokens".to_string(),
             "max_tokens".to_string(),
             "reasoning".to_string(),
@@ -1172,6 +988,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -1186,7 +1004,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("arcee-ai/virtuoso-large", ModelMetadata {
         display_name: Some("Arcee AI: Virtuoso Large".to_string()),
-        family: None,
+        family: Some("virtuoso-large".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(64000),
         modalities: Some(ModelModalities {
@@ -1219,186 +1037,10 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2025-03-31".to_string()),
         created: Some(1746478885),
     });
-    m.insert("baidu/cobuddy:free", ModelMetadata {
-        display_name: Some("Baidu Qianfan: CoBuddy (free)".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: Some(65536),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("CoBuddy is a code generation model from Baidu, optimized for coding tasks and AI Agent workflows. It features high inference throughput and low end-to-end latency, with native support for tool...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0_f64),
-            completion_per_token: Some(0_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "include_reasoning".to_string(),
-            "max_tokens".to_string(),
-            "reasoning".to_string(),
-            "stop".to_string(),
-            "tools".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: Some(1778035480),
-    });
-    m.insert("baidu/ernie-4.5-21b-a3b", ModelMetadata {
-        display_name: Some("Baidu: ERNIE 4.5 21B A3B".to_string()),
-        family: None,
-        context_window: Some(120000),
-        max_output_tokens: Some(8000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("A sophisticated text-based Mixture-of-Experts (MoE) model featuring 21B total parameters with 3B activated per token, delivering exceptional multimodal understanding and generation through heterogeneous MoE structures and modality-isolated routing. Supporting an...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000007_f64),
-            completion_per_token: Some(0.00000028_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "repetition_penalty".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: Some(ModelDefaultParameters {
-            temperature: Some(0.8_f32),
-            top_p: Some(0.8_f32),
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-        }),
-        knowledge_cutoff: Some("2025-03-31".to_string()),
-        created: Some(1755034167),
-    });
-    m.insert("baidu/ernie-4.5-21b-a3b-thinking", ModelMetadata {
-        display_name: Some("Baidu: ERNIE 4.5 21B A3B Thinking".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: Some(65536),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("ERNIE-4.5-21B-A3B-Thinking is Baidu's upgraded lightweight MoE model, refined to boost reasoning depth and quality for top-tier performance in logical puzzles, math, science, coding, text generation, and expert-level academic benchmarks.".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000007_f64),
-            completion_per_token: Some(0.00000028_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "include_reasoning".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "reasoning".to_string(),
-            "repetition_penalty".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "temperature".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: Some(ModelDefaultParameters {
-            temperature: Some(0.6_f32),
-            top_p: Some(0.95_f32),
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-        }),
-        knowledge_cutoff: Some("2025-03-31".to_string()),
-        created: Some(1760048887),
-    });
-    m.insert("baidu/ernie-4.5-300b-a47b", ModelMetadata {
-        display_name: Some("Baidu: ERNIE 4.5 300B A47B ".to_string()),
-        family: None,
-        context_window: Some(123000),
-        max_output_tokens: Some(12000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("ERNIE-4.5-300B-A47B is a 300B parameter Mixture-of-Experts (MoE) language model developed by Baidu as part of the ERNIE 4.5 series. It activates 47B parameters per token and supports text generation in...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000028_f64),
-            completion_per_token: Some(0.0000011_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "repetition_penalty".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "temperature".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2025-03-31".to_string()),
-        created: Some(1751300139),
-    });
-    m.insert("baidu/ernie-4.5-vl-28b-a3b", ModelMetadata {
-        display_name: Some("Baidu: ERNIE 4.5 VL 28B A3B".to_string()),
-        family: None,
-        context_window: Some(30000),
-        max_output_tokens: Some(8000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text, Modality::Image],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("A powerful multimodal Mixture-of-Experts chat model featuring 28B total parameters with 3B activated per token, delivering exceptional text and vision understanding through its innovative heterogeneous MoE structure with modality-isolated routing....".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000014_f64),
-            completion_per_token: Some(0.00000056_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "include_reasoning".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "reasoning".to_string(),
-            "repetition_penalty".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2025-03-31".to_string()),
-        created: Some(1755032836),
-    });
     m.insert("baidu/ernie-4.5-vl-424b-a47b", ModelMetadata {
         display_name: Some("Baidu: ERNIE 4.5 VL 424B A47B ".to_string()),
-        family: None,
-        context_window: Some(123000),
+        family: Some("ernie".to_string()),
+        context_window: Some(131072),
         max_output_tokens: Some(16000),
         modalities: Some(ModelModalities {
             input: vec![Modality::Image, Modality::Text],
@@ -1429,42 +1071,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2025-03-31".to_string()),
         created: Some(1751300903),
     });
-    m.insert("baidu/qianfan-ocr-fast:free", ModelMetadata {
-        display_name: Some("Baidu: Qianfan-OCR-Fast (free)".to_string()),
-        family: None,
-        context_window: Some(65536),
-        max_output_tokens: Some(28672),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Image, Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Qianfan-OCR-Fast is a domain-specific multimodal large model purpose-built for OCR. By leveraging specialized OCR training data while preserving versatile multimodal intelligence, it provides a powerful performance upgrade over Qianfan-OCR.".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0_f64),
-            completion_per_token: Some(0_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "include_reasoning".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "reasoning".to_string(),
-            "repetition_penalty".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "temperature".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: Some(1776707472),
-    });
     m.insert("bytedance-seed/seed-1.6", ModelMetadata {
         display_name: Some("ByteDance Seed: Seed 1.6".to_string()),
-        family: None,
+        family: Some("seed".to_string()),
         context_window: Some(262144),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -1498,7 +1107,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("bytedance-seed/seed-1.6-flash", ModelMetadata {
         display_name: Some("ByteDance Seed: Seed 1.6 Flash".to_string()),
-        family: None,
+        family: Some("seed-flash".to_string()),
         context_window: Some(262144),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -1532,7 +1141,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("bytedance-seed/seed-2.0-lite", ModelMetadata {
         display_name: Some("ByteDance Seed: Seed-2.0-Lite".to_string()),
-        family: None,
+        family: Some("seed-lite".to_string()),
         context_window: Some(262144),
         max_output_tokens: Some(131072),
         modalities: Some(ModelModalities {
@@ -1566,7 +1175,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("bytedance-seed/seed-2.0-mini", ModelMetadata {
         display_name: Some("ByteDance Seed: Seed-2.0-Mini".to_string()),
-        family: None,
+        family: Some("seed-mini".to_string()),
         context_window: Some(262144),
         max_output_tokens: Some(131072),
         modalities: Some(ModelModalities {
@@ -1600,7 +1209,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("bytedance/ui-tars-1.5-7b", ModelMetadata {
         display_name: Some("ByteDance: UI-TARS 7B ".to_string()),
-        family: None,
+        family: Some("ui-tars".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(2048),
         modalities: Some(ModelModalities {
@@ -1618,13 +1227,16 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
             "seed".to_string(),
             "stop".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -1633,7 +1245,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("cognitivecomputations/dolphin-mistral-24b-venice-edition:free", ModelMetadata {
         display_name: Some("Venice: Uncensored (free)".to_string()),
-        family: None,
+        family: Some("dolphin-mistral-venice-edition".to_string()),
         context_window: Some(32768),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -1665,7 +1277,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("cohere/command-a", ModelMetadata {
         display_name: Some("Cohere: Command A".to_string()),
-        family: None,
+        family: Some("command-a".to_string()),
         context_window: Some(256000),
         max_output_tokens: Some(8192),
         modalities: Some(ModelModalities {
@@ -1698,7 +1310,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("cohere/command-r-08-2024", ModelMetadata {
         display_name: Some("Cohere: Command R (08-2024)".to_string()),
-        family: None,
+        family: Some("command-r".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(4000),
         modalities: Some(ModelModalities {
@@ -1733,7 +1345,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("cohere/command-r-plus-08-2024", ModelMetadata {
         display_name: Some("Cohere: Command R+ (08-2024)".to_string()),
-        family: None,
+        family: Some("command-r-plus".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(4000),
         modalities: Some(ModelModalities {
@@ -1768,7 +1380,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("cohere/command-r7b-12-2024", ModelMetadata {
         display_name: Some("Cohere: Command R7B (12-2024)".to_string()),
-        family: None,
+        family: Some("command-r7b".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(4000),
         modalities: Some(ModelModalities {
@@ -1799,9 +1411,44 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2024-08-31".to_string()),
         created: Some(1734158152),
     });
+    m.insert("cohere/north-mini-code:free", ModelMetadata {
+        display_name: Some("Cohere: North Mini Code (free)".to_string()),
+        family: Some("north-mini-code".to_string()),
+        context_window: Some(256000),
+        max_output_tokens: Some(64000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("North Mini Code is Cohere's first agentic coding model and the debut of its North family. A sparse mixture-of-experts model with 30B total parameters and 3B active, it is optimized...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0_f64),
+            completion_per_token: Some(0_f64),
+            web_search_per_request: None,
+            input_cache_read_per_token: None,
+        }),
+        supported_parameters: Some(vec![
+            "frequency_penalty".to_string(),
+            "include_reasoning".to_string(),
+            "max_tokens".to_string(),
+            "presence_penalty".to_string(),
+            "reasoning".to_string(),
+            "seed".to_string(),
+            "stop".to_string(),
+            "temperature".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+            "top_k".to_string(),
+            "top_p".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: Some(1781723748),
+    });
     m.insert("deepcogito/cogito-v2.1-671b", ModelMetadata {
         display_name: Some("Deep Cogito: Cogito v2.1 671B".to_string()),
-        family: None,
+        family: Some("cogito-v".to_string()),
         context_window: Some(128000),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -1838,9 +1485,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("deepseek/deepseek-chat", ModelMetadata {
         display_name: Some("DeepSeek: DeepSeek V3".to_string()),
-        family: None,
-        context_window: Some(163840),
-        max_output_tokens: Some(16384),
+        family: Some("deepseek".to_string()),
+        context_window: Some(131072),
+        max_output_tokens: Some(16000),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -1848,8 +1495,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("DeepSeek-V3 is the latest model from the DeepSeek team, building upon the instruction following and coding abilities of the previous versions. Pre-trained on nearly 15 trillion tokens, the reported evaluations...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000032_f64),
-            completion_per_token: Some(0.00000089_f64),
+            prompt_per_token: Some(0.0000002002_f64),
+            completion_per_token: Some(0.0000008001_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
         }),
@@ -1876,7 +1523,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("deepseek/deepseek-chat-v3-0324", ModelMetadata {
         display_name: Some("DeepSeek: DeepSeek V3 0324".to_string()),
-        family: None,
+        family: Some("deepseek-v-0324".to_string()),
         context_window: Some(163840),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -1886,8 +1533,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("DeepSeek V3, a 685B-parameter, mixture-of-experts model, is the latest iteration of the flagship chat model family from the DeepSeek team. It succeeds the [DeepSeek V3](/deepseek/deepseek-chat-v3) model and performs really well...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000002_f64),
-            completion_per_token: Some(0.00000077_f64),
+            prompt_per_token: Some(0.00000024_f64),
+            completion_per_token: Some(0.0000009_f64),
             web_search_per_request: None,
             input_cache_read_per_token: Some(0.000000135_f64),
         }),
@@ -1914,9 +1561,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("deepseek/deepseek-chat-v3.1", ModelMetadata {
         display_name: Some("DeepSeek: DeepSeek V3.1".to_string()),
-        family: None,
-        context_window: Some(32768),
-        max_output_tokens: Some(7168),
+        family: Some("deepseek-v".to_string()),
+        context_window: Some(163840),
+        max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -1924,10 +1571,10 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("DeepSeek-V3.1 is a large hybrid reasoning model (671B parameters, 37B active) that supports both thinking and non-thinking modes via prompt templates. It extends the DeepSeek-V3 base with a two-phase long-context...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000015_f64),
-            completion_per_token: Some(0.00000075_f64),
+            prompt_per_token: Some(0.00000021_f64),
+            completion_per_token: Some(0.00000079_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: None,
+            input_cache_read_per_token: Some(0.00000013_f64),
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
@@ -1956,8 +1603,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("deepseek/deepseek-r1", ModelMetadata {
         display_name: Some("DeepSeek: R1".to_string()),
-        family: None,
-        context_window: Some(64000),
+        family: Some("deepseek-r".to_string()),
+        context_window: Some(163840),
         max_output_tokens: Some(16000),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
@@ -1979,8 +1626,10 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "presence_penalty".to_string(),
             "reasoning".to_string(),
             "repetition_penalty".to_string(),
+            "response_format".to_string(),
             "seed".to_string(),
             "stop".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
@@ -1993,7 +1642,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("deepseek/deepseek-r1-0528", ModelMetadata {
         display_name: Some("DeepSeek: R1 0528".to_string()),
-        family: None,
+        family: Some("deepseek-r-0528".to_string()),
         context_window: Some(163840),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -2012,6 +1661,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
@@ -2025,6 +1675,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -2033,9 +1684,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("deepseek/deepseek-r1-distill-llama-70b", ModelMetadata {
         display_name: Some("DeepSeek: R1 Distill Llama 70B".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: Some(16384),
+        family: Some("deepseek-r-llama".to_string()),
+        context_window: Some(128000),
+        max_output_tokens: Some(8192),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -2043,7 +1694,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("DeepSeek R1 Distill Llama 70B is a distilled large language model based on [Llama-3.3-70B-Instruct](/meta-llama/llama-3.3-70b-instruct), using outputs from [DeepSeek R1](/deepseek/deepseek-r1). The model combines advanced distillation techniques to achieve high performance across...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000007_f64),
+            prompt_per_token: Some(0.0000008_f64),
             completion_per_token: Some(0.0000008_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
@@ -2051,13 +1702,10 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
-            "logit_bias".to_string(),
             "max_tokens".to_string(),
-            "min_p".to_string(),
             "presence_penalty".to_string(),
             "reasoning".to_string(),
             "repetition_penalty".to_string(),
-            "response_format".to_string(),
             "seed".to_string(),
             "stop".to_string(),
             "temperature".to_string(),
@@ -2068,46 +1716,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2024-07-31".to_string()),
         created: Some(1737663169),
     });
-    m.insert("deepseek/deepseek-r1-distill-qwen-32b", ModelMetadata {
-        display_name: Some("DeepSeek: R1 Distill Qwen 32B".to_string()),
-        family: None,
-        context_window: Some(32768),
-        max_output_tokens: Some(32768),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("DeepSeek R1 Distill Qwen 32B is a distilled large language model based on [Qwen 2.5 32B](https://huggingface.co/Qwen/Qwen2.5-32B), using outputs from [DeepSeek R1](/deepseek/deepseek-r1). It outperforms OpenAI's o1-mini across various benchmarks, achieving new...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000029_f64),
-            completion_per_token: Some(0.00000029_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "include_reasoning".to_string(),
-            "logprobs".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "reasoning".to_string(),
-            "repetition_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "top_logprobs".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2024-07-31".to_string()),
-        created: Some(1738194830),
-    });
     m.insert("deepseek/deepseek-v3.1-terminus", ModelMetadata {
         display_name: Some("DeepSeek: DeepSeek V3.1 Terminus".to_string()),
-        family: None,
+        family: Some("deepseek-v-terminus".to_string()),
         context_window: Some(163840),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -2147,9 +1758,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("deepseek/deepseek-v3.2", ModelMetadata {
         display_name: Some("DeepSeek: DeepSeek V3.2".to_string()),
-        family: None,
+        family: Some("deepseek-v".to_string()),
         context_window: Some(131072),
-        max_output_tokens: Some(65536),
+        max_output_tokens: Some(64000),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -2157,15 +1768,16 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("DeepSeek-V3.2 is a large language model designed to harmonize high computational efficiency with strong reasoning and agentic tool-use performance. It introduces DeepSeek Sparse Attention (DSA), a fine-grained sparse attention mechanism...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000000252_f64),
-            completion_per_token: Some(0.000000378_f64),
+            prompt_per_token: Some(0.0000002288_f64),
+            completion_per_token: Some(0.0000003432_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: Some(0.0000000252_f64),
+            input_cache_read_per_token: Some(0.00000002288_f64),
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
@@ -2179,6 +1791,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -2193,7 +1806,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("deepseek/deepseek-v3.2-exp", ModelMetadata {
         display_name: Some("DeepSeek: DeepSeek V3.2 Exp".to_string()),
-        family: None,
+        family: Some("deepseek-v".to_string()),
         context_window: Some(163840),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
@@ -2212,6 +1825,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
@@ -2225,6 +1839,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -2237,55 +1852,11 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2025-07-31".to_string()),
         created: Some(1759150481),
     });
-    m.insert("deepseek/deepseek-v3.2-speciale", ModelMetadata {
-        display_name: Some("DeepSeek: DeepSeek V3.2 Speciale".to_string()),
-        family: None,
-        context_window: Some(163840),
-        max_output_tokens: Some(163840),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("DeepSeek-V3.2-Speciale is a high-compute variant of DeepSeek-V3.2 optimized for maximum reasoning and agentic performance. It builds on DeepSeek Sparse Attention (DSA) for efficient long-context processing, then scales post-training reinforcement learning...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000000287_f64),
-            completion_per_token: Some(0.000000431_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: Some(0.000000058_f64),
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "include_reasoning".to_string(),
-            "logit_bias".to_string(),
-            "max_tokens".to_string(),
-            "min_p".to_string(),
-            "presence_penalty".to_string(),
-            "reasoning".to_string(),
-            "repetition_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: Some(ModelDefaultParameters {
-            temperature: Some(1_f32),
-            top_p: Some(0.95_f32),
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-        }),
-        knowledge_cutoff: None,
-        created: Some(1764594837),
-    });
     m.insert("deepseek/deepseek-v4-flash", ModelMetadata {
         display_name: Some("DeepSeek: DeepSeek V4 Flash".to_string()),
-        family: None,
+        family: Some("deepseek-v-flash".to_string()),
         context_window: Some(1048576),
-        max_output_tokens: Some(384000),
+        max_output_tokens: None,
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -2293,10 +1864,10 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("DeepSeek V4 Flash is an efficiency-optimized Mixture-of-Experts model from DeepSeek with 284B total parameters and 13B activated parameters, supporting a 1M-token context window. It is designed for fast inference and...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000014_f64),
-            completion_per_token: Some(0.00000028_f64),
+            prompt_per_token: Some(0.000000089_f64),
+            completion_per_token: Some(0.00000018_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: Some(0.0000000028_f64),
+            input_cache_read_per_token: Some(0.000000018_f64),
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
@@ -2325,7 +1896,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("deepseek/deepseek-v4-pro", ModelMetadata {
         display_name: Some("DeepSeek: DeepSeek V4 Pro".to_string()),
-        family: None,
+        family: Some("deepseek-v-pro".to_string()),
         context_window: Some(1048576),
         max_output_tokens: Some(384000),
         modalities: Some(ModelModalities {
@@ -2371,326 +1942,198 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1777000679),
     });
-    m.insert("essentialai/rnj-1-instruct", ModelMetadata {
-        display_name: Some("EssentialAI: Rnj 1 Instruct".to_string()),
-        family: None,
-        context_window: Some(32768),
-        max_output_tokens: None,
+    m.insert("gemini-2.0-flash", ModelMetadata {
+        display_name: Some("Gemini 2.0 Flash".to_string()),
+        family: Some("gemini-2.0-flash".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(8192),
         modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
+            input: vec![Modality::Audio, Modality::Image, Modality::Text],
             output: vec![Modality::Text],
         }),
-        capabilities: vec![],
-        description: Some("Rnj-1 is an 8B-parameter, dense, open-weight model family developed by Essential AI and trained from scratch with a focus on programming, math, and scientific reasoning. The model demonstrates strong performance...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000015_f64),
-            completion_per_token: Some(0.00000015_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "logit_bias".to_string(),
-            "max_tokens".to_string(),
-            "min_p".to_string(),
-            "presence_penalty".to_string(),
-            "repetition_penalty".to_string(),
-            "response_format".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+        description: None,
+        pricing: None,
+        supported_parameters: None,
         default_parameters: None,
         knowledge_cutoff: None,
-        created: Some(1765094847),
+        created: None,
     });
-    m.insert(
-        "gemini-2.0-flash",
-        ModelMetadata {
-            display_name: Some("Gemini 2.0 Flash".to_string()),
-            family: Some("gemini-2.0-flash".to_string()),
-            context_window: Some(1048576),
-            max_output_tokens: Some(8192),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Audio, Modality::Image, Modality::Text],
-                output: vec![Modality::Text],
-            }),
-            capabilities: vec![
-                "batch".to_string(),
-                "function_calling".to_string(),
-                "structured_output".to_string(),
-            ],
-            description: None,
-            pricing: None,
-            supported_parameters: None,
-            default_parameters: None,
-            knowledge_cutoff: None,
-            created: None,
-        },
-    );
-    m.insert(
-        "gemini-2.0-flash-001",
-        ModelMetadata {
-            display_name: Some("Gemini 2.0 Flash".to_string()),
-            family: Some("gemini-2.0-flash".to_string()),
-            context_window: Some(1048576),
-            max_output_tokens: Some(8192),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Audio, Modality::Image, Modality::Text],
-                output: vec![Modality::Text],
-            }),
-            capabilities: vec![
-                "batch".to_string(),
-                "function_calling".to_string(),
-                "structured_output".to_string(),
-            ],
-            description: None,
-            pricing: None,
-            supported_parameters: None,
-            default_parameters: None,
-            knowledge_cutoff: None,
-            created: None,
-        },
-    );
-    m.insert(
-        "gemini-2.0-flash-lite",
-        ModelMetadata {
-            display_name: Some("Gemini 2.0 Flash-Lite".to_string()),
-            family: Some("gemini-2.0-flash-lite".to_string()),
-            context_window: Some(1048576),
-            max_output_tokens: Some(8192),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Audio, Modality::Image, Modality::Text],
-                output: vec![Modality::Text],
-            }),
-            capabilities: vec![
-                "batch".to_string(),
-                "function_calling".to_string(),
-                "structured_output".to_string(),
-            ],
-            description: None,
-            pricing: None,
-            supported_parameters: None,
-            default_parameters: None,
-            knowledge_cutoff: None,
-            created: None,
-        },
-    );
-    m.insert(
-        "gemini-2.0-flash-lite-001",
-        ModelMetadata {
-            display_name: Some("Gemini 2.0 Flash-Lite".to_string()),
-            family: Some("gemini-2.0-flash-lite".to_string()),
-            context_window: Some(1048576),
-            max_output_tokens: Some(8192),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Audio, Modality::Image, Modality::Text],
-                output: vec![Modality::Text],
-            }),
-            capabilities: vec![
-                "batch".to_string(),
-                "function_calling".to_string(),
-                "structured_output".to_string(),
-            ],
-            description: None,
-            pricing: None,
-            supported_parameters: None,
-            default_parameters: None,
-            knowledge_cutoff: None,
-            created: None,
-        },
-    );
-    m.insert(
-        "gemini-2.5-flash",
-        ModelMetadata {
-            display_name: Some("Gemini 2.5 Flash".to_string()),
-            family: Some("gemini-2.5-flash".to_string()),
-            context_window: Some(1048576),
-            max_output_tokens: Some(65536),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Audio, Modality::Image, Modality::Text],
-                output: vec![Modality::Text],
-            }),
-            capabilities: vec![
-                "batch".to_string(),
-                "function_calling".to_string(),
-                "structured_output".to_string(),
-            ],
-            description: None,
-            pricing: None,
-            supported_parameters: None,
-            default_parameters: None,
-            knowledge_cutoff: None,
-            created: None,
-        },
-    );
-    m.insert(
-        "gemini-2.5-flash-lite",
-        ModelMetadata {
-            display_name: Some("Gemini 2.5 Flash-Lite".to_string()),
-            family: Some("gemini-2.5-flash-lite".to_string()),
-            context_window: Some(1048576),
-            max_output_tokens: Some(65536),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Audio, Modality::Image, Modality::Text],
-                output: vec![Modality::Text],
-            }),
-            capabilities: vec![
-                "batch".to_string(),
-                "function_calling".to_string(),
-                "structured_output".to_string(),
-            ],
-            description: None,
-            pricing: None,
-            supported_parameters: None,
-            default_parameters: None,
-            knowledge_cutoff: None,
-            created: None,
-        },
-    );
-    m.insert(
-        "gemini-2.5-pro",
-        ModelMetadata {
-            display_name: Some("Gemini 2.5 Pro".to_string()),
-            family: Some("gemini-2.5-pro".to_string()),
-            context_window: Some(1048576),
-            max_output_tokens: Some(65536),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Audio, Modality::Image, Modality::Text],
-                output: vec![Modality::Text],
-            }),
-            capabilities: vec![
-                "batch".to_string(),
-                "function_calling".to_string(),
-                "structured_output".to_string(),
-            ],
-            description: None,
-            pricing: None,
-            supported_parameters: None,
-            default_parameters: None,
-            knowledge_cutoff: None,
-            created: None,
-        },
-    );
-    m.insert(
-        "gemini-3-flash-preview",
-        ModelMetadata {
-            display_name: Some("Gemini 3 Flash".to_string()),
-            family: Some("gemini-3-flash".to_string()),
-            context_window: Some(1048576),
-            max_output_tokens: Some(65536),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Audio, Modality::Image, Modality::Text],
-                output: vec![Modality::Text],
-            }),
-            capabilities: vec![
-                "batch".to_string(),
-                "function_calling".to_string(),
-                "structured_output".to_string(),
-            ],
-            description: None,
-            pricing: None,
-            supported_parameters: None,
-            default_parameters: None,
-            knowledge_cutoff: None,
-            created: None,
-        },
-    );
-    m.insert(
-        "gemini-3-pro-preview",
-        ModelMetadata {
-            display_name: Some("Gemini 3 Pro".to_string()),
-            family: Some("gemini-3-pro".to_string()),
-            context_window: Some(1048576),
-            max_output_tokens: Some(65536),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Audio, Modality::Image, Modality::Text],
-                output: vec![Modality::Text],
-            }),
-            capabilities: vec![
-                "batch".to_string(),
-                "function_calling".to_string(),
-                "structured_output".to_string(),
-            ],
-            description: None,
-            pricing: None,
-            supported_parameters: None,
-            default_parameters: None,
-            knowledge_cutoff: None,
-            created: None,
-        },
-    );
-    m.insert("google/gemini-2.0-flash-001", ModelMetadata {
-        display_name: Some("Google: Gemini 2.0 Flash".to_string()),
-        family: None,
+    m.insert("gemini-2.0-flash-001", ModelMetadata {
+        display_name: Some("Gemini 2.0 Flash".to_string()),
+        family: Some("gemini-2.0-flash".to_string()),
         context_window: Some(1048576),
         max_output_tokens: Some(8192),
         modalities: Some(ModelModalities {
-            input: vec![Modality::Text, Modality::Image, Modality::Audio, Modality::Video],
+            input: vec![Modality::Audio, Modality::Image, Modality::Text],
             output: vec![Modality::Text],
         }),
-        capabilities: vec![],
-        description: Some("Gemini Flash 2.0 offers a significantly faster time to first token (TTFT) compared to [Gemini Flash 1.5](/google/gemini-flash-1.5), while maintaining quality on par with larger models like [Gemini Pro 1.5](/google/gemini-pro-1.5). It...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000001_f64),
-            completion_per_token: Some(0.0000004_f64),
-            web_search_per_request: Some(0.014_f64),
-            input_cache_read_per_token: Some(0.000000025_f64),
-        }),
-        supported_parameters: Some(vec![
-            "max_tokens".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_p".to_string(),
-        ]),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+        description: None,
+        pricing: None,
+        supported_parameters: None,
         default_parameters: None,
-        knowledge_cutoff: Some("2024-08-31".to_string()),
-        created: Some(1738769413),
+        knowledge_cutoff: None,
+        created: None,
     });
-    m.insert("google/gemini-2.0-flash-lite-001", ModelMetadata {
-        display_name: Some("Google: Gemini 2.0 Flash Lite".to_string()),
-        family: None,
+    m.insert("gemini-2.0-flash-lite", ModelMetadata {
+        display_name: Some("Gemini 2.0 Flash-Lite".to_string()),
+        family: Some("gemini-2.0-flash-lite".to_string()),
         context_window: Some(1048576),
         max_output_tokens: Some(8192),
         modalities: Some(ModelModalities {
-            input: vec![Modality::Text, Modality::Image, Modality::Audio, Modality::Video],
+            input: vec![Modality::Audio, Modality::Image, Modality::Text],
             output: vec![Modality::Text],
         }),
-        capabilities: vec![],
-        description: Some("Gemini 2.0 Flash Lite offers a significantly faster time to first token (TTFT) compared to [Gemini Flash 1.5](/google/gemini-flash-1.5), while maintaining quality on par with larger models like [Gemini Pro 1.5](/google/gemini-pro-1.5),...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000000075_f64),
-            completion_per_token: Some(0.0000003_f64),
-            web_search_per_request: Some(0.014_f64),
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "max_tokens".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_p".to_string(),
-        ]),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+        description: None,
+        pricing: None,
+        supported_parameters: None,
         default_parameters: None,
-        knowledge_cutoff: Some("2024-08-31".to_string()),
-        created: Some(1740506212),
+        knowledge_cutoff: None,
+        created: None,
+    });
+    m.insert("gemini-2.0-flash-lite-001", ModelMetadata {
+        display_name: Some("Gemini 2.0 Flash-Lite".to_string()),
+        family: Some("gemini-2.0-flash-lite".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(8192),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Audio, Modality::Image, Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+        description: None,
+        pricing: None,
+        supported_parameters: None,
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: None,
+    });
+    m.insert("gemini-2.5-flash", ModelMetadata {
+        display_name: Some("Gemini 2.5 Flash".to_string()),
+        family: Some("gemini-2.5-flash".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(65536),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Audio, Modality::Image, Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+        description: None,
+        pricing: None,
+        supported_parameters: None,
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: None,
+    });
+    m.insert("gemini-2.5-flash-lite", ModelMetadata {
+        display_name: Some("Gemini 2.5 Flash-Lite".to_string()),
+        family: Some("gemini-2.5-flash-lite".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(65536),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Audio, Modality::Image, Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+        description: None,
+        pricing: None,
+        supported_parameters: None,
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: None,
+    });
+    m.insert("gemini-2.5-pro", ModelMetadata {
+        display_name: Some("Gemini 2.5 Pro".to_string()),
+        family: Some("gemini-2.5-pro".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(65536),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Audio, Modality::Image, Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+        description: None,
+        pricing: None,
+        supported_parameters: None,
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: None,
+    });
+    m.insert("gemini-3-flash-preview", ModelMetadata {
+        display_name: Some("Gemini 3 Flash".to_string()),
+        family: Some("gemini-3-flash".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(65536),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Audio, Modality::Image, Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+        description: None,
+        pricing: None,
+        supported_parameters: None,
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: None,
+    });
+    m.insert("gemini-3-pro-preview", ModelMetadata {
+        display_name: Some("Gemini 3 Pro".to_string()),
+        family: Some("gemini-3-pro".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(65536),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Audio, Modality::Image, Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+        description: None,
+        pricing: None,
+        supported_parameters: None,
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: None,
     });
     m.insert("google/gemini-2.5-flash", ModelMetadata {
         display_name: Some("Google: Gemini 2.5 Flash".to_string()),
-        family: None,
+        family: Some("gemini-flash".to_string()),
         context_window: Some(1048576),
         max_output_tokens: Some(65535),
         modalities: Some(ModelModalities {
@@ -2724,7 +2167,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("google/gemini-2.5-flash-image", ModelMetadata {
         display_name: Some("Google: Nano Banana (Gemini 2.5 Flash Image)".to_string()),
-        family: None,
+        family: Some("gemini-flash".to_string()),
         context_window: Some(32768),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -2754,7 +2197,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("google/gemini-2.5-flash-lite", ModelMetadata {
         display_name: Some("Google: Gemini 2.5 Flash Lite".to_string()),
-        family: None,
+        family: Some("gemini-flash-lite".to_string()),
         context_window: Some(1048576),
         max_output_tokens: Some(65535),
         modalities: Some(ModelModalities {
@@ -2788,7 +2231,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("google/gemini-2.5-flash-lite-preview-09-2025", ModelMetadata {
         display_name: Some("Google: Gemini 2.5 Flash Lite Preview 09-2025".to_string()),
-        family: None,
+        family: Some("gemini-flash-lite".to_string()),
         context_window: Some(1048576),
         max_output_tokens: Some(65535),
         modalities: Some(ModelModalities {
@@ -2822,7 +2265,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("google/gemini-2.5-pro", ModelMetadata {
         display_name: Some("Google: Gemini 2.5 Pro".to_string()),
-        family: None,
+        family: Some("gemini-pro".to_string()),
         context_window: Some(1048576),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
@@ -2856,7 +2299,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("google/gemini-2.5-pro-preview", ModelMetadata {
         display_name: Some("Google: Gemini 2.5 Pro Preview 06-05".to_string()),
-        family: None,
+        family: Some("gemini-pro".to_string()),
         context_window: Some(1048576),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
@@ -2890,7 +2333,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("google/gemini-2.5-pro-preview-05-06", ModelMetadata {
         display_name: Some("Google: Gemini 2.5 Pro Preview 05-06".to_string()),
-        family: None,
+        family: Some("gemini-pro".to_string()),
         context_window: Some(1048576),
         max_output_tokens: Some(65535),
         modalities: Some(ModelModalities {
@@ -2924,9 +2367,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("google/gemini-3-flash-preview", ModelMetadata {
         display_name: Some("Google: Gemini 3 Flash Preview".to_string()),
-        family: None,
+        family: Some("gemini-flash".to_string()),
         context_window: Some(1048576),
-        max_output_tokens: Some(65536),
+        max_output_tokens: Some(65535),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text, Modality::Image, Modality::Audio, Modality::Video],
             output: vec![Modality::Text],
@@ -2956,9 +2399,43 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1765987078),
     });
+    m.insert("google/gemini-3-pro-image", ModelMetadata {
+        display_name: Some("Google: Nano Banana Pro (Gemini 3 Pro Image)".to_string()),
+        family: Some("gemini-pro".to_string()),
+        context_window: Some(65536),
+        max_output_tokens: Some(32768),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Image, Modality::Text],
+            output: vec![Modality::Image, Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("Nano Banana Pro is Google’s most advanced image-generation and editing model, built on Gemini 3 Pro. It extends the original Nano Banana with significantly improved multimodal reasoning, real-world grounding, and...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.000002_f64),
+            completion_per_token: Some(0.000012_f64),
+            web_search_per_request: Some(0.014_f64),
+            input_cache_read_per_token: Some(0.0000002_f64),
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "max_tokens".to_string(),
+            "reasoning".to_string(),
+            "response_format".to_string(),
+            "seed".to_string(),
+            "stop".to_string(),
+            "structured_outputs".to_string(),
+            "temperature".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+            "top_p".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: Some(1781754054),
+    });
     m.insert("google/gemini-3-pro-image-preview", ModelMetadata {
         display_name: Some("Google: Nano Banana Pro (Gemini 3 Pro Image Preview)".to_string()),
-        family: None,
+        family: Some("gemini-pro".to_string()),
         context_window: Some(65536),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -2988,11 +2465,42 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1763653797),
     });
+    m.insert("google/gemini-3.1-flash-image", ModelMetadata {
+        display_name: Some("Google: Nano Banana 2 (Gemini 3.1 Flash Image)".to_string()),
+        family: Some("gemini-flash".to_string()),
+        context_window: Some(131072),
+        max_output_tokens: Some(32768),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Image, Modality::Text],
+            output: vec![Modality::Image, Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("Gemini 3.1 Flash Image, a.k.a. \"Nano Banana 2,\" is Google’s latest state of the art image generation and editing model, delivering Pro-level visual quality at Flash speed. It combines advanced...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.0000005_f64),
+            completion_per_token: Some(0.000003_f64),
+            web_search_per_request: Some(0.014_f64),
+            input_cache_read_per_token: None,
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "max_tokens".to_string(),
+            "reasoning".to_string(),
+            "response_format".to_string(),
+            "seed".to_string(),
+            "structured_outputs".to_string(),
+            "temperature".to_string(),
+            "top_p".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: Some(1781754065),
+    });
     m.insert("google/gemini-3.1-flash-image-preview", ModelMetadata {
         display_name: Some("Google: Nano Banana 2 (Gemini 3.1 Flash Image Preview)".to_string()),
-        family: None,
-        context_window: Some(65536),
-        max_output_tokens: Some(65536),
+        family: Some("gemini-flash".to_string()),
+        context_window: Some(131072),
+        max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
             input: vec![Modality::Image, Modality::Text],
             output: vec![Modality::Image, Modality::Text],
@@ -3011,7 +2519,6 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "reasoning".to_string(),
             "response_format".to_string(),
             "seed".to_string(),
-            "stop".to_string(),
             "structured_outputs".to_string(),
             "temperature".to_string(),
             "top_p".to_string(),
@@ -3020,9 +2527,73 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1772119558),
     });
+    m.insert("google/gemini-3.1-flash-lite", ModelMetadata {
+        display_name: Some("Google: Gemini 3.1 Flash Lite".to_string()),
+        family: Some("gemini-flash-lite".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(65536),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text, Modality::Image, Modality::Video, Modality::Audio],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("Gemini 3.1 Flash Lite is Google’s GA high-efficiency multimodal model optimized for low-latency, high-volume workloads. It supports text, image, video, audio, and PDF inputs, and is designed for lightweight agentic...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.00000025_f64),
+            completion_per_token: Some(0.0000015_f64),
+            web_search_per_request: Some(0.014_f64),
+            input_cache_read_per_token: Some(0.000000025_f64),
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "max_tokens".to_string(),
+            "reasoning".to_string(),
+            "response_format".to_string(),
+            "seed".to_string(),
+            "stop".to_string(),
+            "structured_outputs".to_string(),
+            "temperature".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+            "top_p".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: Some(1778168828),
+    });
+    m.insert("google/gemini-3.1-flash-lite-image", ModelMetadata {
+        display_name: Some("Google: Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image)".to_string()),
+        family: Some("gemini-flash-lite".to_string()),
+        context_window: Some(65536),
+        max_output_tokens: Some(66000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Image, Modality::Text],
+            output: vec![Modality::Image, Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image) is Google's fastest, most cost-efficient Gemini image model, built for high-velocity developer pipelines and rapid-fire visual exploration. It delivers text-to-image generation...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.00000025_f64),
+            completion_per_token: Some(0.0000015_f64),
+            web_search_per_request: Some(0.014_f64),
+            input_cache_read_per_token: None,
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "max_tokens".to_string(),
+            "reasoning".to_string(),
+            "response_format".to_string(),
+            "seed".to_string(),
+            "temperature".to_string(),
+            "top_p".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: Some("2025-01-01".to_string()),
+        created: Some(1782837225),
+    });
     m.insert("google/gemini-3.1-flash-lite-preview", ModelMetadata {
         display_name: Some("Google: Gemini 3.1 Flash Lite Preview".to_string()),
-        family: None,
+        family: Some("gemini-flash-lite".to_string()),
         context_window: Some(1048576),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
@@ -3056,7 +2627,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("google/gemini-3.1-pro-preview", ModelMetadata {
         display_name: Some("Google: Gemini 3.1 Pro Preview".to_string()),
-        family: None,
+        family: Some("gemini-pro".to_string()),
         context_window: Some(1048576),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
@@ -3090,8 +2661,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("google/gemini-3.1-pro-preview-customtools", ModelMetadata {
         display_name: Some("Google: Gemini 3.1 Pro Preview Custom Tools".to_string()),
-        family: None,
-        context_window: Some(1048576),
+        family: Some("gemini-pro-customtools".to_string()),
+        context_window: Some(1048756),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text, Modality::Audio, Modality::Image, Modality::Video],
@@ -3111,7 +2682,6 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "reasoning".to_string(),
             "response_format".to_string(),
             "seed".to_string(),
-            "stop".to_string(),
             "structured_outputs".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
@@ -3122,9 +2692,43 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1772045923),
     });
+    m.insert("google/gemini-3.5-flash", ModelMetadata {
+        display_name: Some("Google: Gemini 3.5 Flash".to_string()),
+        family: Some("gemini-flash".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(65536),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text, Modality::Image, Modality::Video, Modality::Audio],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("Gemini 3.5 Flash is Google's high-efficiency multimodal model, bringing near-Pro level coding and reasoning at Flash-tier cost and speed. It is highly optimized for coding proficiency and parallel agentic execution...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.0000015_f64),
+            completion_per_token: Some(0.000009_f64),
+            web_search_per_request: Some(0.014_f64),
+            input_cache_read_per_token: Some(0.00000015_f64),
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "max_tokens".to_string(),
+            "reasoning".to_string(),
+            "response_format".to_string(),
+            "seed".to_string(),
+            "stop".to_string(),
+            "structured_outputs".to_string(),
+            "temperature".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+            "top_p".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: Some("2025-01-01".to_string()),
+        created: Some(1779193800),
+    });
     m.insert("google/gemma-2-27b-it", ModelMetadata {
         display_name: Some("Google: Gemma 2 27B".to_string()),
-        family: None,
+        family: Some("gemma".to_string()),
         context_window: Some(8192),
         max_output_tokens: Some(2048),
         modalities: Some(ModelModalities {
@@ -3157,7 +2761,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("google/gemma-3-12b-it", ModelMetadata {
         display_name: Some("Google: Gemma 3 12B".to_string()),
-        family: None,
+        family: Some("gemma".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -3167,8 +2771,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Gemma 3 introduces multimodality, supporting vision-language input and text outputs. It handles context windows up to 128k tokens, understands over 140 languages, and offers improved math, reasoning, and chat capabilities,...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000004_f64),
-            completion_per_token: Some(0.00000013_f64),
+            prompt_per_token: Some(0.00000005_f64),
+            completion_per_token: Some(0.00000015_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
         }),
@@ -3195,7 +2799,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("google/gemma-3-27b-it", ModelMetadata {
         display_name: Some("Google: Gemma 3 27B".to_string()),
-        family: None,
+        family: Some("gemma".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -3213,6 +2817,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
@@ -3225,6 +2830,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -3233,7 +2839,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("google/gemma-3-4b-it", ModelMetadata {
         display_name: Some("Google: Gemma 3 4B".to_string()),
-        family: None,
+        family: Some("gemma".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -3243,8 +2849,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Gemma 3 introduces multimodality, supporting vision-language input and text outputs. It handles context windows up to 128k tokens, understands over 140 languages, and offers improved math, reasoning, and chat capabilities,...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000004_f64),
-            completion_per_token: Some(0.00000008_f64),
+            prompt_per_token: Some(0.00000005_f64),
+            completion_per_token: Some(0.0000001_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
         }),
@@ -3269,7 +2875,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("google/gemma-3n-e4b-it", ModelMetadata {
         display_name: Some("Google: Gemma 3n 4B".to_string()),
-        family: None,
+        family: Some("gemma-3n-e4b".to_string()),
         context_window: Some(32768),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -3291,7 +2897,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "min_p".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
+            "response_format".to_string(),
             "stop".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "top_k".to_string(),
             "top_p".to_string(),
@@ -3302,7 +2910,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("google/gemma-4-26b-a4b-it", ModelMetadata {
         display_name: Some("Google: Gemma 4 26B A4B ".to_string()),
-        family: None,
+        family: Some("gemma".to_string()),
         context_window: Some(262144),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -3350,7 +2958,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("google/gemma-4-26b-a4b-it:free", ModelMetadata {
         display_name: Some("Google: Gemma 4 26B A4B  (free)".to_string()),
-        family: None,
+        family: Some("gemma".to_string()),
         context_window: Some(262144),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -3366,14 +2974,20 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
+            "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
             "max_tokens".to_string(),
+            "presence_penalty".to_string(),
             "reasoning".to_string(),
+            "repetition_penalty".to_string(),
             "response_format".to_string(),
             "seed".to_string(),
+            "stop".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_k".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -3388,9 +3002,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("google/gemma-4-31b-it", ModelMetadata {
         display_name: Some("Google: Gemma 4 31B".to_string()),
-        family: None,
+        family: Some("gemma".to_string()),
         context_window: Some(262144),
-        max_output_tokens: Some(16384),
+        max_output_tokens: Some(262144),
         modalities: Some(ModelModalities {
             input: vec![Modality::Image, Modality::Text, Modality::Video],
             output: vec![Modality::Text],
@@ -3398,10 +3012,10 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Gemma 4 31B Instruct is Google DeepMind's 30.7B dense multimodal model supporting text and image input with text output. Features a 256K token context window, configurable thinking/reasoning mode, native function...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000013_f64),
-            completion_per_token: Some(0.00000038_f64),
+            prompt_per_token: Some(0.00000012_f64),
+            completion_per_token: Some(0.00000035_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: None,
+            input_cache_read_per_token: Some(0.00000009_f64),
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
@@ -3436,9 +3050,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("google/gemma-4-31b-it:free", ModelMetadata {
         display_name: Some("Google: Gemma 4 31B (free)".to_string()),
-        family: None,
+        family: Some("gemma".to_string()),
         context_window: Some(262144),
-        max_output_tokens: Some(32768),
+        max_output_tokens: Some(8192),
         modalities: Some(ModelModalities {
             input: vec![Modality::Image, Modality::Text, Modality::Video],
             output: vec![Modality::Text],
@@ -3454,12 +3068,16 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "include_reasoning".to_string(),
             "max_tokens".to_string(),
+            "min_p".to_string(),
             "reasoning".to_string(),
             "response_format".to_string(),
             "seed".to_string(),
+            "stop".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_a".to_string(),
+            "top_k".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -3474,7 +3092,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("google/lyria-3-clip-preview", ModelMetadata {
         display_name: Some("Google: Lyria 3 Clip Preview".to_string()),
-        family: None,
+        family: Some("lyria-clip".to_string()),
         context_window: Some(1048576),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
@@ -3502,7 +3120,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("google/lyria-3-pro-preview", ModelMetadata {
         display_name: Some("Google: Lyria 3 Pro Preview".to_string()),
-        family: None,
+        family: Some("lyria-pro".to_string()),
         context_window: Some(1048576),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
@@ -3528,99 +3146,89 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1774907286),
     });
-    m.insert(
-        "gpt-3.5-turbo",
-        ModelMetadata {
-            display_name: Some("GPT-3.5 Turbo".to_string()),
-            family: Some("gpt-3.5-turbo".to_string()),
-            context_window: Some(16385),
-            max_output_tokens: Some(4096),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Text],
-                output: vec![Modality::Embeddings, Modality::Text],
-            }),
-            capabilities: vec!["batch".to_string()],
-            description: None,
-            pricing: None,
-            supported_parameters: None,
-            default_parameters: None,
-            knowledge_cutoff: None,
-            created: None,
-        },
-    );
-    m.insert(
-        "gpt-5.1-codex",
-        ModelMetadata {
-            display_name: Some("GPT-5.1 Codex".to_string()),
-            family: Some("gpt-5.1-codex".to_string()),
-            context_window: Some(400000),
-            max_output_tokens: Some(128000),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Image, Modality::Text],
-                output: vec![Modality::Embeddings, Modality::Text],
-            }),
-            capabilities: vec![
-                "function_calling".to_string(),
-                "structured_output".to_string(),
-            ],
-            description: None,
-            pricing: None,
-            supported_parameters: None,
-            default_parameters: None,
-            knowledge_cutoff: None,
-            created: None,
-        },
-    );
-    m.insert(
-        "gpt-5.2",
-        ModelMetadata {
-            display_name: Some("GPT-5.2".to_string()),
-            family: Some("gpt-5.2".to_string()),
-            context_window: Some(400000),
-            max_output_tokens: Some(128000),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Image, Modality::Text],
-                output: vec![Modality::Embeddings, Modality::Text],
-            }),
-            capabilities: vec![
-                "batch".to_string(),
-                "function_calling".to_string(),
-                "structured_output".to_string(),
-            ],
-            description: None,
-            pricing: None,
-            supported_parameters: None,
-            default_parameters: None,
-            knowledge_cutoff: None,
-            created: None,
-        },
-    );
-    m.insert(
-        "gpt-5.2-chat-latest",
-        ModelMetadata {
-            display_name: Some("GPT-5.2 Chat".to_string()),
-            family: Some("gpt-5.2-chat-latest".to_string()),
-            context_window: Some(128000),
-            max_output_tokens: Some(16384),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Image, Modality::Text],
-                output: vec![Modality::Embeddings, Modality::Text],
-            }),
-            capabilities: vec![
-                "function_calling".to_string(),
-                "structured_output".to_string(),
-            ],
-            description: None,
-            pricing: None,
-            supported_parameters: None,
-            default_parameters: None,
-            knowledge_cutoff: None,
-            created: None,
-        },
-    );
+    m.insert("gpt-3.5-turbo", ModelMetadata {
+        display_name: Some("GPT-3.5 Turbo".to_string()),
+        family: Some("gpt-3.5-turbo".to_string()),
+        context_window: Some(16385),
+        max_output_tokens: Some(4096),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text],
+            output: vec![Modality::Embeddings, Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+        ],
+        description: None,
+        pricing: None,
+        supported_parameters: None,
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: None,
+    });
+    m.insert("gpt-5.1-codex", ModelMetadata {
+        display_name: Some("GPT-5.1 Codex".to_string()),
+        family: Some("gpt-5.1-codex".to_string()),
+        context_window: Some(400000),
+        max_output_tokens: Some(128000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Image, Modality::Text],
+            output: vec![Modality::Embeddings, Modality::Text],
+        }),
+        capabilities: vec![
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+        description: None,
+        pricing: None,
+        supported_parameters: None,
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: None,
+    });
+    m.insert("gpt-5.2", ModelMetadata {
+        display_name: Some("GPT-5.2".to_string()),
+        family: Some("gpt-5.2".to_string()),
+        context_window: Some(400000),
+        max_output_tokens: Some(128000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Image, Modality::Text],
+            output: vec![Modality::Embeddings, Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+        description: None,
+        pricing: None,
+        supported_parameters: None,
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: None,
+    });
+    m.insert("gpt-5.2-chat-latest", ModelMetadata {
+        display_name: Some("GPT-5.2 Chat".to_string()),
+        family: Some("gpt-5.2-chat-latest".to_string()),
+        context_window: Some(128000),
+        max_output_tokens: Some(16384),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Image, Modality::Text],
+            output: vec![Modality::Embeddings, Modality::Text],
+        }),
+        capabilities: vec![
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+        description: None,
+        pricing: None,
+        supported_parameters: None,
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: None,
+    });
     m.insert("gryphe/mythomax-l2-13b", ModelMetadata {
         display_name: Some("MythoMax 13B".to_string()),
-        family: None,
+        family: Some("mythomax-l".to_string()),
         context_window: Some(4096),
         max_output_tokens: Some(4096),
         modalities: Some(ModelModalities {
@@ -3659,9 +3267,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("ibm-granite/granite-4.0-h-micro", ModelMetadata {
         display_name: Some("IBM: Granite 4.0 Micro".to_string()),
-        family: None,
+        family: Some("granite-h-micro".to_string()),
         context_window: Some(131000),
-        max_output_tokens: None,
+        max_output_tokens: Some(131000),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -3670,18 +3278,24 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         description: Some("Granite-4.0-H-Micro is a 3B parameter from the Granite 4 family of models. These models are the latest in a series of models released by IBM. They are fine-tuned for long...".to_string()),
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0.000000017_f64),
-            completion_per_token: Some(0.00000011_f64),
+            completion_per_token: Some(0.000000112_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
+            "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
+            "min_p".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
+            "response_format".to_string(),
             "seed".to_string(),
+            "stop".to_string(),
             "temperature".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -3690,7 +3304,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("ibm-granite/granite-4.1-8b", ModelMetadata {
         display_name: Some("IBM: Granite 4.1 8B".to_string()),
-        family: None,
+        family: Some("granite".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(131072),
         modalities: Some(ModelModalities {
@@ -3707,6 +3321,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
@@ -3718,6 +3333,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -3726,7 +3342,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("inception/mercury-2", ModelMetadata {
         display_name: Some("Inception: Mercury 2".to_string()),
-        family: None,
+        family: Some("mercury".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(50000),
         modalities: Some(ModelModalities {
@@ -3762,9 +3378,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1772636275),
     });
-    m.insert("inclusionai/ling-2.6-1t:free", ModelMetadata {
-        display_name: Some("inclusionAI: Ling-2.6-1T (free)".to_string()),
-        family: None,
+    m.insert("inclusionai/ling-2.6-1t", ModelMetadata {
+        display_name: Some("inclusionAI: Ling-2.6-1T".to_string()),
+        family: Some("ling-1t".to_string()),
         context_window: Some(262144),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -3774,13 +3390,14 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Ling-2.6-1T is an instant (instruct) model from inclusionAI and the company’s trillion-parameter flagship, designed for real-world agents that require fast execution and high efficiency at scale. It uses a “fast...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0_f64),
-            completion_per_token: Some(0_f64),
+            prompt_per_token: Some(0.000000075_f64),
+            completion_per_token: Some(0.000000625_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: None,
+            input_cache_read_per_token: Some(0.000000015_f64),
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
@@ -3792,6 +3409,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -3800,7 +3418,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("inclusionai/ling-2.6-flash", ModelMetadata {
         display_name: Some("inclusionAI: Ling-2.6-flash".to_string()),
-        family: None,
+        family: Some("ling-flash".to_string()),
         context_window: Some(262144),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -3810,13 +3428,14 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Ling-2.6-flash is an instant (instruct) model from inclusionAI with 104B total parameters and 7.4B active parameters, designed for real-world agents that require fast responses, strong execution, and high token efficiency....".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000008_f64),
-            completion_per_token: Some(0.00000024_f64),
+            prompt_per_token: Some(0.00000001_f64),
+            completion_per_token: Some(0.00000003_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: Some(0.000000016_f64),
+            input_cache_read_per_token: Some(0.000000002_f64),
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
@@ -3828,15 +3447,53 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
         knowledge_cutoff: None,
         created: Some(1776795886),
     });
+    m.insert("inclusionai/ring-2.6-1t", ModelMetadata {
+        display_name: Some("inclusionAI: Ring-2.6-1T".to_string()),
+        family: Some("ring-1t".to_string()),
+        context_window: Some(262144),
+        max_output_tokens: Some(65536),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("Ring-2.6-1T is a 1T-parameter-scale thinking model with 63B active parameters, built for real-world agent workflows that require both strong capability and operational efficiency. It is optimized for coding agents, tool...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.000000075_f64),
+            completion_per_token: Some(0.000000625_f64),
+            web_search_per_request: None,
+            input_cache_read_per_token: Some(0.000000015_f64),
+        }),
+        supported_parameters: Some(vec![
+            "frequency_penalty".to_string(),
+            "include_reasoning".to_string(),
+            "max_tokens".to_string(),
+            "presence_penalty".to_string(),
+            "reasoning".to_string(),
+            "repetition_penalty".to_string(),
+            "response_format".to_string(),
+            "seed".to_string(),
+            "stop".to_string(),
+            "temperature".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+            "top_k".to_string(),
+            "top_p".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: Some(1778247440),
+    });
     m.insert("inflection/inflection-3-pi", ModelMetadata {
         display_name: Some("Inflection: Inflection 3 Pi".to_string()),
-        family: None,
+        family: Some("inflection-pi".to_string()),
         context_window: Some(8000),
         max_output_tokens: Some(1024),
         modalities: Some(ModelModalities {
@@ -3863,7 +3520,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("inflection/inflection-3-productivity", ModelMetadata {
         display_name: Some("Inflection: Inflection 3 Productivity".to_string()),
-        family: None,
+        family: Some("inflection-productivity".to_string()),
         context_window: Some(8000),
         max_output_tokens: Some(1024),
         modalities: Some(ModelModalities {
@@ -3890,7 +3547,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("kwaipilot/kat-coder-pro-v2", ModelMetadata {
         display_name: Some("Kwaipilot: KAT-Coder-Pro V2".to_string()),
-        family: None,
+        family: Some("kat-coder-pro-v".to_string()),
         context_window: Some(256000),
         max_output_tokens: Some(80000),
         modalities: Some(ModelModalities {
@@ -3908,6 +3565,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
@@ -3920,6 +3578,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -3928,8 +3587,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("liquid/lfm-2-24b-a2b", ModelMetadata {
         display_name: Some("LiquidAI: LFM2-24B-A2B".to_string()),
-        family: None,
-        context_window: Some(32768),
+        family: Some("lfm".to_string()),
+        context_window: Some(128000),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
@@ -3950,6 +3609,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "min_p".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
+            "response_format".to_string(),
             "stop".to_string(),
             "temperature".to_string(),
             "top_k".to_string(),
@@ -3967,7 +3627,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("liquid/lfm-2.5-1.2b-instruct:free", ModelMetadata {
         display_name: Some("LiquidAI: LFM2.5-1.2B-Instruct (free)".to_string()),
-        family: None,
+        family: Some("lfm".to_string()),
         context_window: Some(32768),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -3990,6 +3650,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "repetition_penalty".to_string(),
             "seed".to_string(),
             "stop".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "top_k".to_string(),
             "top_p".to_string(),
@@ -4000,7 +3661,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("liquid/lfm-2.5-1.2b-thinking:free", ModelMetadata {
         display_name: Some("LiquidAI: LFM2.5-1.2B-Thinking (free)".to_string()),
-        family: None,
+        family: Some("lfm".to_string()),
         context_window: Some(32768),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -4025,7 +3686,10 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "repetition_penalty".to_string(),
             "seed".to_string(),
             "stop".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
             "top_k".to_string(),
             "top_p".to_string(),
         ]),
@@ -4035,7 +3699,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("mancer/weaver", ModelMetadata {
         display_name: Some("Mancer: Weaver (alpha)".to_string()),
-        family: None,
+        family: Some("weaver".to_string()),
         context_window: Some(8000),
         max_output_tokens: Some(2000),
         modalities: Some(ModelModalities {
@@ -4061,6 +3725,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "response_format".to_string(),
             "seed".to_string(),
             "stop".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "top_a".to_string(),
             "top_k".to_string(),
@@ -4071,43 +3736,11 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2023-06-30".to_string()),
         created: Some(1690934400),
     });
-    m.insert("meta-llama/llama-3-70b-instruct", ModelMetadata {
-        display_name: Some("Meta: Llama 3 70B Instruct".to_string()),
-        family: None,
-        context_window: Some(8192),
-        max_output_tokens: Some(8000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Meta's latest class of model (Llama 3) launched with a variety of sizes & flavors. This 70B instruct-tuned version was optimized for high quality dialogue usecases. It has demonstrated strong...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000051_f64),
-            completion_per_token: Some(0.00000074_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "repetition_penalty".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "temperature".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2023-12-31".to_string()),
-        created: Some(1713398400),
-    });
     m.insert("meta-llama/llama-3-8b-instruct", ModelMetadata {
         display_name: Some("Meta: Llama 3 8B Instruct".to_string()),
-        family: None,
+        family: Some("llama".to_string()),
         context_window: Some(8192),
-        max_output_tokens: Some(8192),
+        max_output_tokens: None,
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -4115,8 +3748,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Meta's latest class of model (Llama 3) launched with a variety of sizes & flavors. This 8B instruct-tuned version was optimized for high quality dialogue usecases. It has demonstrated strong...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000004_f64),
-            completion_per_token: Some(0.00000004_f64),
+            prompt_per_token: Some(0.00000014_f64),
+            completion_per_token: Some(0.00000014_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
         }),
@@ -4127,8 +3760,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "min_p".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
-            "seed".to_string(),
+            "response_format".to_string(),
             "stop".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "top_k".to_string(),
             "top_p".to_string(),
@@ -4139,7 +3773,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("meta-llama/llama-3.1-70b-instruct", ModelMetadata {
         display_name: Some("Meta: Llama 3.1 70B Instruct".to_string()),
-        family: None,
+        family: Some("llama".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -4157,6 +3791,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
@@ -4169,6 +3804,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -4177,8 +3813,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("meta-llama/llama-3.1-8b-instruct", ModelMetadata {
         display_name: Some("Meta: Llama 3.1 8B Instruct".to_string()),
-        family: None,
-        context_window: Some(16384),
+        family: Some("llama".to_string()),
+        context_window: Some(131072),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
@@ -4188,7 +3824,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         description: Some("Meta's latest class of model (Llama 3.1) launched with a variety of sizes & flavors. This 8B instruct-tuned version is fast and efficient. It has demonstrated strong performance compared to...".to_string()),
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0.00000002_f64),
-            completion_per_token: Some(0.00000005_f64),
+            completion_per_token: Some(0.00000003_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
         }),
@@ -4217,7 +3853,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("meta-llama/llama-3.2-11b-vision-instruct", ModelMetadata {
         display_name: Some("Meta: Llama 3.2 11B Vision Instruct".to_string()),
-        family: None,
+        family: Some("llama".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -4227,8 +3863,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Llama 3.2 11B Vision is a multimodal model with 11 billion parameters, designed to handle tasks combining visual and textual data. It excels in tasks such as image captioning and...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000000245_f64),
-            completion_per_token: Some(0.000000245_f64),
+            prompt_per_token: Some(0.000000345_f64),
+            completion_per_token: Some(0.000000345_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
         }),
@@ -4252,9 +3888,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("meta-llama/llama-3.2-1b-instruct", ModelMetadata {
         display_name: Some("Meta: Llama 3.2 1B Instruct".to_string()),
-        family: None,
-        context_window: Some(60000),
-        max_output_tokens: None,
+        family: Some("llama".to_string()),
+        context_window: Some(131072),
+        max_output_tokens: Some(60000),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -4263,16 +3899,19 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         description: Some("Llama 3.2 1B is a 1-billion-parameter language model focused on efficiently performing natural language tasks, such as summarization, dialogue, and multilingual text analysis. Its smaller size allows it to operate...".to_string()),
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0.000000027_f64),
-            completion_per_token: Some(0.0000002_f64),
+            completion_per_token: Some(0.000000201_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
+            "logit_bias".to_string(),
             "max_tokens".to_string(),
+            "min_p".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
             "seed".to_string(),
+            "stop".to_string(),
             "temperature".to_string(),
             "top_k".to_string(),
             "top_p".to_string(),
@@ -4283,9 +3922,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("meta-llama/llama-3.2-3b-instruct", ModelMetadata {
         display_name: Some("Meta: Llama 3.2 3B Instruct".to_string()),
-        family: None,
-        context_window: Some(80000),
-        max_output_tokens: None,
+        family: Some("llama".to_string()),
+        context_window: Some(131072),
+        max_output_tokens: Some(80000),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -4293,19 +3932,24 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Llama 3.2 3B is a 3-billion-parameter multilingual large language model, optimized for advanced natural language processing tasks like dialogue generation, reasoning, and summarization. Designed with the latest transformer architecture, it...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000000051_f64),
-            completion_per_token: Some(0.00000034_f64),
+            prompt_per_token: Some(0.0000000509_f64),
+            completion_per_token: Some(0.000000335_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
+            "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
+            "min_p".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
             "seed".to_string(),
+            "stop".to_string(),
             "temperature".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -4314,7 +3958,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("meta-llama/llama-3.2-3b-instruct:free", ModelMetadata {
         display_name: Some("Meta: Llama 3.2 3B Instruct (free)".to_string()),
-        family: None,
+        family: Some("llama".to_string()),
         context_window: Some(131072),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -4344,7 +3988,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("meta-llama/llama-3.3-70b-instruct", ModelMetadata {
         display_name: Some("Meta: Llama 3.3 70B Instruct".to_string()),
-        family: None,
+        family: Some("llama".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -4362,6 +4006,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
@@ -4374,6 +4019,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -4382,8 +4028,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("meta-llama/llama-3.3-70b-instruct:free", ModelMetadata {
         display_name: Some("Meta: Llama 3.3 70B Instruct (free)".to_string()),
-        family: None,
-        context_window: Some(65536),
+        family: Some("llama".to_string()),
+        context_window: Some(131072),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
@@ -4414,7 +4060,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("meta-llama/llama-4-maverick", ModelMetadata {
         display_name: Some("Meta: Llama 4 Maverick".to_string()),
-        family: None,
+        family: Some("llama-maverick".to_string()),
         context_window: Some(1048576),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -4432,6 +4078,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
@@ -4441,7 +4088,10 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "stop".to_string(),
             "structured_outputs".to_string(),
             "temperature".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -4450,8 +4100,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("meta-llama/llama-4-scout", ModelMetadata {
         display_name: Some("Meta: Llama 4 Scout".to_string()),
-        family: None,
-        context_window: Some(327680),
+        family: Some("llama-scout".to_string()),
+        context_window: Some(10000000),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text, Modality::Image],
@@ -4460,7 +4110,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Llama 4 Scout 17B Instruct (16E) is a mixture-of-experts (MoE) language model developed by Meta, activating 17 billion parameters out of a total of 109B. It supports native multimodal input...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000008_f64),
+            prompt_per_token: Some(0.0000001_f64),
             completion_per_token: Some(0.0000003_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
@@ -4486,40 +4136,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2024-08-31".to_string()),
         created: Some(1743881519),
     });
-    m.insert("meta-llama/llama-guard-3-8b", ModelMetadata {
-        display_name: Some("Llama Guard 3 8B".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: None,
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Llama Guard 3 is a Llama-3.1-8B pretrained model, fine-tuned for content safety classification. Similar to previous versions, it can be used to classify content in both LLM inputs (prompt classification)...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000048_f64),
-            completion_per_token: Some(0.00000003_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "repetition_penalty".to_string(),
-            "seed".to_string(),
-            "temperature".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2023-12-31".to_string()),
-        created: Some(1739401318),
-    });
     m.insert("meta-llama/llama-guard-4-12b", ModelMetadata {
         display_name: Some("Meta: Llama Guard 4 12B".to_string()),
-        family: None,
+        family: Some("llama".to_string()),
         context_window: Some(163840),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -4554,7 +4173,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("microsoft/phi-4", ModelMetadata {
         display_name: Some("Microsoft: Phi 4".to_string()),
-        family: None,
+        family: Some("phi".to_string()),
         context_window: Some(16384),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -4564,7 +4183,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("[Microsoft Research](/microsoft) Phi-4 is designed to perform well in complex reasoning tasks and can operate efficiently in situations with limited memory or where quick responses are needed. At 14 billion...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000000065_f64),
+            prompt_per_token: Some(0.00000007_f64),
             completion_per_token: Some(0.00000014_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
@@ -4572,7 +4191,6 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "logit_bias".to_string(),
-            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
@@ -4583,51 +4201,16 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "structured_outputs".to_string(),
             "temperature".to_string(),
             "top_k".to_string(),
-            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
         knowledge_cutoff: Some("2024-06-30".to_string()),
         created: Some(1736489872),
     });
-    m.insert("microsoft/phi-4-mini-instruct", ModelMetadata {
-        display_name: Some("Microsoft: Phi 4 Mini Instruct".to_string()),
-        family: None,
-        context_window: Some(128000),
-        max_output_tokens: Some(128000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Phi-4-mini-instruct is a lightweight open model built upon synthetic data and filtered publicly available websites - with a focus on high-quality, reasoning dense data. The model belongs to the Phi-4...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000008_f64),
-            completion_per_token: Some(0.00000035_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: Some(0.00000008_f64),
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "repetition_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: Some(1760726049),
-    });
     m.insert("microsoft/wizardlm-2-8x22b", ModelMetadata {
         display_name: Some("WizardLM-2 8x22B".to_string()),
-        family: None,
-        context_window: Some(65535),
+        family: Some("wizardlm".to_string()),
+        context_window: Some(65536),
         max_output_tokens: Some(8000),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
@@ -4646,6 +4229,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
+            "response_format".to_string(),
             "seed".to_string(),
             "stop".to_string(),
             "temperature".to_string(),
@@ -4658,7 +4242,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("minimax/minimax-01", ModelMetadata {
         display_name: Some("MiniMax: MiniMax-01".to_string()),
-        family: None,
+        family: Some("minimax".to_string()),
         context_window: Some(1000192),
         max_output_tokens: Some(1000192),
         modalities: Some(ModelModalities {
@@ -4684,7 +4268,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("minimax/minimax-m1", ModelMetadata {
         display_name: Some("MiniMax: MiniMax M1".to_string()),
-        family: None,
+        family: Some("minimax-m".to_string()),
         context_window: Some(1000000),
         max_output_tokens: Some(40000),
         modalities: Some(ModelModalities {
@@ -4720,9 +4304,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("minimax/minimax-m2", ModelMetadata {
         display_name: Some("MiniMax: MiniMax M2".to_string()),
-        family: None,
-        context_window: Some(196608),
-        max_output_tokens: Some(196608),
+        family: Some("minimax-m".to_string()),
+        context_window: Some(204800),
+        max_output_tokens: Some(131072),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -4731,16 +4315,15 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         description: Some("MiniMax-M2 is a compact, high-efficiency large language model optimized for end-to-end coding and agentic workflows. With 10 billion activated parameters (230 billion total), it delivers near-frontier intelligence across general reasoning,...".to_string()),
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0.000000255_f64),
-            completion_per_token: Some(0.000001_f64),
+            completion_per_token: Some(0.00000102_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: Some(0.00000003_f64),
+            input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
-            "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
-            "min_p".to_string(),
             "presence_penalty".to_string(),
             "reasoning".to_string(),
             "repetition_penalty".to_string(),
@@ -4752,6 +4335,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -4766,7 +4350,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("minimax/minimax-m2-her", ModelMetadata {
         display_name: Some("MiniMax: MiniMax M2-her".to_string()),
-        family: None,
+        family: Some("minimax-m-her".to_string()),
         context_window: Some(65536),
         max_output_tokens: Some(2048),
         modalities: Some(ModelModalities {
@@ -4798,9 +4382,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("minimax/minimax-m2.1", ModelMetadata {
         display_name: Some("MiniMax: MiniMax M2.1".to_string()),
-        family: None,
-        context_window: Some(196608),
-        max_output_tokens: Some(196608),
+        family: Some("minimax-m".to_string()),
+        context_window: Some(204800),
+        max_output_tokens: Some(131072),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -4808,24 +4392,21 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("MiniMax-M2.1 is a lightweight, state-of-the-art large language model optimized for coding, agentic workflows, and modern application development. With only 10 billion activated parameters, it delivers a major jump in real-world...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000029_f64),
-            completion_per_token: Some(0.00000095_f64),
+            prompt_per_token: Some(0.0000003_f64),
+            completion_per_token: Some(0.0000012_f64),
             web_search_per_request: None,
             input_cache_read_per_token: Some(0.00000003_f64),
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
-            "logit_bias".to_string(),
             "max_tokens".to_string(),
-            "min_p".to_string(),
             "presence_penalty".to_string(),
             "reasoning".to_string(),
             "repetition_penalty".to_string(),
             "response_format".to_string(),
             "seed".to_string(),
             "stop".to_string(),
-            "structured_outputs".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
@@ -4844,9 +4425,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("minimax/minimax-m2.5", ModelMetadata {
         display_name: Some("MiniMax: MiniMax M2.5".to_string()),
-        family: None,
-        context_window: Some(196608),
-        max_output_tokens: Some(131072),
+        family: Some("minimax-m".to_string()),
+        context_window: Some(204800),
+        max_output_tokens: Some(196608),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -4854,10 +4435,10 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("MiniMax-M2.5 is a SOTA large language model designed for real-world productivity. Trained in a diverse range of complex real-world digital working environments, M2.5 builds upon the coding expertise of M2.1...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000015_f64),
-            completion_per_token: Some(0.00000115_f64),
+            prompt_per_token: Some(0.00000012_f64),
+            completion_per_token: Some(0.00000048_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: Some(0.00000003_f64),
+            input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
@@ -4892,48 +4473,11 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1770908502),
     });
-    m.insert("minimax/minimax-m2.5:free", ModelMetadata {
-        display_name: Some("MiniMax: MiniMax M2.5 (free)".to_string()),
-        family: None,
-        context_window: Some(196608),
-        max_output_tokens: Some(8192),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("MiniMax-M2.5 is a SOTA large language model designed for real-world productivity. Trained in a diverse range of complex real-world digital working environments, M2.5 builds upon the coding expertise of M2.1...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0_f64),
-            completion_per_token: Some(0_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "include_reasoning".to_string(),
-            "max_tokens".to_string(),
-            "reasoning".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "temperature".to_string(),
-            "tools".to_string(),
-        ]),
-        default_parameters: Some(ModelDefaultParameters {
-            temperature: Some(1_f32),
-            top_p: Some(0.95_f32),
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-        }),
-        knowledge_cutoff: None,
-        created: Some(1770908502),
-    });
     m.insert("minimax/minimax-m2.7", ModelMetadata {
         display_name: Some("MiniMax: MiniMax M2.7".to_string()),
-        family: None,
-        context_window: Some(196608),
-        max_output_tokens: None,
+        family: Some("minimax-m".to_string()),
+        context_window: Some(204800),
+        max_output_tokens: Some(196608),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -4941,10 +4485,10 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("MiniMax-M2.7 is a next-generation large language model designed for autonomous, real-world productivity and continuous improvement. Built to actively participate in its own evolution, M2.7 integrates advanced agentic capabilities through multi-agent...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000003_f64),
-            completion_per_token: Some(0.0000012_f64),
+            prompt_per_token: Some(0.00000018_f64),
+            completion_per_token: Some(0.00000072_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: Some(0.000000059_f64),
+            input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
@@ -4977,9 +4521,57 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1773836697),
     });
+    m.insert("minimax/minimax-m3", ModelMetadata {
+        display_name: Some("MiniMax: MiniMax M3".to_string()),
+        family: Some("minimax-m".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(512000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text, Modality::Image, Modality::Video],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("MiniMax-M3 is a multimodal foundation model from MiniMax. It supports text, image, and video inputs with text output, a 1M-token context window, and is suited for long-horizon agentic work, coding,...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.0000003_f64),
+            completion_per_token: Some(0.0000012_f64),
+            web_search_per_request: None,
+            input_cache_read_per_token: Some(0.00000006_f64),
+        }),
+        supported_parameters: Some(vec![
+            "frequency_penalty".to_string(),
+            "include_reasoning".to_string(),
+            "logit_bias".to_string(),
+            "logprobs".to_string(),
+            "max_tokens".to_string(),
+            "min_p".to_string(),
+            "presence_penalty".to_string(),
+            "reasoning".to_string(),
+            "repetition_penalty".to_string(),
+            "response_format".to_string(),
+            "seed".to_string(),
+            "stop".to_string(),
+            "structured_outputs".to_string(),
+            "temperature".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+            "top_k".to_string(),
+            "top_logprobs".to_string(),
+            "top_p".to_string(),
+        ]),
+        default_parameters: Some(ModelDefaultParameters {
+            temperature: Some(1_f32),
+            top_p: Some(0.95_f32),
+            top_k: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+        }),
+        knowledge_cutoff: None,
+        created: Some(1780245374),
+    });
     m.insert("mistralai/codestral-2508", ModelMetadata {
         display_name: Some("Mistral: Codestral 2508".to_string()),
-        family: None,
+        family: Some("codestral".to_string()),
         context_window: Some(256000),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -5019,7 +4611,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("mistralai/devstral-2512", ModelMetadata {
         display_name: Some("Mistral: Devstral 2 2512".to_string()),
-        family: None,
+        family: Some("devstral".to_string()),
         context_window: Some(262144),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -5057,89 +4649,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1765285419),
     });
-    m.insert("mistralai/devstral-medium", ModelMetadata {
-        display_name: Some("Mistral: Devstral Medium".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: None,
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Devstral Medium is a high-performance code generation and agentic reasoning model developed jointly by Mistral AI and All Hands AI. Positioned as a step up from Devstral Small, it achieves...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000004_f64),
-            completion_per_token: Some(0.000002_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: Some(0.00000004_f64),
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: Some(ModelDefaultParameters {
-            temperature: Some(0.3_f32),
-            top_p: None,
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-        }),
-        knowledge_cutoff: Some("2025-06-30".to_string()),
-        created: Some(1752161321),
-    });
-    m.insert("mistralai/devstral-small", ModelMetadata {
-        display_name: Some("Mistral: Devstral Small 1.1".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: None,
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Devstral Small 1.1 is a 24B parameter open-weight language model for software engineering agents, developed by Mistral AI in collaboration with All Hands AI. Finetuned from Mistral Small 3.1 and...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000001_f64),
-            completion_per_token: Some(0.0000003_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: Some(0.00000001_f64),
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: Some(ModelDefaultParameters {
-            temperature: Some(0.3_f32),
-            top_p: None,
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-        }),
-        knowledge_cutoff: Some("2025-03-31".to_string()),
-        created: Some(1752160751),
-    });
     m.insert("mistralai/ministral-14b-2512", ModelMetadata {
         display_name: Some("Mistral: Ministral 3 14B 2512".to_string()),
-        family: None,
+        family: Some("ministral".to_string()),
         context_window: Some(262144),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -5182,7 +4694,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("mistralai/ministral-3b-2512", ModelMetadata {
         display_name: Some("Mistral: Ministral 3 3B 2512".to_string()),
-        family: None,
+        family: Some("ministral".to_string()),
         context_window: Some(131072),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -5225,7 +4737,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("mistralai/ministral-8b-2512", ModelMetadata {
         display_name: Some("Mistral: Ministral 3 8B 2512".to_string()),
-        family: None,
+        family: Some("ministral".to_string()),
         context_window: Some(262144),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -5266,46 +4778,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1764681654),
     });
-    m.insert("mistralai/mistral-7b-instruct-v0.1", ModelMetadata {
-        display_name: Some("Mistral: Mistral 7B Instruct v0.1".to_string()),
-        family: None,
-        context_window: Some(2824),
-        max_output_tokens: None,
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("A 7.3B parameter model that outperforms Llama 2 13B on all benchmarks, with optimizations for speed and context length.".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000011_f64),
-            completion_per_token: Some(0.00000019_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "repetition_penalty".to_string(),
-            "seed".to_string(),
-            "temperature".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: Some(ModelDefaultParameters {
-            temperature: Some(0.3_f32),
-            top_p: None,
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-        }),
-        knowledge_cutoff: Some("2023-09-30".to_string()),
-        created: Some(1695859200),
-    });
     m.insert("mistralai/mistral-large", ModelMetadata {
         display_name: Some("Mistral Large".to_string()),
-        family: None,
+        family: Some("mistral-large".to_string()),
         context_window: Some(128000),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -5345,7 +4820,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("mistralai/mistral-large-2407", ModelMetadata {
         display_name: Some("Mistral Large 2407".to_string()),
-        family: None,
+        family: Some("mistral-large".to_string()),
         context_window: Some(131072),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -5383,49 +4858,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2024-03-31".to_string()),
         created: Some(1731978415),
     });
-    m.insert("mistralai/mistral-large-2411", ModelMetadata {
-        display_name: Some("Mistral Large 2411".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: None,
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Mistral Large 2 2411 is an update of [Mistral Large 2](/mistralai/mistral-large) released together with [Pixtral Large 2411](/mistralai/pixtral-large-2411) It provides a significant upgrade on the previous [Mistral Large 24.07](/mistralai/mistral-large-2407), with notable...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000002_f64),
-            completion_per_token: Some(0.000006_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: Some(0.0000002_f64),
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: Some(ModelDefaultParameters {
-            temperature: Some(0.3_f32),
-            top_p: None,
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-        }),
-        knowledge_cutoff: Some("2024-07-31".to_string()),
-        created: Some(1731978685),
-    });
     m.insert("mistralai/mistral-large-2512", ModelMetadata {
         display_name: Some("Mistral: Mistral Large 3 2512".to_string()),
-        family: None,
+        family: Some("mistral-large".to_string()),
         context_window: Some(262144),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -5465,7 +4900,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("mistralai/mistral-medium-3", ModelMetadata {
         display_name: Some("Mistral: Mistral Medium 3".to_string()),
-        family: None,
+        family: Some("mistral-medium".to_string()),
         context_window: Some(131072),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -5505,7 +4940,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("mistralai/mistral-medium-3-5", ModelMetadata {
         display_name: Some("Mistral: Mistral Medium 3.5".to_string()),
-        family: None,
+        family: Some("mistral-medium".to_string()),
         context_window: Some(262144),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -5541,7 +4976,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("mistralai/mistral-medium-3.1", ModelMetadata {
         display_name: Some("Mistral: Mistral Medium 3.1".to_string()),
-        family: None,
+        family: Some("mistral-medium".to_string()),
         context_window: Some(131072),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -5581,7 +5016,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("mistralai/mistral-nemo", ModelMetadata {
         display_name: Some("Mistral: Mistral Nemo".to_string()),
-        family: None,
+        family: Some("mistral-nemo".to_string()),
         context_window: Some(131072),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -5627,7 +5062,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("mistralai/mistral-saba", ModelMetadata {
         display_name: Some("Mistral: Saba".to_string()),
-        family: None,
+        family: Some("mistral".to_string()),
         context_window: Some(32768),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -5667,7 +5102,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("mistralai/mistral-small-24b-instruct-2501", ModelMetadata {
         display_name: Some("Mistral: Mistral Small 3".to_string()),
-        family: None,
+        family: Some("mistral-small".to_string()),
         context_window: Some(32768),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -5709,7 +5144,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("mistralai/mistral-small-2603", ModelMetadata {
         display_name: Some("Mistral: Mistral Small 4".to_string()),
-        family: None,
+        family: Some("mistral-small".to_string()),
         context_window: Some(262144),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -5746,9 +5181,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("mistralai/mistral-small-3.1-24b-instruct", ModelMetadata {
         display_name: Some("Mistral: Mistral Small 3.1 24B".to_string()),
-        family: None,
+        family: Some("mistral-small".to_string()),
         context_window: Some(128000),
-        max_output_tokens: None,
+        max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text, Modality::Image],
             output: vec![Modality::Text],
@@ -5756,19 +5191,24 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Mistral Small 3.1 24B Instruct is an upgraded variant of Mistral Small 3 (2501), featuring 24 billion parameters with advanced multimodal capabilities. It provides state-of-the-art performance in text-based reasoning and...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000035_f64),
-            completion_per_token: Some(0.00000056_f64),
+            prompt_per_token: Some(0.000000351_f64),
+            completion_per_token: Some(0.000000555_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
+            "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
+            "min_p".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
             "seed".to_string(),
+            "stop".to_string(),
             "temperature".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -5783,7 +5223,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("mistralai/mistral-small-3.2-24b-instruct", ModelMetadata {
         display_name: Some("Mistral: Mistral Small 3.2 24B".to_string()),
-        family: None,
+        family: Some("mistral-small".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -5801,6 +5241,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
@@ -5813,6 +5254,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -5827,7 +5269,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("mistralai/mixtral-8x22b-instruct", ModelMetadata {
         display_name: Some("Mistral: Mixtral 8x22B Instruct".to_string()),
-        family: None,
+        family: Some("mixtral".to_string()),
         context_window: Some(65536),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -5865,93 +5307,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2024-01-31".to_string()),
         created: Some(1713312000),
     });
-    m.insert("mistralai/mixtral-8x7b-instruct", ModelMetadata {
-        display_name: Some("Mistral: Mixtral 8x7B Instruct".to_string()),
-        family: None,
-        context_window: Some(32768),
-        max_output_tokens: Some(16384),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Mixtral 8x7B Instruct is a pretrained generative Sparse Mixture of Experts, by Mistral AI, for chat and instruction use. Incorporates 8 experts (feed-forward networks) for a total of 47 billion...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000054_f64),
-            completion_per_token: Some(0.00000054_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "logit_bias".to_string(),
-            "max_tokens".to_string(),
-            "min_p".to_string(),
-            "presence_penalty".to_string(),
-            "repetition_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: Some(ModelDefaultParameters {
-            temperature: Some(0.3_f32),
-            top_p: None,
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-        }),
-        knowledge_cutoff: Some("2023-12-31".to_string()),
-        created: Some(1702166400),
-    });
-    m.insert("mistralai/pixtral-large-2411", ModelMetadata {
-        display_name: Some("Mistral: Pixtral Large 2411".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: None,
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text, Modality::Image],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Pixtral Large is a 124B parameter, open-weight, multimodal model built on top of [Mistral Large 2](/mistralai/mistral-large-2411). The model is able to understand documents, charts and natural images. The model is...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000002_f64),
-            completion_per_token: Some(0.000006_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: Some(0.0000002_f64),
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: Some(ModelDefaultParameters {
-            temperature: Some(0.3_f32),
-            top_p: None,
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-        }),
-        knowledge_cutoff: Some("2024-07-31".to_string()),
-        created: Some(1731977388),
-    });
     m.insert("mistralai/voxtral-small-24b-2507", ModelMetadata {
         display_name: Some("Mistral: Voxtral Small 24B 2507".to_string()),
-        family: None,
+        family: Some("voxtral-small".to_string()),
         context_window: Some(32000),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -5991,9 +5349,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("moonshotai/kimi-k2", ModelMetadata {
         display_name: Some("MoonshotAI: Kimi K2 0711".to_string()),
-        family: None,
+        family: Some("kimi-k".to_string()),
         context_window: Some(131072),
-        max_output_tokens: Some(32768),
+        max_output_tokens: Some(100352),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -6025,9 +5383,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("moonshotai/kimi-k2-0905", ModelMetadata {
         display_name: Some("MoonshotAI: Kimi K2 0905".to_string()),
-        family: None,
+        family: Some("kimi-k-0905".to_string()),
         context_window: Some(262144),
-        max_output_tokens: Some(262144),
+        max_output_tokens: Some(100352),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -6035,16 +5393,14 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Kimi K2 0905 is the September update of [Kimi K2 0711](moonshotai/kimi-k2). It is a large-scale Mixture-of-Experts (MoE) language model developed by Moonshot AI, featuring 1 trillion total parameters with 32...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000004_f64),
-            completion_per_token: Some(0.000002_f64),
+            prompt_per_token: Some(0.0000006_f64),
+            completion_per_token: Some(0.0000025_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
-            "logit_bias".to_string(),
             "max_tokens".to_string(),
-            "min_p".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
             "response_format".to_string(),
@@ -6063,9 +5419,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("moonshotai/kimi-k2-thinking", ModelMetadata {
         display_name: Some("MoonshotAI: Kimi K2 Thinking".to_string()),
-        family: None,
+        family: Some("kimi-k".to_string()),
         context_window: Some(262144),
-        max_output_tokens: Some(262144),
+        max_output_tokens: Some(100352),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -6081,7 +5437,48 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
+            "logprobs".to_string(),
+            "max_tokens".to_string(),
+            "presence_penalty".to_string(),
+            "reasoning".to_string(),
+            "repetition_penalty".to_string(),
+            "response_format".to_string(),
+            "seed".to_string(),
+            "stop".to_string(),
+            "structured_outputs".to_string(),
+            "temperature".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+            "top_k".to_string(),
+            "top_logprobs".to_string(),
+            "top_p".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: Some(1762440622),
+    });
+    m.insert("moonshotai/kimi-k2.5", ModelMetadata {
+        display_name: Some("MoonshotAI: Kimi K2.5".to_string()),
+        family: Some("kimi-k".to_string()),
+        context_window: Some(262144),
+        max_output_tokens: None,
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text, Modality::Image],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("Kimi K2.5 is Moonshot AI's native multimodal model, delivering state-of-the-art visual coding capability and a self-directed agent swarm paradigm. Built on Kimi K2 with continued pretraining over approximately 15T mixed...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.000000375_f64),
+            completion_per_token: Some(0.000002025_f64),
+            web_search_per_request: None,
+            input_cache_read_per_token: None,
+        }),
+        supported_parameters: Some(vec![
+            "frequency_penalty".to_string(),
+            "include_reasoning".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
@@ -6095,28 +5492,29 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
         knowledge_cutoff: None,
-        created: Some(1762440622),
+        created: Some(1769487076),
     });
-    m.insert("moonshotai/kimi-k2.5", ModelMetadata {
-        display_name: Some("MoonshotAI: Kimi K2.5".to_string()),
-        family: None,
+    m.insert("moonshotai/kimi-k2.6", ModelMetadata {
+        display_name: Some("MoonshotAI: Kimi K2.6".to_string()),
+        family: Some("kimi-k".to_string()),
         context_window: Some(262144),
-        max_output_tokens: Some(65535),
+        max_output_tokens: Some(262144),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text, Modality::Image],
             output: vec![Modality::Text],
         }),
         capabilities: vec![],
-        description: Some("Kimi K2.5 is Moonshot AI's native multimodal model, delivering state-of-the-art visual coding capability and a self-directed agent swarm paradigm. Built on Kimi K2 with continued pretraining over approximately 15T mixed...".to_string()),
+        description: Some("Kimi K2.6 is Moonshot AI's next-generation multimodal model, designed for long-horizon coding, coding-driven UI/UX generation, and multi-agent orchestration. It handles complex end-to-end coding tasks across Python, Rust, and Go, and...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000044_f64),
-            completion_per_token: Some(0.000002_f64),
+            prompt_per_token: Some(0.00000066_f64),
+            completion_per_token: Some(0.00000341_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: Some(0.00000022_f64),
+            input_cache_read_per_token: Some(0.00000014_f64),
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
@@ -6142,11 +5540,11 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         ]),
         default_parameters: None,
         knowledge_cutoff: None,
-        created: Some(1769487076),
+        created: Some(1776699402),
     });
-    m.insert("moonshotai/kimi-k2.6", ModelMetadata {
-        display_name: Some("MoonshotAI: Kimi K2.6".to_string()),
-        family: None,
+    m.insert("moonshotai/kimi-k2.7-code", ModelMetadata {
+        display_name: Some("MoonshotAI: Kimi K2.7 Code".to_string()),
+        family: Some("kimi-k-code".to_string()),
         context_window: Some(262144),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -6154,9 +5552,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             output: vec![Modality::Text],
         }),
         capabilities: vec![],
-        description: Some("Kimi K2.6 is Moonshot AI's next-generation multimodal model, designed for long-horizon coding, coding-driven UI/UX generation, and multi-agent orchestration. It handles complex end-to-end coding tasks across Python, Rust, and Go, and...".to_string()),
+        description: Some("MoonshotAI: Kimi K2.7 Code is a coding-focused model in Moonshot AI's Kimi K2 family, built to complete end-to-end programming tasks reliably over long contexts. It uses a native multimodal mixture-of-experts...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000075_f64),
+            prompt_per_token: Some(0.00000074_f64),
             completion_per_token: Some(0.0000035_f64),
             web_search_per_request: None,
             input_cache_read_per_token: Some(0.00000015_f64),
@@ -6186,11 +5584,11 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         ]),
         default_parameters: None,
         knowledge_cutoff: None,
-        created: Some(1776699402),
+        created: Some(1781266361),
     });
     m.insert("morph/morph-v3-fast", ModelMetadata {
         display_name: Some("Morph: Morph V3 Fast".to_string()),
-        family: None,
+        family: Some("morph-v".to_string()),
         context_window: Some(81920),
         max_output_tokens: Some(38000),
         modalities: Some(ModelModalities {
@@ -6216,7 +5614,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("morph/morph-v3-large", ModelMetadata {
         display_name: Some("Morph: Morph V3 Large".to_string()),
-        family: None,
+        family: Some("morph-v-large".to_string()),
         context_window: Some(262144),
         max_output_tokens: Some(131072),
         modalities: Some(ModelModalities {
@@ -6232,83 +5630,59 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
+            "logprobs".to_string(),
             "max_tokens".to_string(),
+            "response_format".to_string(),
             "stop".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
+            "top_logprobs".to_string(),
         ]),
         default_parameters: None,
         knowledge_cutoff: None,
         created: Some(1751910858),
     });
-    m.insert("nex-agi/deepseek-v3.1-nex-n1", ModelMetadata {
-        display_name: Some("Nex AGI: DeepSeek V3.1 Nex N1".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: Some(163840),
+    m.insert("nex-agi/nex-n2-pro", ModelMetadata {
+        display_name: Some("Nex AGI: Nex-N2-Pro".to_string()),
+        family: Some("nex-n-pro".to_string()),
+        context_window: Some(262144),
+        max_output_tokens: Some(262144),
         modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
+            input: vec![Modality::Text, Modality::Image],
             output: vec![Modality::Text],
         }),
         capabilities: vec![],
-        description: Some("DeepSeek V3.1 Nex-N1 is the flagship release of the Nex-N1 series — a post-trained model designed to highlight agent autonomy, tool use, and real-world productivity. Nex-N1 demonstrates competitive performance across...".to_string()),
+        description: Some("Nex-N2-Pro is an agentic mixture-of-experts model from Nex AGI, with 17B active parameters out of 397B total. Built on the Qwen3.5 architecture, it accepts text and image input and produces...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000000135_f64),
-            completion_per_token: Some(0.0000005_f64),
+            prompt_per_token: Some(0.00000025_f64),
+            completion_per_token: Some(0.000001_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: None,
+            input_cache_read_per_token: Some(0.000000025_f64),
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
+            "include_reasoning".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
-            "response_format".to_string(),
-            "structured_outputs".to_string(),
+            "reasoning".to_string(),
             "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
-        default_parameters: None,
+        default_parameters: Some(ModelDefaultParameters {
+            temperature: Some(0.7_f32),
+            top_p: Some(0.95_f32),
+            top_k: Some(40),
+            frequency_penalty: None,
+            presence_penalty: None,
+        }),
         knowledge_cutoff: None,
-        created: Some(1765204393),
-    });
-    m.insert("nousresearch/hermes-2-pro-llama-3-8b", ModelMetadata {
-        display_name: Some("NousResearch: Hermes 2 Pro - Llama-3 8B".to_string()),
-        family: None,
-        context_window: Some(8192),
-        max_output_tokens: Some(8192),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Hermes 2 Pro is an upgraded, retrained version of Nous Hermes 2, consisting of an updated and cleaned version of the OpenHermes 2.5 Dataset, as well as a newly introduced...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000014_f64),
-            completion_per_token: Some(0.00000014_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "repetition_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2023-12-31".to_string()),
-        created: Some(1716768000),
+        created: Some(1780937140),
     });
     m.insert("nousresearch/hermes-3-llama-3.1-405b", ModelMetadata {
         display_name: Some("Nous: Hermes 3 405B Instruct".to_string()),
-        family: None,
+        family: Some("hermes-llama".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -6344,7 +5718,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("nousresearch/hermes-3-llama-3.1-405b:free", ModelMetadata {
         display_name: Some("Nous: Hermes 3 405B Instruct (free)".to_string()),
-        family: None,
+        family: Some("hermes-llama".to_string()),
         context_window: Some(131072),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -6374,7 +5748,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("nousresearch/hermes-3-llama-3.1-70b", ModelMetadata {
         display_name: Some("Nous: Hermes 3 70B Instruct".to_string()),
-        family: None,
+        family: Some("hermes-llama".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -6384,8 +5758,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Hermes 3 is a generalist language model with many improvements over [Hermes 2](/models/nousresearch/nous-hermes-2-mistral-7b-dpo), including advanced agentic capabilities, much better roleplaying, reasoning, multi-turn conversation, long context coherence, and improvements across the...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000003_f64),
-            completion_per_token: Some(0.0000003_f64),
+            prompt_per_token: Some(0.0000007_f64),
+            completion_per_token: Some(0.0000007_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
         }),
@@ -6410,7 +5784,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("nousresearch/hermes-4-405b", ModelMetadata {
         display_name: Some("Nous: Hermes 4 405B".to_string()),
-        family: None,
+        family: Some("hermes".to_string()),
         context_window: Some(131072),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -6443,7 +5817,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("nousresearch/hermes-4-70b", ModelMetadata {
         display_name: Some("Nous: Hermes 4 70B".to_string()),
-        family: None,
+        family: Some("hermes".to_string()),
         context_window: Some(131072),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -6474,46 +5848,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2024-08-31".to_string()),
         created: Some(1756236182),
     });
-    m.insert("nvidia/llama-3.1-nemotron-70b-instruct", ModelMetadata {
-        display_name: Some("NVIDIA: Llama 3.1 Nemotron 70B Instruct".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: Some(16384),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("NVIDIA's Llama 3.1 Nemotron 70B is a language model designed for generating precise and useful responses. Leveraging [Llama 3.1 70B](/models/meta-llama/llama-3.1-70b-instruct) architecture and Reinforcement Learning from Human Feedback (RLHF), it excels...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000012_f64),
-            completion_per_token: Some(0.0000012_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "logit_bias".to_string(),
-            "max_tokens".to_string(),
-            "min_p".to_string(),
-            "presence_penalty".to_string(),
-            "repetition_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2023-12-31".to_string()),
-        created: Some(1728950400),
-    });
     m.insert("nvidia/llama-3.3-nemotron-super-49b-v1.5", ModelMetadata {
         display_name: Some("NVIDIA: Llama 3.3 Nemotron Super 49B V1.5".to_string()),
-        family: None,
+        family: Some("llama-nemotron-super-v".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -6523,7 +5860,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Llama-3.3-Nemotron-Super-49B-v1.5 is a 49B-parameter, English-centric reasoning/chat model derived from Meta’s Llama-3.3-70B-Instruct with a 128K context. It’s post-trained for agentic workflows (RAG, tool calling) via SFT across math, code, science, and...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000001_f64),
+            prompt_per_token: Some(0.0000004_f64),
             completion_per_token: Some(0.0000004_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
@@ -6558,7 +5895,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("nvidia/nemotron-3-nano-30b-a3b", ModelMetadata {
         display_name: Some("NVIDIA: Nemotron 3 Nano 30B A3B".to_string()),
-        family: None,
+        family: Some("nemotron-nano".to_string()),
         context_window: Some(262144),
         max_output_tokens: Some(228000),
         modalities: Some(ModelModalities {
@@ -6577,6 +5914,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
@@ -6585,10 +5923,12 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "response_format".to_string(),
             "seed".to_string(),
             "stop".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -6597,7 +5937,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("nvidia/nemotron-3-nano-30b-a3b:free", ModelMetadata {
         display_name: Some("NVIDIA: Nemotron 3 Nano 30B A3B (free)".to_string()),
-        family: None,
+        family: Some("nemotron-nano".to_string()),
         context_window: Some(256000),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -6628,7 +5968,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", ModelMetadata {
         display_name: Some("NVIDIA: Nemotron 3 Nano Omni (free)".to_string()),
-        family: None,
+        family: Some("nemotron-nano-omni-reasoning".to_string()),
         context_window: Some(256000),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
@@ -6665,9 +6005,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("nvidia/nemotron-3-super-120b-a12b", ModelMetadata {
         display_name: Some("NVIDIA: Nemotron 3 Super".to_string()),
-        family: None,
-        context_window: Some(262144),
-        max_output_tokens: None,
+        family: Some("nemotron-super".to_string()),
+        context_window: Some(1000000),
+        max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -6675,8 +6015,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("NVIDIA Nemotron 3 Super is a 120B-parameter open hybrid MoE model, activating just 12B parameters for maximum compute efficiency and accuracy in complex multi-agent applications. Built on a hybrid Mamba-Transformer...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000009_f64),
-            completion_per_token: Some(0.00000045_f64),
+            prompt_per_token: Some(0.000000085_f64),
+            completion_per_token: Some(0.0000004_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
         }),
@@ -6693,6 +6033,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "response_format".to_string(),
             "seed".to_string(),
             "stop".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
@@ -6712,8 +6053,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("nvidia/nemotron-3-super-120b-a12b:free", ModelMetadata {
         display_name: Some("NVIDIA: Nemotron 3 Super (free)".to_string()),
-        family: None,
-        context_window: Some(262144),
+        family: Some("nemotron-super".to_string()),
+        context_window: Some(1000000),
         max_output_tokens: Some(262144),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
@@ -6749,9 +6090,121 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1773245239),
     });
+    m.insert("nvidia/nemotron-3-ultra-550b-a55b", ModelMetadata {
+        display_name: Some("NVIDIA: Nemotron 3 Ultra".to_string()),
+        family: Some("nemotron-ultra".to_string()),
+        context_window: Some(1000000),
+        max_output_tokens: Some(16384),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("NVIDIA Nemotron 3 Ultra is an open frontier-reasoning and orchestration model from NVIDIA, with 55B active parameters out of 550B total (MoE). Built on a hybrid Transformer-Mamba mixture-of-experts architecture, it...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.0000005_f64),
+            completion_per_token: Some(0.0000022_f64),
+            web_search_per_request: None,
+            input_cache_read_per_token: Some(0.0000001_f64),
+        }),
+        supported_parameters: Some(vec![
+            "frequency_penalty".to_string(),
+            "include_reasoning".to_string(),
+            "logit_bias".to_string(),
+            "max_tokens".to_string(),
+            "min_p".to_string(),
+            "presence_penalty".to_string(),
+            "reasoning".to_string(),
+            "repetition_penalty".to_string(),
+            "response_format".to_string(),
+            "seed".to_string(),
+            "stop".to_string(),
+            "structured_outputs".to_string(),
+            "temperature".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+            "top_k".to_string(),
+            "top_p".to_string(),
+        ]),
+        default_parameters: Some(ModelDefaultParameters {
+            temperature: Some(1_f32),
+            top_p: Some(0.95_f32),
+            top_k: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+        }),
+        knowledge_cutoff: None,
+        created: Some(1780551208),
+    });
+    m.insert("nvidia/nemotron-3-ultra-550b-a55b:free", ModelMetadata {
+        display_name: Some("NVIDIA: Nemotron 3 Ultra (free)".to_string()),
+        family: Some("nemotron-ultra".to_string()),
+        context_window: Some(1000000),
+        max_output_tokens: Some(65536),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("NVIDIA Nemotron 3 Ultra is an open frontier-reasoning and orchestration model from NVIDIA, with 55B active parameters out of 550B total (MoE). Built on a hybrid Transformer-Mamba mixture-of-experts architecture, it...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0_f64),
+            completion_per_token: Some(0_f64),
+            web_search_per_request: None,
+            input_cache_read_per_token: None,
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "max_tokens".to_string(),
+            "reasoning".to_string(),
+            "seed".to_string(),
+            "temperature".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+            "top_p".to_string(),
+        ]),
+        default_parameters: Some(ModelDefaultParameters {
+            temperature: Some(1_f32),
+            top_p: Some(0.95_f32),
+            top_k: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+        }),
+        knowledge_cutoff: None,
+        created: Some(1780551208),
+    });
+    m.insert("nvidia/nemotron-3.5-content-safety:free", ModelMetadata {
+        display_name: Some("NVIDIA: Nemotron 3.5 Content Safety (free)".to_string()),
+        family: Some("nemotron-content-safety".to_string()),
+        context_window: Some(128000),
+        max_output_tokens: Some(8192),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text, Modality::Image],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("NVIDIA Nemotron 3.5 Content Safety is a compact 4B-parameter multimodal guardrail model from NVIDIA, fine-tuned from Google Gemma-3-4B. It moderates both inputs to and responses from LLMs and VLMs, accepting...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0_f64),
+            completion_per_token: Some(0_f64),
+            web_search_per_request: None,
+            input_cache_read_per_token: None,
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "max_tokens".to_string(),
+            "reasoning".to_string(),
+            "seed".to_string(),
+            "temperature".to_string(),
+            "top_p".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: Some(1780581864),
+    });
     m.insert("nvidia/nemotron-nano-12b-v2-vl:free", ModelMetadata {
         display_name: Some("NVIDIA: Nemotron Nano 12B 2 VL (free)".to_string()),
-        family: None,
+        family: Some("nemotron-nano-v".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -6780,48 +6233,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1761675565),
     });
-    m.insert("nvidia/nemotron-nano-9b-v2", ModelMetadata {
-        display_name: Some("NVIDIA: Nemotron Nano 9B V2".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: Some(16384),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("NVIDIA-Nemotron-Nano-9B-v2 is a large language model (LLM) trained from scratch by NVIDIA, and designed as a unified model for both reasoning and non-reasoning tasks. It responds to user queries and...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000004_f64),
-            completion_per_token: Some(0.00000016_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "include_reasoning".to_string(),
-            "logit_bias".to_string(),
-            "max_tokens".to_string(),
-            "min_p".to_string(),
-            "presence_penalty".to_string(),
-            "reasoning".to_string(),
-            "repetition_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2025-03-31".to_string()),
-        created: Some(1757106807),
-    });
     m.insert("nvidia/nemotron-nano-9b-v2:free", ModelMetadata {
         display_name: Some("NVIDIA: Nemotron Nano 9B V2 (free)".to_string()),
-        family: None,
+        family: Some("nemotron-nano-v".to_string()),
         context_window: Some(128000),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -6852,105 +6266,93 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2025-03-31".to_string()),
         created: Some(1757106807),
     });
-    m.insert(
-        "o3",
-        ModelMetadata {
-            display_name: Some("o3".to_string()),
-            family: Some("o3".to_string()),
-            context_window: Some(200000),
-            max_output_tokens: Some(100000),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Image, Modality::Text],
-                output: vec![Modality::Embeddings, Modality::Text],
-            }),
-            capabilities: vec![
-                "batch".to_string(),
-                "function_calling".to_string(),
-                "structured_output".to_string(),
-            ],
-            description: None,
-            pricing: None,
-            supported_parameters: None,
-            default_parameters: None,
-            knowledge_cutoff: None,
-            created: None,
-        },
-    );
-    m.insert(
-        "o3-mini",
-        ModelMetadata {
-            display_name: Some("o3-mini".to_string()),
-            family: Some("o3-mini".to_string()),
-            context_window: Some(200000),
-            max_output_tokens: Some(100000),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Text],
-                output: vec![Modality::Embeddings, Modality::Text],
-            }),
-            capabilities: vec![
-                "batch".to_string(),
-                "function_calling".to_string(),
-                "structured_output".to_string(),
-            ],
-            description: None,
-            pricing: None,
-            supported_parameters: None,
-            default_parameters: None,
-            knowledge_cutoff: None,
-            created: None,
-        },
-    );
-    m.insert(
-        "o3-mini-2025-01-31",
-        ModelMetadata {
-            display_name: Some("o3-mini".to_string()),
-            family: Some("o3-mini".to_string()),
-            context_window: Some(200000),
-            max_output_tokens: Some(100000),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Text],
-                output: vec![Modality::Embeddings, Modality::Text],
-            }),
-            capabilities: vec![
-                "batch".to_string(),
-                "function_calling".to_string(),
-                "structured_output".to_string(),
-            ],
-            description: None,
-            pricing: None,
-            supported_parameters: None,
-            default_parameters: None,
-            knowledge_cutoff: None,
-            created: None,
-        },
-    );
-    m.insert(
-        "o4-mini",
-        ModelMetadata {
-            display_name: Some("o4-mini".to_string()),
-            family: Some("o4-mini".to_string()),
-            context_window: Some(200000),
-            max_output_tokens: Some(100000),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Image, Modality::Text],
-                output: vec![Modality::Embeddings, Modality::Text],
-            }),
-            capabilities: vec![
-                "batch".to_string(),
-                "function_calling".to_string(),
-                "structured_output".to_string(),
-            ],
-            description: None,
-            pricing: None,
-            supported_parameters: None,
-            default_parameters: None,
-            knowledge_cutoff: None,
-            created: None,
-        },
-    );
+    m.insert("o3", ModelMetadata {
+        display_name: Some("o3".to_string()),
+        family: Some("o3".to_string()),
+        context_window: Some(200000),
+        max_output_tokens: Some(100000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Image, Modality::Text],
+            output: vec![Modality::Embeddings, Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+        description: None,
+        pricing: None,
+        supported_parameters: None,
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: None,
+    });
+    m.insert("o3-mini", ModelMetadata {
+        display_name: Some("o3-mini".to_string()),
+        family: Some("o3-mini".to_string()),
+        context_window: Some(200000),
+        max_output_tokens: Some(100000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text],
+            output: vec![Modality::Embeddings, Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+        description: None,
+        pricing: None,
+        supported_parameters: None,
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: None,
+    });
+    m.insert("o3-mini-2025-01-31", ModelMetadata {
+        display_name: Some("o3-mini".to_string()),
+        family: Some("o3-mini".to_string()),
+        context_window: Some(200000),
+        max_output_tokens: Some(100000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text],
+            output: vec![Modality::Embeddings, Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+        description: None,
+        pricing: None,
+        supported_parameters: None,
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: None,
+    });
+    m.insert("o4-mini", ModelMetadata {
+        display_name: Some("o4-mini".to_string()),
+        family: Some("o4-mini".to_string()),
+        context_window: Some(200000),
+        max_output_tokens: Some(100000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Image, Modality::Text],
+            output: vec![Modality::Embeddings, Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+        description: None,
+        pricing: None,
+        supported_parameters: None,
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: None,
+    });
     m.insert("openai/gpt-3.5-turbo", ModelMetadata {
         display_name: Some("OpenAI: GPT-3.5 Turbo".to_string()),
-        family: None,
+        family: Some("gpt".to_string()),
         context_window: Some(16385),
         max_output_tokens: Some(4096),
         modalities: Some(ModelModalities {
@@ -6987,7 +6389,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-3.5-turbo-0613", ModelMetadata {
         display_name: Some("OpenAI: GPT-3.5 Turbo (older v0613)".to_string()),
-        family: None,
+        family: Some("gpt-0613".to_string()),
         context_window: Some(4095),
         max_output_tokens: Some(4096),
         modalities: Some(ModelModalities {
@@ -7024,7 +6426,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-3.5-turbo-16k", ModelMetadata {
         display_name: Some("OpenAI: GPT-3.5 Turbo 16k".to_string()),
-        family: None,
+        family: Some("gpt-16k".to_string()),
         context_window: Some(16385),
         max_output_tokens: Some(4096),
         modalities: Some(ModelModalities {
@@ -7062,7 +6464,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-3.5-turbo-instruct", ModelMetadata {
         display_name: Some("OpenAI: GPT-3.5 Turbo Instruct".to_string()),
-        family: None,
+        family: Some("gpt".to_string()),
         context_window: Some(4095),
         max_output_tokens: Some(4096),
         modalities: Some(ModelModalities {
@@ -7097,7 +6499,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-4", ModelMetadata {
         display_name: Some("OpenAI: GPT-4".to_string()),
-        family: None,
+        family: Some("gpt".to_string()),
         context_window: Some(8191),
         max_output_tokens: Some(4096),
         modalities: Some(ModelModalities {
@@ -7133,83 +6535,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2021-09-30".to_string()),
         created: Some(1685232000),
     });
-    m.insert("openai/gpt-4-0314", ModelMetadata {
-        display_name: Some("OpenAI: GPT-4 (older v0314)".to_string()),
-        family: None,
-        context_window: Some(8191),
-        max_output_tokens: Some(4096),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("GPT-4-0314 is the first version of GPT-4 released, with a context length of 8,192 tokens, and was supported until June 14. Training data: up to Sep 2021.".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00003_f64),
-            completion_per_token: Some(0.00006_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "logit_bias".to_string(),
-            "logprobs".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_logprobs".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2021-09-30".to_string()),
-        created: Some(1685232000),
-    });
-    m.insert("openai/gpt-4-1106-preview", ModelMetadata {
-        display_name: Some("OpenAI: GPT-4 Turbo (older v1106)".to_string()),
-        family: None,
-        context_window: Some(128000),
-        max_output_tokens: Some(4096),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("The latest GPT-4 Turbo model with vision capabilities. Vision requests can now use JSON mode and function calling.\n\nTraining data: up to April 2023.".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00001_f64),
-            completion_per_token: Some(0.00003_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "logit_bias".to_string(),
-            "logprobs".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_logprobs".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2023-04-30".to_string()),
-        created: Some(1699228800),
-    });
     m.insert("openai/gpt-4-turbo", ModelMetadata {
         display_name: Some("OpenAI: GPT-4 Turbo".to_string()),
-        family: None,
+        family: Some("gpt".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(4096),
         modalities: Some(ModelModalities {
@@ -7246,7 +6574,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-4-turbo-preview", ModelMetadata {
         display_name: Some("OpenAI: GPT-4 Turbo Preview".to_string()),
-        family: None,
+        family: Some("gpt".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(4096),
         modalities: Some(ModelModalities {
@@ -7283,7 +6611,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-4.1", ModelMetadata {
         display_name: Some("OpenAI: GPT-4.1".to_string()),
-        family: None,
+        family: Some("gpt".to_string()),
         context_window: Some(1047576),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -7295,7 +6623,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0.000002_f64),
             completion_per_token: Some(0.000008_f64),
-            web_search_per_request: None,
+            web_search_per_request: Some(0.01_f64),
             input_cache_read_per_token: Some(0.0000005_f64),
         }),
         supported_parameters: Some(vec![
@@ -7315,7 +6643,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-4.1-mini", ModelMetadata {
         display_name: Some("OpenAI: GPT-4.1 Mini".to_string()),
-        family: None,
+        family: Some("gpt-mini".to_string()),
         context_window: Some(1047576),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -7347,7 +6675,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-4.1-nano", ModelMetadata {
         display_name: Some("OpenAI: GPT-4.1 Nano".to_string()),
-        family: None,
+        family: Some("gpt-nano".to_string()),
         context_window: Some(1047576),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -7379,7 +6707,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-4o", ModelMetadata {
         display_name: Some("OpenAI: GPT-4o".to_string()),
-        family: None,
+        family: Some("gpt-4o".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -7418,7 +6746,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-4o-2024-05-13", ModelMetadata {
         display_name: Some("OpenAI: GPT-4o (2024-05-13)".to_string()),
-        family: None,
+        family: Some("gpt-4o".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(4096),
         modalities: Some(ModelModalities {
@@ -7457,7 +6785,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-4o-2024-08-06", ModelMetadata {
         display_name: Some("OpenAI: GPT-4o (2024-08-06)".to_string()),
-        family: None,
+        family: Some("gpt-4o".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -7496,7 +6824,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-4o-2024-11-20", ModelMetadata {
         display_name: Some("OpenAI: GPT-4o (2024-11-20)".to_string()),
-        family: None,
+        family: Some("gpt-4o".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -7532,46 +6860,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2023-10-31".to_string()),
         created: Some(1732127594),
     });
-    m.insert("openai/gpt-4o-audio-preview", ModelMetadata {
-        display_name: Some("OpenAI: GPT-4o Audio".to_string()),
-        family: None,
-        context_window: Some(128000),
-        max_output_tokens: Some(16384),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Audio, Modality::Text],
-            output: vec![Modality::Text, Modality::Audio],
-        }),
-        capabilities: vec![],
-        description: Some("The gpt-4o-audio-preview model adds support for audio inputs as prompts. This enhancement allows the model to detect nuances within audio recordings and add depth to generated user experiences. Audio outputs...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000025_f64),
-            completion_per_token: Some(0.00001_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "logit_bias".to_string(),
-            "logprobs".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_logprobs".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2023-10-31".to_string()),
-        created: Some(1755233061),
-    });
     m.insert("openai/gpt-4o-mini", ModelMetadata {
         display_name: Some("OpenAI: GPT-4o-mini".to_string()),
-        family: None,
+        family: Some("gpt-4o-mini".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -7610,7 +6901,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-4o-mini-2024-07-18", ModelMetadata {
         display_name: Some("OpenAI: GPT-4o-mini (2024-07-18)".to_string()),
-        family: None,
+        family: Some("gpt-4o-mini".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -7648,7 +6939,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-4o-mini-search-preview", ModelMetadata {
         display_name: Some("OpenAI: GPT-4o-mini Search Preview".to_string()),
-        family: None,
+        family: Some("gpt-4o-mini-search".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -7675,7 +6966,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-4o-search-preview", ModelMetadata {
         display_name: Some("OpenAI: GPT-4o Search Preview".to_string()),
-        family: None,
+        family: Some("gpt-4o-search".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -7702,7 +6993,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5", ModelMetadata {
         display_name: Some("OpenAI: GPT-5".to_string()),
-        family: None,
+        family: Some("gpt".to_string()),
         context_window: Some(400000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -7714,7 +7005,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0.00000125_f64),
             completion_per_token: Some(0.00001_f64),
-            web_search_per_request: None,
+            web_search_per_request: Some(0.01_f64),
             input_cache_read_per_token: Some(0.000000125_f64),
         }),
         supported_parameters: Some(vec![
@@ -7734,7 +7025,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5-chat", ModelMetadata {
         display_name: Some("OpenAI: GPT-5 Chat".to_string()),
-        family: None,
+        family: Some("gpt".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -7761,7 +7052,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5-codex", ModelMetadata {
         display_name: Some("OpenAI: GPT-5 Codex".to_string()),
-        family: None,
+        family: Some("gpt-codex".to_string()),
         context_window: Some(400000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -7773,7 +7064,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0.00000125_f64),
             completion_per_token: Some(0.00001_f64),
-            web_search_per_request: None,
+            web_search_per_request: Some(0.01_f64),
             input_cache_read_per_token: Some(0.000000125_f64),
         }),
         supported_parameters: Some(vec![
@@ -7792,7 +7083,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5-image", ModelMetadata {
         display_name: Some("OpenAI: GPT-5 Image".to_string()),
-        family: None,
+        family: Some("gpt".to_string()),
         context_window: Some(400000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -7829,7 +7120,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5-image-mini", ModelMetadata {
         display_name: Some("OpenAI: GPT-5 Image Mini".to_string()),
-        family: None,
+        family: Some("gpt-mini".to_string()),
         context_window: Some(400000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -7866,7 +7157,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5-mini", ModelMetadata {
         display_name: Some("OpenAI: GPT-5 Mini".to_string()),
-        family: None,
+        family: Some("gpt-mini".to_string()),
         context_window: Some(400000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -7898,7 +7189,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5-nano", ModelMetadata {
         display_name: Some("OpenAI: GPT-5 Nano".to_string()),
-        family: None,
+        family: Some("gpt-nano".to_string()),
         context_window: Some(400000),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -7910,7 +7201,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0.00000005_f64),
             completion_per_token: Some(0.0000004_f64),
-            web_search_per_request: None,
+            web_search_per_request: Some(0.01_f64),
             input_cache_read_per_token: Some(0.00000001_f64),
         }),
         supported_parameters: Some(vec![
@@ -7930,7 +7221,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5-pro", ModelMetadata {
         display_name: Some("OpenAI: GPT-5 Pro".to_string()),
-        family: None,
+        family: Some("gpt-pro".to_string()),
         context_window: Some(400000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -7961,7 +7252,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5.1", ModelMetadata {
         display_name: Some("OpenAI: GPT-5.1".to_string()),
-        family: None,
+        family: Some("gpt".to_string()),
         context_window: Some(400000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -7973,7 +7264,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0.00000125_f64),
             completion_per_token: Some(0.00001_f64),
-            web_search_per_request: None,
+            web_search_per_request: Some(0.01_f64),
             input_cache_read_per_token: Some(0.00000013_f64),
         }),
         supported_parameters: Some(vec![
@@ -7993,9 +7284,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5.1-chat", ModelMetadata {
         display_name: Some("OpenAI: GPT-5.1 Chat".to_string()),
-        family: None,
+        family: Some("gpt".to_string()),
         context_window: Some(128000),
-        max_output_tokens: Some(16384),
+        max_output_tokens: Some(32000),
         modalities: Some(ModelModalities {
             input: vec![Modality::Image, Modality::Text],
             output: vec![Modality::Text],
@@ -8006,7 +7297,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             prompt_per_token: Some(0.00000125_f64),
             completion_per_token: Some(0.00001_f64),
             web_search_per_request: Some(0.01_f64),
-            input_cache_read_per_token: Some(0.000000125_f64),
+            input_cache_read_per_token: Some(0.00000013_f64),
         }),
         supported_parameters: Some(vec![
             "max_completion_tokens".to_string(),
@@ -8023,7 +7314,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5.1-codex", ModelMetadata {
         display_name: Some("OpenAI: GPT-5.1-Codex".to_string()),
-        family: None,
+        family: Some("gpt-codex".to_string()),
         context_window: Some(400000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -8035,8 +7326,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0.00000125_f64),
             completion_per_token: Some(0.00001_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: Some(0.000000125_f64),
+            web_search_per_request: Some(0.01_f64),
+            input_cache_read_per_token: Some(0.00000013_f64),
         }),
         supported_parameters: Some(vec![
             "include_reasoning".to_string(),
@@ -8055,7 +7346,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5.1-codex-max", ModelMetadata {
         display_name: Some("OpenAI: GPT-5.1-Codex-Max".to_string()),
-        family: None,
+        family: Some("gpt-codex-max".to_string()),
         context_window: Some(400000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -8085,46 +7376,41 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1764878934),
     });
-    m.insert(
-        "openai/gpt-5.1-codex-mini",
-        ModelMetadata {
-            display_name: Some("OpenAI: GPT-5.1-Codex-Mini".to_string()),
-            family: None,
-            context_window: Some(400000),
-            max_output_tokens: Some(128000),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Image, Modality::Text],
-                output: vec![Modality::Text],
-            }),
-            capabilities: vec![],
-            description: Some(
-                "GPT-5.1-Codex-Mini is a smaller and faster version of GPT-5.1-Codex".to_string(),
-            ),
-            pricing: Some(ModelPricing {
-                prompt_per_token: Some(0.00000025_f64),
-                completion_per_token: Some(0.000002_f64),
-                web_search_per_request: None,
-                input_cache_read_per_token: Some(0.00000003_f64),
-            }),
-            supported_parameters: Some(vec![
-                "include_reasoning".to_string(),
-                "max_completion_tokens".to_string(),
-                "max_tokens".to_string(),
-                "reasoning".to_string(),
-                "response_format".to_string(),
-                "seed".to_string(),
-                "structured_outputs".to_string(),
-                "tool_choice".to_string(),
-                "tools".to_string(),
-            ]),
-            default_parameters: None,
-            knowledge_cutoff: None,
-            created: Some(1763057820),
-        },
-    );
+    m.insert("openai/gpt-5.1-codex-mini", ModelMetadata {
+        display_name: Some("OpenAI: GPT-5.1-Codex-Mini".to_string()),
+        family: Some("gpt-codex-mini".to_string()),
+        context_window: Some(400000),
+        max_output_tokens: Some(100000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Image, Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("GPT-5.1-Codex-Mini is a smaller and faster version of GPT-5.1-Codex".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.00000025_f64),
+            completion_per_token: Some(0.000002_f64),
+            web_search_per_request: Some(0.01_f64),
+            input_cache_read_per_token: Some(0.000000025_f64),
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "max_completion_tokens".to_string(),
+            "max_tokens".to_string(),
+            "reasoning".to_string(),
+            "response_format".to_string(),
+            "seed".to_string(),
+            "structured_outputs".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: Some(1763057820),
+    });
     m.insert("openai/gpt-5.2", ModelMetadata {
         display_name: Some("OpenAI: GPT-5.2".to_string()),
-        family: None,
+        family: Some("gpt".to_string()),
         context_window: Some(400000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -8136,7 +7422,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0.00000175_f64),
             completion_per_token: Some(0.000014_f64),
-            web_search_per_request: None,
+            web_search_per_request: Some(0.01_f64),
             input_cache_read_per_token: Some(0.000000175_f64),
         }),
         supported_parameters: Some(vec![
@@ -8156,9 +7442,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5.2-chat", ModelMetadata {
         display_name: Some("OpenAI: GPT-5.2 Chat".to_string()),
-        family: None,
+        family: Some("gpt".to_string()),
         context_window: Some(128000),
-        max_output_tokens: Some(32000),
+        max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
             input: vec![Modality::Image, Modality::Text],
             output: vec![Modality::Text],
@@ -8168,7 +7454,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0.00000175_f64),
             completion_per_token: Some(0.000014_f64),
-            web_search_per_request: None,
+            web_search_per_request: Some(0.01_f64),
             input_cache_read_per_token: Some(0.000000175_f64),
         }),
         supported_parameters: Some(vec![
@@ -8186,7 +7472,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5.2-codex", ModelMetadata {
         display_name: Some("OpenAI: GPT-5.2-Codex".to_string()),
-        family: None,
+        family: Some("gpt-codex".to_string()),
         context_window: Some(400000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -8198,7 +7484,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0.00000175_f64),
             completion_per_token: Some(0.000014_f64),
-            web_search_per_request: None,
+            web_search_per_request: Some(0.01_f64),
             input_cache_read_per_token: Some(0.000000175_f64),
         }),
         supported_parameters: Some(vec![
@@ -8218,7 +7504,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5.2-pro", ModelMetadata {
         display_name: Some("OpenAI: GPT-5.2 Pro".to_string()),
-        family: None,
+        family: Some("gpt-pro".to_string()),
         context_window: Some(400000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -8249,7 +7535,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5.3-chat", ModelMetadata {
         display_name: Some("OpenAI: GPT-5.3 Chat".to_string()),
-        family: None,
+        family: Some("gpt".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -8279,7 +7565,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5.3-codex", ModelMetadata {
         display_name: Some("OpenAI: GPT-5.3-Codex".to_string()),
-        family: None,
+        family: Some("gpt-codex".to_string()),
         context_window: Some(400000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -8311,7 +7597,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5.4", ModelMetadata {
         display_name: Some("OpenAI: GPT-5.4".to_string()),
-        family: None,
+        family: Some("gpt".to_string()),
         context_window: Some(1050000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -8343,7 +7629,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5.4-image-2", ModelMetadata {
         display_name: Some("OpenAI: GPT-5.4 Image 2".to_string()),
-        family: None,
+        family: Some("gpt".to_string()),
         context_window: Some(272000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -8378,7 +7664,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5.4-mini", ModelMetadata {
         display_name: Some("OpenAI: GPT-5.4 Mini".to_string()),
-        family: None,
+        family: Some("gpt-mini".to_string()),
         context_window: Some(400000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -8410,7 +7696,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5.4-nano", ModelMetadata {
         display_name: Some("OpenAI: GPT-5.4 Nano".to_string()),
-        family: None,
+        family: Some("gpt-nano".to_string()),
         context_window: Some(400000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -8442,7 +7728,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5.4-pro", ModelMetadata {
         display_name: Some("OpenAI: GPT-5.4 Pro".to_string()),
-        family: None,
+        family: Some("gpt-pro".to_string()),
         context_window: Some(1050000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -8474,7 +7760,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5.5", ModelMetadata {
         display_name: Some("OpenAI: GPT-5.5".to_string()),
-        family: None,
+        family: Some("gpt".to_string()),
         context_window: Some(1050000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -8506,7 +7792,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-5.5-pro", ModelMetadata {
         display_name: Some("OpenAI: GPT-5.5 Pro".to_string()),
-        family: None,
+        family: Some("gpt-pro".to_string()),
         context_window: Some(1050000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -8537,7 +7823,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-audio", ModelMetadata {
         display_name: Some("OpenAI: GPT Audio".to_string()),
-        family: None,
+        family: Some("gpt".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -8574,7 +7860,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-audio-mini", ModelMetadata {
         display_name: Some("OpenAI: GPT Audio Mini".to_string()),
-        family: None,
+        family: Some("gpt-mini".to_string()),
         context_window: Some(128000),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -8611,7 +7897,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-chat-latest", ModelMetadata {
         display_name: Some("OpenAI: GPT Chat Latest".to_string()),
-        family: None,
+        family: Some("gpt".to_string()),
         context_window: Some(400000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -8646,9 +7932,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-oss-120b", ModelMetadata {
         display_name: Some("OpenAI: gpt-oss-120b".to_string()),
-        family: None,
+        family: Some("gpt-oss".to_string()),
         context_window: Some(131072),
-        max_output_tokens: None,
+        max_output_tokens: Some(131072),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -8656,8 +7942,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("gpt-oss-120b is an open-weight, 117B-parameter Mixture-of-Experts (MoE) language model from OpenAI designed for high-reasoning, agentic, and general-purpose production use cases. It activates 5.1B parameters per forward pass and is optimized...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000000039_f64),
-            completion_per_token: Some(0.00000018_f64),
+            prompt_per_token: Some(0.00000003_f64),
+            completion_per_token: Some(0.00000015_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
         }),
@@ -8678,6 +7964,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_a".to_string(),
             "top_k".to_string(),
             "top_logprobs".to_string(),
             "top_p".to_string(),
@@ -8688,7 +7975,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-oss-120b:free", ModelMetadata {
         display_name: Some("OpenAI: gpt-oss-120b (free)".to_string()),
-        family: None,
+        family: Some("gpt-oss".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(131072),
         modalities: Some(ModelModalities {
@@ -8706,12 +7993,16 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "include_reasoning".to_string(),
             "max_tokens".to_string(),
+            "min_p".to_string(),
             "reasoning".to_string(),
             "seed".to_string(),
             "stop".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_a".to_string(),
+            "top_k".to_string(),
+            "top_p".to_string(),
         ]),
         default_parameters: None,
         knowledge_cutoff: Some("2024-06-30".to_string()),
@@ -8719,9 +8010,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-oss-20b", ModelMetadata {
         display_name: Some("OpenAI: gpt-oss-20b".to_string()),
-        family: None,
+        family: Some("gpt-oss".to_string()),
         context_window: Some(131072),
-        max_output_tokens: Some(131072),
+        max_output_tokens: None,
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -8729,7 +8020,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("gpt-oss-20b is an open-weight 21B parameter model released by OpenAI under the Apache 2.0 license. It uses a Mixture-of-Experts (MoE) architecture with 3.6B active parameters per forward pass, optimized for...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000003_f64),
+            prompt_per_token: Some(0.000000029_f64),
             completion_per_token: Some(0.00000014_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
@@ -8761,9 +8052,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-oss-20b:free", ModelMetadata {
         display_name: Some("OpenAI: gpt-oss-20b (free)".to_string()),
-        family: None,
+        family: Some("gpt-oss".to_string()),
         context_window: Some(131072),
-        max_output_tokens: Some(8192),
+        max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -8777,14 +8068,23 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
+            "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
             "max_tokens".to_string(),
+            "min_p".to_string(),
+            "presence_penalty".to_string(),
             "reasoning".to_string(),
+            "repetition_penalty".to_string(),
+            "response_format".to_string(),
             "seed".to_string(),
             "stop".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_a".to_string(),
+            "top_k".to_string(),
+            "top_p".to_string(),
         ]),
         default_parameters: None,
         knowledge_cutoff: Some("2024-06-30".to_string()),
@@ -8792,7 +8092,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/gpt-oss-safeguard-20b", ModelMetadata {
         display_name: Some("OpenAI: gpt-oss-safeguard-20b".to_string()),
-        family: None,
+        family: Some("gpt-oss-safeguard".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
@@ -8805,7 +8105,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             prompt_per_token: Some(0.000000075_f64),
             completion_per_token: Some(0.0000003_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: Some(0.000000037_f64),
+            input_cache_read_per_token: Some(0.0000000375_f64),
         }),
         supported_parameters: Some(vec![
             "include_reasoning".to_string(),
@@ -8814,6 +8114,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "response_format".to_string(),
             "seed".to_string(),
             "stop".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
@@ -8825,7 +8126,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/o1", ModelMetadata {
         display_name: Some("OpenAI: o1".to_string()),
-        family: None,
+        family: Some("o1".to_string()),
         context_window: Some(200000),
         max_output_tokens: Some(100000),
         modalities: Some(ModelModalities {
@@ -8837,7 +8138,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0.000015_f64),
             completion_per_token: Some(0.00006_f64),
-            web_search_per_request: None,
+            web_search_per_request: Some(0.01_f64),
             input_cache_read_per_token: Some(0.0000075_f64),
         }),
         supported_parameters: Some(vec![
@@ -8856,7 +8157,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/o1-pro", ModelMetadata {
         display_name: Some("OpenAI: o1-pro".to_string()),
-        family: None,
+        family: Some("o1-pro".to_string()),
         context_window: Some(200000),
         max_output_tokens: Some(100000),
         modalities: Some(ModelModalities {
@@ -8868,7 +8169,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0.00015_f64),
             completion_per_token: Some(0.0006_f64),
-            web_search_per_request: None,
+            web_search_per_request: Some(0.01_f64),
             input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
@@ -8885,7 +8186,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/o3", ModelMetadata {
         display_name: Some("OpenAI: o3".to_string()),
-        family: None,
+        family: Some("o3".to_string()),
         context_window: Some(200000),
         max_output_tokens: Some(100000),
         modalities: Some(ModelModalities {
@@ -8916,7 +8217,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/o3-deep-research", ModelMetadata {
         display_name: Some("OpenAI: o3 Deep Research".to_string()),
-        family: None,
+        family: Some("o3-deep-research".to_string()),
         context_window: Some(200000),
         max_output_tokens: Some(100000),
         modalities: Some(ModelModalities {
@@ -8955,7 +8256,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/o3-mini", ModelMetadata {
         display_name: Some("OpenAI: o3 Mini".to_string()),
-        family: None,
+        family: Some("o3-mini".to_string()),
         context_window: Some(200000),
         max_output_tokens: Some(100000),
         modalities: Some(ModelModalities {
@@ -8967,7 +8268,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0.0000011_f64),
             completion_per_token: Some(0.0000044_f64),
-            web_search_per_request: None,
+            web_search_per_request: Some(0.01_f64),
             input_cache_read_per_token: Some(0.00000055_f64),
         }),
         supported_parameters: Some(vec![
@@ -8986,7 +8287,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/o3-mini-high", ModelMetadata {
         display_name: Some("OpenAI: o3 Mini High".to_string()),
-        family: None,
+        family: Some("o3-mini-high".to_string()),
         context_window: Some(200000),
         max_output_tokens: Some(100000),
         modalities: Some(ModelModalities {
@@ -8998,7 +8299,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0.0000011_f64),
             completion_per_token: Some(0.0000044_f64),
-            web_search_per_request: None,
+            web_search_per_request: Some(0.01_f64),
             input_cache_read_per_token: Some(0.00000055_f64),
         }),
         supported_parameters: Some(vec![
@@ -9017,7 +8318,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/o3-pro", ModelMetadata {
         display_name: Some("OpenAI: o3 Pro".to_string()),
-        family: None,
+        family: Some("o3-pro".to_string()),
         context_window: Some(200000),
         max_output_tokens: Some(100000),
         modalities: Some(ModelModalities {
@@ -9048,7 +8349,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/o4-mini", ModelMetadata {
         display_name: Some("OpenAI: o4 Mini".to_string()),
-        family: None,
+        family: Some("o4-mini".to_string()),
         context_window: Some(200000),
         max_output_tokens: Some(100000),
         modalities: Some(ModelModalities {
@@ -9079,7 +8380,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/o4-mini-deep-research", ModelMetadata {
         display_name: Some("OpenAI: o4 Mini Deep Research".to_string()),
-        family: None,
+        family: Some("o4-mini-deep-research".to_string()),
         context_window: Some(200000),
         max_output_tokens: Some(100000),
         modalities: Some(ModelModalities {
@@ -9118,7 +8419,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openai/o4-mini-high", ModelMetadata {
         display_name: Some("OpenAI: o4 Mini High".to_string()),
-        family: None,
+        family: Some("o4-mini-high".to_string()),
         context_window: Some(200000),
         max_output_tokens: Some(100000),
         modalities: Some(ModelModalities {
@@ -9149,7 +8450,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openrouter/auto", ModelMetadata {
         display_name: Some("Auto Router".to_string()),
-        family: None,
+        family: Some("auto".to_string()),
         context_window: Some(2000000),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -9157,7 +8458,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             output: vec![Modality::Text, Modality::Image],
         }),
         capabilities: vec![],
-        description: Some("\"Your prompt will be processed by a meta-model and routed to one of dozens of models (see below), optimizing for the best possible output. To see which model was used,...".to_string()),
+        description: Some("Your prompt will be processed by a meta-model and routed to one of dozens of models (see below), optimizing for the best possible output. To see which model was used,...".to_string()),
         pricing: Some(ModelPricing {
             prompt_per_token: Some(-1_f64),
             completion_per_token: Some(-1_f64),
@@ -9182,6 +8483,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_a".to_string(),
             "top_k".to_string(),
             "top_logprobs".to_string(),
             "top_p".to_string(),
@@ -9193,7 +8495,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openrouter/bodybuilder", ModelMetadata {
         display_name: Some("Body Builder (beta)".to_string()),
-        family: None,
+        family: Some("bodybuilder".to_string()),
         context_window: Some(128000),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -9215,7 +8517,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("openrouter/free", ModelMetadata {
         display_name: Some("Free Models Router".to_string()),
-        family: None,
+        family: Some("free".to_string()),
         context_window: Some(200000),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -9245,6 +8547,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_a".to_string(),
             "top_k".to_string(),
             "top_p".to_string(),
         ]),
@@ -9252,53 +8555,39 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1769917427),
     });
-    m.insert("openrouter/owl-alpha", ModelMetadata {
-        display_name: Some("Owl Alpha".to_string()),
-        family: None,
-        context_window: Some(1048756),
-        max_output_tokens: Some(262144),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Owl Alpha is a high-performance foundation model designed for agentic workloads. Natively supports tool use, and long-context tasks, with strong performance in code generation, automated workflows, and complex instruction execution....".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0_f64),
-            completion_per_token: Some(0_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "logit_bias".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "repetition_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tools".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: Some(1777398589),
-    });
-    m.insert("openrouter/pareto-code", ModelMetadata {
-        display_name: Some("Pareto Code Router".to_string()),
-        family: None,
-        context_window: Some(200000),
+    m.insert("openrouter/fusion", ModelMetadata {
+        display_name: Some("OpenRouter: Fusion".to_string()),
+        family: Some("fusion".to_string()),
+        context_window: Some(1000000),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
         }),
         capabilities: vec![],
-        description: Some("The Pareto Router is a way to have OpenRouter always pick a strong coding model for your needs without committing to a specific one. You express a single `min_coding_score` preference...".to_string()),
+        description: Some("Fusion turns your prompt into a small multi-model deliberation. A panel of expert models (see below) analyzes your prompt in parallel with web search and web fetch enabled, then a...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(-1_f64),
+            completion_per_token: Some(-1_f64),
+            web_search_per_request: None,
+            input_cache_read_per_token: None,
+        }),
+        supported_parameters: Some(vec![]),
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: Some(1781371647),
+    });
+    m.insert("openrouter/pareto-code", ModelMetadata {
+        display_name: Some("Pareto Code Router".to_string()),
+        family: Some("pareto-code".to_string()),
+        context_window: Some(2000000),
+        max_output_tokens: None,
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("The Pareto Router maintains a tiered shortlist of strong coding models, ranked by [Artificial Analysis](https://artificialanalysis.ai/) coding percentiles. Set min_coding_score between 0 and 1 on the [pareto-router plugin](https://openrouter.ai/docs/guides/routing/routers/pareto-router#the-min_coding_score-parameter) to control how...".to_string()),
         pricing: Some(ModelPricing {
             prompt_per_token: Some(-1_f64),
             completion_per_token: Some(-1_f64),
@@ -9310,9 +8599,41 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1776747900),
     });
+    m.insert("perceptron/perceptron-mk1", ModelMetadata {
+        display_name: Some("Perceptron: Perceptron Mk1".to_string()),
+        family: Some("perceptron-mk".to_string()),
+        context_window: Some(32768),
+        max_output_tokens: Some(8192),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text, Modality::Image, Modality::Video],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("Perceptron Mk1 (Mark One) is Perceptron's highest-quality vision-language model for video and embodied reasoning.** It accepts image and video inputs paired with natural language queries, and produces detailed visual understanding...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.00000015_f64),
+            completion_per_token: Some(0.0000015_f64),
+            web_search_per_request: None,
+            input_cache_read_per_token: None,
+        }),
+        supported_parameters: Some(vec![
+            "frequency_penalty".to_string(),
+            "include_reasoning".to_string(),
+            "max_tokens".to_string(),
+            "presence_penalty".to_string(),
+            "reasoning".to_string(),
+            "structured_outputs".to_string(),
+            "temperature".to_string(),
+            "top_k".to_string(),
+            "top_p".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: Some(1778597029),
+    });
     m.insert("perplexity/sonar", ModelMetadata {
         display_name: Some("Perplexity: Sonar".to_string()),
-        family: None,
+        family: Some("sonar".to_string()),
         context_window: Some(127072),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -9342,7 +8663,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("perplexity/sonar-deep-research", ModelMetadata {
         display_name: Some("Perplexity: Sonar Deep Research".to_string()),
-        family: None,
+        family: Some("sonar-deep-research".to_string()),
         context_window: Some(128000),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -9374,7 +8695,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("perplexity/sonar-pro", ModelMetadata {
         display_name: Some("Perplexity: Sonar Pro".to_string()),
-        family: None,
+        family: Some("sonar-pro".to_string()),
         context_window: Some(200000),
         max_output_tokens: Some(8000),
         modalities: Some(ModelModalities {
@@ -9404,7 +8725,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("perplexity/sonar-pro-search", ModelMetadata {
         display_name: Some("Perplexity: Sonar Pro Search".to_string()),
-        family: None,
+        family: Some("sonar-pro-search".to_string()),
         context_window: Some(200000),
         max_output_tokens: Some(8000),
         modalities: Some(ModelModalities {
@@ -9437,7 +8758,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("perplexity/sonar-reasoning-pro", ModelMetadata {
         display_name: Some("Perplexity: Sonar Reasoning Pro".to_string()),
-        family: None,
+        family: Some("sonar-reasoning-pro".to_string()),
         context_window: Some(128000),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -9467,17 +8788,46 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1741313308),
     });
-    m.insert("poolside/laguna-m.1:free", ModelMetadata {
-        display_name: Some("Poolside: Laguna M.1 (free)".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: Some(8192),
+    m.insert("poolside/laguna-m.1", ModelMetadata {
+        display_name: Some("Poolside: Laguna M.1".to_string()),
+        family: Some("laguna-m.".to_string()),
+        context_window: Some(262144),
+        max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
         }),
         capabilities: vec![],
-        description: Some("Laguna M.1 is the flagship coding agent model from [Poolside](https://poolside.ai), optimized for complex software engineering tasks. Designed for agentic coding workflows, it supports tool calling and reasoning, with a 128K...".to_string()),
+        description: Some("Laguna M.1 is the flagship coding agent model from [Poolside](https://poolside.ai/), optimized for complex software engineering tasks. Designed for agentic coding workflows, it supports tool calling and reasoning, with a 256K...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.0000002_f64),
+            completion_per_token: Some(0.0000004_f64),
+            web_search_per_request: None,
+            input_cache_read_per_token: Some(0.0000001_f64),
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "max_tokens".to_string(),
+            "reasoning".to_string(),
+            "temperature".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: Some(1777388504),
+    });
+    m.insert("poolside/laguna-m.1:free", ModelMetadata {
+        display_name: Some("Poolside: Laguna M.1 (free)".to_string()),
+        family: Some("laguna-m.".to_string()),
+        context_window: Some(262144),
+        max_output_tokens: Some(32768),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("Laguna M.1 is the flagship coding agent model from [Poolside](https://poolside.ai/), optimized for complex software engineering tasks. Designed for agentic coding workflows, it supports tool calling and reasoning, with a 256K...".to_string()),
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0_f64),
             completion_per_token: Some(0_f64),
@@ -9496,17 +8846,122 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1777388504),
     });
-    m.insert("poolside/laguna-xs.2:free", ModelMetadata {
-        display_name: Some("Poolside: Laguna XS.2 (free)".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: Some(8192),
+    m.insert("poolside/laguna-xs-2.1", ModelMetadata {
+        display_name: Some("Poolside: Laguna XS 2.1".to_string()),
+        family: Some("laguna-xs".to_string()),
+        context_window: Some(262144),
+        max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
         }),
         capabilities: vec![],
-        description: Some("Laguna XS.2 is the second-generation model in the XS size class from [Poolside](https://poolside.ai), their efficient coding agent series. It combines tool calling and reasoning capabilities with a compact footprint, offering...".to_string()),
+        description: Some("Laguna XS 2.1 is the latest coding agent model in the 33B-A3B category from [Poolside](https://poolside.ai/) and a step forward from their Laguna XS.2 model (released in April 2026). It combines...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.00000006_f64),
+            completion_per_token: Some(0.00000012_f64),
+            web_search_per_request: None,
+            input_cache_read_per_token: Some(0.00000003_f64),
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "max_tokens".to_string(),
+            "reasoning".to_string(),
+            "temperature".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+        ]),
+        default_parameters: Some(ModelDefaultParameters {
+            temperature: Some(0.7_f32),
+            top_p: Some(0.9_f32),
+            top_k: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+        }),
+        knowledge_cutoff: None,
+        created: Some(1783002429),
+    });
+    m.insert("poolside/laguna-xs-2.1:free", ModelMetadata {
+        display_name: Some("Poolside: Laguna XS 2.1 (free)".to_string()),
+        family: Some("laguna-xs".to_string()),
+        context_window: Some(262144),
+        max_output_tokens: Some(32768),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("Laguna XS 2.1 is the latest coding agent model in the 33B-A3B category from [Poolside](https://poolside.ai/) and a step forward from their Laguna XS.2 model (released in April 2026). It combines...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0_f64),
+            completion_per_token: Some(0_f64),
+            web_search_per_request: None,
+            input_cache_read_per_token: None,
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "max_tokens".to_string(),
+            "reasoning".to_string(),
+            "temperature".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+        ]),
+        default_parameters: Some(ModelDefaultParameters {
+            temperature: Some(0.7_f32),
+            top_p: Some(0.9_f32),
+            top_k: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+        }),
+        knowledge_cutoff: None,
+        created: Some(1783002429),
+    });
+    m.insert("poolside/laguna-xs.2", ModelMetadata {
+        display_name: Some("Poolside: Laguna XS.2".to_string()),
+        family: Some("laguna-xs.".to_string()),
+        context_window: Some(262144),
+        max_output_tokens: Some(32768),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("Laguna XS.2 is the second-generation model in the XS size class from [Poolside](https://poolside.ai/), their efficient coding agent series. It combines tool calling and reasoning capabilities with a compact footprint, offering...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.0000001_f64),
+            completion_per_token: Some(0.0000002_f64),
+            web_search_per_request: None,
+            input_cache_read_per_token: Some(0.00000005_f64),
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "max_tokens".to_string(),
+            "reasoning".to_string(),
+            "temperature".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+        ]),
+        default_parameters: Some(ModelDefaultParameters {
+            temperature: Some(0.7_f32),
+            top_p: Some(0.9_f32),
+            top_k: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+        }),
+        knowledge_cutoff: None,
+        created: Some(1777389604),
+    });
+    m.insert("poolside/laguna-xs.2:free", ModelMetadata {
+        display_name: Some("Poolside: Laguna XS.2 (free)".to_string()),
+        family: Some("laguna-xs.".to_string()),
+        context_window: Some(262144),
+        max_output_tokens: Some(32768),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("Laguna XS.2 is the second-generation model in the XS size class from [Poolside](https://poolside.ai/), their efficient coding agent series. It combines tool calling and reasoning capabilities with a compact footprint, offering...".to_string()),
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0_f64),
             completion_per_token: Some(0_f64),
@@ -9531,52 +8986,10 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1777389604),
     });
-    m.insert("prime-intellect/intellect-3", ModelMetadata {
-        display_name: Some("Prime Intellect: INTELLECT-3".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: Some(131072),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("INTELLECT-3 is a 106B-parameter Mixture-of-Experts model (12B active) post-trained from GLM-4.5-Air-Base using supervised fine-tuning (SFT) followed by large-scale reinforcement learning (RL). It offers state-of-the-art performance for its size across math,...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000002_f64),
-            completion_per_token: Some(0.0000011_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "include_reasoning".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "reasoning".to_string(),
-            "repetition_penalty".to_string(),
-            "response_format".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: Some(ModelDefaultParameters {
-            temperature: Some(0.6_f32),
-            top_p: None,
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-        }),
-        knowledge_cutoff: None,
-        created: Some(1764212534),
-    });
     m.insert("qwen/qwen-2.5-72b-instruct", ModelMetadata {
         display_name: Some("Qwen2.5 72B Instruct".to_string()),
-        family: None,
-        context_window: Some(32768),
+        family: Some("qwen".to_string()),
+        context_window: Some(131072),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
@@ -9613,8 +9026,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen-2.5-7b-instruct", ModelMetadata {
         display_name: Some("Qwen: Qwen2.5 7B Instruct".to_string()),
-        family: None,
-        context_window: Some(32768),
+        family: Some("qwen".to_string()),
+        context_window: Some(131072),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
@@ -9631,6 +9044,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
@@ -9638,10 +9052,12 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "response_format".to_string(),
             "seed".to_string(),
             "stop".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -9650,9 +9066,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen-2.5-coder-32b-instruct", ModelMetadata {
         display_name: Some("Qwen2.5 Coder 32B Instruct".to_string()),
-        family: None,
-        context_window: Some(32768),
-        max_output_tokens: None,
+        family: Some("qwen-coder".to_string()),
+        context_window: Some(128000),
+        max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -9667,10 +9083,13 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
+            "logit_bias".to_string(),
             "max_tokens".to_string(),
+            "min_p".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
             "seed".to_string(),
+            "stop".to_string(),
             "temperature".to_string(),
             "top_k".to_string(),
             "top_p".to_string(),
@@ -9679,40 +9098,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2024-06-30".to_string()),
         created: Some(1731368400),
     });
-    m.insert("qwen/qwen-max", ModelMetadata {
-        display_name: Some("Qwen: Qwen-Max ".to_string()),
-        family: None,
-        context_window: Some(32768),
-        max_output_tokens: Some(8192),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Qwen-Max, based on Qwen2.5, provides the best inference performance among [Qwen models](/qwen), especially for complex multi-step tasks. It's a large-scale MoE model that has been pretrained on over 20 trillion...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000104_f64),
-            completion_per_token: Some(0.00000416_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: Some(0.000000208_f64),
-        }),
-        supported_parameters: Some(vec![
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2025-03-31".to_string()),
-        created: Some(1738402289),
-    });
     m.insert("qwen/qwen-plus", ModelMetadata {
         display_name: Some("Qwen: Qwen-Plus".to_string()),
-        family: None,
+        family: Some("qwen-plus".to_string()),
         context_window: Some(1000000),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -9728,13 +9116,16 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             input_cache_read_per_token: Some(0.000000052_f64),
         }),
         supported_parameters: Some(vec![
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "response_format".to_string(),
             "seed".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -9743,7 +9134,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen-plus-2025-07-28", ModelMetadata {
         display_name: Some("Qwen: Qwen Plus 0728".to_string()),
-        family: None,
+        family: Some("qwen-plus".to_string()),
         context_window: Some(1000000),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -9759,6 +9150,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "response_format".to_string(),
@@ -9767,6 +9159,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -9775,7 +9168,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen-plus-2025-07-28:thinking", ModelMetadata {
         display_name: Some("Qwen: Qwen Plus 0728 (thinking)".to_string()),
-        family: None,
+        family: Some("qwen-plus".to_string()),
         context_window: Some(1000000),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -9807,102 +9200,11 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2025-03-31".to_string()),
         created: Some(1757347599),
     });
-    m.insert("qwen/qwen-turbo", ModelMetadata {
-        display_name: Some("Qwen: Qwen-Turbo".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: Some(8192),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Qwen-Turbo, based on Qwen2.5, is a 1M context model that provides fast speed and low cost, suitable for simple tasks.".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000000325_f64),
-            completion_per_token: Some(0.00000013_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: Some(0.0000000065_f64),
-        }),
-        supported_parameters: Some(vec![
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2025-03-31".to_string()),
-        created: Some(1738410974),
-    });
-    m.insert("qwen/qwen-vl-max", ModelMetadata {
-        display_name: Some("Qwen: Qwen VL Max".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: Some(32768),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text, Modality::Image],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Qwen VL Max is a visual understanding model with 7500 tokens context length. It excels in delivering optimal performance for a broader spectrum of complex tasks.\n".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000052_f64),
-            completion_per_token: Some(0.00000208_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2025-03-31".to_string()),
-        created: Some(1738434304),
-    });
-    m.insert("qwen/qwen-vl-plus", ModelMetadata {
-        display_name: Some("Qwen: Qwen VL Plus".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: Some(8192),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text, Modality::Image],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Qwen's Enhanced Large Visual Language Model. Significantly upgraded for detailed recognition capabilities and text recognition abilities, supporting ultra-high pixel resolutions up to millions of pixels and extreme aspect ratios for...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000001365_f64),
-            completion_per_token: Some(0.0000004095_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: Some(0.0000000273_f64),
-        }),
-        supported_parameters: Some(vec![
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "temperature".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2025-03-31".to_string()),
-        created: Some(1738731255),
-    });
     m.insert("qwen/qwen2.5-vl-72b-instruct", ModelMetadata {
         display_name: Some("Qwen: Qwen2.5 VL 72B Instruct".to_string()),
-        family: None,
-        context_window: Some(32000),
-        max_output_tokens: None,
+        family: Some("qwen".to_string()),
+        context_window: Some(131072),
+        max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text, Modality::Image],
             output: vec![Modality::Text],
@@ -9910,14 +9212,15 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Qwen2.5-VL is proficient in recognizing common objects such as flowers, birds, fish, and insects. It is also highly capable of analyzing texts, charts, icons, graphics, and layouts within images.".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000025_f64),
-            completion_per_token: Some(0.00000075_f64),
+            prompt_per_token: Some(0.0000008_f64),
+            completion_per_token: Some(0.000001_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: None,
+            input_cache_read_per_token: Some(0.0000004_f64),
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
@@ -9927,6 +9230,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "structured_outputs".to_string(),
             "temperature".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -9935,8 +9239,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-14b", ModelMetadata {
         display_name: Some("Qwen: Qwen3 14B".to_string()),
-        family: None,
-        context_window: Some(40960),
+        family: Some("qwen".to_string()),
+        context_window: Some(131702),
         max_output_tokens: Some(40960),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
@@ -9945,7 +9249,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Qwen3-14B is a dense 14.8B parameter causal language model from the Qwen3 series, designed for both complex reasoning and efficient dialogue. It supports seamless switching between a \"thinking\" mode for...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000006_f64),
+            prompt_per_token: Some(0.0000001_f64),
             completion_per_token: Some(0.00000024_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
@@ -9977,7 +9281,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-235b-a22b", ModelMetadata {
         display_name: Some("Qwen: Qwen3 235B A22B".to_string()),
-        family: None,
+        family: Some("qwen".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(8192),
         modalities: Some(ModelModalities {
@@ -10010,7 +9314,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-235b-a22b-2507", ModelMetadata {
         display_name: Some("Qwen: Qwen3 235B A22B Instruct 2507".to_string()),
-        family: None,
+        family: Some("qwen".to_string()),
         context_window: Some(262144),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -10020,7 +9324,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Qwen3-235B-A22B-Instruct-2507 is a multilingual, instruction-tuned mixture-of-experts language model based on the Qwen3-235B architecture, with 22B active parameters per forward pass. It is optimized for general-purpose text generation, including instruction following,...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000000071_f64),
+            prompt_per_token: Some(0.00000009_f64),
             completion_per_token: Some(0.0000001_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
@@ -10050,8 +9354,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-235b-a22b-thinking-2507", ModelMetadata {
         display_name: Some("Qwen: Qwen3 235B A22B Thinking 2507".to_string()),
-        family: None,
-        context_window: Some(131072),
+        family: Some("qwen".to_string()),
+        context_window: Some(262144),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
@@ -10069,6 +9373,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
@@ -10077,11 +9382,11 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "response_format".to_string(),
             "seed".to_string(),
             "stop".to_string(),
-            "structured_outputs".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -10090,9 +9395,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-30b-a3b", ModelMetadata {
         display_name: Some("Qwen: Qwen3 30B A3B".to_string()),
-        family: None,
-        context_window: Some(40960),
-        max_output_tokens: Some(20000),
+        family: Some("qwen".to_string()),
+        context_window: Some(131072),
+        max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -10100,8 +9405,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Qwen3, the latest generation in the Qwen large language model series, features both dense and mixture-of-experts (MoE) architectures to excel in reasoning, multilingual support, and advanced agent tasks. Its unique...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000009_f64),
-            completion_per_token: Some(0.00000045_f64),
+            prompt_per_token: Some(0.00000012_f64),
+            completion_per_token: Some(0.0000005_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
         }),
@@ -10132,9 +9437,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-30b-a3b-instruct-2507", ModelMetadata {
         display_name: Some("Qwen: Qwen3 30B A3B Instruct 2507".to_string()),
-        family: None,
-        context_window: Some(262144),
-        max_output_tokens: Some(262144),
+        family: Some("qwen".to_string()),
+        context_window: Some(131072),
+        max_output_tokens: Some(32000),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -10142,16 +9447,16 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Qwen3-30B-A3B-Instruct-2507 is a 30.5B-parameter mixture-of-experts language model from Qwen, with 3.3B active parameters per inference. It operates in non-thinking mode and is designed for high-quality instruction following, multilingual understanding, and...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000009_f64),
-            completion_per_token: Some(0.0000003_f64),
+            prompt_per_token: Some(0.00000004815_f64),
+            completion_per_token: Some(0.00000019305_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
-            "min_p".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
             "response_format".to_string(),
@@ -10162,6 +9467,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -10170,9 +9476,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-30b-a3b-thinking-2507", ModelMetadata {
         display_name: Some("Qwen: Qwen3 30B A3B Thinking 2507".to_string()),
-        family: None,
+        family: Some("qwen".to_string()),
         context_window: Some(131072),
-        max_output_tokens: Some(131072),
+        max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -10180,28 +9486,21 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Qwen3-30B-A3B-Thinking-2507 is a 30B parameter Mixture-of-Experts reasoning model optimized for complex tasks requiring extended multi-step thinking. The model is designed specifically for “thinking mode,” where internal reasoning traces are separated...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000008_f64),
-            completion_per_token: Some(0.0000004_f64),
+            prompt_per_token: Some(0.00000013_f64),
+            completion_per_token: Some(0.00000156_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: Some(0.00000008_f64),
+            input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
-            "logit_bias".to_string(),
             "max_tokens".to_string(),
-            "min_p".to_string(),
             "presence_penalty".to_string(),
             "reasoning".to_string(),
-            "repetition_penalty".to_string(),
             "response_format".to_string(),
             "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
-            "top_k".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -10210,9 +9509,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-32b", ModelMetadata {
         display_name: Some("Qwen: Qwen3 32B".to_string()),
-        family: None,
-        context_window: Some(40960),
-        max_output_tokens: Some(40960),
+        family: Some("qwen".to_string()),
+        context_window: Some(131072),
+        max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -10221,14 +9520,15 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         description: Some("Qwen3-32B is a dense 32.8B parameter causal language model from the Qwen3 series, optimized for both complex reasoning and efficient dialogue. It supports seamless switching between a \"thinking\" mode for...".to_string()),
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0.00000008_f64),
-            completion_per_token: Some(0.00000024_f64),
+            completion_per_token: Some(0.00000028_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: Some(0.00000004_f64),
+            input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
@@ -10242,6 +9542,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -10250,8 +9551,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-8b", ModelMetadata {
         display_name: Some("Qwen: Qwen3 8B".to_string()),
-        family: None,
-        context_window: Some(40960),
+        family: Some("qwen".to_string()),
+        context_window: Some(131072),
         max_output_tokens: Some(8192),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
@@ -10260,28 +9561,21 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Qwen3-8B is a dense 8.2B parameter causal language model from the Qwen3 series, designed for both reasoning-heavy tasks and efficient dialogue. It supports seamless switching between \"thinking\" mode for math,...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000005_f64),
-            completion_per_token: Some(0.0000004_f64),
+            prompt_per_token: Some(0.000000117_f64),
+            completion_per_token: Some(0.000000455_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: Some(0.00000005_f64),
+            input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
-            "logit_bias".to_string(),
             "max_tokens".to_string(),
-            "min_p".to_string(),
             "presence_penalty".to_string(),
             "reasoning".to_string(),
-            "repetition_penalty".to_string(),
             "response_format".to_string(),
             "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
-            "top_k".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -10296,8 +9590,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-coder", ModelMetadata {
         display_name: Some("Qwen: Qwen3 Coder 480B A35B".to_string()),
-        family: None,
-        context_window: Some(262144),
+        family: Some("qwen-coder".to_string()),
+        context_window: Some(1048576),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
@@ -10314,6 +9608,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
@@ -10326,6 +9621,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -10334,7 +9630,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-coder-30b-a3b-instruct", ModelMetadata {
         display_name: Some("Qwen: Qwen3 Coder 30B A3B Instruct".to_string()),
-        family: None,
+        family: Some("qwen-coder".to_string()),
         context_window: Some(160000),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -10351,6 +9647,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
@@ -10362,6 +9659,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -10370,7 +9668,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-coder-flash", ModelMetadata {
         display_name: Some("Qwen: Qwen3 Coder Flash".to_string()),
-        family: None,
+        family: Some("qwen-coder-flash".to_string()),
         context_window: Some(1000000),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
@@ -10386,6 +9684,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             input_cache_read_per_token: Some(0.000000039_f64),
         }),
         supported_parameters: Some(vec![
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "response_format".to_string(),
@@ -10393,6 +9692,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -10401,7 +9701,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-coder-next", ModelMetadata {
         display_name: Some("Qwen: Qwen3 Coder Next".to_string()),
-        family: None,
+        family: Some("qwen-coder-next".to_string()),
         context_window: Some(262144),
         max_output_tokens: Some(262144),
         modalities: Some(ModelModalities {
@@ -10419,8 +9719,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
-            "min_p".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
             "response_format".to_string(),
@@ -10431,6 +9731,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -10445,7 +9746,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-coder-plus", ModelMetadata {
         display_name: Some("Qwen: Qwen3 Coder Plus".to_string()),
-        family: None,
+        family: Some("qwen-coder-plus".to_string()),
         context_window: Some(1000000),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
@@ -10461,6 +9762,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             input_cache_read_per_token: Some(0.00000013_f64),
         }),
         supported_parameters: Some(vec![
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "response_format".to_string(),
@@ -10469,6 +9771,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -10477,8 +9780,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-coder:free", ModelMetadata {
         display_name: Some("Qwen: Qwen3 Coder 480B A35B (free)".to_string()),
-        family: None,
-        context_window: Some(262000),
+        family: Some("qwen-coder".to_string()),
+        context_window: Some(1048576),
         max_output_tokens: Some(262000),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
@@ -10509,7 +9812,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-max", ModelMetadata {
         display_name: Some("Qwen: Qwen3 Max".to_string()),
-        family: None,
+        family: Some("qwen-max".to_string()),
         context_window: Some(262144),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -10525,13 +9828,16 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             input_cache_read_per_token: Some(0.000000156_f64),
         }),
         supported_parameters: Some(vec![
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "response_format".to_string(),
             "seed".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -10546,7 +9852,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-max-thinking", ModelMetadata {
         display_name: Some("Qwen: Qwen3 Max Thinking".to_string()),
-        family: None,
+        family: Some("qwen-max".to_string()),
         context_window: Some(262144),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -10563,6 +9869,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         }),
         supported_parameters: Some(vec![
             "include_reasoning".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "reasoning".to_string(),
@@ -10572,6 +9879,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -10580,7 +9888,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-next-80b-a3b-instruct", ModelMetadata {
         display_name: Some("Qwen: Qwen3 Next 80B A3B Instruct".to_string()),
-        family: None,
+        family: Some("qwen-next".to_string()),
         context_window: Some(262144),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -10598,6 +9906,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
@@ -10610,6 +9919,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -10618,7 +9928,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-next-80b-a3b-instruct:free", ModelMetadata {
         display_name: Some("Qwen: Qwen3 Next 80B A3B Instruct (free)".to_string()),
-        family: None,
+        family: Some("qwen-next".to_string()),
         context_window: Some(262144),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -10652,8 +9962,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-next-80b-a3b-thinking", ModelMetadata {
         display_name: Some("Qwen: Qwen3 Next 80B A3B Thinking".to_string()),
-        family: None,
-        context_window: Some(131072),
+        family: Some("qwen-next".to_string()),
+        context_window: Some(262144),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
@@ -10670,9 +9980,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
-            "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
-            "min_p".to_string(),
             "presence_penalty".to_string(),
             "reasoning".to_string(),
             "repetition_penalty".to_string(),
@@ -10684,6 +9993,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -10692,7 +10002,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-vl-235b-a22b-instruct", ModelMetadata {
         display_name: Some("Qwen: Qwen3 VL 235B A22B Instruct".to_string()),
-        family: None,
+        family: Some("qwen".to_string()),
         context_window: Some(262144),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -10710,6 +10020,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
@@ -10722,6 +10033,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -10736,7 +10048,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-vl-235b-a22b-thinking", ModelMetadata {
         display_name: Some("Qwen: Qwen3 VL 235B A22B Thinking".to_string()),
-        family: None,
+        family: Some("qwen".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -10754,6 +10066,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "reasoning".to_string(),
@@ -10761,10 +10074,12 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "response_format".to_string(),
             "seed".to_string(),
             "stop".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -10779,8 +10094,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-vl-30b-a3b-instruct", ModelMetadata {
         display_name: Some("Qwen: Qwen3 VL 30B A3B Instruct".to_string()),
-        family: None,
-        context_window: Some(131072),
+        family: Some("qwen".to_string()),
+        context_window: Some(262144),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text, Modality::Image],
@@ -10797,6 +10112,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
@@ -10809,6 +10125,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -10823,7 +10140,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-vl-30b-a3b-thinking", ModelMetadata {
         display_name: Some("Qwen: Qwen3 VL 30B A3B Thinking".to_string()),
-        family: None,
+        family: Some("qwen".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -10841,18 +10158,18 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "reasoning".to_string(),
-            "repetition_penalty".to_string(),
             "response_format".to_string(),
             "seed".to_string(),
-            "stop".to_string(),
             "structured_outputs".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -10867,8 +10184,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-vl-32b-instruct", ModelMetadata {
         display_name: Some("Qwen: Qwen3 VL 32B Instruct".to_string()),
-        family: None,
-        context_window: Some(131072),
+        family: Some("qwen".to_string()),
+        context_window: Some(262144),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text, Modality::Image],
@@ -10883,13 +10200,16 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "response_format".to_string(),
             "seed".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -10904,8 +10224,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-vl-8b-instruct", ModelMetadata {
         display_name: Some("Qwen: Qwen3 VL 8B Instruct".to_string()),
-        family: None,
-        context_window: Some(131072),
+        family: Some("qwen".to_string()),
+        context_window: Some(256000),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
             input: vec![Modality::Image, Modality::Text],
@@ -10914,16 +10234,16 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Qwen3-VL-8B-Instruct is a multimodal vision-language model from the Qwen3-VL series, built for high-fidelity understanding and reasoning across text, images, and video. It features improved multimodal fusion with Interleaved-MRoPE for long-horizon...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000008_f64),
-            completion_per_token: Some(0.0000005_f64),
+            prompt_per_token: Some(0.000000117_f64),
+            completion_per_token: Some(0.000000455_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
-            "min_p".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
             "response_format".to_string(),
@@ -10934,6 +10254,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -10948,8 +10269,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3-vl-8b-thinking", ModelMetadata {
         display_name: Some("Qwen: Qwen3 VL 8B Thinking".to_string()),
-        family: None,
-        context_window: Some(131072),
+        family: Some("qwen".to_string()),
+        context_window: Some(256000),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
             input: vec![Modality::Image, Modality::Text],
@@ -10965,6 +10286,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         }),
         supported_parameters: Some(vec![
             "include_reasoning".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "reasoning".to_string(),
@@ -10974,6 +10296,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -10988,9 +10311,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3.5-122b-a10b", ModelMetadata {
         display_name: Some("Qwen: Qwen3.5-122B-A10B".to_string()),
-        family: None,
+        family: Some("qwen".to_string()),
         context_window: Some(262144),
-        max_output_tokens: Some(65536),
+        max_output_tokens: Some(262144),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text, Modality::Image, Modality::Video],
             output: vec![Modality::Text],
@@ -11036,7 +10359,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3.5-27b", ModelMetadata {
         display_name: Some("Qwen: Qwen3.5-27B".to_string()),
-        family: None,
+        family: Some("qwen".to_string()),
         context_window: Some(262144),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
@@ -11084,9 +10407,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3.5-35b-a3b", ModelMetadata {
         display_name: Some("Qwen: Qwen3.5-35B-A3B".to_string()),
-        family: None,
+        family: Some("qwen".to_string()),
         context_window: Some(262144),
-        max_output_tokens: Some(262144),
+        max_output_tokens: Some(81920),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text, Modality::Image, Modality::Video],
             output: vec![Modality::Text],
@@ -11094,7 +10417,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("The Qwen3.5 Series 35B-A3B is a native vision-language model designed with a hybrid architecture that integrates linear attention mechanisms and a sparse mixture-of-experts model, achieving higher inference efficiency. Its overall...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000015_f64),
+            prompt_per_token: Some(0.00000014_f64),
             completion_per_token: Some(0.000001_f64),
             web_search_per_request: None,
             input_cache_read_per_token: Some(0.00000005_f64),
@@ -11132,9 +10455,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3.5-397b-a17b", ModelMetadata {
         display_name: Some("Qwen: Qwen3.5 397B A17B".to_string()),
-        family: None,
-        context_window: Some(262144),
-        max_output_tokens: Some(65536),
+        family: Some("qwen".to_string()),
+        context_window: Some(256000),
+        max_output_tokens: None,
         modalities: Some(ModelModalities {
             input: vec![Modality::Text, Modality::Image, Modality::Video],
             output: vec![Modality::Text],
@@ -11142,10 +10465,10 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("The Qwen3.5 series 397B-A17B native vision-language model is built on a hybrid architecture that integrates a linear attention mechanism with a sparse mixture-of-experts model, achieving higher inference efficiency. It delivers...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000039_f64),
-            completion_per_token: Some(0.00000234_f64),
+            prompt_per_token: Some(0.000000385_f64),
+            completion_per_token: Some(0.00000245_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: Some(0.000000195_f64),
+            input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
@@ -11180,9 +10503,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3.5-9b", ModelMetadata {
         display_name: Some("Qwen: Qwen3.5-9B".to_string()),
-        family: None,
+        family: Some("qwen".to_string()),
         context_window: Some(262144),
-        max_output_tokens: None,
+        max_output_tokens: Some(262144),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text, Modality::Image, Modality::Video],
             output: vec![Modality::Text],
@@ -11206,6 +10529,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "reasoning".to_string(),
             "repetition_penalty".to_string(),
             "response_format".to_string(),
+            "seed".to_string(),
             "stop".to_string(),
             "structured_outputs".to_string(),
             "temperature".to_string(),
@@ -11221,7 +10545,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3.5-flash-02-23", ModelMetadata {
         display_name: Some("Qwen: Qwen3.5-Flash".to_string()),
-        family: None,
+        family: Some("qwen-flash".to_string()),
         context_window: Some(1000000),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
@@ -11255,7 +10579,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3.5-plus-02-15", ModelMetadata {
         display_name: Some("Qwen: Qwen3.5 Plus 2026-02-15".to_string()),
-        family: None,
+        family: Some("qwen-plus".to_string()),
         context_window: Some(1000000),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
@@ -11272,6 +10596,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         }),
         supported_parameters: Some(vec![
             "include_reasoning".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "reasoning".to_string(),
@@ -11281,6 +10606,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -11289,7 +10615,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3.5-plus-20260420", ModelMetadata {
         display_name: Some("Qwen: Qwen3.5 Plus 2026-04-20".to_string()),
-        family: None,
+        family: Some("qwen-plus".to_string()),
         context_window: Some(1000000),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
@@ -11299,13 +10625,14 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Qwen3.5 Plus (April 2026) is a large-scale multimodal language model from Alibaba. It accepts text, image, and video input and produces text output, with a 1M token context window. This...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000004_f64),
-            completion_per_token: Some(0.0000024_f64),
+            prompt_per_token: Some(0.0000003_f64),
+            completion_per_token: Some(0.0000018_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
             "include_reasoning".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "reasoning".to_string(),
@@ -11315,6 +10642,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -11323,9 +10651,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3.6-27b", ModelMetadata {
         display_name: Some("Qwen: Qwen3.6 27B".to_string()),
-        family: None,
+        family: Some("qwen".to_string()),
         context_window: Some(262144),
-        max_output_tokens: Some(81920),
+        max_output_tokens: Some(262140),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text, Modality::Image, Modality::Video],
             output: vec![Modality::Text],
@@ -11333,8 +10661,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Qwen3.6 27B is a dense 27-billion-parameter language model from the Qwen Team at Alibaba, released in April 2026. It features hybrid multimodal capabilities — accepting text, image, and video inputs...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000032_f64),
-            completion_per_token: Some(0.0000032_f64),
+            prompt_per_token: Some(0.000000285_f64),
+            completion_per_token: Some(0.0000024_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
         }),
@@ -11365,7 +10693,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3.6-35b-a3b", ModelMetadata {
         display_name: Some("Qwen: Qwen3.6 35B A3B".to_string()),
-        family: None,
+        family: Some("qwen".to_string()),
         context_window: Some(262144),
         max_output_tokens: Some(262144),
         modalities: Some(ModelModalities {
@@ -11375,15 +10703,16 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Qwen3.6-35B-A3B is an open-weight multimodal model from Alibaba Cloud with 35 billion total parameters and 3 billion active parameters per token. It uses a hybrid sparse mixture-of-experts architecture combining Gated...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000015_f64),
+            prompt_per_token: Some(0.00000014_f64),
             completion_per_token: Some(0.000001_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: Some(0.00000005_f64),
+            input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
@@ -11397,6 +10726,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -11411,7 +10741,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3.6-flash", ModelMetadata {
         display_name: Some("Qwen: Qwen3.6 Flash".to_string()),
-        family: None,
+        family: Some("qwen-flash".to_string()),
         context_window: Some(1000000),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
@@ -11421,13 +10751,14 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Qwen3.6 Flash is a fast, efficient language model from Alibaba's Qwen 3.6 series. It supports text, image, and video input with a 1M token context window. Tiered pricing kicks in...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000025_f64),
-            completion_per_token: Some(0.0000015_f64),
+            prompt_per_token: Some(0.0000001875_f64),
+            completion_per_token: Some(0.000001125_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
             "include_reasoning".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "reasoning".to_string(),
@@ -11437,6 +10768,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -11445,7 +10777,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3.6-max-preview", ModelMetadata {
         display_name: Some("Qwen: Qwen3.6 Max Preview".to_string()),
-        family: None,
+        family: Some("qwen-max".to_string()),
         context_window: Some(262144),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
@@ -11481,7 +10813,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("qwen/qwen3.6-plus", ModelMetadata {
         display_name: Some("Qwen: Qwen3.6 Plus".to_string()),
-        family: None,
+        family: Some("qwen-plus".to_string()),
         context_window: Some(1000000),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
@@ -11498,6 +10830,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         }),
         supported_parameters: Some(vec![
             "include_reasoning".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "reasoning".to_string(),
@@ -11507,15 +10840,88 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
         knowledge_cutoff: None,
         created: Some(1775133557),
     });
+    m.insert("qwen/qwen3.7-max", ModelMetadata {
+        display_name: Some("Qwen: Qwen3.7 Max".to_string()),
+        family: Some("qwen-max".to_string()),
+        context_window: Some(1000000),
+        max_output_tokens: Some(65536),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("Qwen3.7-Max is the flagship model in Alibaba's Qwen3.7 series. It supports text input and output and is designed for agent-centric workloads, with particular strengths in coding, office and productivity tasks,...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.00000125_f64),
+            completion_per_token: Some(0.00000375_f64),
+            web_search_per_request: None,
+            input_cache_read_per_token: Some(0.00000025_f64),
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "logprobs".to_string(),
+            "max_tokens".to_string(),
+            "presence_penalty".to_string(),
+            "reasoning".to_string(),
+            "response_format".to_string(),
+            "seed".to_string(),
+            "structured_outputs".to_string(),
+            "temperature".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+            "top_logprobs".to_string(),
+            "top_p".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: Some(1779376861),
+    });
+    m.insert("qwen/qwen3.7-plus", ModelMetadata {
+        display_name: Some("Qwen: Qwen3.7 Plus".to_string()),
+        family: Some("qwen-plus".to_string()),
+        context_window: Some(1000000),
+        max_output_tokens: Some(65536),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text, Modality::Image],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("Qwen3.7-Plus is a cost-effective model in Alibaba's Qwen3.7 series. It supports text and image input with text output, building on the series' text capabilities with a comprehensive upgrade to its...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.00000032_f64),
+            completion_per_token: Some(0.00000128_f64),
+            web_search_per_request: None,
+            input_cache_read_per_token: Some(0.000000064_f64),
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "logprobs".to_string(),
+            "max_tokens".to_string(),
+            "presence_penalty".to_string(),
+            "reasoning".to_string(),
+            "response_format".to_string(),
+            "seed".to_string(),
+            "structured_outputs".to_string(),
+            "temperature".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+            "top_logprobs".to_string(),
+            "top_p".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: Some(1780491783),
+    });
     m.insert("rekaai/reka-edge", ModelMetadata {
         display_name: Some("Reka Edge".to_string()),
-        family: None,
+        family: Some("reka-edge".to_string()),
         context_window: Some(16384),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -11532,6 +10938,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "seed".to_string(),
@@ -11541,6 +10948,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -11549,7 +10957,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("rekaai/reka-flash-3", ModelMetadata {
         display_name: Some("Reka Flash 3".to_string()),
-        family: None,
+        family: Some("reka-flash".to_string()),
         context_window: Some(65536),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
@@ -11567,13 +10975,16 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "reasoning".to_string(),
             "seed".to_string(),
             "stop".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -11582,7 +10993,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("relace/relace-apply-3", ModelMetadata {
         display_name: Some("Relace: Relace Apply 3".to_string()),
-        family: None,
+        family: Some("relace-apply".to_string()),
         context_window: Some(256000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -11608,7 +11019,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("relace/relace-search", ModelMetadata {
         display_name: Some("Relace: Relace Search".to_string()),
-        family: None,
+        family: Some("relace-search".to_string()),
         context_window: Some(256000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -11625,6 +11036,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         }),
         supported_parameters: Some(vec![
             "max_tokens".to_string(),
+            "response_format".to_string(),
             "seed".to_string(),
             "stop".to_string(),
             "temperature".to_string(),
@@ -11636,43 +11048,38 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1765213560),
     });
-    m.insert("sao10k/l3-euryale-70b", ModelMetadata {
-        display_name: Some("Sao10k: Llama 3 Euryale 70B v2.1".to_string()),
-        family: None,
-        context_window: Some(8192),
-        max_output_tokens: Some(8192),
+    m.insert("sakana/fugu-ultra", ModelMetadata {
+        display_name: Some("Sakana: Fugu Ultra".to_string()),
+        family: Some("fugu-ultra".to_string()),
+        context_window: Some(1000000),
+        max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
+            input: vec![Modality::Text, Modality::Image],
             output: vec![Modality::Text],
         }),
         capabilities: vec![],
-        description: Some("Euryale 70B v2.1 is a model focused on creative roleplay from [Sao10k](https://ko-fi.com/sao10k). - Better prompt adherence. - Better anatomy / spatial awareness. - Adapts much better to unique and custom...".to_string()),
+        description: Some("Fugu Ultra is the higher-performance model in Sakana AI's Fugu family. Rather than a single monolithic model, Fugu is a learned multi-agent orchestration system: a language model trained to route...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000148_f64),
-            completion_per_token: Some(0.00000148_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
+            prompt_per_token: Some(0.000005_f64),
+            completion_per_token: Some(0.00003_f64),
+            web_search_per_request: Some(0.01_f64),
+            input_cache_read_per_token: Some(0.0000005_f64),
         }),
         supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "repetition_penalty".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "temperature".to_string(),
+            "include_reasoning".to_string(),
+            "reasoning".to_string(),
+            "structured_outputs".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
+            "web_search_options".to_string(),
         ]),
         default_parameters: None,
-        knowledge_cutoff: Some("2023-12-31".to_string()),
-        created: Some(1718668800),
+        knowledge_cutoff: None,
+        created: Some(1782276303),
     });
     m.insert("sao10k/l3-lunaris-8b", ModelMetadata {
         display_name: Some("Sao10K: Llama 3 8B Lunaris".to_string()),
-        family: None,
+        family: Some("l-lunaris".to_string()),
         context_window: Some(8192),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -11708,7 +11115,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("sao10k/l3.1-70b-hanami-x1", ModelMetadata {
         display_name: Some("Sao10K: Llama 3.1 70B Hanami x1".to_string()),
-        family: None,
+        family: Some("l-hanami-x".to_string()),
         context_window: Some(16000),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -11732,6 +11139,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "repetition_penalty".to_string(),
             "seed".to_string(),
             "stop".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "top_k".to_string(),
             "top_p".to_string(),
@@ -11742,7 +11150,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("sao10k/l3.1-euryale-70b", ModelMetadata {
         display_name: Some("Sao10K: Llama 3.1 Euryale 70B v2.2".to_string()),
-        family: None,
+        family: Some("l-euryale".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -11780,7 +11188,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("sao10k/l3.3-euryale-70b", ModelMetadata {
         display_name: Some("Sao10K: Llama 3.3 Euryale 70B".to_string()),
-        family: None,
+        family: Some("l-euryale".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -11797,10 +11205,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
-            "logit_bias".to_string(),
             "logprobs".to_string(),
             "max_tokens".to_string(),
-            "min_p".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
             "response_format".to_string(),
@@ -11808,7 +11214,6 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "stop".to_string(),
             "structured_outputs".to_string(),
             "temperature".to_string(),
-            "top_k".to_string(),
             "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
@@ -11818,7 +11223,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("stepfun/step-3.5-flash", ModelMetadata {
         display_name: Some("StepFun: Step 3.5 Flash".to_string()),
-        family: None,
+        family: Some("step-flash".to_string()),
         context_window: Some(262144),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
@@ -11836,15 +11241,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
-            "logit_bias".to_string(),
             "max_tokens".to_string(),
-            "min_p".to_string(),
-            "presence_penalty".to_string(),
             "reasoning".to_string(),
-            "repetition_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
@@ -11855,9 +11253,51 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1769728337),
     });
+    m.insert("stepfun/step-3.7-flash", ModelMetadata {
+        display_name: Some("StepFun: Step 3.7 Flash".to_string()),
+        family: Some("step-flash".to_string()),
+        context_window: Some(256000),
+        max_output_tokens: Some(256000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text, Modality::Image, Modality::Video],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("Step 3.7 Flash is StepFun's latest high-efficiency multimodal Mixture-of-Experts model. It pairs a 196B-parameter language backbone with a vision encoder for native image and video understanding, activating roughly 11B parameters...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.0000002_f64),
+            completion_per_token: Some(0.00000115_f64),
+            web_search_per_request: None,
+            input_cache_read_per_token: Some(0.00000004_f64),
+        }),
+        supported_parameters: Some(vec![
+            "frequency_penalty".to_string(),
+            "include_reasoning".to_string(),
+            "logit_bias".to_string(),
+            "logprobs".to_string(),
+            "max_tokens".to_string(),
+            "min_p".to_string(),
+            "presence_penalty".to_string(),
+            "reasoning".to_string(),
+            "repetition_penalty".to_string(),
+            "response_format".to_string(),
+            "seed".to_string(),
+            "stop".to_string(),
+            "structured_outputs".to_string(),
+            "temperature".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+            "top_k".to_string(),
+            "top_logprobs".to_string(),
+            "top_p".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: Some(1779985069),
+    });
     m.insert("switchpoint/router", ModelMetadata {
         display_name: Some("Switchpoint Router".to_string()),
-        family: None,
+        family: Some("router".to_string()),
         context_window: Some(131072),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -11876,6 +11316,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "include_reasoning".to_string(),
             "max_tokens".to_string(),
             "reasoning".to_string(),
+            "response_format".to_string(),
             "seed".to_string(),
             "stop".to_string(),
             "temperature".to_string(),
@@ -11888,7 +11329,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("tencent/hunyuan-a13b-instruct", ModelMetadata {
         display_name: Some("Tencent: Hunyuan A13B Instruct".to_string()),
-        family: None,
+        family: Some("hunyuan".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(131072),
         modalities: Some(ModelModalities {
@@ -11918,11 +11359,11 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2025-03-31".to_string()),
         created: Some(1751987664),
     });
-    m.insert("tencent/hy3-preview:free", ModelMetadata {
-        display_name: Some("Tencent: Hy3 preview (free)".to_string()),
-        family: None,
+    m.insert("tencent/hy3-preview", ModelMetadata {
+        display_name: Some("Tencent: Hy3 preview".to_string()),
+        family: Some("hy".to_string()),
         context_window: Some(262144),
-        max_output_tokens: Some(262144),
+        max_output_tokens: None,
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -11930,10 +11371,10 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Hy3 preview is a high-efficiency Mixture-of-Experts model from Tencent designed for agentic workflows and production use. It supports configurable reasoning levels across disabled, low, and high modes, allowing it to...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0_f64),
-            completion_per_token: Some(0_f64),
+            prompt_per_token: Some(0.000000063_f64),
+            completion_per_token: Some(0.00000021_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: None,
+            input_cache_read_per_token: Some(0.000000021_f64),
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
@@ -11941,6 +11382,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "reasoning".to_string(),
+            "seed".to_string(),
             "stop".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
@@ -11960,7 +11402,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("thedrummer/cydonia-24b-v4.1", ModelMetadata {
         display_name: Some("TheDrummer: Cydonia 24B V4.1".to_string()),
-        family: None,
+        family: Some("cydonia-v".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(131072),
         modalities: Some(ModelModalities {
@@ -11978,13 +11420,17 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
+            "response_format".to_string(),
             "seed".to_string(),
             "stop".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -11993,9 +11439,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("thedrummer/rocinante-12b", ModelMetadata {
         display_name: Some("TheDrummer: Rocinante 12B".to_string()),
-        family: None,
+        family: Some("rocinante".to_string()),
         context_window: Some(32768),
-        max_output_tokens: Some(32768),
+        max_output_tokens: None,
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -12003,28 +11449,22 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Rocinante 12B is designed for engaging storytelling and rich prose. Early testers have reported: - Expanded vocabulary with unique and expressive word choices - Enhanced creativity for vivid narratives -...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000017_f64),
-            completion_per_token: Some(0.00000043_f64),
+            prompt_per_token: Some(0.00000025_f64),
+            completion_per_token: Some(0.0000005_f64),
             web_search_per_request: None,
             input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "logit_bias".to_string(),
-            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
-            "response_format".to_string(),
             "seed".to_string(),
             "stop".to_string(),
-            "structured_outputs".to_string(),
             "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
             "top_k".to_string(),
-            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -12033,7 +11473,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("thedrummer/skyfall-36b-v2", ModelMetadata {
         display_name: Some("TheDrummer: Skyfall 36B V2".to_string()),
-        family: None,
+        family: Some("skyfall-v".to_string()),
         context_window: Some(32768),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -12051,13 +11491,17 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "presence_penalty".to_string(),
             "repetition_penalty".to_string(),
+            "response_format".to_string(),
             "seed".to_string(),
             "stop".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: None,
@@ -12066,7 +11510,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("thedrummer/unslopnemo-12b", ModelMetadata {
         display_name: Some("TheDrummer: UnslopNemo 12B".to_string()),
-        family: None,
+        family: Some("unslopnemo".to_string()),
         context_window: Some(32768),
         max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
@@ -12101,47 +11545,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2024-04-30".to_string()),
         created: Some(1731103448),
     });
-    m.insert("tngtech/deepseek-r1t2-chimera", ModelMetadata {
-        display_name: Some("TNG: DeepSeek R1T2 Chimera".to_string()),
-        family: None,
-        context_window: Some(163840),
-        max_output_tokens: Some(163840),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("DeepSeek-TNG-R1T2-Chimera is the second-generation Chimera model from TNG Tech. It is a 671 B-parameter mixture-of-experts text-generation model assembled from DeepSeek-AI’s R1-0528, R1, and V3-0324 checkpoints with an Assembly-of-Experts merge. The...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000003_f64),
-            completion_per_token: Some(0.0000011_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: Some(0.00000015_f64),
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "include_reasoning".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "reasoning".to_string(),
-            "repetition_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2024-07-31".to_string()),
-        created: Some(1751986985),
-    });
     m.insert("undi95/remm-slerp-l2-13b", ModelMetadata {
         display_name: Some("ReMM SLERP 13B".to_string()),
-        family: None,
+        family: Some("remm-slerp-l".to_string()),
         context_window: Some(6144),
         max_output_tokens: Some(4096),
         modalities: Some(ModelModalities {
@@ -12180,7 +11586,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("upstage/solar-pro-3", ModelMetadata {
         display_name: Some("Upstage: Solar Pro 3".to_string()),
-        family: None,
+        family: Some("solar-pro".to_string()),
         context_window: Some(128000),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -12211,7 +11617,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("writer/palmyra-x5", ModelMetadata {
         display_name: Some("Writer: Palmyra X5".to_string()),
-        family: None,
+        family: Some("palmyra-x".to_string()),
         context_window: Some(1040000),
         max_output_tokens: Some(8192),
         modalities: Some(ModelModalities {
@@ -12237,262 +11643,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1769003823),
     });
-    m.insert("x-ai/grok-3", ModelMetadata {
-        display_name: Some("xAI: Grok 3".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: None,
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Grok 3 is the latest model from xAI. It's their flagship model that excels at enterprise use cases like data extraction, coding, and text summarization. Possesses deep domain knowledge in...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000003_f64),
-            completion_per_token: Some(0.000015_f64),
-            web_search_per_request: Some(0.005_f64),
-            input_cache_read_per_token: Some(0.00000075_f64),
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "logprobs".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_logprobs".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2025-02-28".to_string()),
-        created: Some(1749582908),
-    });
-    m.insert("x-ai/grok-3-beta", ModelMetadata {
-        display_name: Some("xAI: Grok 3 Beta".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: None,
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Grok 3 is the latest model from xAI. It's their flagship model that excels at enterprise use cases like data extraction, coding, and text summarization. Possesses deep domain knowledge in...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000003_f64),
-            completion_per_token: Some(0.000015_f64),
-            web_search_per_request: Some(0.005_f64),
-            input_cache_read_per_token: Some(0.00000075_f64),
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "logprobs".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_logprobs".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2025-02-28".to_string()),
-        created: Some(1744240068),
-    });
-    m.insert("x-ai/grok-3-mini", ModelMetadata {
-        display_name: Some("xAI: Grok 3 Mini".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: None,
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("A lightweight model that thinks before responding. Fast, smart, and great for logic-based tasks that do not require deep domain knowledge. The raw thinking traces are accessible.".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000003_f64),
-            completion_per_token: Some(0.0000005_f64),
-            web_search_per_request: Some(0.005_f64),
-            input_cache_read_per_token: Some(0.000000075_f64),
-        }),
-        supported_parameters: Some(vec![
-            "include_reasoning".to_string(),
-            "logprobs".to_string(),
-            "max_tokens".to_string(),
-            "reasoning".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_logprobs".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2025-02-28".to_string()),
-        created: Some(1749583245),
-    });
-    m.insert("x-ai/grok-3-mini-beta", ModelMetadata {
-        display_name: Some("xAI: Grok 3 Mini Beta".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: None,
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Grok 3 Mini is a lightweight, smaller thinking model. Unlike traditional models that generate answers immediately, Grok 3 Mini thinks before responding. It’s ideal for reasoning-heavy tasks that don’t demand...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000003_f64),
-            completion_per_token: Some(0.0000005_f64),
-            web_search_per_request: Some(0.005_f64),
-            input_cache_read_per_token: Some(0.000000075_f64),
-        }),
-        supported_parameters: Some(vec![
-            "include_reasoning".to_string(),
-            "logprobs".to_string(),
-            "max_tokens".to_string(),
-            "reasoning".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_logprobs".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2025-02-28".to_string()),
-        created: Some(1744240195),
-    });
-    m.insert("x-ai/grok-4", ModelMetadata {
-        display_name: Some("xAI: Grok 4".to_string()),
-        family: None,
-        context_window: Some(256000),
-        max_output_tokens: None,
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Image, Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Grok 4 is xAI's latest reasoning model with a 256k context window. It supports parallel tool calling, structured outputs, and both image and text inputs. Note that reasoning is not...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000003_f64),
-            completion_per_token: Some(0.000015_f64),
-            web_search_per_request: Some(0.005_f64),
-            input_cache_read_per_token: Some(0.00000075_f64),
-        }),
-        supported_parameters: Some(vec![
-            "include_reasoning".to_string(),
-            "logprobs".to_string(),
-            "max_tokens".to_string(),
-            "reasoning".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_logprobs".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2025-07-31".to_string()),
-        created: Some(1752087689),
-    });
-    m.insert("x-ai/grok-4-fast", ModelMetadata {
-        display_name: Some("xAI: Grok 4 Fast".to_string()),
-        family: None,
-        context_window: Some(2000000),
-        max_output_tokens: Some(30000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text, Modality::Image],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Grok 4 Fast is xAI's latest multimodal model with SOTA cost-efficiency and a 2M token context window. It comes in two flavors: non-reasoning and reasoning. Read more about the model...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000002_f64),
-            completion_per_token: Some(0.0000005_f64),
-            web_search_per_request: Some(0.005_f64),
-            input_cache_read_per_token: Some(0.00000005_f64),
-        }),
-        supported_parameters: Some(vec![
-            "include_reasoning".to_string(),
-            "logprobs".to_string(),
-            "max_tokens".to_string(),
-            "reasoning".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_logprobs".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2025-09-30".to_string()),
-        created: Some(1758240090),
-    });
-    m.insert("x-ai/grok-4.1-fast", ModelMetadata {
-        display_name: Some("xAI: Grok 4.1 Fast".to_string()),
-        family: None,
-        context_window: Some(2000000),
-        max_output_tokens: Some(30000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text, Modality::Image],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("Grok 4.1 Fast is xAI's best agentic tool calling model that shines in real-world use cases like customer support and deep research. 2M context window. Reasoning can be enabled/disabled using...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000002_f64),
-            completion_per_token: Some(0.0000005_f64),
-            web_search_per_request: Some(0.005_f64),
-            input_cache_read_per_token: Some(0.00000005_f64),
-        }),
-        supported_parameters: Some(vec![
-            "include_reasoning".to_string(),
-            "logprobs".to_string(),
-            "max_tokens".to_string(),
-            "reasoning".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_logprobs".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: Some(ModelDefaultParameters {
-            temperature: Some(0.7_f32),
-            top_p: Some(0.95_f32),
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-        }),
-        knowledge_cutoff: None,
-        created: Some(1763587502),
-    });
     m.insert("x-ai/grok-4.20", ModelMetadata {
         display_name: Some("xAI: Grok 4.20".to_string()),
-        family: None,
+        family: Some("grok".to_string()),
         context_window: Some(2000000),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -12500,7 +11653,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             output: vec![Modality::Text],
         }),
         capabilities: vec![],
-        description: Some("Grok 4.20 is xAI's newest flagship model with industry-leading speed and agentic tool calling capabilities. It combines the lowest hallucination rate on the market with strict prompt adherance, delivering consistently...".to_string()),
+        description: Some("Grok 4.20 is a reasoning model from xAI with industry-leading speed and agentic tool calling capabilities. It combines the lowest hallucination rate on the market with strict prompt adherance, delivering...".to_string()),
         pricing: Some(ModelPricing {
             prompt_per_token: Some(0.00000125_f64),
             completion_per_token: Some(0.0000025_f64),
@@ -12527,7 +11680,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("x-ai/grok-4.20-multi-agent", ModelMetadata {
         display_name: Some("xAI: Grok 4.20 Multi-Agent".to_string()),
-        family: None,
+        family: Some("grok-multi-agent".to_string()),
         context_window: Some(2000000),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -12537,8 +11690,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Grok 4.20 Multi-Agent is a variant of xAI’s Grok 4.20 designed for collaborative, agent-based workflows. Multiple agents operate in parallel to conduct deep research, coordinate tool use, and synthesize information...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000002_f64),
-            completion_per_token: Some(0.000006_f64),
+            prompt_per_token: Some(0.00000125_f64),
+            completion_per_token: Some(0.0000025_f64),
             web_search_per_request: Some(0.005_f64),
             input_cache_read_per_token: Some(0.0000002_f64),
         }),
@@ -12560,7 +11713,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("x-ai/grok-4.3", ModelMetadata {
         display_name: Some("xAI: Grok 4.3".to_string()),
-        family: None,
+        family: Some("grok".to_string()),
         context_window: Some(1000000),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -12596,27 +11749,29 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1777591821),
     });
-    m.insert("x-ai/grok-code-fast-1", ModelMetadata {
-        display_name: Some("xAI: Grok Code Fast 1".to_string()),
-        family: None,
+    m.insert("x-ai/grok-build-0.1", ModelMetadata {
+        display_name: Some("xAI: Grok Build 0.1".to_string()),
+        family: Some("grok-build".to_string()),
         context_window: Some(256000),
-        max_output_tokens: Some(10000),
+        max_output_tokens: None,
         modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
+            input: vec![Modality::Text, Modality::Image],
             output: vec![Modality::Text],
         }),
         capabilities: vec![],
-        description: Some("Grok Code Fast 1 is a speedy and economical reasoning model that excels at agentic coding. With reasoning traces visible in the response, developers can steer Grok Code for high-quality...".to_string()),
+        description: Some("Grok Build 0.1 is xAI’s fast coding model trained specifically for agentic software engineering workflows. It supports text and image inputs with text output, and is optimized for interactive coding...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000002_f64),
-            completion_per_token: Some(0.0000015_f64),
+            prompt_per_token: Some(0.000001_f64),
+            completion_per_token: Some(0.000002_f64),
             web_search_per_request: Some(0.005_f64),
-            input_cache_read_per_token: Some(0.00000002_f64),
+            input_cache_read_per_token: Some(0.0000002_f64),
         }),
         supported_parameters: Some(vec![
+            "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
             "logprobs".to_string(),
             "max_tokens".to_string(),
+            "presence_penalty".to_string(),
             "reasoning".to_string(),
             "response_format".to_string(),
             "seed".to_string(),
@@ -12629,30 +11784,33 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "top_p".to_string(),
         ]),
         default_parameters: None,
-        knowledge_cutoff: Some("2025-09-30".to_string()),
-        created: Some(1756238927),
+        knowledge_cutoff: None,
+        created: Some(1779298123),
     });
-    m.insert("xiaomi/mimo-v2-flash", ModelMetadata {
-        display_name: Some("Xiaomi: MiMo-V2-Flash".to_string()),
-        family: None,
-        context_window: Some(262144),
-        max_output_tokens: Some(65536),
+    m.insert("xiaomi/mimo-v2.5", ModelMetadata {
+        display_name: Some("Xiaomi: MiMo-V2.5".to_string()),
+        family: Some("mimo-v".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: None,
         modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
+            input: vec![Modality::Text, Modality::Audio, Modality::Image, Modality::Video],
             output: vec![Modality::Text],
         }),
         capabilities: vec![],
-        description: Some("MiMo-V2-Flash is an open-source foundation language model developed by Xiaomi. It is a Mixture-of-Experts model with 309B total parameters and 15B active parameters, adopting hybrid attention architecture. MiMo-V2-Flash supports a...".to_string()),
+        description: Some("MiMo-V2.5 is a native omnimodal model by Xiaomi. It delivers Pro-level agentic performance at roughly half the inference cost, while surpassing MiMo-V2-Omni in multimodal perception across image and video understanding...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000009_f64),
-            completion_per_token: Some(0.00000029_f64),
+            prompt_per_token: Some(0.000000105_f64),
+            completion_per_token: Some(0.00000028_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: Some(0.000000045_f64),
+            input_cache_read_per_token: None,
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
+            "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
+            "min_p".to_string(),
             "presence_penalty".to_string(),
             "reasoning".to_string(),
             "repetition_penalty".to_string(),
@@ -12664,126 +11822,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: Some(ModelDefaultParameters {
-            temperature: None,
-            top_p: Some(0.95_f32),
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-        }),
-        knowledge_cutoff: None,
-        created: Some(1765731308),
-    });
-    m.insert("xiaomi/mimo-v2-omni", ModelMetadata {
-        display_name: Some("Xiaomi: MiMo-V2-Omni".to_string()),
-        family: None,
-        context_window: Some(262144),
-        max_output_tokens: Some(65536),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text, Modality::Audio, Modality::Image, Modality::Video],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("MiMo-V2-Omni is a frontier omni-modal model that natively processes image, video, and audio inputs within a unified architecture. It combines strong multimodal perception with agentic capability - visual grounding, multi-step...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000004_f64),
-            completion_per_token: Some(0.000002_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: Some(0.00000008_f64),
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "include_reasoning".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "reasoning".to_string(),
-            "response_format".to_string(),
-            "stop".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: Some(ModelDefaultParameters {
-            temperature: Some(1_f32),
-            top_p: Some(0.95_f32),
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-        }),
-        knowledge_cutoff: None,
-        created: Some(1773863703),
-    });
-    m.insert("xiaomi/mimo-v2-pro", ModelMetadata {
-        display_name: Some("Xiaomi: MiMo-V2-Pro".to_string()),
-        family: None,
-        context_window: Some(1048576),
-        max_output_tokens: Some(131072),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("MiMo-V2-Pro is Xiaomi's flagship foundation model, featuring over 1T total parameters and a 1M context length, deeply optimized for agentic scenarios. It is highly adaptable to general agent frameworks like...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000001_f64),
-            completion_per_token: Some(0.000003_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: Some(0.0000002_f64),
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "include_reasoning".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "reasoning".to_string(),
-            "response_format".to_string(),
-            "stop".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: Some(ModelDefaultParameters {
-            temperature: Some(1_f32),
-            top_p: Some(0.95_f32),
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-        }),
-        knowledge_cutoff: None,
-        created: Some(1773863643),
-    });
-    m.insert("xiaomi/mimo-v2.5", ModelMetadata {
-        display_name: Some("Xiaomi: MiMo-V2.5".to_string()),
-        family: None,
-        context_window: Some(1048576),
-        max_output_tokens: Some(131072),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text, Modality::Audio, Modality::Image, Modality::Video],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("MiMo-V2.5 is a native omnimodal model by Xiaomi. It delivers Pro-level agentic performance at roughly half the inference cost, while surpassing MiMo-V2-Omni in multimodal perception across image and video understanding...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000004_f64),
-            completion_per_token: Some(0.000002_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: Some(0.00000008_f64),
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "include_reasoning".to_string(),
-            "max_tokens".to_string(),
-            "presence_penalty".to_string(),
-            "reasoning".to_string(),
-            "response_format".to_string(),
-            "stop".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -12798,7 +11837,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("xiaomi/mimo-v2.5-pro", ModelMetadata {
         display_name: Some("Xiaomi: MiMo-V2.5-Pro".to_string()),
-        family: None,
+        family: Some("mimo-v-pro".to_string()),
         context_window: Some(1048576),
         max_output_tokens: Some(131072),
         modalities: Some(ModelModalities {
@@ -12808,22 +11847,30 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("MiMo-V2.5-Pro is Xiaomi’s flagship model, delivering strong performance in general agentic capabilities, complex software engineering, and long-horizon tasks, with top rankings on benchmarks such as ClawEval, GDPVal, and SWE-bench Pro....".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000001_f64),
-            completion_per_token: Some(0.000003_f64),
+            prompt_per_token: Some(0.000000435_f64),
+            completion_per_token: Some(0.00000087_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: Some(0.0000002_f64),
+            input_cache_read_per_token: Some(0.0000000036_f64),
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
+            "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
+            "min_p".to_string(),
             "presence_penalty".to_string(),
             "reasoning".to_string(),
+            "repetition_penalty".to_string(),
             "response_format".to_string(),
+            "seed".to_string(),
             "stop".to_string(),
+            "structured_outputs".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -12836,43 +11883,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1776874273),
     });
-    m.insert("z-ai/glm-4-32b", ModelMetadata {
-        display_name: Some("Z.ai: GLM 4 32B ".to_string()),
-        family: None,
-        context_window: Some(128000),
-        max_output_tokens: None,
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("GLM 4 32B is a cost-effective foundation language model. It can efficiently perform complex tasks and has significantly enhanced capabilities in tool use, online search, and code-related intelligent tasks. It...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000001_f64),
-            completion_per_token: Some(0.0000001_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "max_tokens".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: Some(ModelDefaultParameters {
-            temperature: Some(0.75_f32),
-            top_p: None,
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-        }),
-        knowledge_cutoff: Some("2024-06-30".to_string()),
-        created: Some(1753376617),
-    });
     m.insert("z-ai/glm-4.5", ModelMetadata {
         display_name: Some("Z.ai: GLM 4.5".to_string()),
-        family: None,
+        family: Some("glm".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(98304),
         modalities: Some(ModelModalities {
@@ -12888,15 +11901,10 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             input_cache_read_per_token: Some(0.00000011_f64),
         }),
         supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
             "max_tokens".to_string(),
-            "presence_penalty".to_string(),
             "reasoning".to_string(),
-            "repetition_penalty".to_string(),
             "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
@@ -12915,7 +11923,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("z-ai/glm-4.5-air", ModelMetadata {
         display_name: Some("Z.ai: GLM 4.5 Air".to_string()),
-        family: None,
+        family: Some("glm-air".to_string()),
         context_window: Some(131072),
         max_output_tokens: Some(98304),
         modalities: Some(ModelModalities {
@@ -12955,45 +11963,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2024-12-31".to_string()),
         created: Some(1753471258),
     });
-    m.insert("z-ai/glm-4.5-air:free", ModelMetadata {
-        display_name: Some("Z.ai: GLM 4.5 Air (free)".to_string()),
-        family: None,
-        context_window: Some(131072),
-        max_output_tokens: Some(96000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("GLM-4.5-Air is the lightweight variant of our latest flagship model family, also purpose-built for agent-centric applications. Like GLM-4.5, it adopts the Mixture-of-Experts (MoE) architecture but with a more compact parameter...".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0_f64),
-            completion_per_token: Some(0_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: None,
-        }),
-        supported_parameters: Some(vec![
-            "include_reasoning".to_string(),
-            "max_tokens".to_string(),
-            "reasoning".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: Some(ModelDefaultParameters {
-            temperature: Some(0.75_f32),
-            top_p: None,
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-        }),
-        knowledge_cutoff: Some("2024-12-31".to_string()),
-        created: Some(1753471258),
-    });
     m.insert("z-ai/glm-4.5v", ModelMetadata {
         display_name: Some("Z.ai: GLM 4.5V".to_string()),
-        family: None,
+        family: Some("glm-4.5v".to_string()),
         context_window: Some(65536),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -13015,6 +11987,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "presence_penalty".to_string(),
             "reasoning".to_string(),
             "repetition_penalty".to_string(),
+            "response_format".to_string(),
             "seed".to_string(),
             "stop".to_string(),
             "temperature".to_string(),
@@ -13035,9 +12008,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("z-ai/glm-4.6", ModelMetadata {
         display_name: Some("Z.ai: GLM 4.6".to_string()),
-        family: None,
-        context_window: Some(204800),
-        max_output_tokens: Some(204800),
+        family: Some("glm".to_string()),
+        context_window: Some(202752),
+        max_output_tokens: Some(131072),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -13045,10 +12018,10 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("Compared with GLM-4.5, this generation brings several key improvements: Longer context window: The context window has been expanded from 128K to 200K tokens, enabling the model to handle more complex...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000039_f64),
-            completion_per_token: Some(0.0000019_f64),
+            prompt_per_token: Some(0.00000043_f64),
+            completion_per_token: Some(0.00000174_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: None,
+            input_cache_read_per_token: Some(0.00000008_f64),
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
@@ -13081,9 +12054,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("z-ai/glm-4.6v", ModelMetadata {
         display_name: Some("Z.ai: GLM 4.6V".to_string()),
-        family: None,
+        family: Some("glm-4.6v".to_string()),
         context_window: Some(131072),
-        max_output_tokens: Some(24000),
+        max_output_tokens: Some(32768),
         modalities: Some(ModelModalities {
             input: vec![Modality::Image, Modality::Text, Modality::Video],
             output: vec![Modality::Text],
@@ -13094,7 +12067,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             prompt_per_token: Some(0.0000003_f64),
             completion_per_token: Some(0.0000009_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: Some(0.00000005_f64),
+            input_cache_read_per_token: Some(0.000000055_f64),
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
@@ -13103,6 +12076,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "presence_penalty".to_string(),
             "reasoning".to_string(),
             "repetition_penalty".to_string(),
+            "response_format".to_string(),
             "seed".to_string(),
             "stop".to_string(),
             "temperature".to_string(),
@@ -13123,9 +12097,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("z-ai/glm-4.7", ModelMetadata {
         display_name: Some("Z.ai: GLM 4.7".to_string()),
-        family: None,
+        family: Some("glm".to_string()),
         context_window: Some(202752),
-        max_output_tokens: None,
+        max_output_tokens: Some(131072),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -13133,10 +12107,10 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("GLM-4.7 is Z.ai’s latest flagship model, featuring upgrades in two key areas: enhanced programming capabilities and more stable multi-step reasoning/execution. It demonstrates significant improvements in executing complex agent tasks while...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000038_f64),
-            completion_per_token: Some(0.00000174_f64),
+            prompt_per_token: Some(0.0000004_f64),
+            completion_per_token: Some(0.00000175_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: None,
+            input_cache_read_per_token: Some(0.00000008_f64),
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
@@ -13171,7 +12145,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("z-ai/glm-4.7-flash", ModelMetadata {
         display_name: Some("Z.ai: GLM 4.7 Flash".to_string()),
-        family: None,
+        family: Some("glm-flash".to_string()),
         context_window: Some(202752),
         max_output_tokens: Some(16384),
         modalities: Some(ModelModalities {
@@ -13190,6 +12164,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "frequency_penalty".to_string(),
             "include_reasoning".to_string(),
             "logit_bias".to_string(),
+            "logprobs".to_string(),
             "max_tokens".to_string(),
             "min_p".to_string(),
             "presence_penalty".to_string(),
@@ -13203,6 +12178,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "tool_choice".to_string(),
             "tools".to_string(),
             "top_k".to_string(),
+            "top_logprobs".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -13217,7 +12193,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("z-ai/glm-5", ModelMetadata {
         display_name: Some("Z.ai: GLM 5".to_string()),
-        family: None,
+        family: Some("glm".to_string()),
         context_window: Some(202752),
         max_output_tokens: None,
         modalities: Some(ModelModalities {
@@ -13265,8 +12241,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("z-ai/glm-5-turbo", ModelMetadata {
         display_name: Some("Z.ai: GLM 5 Turbo".to_string()),
-        family: None,
-        context_window: Some(202752),
+        family: Some("glm".to_string()),
+        context_window: Some(262144),
         max_output_tokens: Some(131072),
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
@@ -13310,9 +12286,9 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("z-ai/glm-5.1", ModelMetadata {
         display_name: Some("Z.ai: GLM 5.1".to_string()),
-        family: None,
+        family: Some("glm".to_string()),
         context_window: Some(202752),
-        max_output_tokens: Some(65535),
+        max_output_tokens: None,
         modalities: Some(ModelModalities {
             input: vec![Modality::Text],
             output: vec![Modality::Text],
@@ -13320,10 +12296,58 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("GLM-5.1 delivers a major leap in coding capability, with particularly significant gains in handling long-horizon tasks. Unlike previous models built around minute-level interactions, GLM-5.1 can work independently and continuously on...".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000105_f64),
-            completion_per_token: Some(0.0000035_f64),
+            prompt_per_token: Some(0.000000975_f64),
+            completion_per_token: Some(0.0000043_f64),
             web_search_per_request: None,
-            input_cache_read_per_token: Some(0.000000525_f64),
+            input_cache_read_per_token: None,
+        }),
+        supported_parameters: Some(vec![
+            "frequency_penalty".to_string(),
+            "include_reasoning".to_string(),
+            "logit_bias".to_string(),
+            "logprobs".to_string(),
+            "max_tokens".to_string(),
+            "min_p".to_string(),
+            "presence_penalty".to_string(),
+            "reasoning".to_string(),
+            "repetition_penalty".to_string(),
+            "response_format".to_string(),
+            "seed".to_string(),
+            "stop".to_string(),
+            "structured_outputs".to_string(),
+            "temperature".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+            "top_k".to_string(),
+            "top_logprobs".to_string(),
+            "top_p".to_string(),
+        ]),
+        default_parameters: Some(ModelDefaultParameters {
+            temperature: Some(1_f32),
+            top_p: Some(0.95_f32),
+            top_k: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+        }),
+        knowledge_cutoff: None,
+        created: Some(1775578025),
+    });
+    m.insert("z-ai/glm-5.2", ModelMetadata {
+        display_name: Some("Z.ai: GLM 5.2".to_string()),
+        family: Some("glm".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(32768),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("GLM 5.2 is a large-scale reasoning model from Z.ai. It supports text input and output with a 1M-token context window, and is suited for long-horizon agent workflows, project-level software engineering,...".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.00000093_f64),
+            completion_per_token: Some(0.000003_f64),
+            web_search_per_request: None,
+            input_cache_read_per_token: Some(0.00000018_f64),
         }),
         supported_parameters: Some(vec![
             "frequency_penalty".to_string(),
@@ -13356,11 +12380,11 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             presence_penalty: None,
         }),
         knowledge_cutoff: None,
-        created: Some(1775578025),
+        created: Some(1781631930),
     });
     m.insert("z-ai/glm-5v-turbo", ModelMetadata {
         display_name: Some("Z.ai: GLM 5V Turbo".to_string()),
-        family: None,
+        family: Some("glm-5v".to_string()),
         context_window: Some(202752),
         max_output_tokens: Some(131072),
         modalities: Some(ModelModalities {
@@ -13383,6 +12407,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
+            "top_k".to_string(),
             "top_p".to_string(),
         ]),
         default_parameters: Some(ModelDefaultParameters {
@@ -13395,13 +12420,46 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1775061458),
     });
+    m.insert("~anthropic/claude-fable-latest", ModelMetadata {
+        display_name: Some("Anthropic: Claude Fable Latest".to_string()),
+        family: Some("claude-fable".to_string()),
+        context_window: Some(1000000),
+        max_output_tokens: Some(128000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text, Modality::Image],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("This model always redirects to the latest model in the Claude Fable family.".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.00001_f64),
+            completion_per_token: Some(0.00005_f64),
+            web_search_per_request: Some(0.01_f64),
+            input_cache_read_per_token: Some(0.000001_f64),
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "max_completion_tokens".to_string(),
+            "max_tokens".to_string(),
+            "reasoning".to_string(),
+            "response_format".to_string(),
+            "stop".to_string(),
+            "structured_outputs".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+            "verbosity".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: Some(1781029944),
+    });
     m.insert("~anthropic/claude-haiku-latest", ModelMetadata {
         display_name: Some("Anthropic Claude Haiku Latest".to_string()),
-        family: None,
+        family: Some("claude-haiku".to_string()),
         context_window: Some(200000),
         max_output_tokens: Some(64000),
         modalities: Some(ModelModalities {
-            input: vec![Modality::Image, Modality::Text],
+            input: vec![Modality::Text, Modality::Image],
             output: vec![Modality::Text],
         }),
         capabilities: vec![],
@@ -13429,47 +12487,41 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1777318492),
     });
-    m.insert(
-        "~anthropic/claude-opus-latest",
-        ModelMetadata {
-            display_name: Some("Anthropic: Claude Opus Latest".to_string()),
-            family: None,
-            context_window: Some(1000000),
-            max_output_tokens: Some(128000),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Text, Modality::Image],
-                output: vec![Modality::Text],
-            }),
-            capabilities: vec![],
-            description: Some(
-                "This model always redirects to the latest model in the Claude Opus family."
-                    .to_string(),
-            ),
-            pricing: Some(ModelPricing {
-                prompt_per_token: Some(0.000005_f64),
-                completion_per_token: Some(0.000025_f64),
-                web_search_per_request: Some(0.01_f64),
-                input_cache_read_per_token: Some(0.0000005_f64),
-            }),
-            supported_parameters: Some(vec![
-                "include_reasoning".to_string(),
-                "max_tokens".to_string(),
-                "reasoning".to_string(),
-                "response_format".to_string(),
-                "stop".to_string(),
-                "structured_outputs".to_string(),
-                "tool_choice".to_string(),
-                "tools".to_string(),
-                "verbosity".to_string(),
-            ]),
-            default_parameters: None,
-            knowledge_cutoff: None,
-            created: Some(1776795361),
-        },
-    );
+    m.insert("~anthropic/claude-opus-latest", ModelMetadata {
+        display_name: Some("Anthropic: Claude Opus Latest".to_string()),
+        family: Some("claude-opus".to_string()),
+        context_window: Some(1000000),
+        max_output_tokens: Some(128000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text, Modality::Image],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("This model always redirects to the latest model in the Claude Opus family.".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.000005_f64),
+            completion_per_token: Some(0.000025_f64),
+            web_search_per_request: Some(0.01_f64),
+            input_cache_read_per_token: Some(0.0000005_f64),
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "max_tokens".to_string(),
+            "reasoning".to_string(),
+            "response_format".to_string(),
+            "stop".to_string(),
+            "structured_outputs".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+            "verbosity".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: Some(1776795361),
+    });
     m.insert("~anthropic/claude-sonnet-latest", ModelMetadata {
         display_name: Some("Anthropic Claude Sonnet Latest".to_string()),
-        family: None,
+        family: Some("claude-sonnet".to_string()),
         context_window: Some(1000000),
         max_output_tokens: Some(128000),
         modalities: Some(ModelModalities {
@@ -13479,10 +12531,10 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         capabilities: vec![],
         description: Some("This model always redirects to the latest model in the Anthropic Claude Sonnet family.".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000003_f64),
-            completion_per_token: Some(0.000015_f64),
+            prompt_per_token: Some(0.000002_f64),
+            completion_per_token: Some(0.00001_f64),
             web_search_per_request: Some(0.01_f64),
-            input_cache_read_per_token: Some(0.0000003_f64),
+            input_cache_read_per_token: Some(0.0000002_f64),
         }),
         supported_parameters: Some(vec![
             "include_reasoning".to_string(),
@@ -13492,11 +12544,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
             "response_format".to_string(),
             "stop".to_string(),
             "structured_outputs".to_string(),
-            "temperature".to_string(),
             "tool_choice".to_string(),
             "tools".to_string(),
-            "top_k".to_string(),
-            "top_p".to_string(),
             "verbosity".to_string(),
         ]),
         default_parameters: None,
@@ -13505,20 +12554,54 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
     });
     m.insert("~google/gemini-flash-latest", ModelMetadata {
         display_name: Some("Google Gemini Flash Latest".to_string()),
-        family: None,
+        family: Some("gemini-flash".to_string()),
         context_window: Some(1048576),
         max_output_tokens: Some(65536),
         modalities: Some(ModelModalities {
-            input: vec![Modality::Text, Modality::Image, Modality::Audio, Modality::Video],
+            input: vec![Modality::Text, Modality::Image, Modality::Video, Modality::Audio],
             output: vec![Modality::Text],
         }),
         capabilities: vec![],
         description: Some("This model always redirects to the latest model in the Google Gemini Flash family.".to_string()),
         pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.0000005_f64),
-            completion_per_token: Some(0.000003_f64),
+            prompt_per_token: Some(0.0000015_f64),
+            completion_per_token: Some(0.000009_f64),
             web_search_per_request: Some(0.014_f64),
-            input_cache_read_per_token: Some(0.00000005_f64),
+            input_cache_read_per_token: Some(0.00000015_f64),
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "max_tokens".to_string(),
+            "reasoning".to_string(),
+            "response_format".to_string(),
+            "seed".to_string(),
+            "stop".to_string(),
+            "structured_outputs".to_string(),
+            "temperature".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+            "top_p".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: Some("2025-01-01".to_string()),
+        created: Some(1777318398),
+    });
+    m.insert("~google/gemini-pro-latest", ModelMetadata {
+        display_name: Some("Google Gemini Pro Latest".to_string()),
+        family: Some("gemini-pro".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(65536),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Audio, Modality::Image, Modality::Text, Modality::Video],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("This model always redirects to the latest model in the Google Gemini Pro family.".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.000002_f64),
+            completion_per_token: Some(0.000012_f64),
+            web_search_per_request: Some(0.014_f64),
+            input_cache_read_per_token: Some(0.0000002_f64),
         }),
         supported_parameters: Some(vec![
             "include_reasoning".to_string(),
@@ -13535,178 +12618,114 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         ]),
         default_parameters: None,
         knowledge_cutoff: None,
-        created: Some(1777318398),
+        created: Some(1777318451),
     });
-    m.insert(
-        "~google/gemini-pro-latest",
-        ModelMetadata {
-            display_name: Some("Google Gemini Pro Latest".to_string()),
-            family: None,
-            context_window: Some(1048576),
-            max_output_tokens: Some(65536),
-            modalities: Some(ModelModalities {
-                input: vec![
-                    Modality::Audio,
-                    Modality::Image,
-                    Modality::Text,
-                    Modality::Video,
-                ],
-                output: vec![Modality::Text],
-            }),
-            capabilities: vec![],
-            description: Some(
-                "This model always redirects to the latest model in the Google Gemini Pro family."
-                    .to_string(),
-            ),
-            pricing: Some(ModelPricing {
-                prompt_per_token: Some(0.000002_f64),
-                completion_per_token: Some(0.000012_f64),
-                web_search_per_request: Some(0.014_f64),
-                input_cache_read_per_token: Some(0.0000002_f64),
-            }),
-            supported_parameters: Some(vec![
-                "include_reasoning".to_string(),
-                "max_tokens".to_string(),
-                "reasoning".to_string(),
-                "response_format".to_string(),
-                "seed".to_string(),
-                "stop".to_string(),
-                "structured_outputs".to_string(),
-                "temperature".to_string(),
-                "tool_choice".to_string(),
-                "tools".to_string(),
-                "top_p".to_string(),
-            ]),
-            default_parameters: None,
-            knowledge_cutoff: None,
-            created: Some(1777318451),
-        },
-    );
-    m.insert(
-        "~moonshotai/kimi-latest",
-        ModelMetadata {
-            display_name: Some("MoonshotAI Kimi Latest".to_string()),
-            family: None,
-            context_window: Some(262144),
-            max_output_tokens: Some(16384),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Text, Modality::Image],
-                output: vec![Modality::Text],
-            }),
-            capabilities: vec![],
-            description: Some(
-                "This model always redirects to the latest model in the MoonshotAI Kimi family."
-                    .to_string(),
-            ),
-            pricing: Some(ModelPricing {
-                prompt_per_token: Some(0.00000075_f64),
-                completion_per_token: Some(0.0000035_f64),
-                web_search_per_request: None,
-                input_cache_read_per_token: Some(0.00000015_f64),
-            }),
-            supported_parameters: Some(vec![
-                "frequency_penalty".to_string(),
-                "include_reasoning".to_string(),
-                "logit_bias".to_string(),
-                "logprobs".to_string(),
-                "max_tokens".to_string(),
-                "min_p".to_string(),
-                "parallel_tool_calls".to_string(),
-                "presence_penalty".to_string(),
-                "reasoning".to_string(),
-                "reasoning_effort".to_string(),
-                "repetition_penalty".to_string(),
-                "response_format".to_string(),
-                "seed".to_string(),
-                "stop".to_string(),
-                "structured_outputs".to_string(),
-                "temperature".to_string(),
-                "tool_choice".to_string(),
-                "tools".to_string(),
-                "top_k".to_string(),
-                "top_logprobs".to_string(),
-                "top_p".to_string(),
-            ]),
-            default_parameters: None,
-            knowledge_cutoff: None,
-            created: Some(1777318428),
-        },
-    );
-    m.insert(
-        "~openai/gpt-latest",
-        ModelMetadata {
-            display_name: Some("OpenAI GPT Latest".to_string()),
-            family: None,
-            context_window: Some(1050000),
-            max_output_tokens: Some(128000),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Image, Modality::Text],
-                output: vec![Modality::Text],
-            }),
-            capabilities: vec![],
-            description: Some(
-                "This model always redirects to the latest model in the OpenAI GPT family."
-                    .to_string(),
-            ),
-            pricing: Some(ModelPricing {
-                prompt_per_token: Some(0.000005_f64),
-                completion_per_token: Some(0.00003_f64),
-                web_search_per_request: Some(0.01_f64),
-                input_cache_read_per_token: Some(0.0000005_f64),
-            }),
-            supported_parameters: Some(vec![
-                "include_reasoning".to_string(),
-                "max_completion_tokens".to_string(),
-                "max_tokens".to_string(),
-                "reasoning".to_string(),
-                "response_format".to_string(),
-                "seed".to_string(),
-                "structured_outputs".to_string(),
-                "tool_choice".to_string(),
-                "tools".to_string(),
-            ]),
-            default_parameters: None,
-            knowledge_cutoff: Some("2025-12-01".to_string()),
-            created: Some(1777318334),
-        },
-    );
-    m.insert(
-        "~openai/gpt-mini-latest",
-        ModelMetadata {
-            display_name: Some("OpenAI GPT Mini Latest".to_string()),
-            family: None,
-            context_window: Some(400000),
-            max_output_tokens: Some(128000),
-            modalities: Some(ModelModalities {
-                input: vec![Modality::Image, Modality::Text],
-                output: vec![Modality::Text],
-            }),
-            capabilities: vec![],
-            description: Some(
-                "This model always redirects to the latest model in the OpenAI GPT Mini family."
-                    .to_string(),
-            ),
-            pricing: Some(ModelPricing {
-                prompt_per_token: Some(0.00000075_f64),
-                completion_per_token: Some(0.0000045_f64),
-                web_search_per_request: Some(0.01_f64),
-                input_cache_read_per_token: Some(0.000000075_f64),
-            }),
-            supported_parameters: Some(vec![
-                "include_reasoning".to_string(),
-                "max_completion_tokens".to_string(),
-                "max_tokens".to_string(),
-                "reasoning".to_string(),
-                "response_format".to_string(),
-                "seed".to_string(),
-                "structured_outputs".to_string(),
-                "tool_choice".to_string(),
-                "tools".to_string(),
-            ]),
-            default_parameters: None,
-            knowledge_cutoff: Some("2025-08-31".to_string()),
-            created: Some(1777318471),
-        },
-    );
+    m.insert("~moonshotai/kimi-latest", ModelMetadata {
+        display_name: Some("MoonshotAI Kimi Latest".to_string()),
+        family: Some("kimi".to_string()),
+        context_window: Some(262144),
+        max_output_tokens: Some(262144),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text, Modality::Image],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("This model always redirects to the latest model in the MoonshotAI Kimi family.".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.00000066_f64),
+            completion_per_token: Some(0.00000341_f64),
+            web_search_per_request: None,
+            input_cache_read_per_token: Some(0.00000014_f64),
+        }),
+        supported_parameters: Some(vec![
+            "frequency_penalty".to_string(),
+            "include_reasoning".to_string(),
+            "logit_bias".to_string(),
+            "logprobs".to_string(),
+            "max_tokens".to_string(),
+            "min_p".to_string(),
+            "parallel_tool_calls".to_string(),
+            "presence_penalty".to_string(),
+            "reasoning".to_string(),
+            "repetition_penalty".to_string(),
+            "response_format".to_string(),
+            "seed".to_string(),
+            "stop".to_string(),
+            "structured_outputs".to_string(),
+            "temperature".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+            "top_k".to_string(),
+            "top_logprobs".to_string(),
+            "top_p".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: None,
+        created: Some(1777318428),
+    });
+    m.insert("~openai/gpt-latest", ModelMetadata {
+        display_name: Some("OpenAI GPT Latest".to_string()),
+        family: Some("gpt".to_string()),
+        context_window: Some(1050000),
+        max_output_tokens: Some(128000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Image, Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("This model always redirects to the latest model in the OpenAI GPT family.".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.000005_f64),
+            completion_per_token: Some(0.00003_f64),
+            web_search_per_request: Some(0.01_f64),
+            input_cache_read_per_token: Some(0.0000005_f64),
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "max_completion_tokens".to_string(),
+            "max_tokens".to_string(),
+            "reasoning".to_string(),
+            "response_format".to_string(),
+            "seed".to_string(),
+            "structured_outputs".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: Some("2025-12-01".to_string()),
+        created: Some(1777318334),
+    });
+    m.insert("~openai/gpt-mini-latest", ModelMetadata {
+        display_name: Some("OpenAI GPT Mini Latest".to_string()),
+        family: Some("gpt-mini".to_string()),
+        context_window: Some(400000),
+        max_output_tokens: Some(128000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Image, Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![],
+        description: Some("This model always redirects to the latest model in the OpenAI GPT Mini family.".to_string()),
+        pricing: Some(ModelPricing {
+            prompt_per_token: Some(0.00000075_f64),
+            completion_per_token: Some(0.0000045_f64),
+            web_search_per_request: Some(0.01_f64),
+            input_cache_read_per_token: Some(0.000000075_f64),
+        }),
+        supported_parameters: Some(vec![
+            "include_reasoning".to_string(),
+            "max_completion_tokens".to_string(),
+            "max_tokens".to_string(),
+            "reasoning".to_string(),
+            "response_format".to_string(),
+            "seed".to_string(),
+            "structured_outputs".to_string(),
+            "tool_choice".to_string(),
+            "tools".to_string(),
+        ]),
+        default_parameters: None,
+        knowledge_cutoff: Some("2025-08-31".to_string()),
+        created: Some(1777318471),
+    });
     m
 });
