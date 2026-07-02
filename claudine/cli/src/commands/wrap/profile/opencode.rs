@@ -150,10 +150,16 @@ impl WrapperProfile for OpencodeWrapper {
                     prompt.len() / 1024
                 );
             }
-            Ok(PromptDelivery::AppendArgs(vec![
-                "--prompt".to_string(),
-                prompt.to_string(),
-            ]))
+            // A prompt beginning with `-` (composed prompts commonly open
+            // with a Markdown bullet) makes OpenCode's yargs parser treat the
+            // value as an option: it prints its top-level help and exits 1.
+            // The attached `--prompt=<value>` form binds the value to the flag
+            // unambiguously, mirroring the non-interactive `--` guard above.
+            Ok(if prompt.starts_with('-') {
+                PromptDelivery::AppendArgs(vec![format!("--prompt={prompt}")])
+            } else {
+                PromptDelivery::AppendArgs(vec!["--prompt".to_string(), prompt.to_string()])
+            })
         }
     }
 

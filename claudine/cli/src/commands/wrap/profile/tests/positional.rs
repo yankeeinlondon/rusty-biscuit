@@ -170,6 +170,74 @@ fn opencode_non_interactive_prompt_starting_with_dash_is_separated_with_end_of_o
     );
 }
 
+#[test]
+fn opencode_interactive_prompt_starting_with_dash_uses_attached_prompt_flag() {
+    // Regression: OpenCode's yargs parser treats a `--prompt` value beginning
+    // with `-` (a Markdown bullet) as an option, prints its help, and exits 1.
+    // The attached `--prompt=<value>` form binds the value to the flag.
+    let p = profile(Provider::OpenCode);
+    let args = Vec::new();
+    let delivery = p
+        .prompt_delivery(&args, "- review the spec\n- ask questions", false)
+        .unwrap();
+    let mut applied = Vec::new();
+    delivery.apply_to(&mut applied);
+    assert_eq!(
+        applied,
+        vec!["--prompt=- review the spec\n- ask questions".to_string()]
+    );
+}
+
+#[test]
+fn opencode_interactive_prompt_without_dash_keeps_space_separated_flag() {
+    let p = profile(Provider::OpenCode);
+    let args = Vec::new();
+    let delivery = p.prompt_delivery(&args, "review the spec", false).unwrap();
+    let mut applied = Vec::new();
+    delivery.apply_to(&mut applied);
+    assert_eq!(applied, vec!["--prompt".to_string(), "review the spec".to_string()]);
+}
+
+#[test]
+fn codex_interactive_prompt_starting_with_dash_is_separated_with_end_of_options() {
+    // Regression: Codex's clap parser rejects a leading-`-` positional prompt
+    // ("unexpected argument '- ' found"). The prompt must follow a `--`
+    // end-of-options marker placed after every flag.
+    let p = profile(Provider::Codex);
+    let args = vec!["--model".to_string(), "gpt-5".to_string()];
+    let delivery = p
+        .prompt_delivery(&args, "- review the spec\n- ask questions", false)
+        .unwrap();
+    let mut applied = args.clone();
+    delivery.apply_to(&mut applied);
+    assert_eq!(
+        applied,
+        vec![
+            "--model".to_string(),
+            "gpt-5".to_string(),
+            "--".to_string(),
+            "- review the spec\n- ask questions".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn codex_interactive_prompt_without_dash_keeps_leading_positional() {
+    let p = profile(Provider::Codex);
+    let args = vec!["--model".to_string(), "gpt-5".to_string()];
+    let delivery = p.prompt_delivery(&args, "review the spec", false).unwrap();
+    let mut applied = args.clone();
+    delivery.apply_to(&mut applied);
+    assert_eq!(
+        applied,
+        vec![
+            "review the spec".to_string(),
+            "--model".to_string(),
+            "gpt-5".to_string(),
+        ]
+    );
+}
+
 fn catalog_entrypoint_args(provider: Provider, non_interactive: bool) -> Vec<String> {
     let info = provider_info(provider);
     let target_mode = if non_interactive {

@@ -65,6 +65,15 @@ impl WrapperProfile for CodexWrapper {
             // errors when prompt-file content exceeds OS argument length limits.
             // Codex exec reads from stdin when no positional prompt is provided.
             Ok(PromptDelivery::Stdin(prompt.to_string()))
+        } else if prompt.starts_with('-') {
+            // A prompt beginning with `-` (e.g. a Markdown bullet) is otherwise
+            // parsed by Codex's clap as an option ("unexpected argument '- '").
+            // Append it after a `--` end-of-options marker, past every flag, so
+            // it is taken as the positional PROMPT.
+            Ok(PromptDelivery::AppendArgs(vec![
+                "--".to_string(),
+                prompt.to_string(),
+            ]))
         } else {
             // Interactive: insert as positional after "exec"
             let insert_at = if args.first().is_some_and(|f| f == "exec" || f == "e") {
