@@ -205,7 +205,7 @@ pub fn derive_model_id(input: TokenStream) -> TokenStream {
 /// - Converts underscores to hyphens
 /// - Lowercases all characters
 fn normalize_provider(s: &str) -> String {
-    s.trim_matches('_').replace('_', "-").to_ascii_lowercase()
+    decode_model(s)
 }
 
 /// Decode the model name according to:
@@ -294,4 +294,17 @@ fn parse_metadata_config(input: &DeriveInput) -> Option<MetadataConfig> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_provider_decodes_hyphen_encoded_namespaces() {
+        assert_eq!(normalize_provider("X__Ai"), "x-ai");
+        assert_eq!(normalize_provider("Z__Ai"), "z-ai");
+        assert_eq!(normalize_provider("Meta__Llama"), "meta-llama");
+        assert_eq!(normalize_provider("Openai"), "openai");
+    }
 }
