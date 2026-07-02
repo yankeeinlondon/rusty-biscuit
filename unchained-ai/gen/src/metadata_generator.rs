@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use unchained_ai::models::identity::ModelIdentity;
 use unchained_ai::models::model_metadata::{Modality, ModelModalities, ProviderModelMetadata};
 
 use crate::parsera::ParseraModel;
@@ -25,7 +26,19 @@ impl MetadataGenerator {
     }
 
     /// Registers a model ID with optional merged metadata.
+    ///
+    /// When no source (Parsera, provider-native) supplied a `family`, it is
+    /// filled from the id's parsed identity so the family index has full
+    /// coverage regardless of upstream data quality.
     pub fn register(&mut self, model_id: String, metadata: Option<ProviderModelMetadata>) {
+        let metadata = metadata.map(|mut meta| {
+            if meta.family.is_none() {
+                meta.family = ModelIdentity::parse(&model_id)
+                    .family_or_none()
+                    .map(str::to_string);
+            }
+            meta
+        });
         self.entries.insert(model_id, metadata);
     }
 
