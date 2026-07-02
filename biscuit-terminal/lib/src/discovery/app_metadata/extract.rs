@@ -14,6 +14,8 @@
 //!   sibling dot-path resolver over [`plist::Value`].
 //! - `KittyConf` / `KeyValue` — flat line scan (last value wins), with
 //!   best-effort `include` / `config-file` following.
+//! - Directory candidates — locator-only; v1 does not choose one child file out
+//!   of a vendor-managed directory.
 //! - `Lua` / `Dconf` / `None` — locator-only; no value is extracted and a short
 //!   machine-readable reason is reported instead.
 //!
@@ -96,6 +98,10 @@ impl ConfigDocument {
     /// [`ConfigDocument::Unreadable`], and formats without a v1 extractor become
     /// [`ConfigDocument::LocatorOnly`].
     pub fn load(path: &Path, format: ConfigFormat) -> ConfigDocument {
+        if path.is_dir() {
+            return ConfigDocument::LocatorOnly("directory candidate");
+        }
+
         match format {
             ConfigFormat::Toml => load_structured(path, StructuredKind::Toml),
             ConfigFormat::Yaml => load_structured(path, StructuredKind::Yaml),
@@ -453,6 +459,19 @@ mod tests {
             doc.extract("profiles.main.font.size"),
             SettingValue::Found {
                 value: "12".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn directory_candidates_are_locator_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = ConfigDocument::load(dir.path(), ConfigFormat::Yaml);
+
+        assert_eq!(
+            doc.extract("themes"),
+            SettingValue::LocatorOnly {
+                reason: "directory candidate"
             }
         );
     }

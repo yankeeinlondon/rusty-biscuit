@@ -279,7 +279,7 @@ fn test_about_alacritty_json_extracts_legacy_yaml_candidate() {
 }
 
 #[test]
-fn test_about_warp_json_treats_warp_directory_as_locator_only() {
+fn test_about_warp_json_resolves_directory_without_none_format() {
     let home = tempfile::tempdir().expect("temp home");
     let warp_dir = home.path().join(".warp");
     std::fs::create_dir_all(&warp_dir).expect("warp config dir");
@@ -299,7 +299,14 @@ fn test_about_warp_json_treats_warp_directory_as_locator_only() {
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("Output should be valid JSON");
 
-    assert_eq!(parsed.pointer("/config/format").and_then(|v| v.as_str()), Some("None"));
+    assert_eq!(
+        parsed.pointer("/config/format").and_then(|v| v.as_str()),
+        Some("Yaml")
+    );
+    assert_ne!(
+        parsed.pointer("/config/format").and_then(|v| v.as_str()),
+        Some("None")
+    );
     assert_eq!(
         parsed.pointer("/config/resolved_file").and_then(|v| v.as_str()),
         Some(warp_dir.to_str().unwrap())

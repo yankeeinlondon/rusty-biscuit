@@ -13,7 +13,8 @@ use super::expand::ExpansionCtx;
 use super::os_target::{ConfigOsTarget, current_config_os_target};
 use super::seed::metadata_for;
 use super::types::{
-    ConfigEnvKind, ConfigFormat, ConfigMetadata, ConfigSource, ResolvedConfig, TerminalAppMetadata,
+    ConfigCandidateKind, ConfigEnvKind, ConfigFormat, ConfigMetadata, ConfigSource,
+    ResolvedConfig, TerminalAppMetadata,
 };
 use crate::discovery::detection::TerminalApp;
 
@@ -73,7 +74,7 @@ pub(crate) fn resolve_config(
                 None => continue,
             },
         };
-        if config_path_matches(&path, meta.format) {
+        if config_path_matches(&path, ConfigCandidateKind::File, meta.format) {
             return Some(ResolvedConfig {
                 path,
                 format: meta.format,
@@ -85,7 +86,7 @@ pub(crate) fn resolve_config(
     for (idx, candidate) in meta.locations.for_target(ctx.os_target).iter().enumerate() {
         for path in ctx.expand_candidate(candidate.template) {
             let format = candidate.format.unwrap_or(meta.format);
-            if config_path_matches(&path, format) {
+            if config_path_matches(&path, candidate.kind, format) {
                 return Some(ResolvedConfig {
                     path,
                     format,
@@ -98,10 +99,11 @@ pub(crate) fn resolve_config(
     None
 }
 
-fn config_path_matches(path: &Path, format: ConfigFormat) -> bool {
-    match format {
-        ConfigFormat::None => path.exists(),
-        _ => path.is_file(),
+fn config_path_matches(path: &Path, kind: ConfigCandidateKind, format: ConfigFormat) -> bool {
+    match (kind, format) {
+        (_, ConfigFormat::None) => path.exists(),
+        (ConfigCandidateKind::File, _) => path.is_file(),
+        (ConfigCandidateKind::Directory, _) => path.is_dir(),
     }
 }
 
@@ -229,6 +231,26 @@ mod tests {
             .config;
 
         assert!(resolve_config(meta, &ctx).is_none());
+    }
+
+    #[test]
+    fn warp_directory_candidate_resolves_as_yaml() {
+        let dir = tempfile::tempdir().unwrap();
+        let warp_dir = dir.path().join(".warp");
+        fs::create_dir_all(&warp_dir).unwrap();
+
+        let ctx = ctx(
+            ConfigOsTarget::Linux,
+            &[("HOME", dir.path().to_str().unwrap())],
+        );
+        let meta = &super::super::seed::metadata_for(&TerminalApp::Warp)
+            .unwrap()
+            .config;
+        let resolved = resolve_config(meta, &ctx).unwrap();
+
+        assert_eq!(resolved.path, warp_dir);
+        assert_eq!(resolved.format, ConfigFormat::Yaml);
+        assert_eq!(resolved.source, ConfigSource::Candidate(0));
     }
 
     #[test]

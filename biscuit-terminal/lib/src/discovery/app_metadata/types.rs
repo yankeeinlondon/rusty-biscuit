@@ -36,9 +36,18 @@ pub enum ConfigFormat {
     Json5,
     /// GNOME Terminal / gsettings — managed by dconf, no flat file.
     Dconf,
-    /// No parseable config file. A floor-bound app may still use this for a
-    /// locator-only candidate that preserves legacy path coverage.
+    /// No parseable config file and outside the app coverage floor.
     None,
+}
+
+/// Filesystem shape expected for a config candidate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ConfigCandidateKind {
+    /// Candidate resolves only when it is a regular file.
+    File,
+    /// Candidate resolves only when it is a directory.
+    Directory,
 }
 
 /// Whether a config-relocating environment variable points at a directory or a file.
@@ -84,6 +93,8 @@ pub enum ValueKind {
 pub struct ConfigCandidate {
     /// Path template with portable tokens (see the type-level docs).
     pub template: &'static str,
+    /// Whether this candidate points at a file or directory.
+    pub kind: ConfigCandidateKind,
     /// Format override for this specific candidate, when it differs from the
     /// app's primary config format.
     pub format: Option<ConfigFormat>,

@@ -11,8 +11,9 @@
 //! new; GNOME Terminal is metadata-only (`Dconf`, empty candidate list).
 
 use super::types::{
-    ConfigCandidate, ConfigEnvKind, ConfigFormat, ConfigLocationEnv, ConfigMetadata,
-    EnvFactMap, OsConfigLocations, SettingLocator, SettingLocators, TerminalAppMetadata, ValueKind,
+    ConfigCandidate, ConfigCandidateKind, ConfigEnvKind, ConfigFormat, ConfigLocationEnv,
+    ConfigMetadata, EnvFactMap, OsConfigLocations, SettingLocator, SettingLocators,
+    TerminalAppMetadata, ValueKind,
 };
 use crate::discovery::detection::TerminalApp;
 
@@ -42,6 +43,7 @@ const fn loc_note(
 const fn cand(template: &'static str) -> ConfigCandidate {
     ConfigCandidate {
         template,
+        kind: ConfigCandidateKind::File,
         format: None,
         note: None,
     }
@@ -55,6 +57,21 @@ const fn cand_format(
 ) -> ConfigCandidate {
     ConfigCandidate {
         template,
+        kind: ConfigCandidateKind::File,
+        format: Some(format),
+        note: Some(note),
+    }
+}
+
+/// A directory candidate whose contained config content uses the declared format.
+const fn cand_dir_format(
+    template: &'static str,
+    format: ConfigFormat,
+    note: &'static str,
+) -> ConfigCandidate {
+    ConfigCandidate {
+        template,
+        kind: ConfigCandidateKind::Directory,
         format: Some(format),
         note: Some(note),
     }
@@ -553,15 +570,15 @@ static WINDOWS_TERMINAL: TerminalAppMetadata = TerminalAppMetadata {
 // not exposed as a parseable flat file, so settings are locator-only; the
 // candidate is kept to hold the coverage floor (§8 Warp note).
 
-static WARP_CANDIDATES: &[ConfigCandidate] = &[ConfigCandidate {
-    template: "~/.warp",
-    format: Some(ConfigFormat::None),
-    note: Some("Warp config directory; themes/launch configs are YAML, primary settings managed in-app"),
-}];
+static WARP_CANDIDATES: &[ConfigCandidate] = &[cand_dir_format(
+    "~/.warp",
+    ConfigFormat::Yaml,
+    "Warp config directory; user themes and launch configs are YAML, primary settings are managed in-app",
+)];
 
 static WARP: TerminalAppMetadata = TerminalAppMetadata {
     config: ConfigMetadata {
-        format: ConfigFormat::None,
+        format: ConfigFormat::Yaml,
         locations: OsConfigLocations {
             linux: WARP_CANDIDATES,
             macos: WARP_CANDIDATES,
@@ -943,6 +960,7 @@ static CONTOUR: TerminalAppMetadata = TerminalAppMetadata {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::ConfigOsTarget;
 
     #[test]
     fn metadata_entries_have_v1_core_setting_locators() {
@@ -985,5 +1003,47 @@ mod tests {
             "metadata-covered apps must define all v1 core locators: {}",
             missing.join(", ")
         );
+    }
+
+    #[test]
+    fn floor_bound_apps_do_not_use_none_format() {
+        let floor = [
+            TerminalApp::Wezterm,
+            TerminalApp::Kitty,
+            TerminalApp::Ghostty,
+            TerminalApp::Alacritty,
+            TerminalApp::ITerm2,
+            TerminalApp::AppleTerminal,
+            TerminalApp::Konsole,
+            TerminalApp::Foot,
+            TerminalApp::Contour,
+            TerminalApp::Warp,
+            TerminalApp::VsCode,
+        ];
+
+        for app in floor {
+            let metadata = metadata_for(&app).expect("floor-bound app should have metadata");
+            assert_ne!(
+                metadata.config.format,
+                ConfigFormat::None,
+                "{app:?} must not use ConfigFormat::None"
+            );
+
+            for target in [
+                ConfigOsTarget::Linux,
+                ConfigOsTarget::MacOS,
+                ConfigOsTarget::Windows,
+                ConfigOsTarget::Wsl1,
+                ConfigOsTarget::Wsl2,
+            ] {
+                for candidate in metadata.config.locations.for_target(target) {
+                    assert_ne!(
+                        candidate.format,
+                        Some(ConfigFormat::None),
+                        "{app:?} {target:?} candidate must not override to ConfigFormat::None"
+                    );
+                }
+            }
+        }
     }
 }
