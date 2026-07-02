@@ -3,7 +3,9 @@ use crate::commands::shared::*;
 use crate::commands::{CliContext, Run};
 use crate::output::RenderMeta;
 use biscuit_terminal::components::graph_expression::GraphExpression;
+use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::components::section::{HeadingLevel, Section};
 use biscuit_terminal::terminal::Terminal;
 use clap::Args as ClapArgs;
 use std::io::Write;
@@ -192,7 +194,7 @@ pub fn display_graph(
             })?;
             return Ok(());
         }
-        Err(error) => return handle_graph_error(error, &graph.fallback_code_block(), source),
+        Err(error) => return handle_graph_error(error, &graph.fallback_code_block(), source, &terminal),
     };
 
     let render_time_ms = start_time.elapsed().as_millis() as u64;
@@ -224,10 +226,9 @@ pub fn handle_graph_error(
     error: biscuit_terminal::components::graph_expression::GraphRenderError,
     fallback: &str,
     source: &str,
+    term: &Terminal,
 ) -> color_eyre::Result<()> {
     use biscuit_terminal::components::graph_expression::GraphRenderError;
-
-    let s = crate::types::CliStyles::detect();
 
     match error {
         GraphRenderError::NoImageSupport => {
@@ -235,19 +236,25 @@ pub fn handle_graph_error(
             Ok(())
         }
         GraphRenderError::Visualization(ref viz_err) => {
-            eprintln!();
-            eprintln!("{}{}Error:{} {}", s.red, s.bold, s.reset, viz_err);
-            eprintln!("\n{}Graph expression was defined as:{}\n", s.dim, s.reset);
-            eprintln!("{fallback}");
+            let mut section = Section::new(HeadingLevel::h3, "Error");
+            section.push(Prose::new(format!(
+                "<red><b>Error:</b></red> {}",
+                Prose::escape_text(&viz_err.to_string())
+            )));
+            section.push(Prose::new("<dim>Graph expression was defined as:</dim>"));
+            section.push(Prose::new(Prose::escape_text(fallback)));
+            eprintln!("{}", section.render(term));
             Err(color_eyre::eyre::eyre!("{}", viz_err))
         }
         GraphRenderError::DisplayError(ref msg) => {
-            eprintln!(
-                "{}{}Error:{} Failed to display image: {}",
-                s.red, s.bold, s.reset, msg
-            );
-            eprintln!("\n{}Graph expression source was:{}\n", s.dim, s.reset);
-            eprintln!("{source}");
+            let mut section = Section::new(HeadingLevel::h3, "Error");
+            section.push(Prose::new(format!(
+                "<red><b>Error:</b></red> Failed to display image: {}",
+                Prose::escape_text(msg)
+            )));
+            section.push(Prose::new("<dim>Graph expression source was:</dim>"));
+            section.push(Prose::new(Prose::escape_text(source)));
+            eprintln!("{}", section.render(term));
             Err(color_eyre::eyre::eyre!("Failed to display image: {}", msg))
         }
     }
