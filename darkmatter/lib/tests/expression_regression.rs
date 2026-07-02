@@ -706,9 +706,19 @@ Skill found
     let md =
         darkmatter::markdown::Markdown::try_from_content(std::fs::read_to_string(&source_path).unwrap())
             .unwrap();
-    let options = darkmatter::markdown::compose::ComposeOptions::new()
-        .with_source_file(&source_path);
-    let (composed, _) = with_agent_env("claude", || md.compose_with(options).unwrap());
+    // Build the options *inside* `with_agent_env`: `ComposeOptions::new()`
+    // snapshots the process environment (via `ComposeContext::capture`) at
+    // construction time, and `ctx.agent()` prefers that captured snapshot over
+    // the live env. Constructing it before the override would freeze the agent
+    // to the ambient `AGENT` value; an unrecognized agent searches neither the
+    // user `.claude/skills` root nor the local one, hiding the pinned skill and
+    // failing this test whenever the caller's ambient `AGENT` is not a
+    // recognized agent name.
+    let (composed, _) = with_agent_env("claude", || {
+        let options = darkmatter::markdown::compose::ComposeOptions::new()
+            .with_source_file(&source_path);
+        md.compose_with(options).unwrap()
+    });
     assert!(composed.content().contains("Skill found"));
 }
 

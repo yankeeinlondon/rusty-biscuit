@@ -37,14 +37,18 @@ pub(crate) fn abbreviate_path(path: &Path) -> String {
     path.display().to_string()
 }
 
-/// Walk up from `start` (or its parent if it's a file) looking for a `.git`
-/// directory, returning the repo root if found.
+/// Walk up from `start` toward the filesystem root looking for a `.git` entry,
+/// returning the directory that contains it.
+///
+/// The search begins at `start` itself: a file `start` simply has no `.git`
+/// child, so its parent is examined on the next iteration. This deliberately
+/// avoids branching on an `is_dir()` probe of `start` — under heavy parallel
+/// filesystem load that stat can fail transiently, and skipping `start` would
+/// then let a `.git` in a shared ancestor (e.g. `$TMPDIR`) hijack the resolved
+/// root. Checking `start.join(".git")` first keeps a pinned repo root
+/// (including a tempdir with its own `.git` marker) authoritative.
 pub(crate) fn find_git_root_from(start: &Path) -> Option<PathBuf> {
-    let mut dir = if start.is_dir() {
-        start.to_path_buf()
-    } else {
-        start.parent()?.to_path_buf()
-    };
+    let mut dir = start.to_path_buf();
     loop {
         if dir.join(".git").exists() {
             return Some(dir);

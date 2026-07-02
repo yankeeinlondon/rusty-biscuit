@@ -383,6 +383,7 @@ The table below is generated from [`EXPRESSION_FUNCTION_DESCRIPTORS`](../../lib/
 | Filesystem | `join(left, right)` | Joins two path strings with normalized separators. | `join("sub", "note.md")` ⇒ `sub/note.md` |
 | Filesystem | `link(file)` | Creates a Markdown link to a local file, using its relative path as the link text. |  |
 | Filesystem | `link(target, desc)` | Creates a Markdown link to a local file or HTTP(S) URL with the given description. |  |
+| Filesystem | `has_command(cmd)` | Returns true when the command is found on PATH or is an existing executable absolute path. |  |
 | Context | `has_skill(name)` | Returns true when a skill directory exists in a user-scoped or local-scoped skill root. |  |
 | Context | `has_local_skill(name)` | Returns true when a skill directory exists in a local-scoped skill root. |  |
 <!-- END GENERATED FUNCTION TABLE -->
@@ -416,8 +417,8 @@ path arguments. The context is supplied automatically on every
 [surface](#availability-across-every-surface).
 
 All path arguments are resolved through the shared rules below. With the
-exception of `file_exists`, read-side functions do not check whether a local
-path exists; they operate on the resolved path shape.
+exception of `file_exists` and `has_command`, read-side functions do not check
+whether a local path exists; they operate on the resolved path shape.
 
 #### Shared Path Rules
 
@@ -446,6 +447,25 @@ path exists; they operate on the resolved path shape.
 | `validate_schema(path, obj)` | accepted for forward compatibility | yes (body only) |
 | `absolute(path)` | the absolute form of a path | **no** |
 | `relative(path)` | a path relative to the base dir | **no** |
+| `has_command(cmd)` | whether a command is runnable on the host | **no** |
+
+`has_command(cmd)` is a `PATH`/executable existence probe: it reports whether
+`cmd` can be run on the host and **never executes** it, so it needs no command
+whitelisting. A bare name (`git`) triggers an OS-native `PATH` search; an
+absolute path (`/usr/bin/git`) must both exist and be executable. On Windows the
+search honors `PATHEXT`; on Unix the executable bit is required. Symlinked
+executables are followed, and directories are rejected.
+
+Unlike the document-reading helpers, `has_command` takes **no** remote URL
+argument and does not use the shared path-resolution rules. Two path shapes are
+intentionally **not** resolved and always return `false` by design:
+
+- **Tilde** — `~` is not expanded, so `has_command("~/bin/mytool")` is `false`.
+- **Relative paths** — `./mytool` and `bin/foo` are not resolved against `PATH`,
+  a base directory, or the CWD.
+
+Both follow the never-error contract — they return `false` rather than raising —
+and can be addressed later without an API change.
 
 #### Indexed and Path Helpers
 

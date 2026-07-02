@@ -596,7 +596,19 @@ impl Writer<'_> {
                     "0",
                     "0",
                 );
-                BrowserFragment::new().define_as_raw_html(svg).finalize()
+                // Spec C5/C6: the rule owns a block box, so the node's outer
+                // `Layout` must place and size it on Browser exactly as on
+                // Terminal. The SVG carries only the rule's intrinsic
+                // `RuleAlignment` centering (its own `margin:auto`); wrapping it
+                // in a block box keeps that from fighting the outer margin over a
+                // single `margin` shorthand. Only `margin` / `width` / `max_width`
+                // are honored — padding is N/A (a rule has no padding box) — and a
+                // default/absent layout adds no wrapper (see `hr_outer_box_css`).
+                let html = match attrs.layout_ref().and_then(hr_outer_box_css) {
+                    Some(box_css) => format!("<div style=\"{box_css}\">{svg}</div>"),
+                    None => svg,
+                };
+                BrowserFragment::new().define_as_raw_html(html).finalize()
             }
         }
     }
@@ -2747,6 +2759,67 @@ fn css_len(len: &crate::layout::Length, vertical: bool) -> String {
     }
 }
 
+/// Lowers the outer box of a thematic-break node to CSS for its SVG wrapper.
+///
+/// Emits `margin`, `width`, `max_width`, and the alignment auto-margins — the
+/// properties the matrix marks Honored for `HorizontalRule`. Padding and
+/// word-wrap are intentionally excluded: a rule has no padding box (matrix N/A)
+/// and cannot wrap. Returns `None` when the layout neither positions nor sizes
+/// the box (every margin side resolves to zero and `width` is `Auto` with no
+/// `max_width`), so a rule with a default or absent layout renders the bare SVG
+/// with no wrapper element.
+fn hr_outer_box_css(layout: &crate::layout::Layout) -> Option<String> {
+    use crate::layout::{Alignment, Length, TargetValue, Width};
+    use crate::target::RenderTarget;
+
+    fn resolve(tv: &TargetValue<Length>) -> Option<&Length> {
+        tv.resolve(RenderTarget::Browser)
+    }
+
+    let m = &layout.margin;
+    let mut decls: Vec<String> = Vec::new();
+    let mut meaningful = false;
+    for (tv, prop, vertical) in [
+        (&m.top, "margin-top", true),
+        (&m.bottom, "margin-bottom", true),
+        (&m.left, "margin-left", false),
+        (&m.right, "margin-right", false),
+    ] {
+        if let Some(l) = resolve(tv) {
+            decls.push(format!("{prop}:{}", css_len(l, vertical)));
+            meaningful |= !matches!(l, Length::Zero);
+        }
+    }
+    match &layout.width {
+        Width::Auto => {}
+        Width::FitContent => {
+            decls.push("width:fit-content".into());
+            meaningful = true;
+        }
+        Width::Fixed(tv) => {
+            if let Some(l) = resolve(tv) {
+                decls.push(format!("width:{}", css_len(l, false)));
+                meaningful = true;
+            }
+        }
+    }
+    if let Some(mw) = layout.max_width.as_ref().and_then(resolve) {
+        decls.push(format!("max-width:{}", css_len(mw, false)));
+        meaningful = true;
+        // A capped width centers/anchors via auto margins, mirroring the outer
+        // box handling for every other block node in `layout_to_css`.
+        match layout.alignment {
+            Alignment::Center => {
+                decls.push("margin-left:auto".into());
+                decls.push("margin-right:auto".into());
+            }
+            Alignment::Right => decls.push("margin-left:auto".into()),
+            Alignment::Left => {}
+        }
+    }
+    meaningful.then(|| decls.join(";"))
+}
+
 fn layout_to_css(layout: &crate::layout::Layout) -> String {
     use crate::layout::{Alignment, Length, TargetValue, Width, WordWrap};
     use crate::target::RenderTarget;
@@ -3576,6 +3649,70 @@ mod tests {
         );
         assert_eq!(html(&RenderNode::hard_break()), "<br>");
         assert_eq!(html(&RenderNode::soft_break()), " ");
+    }
+
+    /// Spec C5/C6: a thematic break owns a block box, so its outer `Layout`
+    /// (`margin` / `width` / `max_width`) must position and size it on Browser —
+    /// the SVG core carries only the rule's intrinsic centering. Padding is N/A
+    /// (a rule has no padding box) and a default/absent layout adds no wrapper.
+    #[test]
+    fn thematic_break_honors_outer_box_layout() {
+        use crate::layout::{Edges, Layout, Length, TargetValue, Width};
+
+        // No layout: bare SVG, no wrapper.
+        assert!(
+            html(&RenderNode::thematic_break()).starts_with("<svg "),
+            "a rule with no outer layout must render the bare SVG"
+        );
+
+        // margin: wrapped in a block box that carries the outer margin.
+        let mut ruled = RenderNode::thematic_break();
+        ruled.attrs.set_layout(&Layout {
+            margin: Edges {
+                left: TargetValue::universal(Length::ch(4)),
+                ..Edges::default()
+            },
+            ..Layout::default()
+        });
+        let out = html(&ruled);
+        assert!(
+            out.starts_with("<div style=\"") && out.contains("margin-left:4ch"),
+            "outer margin must wrap the rule: {out}"
+        );
+        assert!(out.contains("<svg "), "the SVG core survives the wrapper: {out}");
+
+        // max_width: honored on the outer box.
+        let mut capped = RenderNode::thematic_break();
+        capped.attrs.set_layout(&Layout {
+            max_width: Some(TargetValue::universal(Length::ch(40))),
+            ..Layout::default()
+        });
+        assert!(
+            html(&capped).contains("max-width:40ch"),
+            "max_width must be honored on the outer box"
+        );
+
+        // width: honored on the outer box.
+        let mut sized = RenderNode::thematic_break();
+        sized.attrs.set_layout(&Layout {
+            width: Width::Fixed(TargetValue::universal(Length::Percent(50.0))),
+            ..Layout::default()
+        });
+        assert!(
+            html(&sized).contains("width:50%"),
+            "Layout::width must be honored on the outer box"
+        );
+
+        // padding is N/A: a padding-only layout adds no wrapper.
+        let mut padded = RenderNode::thematic_break();
+        padded.attrs.set_layout(&Layout {
+            padding: Edges::all(Length::ch(1)),
+            ..Layout::default()
+        });
+        assert!(
+            html(&padded).starts_with("<svg "),
+            "padding is N/A for a rule and must not introduce a wrapper box"
+        );
     }
 
     /// Review-4 finding 2: under GraphicsMode::Off a `<hr>` produced from

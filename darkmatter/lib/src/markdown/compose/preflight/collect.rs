@@ -913,18 +913,26 @@ spec: \"{{ file_exists(plan) ? dirname(plan) + '/spec.md' : null }}\"
     /// Regression for the review-4 "approves the WRONG command" bug.
     ///
     /// `cmd` is a `$(...)` directive whose argument interpolates `exists`, a
-    /// sibling that calls `file_exists()` — a context-requiring function that
-    /// errors in the context-free pre-flight pass. Before the fix, the
-    /// best-effort interpolation substituted the errored key as empty, so the
-    /// collector approved `echo` (empty arg) while execution ran `echo true`,
-    /// yielding the misleading "command not pre-approved … bug in the pre-flight
-    /// scanner". The collector must instead reject the command as a dynamic
-    /// shape and never put the wrong (or template-bearing) command in the
-    /// approval set.
+    /// sibling that calls `frontmatter()` on a file that does not exist — a
+    /// context-requiring filesystem function that errors in the pre-flight
+    /// resolution pass. Before the fix, the best-effort interpolation
+    /// substituted the errored key as empty, so the collector approved `echo`
+    /// (empty arg) while execution ran the resolved form, yielding the
+    /// misleading "command not pre-approved … bug in the pre-flight scanner".
+    /// The collector must instead reject the command as a dynamic shape and
+    /// never put the wrong (or template-bearing) command in the approval set.
+    ///
+    /// `file_exists()` no longer drives this path: since pre-flight gained a
+    /// resolution context (launch-relative derived-file support), a missing
+    /// local path resolves to `false` — the same value execution produces — so
+    /// such a command is correctly approved (see
+    /// `collects_resolved_command_despite_context_requiring_sibling_key`).
+    /// `frontmatter()` on an absent file still errors, keeping the
+    /// errored-dependency deferral live.
     #[test]
     fn rejects_command_depending_on_context_requiring_sibling_key() {
         let content = "---\n\
-exists: \"{{ file_exists('existing.md') }}\"\n\
+exists: \"{{ frontmatter('missing-sibling.md', 'x') }}\"\n\
 cmd: \"$(echo '{{ exists }}')\"\n\
 ---\nbody\n";
         let md: Markdown = content.into();

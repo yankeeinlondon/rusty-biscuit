@@ -1138,6 +1138,41 @@ pub fn file_exists_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, 
     Ok(Value::Bool(exists))
 }
 
+/// `has_command(cmd) -> bool` — pure existence/executability probe for a host
+/// command. Reports whether `cmd` is on `PATH` or is an existing executable
+/// path; it **never executes** the command. Like [`file_exists_fn`], no
+/// argument shape produces an error beyond the arity guard: a null, non-string,
+/// or empty argument reads as `false`.
+///
+/// Only two input shapes can probe: a bare name (`PATH` search) and an
+/// absolute path (exists + executable, delegated to `which`). Any other
+/// path-shaped input — `./mytool`, `bin/mytool`, `~/bin/mytool`, or a Windows
+/// drive-relative `C:mytool` — reads as `false`: it is neither tilde-expanded
+/// nor resolved against the resolution context or the process CWD.
+pub fn has_command_fn(args: &[Value], _ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("has_command", args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Bool(false));
+    }
+    let raw = match require_string("has_command", &args[0]) {
+        Ok(s) => s,
+        Err(_) => return Ok(Value::Bool(false)),
+    };
+    if raw.is_empty() {
+        return Ok(Value::Bool(false));
+    }
+    // `which::which` resolves relative paths against the process CWD, which
+    // would make document truth depend on where the composer was launched —
+    // reject them before probing. The multi-component test mirrors `which`'s
+    // own separator detection and also catches Windows drive-relative inputs
+    // (`C:mytool` parses as Prefix + Normal but is not absolute).
+    let path = std::path::Path::new(raw);
+    if !path.is_absolute() && path.components().count() > 1 {
+        return Ok(Value::Bool(false));
+    }
+    Ok(Value::Bool(which::which(raw).is_ok()))
+}
+
 /// `relative(file) -> file | Error::InvalidFilePath`
 pub fn relative_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     require_args_expr("relative", args, 1)?;
@@ -2004,6 +2039,7 @@ pub const FS_FUNCTIONS: &[FsFunction] = &[
     FsFunction { canonical: "absolute", aliases: &[], signatures: &["absolute(file)"], handler: absolute_fn },
     FsFunction { canonical: "relative", aliases: &[], signatures: &["relative(file)"], handler: relative_fn },
     FsFunction { canonical: "file_exists", aliases: &["fileexists"], signatures: &["file_exists(file)"], handler: file_exists_fn },
+    FsFunction { canonical: "has_command", aliases: &["hascommand"], signatures: &["has_command(cmd)"], handler: has_command_fn },
     FsFunction { canonical: "is_indexed_file", aliases: &["isindexedfile"], signatures: &["is_indexed_file(file)"], handler: is_indexed_file_fn },
     FsFunction { canonical: "file_index", aliases: &["fileindex"], signatures: &["file_index(file)"], handler: file_index_fn },
     FsFunction { canonical: "increment_file_index", aliases: &["incrementfileindex"], signatures: &["increment_file_index(file)"], handler: increment_file_index_fn },
@@ -2816,6 +2852,189 @@ mod tests {
             assert_eq!(
                 validate_schema_fn(&[json!("plain.md")], &ctx).unwrap(),
                 json!(true)
+            );
+        }
+
+        // A near-universal shell binary, chosen per-OS so the PATH probe also
+        // exercises Windows `PATHEXT` extension resolution (`cmd` → `cmd.exe`).
+        #[cfg(windows)]
+        const PROBE_BINARY: &str = "cmd";
+        #[cfg(not(windows))]
+        const PROBE_BINARY: &str = "sh";
+
+        #[test]
+        fn has_command_found_on_path_returns_true() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            // Guard behind an independent probe so a minimal CI image lacking
+            // the binary skips the positive assertion instead of failing.
+            if which::which(PROBE_BINARY).is_ok() {
+                assert_eq!(
+                    has_command_fn(&[json!(PROBE_BINARY)], &ctx).unwrap(),
+                    json!(true)
+                );
+            }
+        }
+
+        #[test]
+        fn has_command_missing_returns_false() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            assert_eq!(
+                has_command_fn(&[json!("definitely-not-a-real-bin-zzz")], &ctx).unwrap(),
+                json!(false)
+            );
+        }
+
+        #[test]
+        fn has_command_non_string_and_empty_read_as_false() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            for arg in [
+                json!(null),
+                json!(42),
+                json!([]),
+                json!({"a": 1}),
+                json!(true),
+                json!(""),
+            ] {
+                assert_eq!(
+                    has_command_fn(std::slice::from_ref(&arg), &ctx).unwrap(),
+                    json!(false),
+                    "arg: {arg}"
+                );
+            }
+        }
+
+        #[test]
+        fn has_command_absolute_path_to_missing_returns_false() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let missing = std::env::temp_dir().join("definitely-not-a-real-zzz-bin");
+            assert_eq!(
+                has_command_fn(&[json!(missing.to_string_lossy().to_string())], &ctx).unwrap(),
+                json!(false)
+            );
+        }
+
+        #[test]
+        #[cfg(unix)]
+        fn has_command_absolute_path_to_executable_returns_true() {
+            use std::os::unix::fs::PermissionsExt;
+            let dir = tempfile::TempDir::new().unwrap();
+            let path = dir.path().join("tool");
+            std::fs::write(&path, "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            assert_eq!(
+                has_command_fn(&[json!(path.to_string_lossy().to_string())], &ctx).unwrap(),
+                json!(true)
+            );
+        }
+
+        #[test]
+        #[cfg(unix)]
+        fn has_command_absolute_path_to_non_executable_returns_false() {
+            use std::os::unix::fs::PermissionsExt;
+            let dir = tempfile::TempDir::new().unwrap();
+            let path = dir.path().join("data.txt");
+            std::fs::write(&path, "not executable\n").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            assert_eq!(
+                has_command_fn(&[json!(path.to_string_lossy().to_string())], &ctx).unwrap(),
+                json!(false)
+            );
+        }
+
+        #[test]
+        fn has_command_directory_returns_false() {
+            let dir = tempfile::TempDir::new().unwrap();
+            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            assert_eq!(
+                has_command_fn(&[json!(dir.path().to_string_lossy().to_string())], &ctx).unwrap(),
+                json!(false)
+            );
+        }
+
+        #[test]
+        fn has_command_tilde_is_not_expanded() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            assert_eq!(
+                has_command_fn(&[json!("~/bin/x")], &ctx).unwrap(),
+                json!(false)
+            );
+        }
+
+        #[test]
+        fn has_command_relative_path_is_not_resolved() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            assert_eq!(
+                has_command_fn(&[json!("./mytool")], &ctx).unwrap(),
+                json!(false)
+            );
+            assert_eq!(
+                has_command_fn(&[json!("bin/mytool")], &ctx).unwrap(),
+                json!(false)
+            );
+        }
+
+        #[test]
+        #[serial_test::serial]
+        fn has_command_relative_path_ignores_existing_cwd_executable() {
+            // Regression: `which::which` resolves relative paths against the
+            // process CWD, so a real executable at `./mytool` used to read as
+            // `true`. The spec pins relative paths to `false` regardless of
+            // what exists under the CWD.
+            #[cfg(windows)]
+            const TOOL: &str = "mytool.bat";
+            #[cfg(not(windows))]
+            const TOOL: &str = "mytool";
+
+            let dir = tempfile::TempDir::new().unwrap();
+            std::fs::create_dir(dir.path().join("bin")).unwrap();
+            for rel in [TOOL, &format!("bin/{TOOL}")] {
+                let path = dir.path().join(rel);
+                std::fs::write(&path, "#!/bin/sh\n").unwrap();
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(
+                        &path,
+                        std::fs::Permissions::from_mode(0o755),
+                    )
+                    .unwrap();
+                }
+            }
+            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+
+            let original = std::env::current_dir().unwrap();
+            std::env::set_current_dir(dir.path()).unwrap();
+            let dot_relative = has_command_fn(&[json!(format!("./{TOOL}"))], &ctx);
+            let bare_relative = has_command_fn(&[json!(format!("bin/{TOOL}"))], &ctx);
+            std::env::set_current_dir(&original).unwrap();
+
+            assert_eq!(dot_relative.unwrap(), json!(false));
+            assert_eq!(bare_relative.unwrap(), json!(false));
+        }
+
+        #[test]
+        fn has_command_requires_exactly_one_arg() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            assert!(has_command_fn(&[], &ctx).is_err());
+            assert!(has_command_fn(&[json!("sh"), json!("extra")], &ctx).is_err());
+        }
+
+        #[test]
+        fn has_command_dispatches_by_canonical_and_alias() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            assert_eq!(
+                dispatch_fs("has_command", &[json!("definitely-not-a-real-bin-zzz")], &ctx)
+                    .unwrap()
+                    .unwrap(),
+                json!(false)
+            );
+            assert_eq!(
+                dispatch_fs("hascommand", &[json!("definitely-not-a-real-bin-zzz")], &ctx)
+                    .unwrap()
+                    .unwrap(),
+                json!(false)
             );
         }
     }
