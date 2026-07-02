@@ -66,10 +66,38 @@ that research here. Focus on:
       > Guidance worth documenting: user config blocks are static while CLI catalogs
       > self-update — best practice is removing a manual block once the catalog covers
       > that model. Note whether {{state.name}} makes this easy or painful.
+    - **Cross-cloud bridging:** can the user route {{state.name}} at a *different cloud
+      vendor's* API via those same override mechanisms (e.g. a non-OpenAI model on
+      Codex, a non-Anthropic model on Claude Code)? Name the mechanism concretely
+      (which config key or env var) and give a working-looking example. The example
+      must be consistent with the API standard(s) {{state.name}}'s client actually
+      speaks — if the target vendor's native API does not serve that standard, show
+      the required translation proxy (e.g. LiteLLM) instead of a direct base URL
+      that cannot work
 - `## Adding Local Models` Section
-    - For each runner (Ollama, oMLX, LM Studio, llama.cpp, vLLM): is it supported
-      natively, via the OpenAI-compatible shim, or not at all? Give a concrete config
-      example for at least the two most practical runners
+    - **Framing — read this before researching:** local-runner support is a property
+      of **API-standard bridging**, not of {{state.name}} "knowing about" a runner.
+      Most runners expose an OpenAI-compatible endpoint, and some also expose an
+      Anthropic-compatible one, so any provider that allows a base-URL override can
+      use them. The question is never "does {{state.name}} support Ollama" — it is
+      "which API standards can {{state.name}}'s model client speak, and how is its
+      base URL redirected to a local endpoint?"
+    - **Runner-side ground truth:** the runner-side facts (default ports, endpoint
+      paths, which API standards each runner speaks) are already researched. READ the
+      frontmatter of `{{ctx.repo_root}}/claudine/docs/research/local_runners/*.md`
+      (especially each runner's `api_standards` records) as ground truth instead of
+      re-researching runners; your examples must be consistent with it
+    - For each runner (Ollama, oMLX, LM Studio, llama.cpp, vLLM): classify the
+      integration path — first-class integration shipped by {{state.name}}, a
+      base-URL override onto a standard the runner speaks, a translation proxy
+      required, or genuinely unsupported. Give a concrete config example for at least
+      the two most practical runners
+      > **Anti-pattern — do not do this:** never describe the absence of first-class
+      > runner integration as "no support" when a base-URL override path exists. If
+      > {{state.name}}'s client speaks a standard the runner serves (e.g. Ollama and
+      > oMLX both serve the Anthropic Messages API; nearly all runners serve the
+      > OpenAI API), that is a supported path — classify it as a base-URL override
+      > and show it working.
     - How local model ids are written (e.g. `ollama/gemma3:27b` — note size/quantization
       tags)
 - `## Environment Overrides` Section
@@ -125,8 +153,16 @@ Follow these steps exactly:
     - `metadata_overrides` - the per-model keys a user may declare when adding a model
     - `merge_semantics` - `merge`, `shadow`, `replace`, or `unknown`
     - `local_runners` - one record per runner (`ollama`, `omlx`, `lmstudio`,
-      `llamacpp`, `vllm`, `other`): `supported` (`native`/`openai_compatible`/
-      `unsupported`), a concrete `example` for supported ones, `notes`
+      `llamacpp`, `vllm`, `other`): `integration` (`first_class`/`base_url_override`/
+      `proxy_required`/`unsupported`), `standard` (the API standard the path rides
+      on: `openai_compatible`/`anthropic_compatible`/`bespoke`; omit for
+      `unsupported`), a concrete `example` for any supported path, `notes`. Records
+      must be consistent with the local_runners ground-truth frontmatter and with
+      `api_standards` above — `unsupported` is only valid when {{state.name}} has no
+      base-URL override on any standard that runner speaks
+    - `cloud_bridge` - `supported` (boolean: can {{state.name}} be routed at a
+      different cloud vendor's API?), `mechanism` (the config key / env var / adapter
+      involved), `example` (a concrete working-looking invocation or config block)
     - `default_model_site` - where the user pins their default model
     - `env_vars` - one record per environment variable that redirects model endpoints
       or selection: `name` + `effect`

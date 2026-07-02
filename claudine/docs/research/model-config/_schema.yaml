@@ -36,9 +36,23 @@ $schema:
     # shadow (override same-id entries), or replace the catalog entirely.
     merge_semantics: enum(merge,shadow,replace,unknown; required)
 
-    # One record per local-model runner: native = first-class integration,
-    # openai_compatible = works via the generic shim, unsupported = no path.
-    local_runners: "{ runner: enum(ollama,omlx,lmstudio,llamacpp,vllm,other; required), supported: enum(native,openai_compatible,unsupported; required), example: string, notes: string }[]"
+    # One record per local-model runner. Support is a property of API-standard
+    # BRIDGING, not of the provider "knowing about" the runner:
+    #   first_class       = the provider ships explicit runner integration
+    #   base_url_override = works by pointing the provider's OpenAI/Anthropic-
+    #                       compatible client at the runner's endpoint
+    #   proxy_required    = needs a translation shim between the provider's
+    #                       API standard and what the runner speaks
+    #   unsupported       = no path (requires that the provider has no
+    #                       base-URL override on any standard the runner speaks)
+    # `standard` names the API standard the integration path rides on.
+    # Runner-side facts (ports, endpoint paths, standards) come from the
+    # local_runners research topic's frontmatter — the ground truth.
+    local_runners: "{ runner: enum(ollama,omlx,lmstudio,llamacpp,vllm,other; required), integration: enum(first_class,base_url_override,proxy_required,unsupported; required), standard: enum(openai_compatible,anthropic_compatible,bespoke), example: string, notes: string }[]"
+
+    # Can the user route this provider at a DIFFERENT cloud vendor's API
+    # (e.g. a non-OpenAI model on Codex) via the same override mechanisms?
+    cloud_bridge: "{ supported: boolean(required), mechanism: string, example: string }"
 
     # Where the user pins their default model (config key, env var, flag).
     default_model_site: string
