@@ -260,11 +260,14 @@ Two sources of new fields:
 | `logging` | agent-logging | log directory per OS, format, has-desktop-app, desktop-log parity, schema URL |
 | `models` | agent-models | **out-of-box focus**: default offerings (exact accepted strings + `catalog_id` mapping), selection mechanisms, precedence, dynamic listing |
 | `model_config` | *(authored 2026-07-02 — `docs/research/model-config/`, sidecar validated, dry-run clean ×9; fleet run pending)* | **user-extension focus**: config file/schema for adding models, API-standard (`openai_compatible`/`anthropic_compatible`/`bespoke`), adapter mechanism (e.g. OpenCode's `npm` key), base-URL delivery, metadata-override shape (cost/limit/modalities), merge-vs-shadow semantics against the built-in catalog, per-runner local-model support (ollama, oMLX, LM Studio, llama.cpp, vLLM) |
-| `permissions` | agent-permissions | permission CLI params, config file paths (user/repo), agent-scoped permissions, policy-engine fit |
+| `permissions` | agent-permissions | permission CLI params, config file paths (user/repo), agent-scoped permissions, policy-engine fit; **v2 schema planned** (2026-07-02): per-OS config paths, official-schema classification, defaults-when-unspecified, YOLO defaults, permission CLI switches + env vars |
 | `non_interactive` | non-interactive-sessions | output formats, schema URL/type, use-case detectability matrix (cap approaching/capped/no-funds/auth/…) |
 | `usage` | usage | usage-data acquisition strategy (api/cli/pty-scrape), dashboard URL |
 | `cli` | agent-cli | version, homepage/repo/docs URLs, full switch inventory (or a pointer to it) |
-| `env_vars` | *(planned)* | recognized env vars, model env chain, sanitization allow-list |
+| `local_runners` | *(authored + verified 2026-07-02 — `docs/research/local_runners/`, 5 runner docs + `local-runners` skill; see `spike-local-runners.md`)* | **runner-side focus**: per-OS binaries/installs, OpenAI/Anthropic API surfaces, detection probes (a future `sniff` surface), config, model-id grammar, traps |
+| `hooks` | *(planned — decided 2026-07-02, green-field prompt; see `hl-approach.md` §A)* | per-event payload schemas, `capability: can_block/can_mutate/observe_only`, config file/format/section, mapping onto the Claudine-owned canonical-event enum |
+| `skills` / `slash_commands` / `subagents` | agent-skills / slash-commands / subagents *(planned — decided 2026-07-02, three topics sharing one vocabulary block; see `hl-approach.md` §A)* | config formats, user/repo scopes with per-OS paths, recognized/required metadata keys, invocation grammar (commands) — feeds the `linking` portability classification |
+| `env_vars` | *(planned — refocused 2026-07-02: domain topics own their domain's env vars)* | sanitization allow-lists, precedence chains, general env-recognition behavior |
 | `resume` | *(planned)* | resume flags, session-ID injection pattern |
 | `mcp` | *(planned)* | config location/format, security posture, event visibility |
 | `streaming` | *(planned)* | protocol, event coverage, think-delimiter quirks |

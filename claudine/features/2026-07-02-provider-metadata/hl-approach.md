@@ -25,28 +25,62 @@ A. Research contracts ──► B. Catalog & identity ──► C. Claudine gene
 
 ### A — Finish the research-contract layer (in flight)
 
-Immediate: local-runners fleet ([local-runner-plan.md](local-runner-plan.md)), then the
-model-config fix ([model-config-plan.md](model-config-plan.md)). Then sidecars +
-verification pattern for the remaining existing topics (usage, agent-cli,
-non-interactive-sessions) and the planned ones (env-vars, resume, MCP, streaming,
-signals). Each new topic follows the now-standard recipe: schema designed backwards from
-catalog fields → pilot → evaluate → fleet. The `requires_claudine_update` queue is
-triaged as topics land (Kimi 2.0 protocol fix rides the streaming/signals topics).
+Immediate: ~~local-runners fleet~~ (done 2026-07-02 — see
+[spike-local-runners.md](spike-local-runners.md)), then the model-config fix
+([model-config-plan.md](model-config-plan.md)). Then sidecars + verification pattern for
+the remaining existing topics (usage, agent-cli, non-interactive-sessions) and the
+planned ones (hooks, agent-skills, slash-commands, subagents, agent-permissions v2,
+resume, MCP, streaming, signals, env-vars — the last refocused; see below). Each new
+topic follows the now-standard recipe: schema designed backwards from catalog fields →
+pilot → evaluate → fleet → evaluate again → targeted fixes. The
+`requires_claudine_update` queue is triaged as topics land (Kimi 2.0 protocol fix rides
+the streaming/signals topics).
 
-> TODO: we should also add topics for:
->
-> - `hooks` - what event hooks does the agent support? what are the request and response hook schemas for each event? which events can stop execution of the running job versus those just used to extract information from a running process. How do the events an agent supports map to Claudine's canonical event model? What files are used to configure? What is the schema for these configuration files (or at least the "section" used for hook config)?
-> - `agent-skills` - all agents support "agent skills" but there is some variance around config files, config file formats (json, yaml, markdown frontmatter, toml, etc.). Each Agent should also support the idea of "user scope" versus "repo scope" separation which allows skills to be defined across users or for a particular repo but there are often differences in terms of what metadata key/value pairs are recognized and or required. 
-> - `slash-commands` - all agents support "slash commands" even if they call it something else (e.g., "prompts", etc.). Like "agent skills" there is important variance and in fact slash commands tends to have far greater variance than agent skills do. 
-> - `agent-permissions` 
->     - what configuration files are used (user versus repo scoped); this should be OS specific
->     - what is the schema for permissions? is it a formal, informal, or observed schema?
->     - what are the "default permissions" for the given agent if nothing is specified?
->     - what are the default permissions for YOLO mode (if supported)?
->     - what CLI switches does the Agent provide to modify the permissions?
->     - what ENV variables -- if any -- would effect permissions?
+**New topics (decided 2026-07-02).** Four additions, all green-field prompt authoring —
+the legacy `docs/research/hooks/` and `docs/research/cross-referencing/` areas have
+research outputs but no generating prompt, so they cannot be "migrated". They serve as
+**evaluator variance-check inputs** (evaluators diff new claims against them; changes are
+either drift worth documenting or errors worth catching) and are `git rm`'d at promotion
+so a topic directory never carries two generations of truth (the roster filenames differ
+from the legacy ones, so stale siblings would otherwise accumulate — observed with
+`claude.md` vs `claude-code.md` in agent-logging).
 
-QUESTION: what is the best set of seams to use to achieve full research coverage? Do any of the new topics above overlap in scope to existing research areas? Let's finalize this before we do any more research work.
+- `hooks` — per-event records: request/response payload schemas, `capability:
+  enum(can_block, can_mutate, observe_only)`, config file + format + section (evidence
+  for the spec's `config_format` granularity question), and a `canonical_event` mapping
+  onto a **Claudine-owned enum of the 16 lifecycle events** (signal-catalog rule:
+  research fills mappings, never invents taxonomy). Feeds `events`/`adapters` and makes
+  the unified-hooks support matrix machine-checkable.
+- `agent-skills`, `slash-commands`, `subagents` — **three separate topics, run as one
+  wave** (separation wins: breadth is where research quality degrades, the evaluate→fix
+  loop is per-document, and slash-commands has the greatest variance of the three).
+  They share one vocabulary block (`scope` enum with per-OS paths, `format` enum,
+  `metadata_keys[]` record shape), duplicated across the three sidecars with a comment
+  naming the canonical source until darkmatter supports schema fragments — same pending
+  situation as `unit`/`zone`/`confidence` shared with the signal catalog. Cross-kind
+  resource-layout facts (`user_dir`/`repo_dir`, discovery order) are identity facts and
+  live in `providers.yaml`, not in any of the three. Feeds the `linking` module's
+  portability classification. "Shared scripts folders" from the legacy area rides
+  inside `agent-skills` if it earns a record; otherwise dropped.
+
+**Not a new topic:** the agent-permissions bullet list (OS-specific config paths,
+formal/informal schema classification, defaults-when-unspecified, YOLO defaults, CLI
+switches, env vars) is a **v2 schema for the existing live `agent-permissions` topic**
+— reuse the `platforms[]` per-OS pattern from local-runners and the standard
+`has_official_schema: enum(formal,informal,none)` (+ `confidence` for observed facts).
+
+**Env-vars ownership rule (decided):** domain topics own their domain's env vars
+(model-config, local-runners, and permissions-v2 already carry `env_vars[]` records);
+the planned standalone `env-vars` topic is **refocused** to what no domain topic owns —
+sanitization allow-lists, precedence chains, and general env-recognition behavior — or
+becomes a generated consolidation view over the domain topics. Never research the same
+env var in two places.
+
+**Process amendment (from the local-runners cycle):** the recipe is pilot → evaluate →
+fleet → **evaluate again** → targeted fixes. Every fresh generation introduced new
+errors — including in previously-clean documents and once in a hand-written correction
+— so the post-fleet adversarial pass is non-optional, and hand corrections get the same
+verification as generated content.
 
 ### B — Model ground truth & identity (unchained-ai side)
 

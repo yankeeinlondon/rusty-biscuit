@@ -113,14 +113,56 @@ correction the spec's `docs/providers/overrides/` layer is designed for
   legacy model dirs; the current default is `~/.lmstudio/models` (pointer
   file `~/.lmstudio-home-pointer` relocates it).
 
-## Remaining known gaps (accepted, not re-run)
+## Codex verification wave (2026-07-02, post-fleet)
 
-- `omlx.md`: `/v1/mcp/*` endpoints still absent from `metadata_endpoints`;
-  brew tap command missing its URL argument; `auth_notes` overstates the
-  localhost skip toggle.
-- `vllm.md`: `/ping` (SageMaker alias) missing; `VLLM_HOST_IP` companion
-  trap unmentioned.
+Ken directed a final full-content evaluation of the four re-run docs plus the
+omlx fixes, all executed by **Codex** (`codex exec
+--dangerously-bypass-approvals-and-sandbox`, prompt via stdin). Verdicts:
+ollama pass_with_issues, lmstudio pass_with_issues, **llamacpp fail, vllm
+fail** — confirming that targeted-re-run docs need their own adversarial pass
+(every fresh k2p7 generation introduced new errors). All flagged defects were
+then fixed by per-doc Codex correction jobs (live-probe-verified; llamacpp's
+job started a temporary router-mode `llama-server` on port 18080 to observe
+auth gating), with skill-file syncs applied by hand. All five docs and the
+skill are now consistent and schema-valid.
+
+Notable truths established by the wave:
+
+- **vLLM Anthropic versions are split**: `/v1/messages` v0.11.1 but
+  `/v1/messages/count_tokens` v0.17.0 (PR #35588) — both earlier "wrong"
+  version claims were each half-right.
+- **llamacpp contamination recurred in a new form** (`/api/show`, `/api/chat`
+  — PR #22165 removed all `/api` routes); cross-runner contamination survives
+  targeted prompt instructions and needs an explicit verification pass.
+- The hand-written allowlist note from the previous round was itself wrong
+  (`/props`/`/metrics` are NOT in server-http.cpp's public set) — corrections
+  need the same adversarial verification as generated content.
+- Ollama's OpenAI deviations list was stale against current docs
+  (`tool_choice`/`logit_bias`/`user`/`n`/image URLs now supported; verified
+  live); `/v1/responses` first named in v0.14.2 release notes.
+- LM Studio fresh-install default is `~/.lmstudio`; `~/.cache/lm-studio` is
+  legacy migration only; `/openapi.json` returns an error body, not a schema.
+
+### Tooling bugs found while running the wave
+
+1. **claudine compose→codex non-interactive hang.** `prompt_delivery` in
+   `cli/src/commands/wrap/profile/codex.rs` returns `Stdin` for
+   non-interactive runs (comment: "Codex exec reads from stdin"), but the
+   spawned argv carries no `exec` subcommand — bare `codex` opens the
+   interactive TUI, which without a TTY spawns `$EDITOR` (observed: `nvim
+   ~/.claudine/.codex/instructions.md`) and blocks forever. Neither
+   `timeout` nor `step_timeout` fires (hang precedes streaming). Reproduced
+   with frontmatter `agent: codex` and with the `--codex` switch. Workaround
+   used: raw `codex exec` with stdin prompt.
+2. **Stale codex on PATH**: `/usr/local/bin/codex` (old npm install,
+   unauthenticated, crashes under no-TTY) shadows the real
+   `~/.bun/bin/codex`.
+
+## Remaining known gaps
+
+- `vllm.md`: `/ping` (SageMaker alias) still unrecorded; `VLLM_HOST_IP`
+  companion trap mentioned only alongside `VLLM_PORT`.
 - `lmstudio.md`: `llmster` daemon captured only in `alt_binaries`;
-  first-run-bootstrap trap present in body but thin in `traps`.
-- Evaluators judged all of these minor; they are next-regeneration fodder,
-  not catalog-poisoning errors.
+  Linux/Windows home-pointer relocation marked inferred (no official source).
+- Judged minor by evaluators; next-regeneration fodder, not
+  catalog-poisoning errors.
