@@ -1,13 +1,15 @@
 ---
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Roo), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
-last_updated: 2026-06-30
-hash: bbb32528c11dc53d-5b2e5d28ea402568
+last_updated: 2026-07-02
+hash: bbb32528c11dc53d-f8126b812aaf4f61
 ---
 
 ## Overview
 
 Claudine is a universal event handler, shared-resource linker, MCP catalog manager, and composition harness for agentic CLIs. It normalizes **16 lifecycle events** across **8 providers** (Claude Code, Codex CLI, Gemini CLI, Goose, Kimi Code, OpenCode, Qwen Code, and Roo Code) into a single configuration model, fires **6 action types** — TTS, sound effects, logging, shell commands, reports, and blocking calls — when those events fire, synchronizes skills/commands/agents/scripts between providers, manages a provider-agnostic MCP catalog plus provider-specific import/sync/runtime behavior, and provides three Markdown composition commands (`compose`, `inline-compose`, `sequence`) that flow through the same wrapper-grade execution pipeline as the provider wrappers.
+
+The **8 providers** above are the compiled `Provider` enum; the research roster (`claudine/docs/providers.yaml`) intentionally runs ahead of it (Pi and Kilo Code are researched but not yet code-supported; Roo is paused). Automating that gap — research-driven provider metadata, codegen, and the model ground-truth catalog — is an active workstream specced in `claudine/features/provider-metadata/spec.md`; consult it before extending provider metadata by hand.
 
 The package follows the monorepo `lib` + `cli` split: library crate `claudine`, CLI crate `claudine-cli` (binary `claudine`). A third sub-crate, `claudine-contract` (`claudine/contract`), implements `biscuit_contract::inference::InferenceAdapter` by running a provider as a single non-interactive, **tool-free, filesystem-isolated** session and returning its final assistant text — letting deterministic consumers (Reaper, Darkmatter) delegate to an agentic CLI via `Arc<dyn InferenceAdapter>` without depending on `claudine` directly. It depends on `claudine` (lib) but **not** `claudine-cli`. v1 enables Claude and Codex; other providers are reported `Unsupported`. See `claudine/contract/README.md` for the provider support matrix and security posture, and the `biscuit-contract` skill for the contract itself.
 
@@ -189,6 +191,21 @@ Each Agentic CLI's support for skills, slash commands, agents/subagents, and sha
 
 Claudine does not use ACP today but may add it. For ACP work use the **acp** skill; for ACP + observability use the **agent-observability** skill.
 
-### CLI Research
+### Topic Research (schema-enforced fleets)
 
-Subcommands, switches, non-interactive execution, and model selection per platform. *No CLI research documents are available yet.*
+Per-provider, per-topic research documents produced by `claudine sequence` over the
+roster, with structured facts in frontmatter validated by a `_schema.yaml` sidecar
+(`$schema: ./_schema.yaml`). Live topics under `claudine/docs/research/`:
+
+- `agent-logging/` — log surfaces, per-site time semantics (unit/zone), record types
+- `agent-models/` — out-of-box models, selection mechanisms, precedence, dynamic listing
+- `agent-permissions/` — permission CLI params, config files, YOLO, PolicyEngine fit
+- `model-config/` — user-side model extension (cloud + local); **under quality revision**
+  (see `claudine/features/provider-metadata/model-config-plan.md`) — verify a document's
+  `last_updated` before trusting its local-runner claims
+- `agent-cli/`, `non-interactive-sessions/`, `usage/` — earlier topics, sidecar schemas
+  pending
+
+The pattern (sidecar rules, lifecycle verification stacks, pilot technique) is documented
+in `claudine/features/provider-metadata/spec.md` and its spike findings. New topics
+follow that recipe; do not invent a parallel research format.
