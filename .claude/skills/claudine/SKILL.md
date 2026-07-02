@@ -2,7 +2,7 @@
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Roo), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
 last_updated: 2026-07-02
-hash: bbb32528c11dc53d-ad38998fbc1a85a7
+hash: bbb32528c11dc53d-5e086512b71e6078
 ---
 
 ## Overview
@@ -203,6 +203,13 @@ roster, with structured facts in frontmatter validated by a `_schema.yaml` sidec
 - `model-config/` — user-side model extension (cloud + local); **under quality revision**
   (see `claudine/features/2026-07-02-provider-metadata/model-config-plan.md`) — verify a document's
   `last_updated` before trusting its local-runner claims
+- `local_runners/` — the runner-side counterpart to `model-config`: local model
+  runners (Ollama, LM Studio, oMLX, Llama.cpp, vLLM) as servers — per-OS binaries and
+  installs, OpenAI/Anthropic API surfaces, detection probes, config, model-id grammar,
+  traps. Roster: `claudine/docs/local-runners.yaml`; spike notes:
+  `claudine/features/2026-07-02-provider-metadata/spike-local-runners.md`. For
+  runner-specific depth, prefer the **local-runners** skill (distilled tables); the
+  research docs remain the source of truth.
 - `agent-cli/`, `non-interactive-sessions/`, `usage/` — earlier topics, sidecar schemas
   pending
 
