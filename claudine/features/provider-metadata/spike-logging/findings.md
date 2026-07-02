@@ -206,6 +206,26 @@ permissions 0/9). Three observations worth keeping:
    re-runs idempotent. Verified via dry-run: completed providers skip, missing files
    don't crash (`&&` short-circuits).
 
+## Fleet completion (2026-07-02, kimi-for-coding/k2p7)
+
+After switching both sequences to `kimi-for-coding/k2p7` (ZAI capped until Jul 4), the
+resume run finished everything: **agent-models 9/9** (4 skipped via the initialize guard —
+first production use, worked exactly as designed — 5 researched) and **agent-permissions
+9/9**. Combined with logging, all **27 documents across 3 topics are schema-valid**, and
+the `requires_claudine_update` reasons form a coherent work queue (18/27 true): e.g. Kimi
+populates its model catalog dynamically from `/models` at login (no static list —
+challenges `static_models`), Codex permissions are a dual-layer sandbox+approval model
+with Starlark execpolicy rules, OpenCode's last-rule-wins wildcard permission grammar
+doesn't map cleanly onto PolicyEngine's axes.
+
+**Anomaly + backlog item — requested model silently substituted.** One permissions launch
+resolved OpenCode's primary model to `zai-coding-plan/glm-5.2` despite the frontmatter
+(and `--dry-run` metadata, verified) saying `kimi-for-coding/k2p7`; the identical rerun
+minutes later used k2p7. Transient OpenCode-side fallback. Claudine had the evidence
+in-stream (`llm_call_start` model ≠ requested model) and stayed silent — a **model-mismatch
+guard** (warn, or abort like the runaway guards) belongs on the wrapper backlog. It is
+also a signal-catalog row: `model_resolved` / `model_fallback` detection is exactly this.
+
 ## Implications fed back into the spec
 
 - The flat-record (`surfaces[]`/`time_fields[]`/`record_types[]`) approach is confirmed

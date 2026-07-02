@@ -459,10 +459,14 @@ Ordered by leverage; several are prerequisites for codegen landing cleanly:
 
 - **Phase 0 — contracts.** Every research topic gets a SimplifiedSchema designed backwards
   from the catalog fields it feeds and moved to the proposed `_schema.yaml` sidecar.
-  **Status:** agent-logging done + fleet-run 9/9; agent-models and agent-permissions
-  normalized 2026-07-01 (sidecars validated positive/negative, sequence files converted to
-  the sidecar + success-verification pattern, `--dry-run` clean ×9) — research runs
-  pending; usage / agent-cli / non-interactive-sessions still need sidecars authored;
+  **Status:** agent-logging, agent-models, and agent-permissions all done — sidecars
+  validated, sequence files carry the full pattern (sidecar `$schema` + fixed `update:` +
+  `initialize` same-day skip + `success` verification stack), and all three fleets ran
+  9/9 (27 schema-valid docs as of 2026-07-02; 18 flag `requires_claudine_update` with
+  actionable reasons). Usage / agent-cli / non-interactive-sessions still need sidecars
+  authored. New wrapper backlog item from the runs: a **model-mismatch guard** (observed
+  `llm_call_start` model ≠ requested model should warn/abort — one OpenCode launch
+  silently substituted GLM for the requested k2p7);
   identity facts consolidate into `providers.yaml`; render-path inventory (rendering
   workstream milestone 1). **Spiked 2026-07-01 on the logging topic, promoted, and pilot-verified** — see
   [spike-logging/findings.md](spike-logging/findings.md); the validated schema lives at
