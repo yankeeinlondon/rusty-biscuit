@@ -23,6 +23,18 @@
 //! `browser_render_with_max_width` /
 //! `browser_render_authored_side_margins_suppress_centering` unit tests). The
 //! change is therefore **intended**, not regressive, and is accepted here.
+//!
+//! ## `Width::Auto` fills available width (accepted)
+//!
+//! Two terminal snapshots re-baselined from content-hugging to width-filling
+//! tables: `ref_centered_table_terminal` (fills the full 80-column width) and
+//! `ref_table_max_width_terminal` (fills to the 60ch cap). This mirrors the
+//! repo-wide `Width::Auto` fill change (`feat(biscuit-terminal): make
+//! Width::Auto fill the available width`) that regenerated the
+//! `layout_matrix__Table__*` snapshots; the last column absorbs the slack. A
+//! centered table that already fills its container shows no visible offset —
+//! alignment only shifts a table narrower than the available width. The
+//! matching browser snapshots were unaffected (already re-baselined above).
 
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::layout::DarkmatterPage;

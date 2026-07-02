@@ -71,7 +71,7 @@ use darkmatter::markdown::output::{ColorDepth, TerminalOptions};
 use darkmatter::markdown::render_tree::{
     TerminalCodeRenderer, fold_markdown_spanned_with_frontmatter, fold_markdown_to_document,
 };
-use renderable::layout::Alignment;
+use renderable::layout::{Alignment, Length, TargetValue};
 use renderable::tree::{RenderStrictness, SourceDescriptor};
 use serial_test::serial;
 use std::fs;
@@ -425,10 +425,15 @@ const RENDER_PROBE_FIXTURE: &str = "| A | B |\n|---|---|\n| 1 | 2 |\n\n\
 /// OSC8). Pinning TrueColor keeps the color axis deterministic; the OSC8 axis is
 /// left to ambient detection on purpose — that is the capability this probe
 /// exists to exercise against a real pane. The `matched` variant adds a
-/// *matched* layout-only `Tables` center-alignment policy (the document's table
-/// matches it). Centering is layout-only and bakes no color, so a correct
-/// renderer leaves the unrelated code block's color and the link's OSC8 behavior
-/// identical to `no-policy`.
+/// *matched* layout-only `Tables` policy (the document's table matches it) that
+/// caps the table width and centers it. The `max-width` cap is load-bearing:
+/// since `Width::Auto` now fills the available width, center alignment alone
+/// leaves a full-width table with no visible offset — the cap makes the table
+/// narrower than the pane so centering shifts it right, which
+/// [`level2_matched_layout_policy_matches_no_policy_capabilities_in_real_terminal`]
+/// relies on as proof the policy actually matched. Both are layout-only and bake
+/// no color, so a correct renderer leaves the unrelated code block's color and
+/// the link's OSC8 behavior identical to `no-policy`.
 fn render_probe_to_stdout(variant: &str) {
     let term = Terminal::default();
     let md: Markdown = RENDER_PROBE_FIXTURE.into();
@@ -437,6 +442,7 @@ fn render_probe_to_stdout(variant: &str) {
     if variant == "matched" {
         let mut policy = ComponentPolicy::default();
         policy.layout.alignment = Alignment::Center;
+        policy.layout.max_width = Some(TargetValue::universal(Length::Ch(40)));
         page = page.with_component_policy(PageComponent::Tables, policy);
     }
 
@@ -1678,8 +1684,9 @@ fn level2_unmatched_policy_matches_no_policy_color_in_real_terminal() {
 /// So both variants are rendered by [`drive_render_probe`] — which re-execs this
 /// test binary's [`level2_render_probe_entrypoint`] as a foreground command
 /// *inside* the WezTerm pane (a real tty). Each renders the identical fixture (a
-/// table + a syntax-highlighted code block + a hyperlink); `matched` also
-/// centers the table via a layout-only policy the table matches. The assertions
+/// table + a syntax-highlighted code block + a hyperlink); `matched` also caps
+/// the table width and centers it via a layout-only policy the table matches.
+/// The assertions
 /// then compare the captured foreground colors **and** the actual OSC8 hyperlink
 /// openers (`wezterm cli get-text --escapes` re-emits the full opener including
 /// the URI, verified), proving the matched layout changes no capability: the
@@ -1706,10 +1713,12 @@ fn level2_matched_layout_policy_matches_no_policy_capabilities_in_real_terminal(
         return;
     };
 
-    // Premise: the policy actually matched the table — centering shifts the
-    // header row right, so the matched capture has leading whitespace the
-    // no-policy capture lacks. (A no-op policy would make the parity checks
-    // below vacuous.)
+    // Premise: the policy actually matched the table — the capped width plus
+    // center alignment shifts the header row right, so the matched capture has
+    // leading whitespace the (full-width) no-policy capture lacks. Center
+    // alignment alone would not, since `Width::Auto` fills the pane; the
+    // `max-width` cap is what makes centering observable. (A no-op policy would
+    // make the parity checks below vacuous.)
     let table_header = |frame: &CapturedFrame| {
         frame
             .plain
