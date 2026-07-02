@@ -1,5 +1,5 @@
-set dotenv-load := true
-set positional-arguments := true
+set dotenv-load
+set positional-arguments
 
 # set allow-duplicate-recipes
 
@@ -68,13 +68,13 @@ test-cli *args="":
 # test just the Claudine Library
 test-library *args="":
     @just _test claudine {{ args }}
-    
+
 # test the rendezvous core, daemon, and test-client crates
 test-rendezvous *args:
-    @just _test rendezvous-core {{args}}
-    @just _test rendezvous-daemon {{args}}
-    @just _test rendezvous-client {{args}}
-    
+    @just _test rendezvous-core {{ args }}
+    @just _test rendezvous-daemon {{ args }}
+    @just _test rendezvous-client {{ args }}
+
 # Test the library, contract adapter, and CLI.
 test *args="":
     @just _test claudine {{ args }}
@@ -134,7 +134,7 @@ test-browser:
 # by CLAUDINE_CONTRACT_REAL=1 and the provider binary on PATH; each test skips
 # cleanly when its provider/model is unavailable.
 #   - contract adapter against an enabled provider (claude/codex)
-#   - the OpenCode YOLO subagent external-directory regression (compose CLI)
+# - the OpenCode YOLO subagent external-directory regression (compose CLI)
 test-real *args="":
     #!/usr/bin/env bash
     # Run both real-tier binaries independently: one provider being unavailable
@@ -210,6 +210,15 @@ check:
 cli *args="":
     @cargo run -p claudine-cli {{ args }}
 
+# generate model enumeration using the unchained-ai codebase
+generate-models:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "$(sniff repo root)/unchained-ai"
+    just generate-models
+    echo
+    cd -
+
 git-conflict:
     #!/usr/bin/env bash
     base=$(git merge-base HEAD main)
@@ -232,15 +241,14 @@ readme:
 # the directory structure of both CLI and Library
 structure:
     @echo
-    @echo "{{BOLD}}{{GREEN}}Claudine CLI{{RESET}}"
+    @echo "{{ BOLD }}{{ GREEN }}Claudine CLI{{ RESET }}"
     @echo
     @just _structure cli/src
     @echo
-    @echo "{{BOLD}}{{GREEN}}Claudine Library{{RESET}}"
+    @echo "{{ BOLD }}{{ GREEN }}Claudine Library{{ RESET }}"
     @echo
     @just _structure lib/src
     @echo
-
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 
