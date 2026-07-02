@@ -1,29 +1,33 @@
 ---
 sequence: "@claudine/docs/providers.yaml"
 file: "{{ctx.repo_root}}/claudine/docs/research/agent-logging/{{state.file}}"
+# NOTE: `grant:` is not implemented yet — until it is, run this sequence with
+# `--yolo` so the provider can Read files under {{state.user_dir}}; without it
+# OpenCode's external_directory permission is auto-rejected in non-interactive
+# mode and the research agent stops prematurely.
 grant:
     read:
         - "{{state.user_dir}}"
 agent: opencode
-model: zai-coding-plan/glm-5.1
-# all target documents we write to should provide this frontmatter
-target_schema: 
-    created: date
-    last_updated: date(required)
-    agent: string(required)
-    model: string(required)
-    has_schema: enum(formal,informal,none; required)
-    schema_url: string
-    logs_directory: { macos: string, windows: string, linux: string }
-    log_format: enum(jsonl)
-    has_desktop_app: boolean(required)
-    desktop_logs: 
-        same_log_format: boolean
-        same_directory: boolean
-    changes: string[]
-    requires_claudine_update: boolean(required)
-    reason: string
-update: "{{file_exists(file) && markdown_file_empty(file)}}"
+model: zai-coding-plan/glm-5.2
+# the frontmatter contract for target documents lives in the schema sidecar
+# (./_schema.yaml) so the contract is single-sourced and machine-validated
+update: "{{file_exists(file) && !markdown_body_empty(file)}}"
+# make interrupted fleet runs resumable: skip providers already researched today
+initialize:
+    stack:
+        - when: "file_exists(file) && frontmatter(file, 'last_updated') == ctx.today"
+          action:
+              - stderr: "Research for <b>{{state.name}}</b> is already up to date ({{ctx.today}}) — skipping."
+              - skip
+# a provider exiting 0 is not proof the research was written — verify the
+# agent actually stamped today's date before accepting success
+success:
+    stack:
+        - when: "frontmatter(file, 'last_updated') != ctx.today"
+          action:
+              - stderr: "The step reported success but <b>{{file}}</b> was not updated — <code>last_updated</code> is not {{ctx.today}}."
+              - error: "research file was not updated"
 ---
 
 ## Skills
@@ -80,11 +84,12 @@ Follow these steps exactly:
 ::block when="!update"
 - Write and save research to `{{file}}`
 ::end-block
-- Set the `$schema` property of `{{file}}` to:
+- Set the `$schema` property of `{{file}}` to the string `./_schema.yaml`
 
-    {{target_schema}}
-
-    > Note: this is using the `SimpleSchema` schema representation which can be easily converted to JSON schema for validation purposes
+    > This is a file reference to this topic's schema sidecar. Read `_schema.yaml`
+    > (it sits next to this sequence file) before filling frontmatter — it is the
+    > authoritative contract, expressed as a `SimpleSchema`, and `md schema validate`
+    > will enforce it against everything you write.
 
 - Now we will capture other key metadata to the research documents Frontmatter:
     ::block when="!update"
@@ -95,7 +100,14 @@ Follow these steps exactly:
     - `model` - set to "{{env.MODEL || 'default' }}"
     - `has_official_schema` - set to "formal" if a formal schema exists, set to "informal" if an informal schema exists, otherwise set to "none"
     - `schema_url` - if there is a formal or informal schema discovered then set the URL for the schemas definition (always prefer formal over informal); otherwise do not add this property
-    - `logs_directory` - specify where the base of the logs directory is typically located on a host (by operating system): { macos: string, windows: string, linux: string }
+    - `surfaces` - one record per **log surface** the provider writes (session transcripts, subagent transcripts, session/history indexes, prompt history, application logs, state databases, live metadata, statusline). For each record fill the fields defined in `_schema.yaml`:
+        - `path_*` values are **templates**, not literal paths — use placeholders like `{session_id}`, `{sanitized_cwd}`, `{pid}` and keep date-sharding visible (e.g. `sessions/YYYY/MM/DD/...`)
+        - `live_locked` - set true for any surface with live lock/WAL files (e.g. SQLite in WAL mode); these must never be copied or symlinked while the app runs
+        - `schema_versioning` - how the surface signals schema changes: an explicit version field in the data (`explicit_field`), a version suffix in the filename such as `logs_2.sqlite` (`filename_suffix`), or `none`
+    - `time_fields` - one record per **timestamp site** across the surfaces (including timestamps embedded in *filenames*). For each: the `site` (JSONPath-ish location or `filename`), the `unit` (`iso8601`/`unix_seconds`/`unix_millis`), the `zone` (`utc`/`local`/`embedded_offset`/`unspecified`), and your `confidence` (`source_code` > `observed` > `documented` > `inferred`)
+        - **you must answer unit and zone for every site** — if you cannot establish the zone, record `unspecified` with `confidence: inferred`; never omit the record
+    - `record_types` - one record per structured surface: the discriminator field (e.g. `type`) and the **observed** vocabulary of its values
+    - **Evidence requirement:** you have read access to `{{state.user_dir}}` on this host. Inspect the *actual* log files/directories there and prefer what you observe over what documentation claims (`confidence: observed` beats `documented`). Real logs regularly contain surfaces, record types, and time formats the documentation omits.
     - `has_desktop_app` - set as true/false based on whether the given provider not only has a CLI tool but also a desktop based application.
     - `desktop_logs` - as a dictionary:
         - `same_log_format` - set as a boolean value indicating whether the CLI and desktop apps write the same log format/schema or not

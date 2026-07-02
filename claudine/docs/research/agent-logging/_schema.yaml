@@ -1,0 +1,39 @@
+# SimplifiedSchema for the agent-logging research topic.
+#
+# Referenced by each provider research document via `$schema: ./_schema.yaml`.
+# The root `$schema:` key is REQUIRED — it is how darkmatter's resolver
+# classifies this file as a SimplifiedSchema rather than raw JSON Schema
+# (a bare property mapping would validate vacuously).
+#
+# Nested shapes use quoted inline-object literals — YAML-native nested
+# mappings are rejected by the SimplifiedSchema parser today.
+$schema:
+    created: date
+    last_updated: date(required)
+    agent: string(required)
+    model: string(required)
+    has_official_schema: enum(formal,informal,none; required)
+    schema_url: url
+
+    # One record per log surface the provider writes. `live_locked` marks
+    # surfaces with open WAL/lock files that must never be copied or symlinked
+    # (shadow-home hazard). `schema_versioning` records how the surface signals
+    # schema changes. Path values are templates ({session_id}, {sanitized_cwd},
+    # date shards), not resolvable file references — hence `string`, not `file`.
+    surfaces: "{ role: enum(session_transcript,subagent_transcript,session_index,prompt_history,app_log,state_db,live_metadata,statusline,other; required), path_macos: string(required), path_windows: string, path_linux: string, format: enum(jsonl,json,sqlite,text; required), scope: enum(per_session,per_project,global,per_process; required), naming: string, rotation: enum(none,size,time,session; required), live_locked: boolean, schema_versioning: enum(explicit_field,filename_suffix,none), notes: string }[]"
+
+    # Per-site time semantics: forces the unit + timezone questions to be
+    # answered explicitly for every timestamp location (filenames included).
+    # Shares the unit/zone/confidence vocabulary with the signal catalog's
+    # detection records.
+    time_fields: "{ surface: string(required), site: string(required), unit: enum(iso8601,unix_seconds,unix_millis; required), zone: enum(utc,local,embedded_offset,unspecified; required), confidence: enum(source_code,observed,documented,inferred; required) }[]"
+
+    # Observed record-type vocabulary per surface (discriminator path + values).
+    record_types: "{ surface: string(required), discriminator: string(required), values: string[](required) }[]"
+
+    has_desktop_app: boolean(required)
+    desktop_logs: "{ same_log_format: boolean, same_directory: boolean }"
+
+    changes: string[]
+    requires_claudine_update: boolean(required)
+    reason: string
