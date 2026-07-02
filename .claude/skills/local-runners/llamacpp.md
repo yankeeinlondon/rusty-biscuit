@@ -21,10 +21,9 @@ even when auth is enabled.
 | Purpose | Method | Path | auth_gated | Notes |
 | --- | --- | --- | --- | --- |
 | health / identity | GET | `/health` (alias `/v1/health`) | no | `{"status":"ok"}`. 503 while loading. |
-| model list | GET | `/models` (alias `/v1/models`) | no | `owned_by: llamacpp`. No `/api/tags` (Ollama-only). |
+| model list | GET | `/models` (alias `/v1/models`) | no | `owned_by: llamacpp` on `/v1/models` in single-model mode; router-mode `/models` returns per-model status/path metadata. No `/api/*` routes (Ollama-only; removed by PR #22165). |
 | model info / build | GET | `/props` | yes | `build_info` (`b8168-...`); auth-gated when `--api-key` set. |
-| model info (Ollama-style) | POST | `/api/show` | no | `{"model_info":{...},"template":"..."}`. |
-| slots | GET | `/slots` | no | Per-slot processing state; `--no-slots` disables. |
+| slots | GET | `/slots` | yes | Per-slot processing state; `--no-slots` disables; requires key when `--api-key` set. |
 | metrics | GET | `/metrics` | yes | Prometheus; gated by `--metrics` (501 otherwise). |
 | OpenAI chat | POST | `/v1/chat/completions` | opt | Base URL `http://localhost:8080/v1`. Also `/v1/embeddings`, `/v1/rerank`. |
 | Anthropic messages | POST | `/v1/messages`, `/v1/messages/count_tokens` | opt | Base URL `http://localhost:8080`. Since build `b7187`. |
@@ -32,7 +31,8 @@ even when auth is enabled.
 
 ## Config & env vars
 
-Config mechanism: **env vars / CLI flags** — no primary config file. CLI flags take precedence.
+Config mechanism: **mixed** — CLI flags are primary (each maps to a `LLAMA_ARG_*` env var); router
+mode can additionally load model presets from an INI file via `--models-preset`.
 
 | Variable | Effect |
 | --- | --- |
@@ -64,8 +64,10 @@ No registry namespace. Client-facing model ID is, in order: the `--alias` value;
   then fail (the model computes no logits).
 - `--rerank` / `--reranking` forces embedding mode + rank pooling; it is not a chat server.
 - `LLAMA_ARG_PORT` sets the API port. There is no `LLAMA_PORT`; vLLM's `VLLM_PORT` is unrelated.
-- `--api-key` does **not** gate `/health` or `/models`; those stay public, while `/props` and
-  `/metrics` require the key when auth is enabled.
+- `--api-key` does **not** gate `/health`, `/models`, `/v1/models`, or `/` (the public allowlist),
+  while `/props`, `/slots`, and `/metrics` require the key when auth is enabled.
+- In single-model mode the request `model` field is **ignored** (any value accepted); it only
+  routes requests in router mode.
 - `-hf` downloads share the HuggingFace cache; there is no separate llama.cpp model store.
 - The client-visible model ID is the `--alias` value or GGUF filename, not a registry name.
 

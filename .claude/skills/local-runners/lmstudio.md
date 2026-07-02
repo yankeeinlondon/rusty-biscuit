@@ -35,7 +35,7 @@ Config mechanism: **mixed** (JSON files under the resolved home dir + CLI flags 
 
 | File / var | Role |
 | --- | --- |
-| `~/.lmstudio-home-pointer` | Points to the active home dir (this host: `~/.cache/lm-studio`). |
+| `~/.lmstudio-home-pointer` | Points to the active home dir. Fresh installs use `~/.lmstudio` (Windows `%USERPROFILE%\.lmstudio`); `~/.cache/lm-studio` occurs only as a legacy migration (this host). |
 | `{home}/.internal/http-server-config.json` | Port, bind (`networkInterface`), CORS, JIT loading. |
 | `{home}/settings.json` | App preferences; `downloadsFolder` overrides model dir. |
 | `LMS_SERVER_HOST` | Default bind for `lms server start` (overridden by `--bind`). |
@@ -64,7 +64,10 @@ accepts a quantization suffix `id@quant` (e.g. `llama-3.1-8b@q4_k_m`). File impo
 - `lms server start` without `--port` reuses the last-used port (from http-server-config.json), not
   necessarily 1234.
 - `justInTimeModelLoading` changes whether `/v1/models` lists all downloaded models or only loaded ones.
-- `/openapi.json` returns 200 but with empty `paths` — not a usable schema source today.
+- `/openapi.json` returns HTTP 200 with an `{"error":"Unexpected endpoint or method..."}` body —
+  there is no OpenAPI document; not a schema source.
+- The `lms` CLI ships with the app but only works after LM Studio has run at least once, then
+  `~/.lmstudio/bin/lms bootstrap` (Windows: `cmd /c %USERPROFILE%/.lmstudio/bin/lms.exe bootstrap`).
 
 ## Integration hooks
 

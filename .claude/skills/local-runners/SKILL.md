@@ -2,7 +2,7 @@
 name: local-runners
 description: Detecting, configuring, and wiring local model runners into agentic CLIs. Use when working with Ollama, LM Studio, oMLX, llama.cpp (llama-server), or vLLM; probing which local runners are installed or running; hitting OpenAI-compatible local endpoints (/v1) or Anthropic-compatible /v1/messages; serving local models; or connecting a local model to OpenCode or Claude Code via base URL, ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN, or runner-native launch hooks.
 last_updated: 2026-07-02
-hash: 36cdc2cd15df026f-f7d9de1e5d49f38b
+hash: 36cdc2cd15df026f-d34ddf8923ebe8ed
 ---
 
 # Local Model Runners
@@ -21,7 +21,7 @@ base URL against the same running server.
 | Ollama | `ollama` | 11434 | 127.0.0.1 | `http://localhost:11434/v1` | `http://localhost:11434` | `GET /` → `Ollama is running` | none | env vars |
 | LM Studio | `lms` | 1234 | 127.0.0.1 | `http://localhost:1234/v1` | `http://localhost:1234` | `GET /v1/models` → `owned_by: organization_owner` | optional key | JSON files + CLI + GUI |
 | oMLX | `omlx` | 8000 | 127.0.0.1 | `http://localhost:8000/v1` | `http://localhost:8000` | `GET /health` → `status: healthy` | optional key | JSON files + CLI + env |
-| llama.cpp | `llama-server` | 8080 | 127.0.0.1 | `http://localhost:8080/v1` | `http://localhost:8080` | `GET /health` → `status: ok`; `GET /models` → `owned_by: llamacpp` | optional key | CLI flags + env |
+| llama.cpp | `llama-server` | 8080 | 127.0.0.1 | `http://localhost:8080/v1` | `http://localhost:8080` | `GET /health` → `status: ok`; `GET /v1/models` → `owned_by: llamacpp` (single-model mode) | optional key | CLI flags + env + router presets |
 | vLLM | `vllm` | 8000 | **0.0.0.0** | `http://localhost:8000/v1` | `http://localhost:8000` | `GET /version` → `{version}` | optional key | CLI flags + YAML |
 
 Watch: **vLLM binds `0.0.0.0`** (all interfaces), unlike the others. **vLLM and oMLX both default
@@ -37,7 +37,7 @@ Install-check (fast, offline) then running-check (HTTP probe, ungated endpoints 
 | Ollama | `ollama` binary; macOS `/Applications/Ollama.app` | `GET /` → `Ollama is running` (also `GET /api/version`, `GET /api/tags`) |
 | LM Studio | `lms` binary; macOS `/Applications/LM Studio.app`; `~/.lmstudio-home-pointer` | `GET /v1/models` → `owned_by: organization_owner` (no ungated positive health marker; `/` and `/health` return an error body) |
 | oMLX | `omlx` binary; macOS `/Applications/oMLX.app` (bundle id `app.omlx`) | `GET /health` → `status: healthy` (ungated even with auth) |
-| llama.cpp | `llama-server` binary/process | `GET /health` → `status: ok`; `GET /models` → `owned_by: llamacpp` (both ungated) |
+| llama.cpp | `llama-server` binary/process | `GET /health` → `status: ok`; `GET /v1/models` → `owned_by: llamacpp` in single-model mode (both ungated; router-mode `/models` returns status/path metadata) |
 | vLLM | `vllm` binary/entry-point | `GET /version` (ungated only when auth off; `--api-key` gates every endpoint) |
 
 A port-only probe never identifies a runner — always confirm the response marker.

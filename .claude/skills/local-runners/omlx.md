@@ -25,6 +25,9 @@ Anthropic `x-api-key <key>`.
 | model list | GET | `/v1/models` | yes | `owned_by: omlx`. |
 | loaded models | GET | `/v1/models/status` | yes | Per-model load state, memory estimates. |
 | load / unload | POST | `/v1/models/{model_id}/load`, `/unload` | yes | Engine pool. |
+| MCP server list | GET | `/v1/mcp/servers` | yes | MCP server list. |
+| MCP tool list | GET | `/v1/mcp/tools` | yes | MCP tool list. |
+| MCP tool execution | POST | `/v1/mcp/execute` | yes | MCP tool execution. |
 | OpenAI chat | POST | `/v1/chat/completions` | opt | Base URL `http://localhost:8000/v1`. Also `/v1/rerank`, `/v1/audio/*`. |
 | Anthropic messages | POST | `/v1/messages`, `/v1/messages/count_tokens` | opt | Base URL `http://localhost:8000`. |
 | admin UI | GET | `/admin` | no | Web dashboard (offline-first, vendored assets). |

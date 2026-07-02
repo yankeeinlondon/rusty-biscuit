@@ -22,7 +22,7 @@ Default listen: `127.0.0.1:11434`. Auth: none (keys accepted but ignored).
 | health / identity | GET | `/` | no | Returns `Ollama is running`. No `/health` route. |
 | version | GET | `/api/version` | no | `{"version":"..."}`. |
 | model list | GET | `/api/tags` | no | Ollama-specific; entries carry `details.format: gguf`. |
-| loaded models | GET | `/api/ps` | no | Empty array when nothing resident. |
+| loaded models | GET | `/api/ps` | no | Empty `models` array when idle; entries appear while a model is loaded. |
 | model info | POST | `/api/show` | no | Body `{"model":"..."}`. |
 | load / unload | POST | `/api/generate` or `/api/chat` | no | Empty prompt loads; `keep_alive: 0` unloads. |
 | OpenAI chat | POST | `/v1/chat/completions` | no | Base URL `http://localhost:11434/v1`. Since v0.1.24. |

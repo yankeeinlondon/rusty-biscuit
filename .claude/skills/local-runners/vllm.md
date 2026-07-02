@@ -9,7 +9,7 @@ endpoints. FastAPI/OpenAPI. Primarily Linux. **Binds `0.0.0.0` by default.**
 | OS | Support | Binary | Alt binaries | Install |
 | --- | --- | --- | --- | --- |
 | Linux | native | `vllm` | `python`, `uv` | `pip install vllm`, `uv pip install vllm`, Docker `vllm/vllm-openai` |
-| macOS | separate_project | `vllm` | `vllm-metal` | vLLM-Metal (uses MLX; requires mlx-community models) |
+| macOS | separate_project | `vllm` | `vllm-metal` | Experimental Apple Silicon CPU support is build-from-source only (no wheels); GPU is the separate vLLM-Metal project (MLX; mlx-community models) |
 | Windows | wsl | `vllm` | — | WSL2 with Linux install steps (no native Windows) |
 
 ## API endpoints
@@ -20,13 +20,13 @@ endpoint (including `/health` and `/version`) requires `Authorization: Bearer <k
 | Purpose | Method | Path | auth_gated | Notes |
 | --- | --- | --- | --- | --- |
 | version / identity | GET | `/version` | when auth on | `{"version":"..."}`. Strong identity marker. |
-| health | GET | `/health` | when auth on | 200 ready; 503 while loading. |
+| health | GET | `/health` | when auth on | Empty HTTP 200 body when healthy; 503 when the engine is dead. |
 | model list | GET | `/v1/models` | when auth on | Single model (or `--served-model-name` aliases). |
 | metrics | GET | `/metrics` | when auth on | Prometheus (GPU, scheduler, request). |
 | tokenizer info | GET | `/tokenizer_info` | when auth on | Gated by `--enable-tokenizer-info-endpoint`. |
-| LoRA load / unload | POST | `/v1/load_lora_adapter`, `/v1/unload_lora_adapter` | when auth on | Local dev only. |
+| LoRA load / unload | POST | `/v1/load_lora_adapter`, `/v1/unload_lora_adapter` | when auth on | Gated by `--enable-lora` + `VLLM_ALLOW_RUNTIME_LORA_UPDATING=True`. Local dev only. |
 | OpenAI chat | POST | `/v1/chat/completions` | opt | Base URL `http://localhost:8000/v1`. Also `/v1/embeddings`, `/v1/audio/*`, `/rerank`. |
-| Anthropic messages | POST | `/v1/messages`, `/v1/messages/count_tokens` | opt | Base URL `http://localhost:8000`. Since v0.11.1. |
+| Anthropic messages | POST | `/v1/messages`, `/v1/messages/count_tokens` | opt | Base URL `http://localhost:8000`. `/v1/messages` since v0.11.1; `count_tokens` since v0.17.0 (PR #35588). |
 | docs | GET | `/docs` | when auth on | Swagger UI; needs internet unless `--enable-offline-docs`. |
 
 ## Config & env vars
