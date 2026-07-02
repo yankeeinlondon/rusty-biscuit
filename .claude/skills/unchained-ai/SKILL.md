@@ -53,6 +53,7 @@ unchained-ai/
 | `ProviderModelMetadata` | `models::model_metadata` | Rich metadata (pricing, params, modalities, etc.) |
 | `ModelPricing` | `models::model_pricing` | Per-token/request pricing (USD) |
 | `ModelDefaultParameters` | `models::model_default_parameters` | Provider-recommended generation defaults |
+| `ModelIdentity` | `models::identity` | Wire-id identity grammar: family/version/variant decomposition, `latest_in_family` |
 | `CompletionBackend` | `execution` | Injectable seam for text completions |
 | `CompletionRequest` / `CompletionOutput` | `execution` | Single-turn execution surface |
 | `ResolvedParameters` | `execution` | Metadata defaults + caller overrides |

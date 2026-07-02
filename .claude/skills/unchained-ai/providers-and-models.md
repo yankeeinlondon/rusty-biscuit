@@ -161,6 +161,24 @@ pub struct ModelDefaultParameters {
 
 `Modality` enum: `Text`, `Image`, `Audio`, `Video`, `Embeddings`.
 
+### ModelIdentity (`models/identity.rs`)
+
+Wire-id identity grammar: `[source /] vendor / model-id`, with the model-id decomposed
+into family + version + variants + size + date-pin + serving tag.
+
+- `ModelIdentity::parse(wire)` — infallible; unmatched tokens land in `family`
+- `family_key()` — `vendor/family` grouping key for cross-source identity (the same
+  model offered directly and via an aggregator groups together)
+- `latest_in_family(ids, family)` — newest release by version segments, date-pin
+  tiebreak; rolling aliases (`-latest`) are excluded
+- Curated tables: variant vocabulary, vendor aliases (`z-ai`→`zai`, source `gemini`→
+  vendor `google`, …)
+- `gen-models` uses parsed identity to fill `family` when neither Parsera nor
+  provider-native data supplies one
+
+Validated against the full generated catalog (99.9% family inference); design record in
+`claudine/features/provider-metadata/spec.md` (spike-model-identity).
+
 ## Client Adaptors (`providers/client_adaptors/`)
 
 OpenAI-compatible wrappers for non-standard providers:
