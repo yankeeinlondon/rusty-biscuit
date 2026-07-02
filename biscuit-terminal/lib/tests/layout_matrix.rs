@@ -130,6 +130,35 @@ fn layout_matrix_snapshots() {
 //   columns, so they agree by construction.
 // - `terminal_only!` components return the same rendered string for both
 //   columns, so they agree by construction.
+//
+// The ANSI-stripped comparison alone is NOT sufficient to prove the public
+// `render(&term)` path honors a user-set `Style`: `emphasis_bold_italic`
+// lowers to pure SGR (`\x1b[1m`/`\x1b[3m`) with no glyph or width footprint,
+// and `background_subtle` differs only by SGR plus width-fill. Stripping ANSI
+// erases those, so a public render path that silently ignored the style would
+// still pass the stripped check (the original Finding-1 defect). To close that
+// hole, this test also compares an *appearance-marker signature* on the
+// ANSI-retained output of both paths. For `dual!` components the two paths are
+// genuinely distinct (public `render(&term)` vs. the merged fold), so if the
+// public path dropped the emphasis or background the signatures diverge and
+// this test fails. `no_silent_noop_guard` independently proves the fold lowers
+// each style scenario to its marker, so signature *equality* forces the public
+// path to emit the same marker — i.e. the assertion is not vacuous. For
+// `tree_only!`/`bespoke_with_tree!` rows both columns are the same string, so
+// the signature check is trivially satisfied and never false-fails.
+
+/// Presence of the style-bearing SGR runs and border glyph that survive (or
+/// are erased by) ANSI stripping. Compared between the two render paths so a
+/// public `render(&term)` that ignores a user-set `Style` is caught even when
+/// the difference is pure SGR.
+fn appearance_signature(s: &str) -> (bool, bool, bool, bool) {
+    (
+        s.contains("\u{1b}[1m"),  // bold
+        s.contains("\u{1b}[3m"),  // italic
+        s.contains("\u{1b}[48;"), // background fill
+        s.contains('│'),          // left border glyph
+    )
+}
 
 #[test]
 fn render_path_parity_for_every_matrix_cell() {
@@ -143,6 +172,15 @@ fn render_path_parity_for_every_matrix_cell() {
                 tree_stripped.trim(),
                 "{} / {}: VIA_RENDER must equal VIA_TREE_DIRECT \
                  (ANSI-stripped and trimmed)",
+                case.name,
+                scenario.name,
+            );
+            assert_eq!(
+                appearance_signature(&via_render),
+                appearance_signature(&via_tree_direct),
+                "{} / {}: public render(&term) must carry the same appearance \
+                 markers (bold/italic/background/border) as the tree fold; a \
+                 divergence here means the public path ignored the user-set style",
                 case.name,
                 scenario.name,
             );

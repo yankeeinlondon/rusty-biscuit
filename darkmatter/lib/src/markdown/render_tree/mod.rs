@@ -74,6 +74,8 @@ pub mod pipeline;
 pub mod source;
 #[cfg(test)]
 mod structural_gate;
+#[cfg(test)]
+mod style_tree_parity_tests;
 pub mod svg_sanitizer;
 
 #[allow(deprecated)]
