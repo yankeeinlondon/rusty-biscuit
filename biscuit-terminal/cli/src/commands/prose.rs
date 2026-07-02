@@ -48,7 +48,7 @@ pub struct ProseArgs {
 }
 
 impl Run for ProseArgs {
-    fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
+    fn run(self, ctx: &CliContext) -> color_eyre::Result<()> {
         let text = if self.example {
             PROSE_EXAMPLE.to_string()
         } else {
@@ -109,10 +109,12 @@ impl Run for ProseArgs {
             return Ok(());
         }
 
-        let term = if self.force_color {
+        let term = if ctx.plain {
+            terminal_for_render(true)
+        } else if self.force_color {
             Terminal::new_forced()
         } else {
-            detect_terminal_honoring_force_color()
+            terminal_for_render(false)
         };
         let output = prose.render(&term);
 

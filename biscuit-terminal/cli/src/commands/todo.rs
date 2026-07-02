@@ -1,7 +1,7 @@
 use crate::args::LayoutArgs;
 use crate::commands::shared::{
-    apply_renderable_layout, detect_terminal_honoring_force_color, emit_vertical_margins,
-    print_example_command, render_markdown_with_layout_frontmatter,
+    apply_renderable_layout, emit_vertical_margins, print_example_command,
+    render_markdown_with_layout_frontmatter, terminal_for_render,
 };
 use crate::commands::{CliContext, Run};
 use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
@@ -100,7 +100,7 @@ pub struct TodoArgs {
 }
 
 impl Run for TodoArgs {
-    fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
+    fn run(self, ctx: &CliContext) -> color_eyre::Result<()> {
         let description = if self.example && self.description.is_empty() {
             TODO_EXAMPLE_DESCRIPTION.to_string()
         } else {
@@ -156,7 +156,7 @@ impl Run for TodoArgs {
         }
 
         // Terminal (default).
-        let term = detect_terminal_honoring_force_color();
+        let term = terminal_for_render(ctx.plain);
         let output = todo.render(&term);
         emit_vertical_margins(&self.layout, || {
             println!("{}", output);

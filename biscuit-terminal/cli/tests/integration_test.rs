@@ -126,6 +126,55 @@ fn test_tree_rendered_quote_respects_no_color() {
 }
 
 #[test]
+fn test_graph_expression_example_plain_overrides_force_color() {
+    let output = cargo_bin_cmd!("bt")
+        .env("FORCE_COLOR", "1")
+        .env_remove("CLICOLOR_FORCE")
+        .args(["--plain", "graph-expression", "--example"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        !stdout.contains('\x1b'),
+        "stdout must contain no ANSI escapes, got: {stdout:?}"
+    );
+    assert!(
+        !stderr.contains('\x1b'),
+        "stderr must contain no ANSI escapes, got: {stderr:?}"
+    );
+}
+
+#[test]
+fn test_block_plain_overrides_force_color() {
+    let output = cargo_bin_cmd!("bt")
+        .env("FORCE_COLOR", "1")
+        .env("CLICOLOR_FORCE", "1")
+        .args(["--plain", "block", "hello", "--bold"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(stdout.trim_end(), "hello");
+    assert!(
+        !stdout.contains('\x1b'),
+        "stdout must contain no ANSI escapes, got: {stdout:?}"
+    );
+    assert!(
+        !stderr.contains('\x1b'),
+        "stderr must contain no ANSI escapes, got: {stderr:?}"
+    );
+}
+
+#[test]
 fn test_shows_underline_support() {
     cargo_bin_cmd!("bt")
         .assert()

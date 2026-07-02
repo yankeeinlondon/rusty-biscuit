@@ -162,14 +162,19 @@ pub fn emit_image_output(output: &str) -> color_eyre::Result<()> {
 ///
 /// Renders the header and command through [`Prose`] so the output degrades
 /// cleanly when color is disabled while preserving the legacy `Command:` label.
-pub fn print_example_command(cmd: &str) {
-    let term = terminal_for_render(false);
+pub fn print_example_command_with_terminal(cmd: &str, term: &Terminal) {
     println!();
-    println!("{}", Prose::new("<b>Command:</b>").render(&term));
+    println!("{}", Prose::new("<b>Command:</b>").render(term));
     println!(
         "{}",
-        Prose::new(format!("<dim>{}</dim>", Prose::escape_text(cmd))).render(&term)
+        Prose::new(format!("<dim>{}</dim>", Prose::escape_text(cmd))).render(term)
     );
+}
+
+pub fn print_example_command(cmd: &str) {
+    let plain = std::env::args_os().any(|arg| arg == "--plain");
+    let term = terminal_for_render(plain);
+    print_example_command_with_terminal(cmd, &term);
 }
 
 /// Emits a YAML frontmatter block carrying the CLI's `--margin-left` /

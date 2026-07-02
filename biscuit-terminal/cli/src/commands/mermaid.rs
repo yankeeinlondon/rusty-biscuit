@@ -57,14 +57,14 @@ pub fn display_mermaid(
     layout: &LayoutArgs,
     meta: bool,
     debug: bool,
+    terminal: &Terminal,
 ) -> color_eyre::Result<()> {
     let start_time = Instant::now();
-    let terminal = Terminal::new();
 
-    let result = match diagram.try_render(&terminal) {
+    let result = match diagram.try_render(terminal) {
         Ok(result) => result,
         Err(e) => {
-            return handle_mermaid_error(e, instructions, diagram_type, &terminal);
+            return handle_mermaid_error(e, instructions, diagram_type, terminal);
         }
     };
 

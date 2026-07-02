@@ -164,10 +164,11 @@ impl Run for GraphExpressionArgs {
 
         apply_renderable_layout(&mut graph, &self.layout);
 
-        display_graph(&graph, &source, &self.layout, self.meta)?;
+        let terminal = terminal_for_render(ctx.plain);
+        display_graph(&graph, &source, &self.layout, self.meta, &terminal)?;
 
         if self.example {
-            print_example_command(GRAPH_EXPRESSION_EXAMPLE_CMD);
+            print_example_command_with_terminal(GRAPH_EXPRESSION_EXAMPLE_CMD, &terminal);
         }
 
         Ok(())
@@ -180,21 +181,21 @@ pub fn display_graph(
     source: &str,
     layout: &LayoutArgs,
     meta: bool,
+    terminal: &Terminal,
 ) -> color_eyre::Result<()> {
     use biscuit_terminal::components::graph_expression::GraphRenderError;
     let start_time = Instant::now();
-    let terminal = Terminal::new();
 
-    let result = match graph.try_render(&terminal) {
+    let result = match graph.try_render(terminal) {
         Ok(result) => result,
         Err(GraphRenderError::NoImageSupport) => {
             emit_vertical_margins(layout, || {
-                print!("{}", graph.render(&terminal));
+                print!("{}", graph.render(terminal));
                 Ok(())
             })?;
             return Ok(());
         }
-        Err(error) => return handle_graph_error(error, &graph.fallback_code_block(), source, &terminal),
+        Err(error) => return handle_graph_error(error, &graph.fallback_code_block(), source, terminal),
     };
 
     let render_time_ms = start_time.elapsed().as_millis() as u64;
