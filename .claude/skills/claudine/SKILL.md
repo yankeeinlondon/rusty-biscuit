@@ -2,7 +2,7 @@
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Roo), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
 last_updated: 2026-07-02
-hash: bbb32528c11dc53d-5e086512b71e6078
+hash: bbb32528c11dc53d-b7ca15c4ddc757ec
 ---
 
 ## Overview
@@ -200,9 +200,15 @@ roster, with structured facts in frontmatter validated by a `_schema.yaml` sidec
 - `agent-logging/` — log surfaces, per-site time semantics (unit/zone), record types
 - `agent-models/` — out-of-box models, selection mechanisms, precedence, dynamic listing
 - `agent-permissions/` — permission CLI params, config files, YOLO, PolicyEngine fit
-- `model-config/` — user-side model extension (cloud + local); **under quality revision**
-  (see `claudine/features/2026-07-02-provider-metadata/model-config-plan.md`) — verify a document's
-  `last_updated` before trusting its local-runner claims
+- `model-config/` — user-side model extension (cloud + local) across all 9 roster
+  providers: config files/formats, API standards spoken (`api_standards`), local-runner
+  integration paths framed as API-standard bridging
+  (`local_runners[].integration`: first_class / base_url_override / proxy_required /
+  unsupported), cross-cloud bridging (`cloud_bridge`), merge semantics, env overrides.
+  Refreshed 2026-07-02 against local-runners ground truth (refresh notes:
+  `claudine/features/2026-07-02-provider-metadata/model-config-refresh.md`). For
+  configuration depth, prefer the **model-config** skill (distilled comparison tables);
+  the research docs remain the source of truth.
 - `local_runners/` — the runner-side counterpart to `model-config`: local model
   runners (Ollama, LM Studio, oMLX, Llama.cpp, vLLM) as servers — per-OS binaries and
   installs, OpenAI/Anthropic API surfaces, detection probes, config, model-id grammar,
