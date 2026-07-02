@@ -109,6 +109,58 @@ fn provider_to_filename(provider: Provider) -> String {
     format!("{:?}", provider).to_lowercase()
 }
 
+/// Read the current generated model IDs for a provider from its existing enum file.
+fn existing_model_ids(provider: Provider, output_dir: &std::path::Path) -> Vec<String> {
+    let path = output_dir.join(format!("{}.rs", provider_to_filename(provider)));
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+
+    contents
+        .lines()
+        .filter_map(|line| {
+            line.trim()
+                .strip_prefix("/// Model: `")
+                .and_then(|rest| rest.strip_suffix('`'))
+                .map(ToString::to_string)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_existing_model_ids_reads_generated_model_comments() {
+        let dir = std::env::temp_dir().join(format!(
+            "unchained-ai-gen-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join("xai.rs");
+        std::fs::write(
+            &path,
+            r#"
+pub enum ProviderModelXai {
+    /// Model: `grok-4.3`
+    Grok__4_3,
+    /// Custom model ID not in the predefined list.
+    Bespoke(String),
+}
+"#,
+        )
+        .expect("write generated model file");
+
+        let ids = existing_model_ids(Provider::Xai, &dir);
+
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_dir(dir);
+
+        assert_eq!(ids, vec!["grok-4.3".to_string()]);
+    }
+}
+
 /// Result of processing a single provider.
 struct ProviderResult {
     /// Number of models generated.
@@ -197,6 +249,7 @@ async fn process_providers(
 
     for provider in providers {
         let Some(api_key) = api_keys.get(&provider) else {
+            all_model_ids.extend(existing_model_ids(provider, output_dir));
             summary
                 .skipped
                 .push((provider, "No API key configured".to_string()));
@@ -204,6 +257,7 @@ async fn process_providers(
         };
 
         if provider.config().is_local {
+            all_model_ids.extend(existing_model_ids(provider, output_dir));
             summary
                 .skipped
                 .push((provider, "Local provider".to_string()));
@@ -221,6 +275,7 @@ async fn process_providers(
             }
             Err(e) => {
                 warn!("Skipping {:?}: {}", provider, e);
+                all_model_ids.extend(existing_model_ids(provider, output_dir));
                 summary.skipped.push((provider, e.to_string()));
             }
         }
