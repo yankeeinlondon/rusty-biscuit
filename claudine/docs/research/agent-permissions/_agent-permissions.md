@@ -1,30 +1,26 @@
 ---
 sequence: "@claudine/docs/providers.yaml"
 file: "{{ctx.repo_root}}/claudine/docs/research/agent-permissions/{{state.file}}"
-# all target documents we write to should provide this frontmatter
-target_schema: 
-    created: date
-    last_updated: date(required)
-    agent: string(required)
-    model: string(required)
-    # the CLI parameters involved in overriding permissions
-    cli_params: "{ param: string(required), description: string(required), example: string, example_desc: string }[]"
-    # the config files involved in setting permissions
-    config_files: 
-        user: string(required)
-        repo: string(required)
-    agent_permissions: 
-        allowed: boolean(required)
-    yolo:
-        has_interactive_yolo: boolean(required)
-        has_non_interactive_yolo: boolean(required)
-    policy_engine:
-        ergonomic: boolean(required)
-        provides_coverage: boolean(required)
-    changes: string[]
-    requires_claudine_update: boolean(required)
-    reason: string
-update: "{{file_exists(file) && markdown_file_empty(file)}}"
+agent: opencode
+model: kimi-for-coding/k2p7
+# the frontmatter contract for target documents lives in the schema sidecar
+# (./_schema.yaml) so the contract is single-sourced and machine-validated
+update: "{{file_exists(file) && !markdown_body_empty(file)}}"
+# make interrupted fleet runs resumable: skip providers already researched today
+initialize:
+    stack:
+        - when: "file_exists(file) && frontmatter(file, 'last_updated') == ctx.today"
+          action:
+              - stderr: "Research for <b>{{state.name}}</b> is already up to date ({{ctx.today}}) — skipping."
+              - skip
+# a provider exiting 0 is not proof the research was written — verify the
+# agent actually stamped today's date before accepting success
+success:
+    stack:
+        - when: "frontmatter(file, 'last_updated') != ctx.today"
+          action:
+              - stderr: "The step reported success but <b>{{file}}</b> was not updated — <code>last_updated</code> is not {{ctx.today}}."
+              - error: "research file was not updated"
 ---
 
 ## Skills
@@ -72,7 +68,7 @@ Your job is to detailed research into the **permissions** features of the **{{st
             - what file(s) for "repo scope"?
             - give examples that illustrate the grammar which can be used to express permissions for {{state.name}}
     - **Extending the Base**
-        - give a few practical examples of how default permissions might be set but then part of that policy is overwritten by 
+        - give a few practical examples of how default permissions might be set but then part of that policy is overwritten by a narrower scope (repo config overriding user config, or CLI switches overriding both)
 - `## Tools and Permissions`
     - List out the tools that {{state.name}} provides by default
     - Describe out permissions map to tool calls
@@ -102,11 +98,12 @@ Follow these steps exactly:
 - Write and save research to `{{file}}`
     - if you don't know something say that; don't make anything up
 ::end-block
-- Set the `$schema` property of `{{file}}` to:
+- Set the `$schema` property of `{{file}}` to the string `./_schema.yaml`
 
-    {{target_schema}}
-
-    > Note: this is using the `SimpleSchema` schema representation which can be easily converted to JSON schema for validation purposes
+    > This is a file reference to this topic's schema sidecar. Read `_schema.yaml`
+    > (it sits next to this sequence file) before filling frontmatter — it is the
+    > authoritative contract, expressed as a `SimpleSchema`, and `md schema validate`
+    > will enforce it against everything you write.
 
 - Now we will capture other key metadata to the research documents Frontmatter:
     ::block when="!update"
@@ -124,12 +121,18 @@ Follow these steps exactly:
         - `description` - a prose description of what this CLI parameter does
         - `example` - an example of using this parameter
         - `example_description` - describe the example you've provided
+    - `env_vars` - one record per environment variable that influences permissions: `name` and its `effect`
     - `config_files` - is a dictionary and you must set both properties:
         - `user` - the relative (typically relative to user's home dir) filepath to the configuration file used for user scoped permissions
         - `repo` - the relative (from repo root) filepath to the configuration file used for repo scoped permissions
+    - `precedence` - the highest-wins ordering across CLI params, env vars, and config files (e.g. "cli > env > repo config > user config")
+    - `default_posture` - a one-to-two sentence summary of the effective permissions when nothing is configured
     - `agent_permissions`
-        - `allowed` - set to true/flase based on whether {{state.name}} allows permissions to be set on a agent/subagent scoped basis
-        - `fm_properties` - a string array of any properties involved in 
+        - `allowed` - set to true/false based on whether {{state.name}} allows permissions to be set on an agent/subagent scoped basis
+        - `fm_properties` - a string array of the frontmatter/config properties involved in agent-scoped permissions (omit when `allowed` is false)
+    - `yolo` - `has_interactive_yolo` / `has_non_interactive_yolo` booleans plus `mechanism` naming the flag/env/config switch used
+    - `policy_engine` - `ergonomic` / `provides_coverage` booleans plus a `gaps` string array listing anything the PolicyEngine cannot express for {{state.name}}
+    ::block when="update"
     - `changes` - add a list of string descriptions which summarize the changes discovered since the last research was done
     ::end-block
     ::block when="!update"

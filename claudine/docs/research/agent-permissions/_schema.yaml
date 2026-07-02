@@ -1,0 +1,45 @@
+# SimplifiedSchema for the agent-permissions research topic.
+#
+# Referenced by each provider research document via `$schema: ./_schema.yaml`.
+# The root `$schema:` key is REQUIRED — it is how darkmatter's resolver
+# classifies this file as a SimplifiedSchema rather than raw JSON Schema
+# (a bare property mapping would validate vacuously).
+#
+# Nested shapes use quoted inline-object literals — YAML-native nested
+# mappings are rejected by the SimplifiedSchema parser today.
+$schema:
+    created: date
+    last_updated: date(required)
+    agent: string(required)
+    model: string(required)
+
+    # One record per permissions-related CLI parameter.
+    cli_params: "{ param: string(required), style: enum(equals,switch,positional; required), description: string(required), example: string, example_description: string }[]"
+
+    # One record per environment variable that influences permissions.
+    env_vars: "{ name: string(required), effect: string(required) }[]"
+
+    # Config files that define permissions (relative paths: user scope from
+    # $HOME, repo scope from repo root).
+    config_files: "{ user: string(required), repo: string(required) }"
+
+    # Highest-wins ordering across CLI params, env vars, and config files.
+    precedence: string(required)
+
+    # What the effective permissions are when nothing is configured.
+    default_posture: string(required)
+
+    # Can permissions be scoped per agent/subagent? `fm_properties` lists the
+    # frontmatter/config properties involved.
+    agent_permissions: "{ allowed: boolean(required), fm_properties: string[] }"
+
+    # YOLO / auto-approve support (feeds YoloSupport). `mechanism` names the
+    # flag/env/config switch used.
+    yolo: "{ has_interactive_yolo: boolean(required), has_non_interactive_yolo: boolean(required), mechanism: string }"
+
+    # Fit assessment of claudine's PolicyEngine for this provider.
+    policy_engine: "{ ergonomic: boolean(required), provides_coverage: boolean(required), gaps: string[] }"
+
+    changes: string[]
+    requires_claudine_update: boolean(required)
+    reason: string
