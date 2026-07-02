@@ -27,6 +27,10 @@ image = ["dep:resvg", "dep:biscuit-visualized", "biscuit-visualized/image"]
 [dependencies]
 base64 = "0.22"
 biscuit-visualized = { path = "../../biscuit-visualized/src", features = ["clap"], optional = true }
+# Structured config parsing for app-metadata value extraction. Normalizes
+# TOML/YAML/JSON5 to `serde_json::Value`; the underlying parsers stay indirect.
+# `default-features = false` keeps the heavy PDF/gix tree out.
+biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["toml", "yaml", "json5"] }
 ignore = "0.4"
 image = "0.25"
 renderable = { path = "../../renderable" }
@@ -40,6 +44,9 @@ unicode-width = "0.2"
 regex = "1.11"
 paste = "1.0"
 globset = "0.4"
+# Apple property-list (XML + binary) extraction for iTerm2 / Apple Terminal
+# config value reading; the only structured parser added directly (§6/§10).
+plist = "1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 unic-langid = "0.9.6"
 

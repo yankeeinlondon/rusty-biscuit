@@ -162,6 +162,7 @@ fn get_terminal_default_color(app: &TerminalApp, code: u8) -> Option<RgbValue> {
         | TerminalApp::GnomeTerminal
         | TerminalApp::Konsole
         | TerminalApp::VsCode
+        | TerminalApp::WindowsTerminal
         | TerminalApp::Wast => match code {
             10 | 12 => Some(RgbValue::new(229, 229, 229)),
             11 => Some(RgbValue::new(30, 30, 30)),

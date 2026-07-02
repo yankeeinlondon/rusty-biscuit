@@ -30,6 +30,18 @@
   for `#[tokio::test]`. See
   [`biscuit-contract/docs/dependencies.md`](./biscuit-contract/docs/dependencies.md)
   for the full rationale and forbidden-class list.
+- `biscuit-terminal/lib` reads terminal-app config values via its `app_metadata`
+  module. Structured formats (TOML/YAML/JSON5) are parsed through a
+  `default-features = false` path dependency on `biscuit-file`
+  (`features = ["toml","yaml","json5"]`), which normalizes each to a single
+  `serde_json::Value` so one shared dot-path resolver reads them all — the
+  underlying `toml` / `serde_yaml_ng` / `json-five` parsers stay *indirect*. The
+  only structured parser added **directly** is `plist` (v1), for iTerm2 / Apple
+  Terminal XML+binary property lists. No dependency cycle: `biscuit-file` does
+  not depend on `biscuit-terminal`.
+- `biscuit-terminal/cli` adds a path dependency on `sniff/lib` for
+  `bt about [APP]` install detection. The library remains sniff-free; this
+  dependency is CLI-only._
 - `biscuit-file/lib` uses `url` for HTTP(S) file-reference classification and
   gates `reqwest`, `bytes`, and `tokio` behind the off-by-default `fetch`
   feature for policy-enforced HTTP access.
@@ -479,6 +491,13 @@ This is a Rust workspace with the following modules:
     _Well-maintained fork of dotenv for loading environment variables from .env files._
 
     _Tags: environment, configuration, dotenv_
+
+- [plist](https://github.com/ebarnard/rust-plist) _v1_ [📄](https://docs.rs/plist)
+
+    _Apple property-list (XML and binary) reader/writer. Used by biscuit-terminal's
+    app-metadata value extractor to read iTerm2 / Apple Terminal config settings._
+
+    _Tags: configuration, plist, macos, parsing_
 
 - [shellexpand](https://github.com/netvl/shellexpand) _v3_ [📄](https://docs.rs/shellexpand)
 
