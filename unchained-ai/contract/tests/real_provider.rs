@@ -101,7 +101,7 @@ fn default_model_for(provider: Provider) -> ProviderModel {
         Provider::Mistral => ProviderModel::Mistral(ProviderModelMistral::Mistral__Large__Latest),
         Provider::MoonshotAi => ProviderModel::MoonshotAi(ProviderModelMoonshotAi::Kimi__K2_5),
         Provider::Deepseek => ProviderModel::Deepseek(ProviderModelDeepseek::Deepseek__V4__Pro),
-        Provider::Xai => ProviderModel::Xai(ProviderModelXai::Grok__3),
+        Provider::Xai => ProviderModel::Xai(ProviderModelXai::Grok__4_3),
         Provider::OpenRouter => {
             ProviderModel::OpenRouter(ProviderModelOpenRouter::Anthropic___Claude__Sonnet__4_5)
         }
