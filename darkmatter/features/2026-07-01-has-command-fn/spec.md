@@ -5,7 +5,7 @@ created: 2026-07-01
 start_phase: 1
 yolo: true
 clarified: open_code/zai-coding-plan/glm-5.2
-review_iterations: 1
+review_iterations: 4
 ---
 
 # Execution Plan — `has_command(cmd)` Host Command Existence Probe
