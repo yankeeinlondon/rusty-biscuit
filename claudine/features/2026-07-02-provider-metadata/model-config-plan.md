@@ -25,7 +25,7 @@ The same mechanism also covers using *other cloud vendors'* models on vendor pla
 
 - **Use the `claudine` agent skill** (load it first) — it documents the composition/
   sequence machinery, lifecycle stacks, and CLI conventions this plan assumes.
-- Parent spec: `claudine/features/provider-metadata/spec.md` ("Out-of-box vs
+- Parent spec: `claudine/features/2026-07-02-provider-metadata/spec.md` ("Out-of-box vs
   user-configured models", "Model identity grammar"). Current topic files:
   `claudine/docs/research/model-config/{_model-config.md,_schema.yaml}` and 9 provider
   docs produced by the flawed prompt.
@@ -124,7 +124,7 @@ The same mechanism also covers using *other cloud vendors'* models on vendor pla
 ## Done when
 
 The prompt is frozen (record the iteration history briefly in
-`claudine/features/provider-metadata/spike-logging/findings.md`'s style — a short
+`claudine/features/2026-07-02-provider-metadata/spike-logging/findings.md`'s style — a short
 `model-config-refresh.md` note in the feature dir), the 9 provider docs are
 high-quality, consistent, and correctly represent local-runner and cross-cloud
 bridging, the `model-config` skill exists and is consistent with the research, and the

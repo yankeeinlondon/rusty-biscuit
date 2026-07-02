@@ -14,7 +14,7 @@
 //! via [`latest_in_family`].
 //!
 //! Design and empirical validation (99.9% family inference over the generated
-//! catalog): `claudine/features/provider-metadata/spec.md` and the
+//! catalog): `claudine/features/2026-07-02-provider-metadata/spec.md` and the
 //! `spike-model-identity` findings next to it.
 
 use std::cmp::Ordering;

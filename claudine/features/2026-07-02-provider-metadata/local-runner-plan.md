@@ -9,9 +9,9 @@
 
 - **Use the `claudine` agent skill** (load it first) — it documents the composition/
   sequence machinery, lifecycle stacks, and CLI conventions this plan assumes.
-- **Parent spec:** `claudine/features/provider-metadata/spec.md` (read the "Model Ground
+- **Parent spec:** `claudine/features/2026-07-02-provider-metadata/spec.md` (read the "Model Ground
   Truth" and "Out-of-box vs user-configured models" sections). Worked example of the
-  whole research pattern: `claudine/features/provider-metadata/spike-logging/findings.md`.
+  whole research pattern: `claudine/features/2026-07-02-provider-metadata/spike-logging/findings.md`.
 - **The established research pattern** (copy it, don't reinvent): a roster YAML drives
   `claudine sequence` over a topic prompt; structured facts go to frontmatter validated
   by a `_schema.yaml` sidecar (`$schema: ./_schema.yaml`; the sidecar MUST wrap its
@@ -115,7 +115,7 @@ detection-friendly form (exact binary names per OS, exact URL paths).
 2. Re-run the Phase-3 evaluation subagents across all five docs; confirm improvement;
    make final prompt adjustments and (only if needed) one last targeted re-run.
 3. Record outcomes (what the prompt iterations changed, remaining gaps) in a short
-   `claudine/features/provider-metadata/spike-local-runners.md`.
+   `claudine/features/2026-07-02-provider-metadata/spike-local-runners.md`.
 
 ## Phase 5 — the `local-runners` agent skill
 

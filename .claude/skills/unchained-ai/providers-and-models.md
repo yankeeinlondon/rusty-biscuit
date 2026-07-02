@@ -177,7 +177,7 @@ into family + version + variants + size + date-pin + serving tag.
   provider-native data supplies one
 
 Validated against the full generated catalog (99.9% family inference); design record in
-`claudine/features/provider-metadata/spec.md` (spike-model-identity).
+`claudine/features/2026-07-02-provider-metadata/spec.md` (spike-model-identity).
 
 ## Client Adaptors (`providers/client_adaptors/`)
 
