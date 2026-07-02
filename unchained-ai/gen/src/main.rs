@@ -127,40 +127,6 @@ fn existing_model_ids(provider: Provider, output_dir: &std::path::Path) -> Vec<S
         .collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_existing_model_ids_reads_generated_model_comments() {
-        let dir = std::env::temp_dir().join(format!(
-            "unchained-ai-gen-test-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).expect("create temp dir");
-        let path = dir.join("xai.rs");
-        std::fs::write(
-            &path,
-            r#"
-pub enum ProviderModelXai {
-    /// Model: `grok-4.3`
-    Grok__4_3,
-    /// Custom model ID not in the predefined list.
-    Bespoke(String),
-}
-"#,
-        )
-        .expect("write generated model file");
-
-        let ids = existing_model_ids(Provider::Xai, &dir);
-
-        let _ = std::fs::remove_file(path);
-        let _ = std::fs::remove_dir(dir);
-
-        assert_eq!(ids, vec!["grok-4.3".to_string()]);
-    }
-}
-
 /// Result of processing a single provider.
 struct ProviderResult {
     /// Number of models generated.
@@ -401,4 +367,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     result.summary.print();
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_existing_model_ids_reads_generated_model_comments() {
+        let dir = std::env::temp_dir().join(format!(
+            "unchained-ai-gen-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join("xai.rs");
+        std::fs::write(
+            &path,
+            r#"
+pub enum ProviderModelXai {
+    /// Model: `grok-4.3`
+    Grok__4_3,
+    /// Custom model ID not in the predefined list.
+    Bespoke(String),
+}
+"#,
+        )
+        .expect("write generated model file");
+
+        let ids = existing_model_ids(Provider::Xai, &dir);
+
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_dir(dir);
+
+        assert_eq!(ids, vec!["grok-4.3".to_string()]);
+    }
 }
