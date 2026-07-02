@@ -144,24 +144,6 @@ fn models_for(provider: Provider) -> Vec<ProviderModel> {
     }
 }
 
-fn provider_slug(provider: Provider) -> &'static str {
-    match provider {
-        Provider::Anthropic => "anthropic",
-        Provider::Deepseek => "deepseek",
-        Provider::Gemini => "gemini",
-        Provider::Groq => "groq",
-        Provider::HuggingFace => "huggingface",
-        Provider::Mistral => "mistral",
-        Provider::MoonshotAi => "moonshotai",
-        Provider::Ollama => "ollama",
-        Provider::OpenAi => "openai",
-        Provider::OpenRouter => "openrouter",
-        Provider::Xai => "xai",
-        Provider::Zai => "zai",
-        Provider::ZenMux => "zenmux",
-    }
-}
-
 fn provider_display(provider: Provider) -> &'static str {
     match provider {
         Provider::Anthropic => "Anthropic",
@@ -183,13 +165,11 @@ fn provider_display(provider: Provider) -> &'static str {
 fn render_json(groups: &[(Provider, Vec<ProviderModel>)]) -> Result<()> {
     let mut entries: Vec<Value> = Vec::new();
 
-    for (provider, models) in groups {
-        let slug = provider_slug(*provider);
+    for (_provider, models) in groups {
         for model in models {
-            let wire_id = format!("{}/{}", slug, model.model_id());
             let attributes = metadata_to_json(model.metadata());
             entries.push(json!({
-                "model": wire_id,
+                "model": model.wire_id(),
                 "attributes": attributes,
             }));
         }
