@@ -10,7 +10,7 @@ config_files:
   - scope: user
     path: ~/.config/kilo/kilo.jsonc
     format: jsonc
-    notes: 'Global user config. The host file exists at this path and currently contains only a "$schema" reference to https://app.kilo.ai/config.json. Also accepts kilo.json.'
+    notes: 'Global user config. Observed on this host at this path and currently contains only a "$schema" reference to https://app.kilo.ai/config.json. Also accepts kilo.json.'
   - scope: user
     path: ~/.config/kilo/kilo.json
     format: json
@@ -52,17 +52,17 @@ api_standards:
     base_url_site: provider.<id>.options.baseURL
     auth_site: provider.<id>.options.apiKey or {env:VARIABLE_NAME}
     adapter: '@ai-sdk/openai-compatible'
-    notes: 'Primary path for user-added cloud/local models and OpenAI-compatible gateways, including Kilo Gateway.'
+    notes: 'Primary path for custom/local models and OpenAI Chat Completions-compatible gateways. Kilo custom providers default to this unless another API is selected.'
   - standard: anthropic_compatible
     base_url_site: provider.<id>.options.baseURL
-    auth_site: provider.<id>.options.apiKey or {env:ANTHROPIC_API_KEY}
+    auth_site: provider.<id>.options.apiKey or {env:VARIABLE_NAME}
     adapter: '@ai-sdk/anthropic'
-    notes: 'Use the AI SDK Anthropic provider package for Anthropic-compatible endpoints.'
+    notes: 'Used for Anthropic Messages API providers (e.g. Anthropic, MiniMax). Set via the provider api/npm fields.'
   - standard: bespoke
     base_url_site: provider.<id>.options.baseURL
     auth_site: provider.<id>.options.apiKey or {env:VARIABLE_NAME}
-    adapter: 'npm key naming any AI SDK provider package (e.g. @ai-sdk/google, @ai-sdk/azure)'
-    notes: 'Kilo loads the specified npm package to speak the provider native protocol.'
+    adapter: 'npm AI SDK provider package (e.g. @ai-sdk/openai for OpenAI Responses, @ai-sdk/google, @ai-sdk/azure)'
+    notes: 'Provider-native protocols selected via the provider "api" or "npm" fields, such as OpenAI Responses for OpenAI/xAI models.'
 metadata_overrides:
   - id
   - name
@@ -85,28 +85,52 @@ metadata_overrides:
 merge_semantics: merge
 local_runners:
   - runner: ollama
-    supported: openai_compatible
-    example: '{ "provider": { "ollama": { "npm": "@ai-sdk/openai-compatible", "name": "Ollama (local)", "options": { "baseURL": "http://localhost:11434/v1" }, "models": { "gemma3:27b": { "name": "Gemma 3 27B", "limit": { "context": 128000, "output": 8192 } } } } }, "model": "ollama/gemma3:27b" }'
-    notes: 'Uses the Ollama OpenAI-compatible server endpoint. Size/quantization tags are part of the model ID.'
+    integration: base_url_override
+    standard: openai_compatible
+    example: '{"provider":{"ollama":{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"http://localhost:11434/v1"},"models":{"gemma3:27b":{"name":"Gemma 3 27B","limit":{"context":128000,"output":8192}}}}},"model":"ollama/gemma3:27b"}'
+    notes: 'Ollama also exposes an Anthropic-compatible /v1/messages endpoint, but the documented Kilo path uses the OpenAI-compatible server. Size/quantization tags are part of the model ID.'
   - runner: lmstudio
-    supported: openai_compatible
-    example: '{ "provider": { "lmstudio": { "npm": "@ai-sdk/openai-compatible", "name": "LM Studio (local)", "options": { "baseURL": "http://localhost:1234/v1" }, "models": { "deepseek-r1-0528": { "name": "DeepSeek R1 0528" } } } }, "model": "lmstudio/deepseek-r1-0528" }'
-    notes: 'Uses the LM Studio OpenAI-compatible server endpoint loaded by LM Studio.'
+    integration: base_url_override
+    standard: openai_compatible
+    example: '{"provider":{"lmstudio":{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"http://localhost:1234/v1"},"models":{"deepseek-r1-0528":{"name":"DeepSeek R1 0528"}}}},"model":"lmstudio/deepseek-r1-0528"}'
+    notes: 'LM Studio also supports Anthropic Messages, but the documented Kilo path uses the OpenAI-compatible server loaded by LM Studio.'
   - runner: llamacpp
-    supported: openai_compatible
-    example: '{ "provider": { "llamacpp": { "npm": "@ai-sdk/openai-compatible", "name": "llama-server (local)", "options": { "baseURL": "http://127.0.0.1:8080/v1" }, "models": { "qwen3-coder:a3b": { "name": "Qwen3-Coder a3b (local)", "limit": { "context": 128000, "output": 65536 } } } } }, "model": "llamacpp/qwen3-coder:a3b" }'
-    notes: 'Uses llama.cpp llama-server OpenAI-compatible endpoint.'
+    integration: base_url_override
+    standard: openai_compatible
+    example: '{"provider":{"llamacpp":{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"http://127.0.0.1:8080/v1"},"models":{"qwen3-coder:a3b":{"name":"Qwen3-Coder a3b (local)","limit":{"context":128000,"output":65536}}}}},"model":"llamacpp/qwen3-coder:a3b"}'
+    notes: 'llama-server also supports Anthropic Messages; the OpenAI-compatible endpoint is the standard Kilo example.'
   - runner: vllm
-    supported: openai_compatible
-    example: '{ "provider": { "vllm": { "npm": "@ai-sdk/openai-compatible", "name": "vLLM (local)", "options": { "baseURL": "http://localhost:8000/v1" }, "models": { "qwen2.5-coder-32b-instruct": { "name": "Qwen2.5 Coder 32B Instruct (local)" } } } }, "model": "vllm/qwen2.5-coder-32b-instruct" }'
-    notes: 'vLLM exposes an OpenAI-compatible API by default.'
+    integration: base_url_override
+    standard: openai_compatible
+    example: '{"provider":{"vllm":{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"http://localhost:8000/v1","apiKey":"EMPTY"},"models":{"Qwen/Qwen2.5-1.5B-Instruct":{"name":"Qwen2.5 1.5B Instruct (local vLLM)"}}}},"model":"vllm/Qwen/Qwen2.5-1.5B-Instruct"}'
+    notes: 'vLLM also supports Anthropic Messages; the OpenAI-compatible endpoint is the standard Kilo example.'
   - runner: omlx
-    supported: unsupported
-    notes: 'No official documentation or built-in integration. Would require a custom OpenAI-compatible shim if one exists.'
+    integration: base_url_override
+    standard: openai_compatible
+    example: '{"provider":{"omlx":{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"http://localhost:8000/v1"},"models":{"Qwen3.6-35B-A3B-oQ6":{"name":"Qwen3.6-35B-A3B-oQ6 (local)","limit":{"context":262144,"output":98304}}}}},"model":"omlx/Qwen3.6-35B-A3B-oQ6"}'
+    notes: 'oMLX also exposes an Anthropic-compatible /v1/messages endpoint; the OpenAI-compatible endpoint is the standard Kilo example.'
   - runner: other
-    supported: openai_compatible
-    notes: 'Any local server that exposes an OpenAI-compatible /v1 endpoint can be wired via the @ai-sdk/openai-compatible adapter.'
-default_model_site: 'Top-level model key in kilo.jsonc/kilo.json (user/project/managed); session override via --model / -m CLI flag.'
+    integration: base_url_override
+    standard: openai_compatible
+    example: '{"provider":{"my-local":{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"http://localhost:<port>/v1"},"models":{"<model-id>":{"name":"My local model"}}}},"model":"my-local/<model-id>"}'
+    notes: 'Any local server exposing an OpenAI-compatible /v1 chat endpoint can be wired via @ai-sdk/openai-compatible. If the runner only speaks Anthropic Messages, use @ai-sdk/anthropic instead.'
+cloud_bridge:
+  supported: true
+  mechanism: 'provider.<id>.options.baseURL plus the matching AI SDK adapter (the provider "npm" or "api" field).'
+  example: |
+    {
+      "$schema": "https://app.kilo.ai/config.json",
+      "provider": {
+        "openai": {
+          "options": {
+            "baseURL": "https://litellm.example.com/v1",
+            "apiKey": "{env:LITELLM_API_KEY}"
+          }
+        }
+      },
+      "model": "openai/gemini-2.5-pro"
+    }
+default_model_site: 'Top-level model key in kilo.jsonc/kilo.json (global/project/managed); session override via --model / -m CLI flag.'
 env_vars:
   - name: KILO_PROVIDER
     effect: 'Override the active provider ID.'
@@ -128,15 +152,24 @@ env_vars:
     effect: 'Use a custom directory for agents, commands, modes, and plugins.'
   - name: Provider API keys (e.g. OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)
     effect: 'Enable the corresponding built-in provider and its models. Can also be referenced via {env:VAR} in provider.<id>.options.apiKey.'
-changes: []
-requires_claudine_update: false
+changes:
+  - 'Confirmed Kilo CLI 1.0 is an OpenCode fork and uses the same kilo.jsonc/kilo.json config surface, precedence chain, and AI-SDK adapter model as OpenCode.'
+  - 'User-added models live under provider.<provider_id>.models; the full model reference is provider_id/model_id.'
+  - 'Reclassified local runners from "unsupported/first-class shim" to base-URL override paths: Ollama, LM Studio, llama.cpp, vLLM, and oMLX all work by pointing the OpenAI-compatible (or Anthropic-compatible) adapter at their local endpoints.'
+  - 'oMLX is no longer unsupported; it serves OpenAI- and Anthropic-compatible endpoints and integrates the same way as other local runners.'
+  - 'Kilo does not ship runner-native launch hooks (e.g. no "ollama launch kilo"); local integration is done through provider blocks.'
+  - 'Documented the three API-standard paths for custom providers: OpenAI Chat Completions-compatible (default), Anthropic Messages-compatible, and provider-native/bespoke via the npm/api adapter fields.'
+  - 'Updated metadata override keys and merge semantics: user config merges on top of the built-in catalog and hourly-refreshed models.dev data, shadowing same-ID entries.'
+  - 'Added KILO_EXPERIMENTAL_OUTPUT_TOKEN_MAX and provider API-key env variables to the environment override list.'
+requires_claudine_update: true
+reason: 'Claudine should treat Kilo Code as a distinct provider with the OpenCode-derived config surface, support resolving provider.<id>.models blocks and the kilo.jsonc precedence chain, and surface local-runner base-URL overrides for Ollama, LM Studio, oMLX, llama.cpp, and vLLM rather than marking oMLX unsupported.'
 ---
 
 # Kilo Code User-Side Model Configuration
 
 ## Introduction to Kilo Code Model Configuration
 
-Kilo Code stores runtime configuration in JSON or JSONC files. Model-related settings live in the same file as everything else; there is no separate model manifest. The Kilo CLI is a fork of [OpenCode](https://opencode.ai), so the configuration shape, precedence, and adapter mechanism are inherited from OpenCode with Kilo-branded paths and schema URL.
+Kilo Code stores runtime configuration in JSON or JSONC files. Model-related settings live in the same file as everything else; there is no separate model manifest. The Kilo CLI is a fork of [OpenCode](https://opencode.ai), so the configuration shape, precedence, and AI-SDK adapter mechanism are inherited from OpenCode with Kilo-branded paths and schema URL.
 
 | Scope | Path | Format | Notes |
 | :---- | :--- | :----- | :---- |
@@ -198,15 +231,16 @@ What each key means:
 
 ### API standards and adapters
 
-Kilo does not expose a generic "OpenAI" or "Anthropic" toggle. Instead, the user names an AI SDK provider package in the `npm` field. That package determines the wire protocol.
+Kilo does not expose a generic "OpenAI" or "Anthropic" toggle. Instead, the user names an AI SDK provider package in the `npm` field (or selects a protocol in the `api` field). That package determines the wire protocol.
 
-| Standard | Adapter (`npm`) | Base URL | Auth |
-| :------- | :-------------- | :------- | :--- |
-| OpenAI-compatible | `@ai-sdk/openai-compatible` | `provider.<id>.options.baseURL` | `provider.<id>.options.apiKey` or `{env:VAR}` |
-| Anthropic-compatible | `@ai-sdk/anthropic` | `provider.<id>.options.baseURL` | `provider.<id>.options.apiKey` or `{env:ANTHROPIC_API_KEY}` |
-| Bespoke / provider-native | Any AI SDK package, e.g. `@ai-sdk/google`, `@ai-sdk/azure` | `provider.<id>.options.baseURL` | Provider-specific, often via `apiKey` or env vars |
+| Standard | Adapter (`npm` / `api`) | Base URL | Auth |
+| :------- | :---------------------- | :------- | :--- |
+| OpenAI Chat Completions-compatible | `@ai-sdk/openai-compatible` | `provider.<id>.options.baseURL` | `provider.<id>.options.apiKey` or `{env:VAR}` |
+| Anthropic Messages-compatible | `@ai-sdk/anthropic` | `provider.<id>.options.baseURL` | `provider.<id>.options.apiKey` or `{env:VAR}` |
+| OpenAI Responses (provider-native) | `@ai-sdk/openai` | `provider.<id>.options.baseURL` | Provider-specific, often via `apiKey` or env vars |
+| Bespoke / provider-native | Any AI SDK package, e.g. `@ai-sdk/google`, `@ai-sdk/azure` | `provider.<id>.options.baseURL` | Provider-specific |
 
-For providers Kilo already knows about (built-in or from Models.dev), the `npm` adapter may be omitted. For providers Kilo does not already know about, `npm` is required.
+For providers Kilo already knows about (built-in or from Models.dev), the `npm` adapter may be omitted. For providers Kilo does not already know about, `npm` (or a recognized `api` value) is required.
 
 ### Per-model metadata
 
@@ -220,10 +254,10 @@ The published schema and Kilo documentation agree on the following override keys
 | `release_date` | Release date string. |
 | `attachment` | Whether the model accepts file attachments. |
 | `reasoning` | Whether the model supports reasoning/thinking output. |
-| `temperature` | Whether temperature can be set. |
+| `temperature` | Whether the model supports the temperature parameter. |
 | `tool_call` | Whether the model supports tool calling. |
 | `interleaved` | Reasoning field mapping for providers that stream reasoning separately. |
-| `cost` | Per-token pricing: `input`, `output`, optional `cache_read`, `cache_write`, and `context_over_200k`. |
+| `cost` | Per-million-token pricing: `input`, `output`, optional `cache_read`, `cache_write`, and `context_over_200k`. |
 | `limit` | `context`, `input`, and `output` token limits. |
 | `modalities` | `input` and `output` arrays of `text`, `audio`, `image`, `video`, `pdf`. |
 | `experimental` | Flag the model as experimental. |
@@ -241,20 +275,41 @@ User-defined provider and model blocks **merge** with the built-in catalog and r
 - Defining a model with the same ID as a built-in entry shadows the built-in metadata.
 - `whitelist` and `blacklist` on a provider hide built-in models without removing them from the catalog source.
 
-Because Kilo fetches model metadata from remote sources and updates its catalog over time, a manual block for a model that later becomes built-in should be removed to avoid stale overrides. Kilo does not auto-remove or warn about these stale blocks.
+Because Kilo fetches model metadata from Models.dev and refreshes its catalog hourly, a manual block for a model that later becomes built-in should be removed to avoid stale overrides. Kilo does not auto-remove or warn about these stale blocks.
+
+### Cross-cloud bridging
+
+Kilo can be routed at a different cloud vendor's API by overriding `provider.<id>.options.baseURL` and choosing the AI SDK adapter that matches the target's protocol. If the target vendor's native API does not speak one of Kilo's supported standards, route through a translation proxy such as [LiteLLM](https://github.com/BerriAI/litellm) instead of pointing directly at a base URL that cannot work.
+
+```jsonc
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  "model": "openai/gemini-2.5-pro",
+  "provider": {
+    "openai": {
+      "options": {
+        "baseURL": "https://litellm.example.com/v1",
+        "apiKey": "{env:LITELLM_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+Here the `openai` provider's client is redirected to a LiteLLM proxy that translates the OpenAI Chat Completions API to the upstream vendor's native format.
 
 ## Adding Local Models
 
-Local model runners are wired the same way as cloud custom providers: an AI SDK adapter package plus a `baseURL` pointing at the local server.
+Local model runners are wired the same way as cloud custom providers: an AI SDK adapter package plus a `baseURL` pointing at the local server. Kilo does not ship runner-native launch hooks (for example, there is no `ollama launch kilo`); integration is done through provider blocks.
 
-| Runner | Support | Notes |
-| :----- | :------ | :---- |
-| Ollama | OpenAI-compatible shim | First-class docs example; endpoint `http://localhost:11434/v1`. |
-| LM Studio | OpenAI-compatible shim | First-class docs example; endpoint `http://localhost:1234/v1`. |
-| llama.cpp | OpenAI-compatible shim | Expected to work via `llama-server`; endpoint `http://127.0.0.1:8080/v1`. |
-| vLLM | OpenAI-compatible shim | vLLM serves an OpenAI-compatible API by default. |
-| oMLX | Unsupported | No official documentation or integration. |
-| Other | OpenAI-compatible shim | Any local server exposing an OpenAI-compatible `/v1` chat endpoint works with `@ai-sdk/openai-compatible`. |
+| Runner | Integration path | Standard | Notes |
+| :----- | :--------------- | :------- | :---- |
+| Ollama | Base-URL override | OpenAI-compatible | Endpoint `http://localhost:11434/v1`. Also supports Anthropic Messages. |
+| LM Studio | Base-URL override | OpenAI-compatible | Endpoint `http://localhost:1234/v1`. Also supports Anthropic Messages. |
+| llama.cpp | Base-URL override | OpenAI-compatible | Endpoint `http://127.0.0.1:8080/v1`. Also supports Anthropic Messages. |
+| vLLM | Base-URL override | OpenAI-compatible | Endpoint `http://localhost:8000/v1`. Also supports Anthropic Messages. |
+| oMLX | Base-URL override | OpenAI-compatible | Endpoint `http://localhost:8000/v1`. Also supports Anthropic Messages. |
+| Other | Base-URL override | OpenAI-compatible or Anthropic-compatible | Any local server exposing a matching `/v1` endpoint works with the corresponding adapter. |
 
 ### Ollama example
 
@@ -322,9 +377,17 @@ Provider credentials are usually picked up from provider-specific environment va
 Session model selection follows this precedence (highest first):
 
 1. `--model` / `-m` CLI flag.
-2. `model` key in the effective config (project > custom > global > remote).
+2. `model` key in the effective config (project > custom > global > managed).
 3. Last used model.
 4. Internal default priority.
+
+## Changelog
+
+- **2026-07-02** — Confirmed Kilo CLI 1.0 is an OpenCode fork and uses the same `kilo.jsonc` config surface, precedence chain, and AI-SDK adapter model.
+- **2026-07-02** — Reclassified all listed local runners (Ollama, LM Studio, llama.cpp, vLLM, oMLX) as base-URL override paths; oMLX is no longer unsupported.
+- **2026-07-02** — Documented the three API-standard paths for custom providers: OpenAI Chat Completions-compatible, Anthropic Messages-compatible, and provider-native/bespoke via `npm`/`api` adapter fields.
+- **2026-07-02** — Updated per-model metadata keys, merge semantics, and environment variables to match the current published schema and docs.
+- **2026-07-02** — Noted that Kilo does not ship runner-native launch hooks; local integration is done through provider blocks.
 
 ## Sources
 

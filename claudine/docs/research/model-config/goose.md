@@ -37,9 +37,10 @@ api_standards:
     base_url_site: base_url in custom provider JSON (or OLLAMA_HOST for the built-in ollama provider)
     auth_site: none (Ollama local servers typically require no key)
     adapter: none
-    notes: 'Custom providers with engine ollama/ollama_compatible use the Ollama API, which is neither OpenAI nor Anthropic compatible.'
+    notes: 'Custom providers with engine ollama/ollama_compatible use the Ollama native API, which is neither OpenAI nor Anthropic compatible.'
 metadata_overrides:
   - name
+  - resolved_model
   - context_limit
   - input_token_cost
   - output_token_cost
@@ -49,32 +50,36 @@ metadata_overrides:
 merge_semantics: merge
 local_runners:
   - runner: ollama
-    supported: native
+    integration: first_class
+    standard: bespoke
     example: |
       GOOSE_PROVIDER: ollama
       GOOSE_MODEL: qwen2.5
       OLLAMA_HOST: http://localhost:11434
-    notes: 'First-class built-in provider. Model IDs include the Ollama tag, e.g. qwen2.5 or michaelneale/deepseek-r1-goose.'
+    notes: 'First-class built-in provider using the native Ollama API. Model IDs include the Ollama tag, e.g. qwen2.5 or michaelneale/deepseek-r1-goose. Can also be added as a custom OpenAI- or Anthropic-compatible provider.'
   - runner: lmstudio
-    supported: native
+    integration: first_class
+    standard: openai_compatible
     example: |
       GOOSE_PROVIDER: lmstudio
       GOOSE_MODEL: qwen2.5-coder-14b-instruct
-    notes: 'First-class built-in provider. Connects to localhost:1234 by default. Use the model id reported by LM Studio.'
+    notes: 'First-class built-in provider. Connects to localhost:1234 by default over LM Studios OpenAI-compatible endpoint. Use the model id reported by LM Studio.'
   - runner: omlx
-    supported: openai_compatible
+    integration: base_url_override
+    standard: openai_compatible
     example: |
       {
         "name": "local_omlx",
         "engine": "openai",
         "display_name": "oMLX",
-        "base_url": "http://localhost:8080/v1",
+        "base_url": "http://localhost:8000/v1",
         "requires_auth": false,
         "models": [{"name": "qwen2.5-7b", "context_limit": 32768}]
       }
-    notes: 'No native provider; add via custom OpenAI-compatible provider if the oMLX server exposes an OpenAI-compatible endpoint.'
+    notes: 'No native provider; add via custom OpenAI-compatible provider. oMLX also exposes an Anthropic-compatible endpoint, so engine anthropic with base_url http://localhost:8000 works as well.'
   - runner: llamacpp
-    supported: openai_compatible
+    integration: base_url_override
+    standard: openai_compatible
     example: |
       {
         "name": "local_llamacpp",
@@ -84,9 +89,10 @@ local_runners:
         "requires_auth": false,
         "models": [{"name": "qwen2.5-coder-14b", "context_limit": 32768}]
       }
-    notes: 'llama.cpp server exposes an OpenAI-compatible Chat Completions API. Add it as a custom OpenAI-compatible provider.'
+    notes: 'llama.cpp server exposes an OpenAI-compatible Chat Completions API and, since build b7187, an Anthropic-compatible /v1/messages endpoint. Add it as a custom provider on either standard.'
   - runner: vllm
-    supported: openai_compatible
+    integration: base_url_override
+    standard: openai_compatible
     example: |
       {
         "name": "local_vllm",
@@ -96,18 +102,32 @@ local_runners:
         "requires_auth": false,
         "models": [{"name": "qwen2.5-coder-32b-instruct", "context_limit": 32768}]
       }
-    notes: 'vLLM serves an OpenAI-compatible API. Add it as a custom OpenAI-compatible provider or point the built-in openai provider at it.'
+    notes: 'vLLM serves both OpenAI-compatible and Anthropic-compatible APIs (anthropic since v0.11.1). Add it as a custom provider on either standard, or point the built-in openai provider at it with OPENAI_HOST.'
   - runner: other
-    supported: openai_compatible
+    integration: base_url_override
+    standard: openai_compatible
     notes: 'Any local runner that exposes an OpenAI-compatible, Anthropic-compatible, or Ollama-compatible endpoint can be added as a custom provider.'
-default_model_site: GOOSE_MODEL key in ~/.config/goose/config.yaml (or session override via GOOSE_MODEL env var or --model flag)
+cloud_bridge:
+  supported: true
+  mechanism: custom provider JSON with engine openai/anthropic and base_url pointing at a gateway, or OPENAI_HOST/ANTHROPIC_HOST on built-in providers
+  example: |
+    {
+      "name": "litellm_bridge",
+      "engine": "openai",
+      "display_name": "LiteLLM Bridge",
+      "base_url": "http://localhost:4000/v1",
+      "api_key_env": "LITELLM_API_KEY",
+      "requires_auth": true,
+      "models": [{"name": "bedrock-claude-sonnet-4", "context_limit": 200000}]
+    }
+default_model_site: 'GOOSE_MODEL key in ~/.config/goose/config.yaml; session-scope override via GOOSE_MODEL env var or --model flag.'
 env_vars:
   - name: GOOSE_PROVIDER
     effect: Selects the active provider (e.g. anthropic, openai, ollama, lmstudio, or a custom provider id).
   - name: GOOSE_MODEL
     effect: Selects the active model for the session. Overrides the config.yaml GOOSE_MODEL value.
   - name: GOOSE_FAST_MODEL
-    effect: Overrides the provider's default fast/auxiliary model.
+    effect: Overrides the providers default fast/auxiliary model.
   - name: GOOSE_PROVIDER__TYPE
     effect: Overrides the provider implementation type.
   - name: GOOSE_PROVIDER__HOST
@@ -132,10 +152,25 @@ env_vars:
     effect: Overrides the Ollama server endpoint.
   - name: OPENAI_HOST
     effect: Overrides the OpenAI-compatible endpoint used by the built-in openai provider.
+  - name: OPENAI_API_KEY
+    effect: API key for the built-in openai provider.
   - name: ANTHROPIC_HOST
     effect: Overrides the Anthropic endpoint used by the built-in anthropic provider.
-changes: []
-requires_claudine_update: false
+  - name: ANTHROPIC_API_KEY
+    effect: API key for the built-in anthropic provider.
+  - name: CLAUDE_THINKING_TYPE
+    effect: Controls Claude reasoning mode (adaptive/enabled/disabled) on Anthropic and Databricks providers.
+  - name: GEMINI3_THINKING_LEVEL
+    effect: Sets the thinking level for Gemini 3 models (low or high).
+changes:
+  - 'Goose has moved to the Agentic AI Foundation (AAIF). The repository is now https://github.com/aaif-goose/goose and the documentation site is https://goose-docs.ai (block.github.io/goose redirects).'
+  - 'The built-in provider roster has expanded significantly to include Ollama Cloud, Ramalama, Atomic Chat, Docker Model Runner, ChatGPT Codex, GitHub Copilot, and numerous cloud providers (Avian, EmpirioLabs, FuturMix, Novita AI, Routstr, etc.).'
+  - 'LM Studio is now a first-class built-in provider using its OpenAI-compatible endpoint, not only a custom-provider path.'
+  - 'The custom provider JSON schema gained new optional fields: dynamic_models, skip_canonical_filtering, base_path, env_vars, timeout_seconds, catalog_provider_id, model_doc_link, setup_steps, fast_model, preserves_thinking, and resolved_model on ModelInfo.'
+  - 'New environment variables were documented: GOOSE_CONTEXT_LIMIT, GOOSE_INPUT_LIMIT, GOOSE_PLANNER_CONTEXT_LIMIT, GOOSE_FAST_MODEL, CLAUDE_THINKING_TYPE, and GEMINI3_THINKING_LEVEL.'
+  - 'The custom provider engine field accepts openai/openai_compatible, anthropic/anthropic_compatible, and ollama/ollama_compatible (case-insensitive).'
+requires_claudine_update: true
+reason: 'Claudines Goose provider adapter and model-catalog metadata should be updated for the AAIF repository move, the expanded built-in provider roster, and the new custom-provider schema fields (dynamic_models, env_vars, base_path, preserves_thinking, etc.) so that config parsing and provider detection remain accurate.'
 ---
 
 # Goose CLI User-Side Model Configuration
@@ -146,7 +181,7 @@ Goose CLI stores persistent model configuration in YAML files at user scope. The
 
 | Scope | Path | Format | Effect |
 | :---- | :--- | :----- | :----- |
-| User | `~/.config/goose/config.yaml` | YAML | Sets `GOOSE_PROVIDER`, `GOOSE_MODEL`, temperature, token limits, and extensions. |
+| User | `~/.config/goose/config.yaml` | YAML | Sets `GOOSE_PROVIDER`, `GOOSE_MODEL`, temperature, token limits, planner model, and extensions. |
 | User | `~/.config/goose/custom_providers/*.json` | JSON | One file per custom provider; adds user-defined providers and models. |
 | User | `~/.config/goose/secrets.yaml` | YAML | File-based fallback for API keys when the keyring is disabled or unavailable. |
 | Env | Shell environment variables | n/a | Session overrides; highest precedence. |
@@ -201,12 +236,23 @@ GOOSE_MODEL: gpt-4o
 | `name` | Unique provider id used in `GOOSE_PROVIDER`. |
 | `engine` | API family: `openai`/`openai_compatible`, `anthropic`/`anthropic_compatible`, or `ollama`/`ollama_compatible`. |
 | `display_name` | Human-readable label in the UI. |
-| `base_url` | API base URL. |
-| `api_key_env` | Environment variable or secret key name holding the API key. |
-| `requires_auth` | Whether the provider needs an API key. |
+| `description` | Optional short description of the provider. |
+| `base_url` | API base URL; may contain `${VAR}` placeholders expanded from `env_vars`. |
+| `base_path` | Optional URL path appended after `base_url`. |
+| `api_key_env` | Environment variable or secret key name holding the API key; leave empty when auth is not required. |
+| `requires_auth` | Whether the provider needs an API key; defaults to `true`. |
 | `supports_streaming` | Whether the endpoint supports streaming responses. |
 | `models` | Static list of models available from this provider. |
+| `dynamic_models` | When `true` or omitted, fetch models from the providers `/v1/models` endpoint instead of using the static list. |
 | `headers` | Extra headers to send on every request. |
+| `timeout_seconds` | Optional request timeout in seconds. |
+| `env_vars` | Optional templated variables for `base_url`, `base_path`, and `headers`. |
+| `fast_model` | Optional cheaper/faster model for lightweight tasks. |
+| `preserves_thinking` | Whether reasoning/thinking blocks are preserved; defaults to `true` for OpenAI engines, `false` otherwise. |
+| `skip_canonical_filtering` | If `true`, bypass Gooses canonical model-registry filtering. |
+| `catalog_provider_id` | Optional known-catalog mapping for provider-specific behavior. |
+| `model_doc_link` | Optional URL to the providers model documentation. |
+| `setup_steps` | Optional setup instructions shown to the user. |
 
 ### Supported API standards
 
@@ -225,6 +271,7 @@ Inside each object in the `models` array, a user can declare:
 | Key | Meaning |
 | :-- | :------ |
 | `name` | Model id sent to the provider. |
+| `resolved_model` | Optional underlying model name when `name` is an alias or endpoint. |
 | `context_limit` | Maximum context length in tokens. |
 | `input_token_cost` | Per-input-token cost in USD. |
 | `output_token_cost` | Per-output-token cost in USD. |
@@ -238,17 +285,46 @@ Custom providers are **merged** into the provider list alongside built-in provid
 
 Goose does not auto-merge model lists between providers. A model that later ships in a built-in provider will appear there as a separate entry; the user should remove or disable the redundant custom provider file. Goose does not automate this cleanup.
 
+### Cross-cloud bridging
+
+Goose CLI can be routed at a different cloud vendors API by adding a custom provider whose `engine` matches the API standard the target speaks (OpenAI-compatible or Anthropic-compatible) and pointing `base_url` at a gateway or proxy.
+
+If the target vendors native API does not serve either standard, place a translation proxy such as **LiteLLM** between Goose and the vendor:
+
+```json
+{
+  "name": "litellm_bridge",
+  "engine": "openai",
+  "display_name": "LiteLLM Bridge",
+  "base_url": "http://localhost:4000/v1",
+  "api_key_env": "LITELLM_API_KEY",
+  "requires_auth": true,
+  "models": [
+    {"name": "bedrock-claude-sonnet-4", "context_limit": 200000}
+  ]
+}
+```
+
+For the built-in `openai` provider, the same idea works through `OPENAI_HOST`:
+
+```bash
+export OPENAI_HOST="http://localhost:4000/v1"
+export OPENAI_API_KEY="litellm-token"
+export GOOSE_PROVIDER="openai"
+export GOOSE_MODEL="bedrock-claude-sonnet-4"
+```
+
 ## Adding Local Models
 
-Goose has native providers for Ollama and LM Studio. Other local runners can be used if they expose an OpenAI-compatible, Anthropic-compatible, or Ollama-compatible endpoint.
+Goose has first-class providers for **Ollama** and **LM Studio**. Other local runners can be used if they expose an OpenAI-compatible, Anthropic-compatible, or Ollama-compatible endpoint.
 
-| Runner | Supported | Notes |
-| :----- | :-------- | :---- |
-| Ollama | Native | Built-in `ollama` provider; pass model tags as Ollama reports them. |
-| LM Studio | Native | Built-in `lmstudio` provider; connects to `localhost:1234` by default. |
-| oMLX | OpenAI-compatible | No native provider; add via custom provider if the server is OpenAI-compatible. |
-| llama.cpp | OpenAI-compatible | llama.cpp server can be configured as a custom OpenAI-compatible provider. |
-| vLLM | OpenAI-compatible | vLLM can be configured as a custom OpenAI-compatible provider. |
+| Runner | Integration path | Notes |
+| :----- | :--------------- | :---- |
+| Ollama | First-class | Built-in `ollama` provider using the native Ollama API. |
+| LM Studio | First-class | Built-in `lmstudio` provider using LM Studios OpenAI-compatible endpoint. |
+| oMLX | Base-URL override | No native provider; add as a custom OpenAI- or Anthropic-compatible provider. |
+| llama.cpp | Base-URL override | Add `llama-server` as a custom OpenAI- or Anthropic-compatible provider. |
+| vLLM | Base-URL override | Add `vllm serve` as a custom OpenAI- or Anthropic-compatible provider. |
 
 ### Ollama example
 
@@ -266,6 +342,8 @@ The model id includes the size/quantization tag (`:14b`) exactly as Ollama repor
 GOOSE_PROVIDER: lmstudio
 GOOSE_MODEL: qwen2.5-coder-14b-instruct
 ```
+
+LM Studio defaults to `localhost:1234`.
 
 ### vLLM example
 
@@ -305,7 +383,19 @@ Environment variables take precedence over the corresponding settings in `config
 | `GOOSE_MAX_TOKENS` | Maximum tokens per response. |
 | `OLLAMA_HOST` | Ollama server endpoint. |
 | `OPENAI_HOST` | OpenAI-compatible endpoint for the built-in `openai` provider. |
+| `OPENAI_API_KEY` | API key for the built-in `openai` provider. |
 | `ANTHROPIC_HOST` | Anthropic endpoint for the built-in `anthropic` provider. |
+| `ANTHROPIC_API_KEY` | API key for the built-in `anthropic` provider. |
+| `CLAUDE_THINKING_TYPE` | Claude reasoning mode (`adaptive`, `enabled`, `disabled`). |
+| `GEMINI3_THINKING_LEVEL` | Gemini 3 thinking level (`low`, `high`). |
+
+## Changelog
+
+- **2026-07-02** — Updated for Goose move to the Agentic AI Foundation (AAIF): repository is now `https://github.com/aaif-goose/goose` and docs are at `https://goose-docs.ai`.
+- **2026-07-02** — Expanded built-in provider roster to include Ollama Cloud, Ramalama, Atomic Chat, Docker Model Runner, ChatGPT Codex, GitHub Copilot, and additional cloud providers.
+- **2026-07-02** — Reclassified LM Studio as a first-class built-in provider using its OpenAI-compatible endpoint.
+- **2026-07-02** — Documented new custom-provider JSON fields: `dynamic_models`, `skip_canonical_filtering`, `base_path`, `env_vars`, `timeout_seconds`, `catalog_provider_id`, `model_doc_link`, `setup_steps`, `fast_model`, `preserves_thinking`, and `resolved_model` on model entries.
+- **2026-07-02** — Added newly documented environment variables: `GOOSE_CONTEXT_LIMIT`, `GOOSE_INPUT_LIMIT`, `GOOSE_PLANNER_CONTEXT_LIMIT`, `GOOSE_FAST_MODEL`, `CLAUDE_THINKING_TYPE`, and `GEMINI3_THINKING_LEVEL`.
 
 ## Sources
 
@@ -316,6 +406,5 @@ Environment variables take precedence over the corresponding settings in `config
 - [Goose — Environment Variables](https://goose-docs.ai/docs/guides/environment-variables)
 - [Goose — Local LLMs](https://goose-docs.ai/docs/getting-started/providers#local-llms)
 - [Goose source repository](https://github.com/aaif-goose/goose)
-- [Goose provider registry source](https://github.com/aaif-goose/goose/blob/main/crates/goose/src/providers/provider_registry.rs)
-- [Goose declarative provider config source](https://github.com/aaif-goose/goose/blob/main/crates/goose/src/config/declarative_providers.rs)
+- [Goose declarative provider config source](https://github.com/aaif-goose/goose/blob/main/crates/goose-providers/src/declarative.rs)
 - [Goose provider types — ModelInfo source](https://github.com/aaif-goose/goose/blob/main/crates/goose-provider-types/src/base.rs)

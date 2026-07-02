@@ -13,32 +13,33 @@ config_files:
     notes: >-
       Global user settings. `model.name` pins the default model and
       `modelConfigs` declares custom aliases, overrides, and model definitions.
-      Observed on this host with `security.auth.selectedType: gemini-api-key`
-      and `general.previewFeatures: true`.
+      Observed on this host with no `model.name` or `modelConfigs` block, so the
+      CLI is using the default `auto` model selection.
   - scope: repo
     path: .gemini/settings.json
     format: json
     notes: Project-specific settings that override the user settings file.
   - scope: env
-    path: .gemini/.env
+    path: .gemini/.env or ~/.gemini/.env
     format: other
     notes: >-
       Auto-loaded env file (project first, then ~/.gemini/.env). Used for
-      `GEMINI_API_KEY`, `GOOGLE_CLOUD_PROJECT`, `GEMINI_MODEL`, etc. The first
-      file found wins; values are not merged.
+      `GEMINI_MODEL`, `GEMINI_API_KEY`, `GOOGLE_GEMINI_BASE_URL`,
+      `GOOGLE_VERTEX_BASE_URL`, etc. The first file found wins; values are not
+      merged.
   - scope: env
     path: Shell environment variables
     format: other
-    notes: Session-scoped overrides such as `GEMINI_MODEL` and API credentials.
+    notes: Session-scoped overrides such as `GEMINI_MODEL`, API credentials, and gateway base URLs.
 api_standards:
   - standard: bespoke
-    base_url_site: Hard-coded Gemini API / Vertex endpoint (not user-configurable)
+    base_url_site: GOOGLE_GEMINI_BASE_URL / GOOGLE_VERTEX_BASE_URL env vars (no settings.json key)
     auth_site: GEMINI_API_KEY, GOOGLE_API_KEY, GOOGLE_APPLICATION_CREDENTIALS, or OAuth
     notes: >-
       The CLI uses the Google GenAI SDK and speaks the Gemini API (or Vertex AI).
-      There is no OpenAI-compatible or Anthropic-compatible adapter in the
-      shipping CLI; community PRs for OpenAI-compatible providers were closed
-      without merge.
+      A "gateway" auth mode lets users redirect to a custom Gemini API-compatible
+      base URL via `GOOGLE_GEMINI_BASE_URL`. There is no OpenAI-compatible or
+      Anthropic-compatible adapter in the shipping CLI.
 metadata_overrides:
   - displayName
   - tier
@@ -49,37 +50,94 @@ metadata_overrides:
   - features.thinking
   - features.multimodalToolUse
   - modelConfig.model
-  - generateContentConfig.temperature
-  - generateContentConfig.topP
-  - generateContentConfig.maxOutputTokens
-  - generateContentConfig.thinkingConfig
+  - modelConfig.generateContentConfig.temperature
+  - modelConfig.generateContentConfig.topP
+  - modelConfig.generateContentConfig.topK
+  - modelConfig.generateContentConfig.maxOutputTokens
+  - modelConfig.generateContentConfig.thinkingConfig
 merge_semantics: merge
 local_runners:
   - runner: ollama
-    supported: unsupported
-    notes: No native integration and no OpenAI-compatible shim in the shipping CLI.
+    integration: proxy_required
+    standard: bespoke
+    example: >-
+      A Gemini API-compatible translating proxy must sit between Gemini CLI and
+      Ollama. `export GOOGLE_GEMINI_BASE_URL=http://localhost:8080` and
+      `export GEMINI_API_KEY=ollama`, then `gemini --model qwen3:1.7b`. The proxy
+      translates Gemini API requests to Ollama's OpenAI-compatible
+      `/v1/chat/completions` endpoint.
+    notes: >-
+      Ollama serves OpenAI- and Anthropic-compatible endpoints, but Gemini CLI
+      does not speak those standards. A direct base URL to Ollama will not work.
   - runner: omlx
-    supported: unsupported
-    notes: No native integration and no OpenAI-compatible shim in the shipping CLI.
+    integration: proxy_required
+    standard: bespoke
+    example: >-
+      `export GOOGLE_GEMINI_BASE_URL=http://localhost:8080` and
+      `export GEMINI_API_KEY=<omlx-key-or-ignored>`, then
+      `gemini --model Qwen3.6-35B-A3B-oQ6`. A Gemini-to-OpenAI/Anthropic
+      translating proxy is required.
+    notes: >-
+      oMLX serves OpenAI- and Anthropic-compatible endpoints, but Gemini CLI
+      only emits the Gemini API. A direct base URL to oMLX will not work.
   - runner: lmstudio
-    supported: unsupported
-    notes: No native integration and no OpenAI-compatible shim in the shipping CLI.
+    integration: proxy_required
+    standard: bespoke
+    example: >-
+      `export GOOGLE_GEMINI_BASE_URL=http://localhost:8080` and
+      `export GEMINI_API_KEY=lmstudio`, then
+      `gemini --model openai/gpt-oss-20b`. A Gemini-to-OpenAI/Anthropic
+      translating proxy is required.
+    notes: >-
+      LM Studio serves OpenAI- and Anthropic-compatible endpoints, but Gemini CLI
+      does not speak those standards. A direct base URL to LM Studio will not work.
   - runner: llamacpp
-    supported: unsupported
-    notes: No native integration and no OpenAI-compatible shim in the shipping CLI.
+    integration: proxy_required
+    standard: bespoke
+    example: >-
+      `export GOOGLE_GEMINI_BASE_URL=http://localhost:8080` and
+      `export GEMINI_API_KEY=<key-if-set>`, then
+      `gemini --model gemma-3-1b-it.Q4_K_M.gguf`. A Gemini-to-OpenAI/Anthropic
+      translating proxy is required.
+    notes: >-
+      llama-server serves OpenAI- and Anthropic-compatible endpoints, but Gemini
+      CLI only emits the Gemini API. A direct base URL to llama-server will not
+      work.
   - runner: vllm
-    supported: unsupported
-    notes: No native integration and no OpenAI-compatible shim in the shipping CLI.
+    integration: proxy_required
+    standard: bespoke
+    example: >-
+      `export GOOGLE_GEMINI_BASE_URL=http://localhost:8080` and
+      `export GEMINI_API_KEY=EMPTY`, then
+      `gemini --model Qwen/Qwen2.5-1.5B-Instruct`. A Gemini-to-OpenAI/Anthropic
+      translating proxy is required.
+    notes: >-
+      vLLM serves OpenAI- and Anthropic-compatible endpoints, but Gemini CLI does
+      not speak those standards. A direct base URL to vLLM will not work.
   - runner: other
-    supported: native
+    integration: first_class
+    standard: bespoke
     example: >-
       { "experimental": { "gemmaModelRouter": { "enabled": true,
       "classifier": { "host": "http://localhost:9379", "model":
       "gemma3-1b-gpu-custom" } } } }
     notes: >-
       Local Gemma via LiteRT-LM is supported only as an experimental routing
-      classifier, not as a general chat model.
-default_model_site: model.name key in ~/.gemini/settings.json (or .gemini/settings.json); session override via GEMINI_MODEL env var or --model flag
+      classifier, not as a general chat model. Setup is normally done with
+      `gemini gemma setup`.
+cloud_bridge:
+  supported: true
+  mechanism: GOOGLE_GEMINI_BASE_URL env var (or GOOGLE_VERTEX_BASE_URL for Vertex-compatible gateways); optionally set security.auth.selectedType to "gateway" for ACP/IDE mode
+  example: |
+    # Route Gemini CLI through a Gemini API-compatible gateway that proxies to a non-Google API
+    export GOOGLE_GEMINI_BASE_URL="https://my-gateway.example.com/gemini"
+    export GEMINI_API_KEY="gateway-key"
+    gemini --model "openai/gpt-4.1"
+
+    # If the target vendor's API is not Gemini-compatible (e.g. native OpenAI),
+    # the gateway must translate the Gemini API to that vendor's protocol.
+    # A direct base URL such as https://api.openai.com will not work.
+default_model_site: 'model.name key in ~/.gemini/settings.json (or .gemini/settings.json); session override via GEMINI_MODEL env var or --model flag; precedence is --model > GEMINI_MODEL > model.name'
 env_vars:
   - name: GEMINI_MODEL
     effect: Sets the active model for the launched session.
@@ -97,12 +155,30 @@ env_vars:
     effect: Path to a service account JSON key for ADC-based Vertex auth.
   - name: GOOGLE_GENAI_USE_VERTEXAI
     effect: Switches the SDK to the Vertex AI endpoint.
+  - name: GOOGLE_GEMINI_BASE_URL
+    effect: Redirects the Gemini API endpoint to a custom gateway. Triggers the "gateway" auth mode.
+  - name: GOOGLE_VERTEX_BASE_URL
+    effect: Redirects the Vertex AI endpoint to a custom gateway.
+  - name: GEMINI_API_KEY_AUTH_MECHANISM
+    effect: 'Controls API-key header style: `x-goog-api-key` (default) or `bearer`.'
+  - name: GOOGLE_GENAI_API_VERSION
+    effect: Overrides the Google GenAI SDK API version string.
   - name: GEMINI_CLI_SYSTEM_DEFAULTS_PATH
     effect: Overrides the path to the system defaults settings file.
   - name: GEMINI_CLI_SYSTEM_SETTINGS_PATH
     effect: Overrides the path to the system override settings file.
-changes: []
-requires_claudine_update: false
+changes:
+  - 'Discovered a gateway auth mode in Gemini CLI 0.46.0 driven by GOOGLE_GEMINI_BASE_URL (and GOOGLE_VERTEX_BASE_URL). This enables custom Gemini API-compatible endpoints, but it is not an OpenAI/Anthropic base-URL override.'
+  - 'Confirmed that the interactive CLI auth picker does not expose gateway; it is env/ACP-driven. Persistent selection can be recorded via security.auth.selectedType: "gateway" when an ACP/IDE client initializes the session.'
+  - 'Reclassified local runners (Ollama, oMLX, LM Studio, llama.cpp, vLLM) as proxy_required via a Gemini API-compatible translating proxy, not unsupported. A direct base-URL override onto their OpenAI/Anthropic endpoints does not work because Gemini CLI has no such client.'
+  - 'Added GEMINI_API_KEY_AUTH_MECHANISM and GOOGLE_GENAI_API_VERSION to the environment-override list; both affect how the SDK sends credentials and which API version is requested.'
+  - 'Updated modelConfigs coverage: the schema now also documents aliases, customAliases, overrides, customOverrides, modelDefinitions, modelIdResolutions, classifierIdResolutions, and modelChains.'
+requires_claudine_update: true
+reason: >-
+  Claudine should recognize GOOGLE_GEMINI_BASE_URL / GOOGLE_VERTEX_BASE_URL as
+  Gemini CLI endpoint overrides, model the gateway auth type in provider
+  metadata, and classify local runners as proxy_required through a
+  Gemini-compatible translating proxy rather than unsupported.
 ---
 
 # Gemini CLI User-Side Model Configuration
@@ -132,10 +208,10 @@ top-level buckets (`general`, `security`, `tools`, `ui`) but no `model.name` or
 
 ## Adding Cloud Models
 
-Gemini CLI is a first-party Google model client. The only cloud models it can
-use are models served by the Gemini API or Vertex AI. There is no generic
-"add a provider" plug-in, no `baseUrl` setting, and no OpenAI-compatible
-adapter in the released CLI.
+Gemini CLI is a first-party Google model client. Out of the box it talks to the
+Gemini API or Vertex AI. The only way to point it at a different cloud model is
+to use the **gateway** auth mode, which redirects the Google GenAI SDK to a
+custom base URL that must speak the **Gemini API** protocol.
 
 To use a Google model that is not in the built-in alias list, add a
 `modelConfigs` block with a `customAliases` entry and, if necessary, a
@@ -174,25 +250,37 @@ To use a Google model that is not in the built-in alias list, add a
 }
 ```
 
+To redirect requests to a custom Gemini API-compatible gateway, use environment
+variables (there is no `baseUrl` key in `settings.json`):
+
+```bash
+export GOOGLE_GEMINI_BASE_URL="https://my-gateway.example.com/gemini"
+export GEMINI_API_KEY="gateway-key"
+gemini --model my-gemini-3-pro
+```
+
 ### What each piece means
 
 | Key | Effect |
 | :-- | :----- |
 | `model.name` / `--model` / `GEMINI_MODEL` | The string used as the requested model. If it matches a `customAliases` key, that alias is resolved. |
 | `customAliases.<name>.extends` | Inherits from another alias (built-in or custom). |
-| `customAliases.<name>.modelConfig.model` | The concrete model ID passed to the Google GenAI SDK. |
+| `customAliases.<name>.modelConfig.model` | The concrete model ID passed to the Google GenAI SDK (and onward to the gateway). |
 | `modelDefinitions.<id>` | Registry entry that tells the CLI how to display the model and what capabilities it has. |
+| `GOOGLE_GEMINI_BASE_URL` | Env-only override that switches the SDK to gateway mode and points it at a custom Gemini API-compatible endpoint. |
+| `GEMINI_API_KEY` | Credential sent to the gateway. The header style is controlled by `GEMINI_API_KEY_AUTH_MECHANISM` (`x-goog-api-key` or `bearer`). |
 
 ### Supported API standard
 
 Gemini CLI speaks the **Google GenAI / Gemini API** (or Vertex AI). It does not
-support OpenAI-compatible, Anthropic-compatible, or other bespoke provider APIs.
+support OpenAI-compatible, Anthropic-compatible, or other bespoke provider APIs
+natively.
 
 | Aspect | How it is specified |
 | :----- | :------------------ |
-| Base URL | Hard-coded by the SDK based on auth mode (Gemini API or Vertex). Not user-configurable. |
-| Auth | `GEMINI_API_KEY` (AI Studio), `GOOGLE_API_KEY` (Vertex/Cloud), `GOOGLE_APPLICATION_CREDENTIALS` (ADC service account), or OAuth sign-in. |
-| Adapter | None. |
+| Base URL | Hard-coded by the SDK based on auth mode, or overridden via `GOOGLE_GEMINI_BASE_URL` / `GOOGLE_VERTEX_BASE_URL`. Not configurable inside `settings.json`. |
+| Auth | `GEMINI_API_KEY` (AI Studio / gateway), `GOOGLE_API_KEY` (Vertex/Cloud), `GOOGLE_APPLICATION_CREDENTIALS` (ADC service account), or OAuth sign-in. |
+| Adapter | None. The gateway must implement the Gemini API protocol. |
 
 ### Per-model metadata
 
@@ -209,7 +297,7 @@ Users can declare the following metadata in `modelDefinitions`:
 | `features.thinking` | Whether the model supports thinking/reasoning output. |
 | `features.multimodalToolUse` | Whether the model supports multimodal tool use. |
 
-Generation parameters (`temperature`, `topP`, `maxOutputTokens`,
+Generation parameters (`temperature`, `topP`, `topK`, `maxOutputTokens`,
 `thinkingConfig`, etc.) go inside `modelConfig.generateContentConfig`, not in
 `modelDefinitions`.
 
@@ -224,22 +312,66 @@ block for a model that later ships built-in becomes redundant. Gemini CLI does
 not auto-remove these manual blocks; users must delete them from their
 `settings.json`.
 
+### Cross-cloud bridging
+
+Gemini CLI can be routed at a different cloud vendor's API, but only by pointing
+`GOOGLE_GEMINI_BASE_URL` at a **Gemini API-compatible gateway or proxy**. The
+gateway is responsible for translating the Gemini API protocol to the upstream
+vendor's native format.
+
+```bash
+# Route Gemini CLI through a gateway that forwards to a non-Google cloud API
+export GOOGLE_GEMINI_BASE_URL="https://openai-gateway.example.com/gemini"
+export GEMINI_API_KEY="gateway-token"
+gemini --model "openai/gpt-4.1"
+```
+
+If the target vendor's native API is not Gemini-compatible (for example, native
+OpenAI or Anthropic endpoints), a direct base URL will fail. You must run a
+translating proxy that exposes the Gemini API to Gemini CLI and forwards to the
+vendor's API on the back end.
+
 ## Adding Local Models
 
-Gemini CLI has **no native support** for using Ollama, oMLX, LM Studio,
-llama.cpp, or vLLM as the chat model, and no OpenAI-compatible shim is present
-in the released CLI. The only local-model integration is the experimental
-**Gemma model router**, which uses a local Gemma model only to classify and
-route requests to cloud Gemini models.
+Local-runner support is a property of **API-standard bridging**, not of Gemini
+CLI "knowing about" a runner. Gemini CLI's client only speaks the Gemini API, so
+a runner that exposes OpenAI- or Anthropic-compatible endpoints cannot be used
+directly. It can only be used through a translating proxy that exposes a
+Gemini-compatible surface to Gemini CLI.
 
-| Runner | Supported | Notes |
-| :----- | :-------- | :---- |
-| Ollama | Unsupported | No integration; community PRs were closed without merge. |
-| oMLX | Unsupported | No integration. |
-| LM Studio | Unsupported | No integration. |
-| llama.cpp | Unsupported | No integration. |
-| vLLM | Unsupported | No integration. |
-| Gemma via LiteRT-LM | Native (experimental) | Supported only as a routing classifier, not as a general chat model. |
+| Runner | Integration path | Notes |
+| :----- | :--------------- | :---- |
+| Ollama | Proxy required | Start Ollama, then run a Gemini-to-OpenAI/Anthropic proxy and point `GOOGLE_GEMINI_BASE_URL` at it. |
+| oMLX | Proxy required | Start oMLX, then run a Gemini-to-OpenAI/Anthropic proxy and point `GOOGLE_GEMINI_BASE_URL` at it. |
+| LM Studio | Proxy required | Start LM Studio server, then run a Gemini-to-OpenAI/Anthropic proxy and point `GOOGLE_GEMINI_BASE_URL` at it. |
+| llama.cpp | Proxy required | Start `llama-server`, then run a Gemini-to-OpenAI/Anthropic proxy and point `GOOGLE_GEMINI_BASE_URL` at it. |
+| vLLM | Proxy required | Start `vllm serve`, then run a Gemini-to-OpenAI/Anthropic proxy and point `GOOGLE_GEMINI_BASE_URL` at it. |
+| Gemma via LiteRT-LM | First-class (experimental) | Supported only as a routing classifier via `experimental.gemmaModelRouter`, not as a general chat model. |
+
+### Practical example for Ollama
+
+```bash
+# A Gemini API-compatible proxy is listening on :8080 and translating to
+# Ollama's OpenAI-compatible /v1/chat/completions endpoint.
+export GOOGLE_GEMINI_BASE_URL="http://localhost:8080"
+export GEMINI_API_KEY="ollama"
+gemini --model "qwen3:1.7b"
+```
+
+The model ID string is whatever the runner accepts; size and quantization tags
+such as `:1.7b` are part of the runner's model namespace.
+
+### Practical example for LM Studio
+
+```bash
+export GOOGLE_GEMINI_BASE_URL="http://localhost:8080"
+export GEMINI_API_KEY="lmstudio"
+gemini --model "openai/gpt-oss-20b"
+```
+
+Again, `http://localhost:8080` must be a Gemini API-compatible proxy that
+translates to LM Studio's OpenAI- or Anthropic-compatible server endpoint. A
+direct `GOOGLE_GEMINI_BASE_URL=http://localhost:1234` will not work.
 
 ### Local Gemma router example
 
@@ -284,15 +416,26 @@ setting is expressed in both. Model selection follows this order:
 | Variable | Effect |
 | :------- | :----- |
 | `GEMINI_MODEL` | Sets the active model for the session. |
-| `GEMINI_API_KEY` | AI Studio API key for the Gemini API. |
+| `GEMINI_API_KEY` | AI Studio / gateway API key for the Gemini API. |
 | `GOOGLE_API_KEY` | Google Cloud/Vertex AI API key. |
 | `GOOGLE_CLOUD_PROJECT` | Google Cloud project for Vertex/OAuth. |
 | `GOOGLE_CLOUD_PROJECT_ID` | Fallback project ID. |
 | `GOOGLE_CLOUD_LOCATION` | Vertex AI region/location. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Service account JSON for ADC. |
 | `GOOGLE_GENAI_USE_VERTEXAI` | Switches the SDK to Vertex AI. |
+| `GOOGLE_GEMINI_BASE_URL` | Redirects the Gemini API endpoint to a gateway; triggers gateway auth mode. |
+| `GOOGLE_VERTEX_BASE_URL` | Redirects the Vertex AI endpoint to a gateway. |
+| `GEMINI_API_KEY_AUTH_MECHANISM` | API-key header style: `x-goog-api-key` (default) or `bearer`. |
+| `GOOGLE_GENAI_API_VERSION` | Overrides the Google GenAI SDK API version. |
 | `GEMINI_CLI_SYSTEM_DEFAULTS_PATH` | Override system defaults file path. |
 | `GEMINI_CLI_SYSTEM_SETTINGS_PATH` | Override system override file path. |
+
+## Changelog
+
+- **2026-07-02** — Documented the gateway auth mode driven by `GOOGLE_GEMINI_BASE_URL` / `GOOGLE_VERTEX_BASE_URL`. This enables custom Gemini API-compatible endpoints but is not an OpenAI/Anthropic base-URL override.
+- **2026-07-02** — Reclassified local runners as `proxy_required` through a Gemini-compatible translating proxy; a direct base-URL override onto their OpenAI/Anthropic endpoints does not work.
+- **2026-07-02** — Added `GEMINI_API_KEY_AUTH_MECHANISM` and `GOOGLE_GENAI_API_VERSION` to the environment-override list.
+- **2026-07-02** — Expanded `modelConfigs` coverage to include `aliases`, `customAliases`, `overrides`, `customOverrides`, `modelDefinitions`, `modelIdResolutions`, `classifierIdResolutions`, and `modelChains`.
 
 ## Sources
 
