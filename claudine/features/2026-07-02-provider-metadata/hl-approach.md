@@ -33,6 +33,21 @@ signals). Each new topic follows the now-standard recipe: schema designed backwa
 catalog fields → pilot → evaluate → fleet. The `requires_claudine_update` queue is
 triaged as topics land (Kimi 2.0 protocol fix rides the streaming/signals topics).
 
+> TODO: we should also add topics for:
+>
+> - `hooks` - what event hooks does the agent support? what are the request and response hook schemas for each event? which events can stop execution of the running job versus those just used to extract information from a running process. How do the events an agent supports map to Claudine's canonical event model? What files are used to configure? What is the schema for these configuration files (or at least the "section" used for hook config)?
+> - `agent-skills` - all agents support "agent skills" but there is some variance around config files, config file formats (json, yaml, markdown frontmatter, toml, etc.). Each Agent should also support the idea of "user scope" versus "repo scope" separation which allows skills to be defined across users or for a particular repo but there are often differences in terms of what metadata key/value pairs are recognized and or required. 
+> - `slash-commands` - all agents support "slash commands" even if they call it something else (e.g., "prompts", etc.). Like "agent skills" there is important variance and in fact slash commands tends to have far greater variance than agent skills do. 
+> - `agent-permissions` 
+>     - what configuration files are used (user versus repo scoped); this should be OS specific
+>     - what is the schema for permissions? is it a formal, informal, or observed schema?
+>     - what are the "default permissions" for the given agent if nothing is specified?
+>     - what are the default permissions for YOLO mode (if supported)?
+>     - what CLI switches does the Agent provide to modify the permissions?
+>     - what ENV variables -- if any -- would effect permissions?
+
+QUESTION: what is the best set of seams to use to achieve full research coverage? Do any of the new topics above overlap in scope to existing research areas? Let's finalize this before we do any more research work.
+
 ### B — Model ground truth & identity (unchained-ai side)
 
 Fresh catalog snapshot (needs API keys — run `gen` from a normal shell); wire the
