@@ -2,18 +2,25 @@
 sequence: "@claudine/docs/providers.yaml"
 file: "{{ctx.repo_root}}/claudine/docs/research/agent-models/{{state.file}}"
 agent: opencode
-model: zai-coding-plan/glm-5.2
-# all target documents we write to should provide this frontmatter
-target_schema: 
-    created: date
-    last_updated: date(required)
-    agent: string(required)
-    model: string(required)
-    
-    changes: string[]
-    requires_claudine_update: boolean(required)
-    reason: string
-update: "{{file_exists(file) && markdown_file_empty(file) ? false : true }}"
+model: kimi-for-coding/k2p7
+# the frontmatter contract for target documents lives in the schema sidecar
+# (./_schema.yaml) so the contract is single-sourced and machine-validated
+update: "{{file_exists(file) && !markdown_body_empty(file)}}"
+# make interrupted fleet runs resumable: skip providers already researched today
+initialize:
+    stack:
+        - when: "file_exists(file) && frontmatter(file, 'last_updated') == ctx.today"
+          action:
+              - stderr: "Research for <b>{{state.name}}</b> is already up to date ({{ctx.today}}) — skipping."
+              - skip
+# a provider exiting 0 is not proof the research was written — verify the
+# agent actually stamped today's date before accepting success
+success:
+    stack:
+        - when: "frontmatter(file, 'last_updated') != ctx.today"
+          action:
+              - stderr: "The step reported success but <b>{{file}}</b> was not updated — <code>last_updated</code> is not {{ctx.today}}."
+              - error: "research file was not updated"
 ---
 
 ## Skills
@@ -30,9 +37,9 @@ Your job is to do detailed research into the **model** support in the **{{state.
 
 - `## Model Configuration Details` Section
 
-    - Does **{{state.name}}** provide a formal schema for the configuration of it's models? An informal schema?
-    - Is 
-
+    - Does **{{state.name}}** provide a formal schema for the configuration of its models? An informal schema?
+    - How is a model selected at launch time and at runtime (CLI flags, ENV variables, config files, interactive slash commands, wire envelope)? What is the precedence between these mechanisms?
+    - Can the CLI enumerate its model catalog programmatically (a `models`/`list` subcommand, an API, a config dump)?
 
 - `## Sources`
     - add all useful resources that you used in your research as Markdown links
@@ -56,11 +63,12 @@ Follow these steps exactly:
 ::block when="!update"
 - Write and save research to `{{file}}`
 ::end-block
-- Set the `$schema` property of `{{file}}` to:
+- Set the `$schema` property of `{{file}}` to the string `./_schema.yaml`
 
-    {{target_schema}}
-
-    > Note: this is using the `SimpleSchema` schema representation which can be easily converted to JSON schema for validation purposes
+    > This is a file reference to this topic's schema sidecar. Read `_schema.yaml`
+    > (it sits next to this sequence file) before filling frontmatter — it is the
+    > authoritative contract, expressed as a `SimpleSchema`, and `md schema validate`
+    > will enforce it against everything you write.
 
 - Now we will capture other key metadata to the research documents Frontmatter:
     ::block when="!update"
@@ -69,14 +77,13 @@ Follow these steps exactly:
     - `last_updated` - set to "{{ctx.today}}"
     - `agent` - set to "{{env.AGENT}}"
     - `model` - set to "{{env.MODEL || 'default' }}"
-    - `has_official_schema` - set to "formal" if a formal schema exists, set to "informal" if an informal schema exists, otherwise set to "none"
-    - `schema_url` - if there is a formal or informal schema discovered then set the URL for the schemas definition (always prefer formal over informal); otherwise do not add this property
-    - `logs_directory` - specify where the base of the logs directory is typically located on a host (by operating system): { macos: string, windows: string, linux: string }
-    - `has_desktop_app` - set as true/false based on whether the given provider not only has a CLI tool but also a desktop based application.
-    - `desktop_logs` - as a dictionary:
-        - `same_log_format` - set as a boolean value indicating whether the CLI and desktop apps write the same log format/schema or not
-        - `same_directory` - set as a boolean value indicating whether the CLI
-        and desktop apps share the same log file location or not
+    - `has_official_schema` - set to "formal" if a formal schema exists for **model configuration**, "informal" if only an informal one exists, otherwise "none"
+    - `schema_url` - if a formal or informal schema was discovered then set the URL for the schema's definition (always prefer formal over informal); otherwise do not add this property
+    - `default_models` - one record per model available out of the box. `id` must be the **exact string** the CLI/config accepts; add `alias` when a short form exists, `context_window` when documented, and `is_default: true` on the model used when none is specified
+    - `model_selection` - one record per mechanism for choosing a model (`cli_flag`, `env_var`, `config_file`, `interactive_command`, `wire_envelope`); `site` is the flag/variable/key/command name; give an `example` for each
+    - `precedence` - the highest-wins ordering across the `model_selection` mechanisms (e.g. "cli_flag > env_var > config_file")
+    - `custom_models` - one record per way to register bespoke/local models (`local`, `openai_compatible`, `anthropic_compatible`, `provider_plugin`, `other`); `config_site` names the config file/key involved
+    - `dynamic_listing` - whether the CLI can enumerate its model catalog programmatically; if so name the `method` and give an `example`
     ::block when="update"
     - `changes` - add a list of string descriptions which summarize the changes discovered since the last research was done
     ::end-block
