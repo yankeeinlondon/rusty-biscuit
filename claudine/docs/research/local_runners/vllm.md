@@ -35,10 +35,10 @@ platforms:
     support: separate_project
     binary: vllm
     alt_binaries: ["vllm-metal"]
-    install: ["Follow vLLM-Metal install guide at https://github.com/vllm-project/vllm-metal"]
+    install: ["Build official Apple Silicon CPU support from source; follow vLLM-Metal install guide at https://github.com/vllm-project/vllm-metal for GPU acceleration"]
     process_model: foreground
     service: user-managed foreground process
-    notes: Apple Silicon GPU acceleration via vLLM-Metal, which uses MLX instead of PyTorch and requires mlx-community models.
+    notes: Official experimental Apple Silicon CPU support exists but is build-from-source only with no pre-built wheels; Apple Silicon GPU acceleration is the separate vLLM-Metal project, which uses MLX instead of PyTorch and requires mlx-community models.
   - os: windows
     support: wsl
     binary: vllm
@@ -81,6 +81,7 @@ api_standards:
     since_version: "v0.11.1"
     deviations:
       - "Anthropic SDKs append /v1/messages themselves, so base_url omits /v1."
+      - "/v1/messages/count_tokens requires vLLM >= v0.17.0."
       - "Streaming, tools, system prompts, and thinking blocks are supported."
       - "Prompt caching, batches, citations, and PDF content blocks are not supported."
     docs_url: https://docs.vllm.ai/en/latest/online_serving/
@@ -117,8 +118,8 @@ metadata_endpoints:
     path: /health
     gated_by: ""
     auth_gated: true
-    response_hint: '{"status": "healthy"}'
-    notes: Returns 200 when the engine is ready to serve; may return 503 while loading.
+    response_hint: "empty HTTP 200 body"
+    notes: Returns an empty 200 response when the engine is healthy; returns 503 when the engine is dead.
   - purpose: version
     method: get
     path: /version
@@ -150,14 +151,14 @@ metadata_endpoints:
   - purpose: load_model
     method: post
     path: /v1/load_lora_adapter
-    gated_by: ""
+    gated_by: "--enable-lora and VLLM_ALLOW_RUNTIME_LORA_UPDATING=True"
     auth_gated: true
     response_hint: '{"success": true}'
     notes: Dynamically load a LoRA adapter at runtime. Not for production use without safeguards.
   - purpose: unload_model
     method: post
     path: /v1/unload_lora_adapter
-    gated_by: ""
+    gated_by: "--enable-lora and VLLM_ALLOW_RUNTIME_LORA_UPDATING=True"
     auth_gated: true
     response_hint: '{"success": true}'
     notes: Unload a previously loaded LoRA adapter.
@@ -186,8 +187,8 @@ detection:
     method: port
     target: "8000"
     expect: ""
-    confidence: documented
-    notes: Default port is shared with other servers (e.g., oMLX); an HTTP probe is required to confirm vLLM.
+    confidence: observed
+    notes: Default port is shared with other servers. On this host, TCP 8000 is owned by oMLX (`omlx-server`), so an HTTP probe is required to confirm vLLM.
   - os: all
     method: http
     target: GET /version
@@ -239,7 +240,7 @@ env_vars:
   - name: VLLM_LOGGING_LEVEL
     effect: "Default log level for vLLM (default INFO)."
   - name: VLLM_CPU_KVCACHE_SPACE
-    effect: "CPU backend key-value cache size in bytes."
+    effect: "CPU backend key-value cache size in GiB (for example, 40 means 40 GiB)."
   - name: VLLM_WORKER_MULTIPROC_METHOD
     effect: "spawn or fork (default fork); controls worker process spawning."
   - name: VLLM_ALLOW_LONG_MAX_MODEL_LEN
@@ -339,10 +340,12 @@ speech-to-text HTTP endpoints. vLLM is developed at
 | OS | Support | Binary | Install methods | Process model | Service |
 | --- | --- | --- | --- | --- | --- |
 | Linux | native | `vllm` | `pip install vllm`, `uv pip install vllm`, Docker `vllm/vllm-openai` | foreground | user-managed (systemd/Docker/K8s/foreground) |
-| macOS | separate_project | `vllm` | vLLM-Metal install guide | foreground | user-managed foreground process |
+| macOS | separate_project | `vllm` | Source build for official CPU support; vLLM-Metal install guide for GPU | foreground | user-managed foreground process |
 | Windows | wsl | `vllm` | WSL2 with Linux install steps | foreground | user-managed WSL2 process |
 
-vLLM is primarily a Linux project. macOS users should use the community
+vLLM is primarily a Linux project. Official experimental Apple Silicon CPU
+support exists, but it is build-from-source only with no pre-built wheels. Apple
+Silicon GPU acceleration remains the separate
 [vLLM-Metal](https://github.com/vllm-project/vllm-metal) project, which replaces
 PyTorch with MLX and requires MLX-optimized models from the
 [mlx-community](https://huggingface.co/mlx-community) HuggingFace organization.
@@ -377,15 +380,15 @@ endpoint (including `/health` and `/version`) requires `Authorization: Bearer <k
 | `/v1/audio/transcriptions` | Supported | Requires an ASR model. |
 | `/v1/audio/translations` | Supported | Requires an ASR model. |
 | `/v1/responses` | Supported | Non-stateful. |
-| `/v1/load_lora_adapter` | Supported | Dynamic LoRA loading; local dev only. |
-| `/v1/unload_lora_adapter` | Supported | Dynamic LoRA unloading. |
+| `/v1/load_lora_adapter` | Gated | Requires `--enable-lora` and `VLLM_ALLOW_RUNTIME_LORA_UPDATING=True`; local dev only. |
+| `/v1/unload_lora_adapter` | Gated | Requires `--enable-lora` and `VLLM_ALLOW_RUNTIME_LORA_UPDATING=True`. |
 
 ### Anthropic-compatible endpoints
 
 | Path | Status | Notes |
 | --- | --- | --- |
 | `/v1/messages` | Supported (v0.11.1+) | Messages, streaming, tools, system prompts, thinking. |
-| `/v1/messages/count_tokens` | Supported | Token-count helper. |
+| `/v1/messages/count_tokens` | Supported (v0.17.0+) | Token-count helper added by PR #35588. |
 
 Unsupported Anthropic features include prompt caching, batches, citations, and PDF
 content blocks.
@@ -394,7 +397,7 @@ content blocks.
 
 | Path | Purpose | Notes |
 | --- | --- | --- |
-| `/health` | Health check | May return 503 during model load. |
+| `/health` | Health check | Empty HTTP 200 body when healthy; 503 when the engine is dead. |
 | `/version` | Version | Strong identity marker. |
 | `/metrics` | Prometheus metrics | GPU, scheduler, request metrics. |
 | `/tokenize` / `/detokenize` | Tokenization | Native token utilities. |
@@ -412,8 +415,8 @@ A detector should probe in this order:
 
 1. **Binary on PATH**: `vllm` (Linux/macOS/WSL). It is a Python entry-point script.
 2. **Process**: `vllm serve <model>` running in foreground, systemd, Docker, or WSL2.
-3. **Port**: TCP 8000. This port is shared with other servers, so an HTTP identity
-   marker is required.
+3. **Port**: TCP 8000. This port is shared with other servers; on this host it is
+   owned by oMLX (`omlx-server`), so an HTTP identity marker is required.
 4. **HTTP identity**: `GET /version` returns `{"version":"..."}`. `GET /v1/models`
    returns an OpenAI-style model list with a single model.
 5. **Model cache**: `~/.cache/huggingface/hub` (or `HF_HOME`) contains downloaded
@@ -453,7 +456,7 @@ Important environment variables:
 | `VLLM_USE_MODELSCOPE` | Use ModelScope instead of HuggingFace. |
 | `HF_HOME` | HuggingFace cache directory. |
 | `VLLM_LOGGING_LEVEL` | Default log level. |
-| `VLLM_CPU_KVCACHE_SPACE` | CPU backend KV cache size. |
+| `VLLM_CPU_KVCACHE_SPACE` | CPU backend KV cache size in GiB; `40` means 40 GiB. |
 
 ## Models
 
@@ -553,7 +556,12 @@ vLLM does not provide runner-native integration commands for agentic CLIs today.
 - [vLLM online serving reference](https://docs.vllm.ai/en/latest/online_serving/)
 - [vLLM CLI serve reference](https://docs.vllm.ai/en/latest/cli/serve.html)
 - [vLLM environment variables](https://docs.vllm.ai/en/latest/configuration/env_vars.html)
+- [vLLM CPU installation](https://docs.vllm.ai/en/latest/getting_started/installation/cpu/)
 - [vLLM quickstart](https://docs.vllm.ai/en/latest/getting_started/quickstart.html)
+- [vLLM LoRA adapters](https://docs.vllm.ai/en/latest/features/lora/)
 - [vLLM tool calling](https://docs.vllm.ai/en/latest/features/tool_calling.html)
+- [vLLM health endpoint API docs](https://docs.vllm.ai/en/v0.14.1/api/vllm/entrypoints/serve/instrumentator/health/)
 - [vLLM Anthropic /v1/messages PR #22627](https://github.com/vllm-project/vllm/pull/22627)
 - [vLLM v0.11.1 release notes](https://github.com/vllm-project/vllm/releases/tag/v0.11.1)
+- [vLLM Anthropic count_tokens PR #35588](https://github.com/vllm-project/vllm/pull/35588)
+- [vLLM v0.17.0 release notes](https://github.com/vllm-project/vllm/releases/tag/v0.17.0)

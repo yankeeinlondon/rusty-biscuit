@@ -20,10 +20,10 @@ auth: optional_api_key
 auth_notes: >
   Optional via `--api-key KEY`, `--api-key-file FNAME`, or `LLAMA_API_KEY`. When
   set, the server still allows unauthenticated `GET /health` and `GET /models`
-  (observed on this host); authenticated requests must send
+  (observed on this host in router mode); authenticated requests must send
   `Authorization: Bearer KEY` or `X-Api-Key: KEY`. All inference endpoints and
-  some metadata endpoints (`/props`, `/metrics`) require the key when auth is
-  enabled.
+  metadata endpoints outside the public allowlist, including `/props`, `/slots`,
+  and `/metrics`, require the key when auth is enabled.
 
 platforms:
   - os: macos
@@ -98,8 +98,6 @@ api_standards:
       - /apply-template
       - /slots
       - /props
-      - /api/show
-      - /api/chat
     auth: optional_api_key
     since_version: unknown
     deviations:
@@ -127,22 +125,22 @@ metadata_endpoints:
     path: /props
     gated_by: ""
     auth_gated: true
-    response_hint: '{"build_info":"b8168-723c71064"}'
-    notes: No dedicated /version endpoint. Build info is inside /props and as system_fingerprint in completion responses. Auth-gated when --api-key is set (observed 401 without key).
+    response_hint: '{"build_info":"b..."}'
+    notes: No dedicated /version endpoint. Build info is inside /props and as system_fingerprint in completion responses. Auth-gated when --api-key is set (observed 401 without key in router mode).
   - purpose: model_list
     method: get
     path: /models
     gated_by: ""
     auth_gated: false
-    response_hint: '{"object":"list","data":[{"owned_by":"llamacpp"}]}'
-    notes: Also available as /v1/models. There is no /api/tags route (that is Ollama-only; the public allowlist in server-http.cpp is /health, /v1/health, /models, /v1/models, /props, /metrics, and /). Observed unauthenticated on this host.
+    response_hint: '{"object":"list","data":[{"owned_by":"llamacpp"}]} or router metadata with status/path fields'
+    notes: Also available as /v1/models. In single-model mode, the OpenAI-style response includes owned_by=llamacpp. In router mode, GET /models returns richer router metadata with per-model status/path fields. There is no /api/tags route; that is Ollama-only. The public allowlist in server-http.cpp is /health, /v1/health, /models, /v1/models, /, plus embedded UI assets. Observed unauthenticated on this host in router mode.
   - purpose: model_list
     method: get
     path: /v1/models
     gated_by: ""
     auth_gated: false
     response_hint: '{"object":"list","data":[{"owned_by":"llamacpp"}]}'
-    notes: OpenAI-compatible alias for /models.
+    notes: Reliable owned_by=llamacpp marker in single-model mode. In router mode, the response is forwarded from the selected loaded model, or empty when no model is loaded.
   - purpose: model_info
     method: get
     path: /props
@@ -150,27 +148,20 @@ metadata_endpoints:
     auth_gated: true
     response_hint: '{"model_alias":"...","model_path":"...","modalities":{"vision":false,"audio":false}}'
     notes: Returns loaded model path, alias, generation defaults, chat template, and capabilities. Auth-gated when --api-key is set.
-  - purpose: model_info
-    method: post
-    path: /api/show
-    gated_by: ""
-    auth_gated: false
-    response_hint: '{"model_info":{"llama.context_length":...},"template":"..."}'
-    notes: Ollama-compatible model info endpoint.
   - purpose: loaded_models
     method: get
     path: /slots
     gated_by: ""
-    auth_gated: false
+    auth_gated: true
     response_hint: '[{"id":0,"is_processing":false},...]'
-    notes: No dedicated loaded-models endpoint; /slots exposes per-slot processing state. Can be disabled with --no-slots.
+    notes: No dedicated loaded-models endpoint; /slots exposes per-slot processing state. Can be disabled with --no-slots. Requires auth when --api-key is set.
   - purpose: metrics
     method: get
     path: /metrics
     gated_by: --metrics
     auth_gated: true
     response_hint: "# HELP llamacpp:prompt_tokens_total"
-    notes: Prometheus-compatible metrics. Returns 501 when the server was not started with --metrics. Requires auth when --api-key is set.
+    notes: Prometheus-compatible metrics. Returns 501 when the server was not started with --metrics. Requires auth when --api-key is set; observed 401 without key in router mode.
   - purpose: admin_ui
     method: get
     path: /
@@ -203,7 +194,7 @@ detection:
     target: llama-server
     expect: "command line contains -m, --model, -hf, or --host"
     confidence: observed
-    notes: Observed on this host. The process name is the same on all platforms.
+    notes: Observed on this host in router mode. The process name is the same on all platforms.
   - os: all
     method: port
     target: "8080"
@@ -215,19 +206,19 @@ detection:
     target: GET /health
     expect: '{"status":"ok"}'
     confidence: observed
-    notes: Strong identity marker. Ungated even when --api-key is enabled. Observed on this host.
+    notes: Strong identity marker. Ungated even when --api-key is enabled. Observed on this host in router mode.
   - os: all
     method: http
-    target: GET /models
+    target: GET /v1/models
     expect: '{"owned_by":"llamacpp"}'
-    confidence: observed
-    notes: OpenAI-style model list. Ungated even when --api-key is enabled. Observed on this host.
+    confidence: documented
+    notes: OpenAI-style model list in single-model mode. Ungated even when --api-key is enabled. Router-mode GET /models returns richer per-model metadata with status/path fields instead.
   - os: all
     method: http
     target: GET /props
     expect: '{"build_info":"b..."}'
-    confidence: observed
-    notes: Contains build_info with build number and commit hash. Requires API key when auth is enabled.
+    confidence: documented
+    notes: Contains build_info with build number and commit hash in single-model mode. Requires API key when auth is enabled; router mode exposes router properties and was observed gated by auth.
   - os: all
     method: http
     target: GET /metrics
@@ -241,7 +232,7 @@ detection:
     confidence: inferred
     notes: llama-server has no primary config file. Configuration is via CLI flags and LLAMA_ARG_* / LLAMA_API_KEY environment variables.
 
-config_mechanism: env_vars
+config_mechanism: mixed
 
 config_files:
   - os: all
@@ -249,6 +240,11 @@ config_files:
     format: other
     role: none
     notes: llama-server has no primary config file. The --webui-config-file and --webui-config flags accept JSON for WebUI defaults only.
+  - os: all
+    path: "path supplied to --models-preset"
+    format: ini
+    role: router_model_preset
+    notes: Router mode can load model presets from an INI file supplied with --models-preset.
 
 env_vars:
   - name: LLAMA_ARG_HOST
@@ -273,6 +269,8 @@ env_vars:
     effect: "Enable POST /props for changing global properties."
   - name: LLAMA_ARG_ENDPOINT_SLOTS
     effect: "Expose GET /slots endpoint (default enabled)."
+  - name: LLAMA_ARG_MODELS_PRESET
+    effect: "Path to an INI file containing model presets for router mode; equivalent to --models-preset."
   - name: LLAMA_ARG_N_PARALLEL
     effect: "Number of server slots / parallel requests (default -1 auto); equivalent to -np."
   - name: LLAMA_ARG_N_GPU_LAYERS
@@ -343,9 +341,9 @@ hardware_acceleration:
   - cpu
 
 concurrency:
-  multi_model: false
+  multi_model: true
   parallel_requests: true
-  notes: One `llama-server` process serves one model at a time, but supports multiple parallel decoding slots via `-np` / `--parallel` (continuous batching). Router mode (`--models-dir`) can load multiple models in one process but is a separate configuration.
+  notes: Single-model mode serves one model per process, but router mode can load multiple models in one process. Both modes support multiple parallel decoding slots via `-np` / `--parallel` (continuous batching).
 
 streaming_sse: true
 tool_calling: conditional
@@ -367,9 +365,10 @@ traps:
   - "`--embedding` / `--embeddings` puts the server into embedding-only mode; chat/completion endpoints will fail because the loaded model does not compute logits."
   - "`--rerank` / `--reranking` enables reranking but also forces embedding mode and pooling type rank; it is not a chat server."
   - "`LLAMA_ARG_PORT` sets the API port. There is no `LLAMA_PORT` variable; the similarly-named `VLLM_PORT` from vLLM is irrelevant here."
-  - "`--api-key` does not gate `/health` or `/models`; those remain public, while `/props` and `/metrics` require the key when auth is enabled."
+  - "`--api-key` does not gate `/health`, `/v1/health`, `/models`, `/v1/models`, `/`, or embedded UI assets; `/props`, `/slots`, and `/metrics` require the key when auth is enabled."
   - "`-hf` downloads share the Hugging Face cache directory; there is no separate `llama.cpp` model store unless the user creates one."
   - "The model ID seen by clients is the `--alias` value or the GGUF filename, not a registry name."
+  - "In single-model mode, the request `model` field is ignored and any value is accepted; it only routes requests in router mode."
 
 opencode_example: '{"provider":{"llamacpp":{"npm":"@ai-sdk/openai-compatible","name":"Llama.cpp (local)","options":{"baseURL":"http://localhost:8080/v1"},"models":{"gemma-3-1b-it.Q4_K_M.gguf":{"name":"Gemma 3 1B Q4_K_M (local)"}}}}}'
 
@@ -378,9 +377,9 @@ requires_claudine_update: true
 reason: >
   New local runner entry. Claudine's `sniff` detection surface should add probes
   for the `llama-server` binary / process, TCP port 8080 (with HTTP
-  disambiguation), the ungated `GET /health` identity marker, `GET /models` with
-  `owned_by: llamacpp`, and the model-path/alias grammar used by
-  `llama-server`.
+  disambiguation), the ungated `GET /health` identity marker, `GET /v1/models`
+  with `owned_by: llamacpp` in single-model mode, and the model-path/alias
+  grammar used by `llama-server`.
 ---
 
 # Llama.cpp
@@ -448,7 +447,7 @@ Base URL: `http://localhost:8080`
 
 Native endpoints include `/health`, `/models`, `/completion`, `/tokenize`,
 `/detokenize`, `/embedding`, `/reranking`, `/infill`, `/apply-template`,
-`/slots`, `/props`, `/api/show`, and `/api/chat`. These are documented in the
+`/slots`, and `/props`. These are documented in the
 [server README](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md).
 
 ### Metadata endpoints
@@ -458,7 +457,7 @@ Native endpoints include `/health`, `/models`, `/completion`, `/tokenize`,
 | GET | `/health`, `/v1/health` | Health check | — | no |
 | GET | `/models`, `/v1/models` | Model list | — | no |
 | GET | `/props` | Model info / build info | — | yes when auth enabled |
-| GET | `/slots` | Slot / processing state | `--no-slots` disables | no |
+| GET | `/slots` | Slot / processing state | `--no-slots` disables | yes when auth enabled |
 | GET | `/metrics` | Prometheus metrics | `--metrics` | yes when auth enabled |
 | GET | `/` | Web UI | `--no-webui` disables | no |
 
@@ -474,20 +473,25 @@ A detector should probe in this order:
    services, so an HTTP probe is required for disambiguation.
 4. **HTTP identity**:
    - `GET /health` returning `{"status":"ok"}` confirms the server is ready.
-   - `GET /models` returning `owned_by: llamacpp` confirms Llama.cpp.
+   - `GET /v1/models` returning `owned_by: llamacpp` is a reliable
+     single-model-mode marker for Llama.cpp.
+   - In router mode, `GET /models` returns richer per-model metadata such as
+     status and path instead of relying on the `owned_by` marker.
    - `GET /props` returns `build_info` with the build number and commit hash.
 5. **Config file / model store**: none by default; check the path supplied to
    `-m` or the Hugging Face cache when `-hf` is used.
 
 Observed on this host: binary at `/Users/ken/coding/ai/llama.cpp/build/bin/llama-server`,
-`/health` and `/models` return the expected markers, and `/metrics` returns 501
-without `--metrics`.
+version `8168 (723c71064)`. A router-mode probe on port 18080 confirmed
+`/health`, `/models`, and `/v1/models` are public under `--api-key`, while
+`/props`, `/slots`, and `/metrics` require the key.
 
 ## Configuration
 
-`llama-server` has no primary configuration file. All behavior is controlled by
-command-line flags and `LLAMA_ARG_*` environment variables. CLI flags take
-precedence over environment variables when both are set.
+`llama-server` is configured primarily with command-line flags, with matching
+`LLAMA_ARG_*` environment variables for many options. Router mode can also load
+model presets from `--models-preset` INI files. CLI flags take precedence over
+environment variables when both are set.
 
 Important environment variables:
 
@@ -501,6 +505,7 @@ Important environment variables:
 | `LLAMA_ARG_EMBEDDINGS` | Enable embedding mode. |
 | `LLAMA_ARG_RERANKING` | Enable reranking endpoint. |
 | `LLAMA_ARG_ENDPOINT_METRICS` | Enable `/metrics`. |
+| `LLAMA_ARG_MODELS_PRESET` | INI file containing model presets for router mode. |
 | `LLAMA_ARG_N_PARALLEL` | Number of parallel slots. |
 | `LLAMA_ARG_N_GPU_LAYERS` | GPU layer offload count. |
 | `LLAMA_OFFLINE` | Disable network access. |
@@ -543,7 +548,7 @@ from the path given to `-m`. Hugging Face downloads use the standard HF cache:
 | Capability | Status | Notes |
 | --- | --- | --- |
 | Hardware backends | Metal, CUDA, ROCm, Vulkan, SYCL, OpenVINO, MUSA, CANN, OpenCL, CPU | Backend selected at build time. |
-| Multi-model | No | One model per server process; router mode (`--models-dir`) is a separate feature. |
+| Multi-model | Yes, in router mode | Single-model mode serves one model per process; router mode (`--models-dir` / `--models-preset`) can load multiple models. |
 | Parallel requests | Yes | Via `-np` / `--parallel` slots with continuous batching. |
 | SSE streaming | Yes | Used by `/v1/chat/completions`, `/v1/completions`, `/completion`, and Anthropic `/v1/messages`. |
 | Tool/function calling | Conditional | Requires `--jinja` (default enabled). Native formats for Llama 3.x, Functionary, Hermes, Qwen 2.5, Mistral Nemo, Firefunction, Command R7B, DeepSeek R1; generic fallback available. |
@@ -571,7 +576,9 @@ from the path given to `-m`. Hugging Face downloads use the standard HF cache:
 ```
 
 Set the model key to the GGUF filename or the `--alias` value configured when
-starting `llama-server`.
+starting `llama-server`. In single-model mode, `llama-server` ignores the
+request `model` field and accepts any value; that field only selects a backend
+model in router mode.
 
 ### Claude Code via Anthropic endpoint
 
@@ -599,4 +606,4 @@ HTTP API.
 - [Function calling documentation](https://github.com/ggml-org/llama.cpp/blob/master/docs/function-calling.md)
 - [Install documentation](https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md)
 - [Llama.cpp REST API changelog](https://github.com/ggml-org/llama.cpp/issues/9291)
-- [Anthropic Messages API support release (b7187)](https://github.com/ggml-org/llama.cpp/releases/tag/b7187)
+- [Build b7187 release tag for PR #17570 merge](https://github.com/ggml-org/llama.cpp/releases/tag/b7187)

@@ -64,10 +64,9 @@ api_standards:
     auth: none
     since_version: "v0.1.24"
     deviations:
-      - "tool_choice, logit_bias, user, n, echo, best_of, logprobs are not supported."
-      - "Image URL content is not supported; base64 data URIs are."
-      - "/v1/responses was added in v0.13.3 and is non-stateful (no previous_response_id)."
-      - "/v1/images/generations is experimental and may change."
+      - "/v1/completions prompt currently only accepts a string."
+      - "/v1/responses is non-stateful; previous_response_id and conversation are accepted but not preserved. Added version: unknown; release notes first name /v1/responses in v0.14.2."
+      - "/v1/images/generations is experimental and may change or be removed; response_format only supports b64_json."
     docs_url: https://docs.ollama.com/api/openai-compatibility
   - standard: anthropic_compatible
     supported: yes
@@ -127,7 +126,7 @@ metadata_endpoints:
     gated_by: ""
     auth_gated: false
     response_hint: '{"models":[]}'
-    notes: Lists models currently resident in memory. Empty when no models are loaded; observed with loaded models on this host.
+    notes: Lists models currently resident in memory. Observed as an empty models array when idle and with model entries while qwen3:1.7b was loaded.
   - purpose: model_info
     method: post
     path: /api/show
@@ -417,7 +416,7 @@ are accepted but ignored.
 | GET | `/` | Health / identity | Returns `Ollama is running`. No dedicated `/health` endpoint. |
 | GET | `/api/version` | Version | Returns `{"version":"..."}`. |
 | GET | `/api/tags` | List local models | Ollama-specific; includes `details.format: gguf`. |
-| GET | `/api/ps` | List loaded models | Empty array when nothing is resident in memory. |
+| GET | `/api/ps` | List loaded models | Empty `models` array when idle; entries appear while a model is loaded. |
 | POST | `/api/show` | Model info | Body `{"model":"..."}` returns license, modelfile, parameters, template. |
 | POST | `/api/generate` | Text completion / load / unload | Empty prompt loads; `keep_alive: 0` unloads. |
 | POST | `/api/chat` | Chat completion / load / unload | Empty messages load; `keep_alive: 0` unloads. |
@@ -427,11 +426,15 @@ are accepted but ignored.
 | Path | Status | Notes |
 | --- | --- | --- |
 | `/v1/models` | Supported | Lists local models with `owned_by: library` or namespace. |
-| `/v1/completions` | Supported | `prompt` must be a string. |
-| `/v1/chat/completions` | Supported | Streaming, tools, vision, JSON mode, reasoning effort. |
+| `/v1/models/{model}` | Supported | Returns one local model's OpenAI-style model metadata. |
+| `/v1/completions` | Supported | `prompt` must be a string. Supports `echo`, `best_of`, `logprobs`, `logit_bias`, `user`, and `n`. |
+| `/v1/chat/completions` | Supported | Streaming, tools, vision, JSON mode, reasoning effort, logprobs, `tool_choice`, `logit_bias`, `user`, and `n`. Vision supports base64 image content and image URL content. |
 | `/v1/embeddings` | Supported | String or array of strings input. |
-| `/v1/images/generations` | Experimental | Image-generation models only. |
-| `/v1/responses` | Supported (v0.13.3+) | Non-stateful only. |
+| `/v1/images/generations` | Experimental | Image-generation models only; `response_format` only supports `b64_json`. |
+| `/v1/responses` | Supported (added version unknown; release notes name it in v0.14.2) | Non-stateful only; `previous_response_id` and `conversation` are accepted but not preserved. |
+
+Current OpenAI-compatible deviations are limited to `/v1/completions` string-only
+prompts, non-stateful `/v1/responses`, and experimental `/v1/images/generations`.
 
 ### Anthropic-compatible endpoints
 

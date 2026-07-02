@@ -24,14 +24,15 @@ auth_notes: >
   `~/.omlx/settings.json` with `skip_api_key_verification: false`, making auth
   required on hosts installed that way. When auth is enabled, both OpenAI
   (`Authorization: Bearer <key>`) and Anthropic (`x-api-key <key>`) headers are
-  accepted. The `skip_api_key_verification` toggle disables verification entirely.
+  accepted. The `skip_api_key_verification` toggle skips verification for
+  localhost requests only.
 
 platforms:
   - os: macos
     support: native
     binary: omlx
     alt_binaries: ["oMLX.app/Contents/MacOS/oMLX", "oMLX.app/Contents/MacOS/omlx-cli", "omlx-server"]
-    install: ["DMG from GitHub releases", "brew tap jundot/omlx && brew install omlx", "pip install -e . from source"]
+    install: ["DMG from GitHub releases", "brew tap jundot/omlx https://github.com/jundot/omlx && brew install omlx", "pip install -e . from source"]
     process_model: both
     service: brew services (launchd) when using Homebrew; macOS app menubar/login item when using the DMG; foreground `omlx serve` from CLI
     notes: Observed on this host as /Applications/oMLX.app (v0.4.4) with a `~/.omlx/bin/omlx` shim. Requires macOS 15+ and Apple Silicon (M1/M2/M3/M4). Intel Macs are not supported.
@@ -171,6 +172,27 @@ metadata_endpoints:
     auth_gated: true
     response_hint: '{"blocks":[{"location":"hot_ssd|disk_ssd|cold",...}]}'
     notes: Classify per-prompt cache state for a model/message list.
+  - purpose: other
+    method: get
+    path: /v1/mcp/servers
+    gated_by: ""
+    auth_gated: true
+    response_hint: "MCP server list JSON"
+    notes: MCP server list.
+  - purpose: other
+    method: get
+    path: /v1/mcp/tools
+    gated_by: ""
+    auth_gated: true
+    response_hint: "MCP tool list JSON"
+    notes: MCP tool list.
+  - purpose: other
+    method: post
+    path: /v1/mcp/execute
+    gated_by: ""
+    auth_gated: true
+    response_hint: "MCP tool execution JSON"
+    notes: MCP tool execution.
 
 detection:
   - os: macos
@@ -385,7 +407,7 @@ reason: New local runner entry. Claudine's sniff detection surface should add pr
 
 | OS | Support | Binary | Install methods | Process model | Service |
 | --- | --- | --- | --- | --- | --- |
-| macOS | native | `omlx` | DMG, `brew tap jundot/omlx && brew install omlx`, source `pip install -e .` | both | brew services / launchd (Homebrew); menubar/login item (DMG); foreground `omlx serve` (CLI) |
+| macOS | native | `omlx` | DMG, `brew tap jundot/omlx https://github.com/jundot/omlx && brew install omlx`, source `pip install -e .` | both | brew services / launchd (Homebrew); menubar/login item (DMG); foreground `omlx serve` (CLI) |
 | Linux | unsupported | — | — | — | none |
 | Windows | unsupported | — | — | — | none |
 
@@ -422,6 +444,9 @@ The server listens on **127.0.0.1:8000** by default.
 | POST | `/v1/audio/transcriptions` | Speech-to-text |
 | POST | `/v1/audio/process` | Audio processing |
 | POST | `/v1/responses` | Stateful OpenAI Responses API |
+| GET | `/v1/mcp/servers` | MCP server list |
+| GET | `/v1/mcp/tools` | MCP tool list |
+| POST | `/v1/mcp/execute` | MCP tool execution |
 
 ### Anthropic-compatible endpoints
 
@@ -462,7 +487,7 @@ Key settings observed in `~/.omlx/settings.json`:
 
 - `server.host` / `server.port` — bind address and port.
 - `model.model_dirs` — array of model directories (preferred over legacy `model_dir`).
-- `auth.api_key` / `auth.skip_api_key_verification` — API-key auth toggle.
+- `auth.api_key` / `auth.skip_api_key_verification` — API-key auth toggle; the skip only applies to localhost requests.
 - `cache.ssd_cache_dir` / `cache.ssd_cache_max_size` — persistent SSD KV cache.
 - `scheduler.max_concurrent_requests` — continuous batching concurrency.
 - `integrations.opencode_model` / `integrations.pi_model` — default models for `omlx launch`.

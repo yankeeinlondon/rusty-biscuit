@@ -5,7 +5,7 @@ last_updated: 2026-07-02
 agent: open_code
 model: kimi-for-coding/k2p7
 
-summary: LM Studio is a closed-source local LLM runner and server for macOS, Windows, and Linux that serves GGUF and MLX models through a native REST API plus OpenAI- and Anthropic-compatible endpoints.
+summary: LM Studio is a local LLM runner and server for macOS, Windows, and Linux with a closed-source app/server plus open-source CLI and SDKs, serving GGUF and MLX models through a native REST API plus OpenAI- and Anthropic-compatible endpoints.
 homepage: https://lmstudio.ai
 docs_url: https://lmstudio.ai/docs
 repo_url: https://github.com/lmstudio-ai
@@ -184,10 +184,11 @@ metadata_endpoints:
     path: /openapi.json
     gated_by: ""
     auth_gated: false
-    response_hint: 'Returns 200 with an empty or minimal OpenAPI document'
+    response_hint: '{"error":"Unexpected endpoint or method. (GET /openapi.json)"}'
     notes: >
-      Observed on this host returning 200 but with empty `paths`. It does not currently
-      expose a useful machine-readable schema for the API surface.
+      Observed on this host with LM Studio 0.4.12+1 returning HTTP 200 with an
+      "Unexpected endpoint or method" error body. It does not expose a
+      machine-readable OpenAPI schema at this path.
 
 detection:
   - os: all
@@ -197,7 +198,8 @@ detection:
     confidence: observed
     notes: >
       Observed at `/Users/ken/.cache/lm-studio/bin/lms` on this host. `lms --version`
-      prints a CLI commit hash. The binary is installed alongside the app or llmster.
+      prints a CLI commit hash. The binary is installed alongside the app or llmster,
+      and official docs say it only works after LM Studio has been run at least once.
   - os: macos
     method: app_bundle
     target: /Applications/LM Studio.app
@@ -253,8 +255,11 @@ detection:
     expect: "File contains the absolute path to the active LM Studio home directory"
     confidence: observed
     notes: >
-      Observed on this host pointing to `/Users/ken/.cache/lm-studio`. This pointer file
-      relocates the entire configuration, model store, and CLI install.
+      Observed on this host pointing to `/Users/ken/.cache/lm-studio`, a
+      legacy-migrated home. Official docs show fresh macOS/Linux paths under
+      `~/.lmstudio` and Windows paths under `%USERPROFILE%\.lmstudio`; treating the
+      pointer as relocating the entire configuration, model store, and CLI install is
+      inferred from this host.
   - os: macos
     method: config_file
     target: "~/.cache/lm-studio/.internal/http-server-config.json"
@@ -281,10 +286,10 @@ config_files:
     format: text
     role: home directory pointer
     notes: >
-      Observed on this host containing `/Users/ken/.cache/lm-studio`. If this file
-      exists, all other LM Studio paths live under the directory it points to. Fresh
-      installs may default to `~/.cache/lm-studio` or `~/.lmstudio` depending on version
-      and install method.
+      Observed on this legacy-migrated host containing `/Users/ken/.cache/lm-studio`.
+      If this file exists, all other LM Studio paths live under the directory it points
+      to. Official docs show the fresh-install home as `~/.lmstudio` on macOS/Linux and
+      `%USERPROFILE%\.lmstudio` on Windows.
   - os: macos
     path: "{{lmstudio_home}}/.internal/http-server-config.json"
     format: json
@@ -304,7 +309,9 @@ config_files:
     path: "~/.lmstudio-home-pointer"
     format: text
     role: home directory pointer
-    notes: Same relocation mechanism as macOS.
+    notes: >
+      Inferred same relocation mechanism as observed on macOS. Official docs show the
+      fresh-install home as `~/.lmstudio`.
   - os: linux
     path: "{{lmstudio_home}}/.internal/http-server-config.json"
     format: json
@@ -319,7 +326,9 @@ config_files:
     path: '%USERPROFILE%\.lmstudio-home-pointer'
     format: text
     role: home directory pointer
-    notes: Same relocation mechanism as macOS and Linux.
+    notes: >
+      Inferred equivalent relocation mechanism from the macOS observation. Official docs
+      show the fresh-install home as `%USERPROFILE%\.lmstudio`.
   - os: windows
     path: "{{lmstudio_home}}\\.internal\\http-server-config.json"
     format: json
@@ -378,16 +387,21 @@ model_store_paths:
   - os: macos
     path: "~/.lmstudio/models"
     notes: >
-      Canonical path shown in import docs. On this host the live path is
-      `~/.cache/lm-studio/models` because `~/.lmstudio-home-pointer` redirects the home
-      directory. The user also changed the download folder to
+      Canonical fresh-install path shown in import docs. On this legacy-migrated host
+      the live path is `~/.cache/lm-studio/models` because `~/.lmstudio-home-pointer`
+      redirects the home directory. The user also changed the download folder to
       `/Volumes/coding/models/lm-studio`.
   - os: linux
     path: "~/.lmstudio/models"
-    notes: Canonical default; redirectable via `~/.lmstudio-home-pointer`.
+    notes: >
+      Canonical fresh-install default from official docs; redirecting via
+      `~/.lmstudio-home-pointer` is inferred from this host's macOS observation.
   - os: windows
     path: "%USERPROFILE%\\.lmstudio\\models"
-    notes: Canonical default; redirectable via `%USERPROFILE%\.lmstudio-home-pointer`.
+    notes: >
+      Canonical fresh-install default from official docs; redirecting via
+      `%USERPROFILE%\.lmstudio-home-pointer` is inferred from this host's macOS
+      observation.
 
 hardware_acceleration:
   - metal
@@ -421,10 +435,12 @@ integration_hooks: []
 
 traps:
   - "The LM Studio home directory is relocatable via `~/.lmstudio-home-pointer`; this host points it to `~/.cache/lm-studio`, so do not hard-code `~/.lmstudio`."
+  - "Fresh installs use `~/.lmstudio` on macOS/Linux and `%USERPROFILE%\\.lmstudio` on Windows; `~/.cache/lm-studio` is this host's legacy-migrated home reached through the pointer file."
+  - "The `lms` CLI ships with LM Studio but only works after LM Studio has been run at least once; bootstrap it with `~/.lmstudio/bin/lms bootstrap` on macOS/Linux or `%USERPROFILE%/.lmstudio/bin/lms.exe bootstrap` on Windows."
   - "`GET /` and `GET /health` return HTTP 200 with an `Unexpected endpoint or method` error body; they are not positive health checks."
   - "`lms server start` without `--port` reuses the last-used port (stored in http-server-config.json), not necessarily 1234."
   - "`justInTimeModelLoading` changes whether `/v1/models` lists all downloaded models or only loaded ones."
-  - "The `/openapi.json` endpoint returns 200 but with empty paths, so it cannot be used as a formal schema source today."
+  - "The `/openapi.json` endpoint returns HTTP 200 with an `Unexpected endpoint or method` error body, so it cannot be used as a formal schema source today."
 
 opencode_example: |
   {
@@ -453,11 +469,11 @@ reason: >
 
 # LM Studio
 
-LM Studio is a closed-source desktop application and headless daemon for running local
-large language models. It downloads and serves GGUF (via llama.cpp) and MLX (on Apple
-Silicon) models and exposes them through a native REST API plus OpenAI-compatible and
-Anthropic-compatible endpoints. A command-line tool, `lms`, ships with the app and with
-the headless `llmster` daemon.
+LM Studio is a local model runner with a closed-source desktop application and
+headless daemon for running local large language models. It downloads and serves GGUF
+(via llama.cpp) and MLX (on Apple Silicon) models and exposes them through a native
+REST API plus OpenAI-compatible and Anthropic-compatible endpoints. A command-line
+tool, `lms`, ships with the app and with the headless `llmster` daemon.
 
 ## Introduction to LM Studio
 
@@ -484,8 +500,10 @@ server and desktop app are closed source.
 | Windows | native | `lms.exe` | installer, `irm https://lmstudio.ai/install.ps1 \| iex` | both | tray app / login item; `lms daemon up` |
 
 On this host (macOS), `lms` is installed at `~/.cache/lm-studio/bin/lms` and the app is
-at `/Applications/LM Studio.app`. The active process was observed as
-`/Applications/LM Studio.app/Contents/MacOS/LM Studio --run-as-service`.
+at `/Applications/LM Studio.app`. This is a legacy-migrated install reached through
+`~/.lmstudio-home-pointer`; official docs show fresh installs using `~/.lmstudio` on
+macOS/Linux and `%USERPROFILE%\.lmstudio` on Windows. The active process was observed
+as `/Applications/LM Studio.app/Contents/MacOS/LM Studio --run-as-service`.
 
 ## API Surface
 
@@ -552,7 +570,12 @@ identity marker because the port can be changed by the user.
 
 Configuration is mixed: JSON files inside the LM Studio home directory, CLI flags for
 `lms server start`, and GUI toggles. The home directory is relocatable via
-`~/.lmstudio-home-pointer`; on this host it points to `~/.cache/lm-studio`.
+`~/.lmstudio-home-pointer`; on this legacy-migrated host it points to
+`~/.cache/lm-studio`. Fresh installs use `~/.lmstudio` on macOS/Linux and
+`%USERPROFILE%\.lmstudio` on Windows. The `lms` CLI ships with the app but only works
+after LM Studio has been run at least once; bootstrap it with
+`~/.lmstudio/bin/lms bootstrap` on macOS/Linux or
+`%USERPROFILE%/.lmstudio/bin/lms.exe bootstrap` on Windows.
 
 Key files (paths relative to the resolved home directory):
 
@@ -561,6 +584,15 @@ Key files (paths relative to the resolved home directory):
 | `.internal/http-server-config.json` | Port, bind, CORS, JIT loading |
 | `settings.json` | App preferences, including `downloadsFolder` override |
 | `.internal/model-data.json` | Indexed models and source metadata |
+
+## Operational Traps
+
+The `lms` CLI ships with LM Studio, but official docs say LM Studio must be run at
+least once before `lms` works. Bootstrap the CLI with `~/.lmstudio/bin/lms bootstrap`
+on macOS/Linux or `cmd /c %USERPROFILE%/.lmstudio/bin/lms.exe bootstrap` on Windows.
+
+`GET /openapi.json` is not a schema endpoint on LM Studio 0.4.12+1 as observed on
+this host; it returns HTTP 200 with an `Unexpected endpoint or method` error body.
 
 ## Models
 
@@ -635,6 +667,8 @@ done by starting the server and pointing the agent CLI at it.
 - [LM Studio homepage](https://lmstudio.ai)
 - [LM Studio docs](https://lmstudio.ai/docs)
 - [LM Studio developer docs](https://lmstudio.ai/docs/developer)
+- [lms CLI docs](https://lmstudio.ai/docs/cli)
+- [Introducing lms](https://lmstudio.ai/blog/lms)
 - [OpenAI-compatible endpoints](https://lmstudio.ai/docs/developer/openai-compat)
 - [Anthropic-compatible endpoints](https://lmstudio.ai/docs/developer/anthropic-compat)
 - [Native REST API](https://lmstudio.ai/docs/developer/rest)
