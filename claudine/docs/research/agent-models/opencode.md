@@ -179,19 +179,6 @@ model_selection:
     example: "{ \"model\": \"opencode/gpt-5.5\" }"
     notes: "Resolved provider/model ID sent on each inference request after alias and variant expansion."
 precedence: "interactive_command (/models, runtime) > cli_flag (--model / -m) > env_var (OPENCODE_CONFIG_CONTENT inline config; OPENCODE_CONFIG custom path is loaded as a config_file layer) > config_file (model key; layered remote < global < OPENCODE_CONFIG custom path < project < .opencode dirs < OPENCODE_CONFIG_CONTENT < managed settings) > last used model > internal default priority"
-custom_models:
-  - kind: local
-    config_site: "provider.<id> with npm: @ai-sdk/openai-compatible"
-    notes: "Local OpenAI-compatible servers such as Ollama, LM Studio, llama.cpp, and Atomic Chat. Set options.baseURL and register the models map."
-  - kind: openai_compatible
-    config_site: "provider.<custom_id>"
-    notes: "Create a custom provider using the @ai-sdk/openai-compatible package, a baseURL, and a models map. This is the generic path for any OpenAI-compatible endpoint."
-  - kind: provider_plugin
-    config_site: "provider.<built-in>.models"
-    notes: "Extend an existing built-in provider (OpenRouter, LLM Gateway, Helicone, Amazon Bedrock custom inference profiles, etc.) by adding entries to its models map."
-  - kind: other
-    config_site: "provider.<built-in>.options.baseURL"
-    notes: "Route a built-in provider through a proxy, gateway, or BYOK endpoint. OpenCode Zen also supports bringing your own OpenAI or Anthropic key while keeping other Zen models available."
 dynamic_listing:
   available: true
   method: "CLI subcommand `opencode models [provider]` with optional `--refresh` and `--verbose`"

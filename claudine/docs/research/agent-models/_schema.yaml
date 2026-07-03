@@ -29,9 +29,6 @@ $schema:
     # Highest-wins ordering across the model_selection mechanisms.
     precedence: string
 
-    # One record per way to register bespoke/local models.
-    custom_models: "{ kind: enum(local,openai_compatible,anthropic_compatible,provider_plugin,other; required), config_site: string(required), notes: string }[]"
-
     # Can the CLI enumerate its model catalog programmatically?
     # (feeds dynamic_source / ModelCatalogSource)
     dynamic_listing: "{ available: boolean(required), method: string, example: string }"

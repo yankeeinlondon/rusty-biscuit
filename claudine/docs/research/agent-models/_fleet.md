@@ -161,9 +161,6 @@ Follow these steps exactly:
       with the `site` and `example` shown there
     - `precedence` - the highest-wins ordering you established in `## Model Selection`
       (e.g. "cli_flag > env_var > config_file")
-    - `custom_models` - one classification-level record per channel named in
-      `## Extending the Model Set` (`kind`, `config_site`, one-line note); the deep
-      semantics belong to the model-config topic
     - `dynamic_listing` - the facts from `## Dynamic Listing`: `available`, plus
       `method` and `example` when a mechanism exists
     ::block when="update"

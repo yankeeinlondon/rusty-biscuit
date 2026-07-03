@@ -70,22 +70,6 @@ model_selection:
     example: '{ "model": "qwen3-coder-plus" }'
     notes: OpenAI Chat Completions, Anthropic Messages, or Gemini request body after alias/provider resolution.
 precedence: "interactive_command (/model runtime, /auth setup) > cli_flag (--model, --auth-type) > env_var (OPENAI_MODEL, ANTHROPIC_MODEL, GEMINI_MODEL/GOOGLE_MODEL) > config_file (model.name, modelProviders) > built-in default (qwen3.5-plus for OpenAI-compatible protocol)"
-custom_models:
-  - kind: local
-    config_site: "modelProviders.openai with local baseUrl"
-    notes: Ollama, vLLM, LM Studio, etc. via OpenAI-compatible local endpoint (e.g. http://localhost:11434/v1).
-  - kind: openai_compatible
-    config_site: "modelProviders.openai"
-    notes: Any OpenAI-compatible API including OpenAI, Azure OpenAI, OpenRouter, Requesty, ModelScope, DeepSeek, Alibaba Cloud/DashScope.
-  - kind: anthropic_compatible
-    config_site: "modelProviders.anthropic"
-    notes: Anthropic Claude API and DeepSeek's Anthropic-compatible endpoint.
-  - kind: provider_plugin
-    config_site: "modelProviders.gemini or modelProviders.vertex-ai"
-    notes: Google Gemini API or Vertex AI (uses gemini protocol; sets GOOGLE_GENAI_USE_VERTEXAI=true).
-  - kind: other
-    config_site: "/auth Alibaba Cloud Coding Plan or RuntimeModelSnapshot"
-    notes: Coding Plan auto-configures 10 models on auth; ad-hoc CLI/env/runtime configs are captured as RuntimeModelSnapshot and appear in /model picker.
 dynamic_listing:
   available: false
   method: "none — no qwen models / list-models subcommand or API"

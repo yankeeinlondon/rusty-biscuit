@@ -97,20 +97,6 @@ model_selection:
 
 precedence: "interactive_command (/model, runtime) > cli_flag (--model / -m) > env_var (GEMINI_MODEL) > config_file (model.name) > local_router (experimental Gemma model router) > default (auto). settings.json layering (per general config precedence): system-defaults < user (~/.gemini) < project (.gemini) < system-settings; then env vars; then CLI args. Resolved ID is then chosen by modelConfigs.modelIdResolutions / classifierIdResolutions based on context (hasAccessToPreview, useGemini3_1, useGemini3_5Flash, useCustomTools, requestedModels) and availability/fallback is governed by modelConfigs.modelChains. /model does not override sub-agent models."
 
-custom_models:
-  - kind: other
-    config_site: "modelConfigs.modelDefinitions + modelConfigs.customAliases (+ experimental.dynamicModelConfiguration)"
-    notes: "Register bespoke model metadata (tier/family/features/isVisible) and named config presets in the catalog itself. Built-ins already include gemma-4-* via the Gemini API. Editing modelDefinitions requires a restart; runtime edits gated by experimental.dynamicModelConfiguration (default false). This is the closest thing to 'adding a model entry' — it declares metadata, not a new wire backend."
-  - kind: local
-    config_site: "experimental.gemmaModelRouter.* (+ `gemini gemma setup`)"
-    notes: "Local Gemma model router via a LiteRT-LM shim endpoint serving Gemma through the Gemini API. Sub-keys: enabled, autoStartServer, binaryPath (~/.gemini/bin/litert/), classifier.host (localhost:9379), classifier.model (gemma3-1b-gpu-custom). Used to make routing decisions locally instead of via a hosted model; takes precedence over the default `auto` resolution per the model-routing doc."
-  - kind: provider_plugin
-    config_site: "Vertex AI backend (GOOGLE_CLOUD_PROJECT + GOOGLE_CLOUD_LOCATION + GOOGLE_API_KEY/ADC/GOOGLE_APPLICATION_CREDENTIALS, or GOOGLE_GENAI_USE_VERTEXAI=true)"
-    notes: "First-party cloud-provider integration. Sends resolved Gemini model IDs to the Vertex AI endpoint with provider-specific billing headers (billing.vertexAi.requestType / sharedRequestType). Selected interactively ('Vertex AI') or via security.auth.selectedType/enforcedType = 'vertex-ai'. Same model IDs as the Gemini API path."
-  - kind: other
-    config_site: "GOOGLE_GEMINI_BASE_URL / GOOGLE_VERTEX_BASE_URL / GOOGLE_GENAI_API_VERSION"
-    notes: "Route Gemini-/Vertex-API requests at a compatible gateway or proxy (e.g. a Vertex-compatible endpoint or API version pin). Gemini CLI does NOT speak OpenAI Chat Completions or Anthropic Messages, so a raw OpenAI-compatible/Ollama/Anthropic endpoint is NOT directly usable — a translating gateway exposing the Gemini or Vertex API is required. Changes the destination, not the model catalog."
-
 dynamic_listing:
   available: false
   method: "none — no `gemini models` / `--list-models` subcommand or model-catalog API. `/model` opens an interactive picker/dialog (requires a TTY) and is the sole runtime catalog view. The catalog itself is statically declared in `modelConfigs.modelDefinitions` and formally described by the JSON Schema at schemas/settings.schema.json — both machine-readable, but neither is dumped by a CLI command. `/stats model` reports per-model usage statistics and `/chat debug` dumps the most recent API request (including the resolved model); neither enumerates the available catalog."

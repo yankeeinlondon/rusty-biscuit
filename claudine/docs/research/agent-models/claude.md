@@ -145,23 +145,14 @@ model_selection:
 
 precedence: "interactive_command (/model, runtime) > cli_flag (--model) > env_var (ANTHROPIC_MODEL) > config_file (model setting); config_file layering is managed > project > user. --model and ANTHROPIC_MODEL apply to the launched session only. Resumed sessions (--resume/--continue) restore the transcript's saved model unless retired/excluded, but a launch-time --model/ANTHROPIC_MODEL (and, v2.1.195+, an ANTHROPIC_DEFAULT_OPUS_MODEL-family var) overrides the restored model. Organization restrictions and availableModels are enforced on top of every surface."
 
-custom_models:
-  - kind: anthropic_compatible
-    config_site: "ANTHROPIC_BASE_URL (+ ANTHROPIC_MODEL / ANTHROPIC_CUSTOM_MODEL_OPTION)"
-    notes: "Route Claude Code at an Anthropic-Messages-compatible LLM gateway or proxy. ANTHROPIC_BASE_URL changes WHERE requests go, not which model answers; the model is then any string the endpoint accepts (gateway aliases, proxied Claude deployments). Custom picker entry via ANTHROPIC_CUSTOM_MODEL_OPTION. Claude Code does NOT speak the OpenAI Chat Completions API, so a raw OpenAI-compatible/Ollama endpoint is not directly usable — a translating gateway is required."
-  - kind: provider_plugin
-    config_site: "modelOverrides + ANTHROPIC_DEFAULT_*_MODEL (with CLAUDE_CODE_USE_BEDROCK/VERTEX/FOUNDRY)"
-    notes: "First-party cloud-provider integrations. Register bespoke provider-form model IDs: Bedrock inference-profile ARNs (incl. Mantle anthropic.* IDs), Vertex/Agent Platform version names, Foundry deployment names. Pin alias resolution with ANTHROPIC_DEFAULT_{FABLE,OPUS,SONNET,HAIKU}_MODEL; map individual versions via modelOverrides."
-  - kind: other
-    config_site: "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1 (gateway GET /v1/models)"
-    notes: "Dynamic gateway-sourced catalog: Claude Code queries the gateway's /v1/models at startup, filters ids beginning with `claude`/`anthropic`, labels rows 'From gateway', and caches to ~/.claude/cache/gateway-models.json. Bounded by availableModels. Not a local-model mechanism."
-
 dynamic_listing:
   available: false
   method: "none — no `claude models` / `--list-models` subcommand or model-catalog API. The /model picker is interactive-only (requires a TTY) and is the sole native catalog view. Gateway discovery (/v1/models) populates that same interactive picker, not a programmatic listing."
   example: "Interactive only: run `claude` then `/model`. Non-interactive consumers must read the resolved model from the stream-json `result.modelUsage` field rather than enumerate the catalog."
 
-changes: []
+changes:
+  - "Corrected the local-model claim: Ollama, oMLX, LM Studio, llama.cpp (b7187+), and vLLM serve the Anthropic Messages API natively, so a direct ANTHROPIC_BASE_URL override works without a translating gateway; a gateway is required only for OpenAI-only endpoints."
+  - "Removed the custom_models frontmatter block — user-side model extension belongs solely to the model-config topic."
 
 requires_claudine_update: true
 reason: "Claudine's `model_catalog` module maintains a merged provider model catalog with static Claude entries and alias resolution plus user overrides. The Claude lineup and selection surface have shifted substantially and the static catalog / alias map for the Claude provider needs refreshing: Fable 5, Opus 4.8, Sonnet 5, and the new aliases (`best`, `fable`, `sonnet[1m]`, `opus[1m]`, `opusplan`) plus the account-dependent `default` resolver; new selection surfaces Claudine's Claude wrapper does not yet model — fallback chains (--fallback-model / fallbackModel), the advisor (--advisor / advisorModel), effort levels (--effort / effortLevel / CLAUDE_CODE_EFFORT_LEVEL), ANTHROPIC_CUSTOM_MODEL_OPTION, gateway model discovery (CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY + ~/.claude/cache/gateway-models.json), modelOverrides, availableModels/enforceAvailableModels, and CLAUDE_CODE_SUBAGENT_MODEL=inherit. To accurately merge/override and report Claude models, Claudine needs a catalog refresh and awareness of these surfaces."
@@ -208,11 +199,11 @@ To pin a specific version instead of a floating alias, use the full model name (
 
 Claude Code has no native OpenAI-compatible / Ollama / llama.cpp backend. Bespoke and local models are registered through three channels:
 
-1. **Anthropic-compatible LLM gateway** (`anthropic_compatible`) — set `ANTHROPIC_BASE_URL` to a gateway/proxy that speaks the Anthropic Messages format, then point `ANTHROPIC_MODEL` (or add an `ANTHROPIC_CUSTOM_MODEL_OPTION`) at any model string the endpoint accepts. This is the only path to use a non-Anthropic (e.g. locally hosted) model: the gateway must translate, because Claude Code itself never emits the OpenAI Chat Completions protocol.
+1. **Anthropic-compatible endpoint** (`anthropic_compatible`) — set `ANTHROPIC_BASE_URL` to any endpoint that speaks the Anthropic Messages format, then point `ANTHROPIC_MODEL` (or add an `ANTHROPIC_CUSTOM_MODEL_OPTION`) at any model string the endpoint accepts. Claude Code itself never emits the OpenAI Chat Completions protocol, so the endpoint must speak Anthropic Messages natively — as the major local runners do (Ollama, oMLX, LM Studio, llama.cpp `b7187`+, vLLM `v0.11.1`+) — or a translating gateway must front it. Per-runner setup lives in the `model-config` topic.
 2. **Cloud-provider plugin** (`provider_plugin`) — for Bedrock, Vertex AI, Foundry, and Claude Platform on AWS, register provider-form IDs via `modelOverrides` (Anthropic ID → Bedrock inference-profile ARN / Vertex version name / Foundry deployment name) and pin aliases with `ANTHROPIC_DEFAULT_{FABLE,OPUS,SONNET,HAIKU}_MODEL`.
 3. **Gateway model discovery** (`other`) — with `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, Claude Code queries the gateway's `GET /v1/models` at startup and adds returned `claude`/`anthropic`-prefixed IDs to the `/model` picker (cached at `~/.claude/cache/gateway-models.json`).
 
-> ⚠️ A raw local OpenAI-compatible endpoint (Ollama, LM Studio, llama.cpp server) is **not** directly usable. You must front it with a gateway that exposes the Anthropic Messages API.
+> ℹ️ The major local runners (Ollama, oMLX, LM Studio, llama.cpp `b7187`+, vLLM `v0.11.1`+) serve the Anthropic Messages API natively, so `ANTHROPIC_BASE_URL` can point directly at them — no gateway required. A translating gateway is needed only for endpoints that speak solely the OpenAI protocol.
 
 ## Model Configuration Details
 
@@ -289,4 +280,5 @@ The `/model` picker is the sole native catalog view and it is **interactive-only
 
 ## Changelog
 
+- **2026-07-03** — Corrected the local-model claim (curation edit, cross-validated against the `local_runners` and `model-config` research): Ollama, oMLX, LM Studio, llama.cpp (`b7187`+), and vLLM serve the Anthropic Messages API natively, so a direct `ANTHROPIC_BASE_URL` override works with **no** translating gateway; a gateway is required only for OpenAI-only endpoints. Also removed the `custom_models` frontmatter block — user-side model extension belongs solely to the `model-config` topic.
 - **2026-07-01** — Initial research for `claude.md` (this file), observed against the Claude Code `v2.1.198` documentation line. Established Claude Code as a first-party/Anthropic-only model provider with no native OpenAI-compatible or local backend. Documented the alias system (`default`/`best`/`fable`/`opus`/`sonnet`/`haiku`/`sonnet[1m]`/`opus[1m]`/`opusplan`) and the account-dependent `default` resolution; enumerated the underlying out-of-the-box models (Fable 5, Opus 4.8/4.7/4.6, Sonnet 5/4.6/4.5, Haiku 4-5). Captured the full selection surface — `/model` runtime command, `--model`/`--fallback-model`/`--advisor`/`--effort` flags, `ANTHROPIC_MODEL` + `ANTHROPIC_DEFAULT_*_MODEL` + `CLAUDE_CODE_SUBAGENT_MODEL` + `ANTHROPIC_CUSTOM_MODEL_OPTION` env vars, and the `model`/`availableModels`/`enforceAvailableModels`/`fallbackModel`/`modelOverrides`/`effortLevel`/`advisorModel` settings keys — with the documented precedence (`/model` > `--model` > `ANTHROPIC_MODEL` > `model` setting; managed > project > user). Recorded that there is **no** programmatic model catalog (no `claude models` subcommand; `/model` is interactive-only) and that non-interactive consumers must read `result.modelUsage`. Documented the three bespoke-model channels (Anthropic-compatible gateway, Bedrock/Vertex/Foundry provider plugin, gateway `/v1/models` discovery). Classified schema as `informal`. Set `requires_claudine_update: true` against Claudine's `model_catalog` module.

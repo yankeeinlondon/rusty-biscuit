@@ -148,23 +148,6 @@ model_selection:
 
 precedence: "cli_flag (--model/--provider/--models/--thinking) > interactive_command (/model at runtime) > config_file (defaultProvider/defaultModel/enabledModels/defaultThinkingLevel; project overrides global) > auth-based fallback (first available model from defaultModelPerProvider lookup)"
 
-custom_models:
-  - kind: local
-    config_site: "~/.pi/agent/models.json"
-    notes: "Register Ollama, LM Studio, vLLM, or other local servers as providers with api: openai-completions."
-  - kind: openai_compatible
-    config_site: "~/.pi/agent/models.json"
-    notes: "Add any OpenAI Chat Completions or Responses API endpoint (api: openai-completions or openai-responses)."
-  - kind: anthropic_compatible
-    config_site: "~/.pi/agent/models.json"
-    notes: "Add Anthropic Messages API proxies or compatibles (api: anthropic-messages)."
-  - kind: other
-    config_site: "~/.pi/agent/models.json"
-    notes: "Add Google Generative AI endpoints (api: google-generative-ai), e.g. Google AI Studio custom models."
-  - kind: provider_plugin
-    config_site: "Extension pi.registerProvider()"
-    notes: "TypeScript extensions can register arbitrary providers with custom streaming, OAuth, and dynamic model discovery."
-
 dynamic_listing:
   available: true
   method: "pi --list-models [search]"

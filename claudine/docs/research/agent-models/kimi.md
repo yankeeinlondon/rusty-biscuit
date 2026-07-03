@@ -74,19 +74,6 @@ model_selection:
     example: models.current_model_id
     notes: ACP `initialize`/`load_session` responses expose current and available models; model selection happens at session creation, not per-turn.
 precedence: "interactive_command (/model, runtime) > env_var (KIMI_MODEL_NAME) > cli_flag (--model) > config_file (default_model)"
-custom_models:
-  - kind: openai_compatible
-    config_site: providers.<name>.type = "openai_legacy" or "openai_responses"; models.<name>.provider/model
-    notes: Supports OpenAI Chat Completions and Responses API backends, including local servers such as Ollama, vLLM, or llama.cpp.
-  - kind: anthropic_compatible
-    config_site: providers.<name>.type = "anthropic"; models.<name>.provider/model
-    notes: Supports Anthropic Claude API backends.
-  - kind: other
-    config_site: providers.<name>.type = "gemini" or "vertexai"; models.<name>.provider/model
-    notes: Supports Google Gemini and Google Vertex AI backends.
-  - kind: other
-    config_site: Manual config.toml editing or --config/--config-file
-    notes: Any provider/model can be registered by editing the TOML/JSON config; there is no native model marketplace or plugin system.
 dynamic_listing:
   available: true
   method: "Provider GET /v1/models endpoint (queried at /login and when running /model); ACP initialize/load_session exposes available_models"

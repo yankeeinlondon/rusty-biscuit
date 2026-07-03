@@ -82,20 +82,6 @@ model_selection:
 
 precedence: "interactive_command (/model, within an open session) > cli_flag (--model / -c / --oss / --profile) > config_file project (.codex/config.toml, walked root→cwd, closest wins, trusted projects only) > config_file profile (~/.codex/<name>.config.toml via --profile) > config_file user (~/.codex/config.toml) > config_file system (/etc/codex/config.toml on Unix) > built-in defaults. There is NO dedicated model-selection environment variable (unlike Claude Code's ANTHROPIC_MODEL): provider `env_key` vars carry API keys, not model choices. For security, project-local .codex/config.toml ignores model_provider, model_providers, and openai_base_url, so provider/model routing must come from user/system/profile layers or CLI flags."
 
-custom_models:
-  - kind: local
-    config_site: "--oss + oss_provider (built-in ollama / lmstudio providers)"
-    notes: "Run against a local open-source model. `codex --oss` sets model_provider to the `oss` provider and `oss_provider` (`ollama` or `lmstudio`) picks the backend; `--oss` validates that Ollama is running. The ollama and lmstudio provider IDs are built-in and reserved."
-  - kind: openai_compatible
-    config_site: "model_providers.<id> (base_url + env_key + wire_api = \"responses\")"
-    notes: "Define any Responses-API-compatible endpoint as a custom provider (e.g. Mistral, Azure OpenAI, an LLM proxy/router, an OpenAI data-residency endpoint). Set `model_provider = \"<id>\"` and `model = \"<any id the endpoint accepts>\"`. For the built-in OpenAI provider specifically, prefer `openai_base_url` over redefining `[model_providers.openai]` (built-in IDs cannot be overridden). Chat Completions API support is deprecated; `wire_api` accepts only `responses`."
-  - kind: provider_plugin
-    config_site: 'model_provider = "amazon-bedrock" + [model_providers.amazon-bedrock.aws]'
-    notes: "Built-in first-party Amazon Bedrock provider. Set `model` to a Bedrock model ID and configure `[model_providers.amazon-bedrock.aws]` with `profile` and `region` (profile falls back to the standard AWS credential chain when omitted). Unlike custom providers, this built-in supports only the nested AWS profile/region overrides."
-  - kind: other
-    config_site: "model_catalog_json (path to JSON catalog)"
-    notes: "Ship a bespoke JSON model catalog loaded on startup (overridable per profile). Populates the `/model` picker and `codex debug models`; does not by itself define a provider/endpoint, so it is typically paired with a custom `model_providers.<id>` entry."
-
 dynamic_listing:
   available: true
   method: "codex debug models [--bundled]  — prints the raw model catalog Codex sees as JSON. `--bundled` skips the remote refresh and prints only the catalog compiled into the current Codex binary. Complemented at runtime by `/status` (resolved model) and `/debug-config` (effective config layers)."

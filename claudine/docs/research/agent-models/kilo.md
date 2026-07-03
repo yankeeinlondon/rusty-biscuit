@@ -84,23 +84,6 @@ model_selection:
 
 precedence: "interactive_command (/models, runtime) > cli_flag (--model) > env_var (KILO_PROVIDER / KILO_CONFIG / KILO_CONFIG_CONTENT) > config_file (project > global) > last used session model > catalog default (kilo-auto/free)"
 
-custom_models:
-  - kind: local
-    config_site: "provider.ollama.models or provider.lmstudio.models in kilo.jsonc"
-    notes: Register Ollama or LM Studio served models locally.
-  - kind: openai_compatible
-    config_site: "provider.openai-compatible.options.baseURL + provider.openai-compatible.models in kilo.jsonc"
-    notes: Connect any OpenAI Chat Completions-compatible endpoint such as a custom proxy, vLLM, or SGLang.
-  - kind: anthropic_compatible
-    config_site: "provider.<provider_id>.api / provider.<provider_id>.options.baseURL in kilo.jsonc"
-    notes: Use the Anthropic Messages protocol by selecting the Anthropic Messages provider API for a custom endpoint.
-  - kind: provider_plugin
-    config_site: "plugin array in kilo.jsonc (via kilo plugin <module>)"
-    notes: Install an npm plugin that registers additional providers and models.
-  - kind: other
-    config_site: "provider.<provider_id>.models in kilo.jsonc"
-    notes: Register a newly released or unlisted model under any existing provider with overrides for limits, cost, variants, and options.
-
 dynamic_listing:
   available: true
   method: "kilo models [provider] [--verbose] [--refresh] (and REST GET https://api.kilo.ai/api/gateway/models)"
