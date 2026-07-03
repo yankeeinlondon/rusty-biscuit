@@ -634,7 +634,7 @@ Ordered by leverage; several are prerequisites for codegen landing cleanly:
   identity facts consolidate into `providers.yaml`; render-path inventory (rendering
   workstream milestone 1). **Spiked 2026-07-01 on the logging topic, promoted, and pilot-verified** — see
   [spike-logging/findings.md](spike-logging/findings.md); the validated schema lives at
-  `docs/research/agent-logging/_schema.yaml`, `_agent-logging.md` references it and fills
+  `docs/research/agent-logging/_schema.yaml`, `_fleet.md` references it and fills
   the new record families, and a Codex-only pilot run (OpenCode + GLM-5.2, `--yolo`)
   produced a schema-valid document with correct per-site time semantics at
   `confidence: observed` and a concrete `requires_claudine_update` flag. Pilot-surfaced

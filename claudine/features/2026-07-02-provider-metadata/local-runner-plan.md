@@ -17,7 +17,7 @@
   by a `_schema.yaml` sidecar (`$schema: ./_schema.yaml`; the sidecar MUST wrap its
   properties under a root `$schema:` key; nested shapes MUST be quoted inline-object
   literals). Reference implementation: `claudine/docs/research/model-config/`
-  (`_model-config.md` + `_schema.yaml`).
+  (`_fleet.md` + `_schema.yaml`).
 - **Sequence file must carry** (all present in the reference implementation):
   `update: "{{file_exists(file) && !markdown_body_empty(file)}}"`, the `initialize`
   same-day-skip stack, the `success` verification stack (gate on
@@ -82,7 +82,7 @@ detection-friendly form (exact binary names per OS, exact URL paths).
 2. Write `claudine/docs/research/local_runners/_schema.yaml` (from the Phase-1 draft;
    validate positive AND negative with `md schema validate` using temp docs, then delete
    the temp docs).
-3. Write `claudine/docs/research/local_runners/_local_runners.md` — the sequence prompt,
+3. Write `claudine/docs/research/local_runners/_fleet.md` — the sequence prompt,
    following the model-config reference structure: Skills section (`claudine` skill),
    Scope, Document Structure (H2 sections mirroring the schema groups), Task steps,
    `$schema: ./_schema.yaml` instruction, per-field capture instructions, an on-host
@@ -109,7 +109,7 @@ detection-friendly form (exact binary names per OS, exact URL paths).
 
 ## Phase 4 — complete + finalize
 
-1. Run the full fleet (`claudine sequence .../_local_runners.md --yolo`). Already-fresh
+1. Run the full fleet (`claudine sequence .../_fleet.md --yolo`). Already-fresh
    pilot docs re-run only if the prompt changed materially — if so, delete the pilot
    docs first (the initialize skip would otherwise bypass them same-day).
 2. Re-run the Phase-3 evaluation subagents across all five docs; confirm improvement;

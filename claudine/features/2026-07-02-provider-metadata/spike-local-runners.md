@@ -12,7 +12,7 @@
 - `docs/research/local_runners/_schema.yaml` — sidecar contract; validated
   positive AND negative before first use (negative fixture caught all five
   deliberate violations with line numbers).
-- `docs/research/local_runners/_local_runners.md` — sequence prompt carrying
+- `docs/research/local_runners/_fleet.md` — sequence prompt carrying
   the full established pattern (fixed `update:`, `initialize` same-day skip,
   `success` verification stack, `--yolo` grant note, on-host evidence
   requirement).

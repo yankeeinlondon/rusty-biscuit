@@ -19,7 +19,7 @@
 | `permissions` *(merged)* | NO | **none** | — | `agent-permissions/` (9 docs, schema) and legacy `permissions/` (6 docs) merge into ONE topic; **no sequence defined yet** — no prompt, no schema closure |
 | `usage` | NO | old pattern | **0** | prompt only — full authoring run |
 | `agent-cli` | NO | old pattern | 8 | old-generation docs (`claude-code.md`, `gemini-cli.md`, `roo-code.md`); missing pi/kilo |
-| `non-interactive-sessions` | NO | old (`_details.md`) | 8+2 | old-generation docs (`qwen.md`); missing pi/kilo; 2 non-roster extras (`codex-gotchas.md`, `codex-tools-and-events.md`) |
+| `non-interactive-sessions` | NO | old (`_fleet.md`) | 8+2 | old-generation docs (`qwen.md`); missing pi/kilo; 2 non-roster extras (`codex-gotchas.md`, `codex-tools-and-events.md`) |
 | `system-prompt` | yes | current | 9 legacy | **fleet topic**; legacy docs exist, with two stale resume-prompt misfires to treat as evaluator inputs only |
 | `acp` | yes | current | 6 provider docs + reference docs | **fleet topic**; legacy provider docs and protocol/library docs exist |
 | `env-vars` | — | legacy notes only | 1 | **removed as standalone topic**; domain topics own their own env vars |
@@ -58,7 +58,7 @@ fleet topics; they stay as-is unless Checkpoint 0 says otherwise.
   the first `llm_call_start` names the requested model; kill and relaunch if OpenCode
   substituted its config default.
 - **Sequence frontmatter must carry** the standard stacks (copy from
-  `model-config/_model-config.md`): `update:` gate, initialize same-day-skip,
+  `model-config/_fleet.md`): `update:` gate, initialize same-day-skip,
   `success` last_updated verification, `$schema: ./_schema.yaml` instruction, evidence
   requirement (`{{state.user_dir}}` inspection), `::file @prompts/make-it-markdown.md`
   output, `md schema validate` exit criterion.
@@ -123,7 +123,7 @@ Ratified ordering (consumer value first; retrofit before greenfield):
    via a schema-design subagent.
 2. **Modernize the prompt** to the current pattern (sequence frontmatter stacks,
    `$schema` instruction, per-field capture instructions mirroring the schema, evidence
-   requirement, Sources section). Rename `_details.md`-style prompts to
+   requirement, Sources section). Rename `_fleet.md`-style prompts to
    `_<topic>.md`. Fold lessons from the model-config defect: ask capability questions
    ("which standards / mechanisms exist"), never presence questions ("does X support
    Y"), and add topic-specific anti-pattern lines where the old docs show a failure

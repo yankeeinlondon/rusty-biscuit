@@ -71,7 +71,7 @@ signal catalog):
    by the parser ("mapping property values are reserved for a future YAML-native schema
    shape"). The valid form is a quoted inline-object literal:
    `logs_directory: "{ macos: string, windows: string, linux: string }"`.
-   `_agent-logging.md` and `_agent_models.md` both use the invalid form today — the
+   `_fleet.md` and `_fleet.md` both use the invalid form today — the
    sequences run because `target_schema` is interpolated as prompt text, but any agent
    that transplants it verbatim into `$schema` produces a document whose schema fails to
    parse. **Phase 0 must normalize all target_schemas to the inline-literal form** (or
@@ -106,7 +106,7 @@ signal catalog):
 The draft ([`_schema.yaml`](_schema.yaml), pre-wrapper spike copy) was validated end-to-end
 against real-evidence Claude frontmatter (positive) and corrupted/missing-field variants
 (negative), then **promoted 2026-07-01** to `docs/research/agent-logging/_schema.yaml`
-(with the root `$schema:` wrapper). The `_agent-logging.md` sequence file now points
+(with the root `$schema:` wrapper). The `_fleet.md` sequence file now points
 target documents at `$schema: ./_schema.yaml` and its capture instructions fill the
 `surfaces[]` / `time_fields[]` / `record_types[]` records, including the on-host evidence
 requirement (the sequence already grants `state.user_dir` read).
@@ -136,19 +136,19 @@ Defects the pilot surfaced (fixed inline or queued):
    interprets the rejection as "stop": two runs died at ~25s right after the reject,
    without writing anything. Workaround: `--yolo` (the YOLO permission overlay exists
    precisely to prevent this deadlock); real fix: implement `grant` → provider permission
-   mapping. A comment now marks this in `_agent-logging.md`.
+   mapping. A comment now marks this in `_fleet.md`.
 2. **Provider exit 0 ≠ exit criteria met.** Both truncated runs were reported
-   `step succeeded`. Remedy (now in `_agent-logging.md`): a `success` lifecycle stack
+   `step succeeded`. Remedy (now in `_fleet.md`): a `success` lifecycle stack
    gating on `frontmatter(file, 'last_updated') != ctx.today` → styled stderr + `error`.
    This verification pattern should become standard in every research sequence.
 3. **`markdown_file_empty` does not exist** (`markdown_body_empty` is the function) — the
    original `update:` expression could never have evaluated; whole-value strictness
-   caught it on first run. `_agent_models.md` carries the same bug.
+   caught it on first run. `_fleet.md` carries the same bug.
 4. **Lifecycle authoring friction** (documented here so the next author skips 3 failed
    runs): a stack item must have an `action:` key (scalar or array); a scalar `action`
    cannot take sibling keys — use an action *array* for message + control; `when:` is a
    whole expression evaluated directly (`frontmatter(file, ...) != ctx.today`), NOT an
-   interpolated string (`'{{file}}'` inside `when:` crashes). The `_details.md`
+   interpolated string (`'{{file}}'` inside `when:` crashes). The `_fleet.md`
    non-interactive sequence uses older shapes that likely no longer parse.
 5. **Schema gap**: the `unit` enum needs `unix_nanos` — the pilot found
    `logs_2.sqlite.logs.ts_nanos` and had to mislabel it `unix_seconds`.
@@ -158,7 +158,7 @@ Defects the pilot surfaced (fixed inline or queued):
 
 ## Full run (2026-07-01, all 9 roster providers, `--yolo`)
 
-`claudine sequence _agent-logging.md --yolo`: **9/9 succeeded (~50 min, ~5 min per
+`claudine sequence _fleet.md --yolo`: **9/9 succeeded (~50 min, ~5 min per
 provider)**, every document schema-valid and stamped, no truncation (the success stack
 never fired). Coverage: 3–18 surfaces and 12–25 time-field records per provider; only 8
 `zone: unspecified` across all 94 fine-grained timestamp records.

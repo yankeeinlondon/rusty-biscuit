@@ -27,7 +27,7 @@ The same mechanism also covers using *other cloud vendors'* models on vendor pla
   sequence machinery, lifecycle stacks, and CLI conventions this plan assumes.
 - Parent spec: `claudine/features/2026-07-02-provider-metadata/spec.md` ("Out-of-box vs
   user-configured models", "Model identity grammar"). Current topic files:
-  `claudine/docs/research/model-config/{_model-config.md,_schema.yaml}` and 9 provider
+  `claudine/docs/research/model-config/{_fleet.md,_schema.yaml}` and 9 provider
   docs produced by the flawed prompt.
 - Ground truth input: `claudine/docs/research/local_runners/*.md` frontmatter (ports,
   endpoint paths, API-standard support per runner) once that fleet lands.
@@ -55,7 +55,7 @@ The same mechanism also covers using *other cloud vendors'* models on vendor pla
      `mechanism: string`, `example: string`.)
    - Keep everything else (config_files, api_standards, metadata_overrides,
      merge_semantics, env_vars, default_model_site).
-2. **Prompt (`_model-config.md`) changes:**
+2. **Prompt (`_fleet.md`) changes:**
    - Reframe the local-models section: the question is never "does {{state.name}}
      support Ollama" but "which API standards can {{state.name}}'s model client speak,
      and how is its base URL redirected"; runner-side facts (ports, paths, standards)
