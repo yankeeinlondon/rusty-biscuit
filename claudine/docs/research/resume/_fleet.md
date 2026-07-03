@@ -268,7 +268,9 @@ Follow these steps exactly:
     - `session_id_capture` - from `## Session ID Capture`
     - `resume_invocations` - from `## Resume Invocation`
     - `resume_scope` - from `## Session Lookup Scope`
-    - `state_storage` - from `## State Storage`
+    - `state_storage` - from `## State Storage`; one record per OS — storage paths
+      must be recorded separately for macOS, Linux, and Windows (never one record
+      for all OSes; Windows paths always differ)
     - `restored_state` - from `## Restored State`
     - `branching_checkpointing` - from `## Branching and Checkpoints`
     - `hitl_resume` - from `## Human-in-the-Loop Resume`

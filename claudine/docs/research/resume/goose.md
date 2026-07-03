@@ -1,10 +1,10 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-04-02
-last_updated: 2026-07-02
-agent: opencode
-model: kimi-for-coding/k2p7
-docs: https://goose-docs.ai/docs/guides/sessions/session-management
+last_updated: 2026-07-03
+agent: codex
+model: default
+docs: https://goose-docs.ai/docs/guides/sessions/session-management/
 support: first_class
 continuity_model: transcript_replay
 resume_modes:
@@ -14,226 +14,288 @@ resume_modes:
       - "goose session --resume"
       - "goose session --resume --name <name>"
       - "goose session --resume --session-id <id>"
+      - "goose session --resume --path <file>"
       - "goose session --resume --fork"
       - "goose session --resume --edit"
+      - "goose project"
+      - "goose projects"
+      - "goose term init --name <name> plus @goose"
     accepts_followup_prompt: false
     selection_methods:
       - latest
       - id
       - name
-    notes: "No built-in picker for resume; omitting identifiers resumes the most recently updated session globally. --edit opens the conversation YAML in $EDITOR and can truncate history; --fork copies the original."
+      - picker
+      - worktree
+      - other
+    notes: "Interactive resume is first-class. Session resume can target latest, name, ID, or a legacy/export path. Project and terminal integration add human-oriented continuation surfaces; project selection is directory/project-based and terminal named sessions are keyed by the shell integration's session name."
   - mode: non_interactive
     supported: true
     mechanisms:
       - "goose run --resume -t \"follow-up prompt\""
       - "goose run --resume --name <name> -t \"follow-up prompt\""
       - "goose run --resume --session-id <id> -t \"follow-up prompt\""
+      - "goose run --resume --path <file> -t \"follow-up prompt\""
+      - "goose term run <prompt>"
     accepts_followup_prompt: true
     selection_methods:
       - latest
       - id
       - name
-    notes: "run requires -i, -t, or --recipe. --resume loads the prior session and the supplied text is appended as a new user message."
+      - other
+    notes: "Headless run accepts a new prompt from --text, --instructions, stdin, or recipe. --no-session is mutually exclusive with --resume. Terminal integration can send prompts into the terminal-associated persistent session, but it is a separate shell integration surface."
+  - mode: ide
+    supported: true
+    mechanisms:
+      - "Goose Desktop sidebar"
+      - "Session History Resume"
+      - "Session History New Window"
+      - "ACP clients backed by Goose session storage"
+    accepts_followup_prompt: false
+    selection_methods:
+      - picker
+      - latest
+      - id
+      - name
+    notes: "Desktop and CLI use the same session database. Desktop can switch active sessions, resume from history, duplicate, export, import, rename, and delete sessions."
   - mode: headless_server
     supported: false
     mechanisms: []
     accepts_followup_prompt: false
     selection_methods: []
-    notes: "goosed and goose serve exist for ACP/desktop, but there is no documented standalone CLI/API surface for programmatic session resume."
-  - mode: ide
-    supported: true
-    mechanisms:
-      - "ACP clients (Zed, VS Code) resume via session history"
-    accepts_followup_prompt: false
-    selection_methods:
-      - picker
-      - latest
-    notes: "ACP sessions are saved to the same SQLite store; this research focuses on CLI behavior."
+    notes: "goose serve/goosed and ACP exist, but no documented stable headless HTTP or JSON-RPC API was found for Claudine-style programmatic session resume."
   - mode: api
     supported: false
     mechanisms: []
     accepts_followup_prompt: false
     selection_methods: []
-    notes: "No direct public HTTP API for session resume; ACP JSON-RPC is the closest programmatic surface."
+    notes: "No public SDK or REST API for direct resume was verified. ACP is an IDE/client protocol surface rather than a documented general resume API."
 session_id_capture:
   - surface: stdout
     field: "session_id"
-    format: "YYYYMMDD_<N>"
-    notes: "Printed in the ASCII-art session header at start unless --quiet is used. Not emitted inside --output-format json or stream-json events."
+    format: "YYYYMMDD_<COUNT>"
+    notes: "The CLI displays the session ID in the session info header unless quiet output suppresses non-response text."
   - surface: cli_command
     field: "id"
-    format: "YYYYMMDD_<N>"
-    notes: "goose session list --format json returns Session objects with id, name, working_dir, created_at, updated_at."
+    format: "JSON array of Session records"
+    notes: "goose session list --format json returns sessions with id, name, working_dir, timestamps, metadata, and message-count-derived fields."
   - surface: session_file
-    field: "id"
-    format: "YYYYMMDD_<N>"
-    notes: "Primary key in the local SQLite sessions table."
-  - surface: log_file
+    field: "sessions.id"
+    format: "SQLite primary key"
+    notes: "The sessions table primary key is generated as YYYYMMDD_N by create_session. Messages reference it through messages.session_id."
+  - surface: other
     field: "AGENT_SESSION_ID"
-    format: "YYYYMMDD_<N>"
-    notes: "Set in the environment of shell tool subprocesses and stdio extensions; not exposed to the wrapper process."
+    format: "environment variable"
+    notes: "Terminal integration exposes the active terminal session ID through AGENT_SESSION_ID; shell tools/extensions may also receive a session-scoped ID."
+  - surface: log_file
+    field: "session identifiers"
+    format: "implementation logs"
+    notes: "The logging guide says CLI logs include session identifiers, but logs are operational observability rather than the preferred handle-capture surface."
 resume_invocations:
   - mode: interactive
     invocation: "goose session --resume"
     accepts_prompt: false
     selection: latest
-    notes: "Resumes the most recently updated session globally."
+    notes: "Resumes the most recently active visible user/scheduled session."
   - mode: interactive
     invocation: "goose session --resume --name <name>"
     accepts_prompt: false
     selection: name
-    notes: "Names match the user-provided or AI-generated session name; --name also accepts a session ID."
+    notes: "Name matching also accepts an exact session ID through the current get_or_create_session_id implementation."
   - mode: interactive
     invocation: "goose session --resume --session-id <id>"
     accepts_prompt: false
     selection: id
-    notes: "Exact YYYYMMDD_<N> ID."
+    notes: "Best explicit-handle resume path for wrappers."
   - mode: interactive
-    invocation: "goose session --resume --fork [--name <name>|--session-id <id>]"
+    invocation: "goose session --resume --path ./session.json"
     accepts_prompt: false
-    selection: latest
-    notes: "Creates a new session copy before resuming; the original is left intact."
+    selection: other
+    notes: "Documented for exported sessions and legacy JSONL. Current CLI identifier handling extracts the file stem as the session ID; import/export paths are separate commands."
   - mode: interactive
-    invocation: "goose session --resume --edit [--fork]"
+    invocation: "goose session --resume --fork [--name <name>|--session-id <id>|--path <file>] [--history]"
+    accepts_prompt: false
+    selection: other
+    notes: "Copies the selected session and resumes the copy; --history prints previous messages after resuming."
+  - mode: interactive
+    invocation: "goose session --resume --session-id <id> --edit [--fork] [--history]"
     accepts_prompt: false
     selection: id
-    notes: "Opens conversation YAML in $VISUAL/$EDITOR/vi; save to truncate or rewrite history, then continue."
+    notes: "Opens the conversation in $VISUAL, $EDITOR, or vi as YAML; saved edits replace or fork history before continuing."
   - mode: non_interactive
-    invocation: "goose run --resume -t \"follow-up prompt\""
+    invocation: "goose run --resume --session-id <id> -t \"follow-up prompt\" --output-format json"
     accepts_prompt: true
-    selection: latest
-    notes: "Appends the text as a new user message to the latest session."
+    selection: id
+    notes: "Scriptable follow-up. Structured result is available after completion; stream-json emits events but not session_id."
   - mode: non_interactive
     invocation: "goose run --resume --name <name> -t \"follow-up prompt\""
     accepts_prompt: true
     selection: name
-    notes: "Resumes the named session and appends the prompt."
+    notes: "Resolves name or ID to a stored session before appending the prompt."
   - mode: non_interactive
-    invocation: "goose run --resume --session-id <id> -t \"follow-up prompt\""
+    invocation: "goose run --resume -t \"follow-up prompt\""
     accepts_prompt: true
-    selection: id
-    notes: "Resumes the exact session and appends the prompt."
+    selection: latest
+    notes: "Convenient but less deterministic; implementation resolves latest before build_session, but saved provider/model restoration is most reliable when an explicit session_id is supplied."
+  - mode: interactive
+    invocation: "goose project"
+    accepts_prompt: false
+    selection: other
+    notes: "Interactive project manager can resume the most recent tracked project with its associated session or start fresh in that directory."
+  - mode: interactive
+    invocation: "goose projects"
+    accepts_prompt: false
+    selection: picker
+    notes: "Interactive project picker; not safe to treat as an automatable session selector."
+  - mode: non_interactive
+    invocation: "goose term run <prompt>"
+    accepts_prompt: true
+    selection: other
+    notes: "Sends a prompt to the terminal-integrated persistent session selected by AGENT_SESSION_ID or the shell integration's named-session setup."
 state_storage:
   - location: local
     os: macos
     path: "~/.local/share/goose/sessions/sessions.db"
-    format: SQLite
-    retention: "Indefinite until deleted with goose session remove; system logs are cleaned after two weeks."
-    notes: "sessions table stores metadata, provider_name, model_config_json, extension_data, recipe_json, goose_mode, working_dir; messages table stores the conversation."
+    format: "SQLite, current source schema version 14"
+    retention: "Indefinite until removed; CLI/server logs are cleaned after about two weeks."
+    notes: "Official docs group macOS with Unix-like paths. Source uses etcetera app strategy with Block/goose compatibility and GOOSE_PATH_ROOT for tests, so wrappers should prefer goose info/docs over hard-coded parsing. No Goose session database existed on this host under the documented or Block Application Support paths."
   - location: local
     os: linux
     path: "~/.local/share/goose/sessions/sessions.db"
-    format: SQLite
-    retention: "Indefinite until deleted; system logs cleaned after two weeks."
-    notes: "Same schema as macOS."
+    format: "SQLite, current source schema version 14"
+    retention: "Indefinite until removed; CLI/server logs are cleaned after about two weeks."
+    notes: "Legacy JSONL files under the sessions directory are imported during migration and then left unmanaged."
   - location: local
     os: windows
     path: "%APPDATA%\\Block\\goose\\data\\sessions\\sessions.db"
-    format: SQLite
-    retention: "Indefinite until deleted; system logs cleaned after two weeks."
-    notes: "Same schema as Unix. Legacy individual .jsonl files under the sessions directory are imported once and then ignored."
+    format: "SQLite, current source schema version 14"
+    retention: "Indefinite until removed; CLI/server logs are cleaned after about two weeks."
+    notes: "Windows uses the Block/goose data directory documented by Goose. Console and shell behavior differ, but session schema is shared."
 resume_scope:
   project_scoped: false
   cwd_scoped: false
   worktree_aware: false
   all_projects_supported: true
   branch_filtering: false
-  notes: "Sessions are global across working directories. goose session list -w <path> can filter by working_dir for discovery, but resume without an identifier always picks the most recently updated session globally."
+  notes: "Core session resume is global over visible user/scheduled sessions. session list can filter by working_dir substring, and Projects store directory-to-session metadata in projects.json, but plain --resume is not repository-, branch-, or worktree-scoped."
 branching_checkpointing:
   branch_supported: true
   checkpoint_supported: false
-  fork_invocation: "goose session --resume --fork [--name <name>|--session-id <id>]"
+  fork_invocation: "goose session --resume --fork [--name <name>|--session-id <id>|--path <file>]"
   checkpoint_invocation: "n/a"
   preserves_original: true
-  notes: "Fork duplicates the full session. --edit can truncate the original conversation in place. There is no named rewind/checkpoint command beyond /compact (summarization)."
+  notes: "CLI fork creates a new session ID and copies conversation, extension data, schedule/recipe/user values, project ID, provider/model config, and goose mode. The inspected CLI copy path did not copy accumulated usage/cost fields. Desktop has duplicate and edited-message fork concepts; import creates a new ID."
 restored_state:
   transcript: true
   tool_results: true
   approvals: cleared
-  model: restored
+  model: overridable
   cwd: configurable
   env: current_process
-  notes: "Provider, model config, enabled extensions, recipe, and goose_mode are read from the sessions table. CLI --provider/--model can override model. Working directory is only switched back in interactive mode with a confirmation prompt; non-interactive runs stay in the launching directory. Environment is never stored."
+  notes: "Conversation messages, tool requests/responses, extension data, recipe data, provider, model config, project ID, and goose_mode are stored. Explicit --session-id resume restores saved provider/model unless CLI flags override them; latest/name resume resolves through CLI selection and should not be assumed equivalent for model restoration without verification. Interactive resume asks before switching to the saved working directory; headless resume warns and stays in the current launch directory."
 hitl_resume:
   supported: false
-  question_capture: "n/a"
-  answer_injection: "n/a"
-  limitations: "Goose has no defer/return-channel hook. In non-interactive mode, approve/smart_approve modes error out when a tool confirmation is needed, and MCP elicitation errors out. Automation must use GOOSE_MODE=auto to avoid blocking prompts."
+  question_capture: "ActionRequired messages can appear for tool confirmation or MCP elicitation during a live run, and stream-json can emit message events containing action-required content."
+  answer_injection: "No documented CLI/API accepts a later answer into a suspended session. Live interactive code answers by calling internal agent handlers inside the same process."
+  limitations: "Headless approve/smart_approve fails on tool confirmation; MCP elicitation fails in non-interactive mode. There is no durable pending-question queue or resume-with-answer command."
 interruption_recovery:
   crash_resume: true
   ctrl_c_resume: true
   pending_tool_resume: false
   pending_approval_resume: false
-  limitations: "Messages are persisted to SQLite as they are produced, so the session can be resumed after most interruptions. An interrupted assistant turn may be incomplete. In-flight tool calls and mid-turn approvals are not stored."
+  limitations: "Persisted messages can be resumed after process loss. On stream errors or Ctrl+C, CLI code attempts to remove or patch interrupted messages around the most recent user message, so an interrupted turn may be incomplete or rewritten. Concurrent resume/write behavior is undocumented."
 observability:
   stream_events:
     - "message"
     - "notification"
-    - "model_change"
     - "error"
     - "complete"
   hook_events:
-    - "GOOSE_STATUS_HOOK (waiting/thinking)"
+    - "GOOSE_STATUS_HOOK waiting/thinking"
+    - "internal HookEvent::SessionEnd"
   failure_modes:
+    - "Cannot resume - no previous sessions found"
+    - "Cannot resume session <id> - no such session exists"
+    - "No session found with name <name>"
     - "Tool approval required in non-interactive mode"
-    - "Elicitation requested in non-interactive mode"
-  notes: "stream-json is only available for goose run. The status hook is fire-and-forget with suppressed stdout/stderr and no return channel. Session IDs are not embedded in stream-json events; capture them from the session list or start header."
+    - "Elicitation requested but no interactive terminal is available"
+    - "Working directory differs from session; staying in current directory"
+  notes: "goose run --output-format json emits final messages and metadata. stream-json emits event lines as work occurs but no stable session_id field. Session listing, export, diagnostics, and logs are the useful resume observability surfaces."
 quirks:
-  - "Session IDs use YYYYMMDD_<N> (e.g. 20251108_2), not UUIDs."
-  - "--resume without an identifier resumes the most recently updated session globally, not the latest session in the current directory."
-  - "--name also matches session IDs, so a name lookup can accidentally resolve to an ID."
-  - "Non-interactive resumed runs cannot answer tool confirmations or MCP elicitation forms; use GOOSE_MODE=auto for headless automation."
-  - "Working directory is not automatically restored in non-interactive resume; the wrapper must cd first if desired."
-  - "--output-format stream-json does not include the session_id field; do not rely on it for stable handles."
-  - "GOOSE_DISABLE_SESSION_NAMING avoids the AI-generated name call and keeps the default 'CLI Session' name."
-  - "The SQLite schema is internal and may change between releases; direct SQL is possible but not a supported integration surface."
+  - "The project moved from Block-hosted branding to AAIF/Linux Foundation branding, but source paths and Windows directories still preserve Block/goose compatibility."
+  - "Goose was not installed on this host according to sniff software agents, and no local Goose session database or transcript files were found under documented macOS/XDG paths."
+  - "Session IDs are date counters such as 20260213_9, not UUIDs."
+  - "Plain --resume selects the latest visible user/scheduled session globally, not the latest session for the current repository."
+  - "--name matching in current CLI code also matches session IDs."
+  - "Legacy --path is documented for exported JSON and JSONL, but current identifier code extracts a file stem as a session ID; import/export commands are the safer migration surface."
+  - "Explicit --session-id is safer than latest/name resume for wrappers because saved provider/model configuration is read before provider resolution only for explicit IDs in the inspected builder code."
+  - "GOOSE_DISABLE_SESSION_NAMING avoids an extra model call and keeps the default CLI Session name for headless workflows."
+  - "The SQLite schema is observable but internal; direct SQL is useful for diagnostics, not a stable integration contract."
 gaps:
-  - "No documented concurrency guarantees when the same session is resumed from multiple processes."
-  - "Whether MCP OAuth tokens, connection state, and extension runtime state survive resume is not documented."
-  - "Exact behavior when resuming a session that was interrupted mid-assistant-turn is not documented."
-  - "Whether goose run --resume supports --recipe follow-up or resuming from a recipe session is not documented."
-  - "No documented standalone headless API for session resume outside ACP clients."
+  - "No real Goose transcript existed on this host to inspect; local evidence is limited to negative filesystem and program-detection probes plus upstream source/docs."
+  - "No documented concurrency guarantee for resuming the same session from multiple processes."
+  - "No verified public API for resume outside CLI/Desktop/ACP client behavior."
+  - "Exact recovery semantics for an interrupted assistant turn depend on internal message cleanup and were not verified against a live run."
+  - "Whether OAuth/session connection state for every extension survives resume is not documented."
+  - "The docs say exported JSON can be resumed with --path, but source-level path handling appears ID-stem based; live behavior with exported JSON was not verifiable without an installed Goose binary."
 changes:
-  - "2026-07-02: Replaced free-form frontmatter with schema-validated fields and corrected continuity/HITL claims."
-  - "2026-07-02: Documented SQLite session storage, OS-specific paths, and restored-state semantics."
-  - "2026-07-02: Clarified that Goose has no defer/answer-injection hook and that non-interactive approve/smart_approve modes fail on tool confirmation."
-  - "2026-07-02: Added resume-scope notes (global, not cwd-scoped) and branching via --fork."
+  - "2026-07-03: Verified current AAIF Goose docs and source instead of relying on the prior Block-era research."
+  - "2026-07-03: Added project and terminal-integration continuation surfaces, including projects.json and AGENT_SESSION_ID behavior."
+  - "2026-07-03: Updated storage details to current SQLite schema version 14 and added project_id, archived_at, usage/cost, message_count, and last-message fields."
+  - "2026-07-03: Recorded negative local evidence: Goose is not installed on this host and no session database/transcripts were found under documented paths."
+  - "2026-07-03: Corrected wrapper guidance around explicit --session-id resume versus latest/name resume for saved provider/model restoration."
+  - "2026-07-03: Added legacy --path, --history, export/import/diagnostics, Desktop duplicate/import/export, and source-observed fork limitations."
 requires_claudine_update: true
-reason: "The schema migration and corrected findings should update Claudine's Goose adapter: resume must use YYYYMMDD_<N> handles captured from goose session list or the start header, HITL must rely on GOOSE_MODE=auto because there is no defer hook, and cwd/model restore semantics need to be accounted for."
+reason: "Claudine should treat Goose resume as first-class but prefer explicit --session-id handles, account for project/terminal continuation surfaces, avoid relying on stream-json for session IDs, and update Goose metadata for current SQLite schema/project fields and non-HITL limitations."
 ---
+
+# Goose CLI Resume Research
 
 ## Overview
 
-Goose CLI stores every session in a local SQLite database and provides first-class resume for both interactive and non-interactive use. A session is a persisted conversation plus metadata (provider, model, extensions, mode, working directory). Resume loads that persisted state into a new process; there is no live-process attach or remote session server for CLI wrappers.
+Goose CLI has first-class resume support for both interactive and non-interactive sessions. The practical continuity model is local transcript replay from Goose's SQLite session store: a new process loads a saved conversation and session metadata, then appends new messages. CLI wrappers can resume the latest session, a named session, an exact session ID, a legacy/export path, a project-associated session, or a terminal-integrated named session.
+
+The main automation risks are selector ambiguity and partial state restoration. `goose run --resume --session-id <id> -t "..."` is the safest wrapper primitive. `--resume` without an explicit handle is global, not cwd-scoped; `--name` also matches IDs in current source; stream JSON does not include a session ID; and headless runs cannot suspend on approvals or MCP elicitation for a later human answer.
 
 ## Resume Semantics
 
-Resume means "load a previously persisted session from SQLite and continue appending messages to it." The same database is shared by Goose CLI, Goose Desktop, and ACP clients. A resumed session keeps the same `YYYYMMDD_<N>` ID unless it is forked, in which case a new session record is created with copied history.
+Goose's persistent session is a local record with metadata plus conversation messages. Current source defines a `Session` with fields including `id`, `working_dir`, `name`, `user_set_name`, `session_type`, `created_at`, `updated_at`, `extension_data`, usage/cost fields, `schedule_id`, `recipe`, `user_recipe_values`, `conversation`, `message_count`, `last_message_at`, `provider_name`, `model_config`, `goose_mode`, `archived_at`, `project_id`, and `last_message_snippet`. Messages live in a separate SQLite `messages` table and are loaded into a `Conversation` on resume.
+
+The applicable resume patterns are continue-latest, resume-by-handle, interactive picker, non-interactive follow-up, transcript replay, branch/fork, recovery resume, Desktop/IDE continuation, project continuation, and terminal named-session continuation. This is not live-process attach for the CLI: a resumed CLI session reconstructs context from stored messages and metadata. It is not a server-side session in the sense of an authoritative cloud session. Goose has local server/ACP components, but no stable public resume API was verified for Claudine to call directly.
+
+Chat-history export is not itself resume unless Goose can import or load it into a continued session. Goose can export sessions as JSON/YAML/Markdown, import JSON through Desktop/CLI import paths, and documents `--path` for exported JSON or legacy JSONL resume. Memory, context files, `.goosehints`, and project instructions are context sources, not prior-session continuation mechanisms.
 
 ## Supported Modes
 
-| Mode | Entry point | Follow-up prompt | Selector |
-|------|-------------|------------------|----------|
-| Interactive CLI | `goose session --resume` | No | Latest globally |
-| Interactive CLI | `goose session --resume --name <name>` | No | Exact name |
-| Interactive CLI | `goose session --resume --session-id <id>` | No | Exact ID |
-| Interactive CLI | `goose session --resume --fork` | No | Latest / name / ID |
-| Non-interactive CLI | `goose run --resume -t "..."` | Yes | Latest globally |
-| Non-interactive CLI | `goose run --resume --name <name> -t "..."` | Yes | Exact name |
-| Non-interactive CLI | `goose run --resume --session-id <id> -t "..."` | Yes | Exact ID |
+| Mode | Entry point | Follow-up prompt | Selector | Automation fit |
+|------|-------------|------------------|----------|----------------|
+| Interactive CLI | `goose session --resume` | No | Latest globally | Human-oriented |
+| Interactive CLI | `goose session --resume --name <name>` | No | Name, also ID in source | Scriptable selector, interactive session |
+| Interactive CLI | `goose session --resume --session-id <id>` | No | Exact ID | Best interactive handle |
+| Interactive CLI | `goose session --resume --path <file>` | No | Legacy/export path | Ambiguous; verify live before relying on it |
+| Interactive CLI | `goose session --resume --fork` | No | Latest, name, ID, path | Human-oriented branch |
+| Interactive CLI | `goose session --resume --edit` | No | Latest, name, ID, path | Opens editor; not automation-safe |
+| Non-interactive CLI | `goose run --resume --session-id <id> -t "..."` | Yes | Exact ID | Best headless primitive |
+| Non-interactive CLI | `goose run --resume --name <name> -t "..."` | Yes | Name, also ID in source | Scriptable with collision risk |
+| Non-interactive CLI | `goose run --resume -t "..."` | Yes | Latest globally | Scriptable but unsafe if multiple sessions exist |
+| Desktop | Sidebar active session / Session History | Typed after selection | Picker | Human-oriented |
+| Projects | `goose project`, `goose projects` | No direct prompt at selection | Project picker/latest | Human-oriented |
+| Terminal integration | `goose term init --name <name>`, `goose term run <prompt>` | Yes | Terminal/named session | Shell-oriented, not the core `run --resume` path |
 
-`goose run --resume` also accepts `--instructions` and `--recipe`, but the interaction between `--resume` and `--recipe` is not explicitly documented.
+Sessions created by non-interactive `goose run` are stored unless `--no-session` is used. `--no-session` is mutually exclusive with `--resume`, `--name`, and `--path`, so runs intended for later continuation must not use `--no-session`.
 
 ## Session ID Capture
 
-Stable handles are `YYYYMMDD_<N>` strings. Capture surfaces:
+Goose session IDs use `YYYYMMDD_<COUNT>`, such as `20260213_9`. Useful capture surfaces are:
 
-- **Start header**: printed to stdout when a session starts (suppressed by `--quiet`).
-- **`goose session list --format json`**: returns an array of `Session` objects with `id`, `name`, `working_dir`, `created_at`, `updated_at`.
-- **SQLite primary key**: the `id` column in `sessions`.
-- **`AGENT_SESSION_ID`**: set in shell tool and stdio extension subprocesses, not in the wrapper process.
+- The CLI session header, unless `--quiet` suppresses non-response output.
+- `goose session list --format json`, which emits stored session records.
+- `goose session export --session-id <id> --format json`, which emits the full session backup.
+- `goose session diagnostics --session-id <id>`, which emits a diagnostics bundle containing session data and logs.
+- The SQLite `sessions.id` primary key.
+- `AGENT_SESSION_ID` in terminal integration and shell/tool contexts.
 
-Stream-json events do **not** contain `session_id`, so wrappers must capture the ID before or after the run.
+`goose run --output-format stream-json` emits `message`, `notification`, `error`, and `complete` events, but current source does not include a session ID in those event variants. A Claudine wrapper should capture the handle before launching, from the start header, or by listing sessions after launch with a tight correlation strategy.
 
 ## Resume Invocation
 
@@ -243,133 +305,188 @@ Continue the latest session interactively:
 goose session --resume
 ```
 
-Resume a specific session by name or ID:
+Resume an exact session interactively:
+
+```bash
+goose session --resume --session-id 20260213_9
+```
+
+Resume by name:
 
 ```bash
 goose session --resume --name react-migration
-goose session --resume --session-id 20251108_2
 ```
 
-Fork while resuming:
+Show previous messages when resuming:
 
 ```bash
-goose session --resume --fork --name react-migration
-goose session --resume --fork --session-id 20251108_2
+goose session --resume --session-id 20260213_9 --history
 ```
 
-Send a follow-up prompt into a prior non-interactive session:
+Fork and continue a copy:
 
 ```bash
-goose run --resume --session-id 20251108_2 -t "run the tests now"
+goose session --resume --fork --session-id 20260213_9
+```
+
+Edit history before continuing:
+
+```bash
+goose session --resume --session-id 20260213_9 --edit
+goose session --resume --session-id 20260213_9 --fork --edit --history
+```
+
+Send a scriptable follow-up prompt and capture structured output:
+
+```bash
+goose run --resume --session-id 20260213_9 -t "Run the tests and summarize failures" --output-format json
+goose run --resume --session-id 20260213_9 -t "Continue" --output-format stream-json
+```
+
+Project and terminal continuation:
+
+```bash
+goose project
+goose projects
+goose term init zsh --name auth-bug
+goose term run "what was the solution we discussed?"
 ```
 
 ## Session Lookup Scope
 
-Sessions are global. `goose session -r` without an identifier resumes the most recently updated session across all working directories. Use `goose session list -w <path>` to filter discovery by working directory, but resume itself does not scope to the current project, repository, worktree, or branch.
+Core session lookup is global over visible user/scheduled sessions. `goose session --resume` and `goose run --resume` without an identifier select the first result from `SessionManager::list_sessions()`, which lists user and scheduled sessions and orders them by activity in current implementation. It is not scoped to the current directory, repository, worktree, or branch.
+
+Discovery can be narrowed by `goose session list -w <path>`, which filters sessions by a working-directory substring. Goose Projects add a separate directory-to-session layer: the docs describe `~/.local/share/goose/projects.json` with path, last accessed time, last instruction, and associated session ID. That makes project continuation available, but it is a separate project manager surface, not a change to plain session resume scope.
 
 ## State Storage
 
-Resumable state is local SQLite.
+Goose stores resumable session state locally. Official docs list these locations:
 
-| OS | Path |
-|----|------|
-| macOS / Linux | `~/.local/share/goose/sessions/sessions.db` |
-| Windows | `%APPDATA%\Block\goose\data\sessions\sessions.db` |
+| OS | Session records | Command history | CLI/server logs |
+|----|-----------------|-----------------|-----------------|
+| macOS | `~/.local/share/goose/sessions/sessions.db` | `~/.config/goose/history.txt` | `~/.local/state/goose/logs/` |
+| Linux | `~/.local/share/goose/sessions/sessions.db` | `~/.config/goose/history.txt` | `~/.local/state/goose/logs/` |
+| Windows | `%APPDATA%\Block\goose\data\sessions\sessions.db` | `%APPDATA%\Block\goose\data\history.txt` | `%APPDATA%\Block\goose\data\logs\` |
 
-The `sessions` table holds metadata, provider, model config, extension data, recipe, goose mode, and working directory. The `messages` table holds the full conversation including tool requests and responses. Legacy `.jsonl` files remain on disk after migration but are no longer managed.
+Current source uses an `etcetera` app strategy with `Block/goose` kept for backward compatibility and a `GOOSE_PATH_ROOT` override for tests. The source constant `CURRENT_SCHEMA_VERSION` is `14`. The SQLite schema includes `schema_version`, `sessions`, `messages`, and additional inventory/thread tables. The session table stores provider/model config, extension data, recipe values, working directory, mode, project ID, archive time, and usage/cost counters. The messages table stores `message_id`, `session_id`, role, content JSON, timestamps, token count, and metadata JSON.
+
+Local inspection on this macOS host found no installed Goose binary through `sniff software agents`, no `goose` on `PATH`, and no session database or transcript files under the documented XDG paths or the checked `~/Library/Application Support/Block/goose` / `~/Library/Application Support/Goose` paths. That is negative evidence: there were no real local transcript rows to inspect.
+
+The database is useful evidence, but direct parsing should be treated as unsupported. Prefer `goose session list --format json`, `goose session export`, and `goose session diagnostics` when possible.
 
 ## Restored State
 
-Resuming restores:
+Resume restores the transcript and tool results because the conversation is reloaded from `messages`. It also stores and can restore session metadata: provider name, model config, extension data, recipe data, user recipe values, `goose_mode`, working directory, project ID, schedule ID, and usage fields.
 
-- The full conversation transcript and tool results from the `messages` table.
-- Provider and model configuration from the session record, unless overridden by `--provider` / `--model`.
-- Enabled extensions from the saved `extension_data`.
-- Recipe configuration if the session was recipe-based.
-- `goose_mode` from the saved session.
+Restoration is not uniform across selectors. In the inspected `build_session` path, saved provider/model config is read before provider resolution only when `session_config.resume` and `session_config.session_id` are set. A wrapper should therefore prefer `--session-id` over latest/name resume if preserving saved provider/model is important. CLI `--provider` and `--model` can override the saved provider/model. Recipe settings and current config can also participate in provider/model resolution.
 
-Resuming does **not** restore:
-
-- The environment of the original session.
-- The working directory, in non-interactive mode (interactive mode asks whether to switch back).
-- Individual tool approvals; each tool call is gated fresh by the active mode.
+Interactive resume checks whether the current directory differs from the saved working directory and asks whether to switch back. Non-interactive resume does not change directories; it prints a warning and stays in the launch directory. Environment variables are from the current process. Individual approvals are not stored for later replay; tool confirmations are evaluated again under the active Goose mode. Resume continues writing to the same session ID unless `--fork`, duplicate, or import creates a new one.
 
 ## Branching and Checkpoints
 
-Branching is supported via `--fork` on resume; it creates a new session record with copied history and leaves the original intact. Checkpoints/rewind are not supported as named operations. `--edit` can truncate the conversation in place by editing the YAML in an external editor.
+Goose supports branching-like behavior through fork, duplicate, edit, import, and export:
+
+| Feature | Surface | Preserves original | Notes |
+|---------|---------|--------------------|-------|
+| Fork | `goose session --resume --fork ...` | Yes | Creates a new session ID and copies conversation plus key metadata. |
+| Edit | `goose session --resume --edit ...` | No, unless combined with `--fork` | Opens YAML conversation in an editor and replaces/truncates saved messages. |
+| Desktop duplicate | Session History duplicate action | Yes | Docs describe a full copy visible at the top of the session list. |
+| Import | Desktop import or `goose session import <file>` | Yes | Creates a new session ID rather than overwriting. |
+| Export | `goose session export --format json|yaml|markdown` | n/a | JSON/YAML are complete backups; Markdown is for reading/sharing. |
+| Diagnostics | `goose session diagnostics --session-id <id>` | n/a | Captures session data, config files, logs, and system info for debugging. |
+
+There is no named checkpoint, rewind, or live branch graph for CLI wrappers. Goose does have context compaction and message truncation internals, but those are not a general checkpoint API.
 
 ## Human-in-the-Loop Resume
 
-Goose does **not** support Claudine-style HITL resume. There is no hook to defer a tool call or question, capture it, and later inject an answer. In non-interactive mode:
+Goose does not provide Claudine-style human-in-the-loop resume. During a live interactive process, action-required messages can ask for tool confirmation or MCP elicitation. The CLI answers those by calling internal agent handlers in the same process.
 
-- `approve` and `smart_approve` modes fail when a tool confirmation is required.
-- MCP elicitation forms fail because there is no interactive terminal.
-
-For automation, set `GOOSE_MODE=auto` so that tool calls proceed without blocking.
+In headless mode, Goose cannot later capture a question, stop, let another system ask a user, and inject the answer into the same suspended turn. Current source returns an error if `approve` or `smart_approve` mode requires a tool confirmation in non-interactive mode. It also errors when MCP elicitation needs an interactive terminal. Use `GOOSE_MODE=auto` only when the automation policy allows tools to proceed without confirmation; otherwise Claudine must fail or proxy to a provider with a real pause/answer protocol.
 
 ## Interruption Recovery
 
-Because messages are written to SQLite as they are produced, sessions survive:
+Because sessions are persisted locally, Goose can resume after terminal close, process death, crash, provider error, or Ctrl+C as long as enough messages were saved. On errors and cancellation, current CLI code calls interruption cleanup that removes or patches messages around the most recent user message, so a resumed session may continue from the last clean user turn rather than from an in-flight tool call.
 
-- Crash, terminal close, or process kill.
-- `Ctrl+C` during a response.
-
-There is no documented recovery of:
-
-- An in-flight assistant turn that was interrupted before a message was persisted.
-- Pending tool calls or mid-turn approvals.
+Pending tool calls and pending approval prompts are not durable resume points. A killed process does not leave a public "waiting for approval" handle. Concurrent resumes of the same session are not documented; the SQLite code uses transactions for writes, but no high-level interleaving or locking guarantee was found for multiple live Goose processes appending to the same conversation.
 
 ## Observability
 
-Relevant surfaces for resume-aware wrappers:
+Relevant observability surfaces:
 
-- **`--output-format stream-json`**: emits `message`, `notification`, `model_change`, `error`, and `complete` events. No `session_id` in these events.
-- **`--output-format json`**: returns final `messages` and `metadata` after `goose run` completes.
-- **`GOOSE_STATUS_HOOK`**: fire-and-forget shell hook receiving `waiting` or `thinking`; cannot block or return data.
-- **`goose session list --format json`**: the stable way to enumerate and select sessions.
+- `goose session list --format json` for session IDs, names, paths, timestamps, metadata, and activity.
+- `goose session export --format json` for full session content.
+- `goose session diagnostics` for session data plus logs/config.
+- `goose info` for configuration, session storage, and logs according to the CLI docs.
+- `goose run --output-format json` for final messages and metadata after a run.
+- `goose run --output-format stream-json` for `message`, `notification`, `error`, and `complete` lines.
+- `GOOSE_STATUS_HOOK` for fire-and-forget `waiting`/`thinking` status.
+- `AGENT_SESSION_ID` for terminal integration.
+- CLI logs under the documented log directory; docs say logs include session identifiers, timestamps, tool invocations, and responses.
+
+Stream-json is useful for progress, but not for session-handle capture. Hooks are not a blocking request/response channel.
 
 ## Quirks and Gaps
 
 Quirks:
 
-- Session IDs are `YYYYMMDD_<N>`, not UUIDs.
-- `--resume` without identifiers is global, not cwd-scoped.
-- `--name` on resume also matches session IDs.
-- Non-interactive resume cannot handle confirmations or elicitation; use `auto` mode.
-- Working directory is only restored interactively.
-- Direct SQLite queries are possible but the schema is internal.
+- Goose is now documented under AAIF branding, while the repository and data paths retain Block/goose compatibility.
+- Session IDs are date counters, not UUIDs.
+- Plain `--resume` is global and can pick an unrelated latest session.
+- `--name` matching currently also matches exact session IDs.
+- Explicit `--session-id` is safer than latest/name resume for saved provider/model restoration.
+- `--path` is documented for exported JSON and legacy JSONL, but source-level identifier handling extracts a file stem as an ID; import/export are safer for migration.
+- Non-interactive resume cannot handle approvals or elicitation.
+- Working directory is not restored in headless mode.
+- Direct SQLite parsing is possible but not a stable integration path.
 
 Gaps:
 
-- Concurrent resume behavior is undocumented.
-- Survival of MCP OAuth / connection state on resume is undocumented.
-- Mid-turn interruption recovery semantics are undocumented.
-- Resume with `--recipe` is undocumented.
-- No documented standalone API for programmatic resume.
+- No real local Goose transcripts existed on this host to inspect.
+- No public concurrency guarantee was found for simultaneous resumes of one session.
+- No public resume API was verified outside CLI/Desktop/ACP client behavior.
+- Live behavior of `--path` with exported JSON could not be tested without an installed Goose binary.
+- Exact survival of every extension's OAuth/session state after resume is not documented.
+- Mid-turn recovery after a provider/network failure is source-observable but not fully documented as a stable contract.
 
 ## Claudine Integration Notes
 
-- Capture the session ID from the start header or from `goose session list --format json`; do not rely on stream-json events.
-- Use `goose run --resume --session-id <id> -t "..."` for non-interactive continuation.
-- Do not implement HITL defer/answer injection for Goose; instead ensure `GOOSE_MODE=auto` for headless runs.
-- When resuming after failure, be aware that cwd is not restored automatically in non-interactive mode; cd to the original `working_dir` first if the task depends on it.
-- Treat the SQLite database as read-only and unstable; use `goose session export` for stable backups.
+Claudine should model Goose resume as first-class transcript replay with local SQLite persistence. The preferred lifecycle `resume` command is:
+
+```bash
+goose run --resume --session-id "$SESSION_ID" -t "$FOLLOW_UP" --output-format stream-json
+```
+
+For exact restoration, capture and store `SESSION_ID` early. Do not rely on `stream-json` to reveal it. Avoid latest-session resume except as a human convenience. If Claudine wants cwd continuity, it should launch Goose from the saved or intended working directory because Goose headless mode will not `cd` back automatically.
+
+`retry` can re-enter by sending a new prompt to the same session if the previous run persisted a usable state, but it must account for partially cleaned interrupted turns. `proxy` can route to Goose for normal follow-up, but not for deferred approval/HITL. Future human-in-the-loop continuation should mark Goose unsupported unless Goose adds a stable pause/answer API. For policy-sensitive automation, use `GOOSE_MODE=auto` only when Claudine's own policy has already decided auto-execution is allowed; otherwise fail closed instead of trying to answer Goose prompts later.
+
+Project and terminal integration are useful human workflows but should not replace explicit session IDs in Claudine's provider wrapper. They may become optional discovery hints: `projects.json` can associate directories with sessions, and `AGENT_SESSION_ID` can identify an active terminal-integrated session, but both are secondary to `goose session list --format json` and explicit `--session-id`.
 
 ## Changelog
 
+- 2026-07-03: Refreshed against current AAIF Goose docs and upstream source.
+- 2026-07-03: Added project and terminal-integration continuation surfaces.
+- 2026-07-03: Updated storage details to SQLite schema version 14 and added current session fields.
+- 2026-07-03: Recorded negative local evidence: Goose is not installed and no local session DB/transcripts were present on this host.
+- 2026-07-03: Corrected wrapper guidance to prefer explicit `--session-id` because saved provider/model restoration is more reliable than latest/name resume in inspected source.
+- 2026-07-03: Added `--path`, `--history`, export/import/diagnostics, Desktop duplicate/import/export, and source-observed fork limitations.
 - 2026-07-02: Converted to schema-validated frontmatter and corrected HITL/storage claims.
 - 2026-07-02: Added SQLite paths, OS-specific storage, restored-state semantics, and `--fork` branching.
 - 2026-07-02: Documented that Goose has no defer hook and that `approve`/`smart_approve` modes fail in non-interactive runs.
 
 ## Sources
 
-- [Goose session management guide](https://goose-docs.ai/docs/guides/sessions/session-management)
-- [Goose CLI commands reference](https://goose-docs.ai/docs/guides/goose-cli-commands)
-- [Goose logging and session storage](https://goose-docs.ai/docs/guides/logs)
-- [Running tasks with Goose](https://goose-docs.ai/docs/guides/running-tasks)
-- [Goose permission modes](https://goose-docs.ai/docs/guides/managing-tools/goose-permissions)
-- [Goose environment variables](https://goose-docs.ai/docs/guides/environment-variables)
-- [Goose hooks and event stream research](/claudine/docs/research/hooks/goose.md)
+- [Goose Session Management](https://goose-docs.ai/docs/guides/sessions/session-management/)
+- [Goose CLI Commands](https://goose-docs.ai/docs/guides/goose-cli-commands/)
+- [Goose Logging System](https://goose-docs.ai/docs/guides/logs/)
+- [Running Tasks with Goose](https://goose-docs.ai/docs/guides/running-tasks/)
+- [Managing Projects](https://goose-docs.ai/docs/guides/managing-projects/)
+- [Terminal Integration](https://goose-docs.ai/docs/guides/terminal-integration/)
+- [Goose Environment Variables](https://goose-docs.ai/docs/guides/environment-variables/)
+- [Goose Permissions](https://goose-docs.ai/docs/guides/managing-tools/goose-permissions/)
 - [Goose source: `crates/goose-cli/src/cli.rs`](https://github.com/aaif-goose/goose/blob/main/crates/goose-cli/src/cli.rs)
 - [Goose source: `crates/goose-cli/src/session/builder.rs`](https://github.com/aaif-goose/goose/blob/main/crates/goose-cli/src/session/builder.rs)
+- [Goose source: `crates/goose-cli/src/session/mod.rs`](https://github.com/aaif-goose/goose/blob/main/crates/goose-cli/src/session/mod.rs)
+- [Goose source: `crates/goose-cli/src/commands/session.rs`](https://github.com/aaif-goose/goose/blob/main/crates/goose-cli/src/commands/session.rs)
 - [Goose source: `crates/goose/src/session/session_manager.rs`](https://github.com/aaif-goose/goose/blob/main/crates/goose/src/session/session_manager.rs)
+- [Goose source: `crates/goose/src/config/paths.rs`](https://github.com/aaif-goose/goose/blob/main/crates/goose/src/config/paths.rs)

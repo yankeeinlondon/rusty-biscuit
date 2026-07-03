@@ -1,420 +1,461 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-04-02
-last_updated: 2026-07-02
-agent: opencode
-model: kimi-for-coding/k2p7
-docs: https://geminicli.com/docs/cli/tutorials/session-management/
+last_updated: 2026-07-03
+agent: codex
+model: default
+docs: https://geminicli.com/docs/cli/session-management/
 support: first_class
 continuity_model: transcript_replay
 resume_modes:
   - mode: interactive
     supported: true
     mechanisms:
-      - "gemini -r latest"
-      - "gemini -r <index>"
-      - "/resume slash command"
-      - "interactive session picker TUI"
+      - "gemini --resume"
+      - "gemini --resume latest"
+      - "gemini --resume <index>"
+      - "gemini --resume <session_id>"
+      - "/resume session browser"
+      - "/chat compatibility alias"
+      - "/resume save|list|resume|delete <tag>"
     accepts_followup_prompt: true
     selection_methods:
       - latest
+      - id
       - index
       - picker
-    notes: "Follow-up prompt can be supplied as an additional positional argument (gemini -r latest 'next step'). --resume accepts 'latest' or a numeric index from --list-sessions."
+      - name
+      - worktree
+    notes: "Command-line resume accepts an optional positional query. The /resume browser is interactive and picker-oriented; manual chat checkpoints use names/tags. Worktree resume is supported by changing into the worktree and resuming by session ID."
   - mode: non_interactive
     supported: true
     mechanisms:
+      - "gemini -p '<prompt>' --resume"
       - "gemini -p '<prompt>' --resume latest"
       - "gemini -p '<prompt>' --resume <index>"
+      - "gemini -p '<prompt>' --resume <session_id>"
     accepts_followup_prompt: true
     selection_methods:
       - latest
+      - id
       - index
-    notes: "Non-interactive resume uses the -p/--prompt flag. The resume selector is still 'latest' or an index."
+    notes: "Headless mode is triggered by -p/--prompt or non-TTY execution. Follow-up output can be captured with --output-format json or stream-json."
   - mode: headless_server
     supported: false
     mechanisms: []
     accepts_followup_prompt: false
     selection_methods: []
-    notes: "No standalone headless server CLI."
+    notes: "No standalone local server resume surface is documented for normal CLI sessions."
   - mode: ide
-    supported: true
-    mechanisms:
-      - "VS Code companion extension resume"
+    supported: false
+    mechanisms: []
     accepts_followup_prompt: false
-    selection_methods:
-      - picker
-      - latest
-    notes: "IDE surfaces keep their own session history; this research focuses on CLI behavior."
+    selection_methods: []
+    notes: "The CLI has IDE integration commands, but no independently documented IDE resume API was verified for this research."
   - mode: api
     supported: false
     mechanisms: []
     accepts_followup_prompt: false
     selection_methods: []
-    notes: "No direct public HTTP API for session resume. Programmatic control uses gemini -p/--prompt with --output-format json/stream-json."
+    notes: "No public HTTP/SDK resume API is documented. Automation uses the CLI."
 session_id_capture:
   - surface: json_stream
-    field: sessionId
-    format: uuid
-    notes: "Headless --output-format stream-json/json emits an init event with session metadata. Field name observed as camelCase in session files; stream init event is documented to include session ID and model."
-  - surface: hook
     field: session_id
-    format: uuid
-    notes: "All hook stdin JSON payloads include session_id and transcript_path."
+    format: string
+    notes: "Installed Gemini CLI 0.46.0 emits an init event with session_id and model when --output-format stream-json is active."
+  - surface: hook
+    field: session_id + transcript_path
+    format: string + absolute path
+    notes: "Hook stdin base input includes session_id, transcript_path, cwd, hook_event_name, and timestamp."
   - surface: session_file
     field: sessionId
-    format: uuid
-    notes: "First line of the session JSONL contains sessionId, projectHash, startTime, lastUpdated, kind. Filename is session-<timestamp>-<sessionId>.jsonl."
+    format: string
+    notes: "Local transcript metadata records include sessionId, projectHash, startTime, lastUpdated, and kind. Current files are JSONL; older migrated files may be JSON."
   - surface: cli_command
-    field: index + sessionId
-    format: "<index>. <snippet> (<relative time>) [<uuid>]"
-    notes: "gemini --list-sessions emits an ordered list with index, preview, age, and UUID."
-  - surface: other
-    field: GEMINI_SESSION_ID
-    format: uuid
-    notes: "Environment variable set in hook/command subprocesses."
+    field: bracketed session ID
+    format: "<index>. <preview> (<relative time>) [<session_id>]"
+    notes: "gemini --list-sessions printed two sessions for this project, including full bracketed IDs."
+  - surface: interactive_ui
+    field: footer command
+    format: "gemini --resume <session_id>"
+    notes: "The installed TUI code prints a resume command in the exit footer; worktree sessions include a cd into the worktree before gemini --resume."
 resume_invocations:
-  - mode: interactive
-    invocation: "gemini -r latest"
+  - mode: both
+    invocation: "gemini --resume"
     accepts_prompt: true
     selection: latest
-    notes: "Resumes the most recent session for the current project. An optional positional prompt can follow."
-  - mode: interactive
-    invocation: "gemini -r <index>"
+    notes: "Bare --resume is coerced to latest by the installed CLI."
+  - mode: both
+    invocation: "gemini --resume latest"
+    accepts_prompt: true
+    selection: latest
+    notes: "Loads the most recent session for the current project."
+  - mode: both
+    invocation: "gemini --resume 1"
     accepts_prompt: true
     selection: index
-    notes: "Resumes the session at the given index from gemini --list-sessions."
-  - mode: interactive
-    invocation: "gemini -r latest 'next step'"
+    notes: "The index is 1-based from gemini --list-sessions."
+  - mode: both
+    invocation: "gemini --resume a1b2c3d4-e5f6-7890-abcd-ef1234567890"
     accepts_prompt: true
-    selection: latest
-    notes: "Continue latest session and send the prompt as the next user turn."
+    selection: id
+    notes: "Official docs and installed source support full session IDs."
+  - mode: non_interactive
+    invocation: "gemini -p 'continue with the next step' --resume <session_id> --output-format stream-json"
+    accepts_prompt: true
+    selection: id
+    notes: "Scriptable follow-up with structured JSONL lifecycle output."
   - mode: interactive
     invocation: "/resume"
     accepts_prompt: false
     selection: picker
-    notes: "Inside an active session, opens the interactive session browser."
-  - mode: non_interactive
-    invocation: "gemini -p 'next step' --resume latest"
-    accepts_prompt: true
-    selection: latest
-    notes: "Scriptable follow-up into the most recent session for the current project."
-  - mode: non_interactive
-    invocation: "gemini -p 'next step' --resume 5"
-    accepts_prompt: true
-    selection: index
-    notes: "Scriptable follow-up into the session at index 5."
+    notes: "Opens the searchable Session Browser for the current project."
+  - mode: interactive
+    invocation: "/chat"
+    accepts_prompt: false
+    selection: picker
+    notes: "Compatibility alias for the resume/chat checkpoint command family."
   - mode: interactive
     invocation: "/resume save <tag>"
     accepts_prompt: false
     selection: name
-    notes: "Saves the current conversation as a named checkpoint."
+    notes: "Saves a named manual chat checkpoint."
   - mode: interactive
     invocation: "/resume resume <tag>"
     accepts_prompt: false
     selection: name
-    notes: "Loads a previously saved named checkpoint, forking the conversation."
+    notes: "Loads a named checkpoint as a branch point."
+  - mode: interactive
+    invocation: "/rewind"
+    accepts_prompt: false
+    selection: picker
+    notes: "Interactive rewind can move conversation history, file changes, or both back to a prior interaction."
+  - mode: interactive
+    invocation: "/restore [tool_call_id]"
+    accepts_prompt: false
+    selection: other
+    notes: "Automatic file checkpoint restore; requires general.checkpointing.enabled."
 state_storage:
   - location: local
-    os: all
-    path: "~/.gemini/tmp/<project_hash>/chats/session-<timestamp>-<session_id>.jsonl"
+    os: macos
+    path: "/Users/<user>/.gemini/tmp/<project_key>/chats/session-<timestamp>-<short_session_id>.jsonl"
     format: JSONL
-    retention: "general.sessionRetention.maxAge default '30d', minRetention '1d'; maxCount optional."
-    notes: "Session transcript and metadata are stored locally per project. Format is internal; direct parsing is unsupported."
+    retention: "general.sessionRetention.enabled defaults true; maxAge defaults 30d; maxCount optional; minRetention defaults 1d."
+    notes: "Observed on this host via ~/.gemini/tmp/claudine-2/chats/. Related per-project state includes .project_root, logs.json, tool-outputs/session-<session_id>/, plan/task files, and optional checkpoints/. Older local files may be .json."
   - location: local
-    os: all
-    path: "~/.gemini/tmp/<project_hash>/"
-    format: directory
-    retention: "Same session retention sweep."
-    notes: "Manual chat checkpoints from /resume save live here. Windows path: C:\\Users\\<user>\\.gemini\\tmp\\<project_hash>\\."
+    os: linux
+    path: "/home/<user>/.gemini/tmp/<project_key>/chats/session-<timestamp>-<short_session_id>.jsonl"
+    format: JSONL
+    retention: "Same sessionRetention settings."
+    notes: "Linux uses the same home-relative layout under ~/.gemini. The docs call <project_key> <project_hash>; current local storage can also use readable project keys with a .project_root marker."
   - location: local
-    os: all
-    path: "~/.gemini/history/<project_hash>"
-    format: shadow Git repository
-    retention: "Same session retention sweep."
-    notes: "Automatic file-system checkpoints created before mutating tools when general.checkpointing.enabled is true."
+    os: windows
+    path: "C:\\Users\\<user>\\.gemini\\tmp\\<project_key>\\chats\\session-<timestamp>-<short_session_id>.jsonl"
+    format: JSONL
+    retention: "Same sessionRetention settings."
+    notes: "Windows uses the user profile home directory. Worktree footer code quotes session IDs for PowerShell when needed."
 resume_scope:
   project_scoped: true
   cwd_scoped: true
-  worktree_aware: false
+  worktree_aware: true
   all_projects_supported: false
   branch_filtering: false
-  notes: "Session lookup is scoped to the current project directory. --list-sessions, /resume, and saved checkpoints only show sessions/checkpoints for the current project."
+  notes: "Session lookup uses the current project temp directory. Official docs say switching directories switches session history. Worktree resume is documented as cd into the worktree, then gemini --resume <session_id>."
 branching_checkpointing:
   branch_supported: true
   checkpoint_supported: true
-  fork_invocation: '"/resume save <tag>" then "/resume resume <tag>"'
-  checkpoint_invocation: "/restore [tool_call_id]"
+  fork_invocation: "/resume save <tag> then /resume resume <tag>"
+  checkpoint_invocation: "/restore [tool_call_id] or /rewind"
   preserves_original: true
-  notes: "Manual /resume checkpoints create a new branch of history. Automatic checkpointing (disabled by default) snapshots files in a shadow Git repo and can be restored with /restore."
+  notes: "Manual chat checkpoints are named branch points. Automatic file checkpoints are local shadow-Git snapshots plus checkpoint JSON under the project temp directory. Rewind is destructive for the current session history from the selected point."
 restored_state:
   transcript: true
   tool_results: true
-  approvals: cleared
+  approvals: unknown
   model: overridable
-  cwd: restored
+  cwd: current_launch_dir
   env: current_process
-  notes: "Conversation transcript and tool results are replayed from the local JSONL. Approval mode and sandbox settings come from launch flags/settings, not the session. Model can be overridden with --model."
+  notes: "Resume converts saved messages to client history and calls resumeChat. Local transcripts preserve user/gemini turns, thoughts, token counts, tool calls, and tool results; separate tool output files remain on disk. Launch flags/settings still control model, approval mode, sandbox, MCP config, and environment. Resume must be launched in the intended project/worktree directory."
 hitl_resume:
   supported: true
-  question_capture: "BeforeTool hook matching ask_user receives tool_input.questions in stdin JSON. Notification hook receives ToolPermission alerts but cannot act on them."
-  answer_injection: "No native defer/answer-injection API. A wrapper can deny or block the ask_user tool via BeforeTool, ask the user elsewhere, then resume the session with the answer as a new prompt using gemini -r <id> -p '<answer>'."
-  limitations: "BeforeTool can allow, deny/block, or rewrite tool_input; it cannot pause mid-turn and resume later. ask_user is inherently interactive and may fail in non-TTY headless mode. Notification hook is observability-only."
+  question_capture: "BeforeTool hooks can match ask_user and receive tool_input.questions; hook base input also carries session_id and transcript_path."
+  answer_injection: "No native deferred-answer API was found. A wrapper can deny/block ask_user, ask the human elsewhere, then run gemini -p '<answer>' --resume <session_id>."
+  limitations: "This emulates continuation as a new user turn; it does not resume a suspended tool call. Notification hooks are advisory. ask_user itself is an interactive tool that pauses for answers in the TUI."
 interruption_recovery:
   crash_resume: true
   ctrl_c_resume: true
   pending_tool_resume: true
-  pending_approval_resume: true
-  limitations: "Sessions are written continuously, so crash, Ctrl+C, terminal close, and process kill preserve the transcript. No documented mid-turn auto-resume after network failure; ask_user and interactive approval prompts may block or error in non-interactive mode."
+  pending_approval_resume: false
+  limitations: "Session files are written continuously and can be resumed after interruption. Pending approvals are not a documented persisted state; approval and sandbox behavior are recalculated from the resumed launch. Concurrent resume semantics are undocumented."
 observability:
   stream_events:
-    - "init"
-    - "message"
-    - "tool_use"
-    - "tool_result"
-    - "error"
-    - "result"
+    - init
+    - message
+    - tool_use
+    - tool_result
+    - error
+    - result
   hook_events:
-    - "SessionStart"
-    - "SessionEnd"
-    - "BeforeAgent"
-    - "AfterAgent"
-    - "BeforeModel"
-    - "AfterModel"
-    - "BeforeToolSelection"
-    - "BeforeTool"
-    - "AfterTool"
-    - "Notification"
-    - "PreCompress"
+    - SessionStart
+    - SessionEnd
+    - BeforeAgent
+    - AfterAgent
+    - BeforeModel
+    - AfterModel
+    - BeforeToolSelection
+    - BeforeTool
+    - AfterTool
+    - Notification
+    - PreCompress
   failure_modes:
-    - "error"
-    - "tool error / denied tool"
-  notes: "All hooks receive session_id and transcript_path. The init stream event carries session metadata. Stop reasons are not documented as a first-class resume signal."
+    - invalid session identifier
+    - no sessions found
+    - maxSessionTurns exceeded
+    - headless general/API error
+    - hook block or warning
+  notes: "Useful surfaces are stream-json init, hook base input, gemini --list-sessions, local transcript metadata, logs.json, and the TUI exit footer."
 quirks:
-  - "--resume accepts 'latest' or an index per gemini --help. The CLI cheatsheet also shows UUID examples, which creates ambiguity about whether raw session IDs are accepted."
-  - "Sessions are strictly project-scoped; --list-sessions and /resume only show sessions for the current project directory."
-  - "Manual conversation checkpoints (/resume save/resume) are separate from automatic file checkpoints (/restore)."
-  - "Automatic checkpointing is disabled by default and must be enabled in settings.json (general.checkpointing.enabled)."
-  - "--session-file loads a session from an arbitrary JSON file; --session-id manually sets the UUID for a new session."
-  - "ask_user is an interactive tool; non-interactive mode (-p) may not be able to render it unless a hook intercepts it."
-  - "The session JSONL format is internal and not documented as stable for external parsers."
+  - "The dedicated session docs moved from the older tutorial URL to /docs/cli/session-management/."
+  - "Installed CLI help for --resume still mentions latest/index, but official docs and installed source also support full session IDs."
+  - "Docs describe ~/.gemini/tmp/<project_hash>/, but this host's current files use readable project keys such as claudine-2 while transcript metadata still records a SHA-256 projectHash."
+  - "Current local session files are JSONL; older local histories include .json files, and installed source scans both .json and .jsonl."
+  - "The schema of local transcript files is internal. Direct parsing is useful evidence but should not be treated as a stable API."
+  - "Manual chat checkpoints, automatic /restore checkpoints, and /rewind are related but distinct mechanisms."
+  - "Memory files and GEMINI.md context are loaded into sessions but are not themselves resume."
 gaps:
-  - "Whether --resume accepts a raw session UUID in addition to an index (CLI help vs cheatsheet conflict)."
-  - "Exact schema and field names of the stream-json init event."
-  - "Whether approval state (e.g., 'always allow' choices) is persisted inside the session file."
-  - "Exact concurrency semantics when the same session is resumed from multiple processes."
-  - "Whether MCP server connection state and OAuth tokens survive resume."
-  - "How project_hash is computed from the project directory."
+  - "Exact locking/concurrency behavior when two processes resume and append to the same session."
+  - "Whether any 'always allow' approval choices persist outside normal settings/policy files."
+  - "Whether MCP connection runtime state survives resume beyond reloading current settings and OAuth token files."
+  - "Whether --session-file is safe for automation with arbitrary local transcript files; it is documented as loading JSON but the format is internal."
+  - "Precise project key derivation for current readable directories versus metadata projectHash."
 changes:
-  - "2026-07-02: Replaced free-form prompt frontmatter with schema-validated fields."
-  - "2026-07-02: Added exact CLI invocations, session-id capture surfaces, local storage paths, and retention settings from official docs and local inspection."
-  - "2026-07-02: Clarified HITL model: BeforeTool intercepts ask_user, but answer injection must be emulated via follow-up resume prompt."
-  - "2026-07-02: Distinguished manual /resume checkpoints from automatic /restore checkpointing."
+  - "2026-07-03: Updated docs URL to the current official session management page."
+  - "2026-07-03: Verified installed Gemini CLI 0.46.0 and local ~/.gemini session files."
+  - "2026-07-03: Corrected resume selectors to include full session IDs as first-class selectors."
+  - "2026-07-03: Corrected state_storage to one schema-valid record per OS instead of os: all."
+  - "2026-07-03: Added observed JSONL transcript shape, .json legacy compatibility, tool-outputs artifacts, and project key caveat."
+  - "2026-07-03: Marked worktree resume as supported and documented as cd into worktree plus --resume <session_id>."
 requires_claudine_update: true
-reason: "The schema-validated facts, exact resume invocations, session-id capture surfaces, and the corrected HITL model for Gemini CLI should feed into Claudine's lifecycle resume action, session-id capture logic, and provider metadata."
+reason: "Claudine should treat Gemini resume by full session ID as supported, capture stream-json session_id, store project cwd/worktree cwd for lookup, and avoid assuming ~/.gemini/tmp directories are always named by the metadata projectHash."
 ---
+
+# Gemini CLI Resume Research
 
 ## Overview
 
-Gemini CLI's session resume is a first-class, local-transcript-replay system. Every session writes continuously to a JSONL file under `~/.gemini/tmp/<project_hash>/chats/`, and the same file is replayed when the session is continued with `--resume` or `/resume`. Sessions are scoped to the project directory, so resuming from a different directory requires running Gemini CLI from the original project.
+Gemini CLI has first-class resume support backed by local transcript replay. Sessions are saved automatically while the CLI runs, can be resumed from the command line with `--resume`, and can be browsed through the interactive `/resume` Session Browser. The current official session docs describe resume by latest session, numeric index, and full session UUID; the installed Gemini CLI 0.46.0 source on this host implements the same selector set.
+
+For Claudine, the main integration risks are lookup scope and state assumptions. Gemini session lookup is project-scoped and current-directory-sensitive, so a wrapper must preserve the launch project or worktree directory. Resume restores transcript context, tool calls, tool results, thoughts, and token records from local files, but launch-time settings still control model, approval, sandbox, MCP, and environment behavior. Treat local transcript parsing as diagnostic evidence, not as a stable integration API.
 
 ## Resume Semantics
 
-A Gemini CLI "session" is a persisted conversation transcript stored locally on disk, plus optional automatic file checkpoints in a shadow Git repository. Resume means loading that transcript and appending new turns to it, not reattaching to a remote server or live process. The authoritative state is the local JSONL transcript.
+A Gemini CLI session is a locally persisted conversation transcript plus related per-project artifacts. Official docs describe automatic saving of prompts, model responses, tool executions, token usage, and assistant thoughts/reasoning summaries. Local inspection on this host confirms that current session transcripts are JSONL files whose first record contains `sessionId`, `projectHash`, `startTime`, `lastUpdated`, and `kind`, followed by `$set` records and user/gemini message records. Gemini message records include fields such as `model`, `tokens`, `thoughts`, `toolCalls`, and tool result payloads.
+
+Resume means transcript replay into a new CLI process, not live-process attach and not a remote server-side session. The installed CLI converts saved messages back into client history and calls `resumeChat`; new turns append to the resumed conversation. The applicable patterns are continue latest, resume by handle, interactive picker, non-interactive follow-up, transcript replay, manual chat checkpoints, rewind, and interruption recovery. Server-side session and live-process attach were not found.
+
+Memory files such as `GEMINI.md`, private memory folders, and project instructions are context sources. They are not prior-session continuation mechanisms by themselves. A chat-history export is not resume unless Gemini CLI can load it through its session machinery, and the local transcript format is internal.
 
 ## Supported Modes
 
-| Mode | Entry point | Follow-up prompt | Selector |
-|------|-------------|------------------|----------|
-| Interactive CLI | `gemini -r latest` | Optional positional | Latest session in current project |
-| Interactive CLI | `gemini -r <index>` | Optional positional | Session by `--list-sessions` index |
-| Interactive CLI | `/resume` | No | Picker |
-| Interactive CLI | `/resume save <tag>` / `/resume resume <tag>` | No | Named checkpoint |
-| Non-interactive CLI | `gemini -p "<prompt>" --resume latest` | Yes (`-p`) | Latest session in current project |
-| Non-interactive CLI | `gemini -p "<prompt>" --resume <index>` | Yes (`-p`) | Session by index |
+| Mode | Surface | Selector | Follow-up prompt | Automation fit |
+|------|---------|----------|------------------|----------------|
+| Interactive CLI | `gemini --resume`, `gemini -r` | latest, index, full session ID | Optional positional query | Scriptable launch, interactive TUI after launch |
+| Interactive browser | `/resume` or `/chat` | picker | No | Human-oriented; do not automate as a stable API |
+| Manual chat checkpoints | `/resume save`, `/resume list`, `/resume resume`, `/resume delete` | name/tag | No | Interactive command family |
+| Non-interactive CLI | `gemini -p "<prompt>" --resume <selector>` | latest, index, full session ID | Yes | Best Claudine follow-up surface |
+| Headless server/API | none verified | none | No | Unsupported |
+| IDE | no resume-specific API verified | unknown | unknown | Out of scope unless future docs expose an API |
 
-There is no standalone headless server or public HTTP API for session resume.
+Sessions created in headless mode are normal sessions. The observed current-project `--list-sessions` output includes a recent session with a manually supplied non-UUID session ID, and installed source accepts alphanumeric, dash, and underscore session IDs for `--session-id`.
 
 ## Session ID Capture
 
-Stable session identifiers are UUIDs. Capture surfaces:
+The most automation-friendly handle is the session ID. It is available through several surfaces:
 
-- **`--output-format stream-json` / `json`**: the `init` event includes the session ID.
-- **Hooks**: every hook stdin JSON includes `session_id` and `transcript_path`.
-- **Session file**: `~/.gemini/tmp/<project_hash>/chats/session-<timestamp>-<session_id>.jsonl`; the first line contains `sessionId`.
-- **`--list-sessions`**: prints an indexed list with the UUID in brackets.
-- **Environment**: `GEMINI_SESSION_ID` is set in hook/command subprocesses.
+- `--output-format stream-json`: installed source emits an `init` event with `session_id` and `model` after any resumed chat history is loaded.
+- Hooks: the hook base input schema includes `session_id`, `transcript_path`, `cwd`, `hook_event_name`, and `timestamp`.
+- `gemini --list-sessions`: for this project it printed two entries as `index`, preview, relative age, and a bracketed session ID.
+- Local transcript metadata: first JSONL record includes `sessionId`, `projectHash`, `startTime`, `lastUpdated`, and `kind`.
+- TUI footer: installed source prints `gemini --resume <session_id>` on exit; worktree sessions include `cd <worktree> && gemini --resume <session_id>`.
+
+The handle is available early in structured headless output through the `init` event. For a wrapper, that is preferable to polling local files. Hook capture is also stable enough when hooks are installed, but it couples resume support to hook configuration.
 
 ## Resume Invocation
 
-Continue the latest session:
+Continue the latest session for the current project:
 
 ```bash
-gemini -r latest
+gemini --resume
+gemini --resume latest
 gemini -r latest "continue with the next step"
 ```
 
-Resume by index:
+Resume an exact session:
 
 ```bash
 gemini --list-sessions
-gemini -r 1
-gemini -r 1 "finish this task"
+gemini --resume 1
+gemini --resume a1b2c3d4-e5f6-7890-abcd-ef1234567890
 ```
 
-Resume in non-interactive mode:
+Send a scriptable follow-up prompt and capture structured output:
 
 ```bash
-gemini -p "finish this task" --resume latest
-gemini -p "finish this task" --resume 1
+gemini -p "continue with the next step" --resume a1b2c3d4-e5f6-7890-abcd-ef1234567890 --output-format stream-json
+gemini -p "summarize the remaining work" --resume latest --output-format json
 ```
 
 Resume from inside the TUI:
 
 ```text
 /resume
+/chat
 ```
 
-Save and resume a named checkpoint (fork):
+Manual chat checkpoints:
 
 ```text
 /resume save decision-point
-...
+/resume list
 /resume resume decision-point
+/resume delete decision-point
+```
+
+Checkpoint and rewind surfaces:
+
+```text
+/restore [tool_call_id]
+/rewind
 ```
 
 ## Session Lookup Scope
 
-Sessions are stored per project. The default lookup is scoped to the current project directory:
+Gemini session lookup is scoped to the current project. Official docs say sessions are stored under `~/.gemini/tmp/<project_hash>/chats/` and that switching directories switches session history. Local inspection in this workspace showed `~/.gemini/tmp/claudine-2/.project_root` containing `/Users/ken/.claudine/worktrees/rusty-biscuit/claudine`, and `gemini --list-sessions` in that directory listed only the two sessions for that project key.
 
-- `gemini --list-sessions` shows only sessions for the current project.
-- `/resume` only lists sessions and checkpoints saved within the current project.
-- To resume a session from a different project, run Gemini CLI from that project's directory.
-
-There is no documented git branch, worktree, or all-projects filter for session resume.
+Worktrees are explicitly resume-aware, but the lookup model is still directory-based: the docs say to `cd` into the worktree directory and run `gemini --resume <session_id>`. No all-projects resume flag or git-branch filter was verified.
 
 ## State Storage
 
-Resumable state is local, not server-side.
+Resumable state is local. On this macOS host, the effective shell home for this non-interactive session is `/Users/ken/.claudine`, whose `.gemini` entries symlink to `/Users/ken/.gemini`; the user-facing layout remains `~/.gemini`.
 
-| OS | Session transcript path |
-|----|-------------------------|
-| macOS / Linux | `~/.gemini/tmp/<project_hash>/chats/session-<timestamp>-<session_id>.jsonl` |
-| Windows | `C:\Users\<user>\.gemini\tmp\<project_hash>\chats\session-<timestamp>-<session_id>.jsonl` |
+| OS | Primary transcript path | Format |
+|----|-------------------------|--------|
+| macOS | `/Users/<user>/.gemini/tmp/<project_key>/chats/session-<timestamp>-<short_session_id>.jsonl` | JSONL |
+| Linux | `/home/<user>/.gemini/tmp/<project_key>/chats/session-<timestamp>-<short_session_id>.jsonl` | JSONL |
+| Windows | `C:\Users\<user>\.gemini\tmp\<project_key>\chats\session-<timestamp>-<short_session_id>.jsonl` | JSONL |
 
-Additional local state:
+Observed related paths for this project:
 
 | Path | Purpose |
 |------|---------|
-| `~/.gemini/tmp/<project_hash>/` | Manual chat checkpoints from `/resume save` |
-| `~/.gemini/history/<project_hash>` | Shadow Git repository for automatic file checkpoints |
+| `~/.gemini/tmp/claudine-2/.project_root` | Project-root marker used for lookup and display |
+| `~/.gemini/tmp/claudine-2/chats/session-2026-06-10T16-20-99967bca.jsonl` | Main session transcript |
+| `~/.gemini/tmp/claudine-2/chats/session-2026-07-03T15-49-skills-l.jsonl` | Recent session with a custom non-UUID session ID |
+| `~/.gemini/tmp/claudine-2/tool-outputs/session-99967bca-0948-4adf-b8db-da605e09b133/` | Large tool output artifacts |
+| `~/.gemini/tmp/claudine-2/logs.json` | Per-project activity log records |
+| `~/.gemini/history/<project_key>/` | Shadow Git storage for automatic file checkpoints when enabled |
 
-Retention is controlled by `general.sessionRetention` in `settings.json` (default `maxAge: "30d"`, minimum `"1d"`, optional `maxCount`).
+The installed selector code scans both `.json` and `.jsonl`, and this host contains older `.json` session files in other project directories. Retention is controlled by `general.sessionRetention`: cleanup is enabled by default, `maxAge` defaults to `30d`, `maxCount` is optional, and `minRetention` defaults to `1d`.
 
 ## Restored State
 
-Resuming restores:
+Resume restores the conversation transcript and tool history by replaying saved messages into the Gemini client. Local transcript records preserve user turns, assistant turns, reasoning summaries/thoughts, model names for individual assistant records, token counts, tool calls, and tool results. Separate tool output files remain under the project temp directory and are referenced by transcript/tool records.
 
-- The full conversation transcript and tool results from the JSONL file.
-- The working directory/project context.
+Resume does not prove that approval prompts, sandbox mode, model choice, MCP server runtime connection state, environment variables, or current working directory are restored from the original process. The installed code loads resumed message history, then uses the current launch configuration. Model selection is overridable with normal model flags/settings. Approval and sandbox behavior should be passed explicitly by Claudine when they matter. Resume must run from the original project or worktree directory so lookup and workspace context match.
 
-Resuming does **not** restore:
-
-- The approval mode or sandbox policy; these come from launch flags/settings (`--approval-mode`, `--sandbox`, `general.defaultApprovalMode`, etc.).
-- The environment of the original session; it uses the environment of the process that runs the resume command.
-- The model selection can be overridden at resume time with `--model` / `-m`.
+Resume continues the selected session rather than creating a separate server-side session. The installed source deduplicates session list entries by `sessionId` and keeps the newest file for display, which matters because older local histories show multiple files with the same short session ID.
 
 ## Branching and Checkpoints
 
-Gemini CLI supports two related but distinct checkpoint mechanisms:
+Gemini CLI has three separate continuation-adjacent mechanisms:
 
-- **Manual conversation checkpoints**: `/resume save <tag>` saves the current conversation history. `/resume resume <tag>` loads it, creating a new branch of history without losing the original.
-- **Automatic file checkpoints**: enabled with `general.checkpointing.enabled` in `settings.json`. Before any mutating tool runs, Gemini CLI creates a shadow Git commit under `~/.gemini/history/<project_hash>`. Use `/restore [tool_call_id]` to revert files and conversation to that point.
+| Mechanism | Invocation | Preserves original? | Notes |
+|-----------|------------|---------------------|-------|
+| Manual chat checkpoint | `/resume save <tag>` then `/resume resume <tag>` | Yes | Named branch point inside a conversation |
+| Automatic file checkpoint | `/restore [tool_call_id]` | Yes for the checkpoint; current files are reverted | Requires `general.checkpointing.enabled`; creates shadow Git snapshots under `~/.gemini/history/<project_key>` and checkpoint JSON under the project temp directory |
+| Rewind | `/rewind` or Esc twice | No for current session history after the selected point | Interactive, destructive history/file rewind options |
+
+The Session Browser also supports deleting sessions. Command-line deletion is available with `gemini --delete-session <index|id>`, and `/exit --delete` or `/quit --delete` deletes the current session history and temporary files on exit.
 
 ## Human-in-the-Loop Resume
 
-Gemini CLI does **not** provide a native defer-and-resume loop like Claude Code's `permissionDecision: "defer"`. A wrapper can emulate HITL as follows:
+Gemini CLI does not expose a native suspend-now-and-inject-answer-later API for pending questions or approvals. The closest supported primitive is hooks plus normal resume. A Claudine HITL broker can register a `BeforeTool` hook for `ask_user`, capture `tool_input.questions`, and return a denial/block so the tool does not execute. After collecting an answer elsewhere, Claudine can send it back as a new user turn with:
 
-1. Register a `BeforeTool` hook matching the `ask_user` tool.
-2. When the hook fires, capture `tool_input.questions`.
-3. Return `decision: "deny"` (or exit code 2) so the tool does not execute.
-4. The wrapper presents the question to the user and collects an answer.
-5. Resume the session with the answer as a follow-up prompt: `gemini -r <session-id> -p "<user_answer>"`.
+```bash
+gemini -p "<answer>" --resume <session_id> --output-format stream-json
+```
 
-Caveats:
-
-- `BeforeTool` can allow, deny/block, or rewrite `tool_input`; it cannot pause mid-turn and resume later.
-- The `Notification` hook can observe `ToolPermission` alerts but cannot grant permissions.
-- `ask_user` is inherently interactive and may fail in non-TTY headless mode.
+This is a continuation workaround, not a true pending-tool resume. The `ask_user` tool itself is explicitly interactive: it presents a dialog, pauses execution until the user answers or dismisses it, and returns answers to the model. Notification hooks are useful for observation but not for granting a pending approval.
 
 ## Interruption Recovery
 
-Because transcripts are written continuously, sessions survive most interruptions:
+Automatic session saving means crash, terminal close, Ctrl+C, and process kill generally leave a resumable transcript behind. Official docs describe automatic background saving even if a session is interrupted, and local JSONL files are written incrementally. Pending tool calls and tool results already written to the transcript are replayable context; separate tool output artifacts remain on disk until retention cleanup or deletion.
 
-- **Crash / terminal close / process kill**: the JSONL file remains and can be resumed.
-- **Ctrl+C**: the session is preserved; resume with `gemini -r latest`.
-- **Pending tool calls**: the transcript records the request; resuming replays context and the model can continue.
-- **Pending approvals**: the approval mode is re-evaluated from launch settings on resume.
-
-There is no documented mid-turn auto-resume after a network failure.
+Pending approvals should not be treated as resumable state. If a process dies while a confirmation dialog is open, the next launch replays the transcript and uses current approval/sandbox settings. Network failure behavior is not documented as a mid-turn auto-resume feature. Concurrent resumes of the same session are not documented; a wrapper should serialize resumes per Gemini session ID to avoid interleaved appends.
 
 ## Observability
 
-Events and surfaces that expose session identity or resumability:
+Resume-relevant observability surfaces are:
 
-- **`--output-format stream-json`**: `init`, `message`, `tool_use`, `tool_result`, `error`, and `result` events.
-- **Hooks**: `SessionStart`, `SessionEnd`, `BeforeAgent`, `AfterAgent`, `BeforeModel`, `AfterModel`, `BeforeToolSelection`, `BeforeTool`, `AfterTool`, `Notification`, and `PreCompress` all include `session_id` and `transcript_path`.
-- **Local files**: the session JSONL filename and first-line metadata.
-- **`--list-sessions`**: emits the index and UUID for each project session.
+- `--output-format stream-json`: JSONL events include `init`, `message`, `tool_use`, `tool_result`, `error`, and `result`; `init` carries session metadata.
+- Hook stdin: all hooks receive `session_id`, `transcript_path`, `cwd`, `hook_event_name`, and `timestamp`.
+- `gemini --list-sessions`: project-scoped list with index, preview, age, and session ID.
+- Local transcript metadata: `sessionId`, `projectHash`, `startTime`, `lastUpdated`, and `kind`.
+- Local logs: `~/.gemini/tmp/<project_key>/logs.json` records activity with fields including `type`, `sessionId`, `timestamp`, `messageId`, and `message`.
+- TUI footer: prints the command needed to resume the session, including worktree `cd` instructions when relevant.
 
 ## Quirks and Gaps
 
 Quirks:
 
-- `--help` says `--resume` accepts `"latest"` or an index, while the CLI cheatsheet also shows UUID examples. Treat index/`latest` as the documented stable selector.
-- Sessions are strictly project-scoped; there is no built-in cross-project resume.
-- Manual `/resume` checkpoints and automatic `/restore` checkpoints are separate systems.
-- Automatic checkpointing is off by default.
-- The session JSONL format is internal and not versioned for external consumers.
+- The old tutorial URL still exists, but the best official session/resume reference is now `https://geminicli.com/docs/cli/session-management/`.
+- Installed `gemini --help` for 0.46.0 is terse in this non-TTY environment and its `--resume` description mentions only latest/index, while official docs and installed source support full session IDs.
+- Local storage on this host uses readable project keys such as `claudine-2`, not only the SHA-256-looking `projectHash` in transcript metadata.
+- The local transcript format has changed over time: current files are JSONL, older files may be JSON, and source scans both.
+- `--session-id` can start a new session with a non-UUID alphanumeric/dash/underscore ID; one local session uses `skills-list-session`.
+- Manual chat checkpoints, automatic file checkpoints, and rewind are not interchangeable.
 
 Gaps:
 
-- Whether `--resume` accepts a raw session UUID in addition to an index.
-- Exact field names of the stream-json `init` event.
-- Whether approval state ("always allow" choices) is persisted in the session file.
-- Concurrency guarantees when the same session is resumed from multiple processes.
-- Whether MCP server connection state and OAuth tokens survive resume.
-- How `project_hash` is derived from the project directory.
+- Exact file locking and concurrency behavior for simultaneous resumes of one session.
+- Whether any "always allow" approval decisions persist in settings or a separate cache.
+- Whether MCP connection state survives beyond normal settings/token reload.
+- Whether `--session-file` is a stable automation path for arbitrary transcript files.
+- The exact algorithm mapping a project root to the observed project key directory.
 
 ## Claudine Integration Notes
 
-For Claudine's lifecycle `resume` action and future HITL broker:
+For lifecycle `resume`, Claudine should store Gemini's `session_id` from the headless `init` event or hook payload and also store the launch cwd/worktree cwd. Resume should prefer:
 
-- Capture the session ID from the `init` event of `gemini -p ... --output-format stream-json` or from a `SessionStart`/`BeforeTool` hook.
-- Use `gemini -p "<follow-up>" --resume latest` or `--resume <index>` for non-interactive continuation. Keep a mapping from Claudine's run to the numeric index or UUID returned by `--list-sessions`.
-- For human-in-the-loop, install a `BeforeTool` hook matching `ask_user`, deny the tool, extract `tool_input.questions`, ask the user, then resume with the answer as a follow-up prompt.
-- Treat the JSONL transcript as read-only and unstable; do not build parsing logic against it.
-- Be aware that approval mode and sandbox settings are not restored from the session; pass `--approval-mode`/`--sandbox` explicitly if the launch environment requires them.
-- Consider the project-scoped lookup: resume must be run from the same project directory as the original session.
+```bash
+gemini -p "<follow-up>" --resume <session_id> --output-format stream-json
+```
+
+Do not rely on numeric indexes unless Claudine just called `gemini --list-sessions` in the same project directory. Full session ID is the safest selector for exact-session resume. `latest` is useful for human convenience but unsafe for automation if multiple Gemini sessions run in the same project.
+
+For `retry`, start a new Gemini process with the same cwd, model, approval, sandbox, MCP, and prompt settings; do not assume resume restores them. For `proxy`, hooks provide `session_id` and `transcript_path`, which are sufficient to correlate external user questions or blocks with a session. For future HITL recovery, intercept `ask_user` with `BeforeTool`, block/deny it, ask the human elsewhere, then resume by session ID with the answer as a new prompt. Claudine should serialize resume attempts per session ID.
 
 ## Changelog
 
-- 2026-07-02: Converted to schema-validated frontmatter.
-- 2026-07-02: Added exact resume invocations, `--list-sessions` output format, and local storage paths from docs and local inspection.
-- 2026-07-02: Documented the HITL model as hook intercept + follow-up resume prompt rather than native defer.
-- 2026-07-02: Distinguished manual `/resume` checkpoints from automatic `/restore` checkpointing.
+- 2026-07-03: Updated the primary docs URL from the tutorial page to the current session management reference.
+- 2026-07-03: Verified Gemini CLI 0.46.0 locally and inspected real `~/.gemini` session files for this workspace.
+- 2026-07-03: Corrected explicit-handle resume from uncertain to supported for full session IDs.
+- 2026-07-03: Corrected schema-invalid `state_storage.os: all` into separate macOS, Linux, and Windows records.
+- 2026-07-03: Added observed JSONL transcript structure, `.json` legacy compatibility, separate tool output artifacts, and the project-key versus `projectHash` caveat.
+- 2026-07-03: Added worktree-specific resume behavior and clarified that cwd/worktree cwd must be preserved by wrappers.
 
 ## Sources
 
-- [Gemini CLI — Session management tutorial](https://geminicli.com/docs/cli/tutorials/session-management/)
-- [Gemini CLI — Checkpointing](https://geminicli.com/docs/cli/checkpointing/)
-- [Gemini CLI — Rewind](https://geminicli.com/docs/cli/rewind/)
-- [Gemini CLI — Headless mode](https://geminicli.com/docs/cli/headless/)
-- [Gemini CLI — Hooks reference](https://geminicli.com/docs/hooks/reference/)
-- [Gemini CLI — Hooks overview](https://geminicli.com/docs/hooks/)
-- [Gemini CLI — Command reference](https://geminicli.com/docs/reference/commands/)
-- [Gemini CLI — CLI cheatsheet](https://geminicli.com/docs/cli/cli-reference/)
-- [Gemini CLI — Configuration reference](https://geminicli.com/docs/reference/configuration/)
-- [Gemini CLI — Tools reference](https://geminicli.com/docs/reference/tools/)
-- [Gemini CLI — Ask User tool](https://geminicli.com/docs/tools/ask-user/)
+- [Gemini CLI Session management](https://geminicli.com/docs/cli/session-management/)
+- [Gemini CLI Headless mode reference](https://geminicli.com/docs/cli/headless/)
+- [Gemini CLI Hooks reference](https://geminicli.com/docs/hooks/reference/)
+- [Gemini CLI Hooks overview](https://geminicli.com/docs/hooks/)
+- [Gemini CLI Command reference](https://geminicli.com/docs/reference/commands/)
+- [Gemini CLI Configuration reference](https://geminicli.com/docs/reference/configuration/)
+- [Gemini CLI Checkpointing](https://geminicli.com/docs/cli/checkpointing/)
+- [Gemini CLI Rewind](https://geminicli.com/docs/cli/rewind/)
+- [Gemini CLI Git worktrees](https://geminicli.com/docs/cli/git-worktrees/)
+- [Gemini CLI Ask User tool](https://geminicli.com/docs/tools/ask-user/)
 - [Gemini CLI repository](https://github.com/google-gemini/gemini-cli)
+- Local inspection: Gemini CLI 0.46.0 installed at `/Users/ken/.nvm/versions/node/v22.20.0/lib/node_modules/@google/gemini-cli/`
+- Local inspection: `~/.gemini/tmp/claudine-2/chats/session-2026-06-10T16-20-99967bca.jsonl`, `~/.gemini/tmp/claudine-2/chats/session-2026-07-03T15-49-skills-l.jsonl`, `~/.gemini/tmp/claudine-2/.project_root`, and `gemini --list-sessions`

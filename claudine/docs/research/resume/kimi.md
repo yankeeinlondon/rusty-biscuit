@@ -1,10 +1,10 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-04-02
-last_updated: 2026-07-02
-agent: opencode
-model: kimi-for-coding/k2p7
-docs: https://moonshotai.github.io/kimi-cli/en/guides/sessions.html
+last_updated: 2026-07-03
+agent: codex
+model: default
+docs: https://www.kimi.com/code/docs/en/kimi-code-cli/guides/sessions.html
 support: first_class
 continuity_model: transcript_replay
 resume_modes:
@@ -12,8 +12,10 @@ resume_modes:
     supported: true
     mechanisms:
       - "kimi --continue"
-      - "kimi --session (picker)"
+      - "kimi --session"
       - "kimi --session <id>"
+      - "kimi --resume <id>"
+      - "kimi -S <id>"
       - "/sessions slash command"
       - "/resume slash command"
     accepts_followup_prompt: false
@@ -21,69 +23,77 @@ resume_modes:
       - latest
       - id
       - picker
-    notes: "Follow-up prompts are typed inside the resumed interactive session. The /sessions picker can toggle current-directory-only vs all directories with Ctrl-A."
+    notes: "Interactive resume reopens the selected local session in the TUI; follow-up prompts are typed after the session is loaded. --continue and --session are mutually exclusive."
   - mode: non_interactive
     supported: true
     mechanisms:
-      - "kimi --print --session <id>"
-      - "kimi --print --continue"
+      - "kimi --prompt <prompt> --session <id>"
+      - "kimi --prompt <prompt> --continue"
     accepts_followup_prompt: true
     selection_methods:
       - latest
       - id
-    notes: "Not explicitly documented as a combined invocation, but --print, --session, and --continue are global options and compose naturally. --print implies --afk."
+    notes: "The current command reference documents --prompt as non-interactive mode and does not list --session/--continue as conflicts with it. In -p mode regular tool calls run under auto permission policy and human approval is not requested."
   - mode: headless_server
     supported: true
     mechanisms:
       - "kimi acp"
+      - "kimi server run"
+      - "kimi web"
     accepts_followup_prompt: true
     selection_methods:
       - id
-    notes: "Multi-session ACP server over stdio. Session creation/loading is JSON-RPC."
+      - picker
+    notes: "ACP supports session/list, session/load, session/resume, session/prompt, and session/cancel. The local server/web UI exposes session management through a loopback daemon, but REST/WebSocket resume endpoint details were not inspected."
   - mode: ide
     supported: true
     mechanisms:
-      - "ACP-compatible editors (Zed, JetBrains)"
-      - "VS Code extension"
+      - "ACP-compatible editors"
+      - "Kimi Code for VS Code"
     accepts_followup_prompt: true
     selection_methods:
-      - picker
       - id
-    notes: "IDE clients connect via kimi acp or the dedicated extension."
+      - picker
+    notes: "IDE clients use ACP or the dedicated VS Code integration and drive Kimi sessions through the editor UI."
   - mode: api
     supported: true
     mechanisms:
       - "ACP JSON-RPC"
-      - "Wire protocol (--wire)"
+      - "local server REST/WebSocket"
     accepts_followup_prompt: true
     selection_methods:
       - id
-    notes: "Wire protocol exposes prompt/replay/steer/cancel; ACP exposes session lifecycle."
+      - picker
+    notes: "ACP resume is documented. The server publishes OpenAPI/AsyncAPI from a local loopback service, but endpoint details were left to API-specific research."
 session_id_capture:
   - surface: stdout
     field: "resume command hint"
     format: "kimi -r <session-id>"
-    notes: "Printed on exit for non-empty sessions after normal exit, Ctrl-C, /undo, /fork, /sessions switch, etc."
+    notes: "Legacy docs say non-empty sessions print a resume hint after normal exit, Ctrl-C, /undo, /fork, session switch, and related exits. Current docs focus on explicit commands and do not emphasize this hint."
   - surface: session_file
     field: "session directory name"
-    format: "<session-id>"
-    notes: "Session data lives under ~/.kimi/sessions/<work-dir-hash>/<session-id>/."
+    format: "session_<uuid> for current Kimi Code; uuid for legacy kimi-cli"
+    notes: "Current Kimi Code stores sessions under ~/.kimi-code/sessions/<workDirKey>/<sessionId>/ and indexes them in session_index.jsonl. Local inspection found session IDs such as session_292400e4-dc10-4762-8542-7585ee220961."
+  - surface: session_file
+    field: "session_index.jsonl"
+    format: "JSONL records with sessionId, sessionDir, workDir"
+    notes: "Local ~/.kimi-code/session_index.jsonl contained 14 records with exactly these top-level keys."
   - surface: cli_command
     field: "sessionId"
-    format: "uuid"
-    notes: "kimi export [sessionId] accepts or defaults to the previous session for the cwd."
+    format: "session_<uuid> or provider-defined id"
+    notes: "kimi export [sessionId] exports a specified session; without an ID it selects the most recent session for the current directory."
   - surface: interactive_ui
-    field: "session title + last update"
-    format: "text"
-    notes: "/sessions and /resume show titles and timestamps; raw ID is hidden in the picker."
+    field: "session title and metadata"
+    format: "picker rows"
+    notes: "The /sessions picker is human-oriented. Current docs do not state that raw IDs are visible in the picker."
   - surface: hook
-    field: session_id
-    format: "uuid"
-    notes: "SessionStart/SessionEnd hooks receive session_id and cwd in stdin JSON."
+    field: "session_id"
+    format: "string"
+    notes: "Hook stdin JSON includes hook_event_name, session_id, and cwd."
   - surface: json_stream
-    field: session_id
-    format: "uuid"
-    notes: "Wire and ACP protocols carry session_id in lifecycle messages."
+    field: "session id"
+    format: "ACP JSON-RPC session identifiers"
+    notes: "ACP exposes session/list, session/load, and session/resume. The exact response field names are ACP-specific and were not locally exercised."
 resume_invocations:
   - mode: interactive
     invocation: "kimi --continue"
@@ -94,53 +104,80 @@ resume_invocations:
     invocation: "kimi --session"
     accepts_prompt: false
     selection: picker
-    notes: "Opens the interactive session picker (shell mode only)."
+    notes: "Opens an interactive session selector."
   - mode: interactive
-    invocation: "kimi -r <session-id>"
+    invocation: "kimi --session <session-id>"
     accepts_prompt: false
     selection: id
-    notes: "Aliases: --session, --resume, -S. Creates a new session if the ID does not exist."
+    notes: "Resumes the specified session. Hidden aliases include --resume and -r; help also shows -S."
   - mode: interactive
     invocation: "/sessions"
     accepts_prompt: false
     selection: picker
-    notes: "Alias /resume. Lists sessions for the cwd; Ctrl-A toggles all directories."
+    notes: "Slash-command alias /resume browses and resumes a previous session while the agent is idle."
   - mode: non_interactive
-    invocation: "kimi --print --session <session-id> -p \"<prompt>\""
+    invocation: "kimi -p \"<prompt>\" --session <session-id>"
     accepts_prompt: true
     selection: id
-    notes: "Likely valid composition; not explicitly documented. --print implies --afk."
+    notes: "Supported by current flag conflict rules by implication; not verified with a live model call in this research run."
   - mode: non_interactive
-    invocation: "kimi --print --continue -p \"<prompt>\""
+    invocation: "kimi -p \"<prompt>\" --continue"
     accepts_prompt: true
     selection: latest
-    notes: "Continues the latest cwd session with a new prompt in print mode."
-  - mode: api
-    invocation: "kimi acp (JSON-RPC session/load)"
+    notes: "Supported by current flag conflict rules by implication; tool progress and resuming notices go to stderr, answer output to stdout."
+  - mode: non_interactive
+    invocation: "kimi -p \"<prompt>\" --session <session-id> --output-format stream-json"
     accepts_prompt: true
     selection: id
-    notes: "ACP server loads or creates sessions by ID."
+    notes: "Structured stdout is JSONL Assistant/Tool messages; thinking and progress remain off stdout."
+  - mode: api
+    invocation: "kimi acp: session/load"
+    accepts_prompt: false
+    selection: id
+    notes: "Loads a session and replays history via session/update."
+  - mode: api
+    invocation: "kimi acp: session/resume"
+    accepts_prompt: false
+    selection: id
+    notes: "Lightweight resume sibling that skips history replay."
+  - mode: api
+    invocation: "kimi acp: session/prompt"
+    accepts_prompt: true
+    selection: id
+    notes: "Sends a follow-up prompt after session/new, session/load, or session/resume."
 state_storage:
   - location: local
-    os: all
-    path: "~/.kimi/sessions/<work-dir-hash>/<session-id>/"
-    format: "directory with context.jsonl, wire.jsonl, state.json, plus subagents/<id>/"
-    retention: "not documented"
-    notes: "Default share dir is ~/.kimi; override with KIMI_SHARE_DIR. context.jsonl is the conversation transcript; state.json stores approval/plan/additional-dirs/subagent state. Local inspection found an installed kimi-code binary using ~/.kimi-code/sessions/wd_<name>_<hash>/session_<uuid>/ instead, with a different state.json schema."
+    os: macos
+    path: "/Users/<name>/.kimi-code/sessions/<workDirKey>/<sessionId>/"
+    format: "session_index.jsonl plus per-session state.json, agents/main/wire.jsonl, agents/<subagentId>/wire.jsonl, optional logs, tasks, cron, and plan files"
+    retention: "manual deletion; no automatic retention policy documented"
+    notes: "Set KIMI_CODE_HOME to relocate the data root. Local inspection on macOS confirmed ~/.kimi-code/session_index.jsonl and session directories with state.json, agents/main/wire.jsonl, optional agents/agent-N/wire.jsonl, and logs/kimi-code.log."
+  - location: local
+    os: linux
+    path: "/home/<name>/.kimi-code/sessions/<workDirKey>/<sessionId>/"
+    format: "session_index.jsonl plus per-session state.json and agents/*/wire.jsonl"
+    retention: "manual deletion; no automatic retention policy documented"
+    notes: "Path is documented, not independently verified in this macOS research run. Set KIMI_CODE_HOME to relocate the data root."
+  - location: local
+    os: windows
+    path: "C:\\Users\\<name>\\.kimi-code\\sessions\\<workDirKey>\\<sessionId>\\"
+    format: "session_index.jsonl plus per-session state.json and agents/*/wire.jsonl"
+    retention: "manual deletion; no automatic retention policy documented"
+    notes: "Path is documented, not independently verified in this macOS research run. Set KIMI_CODE_HOME to relocate the data root."
 resume_scope:
   project_scoped: true
   cwd_scoped: true
   worktree_aware: false
   all_projects_supported: true
   branch_filtering: false
-  notes: "--continue is cwd-scoped. /sessions defaults to cwd and can widen to all projects with Ctrl-A. Resuming by ID ignores scope."
+  notes: "Sessions are grouped by working directory key, derived from the working directory path as wd_<slug>_<first-12-chars-of-sha256>. --continue selects the most recent session for the current directory. Legacy docs describe Ctrl-A in the picker to show all directories; current docs only say /sessions browses previous sessions."
 branching_checkpointing:
   branch_supported: true
   checkpoint_supported: false
   fork_invocation: "/fork"
   checkpoint_invocation: ""
   preserves_original: true
-  notes: "/fork copies the full conversation history into a new session and switches to it. /undo also forks a new session with history before the selected turn, leaving the original intact. Web UI can fork from any assistant message. There is no rewind/checkpoint command."
+  notes: "/fork creates an independent session that does not affect the original. Current docs say saved /goal state is not copied to the fork. /compact compresses context but is not a checkpoint/rewind feature."
 restored_state:
   transcript: true
   tool_results: true
@@ -148,61 +185,92 @@ restored_state:
   model: overridable
   cwd: restored
   env: current_process
-  notes: "Restores conversation context from context.jsonl, approval state (YOLO/AFK and allow-for-this-session), plan mode, additional directories, and subagent instance state. Model comes from config.toml and can be overridden with --model. Environment is taken from the launching process."
+  notes: "Current Kimi Code replays agents/*/wire.jsonl and restores state.json metadata. Current docs say --auto, --yolo, or --plan can override saved permission/plan mode on resume; --model can override the model for the launch. Environment variables are inherited from the current process. Local legacy ~/.kimi context.jsonl includes roles such as _system_prompt, user, assistant, tool, _usage, and _checkpoint."
 hitl_resume:
   supported: false
-  question_capture: ""
-  answer_injection: ""
-  limitations: "AskUserQuestion is a tool call that expects an immediate answer. In --print mode --afk auto-dismisses questions. Wire/ACP expose QuestionRequest as a blocking JSON-RPC request. There is no documented defer-exit-and-resume-with-answer flow."
+  question_capture: "ACP can surface tool approval and prompt flow while the ACP process is alive; hooks can observe lifecycle events, but no documented persisted pending-question record was found."
+  answer_injection: "ACP clients answer approvals/questions synchronously through the active protocol session. No documented command injects an answer later into a stopped CLI session."
+  limitations: "In -p mode Kimi Code uses auto permission policy and does not request human approval. There is no documented defer-exit-and-resume-with-answer flow for user questions or approval prompts."
 interruption_recovery:
   crash_resume: true
   ctrl_c_resume: true
-  pending_tool_resume: true
-  pending_approval_resume: true
-  limitations: "Resume hint is printed after Ctrl-C and normal exit. state.json uses atomic writes. Docs do not specify whether a tool call or approval request that was in flight at exit is resumed mid-turn or replayed from the start."
+  pending_tool_resume: false
+  pending_approval_resume: false
+  limitations: "The persisted wire event stream supports recovery/replay after process exit, terminal close, crash, or Ctrl-C. Current docs do not say that an in-flight tool call or approval resumes mid-call; treat recovery as session continuation from persisted transcript state, not live tool continuation. Concurrent resume behavior is undocumented."
 observability:
   stream_events:
-    - "Wire TurnBegin/TurnEnd/StepBegin/StepRetry"
-    - "Wire ApprovalRequest/QuestionRequest"
-    - "ACP session lifecycle"
+    - "agents/*/wire.jsonl event records"
+    - "ACP session/list"
+    - "ACP session/load"
+    - "ACP session/resume"
+    - "ACP session/prompt"
+    - "non-interactive stream-json Assistant and Tool messages"
   hook_events:
     - "SessionStart"
     - "SessionEnd"
     - "PreToolUse"
     - "PostToolUse"
-    - "PostToolUseFailure"
     - "Notification"
   failure_modes:
-    - "SessionEnd reason"
-    - "StopFailure hook"
-  notes: "Hooks receive session_id and cwd. Wire replay reads wire.jsonl. The /sessions picker and /export command surface session metadata."
+    - "diagnostic logs under ~/.kimi-code/logs/kimi-code.log"
+    - "optional per-session logs/kimi-code.log"
+    - "kimi server status"
+    - "kimi export debug ZIP"
+  notes: "Hook stdin includes hook_event_name, session_id, and cwd. Current local wire.jsonl records include metadata, system prompt, skills, model, mode, and user input event types; direct parsing is useful for research but not documented as a stable integration API."
 quirks:
-  - "The official docs describe storage under ~/.kimi/, but the locally installed kimi-code 0.14.0 binary uses ~/.kimi-code/ with a different directory layout and state.json schema."
-  - "kimi -r <id> creates a new session if the requested ID does not exist."
-  - "Empty sessions do not print a resume hint on exit."
-  - "The interactive session picker is shell-mode only."
-  - "--print implicitly enables --afk, which auto-dismisses AskUserQuestion rather than pausing for human input."
-  - "/clear and /reset clear conversation context but do not reset session state (approvals, subagents, additional directories)."
-  - "Direct parsing of context.jsonl and wire.jsonl is not documented as a stable interface; use /export or the Wire/ACP protocols for interoperability."
+  - "Kimi CLI has migrated toward Kimi Code CLI: current docs and local 0.14.0 binary use ~/.kimi-code and KIMI_CODE_HOME, while legacy kimi-cli data remains under ~/.kimi with a .migrated-to-kimi-code marker."
+  - "Current non-interactive mode is -p/--prompt; prior research and legacy docs used --print. The installed 0.14.0 help does not show --print."
+  - "The installed 0.14.0 help output shows --session, --continue, --prompt, and --output-format, but the help stream appeared truncated after --skills-dir in this non-interactive shell; the online command reference was used for full flag coverage."
+  - "Current session directories do not contain context.jsonl; the replay source is agents/*/wire.jsonl. Legacy ~/.kimi sessions do contain context.jsonl, wire.jsonl, and state.json."
+  - "Directly editing files in the sessions directory is explicitly warned against because it may prevent restore."
+  - "--continue and --session are mutually exclusive."
+  - "In -p mode, regular tool calls run under auto permission policy and no human approval is requested."
+  - "Kimi Code can override saved permission or plan mode on resume with --auto, --yolo, or --plan."
 gaps:
-  - "Official docs do not explicitly confirm that --print and --session/--continue can be combined on one command line."
-  - "Behavior when the same session is resumed concurrently from multiple terminals is not documented."
-  - "No documented human-in-the-loop defer-and-resume mechanism for AskUserQuestion or approval prompts."
-  - "Session retention/cleanup policy is not documented."
-  - "Windows and Linux paths were not independently verified; docs state ~/.kimi and KIMI_SHARE_DIR."
+  - "No live model call was run to confirm --prompt combined with --session or --continue, because that could consume credentials/network and execute tools. The command reference implies the combination by listing only other flag conflicts."
+  - "Concurrent resumes of the same session from multiple terminals or clients are not documented."
+  - "No documented persisted pending-approval or pending-question answer injection mechanism was found."
+  - "Automatic retention or cleanup policy for session files is not documented."
+  - "Linux and Windows storage paths were taken from official docs and not independently verified on those OSes."
+  - "The local server REST/WebSocket resume endpoints were not inspected; ACP resume is documented and sufficient for this topic."
 changes:
-  - "2026-07-02: Rewrote with schema-validated frontmatter based on current kimi-cli documentation and local inspection of both ~/.kimi and ~/.kimi-code installations."
+  - "2026-07-03: Updated research from legacy Kimi CLI semantics to current Kimi Code CLI docs and local 0.14.0 binary behavior."
+  - "2026-07-03: Replaced legacy ~/.kimi-only storage model with current KIMI_CODE_HOME / ~/.kimi-code storage and documented legacy ~/.kimi migration residue separately."
+  - "2026-07-03: Replaced --print resume examples with current -p/--prompt examples and noted that --print is absent from installed 0.14.0 help."
+  - "2026-07-03: Added local inspection findings for session_index.jsonl, state.json keys, agents/*/wire.jsonl, and legacy context.jsonl roles."
+  - "2026-07-03: Added ACP session/load versus session/resume distinction and current server/web UI surfaces."
 requires_claudine_update: true
-reason: "The previous kimi.md contained incorrect Claude-specific content. Accurate Kimi resume semantics, storage paths, and HITL limitations need to replace the stale provider metadata in Claudine."
+reason: "Claudine's Kimi resume metadata and wrapper assumptions should prefer current Kimi Code CLI behavior: -p/--prompt for non-interactive follow-up, ~/.kimi-code/KIMI_CODE_HOME for session discovery, agents/*/wire.jsonl replay state, and ACP session/load/session/resume semantics. Legacy ~/.kimi parsing alone is no longer sufficient."
 ---
+
+# Kimi Code CLI Resume Research
 
 ## Overview
 
-Kimi Code CLI's resume is a local-transcript-replay system. Each session writes conversation context, wire events, and runtime state to files under the share directory (default `~/.kimi/`). Resume loads those files, replays the conversation, and restores session-level state such as approval mode, plan mode, additional directories, and subagent instances. Resume can be triggered from the interactive shell, the non-interactive `--print` mode, the ACP server (`kimi acp`), or the Wire protocol (`--wire`).
+Kimi Code CLI has first-class resume support backed by local transcript replay. Current Kimi Code sessions are stored under `KIMI_CODE_HOME` (default `~/.kimi-code`) as per-session metadata plus an agent event stream; resume loads the selected session from disk and continues from that saved state. The main wrapper risk is product migration: legacy Kimi CLI data under `~/.kimi` still exists and uses `context.jsonl`, while current Kimi Code uses `~/.kimi-code`, `session_index.jsonl`, and `agents/*/wire.jsonl`.
+
+For Claudine, Kimi resume is scriptable enough for lifecycle `resume`: the CLI supports continue-latest, explicit session ID, picker-based interactive resume, non-interactive follow-up with `-p/--prompt`, ACP session load/resume, and a local web/server mode. It is not a live-process attach or remote server-side continuation. Pending approvals and user questions should be treated as synchronous protocol interactions, not as durable human-in-the-loop checkpoints that can be answered after the process exits.
 
 ## Resume Semantics
 
-A Kimi "session" is a locally persisted conversation plus a `state.json` snapshot. Resume means reading the existing transcript and state and continuing to append turns to the same session. It is not a remote server-side continuation or a live-process attach. The same local files are authoritative for interactive, print-mode, ACP, and Wire clients.
+A current Kimi Code "session" is a locally persisted record under `$KIMI_CODE_HOME/sessions/<workDirKey>/<sessionId>/`. Official docs describe `state.json` as metadata and `agents/*/wire.jsonl` as the agent event stream used for recovery and replay. Local inspection on this host confirmed that current Kimi Code session directories contain `state.json`, `agents/main/wire.jsonl`, optional subagent `agents/agent-N/wire.jsonl`, and optional `logs/kimi-code.log`.
+
+The continuity model is transcript replay. Resume is not a remote server-side session, and it is not attach to a still-running model state. ACP and the local server can host active clients, but their resume behavior still loads local session records. Memory files, `AGENTS.md`, skills, plugins, MCP declarations, and config are context sources or launch configuration, not prior-session continuation mechanisms.
+
+The applicable resume patterns are:
+
+| Pattern | Supported | Continuity model |
+|---------|-----------|------------------|
+| Continue latest | Yes | Local transcript replay for current working directory |
+| Resume by handle | Yes | Session ID |
+| Interactive picker | Yes | TUI picker and slash command |
+| Non-interactive follow-up | Yes | `-p/--prompt` plus `--session` or `--continue` |
+| Transcript replay | Yes | `agents/*/wire.jsonl` in current Kimi Code; `context.jsonl` in legacy Kimi CLI |
+| Server-side session | No | Local server reads local session storage |
+| Live-process attach | No | Not documented as a resume mechanism |
+| Branch/fork | Yes | `/fork` creates an independent session |
+| Recovery resume | Partial | Session can be resumed after interruption, but in-flight calls are not documented as resumable |
+| Human-in-the-loop resume | No | No documented persisted question/answer injection flow |
 
 ## Supported Modes
 
@@ -210,27 +278,32 @@ A Kimi "session" is a locally persisted conversation plus a `state.json` snapsho
 |------|-------------|------------------|----------|
 | Interactive CLI | `kimi --continue` | No | Latest session for cwd |
 | Interactive CLI | `kimi --session` | No | Interactive picker |
-| Interactive CLI | `kimi -r <session-id>` | No | Exact session ID |
-| Interactive CLI | `/sessions` or `/resume` | No | Picker (Ctrl-A toggles all dirs) |
-| Non-interactive CLI | `kimi --print --session <id> -p "…"` | Yes | Exact ID (likely valid composition) |
-| Non-interactive CLI | `kimi --print --continue -p "…"` | Yes | Latest cwd session |
-| Headless server | `kimi acp` | Yes | JSON-RPC session ID |
-| Wire API | `kimi --wire` | Yes | Session passed at initialization |
-| IDE | Zed/JetBrains via ACP, VS Code extension | Yes | Picker or ID |
+| Interactive CLI | `kimi --session <id>` | No | Exact session ID |
+| Interactive CLI | `/sessions` or `/resume` | No | Picker while agent is idle |
+| Non-interactive CLI | `kimi -p "..." --session <id>` | Yes | Exact ID |
+| Non-interactive CLI | `kimi -p "..." --continue` | Yes | Latest cwd session |
+| ACP | `kimi acp` | Yes, through `session/prompt` | ID or list |
+| Local server / Web UI | `kimi server run`, `kimi web` | Yes, through browser/API client | UI/API selection |
+| IDE | ACP-compatible editors, Kimi Code for VS Code | Yes | IDE UI or session ID |
 
-The `--continue` and `--session` options are mutually exclusive. `--session` without an argument opens the picker; with an argument it resumes that exact session (or creates a new one if the ID is missing).
+`--continue` and `--session` are mutually exclusive because both select an existing session. `--session` without an ID opens a picker; with an ID it opens that exact session. The current command reference documents `--prompt` as non-interactive mode and lists its conflicts as `--yolo`, `--auto`, and `--plan`, not `--session` or `--continue`; this research therefore records prompt-time resume as supported by documented flag composition, but the combination was not exercised with a live model call.
+
+Sessions created in non-interactive mode appear to use the same local session machinery as interactive sessions. The current docs do not carve out a separate non-resumable run type, and local `~/.kimi-code/session_index.jsonl` records sessions independently of UI mode.
 
 ## Session ID Capture
 
-Stable session identifiers are UUIDs. Capture surfaces include:
+Current Kimi Code keeps a top-level index at `$KIMI_CODE_HOME/session_index.jsonl`. Local inspection found 14 JSONL records, each with `sessionId`, `sessionDir`, and `workDir`. Current session IDs in local storage use the form `session_<uuid>`, for example `session_292400e4-dc10-4762-8542-7585ee220961`; legacy `~/.kimi` sessions used bare UUID directory names.
 
-- **Resume hint on exit**: `To resume this session: kimi -r <session-id>` is printed for non-empty sessions after normal exit, `Ctrl-C`, `/undo`, `/fork`, and `/sessions` switch.
-- **Session directory**: the `<session-id>` directory name under `~/.kimi/sessions/<work-dir-hash>/`.
-- **Hooks**: `SessionStart`/`SessionEnd` receive `session_id` and `cwd` via stdin JSON.
-- **Wire/ACP protocols**: lifecycle messages carry `session_id`.
-- **`kimi export [sessionId]`**: accepts or defaults to the previous session for the cwd.
+Session IDs can be captured through:
 
-The interactive `/sessions` picker shows titles and timestamps, not raw IDs.
+- `session_index.jsonl`: stable local index with session ID, session directory, and working directory.
+- Session directory name: `$KIMI_CODE_HOME/sessions/<workDirKey>/<sessionId>/`.
+- CLI export: `kimi export [sessionId]` accepts an explicit ID or selects the latest cwd session when omitted.
+- Hooks: hook stdin JSON includes `session_id` and `cwd`.
+- ACP: `session/list`, `session/load`, and `session/resume` use protocol-level session identifiers.
+- Resume hint: legacy docs state non-empty sessions print `kimi -r <session-id>` on exit. Current docs still list `--resume`/`-r` as hidden aliases but focus on `--session`.
+
+The earliest scriptable current handle is the session ID in `session_index.jsonl` after the session has been created and indexed. Hooks provide a cleaner event-time capture when configured. The TUI picker is not a stable automation surface.
 
 ## Resume Invocation
 
@@ -243,7 +316,7 @@ kimi --continue
 Resume a specific session by ID:
 
 ```sh
-kimi -r session_abc123
+kimi --session session_292400e4-dc10-4762-8542-7585ee220961
 ```
 
 Open the interactive picker:
@@ -252,134 +325,206 @@ Open the interactive picker:
 kimi --session
 ```
 
-Switch sessions inside an active shell session:
+Switch sessions inside an idle TUI session:
 
 ```text
 /sessions
 ```
 
-Non-interactive follow-up (composition of global flags; not explicitly documented):
+Send a non-interactive follow-up to a known session:
 
 ```sh
-kimi --print --session session_abc123 -p "next step"
+kimi -p "Continue from the previous result and summarize the remaining risks." --session session_292400e4-dc10-4762-8542-7585ee220961
 ```
+
+Send a non-interactive follow-up to the latest cwd session:
+
+```sh
+kimi -p "Continue and give the next concrete step." --continue
+```
+
+Capture structured non-interactive output:
+
+```sh
+kimi -p "List the changed files." --session session_292400e4-dc10-4762-8542-7585ee220961 --output-format stream-json
+```
+
+In `stream-json` mode, stdout contains JSONL Assistant and Tool messages. Thinking content, tool progress, and resume notices remain on stderr. Stream parsing details belong to the `non-interactive-sessions` topic.
+
+ACP exposes the machine-oriented sequence:
+
+```text
+initialize
+session/list
+session/load or session/resume
+session/prompt
+session/cancel
+```
+
+`session/load` restores a session and replays history to the client. `session/resume` is a lighter sibling that skips history replay.
 
 ## Session Lookup Scope
 
-Session lookup is primarily working-directory scoped. `--continue` resumes the latest session for the current directory. `/sessions` defaults to sessions for the current directory and can be widened to all directories with `Ctrl-A`. Resuming by ID bypasses scope entirely. There is no documented git-branch or worktree filtering.
+Current Kimi Code groups sessions by working directory. The documented `workDirKey` format is `wd_<slug>_<first-12-chars-of-sha256>`, derived from the working directory path. Local directories confirmed that shape, for example `wd_claudine_50714871d8b0` and `wd_sniff_316962d80b01`.
+
+`--continue` selects the most recent session for the current working directory. Explicit `--session <id>` targets a session by ID. Legacy docs say the interactive session picker can toggle between current-directory sessions and all directories with `Ctrl-A`; current Kimi Code docs only say `/sessions` browses previous sessions. There is no documented branch, PR, or git-worktree selector.
 
 ## State Storage
 
-Resumable state is stored locally. The default share directory is `~/.kimi/` (override with `KIMI_SHARE_DIR`):
+Current Kimi Code stores state under `KIMI_CODE_HOME`, defaulting to:
 
+| OS | Default root | Session path |
+|----|--------------|--------------|
+| macOS | `/Users/<name>/.kimi-code` | `/Users/<name>/.kimi-code/sessions/<workDirKey>/<sessionId>/` |
+| Linux | `/home/<name>/.kimi-code` | `/home/<name>/.kimi-code/sessions/<workDirKey>/<sessionId>/` |
+| Windows | `C:\Users\<name>\.kimi-code` | `C:\Users\<name>\.kimi-code\sessions\<workDirKey>\<sessionId>\` |
+
+Official current layout:
+
+```text
+$KIMI_CODE_HOME
+├── config.toml
+├── session_index.jsonl
+└── sessions/
+    └── <workDirKey>/
+        └── <sessionId>/
+            ├── state.json
+            └── agents/
+                ├── main/
+                │   └── wire.jsonl
+                └── <subagentId>/
+                    └── wire.jsonl
 ```
-~/.kimi/
-├── sessions/
-│   └── <work-dir-hash>/
-│       └── <session-id>/
-│           ├── context.jsonl   # conversation transcript
-│           ├── wire.jsonl      # wire event log
-│           └── state.json      # approval, plan, subagents, additional dirs
+
+The data-location docs also list optional `upcoming-goals.json`, `agents/main/plans/`, `logs/kimi-code.log`, `tasks/`, and `cron/` under a session directory. `session_index.jsonl` records `sessionId`, `sessionDir`, and `workDir`.
+
+Local current Kimi Code inspection found:
+
+- `/Users/ken/.kimi-code/session_index.jsonl` with 14 records.
+- `/Users/ken/.kimi-code/sessions/wd_claudine_50714871d8b0/session_292400e4-dc10-4762-8542-7585ee220961/state.json`.
+- `agents/main/wire.jsonl` in current sessions.
+- Subagent streams such as `agents/agent-0/wire.jsonl`, `agents/agent-1/wire.jsonl`, and `agents/agent-2/wire.jsonl` in one observed session.
+- `logs/kimi-code.log` in some session directories.
+
+Current `state.json` files observed locally contained scalar paths such as `createdAt`, `updatedAt`, `title`, `lastPrompt`, `agents.main.homedir`, `agents.main.type`, and for subagents `agents.agent-0.parentAgentId`. Current `agents/main/wire.jsonl` records included top-level shapes such as `type`, `protocol_version`, `app_version`, `created_at`, `systemPrompt`, `names`, `modelAlias`, `thinkingLevel`, `mode`, and `input`.
+
+Legacy Kimi CLI data remains under `/Users/ken/.kimi` on this host, with `/Users/ken/.kimi/.migrated-to-kimi-code` present. Legacy sessions use:
+
+```text
+~/.kimi/sessions/<work-dir-hash>/<uuid>/
+├── context.jsonl
+├── wire.jsonl
+└── state.json
 ```
 
-- `context.jsonl`: full context in JSONL format, including system prompt, user messages, assistant responses, tool calls, and internal records.
-- `wire.jsonl`: wire events for replay and title extraction.
-- `state.json`: runtime state including title, approval decisions, plan mode, subagent instances, and additional directories.
+Observed legacy `context.jsonl` roles included `_system_prompt`, `_checkpoint`, `user`, `assistant`, `_usage`, and `tool`. This legacy format is real and may matter for migration, but current Kimi Code wrapper logic should prefer `~/.kimi-code` and `KIMI_CODE_HOME`.
 
-The system prompt is frozen at session creation and reused on restore. `state.json` is written atomically to reduce corruption on crash.
-
-**Local observation note**: the `kimi` binary installed on this host is `kimi-code` 0.14.0 and stores sessions under `~/.kimi-code/sessions/wd_<name>_<hash>/session_<uuid>/` with a different `state.json` schema. This appears to be the successor product described on the docs site as replacing Kimi Code CLI.
+The session file format is not documented as a stable integration API. Official docs explicitly warn not to manually edit files under `sessions/` because doing so may break restore.
 
 ## Restored State
 
-Resuming restores:
+Kimi Code restores conversation history and tool results by replaying `agents/*/wire.jsonl`. `state.json` restores metadata such as title, creation/update timestamps, `lastPrompt`, `forkedFrom`, and agent/subagent metadata. The current docs state that resuming can restore saved permission or plan mode, and that adding `--auto`, `--yolo`, or `--plan` at resume time overrides those saved modes. `--model` can override the model alias for the launch.
 
-- Conversation transcript and tool results from `context.jsonl`.
-- Approval state (`yolo`, `afk`, and per-session auto-approved operation types) from `state.json`.
-- Plan mode status.
-- Additional directories added via `--add-dir` or `/add-dir`.
-- Subagent instance state and context history.
+Do not assume the original environment survives. A resumed CLI process inherits the current process environment. Current docs resolve additional workspace roots from launch flags and config; persisted roots may exist in session state, but this run did not find a local state example with additional directory fields. Current working directory is part of lookup scope through `workDir`, but exact cwd restoration versus launch cwd should be treated as provider-managed and verified in wrapper tests.
 
-It does not restore the original process environment; the launching process environment is used. The model can be overridden at resume time with `--model`.
+Resume continues the selected local session. The docs do not explicitly state whether resume appends to the same `wire.jsonl` or creates a new stream, but local storage and ACP wording indicate that the session directory remains the authoritative record. Forking is the documented mechanism for creating an independent copy.
 
 ## Branching and Checkpoints
 
-Branching is supported; checkpointing/rewinding is not.
+`/fork` creates an independent session from the current conversation so the user can explore a new direction without affecting the original. Current docs state that the two resulting sessions are independent and that a saved `/goal` is not copied to the fork.
 
-- `/fork` copies the entire conversation history into a new session and switches to it, leaving the original unchanged.
-- `/undo` selects a prior turn and forks a new session containing all history before that turn, also preserving the original.
-- Web UI can fork from any assistant message.
+Kimi Code also supports `/title <text>` and alias `/rename` for naming a session. `kimi export [sessionId]` creates a ZIP with all files in the session directory; `/export-debug-zip` does the same from the TUI, and `/export-md` exports a human-readable Markdown transcript. `kimi vis [sessionId]` opens a visualizer for a specific session or a home view of sessions.
 
-There is no `/rewind` or checkpoint command that reverts within the same session.
+No checkpoint, rewind, or branch-from-arbitrary-turn command was verified in current Kimi Code docs. `/compact` compresses context to save tokens, but it is not a user-addressable checkpoint.
 
 ## Human-in-the-Loop Resume
 
-Kimi Code CLI does **not** provide a documented defer-and-resume flow for interrupted questions or approvals. `AskUserQuestion` is a tool call that expects an immediate answer. In `--print` mode, `--afk` is implied and auto-dismisses questions. Wire/ACP expose `QuestionRequest` and `ApprovalRequest` as blocking JSON-RPC requests that must be answered before the turn continues. Claudine cannot capture a pending question, exit, and later inject an answer through a documented resume path.
+Kimi Code does not document a durable human-in-the-loop resume flow where a wrapper captures a pending question or approval, exits, asks the human elsewhere, then injects the answer into the same stopped session later.
+
+ACP supports normal interactive agent flow, including session prompt, cancel, and tool approval while the ACP process is alive. That is useful for live HITL orchestration, but it is synchronous protocol control, not persisted defer-and-resume. In `-p/--prompt` mode, current docs say no human approval is requested: regular tool calls are handled under the `auto` permission policy and static deny rules remain in effect.
+
+For Claudine, Kimi HITL should be modeled as live-process handling through ACP or the TUI, not as a post-exit lifecycle `resume` capability.
 
 ## Interruption Recovery
 
-Sessions survive most interruptions because files are written locally:
+Because session state is local and replayable, a session can be resumed after terminal close, Ctrl-C, crash, or provider/process failure once enough state has been written. Legacy docs explicitly say a resume hint is printed for non-empty sessions after normal exit and Ctrl-C. Current Kimi Code docs describe persistent session storage and recovery/replay through `agents/*/wire.jsonl`.
 
-- **Normal exit / Ctrl-C / /undo / /fork / /sessions switch**: a resume hint is printed.
-- **Crash / working directory deletion**: the FAQ states a crash report with session ID and workDir is shown, and recovery is possible with `kimi -r <session-id>` from the correct directory.
-- `state.json` uses atomic writes to reduce corruption.
+This is not the same as resuming an in-flight tool call. The docs do not promise that a shell command, file edit, approval prompt, network request, or model call interrupted mid-turn will continue from the exact blocked point. Treat recovery as continuation from persisted transcript/event state. Pending tool and pending approval recovery should be considered unsupported unless wrapper tests prove otherwise for a specific version.
 
-The docs do not specify whether a tool call or approval request that was in flight at the moment of interruption is resumed mid-turn or replayed from the start.
+Concurrent resume of the same session is undocumented. Claudine should avoid launching two write-capable resumes for the same Kimi session unless it adds its own lock.
 
 ## Observability
 
-Relevant observability surfaces:
+Resume-relevant observability surfaces:
 
-- **Hooks**: `SessionStart` and `SessionEnd` fire on resume with `session_id` and `cwd`; `StopFailure` fires on turn-end errors.
-- **Wire protocol**: `event` and `request` messages expose session lifecycle, tool calls, approvals, and questions.
-- **`kimi export`**: bundles the session directory into a ZIP archive.
-- **`/sessions` and `/title`**: list and rename sessions.
-- **`/debug`**: shows message/token counts and checkpoints.
+- `session_index.jsonl`: local session ID, directory, and working directory index.
+- `state.json`: current session metadata and agent/subagent metadata.
+- `agents/*/wire.jsonl`: event stream used for replay and recovery.
+- Hooks: stdin JSON includes `hook_event_name`, `session_id`, and `cwd`; hook commands run in the session project directory.
+- `kimi -p --output-format stream-json`: JSONL Assistant/Tool messages on stdout for non-interactive follow-up.
+- ACP: `session/list`, `session/load`, `session/resume`, `session/prompt`, and `session/cancel`.
+- Logs: global `~/.kimi-code/logs/kimi-code.log` and optional per-session `logs/kimi-code.log`.
+- `kimi export`: ZIP of session directory, with optional inclusion of the global diagnostic log.
+- `kimi server status`: local server installation/running status, with `--json` for automation.
+
+Direct file parsing is useful for discovery and backup, but not documented as a stable API. Prefer CLI commands, hooks, ACP, or server APIs when integrating.
 
 ## Quirks and Gaps
 
 Quirks:
 
-- The installed `kimi` binary may be the successor `kimi-code` product, which uses `~/.kimi-code/` and a different on-disk layout than the documented `~/.kimi/`.
-- `kimi -r <id>` silently creates a new session if the ID does not exist.
-- Empty sessions do not emit a resume hint.
-- The interactive picker is only available in shell mode.
-- `--print` implies `--afk`, so non-interactive runs auto-dismiss questions rather than pausing.
-- `/clear` and `/reset` clear conversation context but leave session state intact.
+- Current Kimi Code is not the same on disk as legacy Kimi CLI. Current data lives under `~/.kimi-code`; legacy migrated data can remain under `~/.kimi`.
+- The installed local binary is `kimi` version `0.14.0` from `/Users/ken/.kimi-code/bin/kimi`.
+- Current non-interactive mode is `-p/--prompt`; `--print` was not shown by installed `kimi --help`.
+- Current session replay uses `agents/*/wire.jsonl`; legacy sessions use `context.jsonl` plus `wire.jsonl`.
+- Current docs warn not to manually edit `sessions/` contents.
+- `--continue` and `--session` are mutually exclusive.
+- Non-interactive `-p` mode uses auto permission policy and does not request human approvals.
+- Resume-time `--auto`, `--yolo`, and `--plan` can override saved permission/plan state.
 
 Gaps:
 
-- No explicit documentation confirming `--print --session` or `--print --continue` composition.
-- No documented behavior for concurrent resumes of the same session.
-- No documented defer-and-resume mechanism for HITL prompts.
-- No documented retention or cleanup policy for session files.
-- Windows and Linux paths were inferred from docs, not independently verified.
+- `kimi -p ... --session <id>` and `kimi -p ... --continue` were not run with a live model call in this research pass. Current docs imply the flag composition, but the body records that as an inference.
+- Concurrent resume semantics are undocumented.
+- No persisted pending HITL question/approval answer-injection path was found.
+- Session retention policy is undocumented.
+- Linux and Windows paths were taken from official docs, not observed on those OSes.
+- Local server REST/WebSocket session APIs were not inspected; ACP was sufficient to verify API-level resume semantics.
 
 ## Claudine Integration Notes
 
-For Claudine's lifecycle `resume` action and future HITL recovery:
+For lifecycle `resume`, Claudine should treat Kimi as a local transcript replay provider with first-class session IDs. Prefer capturing the session ID from hooks or `session_index.jsonl`; fall back to resume hints where available. Current Kimi Code session IDs can include a `session_` prefix, so validators should not assume bare UUIDs.
 
-- Capture `session_id` from the resume hint printed on exit, from `SessionStart` hook JSON, or from the session directory name.
-- Use `kimi --print --session <id> -p "<follow-up>"` for scriptable continuation if flag composition is confirmed in the target version.
-- Use `kimi --continue` to resume the latest cwd session.
-- Do not rely on parsing `context.jsonl` or `wire.jsonl` directly; use `/export`, the Wire protocol, or ACP for stable access.
-- Do not assume HITL deferral is possible; plan to answer `QuestionRequest`/`ApprovalRequest` synchronously when wrapping Kimi via Wire/ACP.
-- Be aware that the installed binary may be `kimi-code` (successor) with different storage paths than the documented `kimi-cli`.
+For non-interactive follow-up, prefer:
+
+```sh
+kimi -p "<follow-up>" --session <session-id> --output-format stream-json
+```
+
+or:
+
+```sh
+kimi -p "<follow-up>" --continue --output-format stream-json
+```
+
+Claudine should not use legacy `--print` for current Kimi Code without version gating. It should discover data under `KIMI_CODE_HOME` or `~/.kimi-code`, not only `~/.kimi`. Legacy `~/.kimi` may still matter for migration or old installations, but current Kimi Code wrapper behavior should target `session_index.jsonl` and `sessions/<workDirKey>/<sessionId>/agents/*/wire.jsonl`.
+
+For `retry`, restarting a failed Kimi run should be modeled as a new launch against the same or latest session, not as resuming an in-flight tool call. For `proxy`, ACP is the best documented protocol surface because it has explicit `session/load`, `session/resume`, `session/prompt`, and `session/cancel`. For future human-in-the-loop recovery, Claudine should handle Kimi questions and approvals while the ACP/TUI process is alive; it should not assume a stopped Kimi session can later receive a persisted answer.
 
 ## Changelog
 
-- 2026-07-02: Converted to schema-validated frontmatter and rewrote body from current kimi-cli documentation plus local inspection.
+- 2026-07-03: Refreshed against current Kimi Code docs, local `kimi` 0.14.0 help, and local session files under `/Users/ken/.kimi-code` and `/Users/ken/.kimi`.
+- 2026-07-03: Replaced legacy `--print` examples with current `-p/--prompt` examples and recorded the flag-composition evidence boundary.
+- 2026-07-03: Updated storage from legacy `~/.kimi/sessions/<hash>/<uuid>/{context.jsonl,wire.jsonl,state.json}` to current `~/.kimi-code/sessions/<workDirKey>/<sessionId>/{state.json,agents/*/wire.jsonl}` while preserving legacy migration notes.
+- 2026-07-03: Added ACP `session/load` versus `session/resume`, server/web surfaces, and local `session_index.jsonl` findings.
 
 ## Sources
 
-- [Kimi Code CLI — Sessions and Context](https://moonshotai.github.io/kimi-cli/en/guides/sessions.html)
-- [Kimi Code CLI — Data Locations](https://moonshotai.github.io/kimi-cli/en/configuration/data-locations.html)
-- [Kimi Code CLI — `kimi` Command Reference](https://moonshotai.github.io/kimi-cli/en/reference/kimi-command.html)
-- [Kimi Code CLI — Slash Commands](https://moonshotai.github.io/kimi-cli/en/reference/slash-commands.html)
-- [Kimi Code CLI — Hooks](https://moonshotai.github.io/kimi-cli/en/customization/hooks.html)
-- [Kimi Code CLI — Print Mode](https://moonshotai.github.io/kimi-cli/en/customization/print-mode.html)
-- [Kimi Code CLI — Wire Mode](https://moonshotai.github.io/kimi-cli/en/customization/wire-mode.html)
-- [Kimi Code CLI — Web UI](https://moonshotai.github.io/kimi-cli/en/reference/kimi-web.html)
-- [Kimi Code CLI — FAQ](https://moonshotai.github.io/kimi-cli/en/faq.html)
-- [Kimi Code CLI — Environment Variables](https://moonshotai.github.io/kimi-cli/en/configuration/env-vars.html)
-- [Kimi Code CLI GitHub repository](https://github.com/MoonshotAI/kimi-cli)
+- [Kimi Code CLI - Sessions and context](https://www.kimi.com/code/docs/en/kimi-code-cli/guides/sessions.html)
+- [Kimi Code CLI - Data locations](https://www.kimi.com/code/docs/en/kimi-code-cli/configuration/data-locations.html)
+- [Kimi Code CLI - `kimi` Command](https://www.kimi.com/code/docs/en/kimi-code-cli/reference/kimi-command.html)
+- [Kimi Code CLI - `kimi acp` Subcommand](https://www.kimi.com/code/docs/en/kimi-code-cli/reference/kimi-acp.html)
+- [Kimi Code CLI - Hooks](https://www.kimi.com/code/docs/en/kimi-code-cli/customization/hooks.html)
+- [Legacy Kimi CLI - Sessions and Context](https://moonshotai.github.io/kimi-cli/en/guides/sessions.html)
+- [MoonshotAI/kimi-cli GitHub repository](https://github.com/MoonshotAI/kimi-cli)
+- Local inspection: `/Users/ken/.kimi-code/bin/kimi --version`, `/Users/ken/.kimi-code/session_index.jsonl`, `/Users/ken/.kimi-code/sessions/*`, and legacy `/Users/ken/.kimi/sessions/*`.

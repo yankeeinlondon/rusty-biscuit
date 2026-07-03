@@ -1,9 +1,9 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-02
-last_updated: 2026-07-02
-agent: opencode
-model: kimi-for-coding/k2p7
+last_updated: 2026-07-03
+agent: codex
+model: default
 docs: https://pi.dev/docs/latest/sessions
 support: first_class
 continuity_model: transcript_replay
@@ -14,69 +14,83 @@ resume_modes:
       - "pi -c / --continue"
       - "pi -r / --resume"
       - "pi --session <path|id>"
-      - "/resume slash command"
-      - "/tree in-place tree navigation"
+      - "pi --fork <path|id>"
+      - "/resume"
+      - "/session"
+      - "/tree"
+      - "/fork"
+      - "/clone"
       - "/import <file>"
+      - "/name <name>"
     accepts_followup_prompt: false
     selection_methods:
       - latest
       - id
       - picker
       - other
-    notes: "Follow-up prompts are typed inside the resumed TUI session. `other` covers selection by file path or partial session UUID."
+    notes: "Interactive resume reopens the TUI. Follow-up text is typed after the session is active. `other` covers file paths and branch/tree entry selection."
   - mode: non_interactive
     supported: true
     mechanisms:
       - "pi -p --continue [message]"
       - "pi -p --session <path|id> [message]"
+      - "pi --mode json --continue [message]"
       - "pi --mode json --session <path|id> [message]"
     accepts_followup_prompt: true
     selection_methods:
       - latest
       - id
       - other
-    notes: "Print and JSON modes append the supplied prompt to the selected JSONL session and return the response. Resuming a session whose cwd differs from the current directory can prompt to fork interactively."
+    notes: "Print and JSON modes can append a prompt to the selected session. `--session` accepts a path or UUID prefix, but a cross-project UUID match can try to prompt for forking and is unsafe for unattended automation."
   - mode: headless_server
     supported: false
     mechanisms: []
     accepts_followup_prompt: false
     selection_methods: []
-    notes: "No standalone headless server. Programmatic control uses an in-process SDK or a spawned RPC subprocess."
+    notes: "Pi has RPC subprocess mode, not a persistent standalone headless server with authoritative session state."
   - mode: ide
     supported: false
     mechanisms: []
     accepts_followup_prompt: false
     selection_methods: []
-    notes: "No documented IDE extension resume surface."
+    notes: "No official IDE resume surface was found."
   - mode: api
     supported: true
     mechanisms:
       - "pi --mode rpc --session <path|id>"
-      - "RPC switch_session command"
-      - "SDK SessionManager.open(path) / SessionManager.continueRecent(cwd)"
-      - "SDK AgentSessionRuntime.switchSession() / fork()"
+      - "RPC prompt"
+      - "RPC switch_session"
+      - "RPC follow_up / steer"
+      - "RPC fork / clone / new_session"
+      - "SessionManager.open(path)"
+      - "SessionManager.continueRecent(cwd)"
+      - "SessionManager.forkFrom(sourcePath, targetCwd)"
+      - "AgentSessionRuntime.switchSession()"
+      - "AgentSessionRuntime.fork()"
+      - "AgentSessionRuntime.importFromJsonl()"
     accepts_followup_prompt: true
     selection_methods:
+      - latest
       - id
       - other
-    notes: "`other` covers selection by absolute file path. The RPC process loads the transcript and appends to it while alive; it is not a remote server."
+    notes: "API resume is local-process transcript replay. RPC can load or switch sessions and then accept prompts, steering, or follow-up messages."
 session_id_capture:
   - surface: json_stream
     field: id
     format: uuid
-    notes: "First line of `pi --mode json` output is the session header. Subsequent events do not repeat the session ID."
+    notes: "`pi --mode json` emits the session header as the first JSONL line, including `type`, `version`, `id`, `timestamp`, and `cwd`."
   - surface: session_file
     field: filename
     format: "<timestamp>_<uuid>.jsonl"
-    notes: "Session UUID also appears as the `id` field in the JSONL header."
+    notes: "The same UUID appears in the first `session` JSONL record. Local files inspected on macOS used version 3 headers."
   - surface: interactive_ui
-    field: sessionId
+    field: session ID
     format: uuid
-    notes: "/session shows the session ID and file path. The /resume picker shows display names/timestamps, not raw IDs."
+    notes: "`/session` shows the current session file and ID. The `/resume` picker is human-oriented and can search, rename, delete, and filter sessions."
   - surface: other
     field: sessionId
     format: uuid
-    notes: "SDK `session.sessionId`, RPC `get_state` response, and `get_session_stats` response expose the UUID."
+    notes: "SDK `AgentSession.sessionId`, RPC `get_state`, and RPC `get_session_stats` expose the active session identifier."
 resume_invocations:
   - mode: interactive
     invocation: "pi -c"
@@ -87,78 +101,90 @@ resume_invocations:
     invocation: "pi -r"
     accepts_prompt: false
     selection: picker
-    notes: "Open the interactive session picker for the current project/directory."
+    notes: "Open the session picker for the current project; the picker can search, show paths, sort, filter named sessions, rename, and delete."
   - mode: interactive
     invocation: "pi --session <path|id>"
     accepts_prompt: false
     selection: id
-    notes: "Open the TUI on the specified session file or partial UUID."
+    notes: "Open a specific JSONL file or UUID-prefix match in the TUI."
   - mode: interactive
     invocation: "/resume"
     accepts_prompt: false
     selection: picker
-    notes: "Inside the TUI, browse and select previous sessions for the current directory."
+    notes: "Browse previous sessions from inside the TUI."
   - mode: interactive
     invocation: "/tree"
     accepts_prompt: false
     selection: picker
-    notes: "Navigate the in-session tree and continue from any previous entry without creating a new file."
+    notes: "Move the active leaf to a previous entry in the same session tree and continue from there."
   - mode: interactive
     invocation: "/import <file>"
     accepts_prompt: false
     selection: other
-    notes: "Load a JSONL session file as a new session. `other` represents file-path selection."
+    notes: "Copy a JSONL session into the current session directory and switch to it."
   - mode: non_interactive
-    invocation: "pi -p --continue [message]"
+    invocation: "pi -p --continue \"follow-up prompt\""
     accepts_prompt: true
     selection: latest
-    notes: "Send a follow-up prompt into the most recent session for the current directory and print the response."
+    notes: "Append a prompt to the most recent current-directory session and print the final answer."
   - mode: non_interactive
-    invocation: "pi -p --session <path|id> [message]"
+    invocation: "pi -p --session <path|id> \"follow-up prompt\""
     accepts_prompt: true
     selection: id
-    notes: "Send a follow-up prompt into a specific session and print the response."
+    notes: "Append a prompt to an explicit session selected by path or UUID prefix."
   - mode: non_interactive
-    invocation: "pi --mode json --session <path|id> [message]"
+    invocation: "pi --mode json --session <path|id> \"follow-up prompt\""
     accepts_prompt: true
     selection: id
-    notes: "Same as print mode but emits structured JSONL events to stdout."
+    notes: "Append a prompt and emit JSONL events. The first line is the session header."
   - mode: api
     invocation: "pi --mode rpc --session <path|id>"
     accepts_prompt: true
     selection: id
-    notes: "Launch an RPC subprocess already loaded into the specified session, then send `prompt` commands."
+    notes: "Start an RPC subprocess with an existing session loaded, then send `prompt`, `steer`, or `follow_up` commands."
   - mode: api
-    invocation: '{"type":"switch_session","sessionPath":"/path/to/session.jsonl"}'
+    invocation: "{\"type\":\"switch_session\",\"sessionPath\":\"/path/to/session.jsonl\"}"
     accepts_prompt: false
     selection: other
-    notes: "Change the active session in a running RPC process."
+    notes: "Switch the active session in a running RPC process; send `prompt` afterward to continue."
   - mode: api
     invocation: "SessionManager.open('/path/to/session.jsonl')"
     accepts_prompt: false
     selection: other
-    notes: "Open an existing session file via the SDK for in-process use."
+    notes: "Open a persisted transcript through the SDK."
 state_storage:
   - location: local
-    os: all
-    path: "~/.pi/agent/sessions/--<cwd>--/<timestamp>_<uuid>.jsonl"
-    format: JSONL
-    retention: "Manual/until deleted. No documented automatic retention or cleanup policy."
-    notes: "`<cwd>` is the absolute working directory with `/` replaced by `-`. The format is versioned (v3) and documented. Overridden by `--session-dir`, `PI_CODING_AGENT_SESSION_DIR`, or `settings.json sessionDir`."
+    os: macos
+    path: "~/.pi/agent/sessions/--<cwd-with-separators-replaced-by-dashes>--/<timestamp>_<uuid>.jsonl"
+    format: "JSONL, current header version 3"
+    retention: "Manual/until deleted. No automatic retention policy was documented; `/resume` can delete via the picker."
+    notes: "Locally verified under `/Users/ken/.pi/agent/sessions/`. This Claudine process also had `$HOME=/Users/ken/.claudine`, producing an empty overlay at `/Users/ken/.claudine/.pi/agent/sessions`; wrappers must avoid confusing process HOME overlays with the user's real Pi home."
+  - location: local
+    os: linux
+    path: "~/.pi/agent/sessions/--<cwd-with-separators-replaced-by-dashes>--/<timestamp>_<uuid>.jsonl"
+    format: "JSONL, current header version 3"
+    retention: "Manual/until deleted. No automatic retention policy was documented; `/resume` can delete via the picker."
+    notes: "Inferred from official docs and installed source using Node `os.homedir()` plus `.pi/agent/sessions`; not locally verified on Linux."
+  - location: local
+    os: windows
+    path: "%USERPROFILE%\\.pi\\agent\\sessions\\--<cwd-with-slashes-backslashes-and-colons-replaced-by-dashes>--\\<timestamp>_<uuid>.jsonl"
+    format: "JSONL, current header version 3"
+    retention: "Manual/until deleted. No automatic retention policy was documented; `/resume` can delete via the picker."
+    notes: "Inferred from installed source using Node `os.homedir()` and platform path joins; not locally verified on Windows. A cwd such as `C:\\Users\\me\\repo` is encoded by replacing `:`, `/`, and `\\` with `-`."
 resume_scope:
   project_scoped: true
   cwd_scoped: true
   worktree_aware: false
-  all_projects_supported: false
+  all_projects_supported: true
   branch_filtering: false
-  notes: "Sessions are stored per working directory. The interactive picker and `SessionManager.list(cwd)` scope to the current directory. SDK `SessionManager.listAll()` can enumerate all sessions but is not a resume UI."
+  notes: "Default lookup is cwd-scoped. `SessionManager.list(cwd)` and `/resume` target the current project, while source inspection shows `--session <uuid-prefix>` falls back to `SessionManager.listAll()` across projects if no local UUID prefix matches. There is no git branch or worktree metadata in the session header."
 branching_checkpointing:
   branch_supported: true
   checkpoint_supported: false
-  fork_invocation: "CLI: pi --fork <path|id>; TUI: /fork; SDK: SessionManager.forkFrom() / createBranchedSession(); RPC: fork"
+  fork_invocation: "CLI: pi --fork <path|id>; TUI: /tree, /fork, /clone; RPC: fork, clone; SDK: SessionManager.forkFrom(), createBranchedSession(), AgentSessionRuntime.fork()"
   checkpoint_invocation: ""
   preserves_original: true
-  notes: "/tree navigates the existing tree in place and leaves all branches in the same file. /fork and /clone create new session files, leaving the source intact. There is no rewind/checkpoint command."
+  notes: "`/tree` branches in place within the same JSONL file by moving the active leaf. `/fork`, `/clone`, and `--fork` create a new session file and preserve the source. Labels can mark entries but are not checkpoints or rewinds."
 restored_state:
   transcript: true
   tool_results: true
@@ -166,223 +192,297 @@ restored_state:
   model: overridable
   cwd: restored
   env: current_process
-  notes: "Transcript and tool results are replayed from the JSONL file. The original cwd is stored in the session header; resuming from a different cwd can prompt to fork. Model and thinking level can be overridden at resume time via CLI flags or commands. Pi has no built-in permission/approval system, so there is no approval state to restore; extensions may add their own."
+  notes: "Resume rebuilds context from the active JSONL branch. Stored entries include messages, tool results, model changes, thinking-level changes, compactions, branch summaries, labels, session_info names, and extension custom/custom_message entries. The header stores the original cwd; Pi recreates runtime services for that cwd when possible. CLI `--model`, `--provider`, and `--thinking` can override future turns. Current process environment, credentials, settings, extensions, tools, project trust, and context/system prompt files are recalculated at launch. Pi has no core approval system, though extensions can implement their own gates."
 hitl_resume:
   supported: false
-  question_capture: ""
-  answer_injection: ""
-  limitations: "Pi deliberately omits built-in permission popups and question tools. Extensions can request user input via the RPC `extension_ui_request` sub-protocol, but pending requests are owned by the live process and are not persisted in the session file for later answer injection."
+  question_capture: "RPC can emit live `extension_ui_request` records for extension dialogs, editor prompts, notifications, widgets, and related UI methods."
+  answer_injection: "RPC clients answer live extension UI requests with `extension_ui_response` records on stdin; normal follow-up messages can also be queued with `follow_up` or `steer` while the process is alive."
+  limitations: "No evidence that a pending extension UI request is persisted into the JSONL session file or can be answered after process exit. Interactive TUI prompts and permission-like extension gates are live-process state, not resumable transcript state."
 interruption_recovery:
   crash_resume: true
   ctrl_c_resume: true
-  pending_tool_resume: true
+  pending_tool_resume: false
   pending_approval_resume: false
-  limitations: "Sessions are append-only JSONL files, so crash, Ctrl+C, terminal close, and process kill generally leave the session resumable. A kill mid-turn may leave a partial assistant message as the current leaf. There is no built-in approval state to recover."
+  limitations: "Completed entries already flushed to JSONL can be resumed after terminal close, Ctrl+C, crash, process kill, network loss, or provider error. Local transcripts show aborted/error assistant messages persisted with `stopReason` and `errorMessage`. In-progress tool calls, live extension UI requests, and queued steering/follow-up messages are process memory and were not observed as durable state. Concurrent writers to the same session file are not documented as safe."
 observability:
   stream_events:
-    - "session header (id, cwd, version) in --mode json"
+    - "JSON mode first line: session header with id, version, timestamp, cwd"
     - "agent_start / agent_end"
     - "turn_start / turn_end"
     - "message_start / message_update / message_end"
     - "tool_execution_start / tool_execution_update / tool_execution_end"
-  hook_events: []
+    - "queue_update"
+    - "compaction_start / compaction_end"
+    - "auto_retry_start / auto_retry_end"
+    - "extension_error"
+  hook_events:
+    - "extension session_start"
+    - "extension session_before_switch"
+    - "extension session_before_fork"
+    - "extension session_shutdown"
   failure_modes:
-    - "auto_retry_start / auto_retry_end on transient provider errors"
-  notes: "The JSONL session file itself is the authoritative resume state. SDK/RPC state queries expose sessionId, sessionFile, and message counts."
+    - "assistant message stopReason=error with errorMessage in JSONL"
+    - "assistant message stopReason=aborted with errorMessage in JSONL"
+    - "RPC error responses for rejected commands or invalid session operations"
+    - "auto_retry_start / auto_retry_end stream events for retryable failures"
+  notes: "The JSONL session file is the durable observability source. RPC `get_state`, `get_session_stats`, `get_entries`, `get_tree`, `get_messages`, and `get_last_assistant_text` expose active session state while the process is alive."
 quirks:
-  - "Resuming a session from a different working directory in print/JSON mode can block on an interactive 'Fork this session into current directory?' prompt."
-  - "`--session` and `--fork` accept either a full file path or a partial session UUID; partial UUIDs may collide."
-  - "`/tree` edits the active leaf in the same file, so branching does not create a new session unless you explicitly /fork or /clone."
-  - "`/import` loads a JSONL file as a new session; it does not overwrite the source file."
-  - "`--no-session` runs ephemerally and produces no resumable file."
-  - "The session directory name encodes the absolute path with `-` separators, which can make cross-machine paths non-portable."
+  - "`--session <uuid-prefix>` first searches the current project, then all projects. If a global match belongs to another cwd, installed 0.73.1 source prompts to fork, which can hang unattended runs."
+  - "`--session <path>` preserves explicit paths and may create a new session at that path if the file does not exist."
+  - "Session names are stored as `session_info` entries and improve picker display, but current CLI docs do not define direct resume-by-name."
+  - "`/resume` is picker-only and should not be treated as scriptable selection."
+  - "`/tree` creates alternate branches inside the same file; only `/fork`, `/clone`, or `--fork` creates a separate transcript."
+  - "`--no-session` and `SessionManager.inMemory()` are intentionally not resumable."
+  - "Direct JSONL parsing is documented for parsers, but wrappers still need to tolerate migrations and extension-defined entries."
+  - "Runtime resources are recalculated on resume, so changing settings, system prompt files, extensions, tools, or project trust can change future behavior of an old session."
 gaps:
-  - "Whether print/JSON mode `--session` accepts a follow-up prompt when the cwd matches is inferred from CLI behavior, not explicitly documented."
-  - "Exact concurrency semantics when two processes open the same `.jsonl` file simultaneously are not documented."
-  - "Whether CLI resume flags (`--model`, `--provider`, `--thinking`) fully override session-restored model state is not explicitly documented."
-  - "Windows session storage paths are inferred from documentation; not locally verified."
-  - "Whether any extension-driven permission/question state is persisted across process restarts is not documented."
-changes: []
+  - "Exact behavior for simultaneous writes by two Pi processes to the same `.jsonl` file is undocumented."
+  - "Whether any extension-provided permission gate can persist enough state for post-exit answer injection is undocumented and was not observed locally."
+  - "Windows and Linux storage paths are source/doc inferred, not locally verified."
+  - "The official docs document session names for display/search but not deterministic resume-by-name creation or selection."
+  - "The exact durability boundary for a process killed mid-tool-call is not documented; local files only prove completed/aborted message records persist."
+changes:
+  - "Verified against Pi 0.73.1 installed locally and current pi.dev docs on 2026-07-03."
+  - "Replaced single `os: all` storage with schema-compliant macOS, Linux, and Windows records."
+  - "Added local evidence from `/Users/ken/.pi/agent/sessions`, including v3 JSONL headers, model/thinking entries, tool result entries, and persisted aborted/error assistant messages."
+  - "Added the `$HOME=/Users/ken/.claudine` overlay caveat for Claudine wrappers inspecting Pi state."
+  - "Added picker rename/delete/name filtering, session_info names, RPC live extension UI request limitations, and cross-project `--session` fork-prompt automation risk."
 requires_claudine_update: true
-reason: "Pi is on the Claudine research roster but is not yet a code-supported provider. The verified resume semantics, session-id surfaces, and cross-cwd fork prompt should feed provider metadata and wrapper design."
+reason: "Pi remains researched but not code-supported in Claudine. The verified local transcript model, session-id capture, per-OS storage paths, HOME-overlay caveat, and cross-project `--session` prompt risk need provider metadata and wrapper behavior before lifecycle `resume` can safely target Pi."
 ---
+
+# Pi Session Resume Research
 
 ## Overview
 
-Pi's session resume is a first-class, local-transcript-replay system. Every session is a versioned JSONL file stored under `~/.pi/agent/sessions/`, organized by working directory. Resume means loading that file, rebuilding the conversation tree, and appending new turns. Pi supports interactive resumption (`-c`, `-r`, `/resume`, `/tree`), scriptable non-interactive follow-up (`pi -p --session <file|uuid> <prompt>`), and programmatic control through the SDK or the RPC subprocess protocol.
+Pi has first-class resume support backed by local JSONL transcript replay. A session is not a remote server allocation or a live model state; it is a versioned append-only file under the Pi agent sessions directory. Resume loads that file, rebuilds the active conversation branch, recreates runtime services for the session cwd, and appends future entries.
+
+For Claudine, Pi is strong enough to support lifecycle `resume` once Pi becomes a code-supported provider, but automation must avoid treating all surfaces as equivalent. `pi -c` is current-directory latest-session resume, `pi --session <path|id>` targets a specific persisted transcript, `/resume` is a human picker, and RPC/SDK resume is local subprocess or in-process state. The main wrapper risks are HOME-overlay confusion, cross-project UUID matches that can prompt to fork, and the fact that live extension UI requests or queued messages are not persisted for later human-in-the-loop continuation.
 
 ## Resume Semantics
 
-A Pi "session" is a persisted JSONL transcript on disk. The authoritative state is the file itself; there is no separate server process or remote session store. The file uses a tree structure (`id`/`parentId`) so `/tree` can branch in place without creating new files. Resuming a session loads the file, restores the active leaf, and continues appending. Forking (`/fork`, `--fork`, `/clone`) copies history into a new file while leaving the original intact.
+A Pi session is a local JSONL transcript. The first line is a `session` header with `type`, `version`, `id`, `timestamp`, and `cwd`; inspected local files use `version: 3`. Subsequent entries form a tree through `id` and `parentId`. The active leaf determines which branch is replayed into model context. Official session-format docs describe entries for messages, model changes, thinking-level changes, compactions, branch summaries, custom extension entries, custom extension messages, labels, and session metadata.
+
+The applicable resume patterns are:
+
+| Pattern | Applies | Continuity model |
+|---|---:|---|
+| Continue latest | Yes | `pi -c` / `--continue` loads the most recent valid JSONL session for the current cwd. |
+| Resume by handle | Yes | `pi --session <path|id>` opens an explicit file path or UUID prefix. |
+| Interactive picker | Yes | `pi -r` and `/resume` open a current-project picker. |
+| Non-interactive follow-up | Yes | Print and JSON modes can append a prompt to `--continue` or `--session`. |
+| Transcript replay | Yes | The session file is the durable state. |
+| Server-side session | No | No separate remote authoritative session store was found. |
+| Live-process attach | Partial | RPC clients talk to a running Pi subprocess, but that is process control rather than reattaching to a saved live process after exit. |
+| Branch/fork/checkpoint | Partial | Branching and forking exist; named checkpoints/rewind do not. |
+| Recovery resume | Partial | Completed persisted entries resume; pending live tool/UI state does not. |
+| Human-in-the-loop resume | No | Live RPC UI requests can be answered while the process lives, but no durable post-exit pending question mechanism was found. |
+
+Chat history export is not a resume mechanism unless Pi can load it as a session JSONL file. Context files such as `AGENTS.md`, `CLAUDE.md`, system prompt files, skills, settings, and extension files affect future launches, but they are context sources rather than prior-session continuation state.
 
 ## Supported Modes
 
-| Mode | Entry point | Follow-up prompt | Selector |
-|------|-------------|------------------|----------|
-| Interactive CLI | `pi -c` | No | Latest in current directory |
-| Interactive CLI | `pi -r` | No | Picker |
-| Interactive CLI | `pi --session <path\|id>` | No | File path or partial UUID |
-| Interactive CLI | `/resume` | No | Picker |
-| Interactive CLI | `/tree` | No | Tree picker |
-| Interactive CLI | `/import <file>` | No | File path |
-| Non-interactive CLI | `pi -p --continue [message]` | Yes | Latest in current directory |
-| Non-interactive CLI | `pi -p --session <path\|id> [message]` | Yes | File path or partial UUID |
-| Non-interactive CLI | `pi --mode json --session <path\|id> [message]` | Yes | File path or partial UUID |
-| RPC / SDK | `pi --mode rpc --session <path\|id>` then `prompt` | Yes | File path or UUID |
-| RPC / SDK | `switch_session`, `SessionManager.open()` | No | File path |
+| Mode | Entry point | Follow-up prompt at invocation | Selector |
+|---|---|---:|---|
+| Interactive | `pi -c` | No | Latest session for cwd |
+| Interactive | `pi -r` | No | Picker |
+| Interactive | `pi --session <path|id>` | No | File path or UUID prefix |
+| Interactive | `/resume` | No | Picker |
+| Interactive | `/tree` | No | Entry/tree selector inside active session |
+| Interactive | `/fork`, `/clone`, `/import <file>` | No | Entry or file path |
+| Non-interactive print | `pi -p --continue "prompt"` | Yes | Latest session for cwd |
+| Non-interactive print | `pi -p --session <path|id> "prompt"` | Yes | File path or UUID prefix |
+| Non-interactive JSON | `pi --mode json --session <path|id> "prompt"` | Yes | File path or UUID prefix |
+| RPC | `pi --mode rpc --session <path|id>` then `prompt` | Yes | File path or UUID prefix |
+| SDK | `SessionManager.open(path)` / `continueRecent(cwd)` | Yes, through `session.prompt()` | File path or latest cwd session |
+
+Interactive resume and non-interactive follow-up are both supported, but the picker must be treated as human-only. Session names are first-class display metadata through `/name`, `--name`, `session_info` entries, and picker filters; current docs do not specify direct command-line resume by name. Non-interactive sessions are normal persisted sessions unless `--no-session` or `SessionManager.inMemory()` is used, so they can be resumed later.
 
 ## Session ID Capture
 
-Stable session identifiers are UUIDs. They can be captured from:
+The stable session handle is a UUID. It appears in the JSONL header and in the filename:
 
-- **`pi --mode json`**: the first line is a `session` header containing `id`.
-- **The session file path**: `~/.pi/agent/sessions/--<cwd>--/<timestamp>_<uuid>.jsonl`.
-- **The session file header**: line 1 has `"type":"session","id":"<uuid>"`.
-- **`/session`**: shows the session ID and file path in the TUI.
-- **SDK/RPC**: `session.sessionId`, `get_state.sessionId`, and `get_session_stats.sessionId`.
+```json
+{"type":"session","version":3,"id":"019f26a9-8c2e-77e9-b9fa-035d8e903788","timestamp":"2026-07-03T06:27:53.518Z","cwd":"/Users/ken/.claudine/worktrees/rusty-biscuit/claudine"}
+```
 
-The interactive `/resume` picker shows display names and timestamps, not raw IDs.
+Observed local filenames use `<timestamp>_<uuid>.jsonl`, for example:
+
+```text
+/Users/ken/.pi/agent/sessions/--Users-ken-.claudine-worktrees-rusty-biscuit-claudine--/2026-07-03T06-27-53-518Z_019f26a9-8c2e-77e9-b9fa-035d8e903788.jsonl
+```
+
+`pi --mode json` emits the session header as its first JSONL line. Interactive `/session` shows the active session file, ID, message count, tokens, and cost. SDK and RPC expose the ID through `AgentSession.sessionId`, `get_state.sessionId`, and session stats.
+
+The handle is available as soon as the session file/header is created. For durable automation, capture either the absolute session file path or the header UUID plus cwd. A bare UUID prefix is less safe because source inspection shows Pi searches the current project first, then all projects.
 
 ## Resume Invocation
 
-Continue the latest session interactively:
+Continue latest interactively:
 
 ```bash
 pi -c
 ```
 
-Browse and resume a session:
+Browse current-project sessions interactively:
 
 ```bash
 pi -r
 ```
 
-Resume a specific session in the TUI:
+Resume an explicit session in the TUI:
 
 ```bash
-pi --session 019f2352-39b4-73fa-9065-78dfc099ac1e
+pi --session /Users/ken/.pi/agent/sessions/--Users-ken--/2026-05-02T11-24-41-165Z_019de86e-fd4c-720b-a89a-73893f5786b4.jsonl
+pi --session 019de86e
 ```
 
-Send a follow-up non-interactively:
+Send a non-interactive follow-up and capture text output:
 
 ```bash
-pi -p --session ~/.pi/agent/sessions/--Users-ken-Projects-foo--/2026-07-02T14-53-39-124Z_019f2352-39b4-73fa-9065-78dfc099ac1e.jsonl "next step"
+pi -p --session /path/to/session.jsonl "Continue from the prior findings and summarize the next step."
 ```
 
-Continue the latest session with a new prompt:
+Send a non-interactive follow-up and capture structured events:
 
 ```bash
-pi -p --continue "finish the task"
+pi --mode json --session /path/to/session.jsonl "Continue from the prior findings."
 ```
 
-Resume via RPC:
+Start RPC on an existing session and send a prompt:
 
 ```bash
 pi --mode rpc --session /path/to/session.jsonl
 ```
 
-Then send a prompt over stdin:
+```json
+{"id":"req-1","type":"prompt","message":"Continue from the prior findings."}
+```
+
+Switch an RPC process to another session:
 
 ```json
-{"type":"prompt","message":"what is the next step?"}
+{"id":"req-2","type":"switch_session","sessionPath":"/path/to/session.jsonl"}
 ```
+
+The follow-up answer can be captured as plain text in print mode, as JSONL stream events in JSON mode, or as RPC events followed by `agent_end` / `get_last_assistant_text`.
 
 ## Session Lookup Scope
 
-Sessions are scoped by the working directory used when they were created. The storage directory encodes the absolute path with `/` replaced by `-`. The interactive picker and `SessionManager.list(cwd)` default to the current directory. There is no documented git-branch, worktree, or cross-project filtering in the CLI picker, although the SDK exposes `SessionManager.listAll()`.
+Default session storage is cwd-scoped. Pi encodes the working directory into the directory name below `~/.pi/agent/sessions/`, replacing path separators with dashes. Official docs describe `/resume` and `pi -r` as current-project selection.
+
+Installed 0.73.1 source adds an important detail for `--session <id>`: it resolves UUID prefixes by checking `SessionManager.list(cwd, sessionDir)` first and `SessionManager.listAll()` second. If a global match is found in another project, Pi reports the source cwd and asks whether to fork into the current directory. That prompt is inappropriate for unattended Claudine runs.
+
+Pi does not store git branch or worktree identity in the session header. A git worktree naturally receives a different encoded cwd if its filesystem path differs, but Pi does not appear to apply git-aware worktree grouping or branch filtering.
 
 ## State Storage
 
-Resumable state is local and file-based.
+On this macOS host, real Pi sessions were found in `/Users/ken/.pi/agent/sessions/`, while the current Claudine process had `$HOME=/Users/ken/.claudine` and therefore an empty overlay at `/Users/ken/.claudine/.pi/agent/sessions/`. This matters for wrappers: inspect the intended user home or Pi agent directory, not blindly the wrapper's temporary HOME.
 
-| OS | Path |
-|----|------|
-| macOS / Linux | `~/.pi/agent/sessions/--<cwd>--/<timestamp>_<uuid>.jsonl` |
-| Windows (inferred) | `%USERPROFILE%\.pi\agent\sessions\--<cwd>--\<timestamp>_<uuid>.jsonl` |
+The installed source defines the default agent directory as `os.homedir()/.pi/agent`, with override environment variable `PI_CODING_AGENT_DIR`. The session directory defaults to `<agentDir>/sessions`, with overrides from `--session-dir`, `PI_CODING_AGENT_SESSION_DIR`, or settings `sessionDir`.
 
-The JSONL format is versioned and documented in [Session File Format](https://pi.dev/docs/latest/session-format). Direct parsing is supported, but the SDK's `SessionManager` is the most stable interface. Storage location can be overridden with `--session-dir`, `PI_CODING_AGENT_SESSION_DIR`, or the `sessionDir` setting. There is no documented automatic retention; sessions persist until manually deleted.
+The JSONL format is documented and versioned. Existing v1/v2 sessions are migrated to the current version on load. Direct parsing is possible and documented, but an integration should still tolerate new entry types and extension-defined `custom` / `custom_message` records.
 
 ## Restored State
 
-Resuming restores:
+Resume restores the transcript branch, tool result messages, model changes, thinking-level changes, compaction summaries, branch summaries, custom messages, labels, and session metadata from JSONL. Local inspected transcripts include assistant records with `stopReason: "stop"`, `stopReason: "aborted"`, and `stopReason: "error"`, including `errorMessage` fields.
 
-- The full conversation transcript and tool results from the JSONL file.
-- The original working directory from the session header. Resuming from a different cwd can trigger a fork prompt.
-- The current model and thinking level recorded in the file, overridable at resume time.
+The original cwd is stored in the session header and used when Pi rebuilds runtime services. If the cwd is missing, installed source has explicit missing-cwd handling: interactive mode can ask the user whether to continue from a fallback cwd, while non-interactive mode exits with an error.
 
-Resuming does not restore the environment of the original session; it uses the launching process environment. Pi has no built-in permission/approval system, so there is no approval state to restore.
+Model and thinking level are restored from the active branch unless launch flags override them. Future environment variables, API keys, project trust, settings, context files, system prompt files, extensions, tools, and resource discovery come from the current launch. Pi does not persist a core approval state because it has no built-in sandbox or approval system; extension-specific gates are outside the core resume contract.
+
+Resume appends to the same transcript when opening an existing session. Forking and cloning create new transcript files.
 
 ## Branching and Checkpoints
 
-Branching is a core feature:
+Pi supports in-file branching and separate-file forks:
 
-- `/tree` navigates the session tree in place. All branches remain in the same file.
-- `/fork` creates a new session file from a previous user message.
-- `/clone` duplicates the current active branch into a new session file.
-- `--fork <path|id>` forks from the CLI.
-- SDK: `SessionManager.forkFrom()`, `createBranchedSession()`, `runtime.fork()`.
-- RPC: `fork`, `clone`, `get_fork_messages`.
+| Feature | Output | Notes |
+|---|---|---|
+| `/tree` | Same session file | Moves the active leaf to an earlier entry. Selecting a user/custom message lets the user edit and resubmit, creating a new branch. |
+| `/fork` | New session file | Creates a new session from a previous user message. |
+| `/clone` | New session file | Duplicates the current active branch. |
+| `pi --fork <path|id>` | New session file | Forks a session selected by file path or UUID prefix. |
+| Labels | Same session file | Marks entries, useful as bookmarks but not a true checkpoint restore feature. |
 
-There is no `/rewind` or checkpoint command. Because `/tree` keeps history in one file, the original branch is not destroyed, but the active leaf moves.
+The `/resume` picker can search, show paths, sort, filter named sessions, rename, and delete. Deletion can use the `trash` CLI when available. Sessions can be exported to HTML or JSONL and shared as a private GitHub gist through `/share`, but sharing/exporting is not itself resume unless the JSONL is imported or opened.
+
+No named rewind/checkpoint primitive was found. The closest resume-safe mechanism is tree navigation plus labels, or fork/clone for copy-preserving continuation.
 
 ## Human-in-the-Loop Resume
 
-Pi does not support native human-in-the-loop resume. It deliberately omits built-in permission popups and question tools. Extensions can build confirmation flows or use the RPC `extension_ui_request` / `extension_ui_response` sub-protocol, but any pending request is tied to the live process and is not persisted in the session file for later injection.
+Pi supports live human interaction in interactive mode and, for extensions, through RPC `extension_ui_request` / `extension_ui_response`. RPC can also queue `steer` and `follow_up` messages while the process is alive.
+
+No durable human-in-the-loop resume mechanism was verified. A pending extension dialog, approval-like tool gate, editor request, or notification is live process state. It was not observed in local session files, and the docs describe the response path as RPC stdin while the request is pending. Claudine should not assume it can stop Pi at a question, ask the user elsewhere, restart Pi later, and inject the answer into the same pending operation. It can only implement that pattern by keeping the RPC process alive or by translating the user's answer into a new prompt/follow-up after normal resume.
 
 ## Interruption Recovery
 
-Because sessions are append-only JSONL files, most interruptions leave the session resumable:
+Because session files are append-only JSONL, completed persisted entries survive terminal close, Ctrl+C, process kill after flush, provider errors, and later launches. Local files show aborted and errored assistant messages persisted with `stopReason` and `errorMessage`, so a subsequent resume can continue after visible failure records.
 
-- **Crash / terminal close / process kill**: the file remains and can be resumed.
-- **Ctrl+C**: the session is preserved; resume with `-c`, `-r`, or `--session`.
-- **Pending tool call**: tool results are written to the file; a kill mid-turn may leave a partial assistant message as the leaf.
-- **Pending approval / question**: not applicable; no built-in approval state is persisted.
+The durable boundary is not identical to live recovery. In-progress tool calls, pending extension UI requests, process-memory queues, and partial output not yet appended are not guaranteed to survive. The installed session manager only writes the initial entries after an assistant message exists, then appends future entries; killing a process before that point can leave no session file for an otherwise started run.
+
+Concurrent resumes of the same file are not documented as safe. Since persistence uses normal append/rewrite operations without a documented lock, Claudine should serialize access to a Pi transcript it owns.
 
 ## Observability
 
-Surfaces that expose session identity or resumability:
+Useful resume observability surfaces:
 
-- **`--mode json`**: first event is the `session` header with `id` and `cwd`.
-- **Session file path/header**: stable UUID and encoded cwd.
-- **RPC `get_state` / `get_session_stats`**: return `sessionId`, `sessionFile`, `messageCount`, etc.
-- **SDK `session.sessionId` and `session.sessionFile`**.
-- **Lifecycle events**: `agent_start`, `turn_start`, `message_start`, `tool_execution_*`, etc., stream progress but do not repeat the session ID.
+| Surface | Resume-relevant data |
+|---|---|
+| JSON mode | First JSONL line is the session header; later events show lifecycle, messages, tools, queues, compaction, retry, and extension errors. |
+| Session file | Durable header, entries, parent links, model/thinking changes, tool results, errors, labels, names, compactions, custom entries. |
+| TUI `/session` | Current session file, ID, message count, tokens, and cost. |
+| RPC `get_state` | `sessionFile`, `sessionId`, `sessionName`, model, thinking level, streaming state, queue counts. |
+| RPC `get_entries` | Append-ordered entries plus `leafId`; supports a `since` cursor. |
+| RPC `get_tree` | Tree nodes plus current `leafId`. |
+| RPC `get_last_assistant_text` | Latest assistant text for final answer capture. |
+| Extension events | `session_start`, `session_before_switch`, `session_before_fork`, and `session_shutdown` can observe or cancel session replacement. |
 
 ## Quirks and Gaps
 
 Quirks:
 
-- Resuming a session from a different working directory in print/JSON mode can block on an interactive fork prompt.
-- `--session` and `--fork` accept a partial UUID, which can collide.
-- `/tree` changes the active leaf in the same file; it does not create a checkpoint.
-- The storage directory name encodes the absolute path, so paths are not portable across machines.
+- Cross-project `--session <uuid-prefix>` can become interactive by asking whether to fork into the current cwd.
+- The current docs support names for display/search, but not direct command-line resume-by-name.
+- `/tree` changes the active branch in the same file; it is not a separate fork unless `/fork` or `/clone` is used.
+- `--no-session` and SDK `SessionManager.inMemory()` produce no resumable state.
+- Pi recalculates launch resources, so an old session can behave differently after settings, extensions, tools, context files, trust, or system prompt files change.
+- In this Claudine environment, `$HOME` points to `/Users/ken/.claudine`; real historical Pi sessions were under `/Users/ken/.pi`, so HOME overlays can hide the sessions Claudine wants.
 
 Gaps:
 
-- Whether print/JSON `--session` accepts a positional follow-up prompt when cwd matches is inferred from observed behavior, not an explicit docs statement.
-- Concurrency semantics when two processes open the same `.jsonl` file are not documented.
-- Whether resume-time CLI flags fully override session-restored model state is not explicitly documented.
-- Windows storage paths are inferred, not locally verified.
+- Simultaneous writes to the same JSONL transcript are undocumented.
+- Windows and Linux storage paths were inferred from docs/source, not locally verified.
+- Persistent post-exit extension UI answer injection was not found.
+- The precise file state after killing Pi during an active tool call is not documented.
+- Deterministic resume-by-session-name remains unsupported by the official docs as of this research.
 
 ## Claudine Integration Notes
 
-For Claudine's lifecycle `resume` action and future recovery:
+For lifecycle `resume`, Claudine should model Pi as transcript replay with a durable local file handle. The safest handle is an absolute JSONL path captured from JSON mode, RPC state, `/session`, or filesystem discovery. UUID-prefix resume is useful for humans but weaker for automation because it can collide or match across projects.
 
-- Capture the session UUID from the first line of `pi --mode json` output or from the session filename.
-- Use `pi -p --session <file|uuid> "<follow-up>"` for scriptable continuation from a matching cwd.
-- Use `pi -p --continue "<follow-up>"` to target the latest session in the current directory.
-- Handle the cross-cwd fork prompt when resuming `--session` from a different directory; prefer launching from the session's original cwd or passing the absolute file path and confirming behavior.
-- For richer programmatic control, spawn `pi --mode rpc --session <file>` and drive it via JSONL commands.
-- Treat the JSONL file as the source of truth; direct parsing is documented, but prefer SDK `SessionManager` when in-process.
-- Do not rely on native HITL resume; build or require an extension if user questions must be brokered.
+`retry` can use ordinary new invocations when the desired behavior is rerunning a prompt, but `resume` should use `--session <absolute-path>` or an RPC process already switched to that file. Claudine should include `--session-dir` or `PI_CODING_AGENT_SESSION_DIR` only when it deliberately owns a separate storage root.
+
+`proxy` and future human-in-the-loop recovery should prefer RPC when a live Pi process must remain answerable. If the process exits while waiting on an extension UI request, Claudine should treat the pending interaction as lost and resume by adding a new prompt rather than pretending to answer the original request.
+
+For non-interactive wrappers, avoid `pi -r`, `/resume`, and cross-project UUID-prefix selection. Also avoid changing `$HOME` unless Claudine intentionally wants isolated Pi config and sessions; otherwise Pi will read and write a different `~/.pi/agent` tree.
+
+## Changelog
+
+- 2026-07-03: Refreshed against Pi 0.73.1 installed locally, current pi.dev docs, and real session files under `/Users/ken/.pi/agent/sessions`. Updated frontmatter to use `agent: codex`, `model: default`, and schema-compliant per-OS storage records.
+- 2026-07-03: Added local JSONL evidence for v3 headers, model/thinking entries, tool results, aborted/error assistant records, and the Claudine `$HOME` overlay caveat.
+- 2026-07-03: Added current session picker behavior, session names via `session_info`, RPC/SDK replacement APIs, live extension UI request limitations, and the cross-project `--session` fork prompt risk.
 
 ## Sources
 
 - [Pi Sessions documentation](https://pi.dev/docs/latest/sessions)
-- [Pi Session File Format](https://pi.dev/docs/latest/session-format)
-- [Pi JSON Event Stream Mode](https://pi.dev/docs/latest/json)
-- [Pi RPC Mode](https://pi.dev/docs/latest/rpc)
+- [Pi Session File Format documentation](https://pi.dev/docs/latest/session-format)
+- [Pi Using Pi documentation](https://pi.dev/docs/latest/usage)
+- [Pi JSON Event Stream Mode documentation](https://pi.dev/docs/latest/json)
+- [Pi RPC Mode documentation](https://pi.dev/docs/latest/rpc)
 - [Pi SDK documentation](https://pi.dev/docs/latest/sdk)
-- [Pi Settings documentation](https://pi.dev/docs/latest/settings)
-- [Pi GitHub README / CLI reference](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md)
-- [Pi project website](https://pi.dev)
+- [Pi Extensions documentation](https://pi.dev/docs/latest/extensions)
+- Local installed Pi package source: `/Users/ken/.bun/install/global/node_modules/@mariozechner/pi-coding-agent/dist/main.js`
+- Local installed Pi session manager source: `/Users/ken/.bun/install/global/node_modules/@mariozechner/pi-coding-agent/dist/core/session-manager.js`
+- Local installed Pi runtime source: `/Users/ken/.bun/install/global/node_modules/@mariozechner/pi-coding-agent/dist/core/agent-session-runtime.js`
+- Local inspected session directory: `/Users/ken/.pi/agent/sessions/`

@@ -1,9 +1,9 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-02
-last_updated: 2026-07-02
-agent: opencode
-model: kimi-for-coding/k2p7
+last_updated: 2026-07-03
+agent: codex
+model: default
 docs: https://kilo.ai/docs/code-with-ai/platforms/cli
 support: first_class
 continuity_model: server_session
@@ -15,14 +15,15 @@ resume_modes:
       - "kilo --session <id>"
       - "kilo --session <id> --fork"
       - "kilo --session <id> --cloud-fork"
-      - "TUI slash commands /sessions /resume /continue"
+      - "kilo attach <url> --continue"
+      - "kilo attach <url> --session <id>"
+      - "TUI /sessions, /resume, and /continue"
     accepts_followup_prompt: false
     selection_methods:
       - latest
       - id
       - picker
-      - all_projects
-    notes: "Follow-up prompts are typed inside the resumed TUI session. The picker shows titles, not raw IDs. --cloud-fork fetches a cloud session and continues it locally."
+    notes: "Interactive resume opens the TUI. Follow-up text is typed after the session opens; the root `--prompt` option is separate from documented `--continue` use and is not a reliable scriptable resume prompt."
   - mode: non_interactive
     supported: true
     mechanisms:
@@ -30,231 +31,254 @@ resume_modes:
       - "kilo run --session <id> <message>"
       - "kilo run --session <id> --fork <message>"
       - "kilo run --session <id> --cloud-fork <message>"
+      - "kilo run --attach <url> --session <id> <message>"
     accepts_followup_prompt: true
     selection_methods:
       - latest
       - id
-    notes: "The scriptable CLI surface that sends a new prompt into an existing session. --continue picks the most recent root session from the current project. --replay can replay visible history on interactive resume."
+    notes: "Scriptable follow-up is first-class. `--format json` emits normalized event records with `sessionID`; default output is formatted text."
   - mode: headless_server
     supported: true
     mechanisms:
       - "kilo serve"
       - "kilo web"
       - "kilo daemon"
-      - "kilo attach <url> --session <id>"
-      - "kilo run --attach <url> --session <id>"
+      - "GET /session"
+      - "POST /session/{sessionID}/message"
+      - "POST /session/{sessionID}/fork"
+      - "POST /session/{sessionID}/revert"
     accepts_followup_prompt: true
     selection_methods:
-      - latest
       - id
-      - picker
-    notes: "Local headless server owns the authoritative session store. Clients attach via HTTP or the running server and can send follow-up prompts. The daemon and console provide persistent server management."
+      - all_projects
+    notes: "The local server exposes HTTP/SSE routes used by the TUI, `kilo run --attach`, Kilo Console, and editor clients."
+  - mode: api
+    supported: true
+    mechanisms:
+      - "@kilocode/sdk/v2 createKiloClient().session.prompt()"
+      - "@kilocode/sdk/v2 createKiloClient().event.subscribe()"
+      - "@kilocode/sdk/v2 createKiloClient().question.reply()"
+      - "@kilocode/sdk/v2 createKiloClient().permission.reply()"
+    accepts_followup_prompt: true
+    selection_methods:
+      - id
+    notes: "Current generated SDK samples use `createKiloClient` from `@kilocode/sdk`; older OpenCode SDK names should not be used for Kilo-specific integration."
   - mode: ide
     supported: true
     mechanisms:
-      - "VS Code extension resume past conversations"
-      - "JetBrains plugin resume"
+      - "VS Code extension sessions"
+      - "JetBrains extension sessions"
+      - "Cloud Agents Recent Sessions"
+      - "Remote Connections"
     accepts_followup_prompt: false
     selection_methods:
       - picker
       - latest
-    notes: "IDE extensions maintain their own session history; this research focuses on CLI behavior."
-  - mode: api
-    supported: true
-    mechanisms:
-      - "HTTP OpenAPI server exposed by kilo serve / kilo daemon"
-      - "@opencode-ai/sdk client.session.prompt() (Kilo CLI is an OpenCode fork)"
-      - "@opencode-ai/sdk client.event.subscribe()"
-    accepts_followup_prompt: true
-    selection_methods:
-      - id
-    notes: "Programmatic resume and follow-up are first-class via the local server API and SDK. Exact endpoint paths are inherited from the OpenCode upstream; Kilo docs do not republish them."
+    notes: "IDE and Cloud Agent resume are picker-oriented user surfaces. This document focuses on CLI/server semantics."
 session_id_capture:
   - surface: json_stream
     field: sessionID
-    format: "ses_<base62>"
-    notes: "Present on every JSON event emitted by kilo run --format json. Inferred from OpenCode heritage; locally verified for session list IDs."
+    format: "ses_<id>"
+    notes: "`kilo run --format json` constructs every emitted record with `type`, `timestamp`, and `sessionID`; locally verified from current source, not by a live model run."
   - surface: cli_command
     field: id
-    format: "ses_<base62>"
-    notes: "kilo session list --format json returns objects with id, title, updated, created, projectId, directory, and project."
+    format: "ses_<id>"
+    notes: "`kilo session list --format json --all` returned stable session IDs with `title`, `updated`, `created`, `projectId`, `directory`, and `project` fields on this host."
   - surface: session_file
     field: id
-    format: "SQLite row in kilo.db"
-    notes: "The session database lives in the Kilo data directory. Session IDs are stable primary keys in the local database, not derived from filenames."
+    format: "SQLite `session.id` primary key"
+    notes: "Observed in `/Users/ken/.local/share/kilo/kilo.db`; related messages and parts use `session_id` foreign keys."
+  - surface: stdout
+    field: info.id
+    format: "ses_<id>"
+    notes: "`kilo export --sanitize <sessionID>` writes JSON with `info.id`, `messages[].info.sessionID`, and `parts[].sessionID`."
   - surface: interactive_ui
     field: title
     format: string
-    notes: "The TUI session picker shows session titles and timestamps, not raw IDs. Raw IDs are exposed through the external session list or export commands."
-  - surface: log_file
-    field: run
-    format: hex
-    notes: "stderr logs identify the run instance, not the session. Session ID must be captured from the JSON stream or session list."
+    notes: "The TUI session switcher is opened by `/sessions`, `/resume`, or `/continue`; it is a human picker, not a stable automation protocol."
 resume_invocations:
   - mode: interactive
     invocation: "kilo --continue"
     accepts_prompt: false
     selection: latest
-    notes: "Resumes the most recent root session for the current project/directory in the TUI."
+    notes: "Opens the most recent root session in the current workspace/project scope."
   - mode: interactive
     invocation: "kilo --session <session-id>"
     accepts_prompt: false
     selection: id
-    notes: "Opens the TUI on the specified session."
+    notes: "Opens the named local session in the TUI."
   - mode: interactive
     invocation: "kilo --session <session-id> --fork"
     accepts_prompt: false
     selection: id
-    notes: "Forks the specified session into a new session, then opens it in the TUI."
+    notes: "Forks the local session, then opens the fork."
   - mode: interactive
-    invocation: "kilo --session <session-id> --cloud-fork"
+    invocation: "kilo --session <cloud-session-id> --cloud-fork"
     accepts_prompt: false
     selection: id
-    notes: "Fetches a cloud session and continues it locally in the TUI."
+    notes: "Imports a cloud session through `kilo.cloud.session.import`, then opens the new local session."
   - mode: interactive
-    invocation: "/sessions (alias /resume, /continue)"
+    invocation: "kilo attach <url> --session <session-id>"
+    accepts_prompt: false
+    selection: id
+    notes: "Attaches a TUI client to an explicit running Kilo server and opens the selected session."
+  - mode: interactive
+    invocation: "/sessions, /resume, or /continue"
     accepts_prompt: false
     selection: picker
-    notes: "Inside the TUI, opens the session selector."
+    notes: "Slash aliases open the session switcher inside the TUI."
   - mode: non_interactive
-    invocation: "kilo run --continue <message>"
+    invocation: "kilo run --continue \"follow-up prompt\""
     accepts_prompt: true
     selection: latest
-    notes: "Sends a follow-up message into the most recent root session and returns the response."
+    notes: "Finds the latest root session through `session.list()` and sends the prompt."
   - mode: non_interactive
-    invocation: "kilo run --session <session-id> <message>"
+    invocation: "kilo run --session <session-id> \"follow-up prompt\""
     accepts_prompt: true
     selection: id
-    notes: "Sends a follow-up message into the specified session and returns the response."
+    notes: "Looks up the session by ID and sends the prompt with `client.session.prompt()`."
   - mode: non_interactive
-    invocation: "kilo run --session <session-id> --fork <message>"
+    invocation: "kilo run --session <session-id> --fork \"follow-up prompt\""
     accepts_prompt: true
     selection: id
-    notes: "Forks the session, sends the message into the new session, and returns the response."
+    notes: "Creates a fork with `session.fork`, then sends the prompt into the fork."
   - mode: non_interactive
-    invocation: "kilo run --session <session-id> --cloud-fork <message>"
+    invocation: "kilo run --session <cloud-session-id> --cloud-fork \"follow-up prompt\""
     accepts_prompt: true
     selection: id
-    notes: "Fetches a cloud session, forks it locally, sends the message, and returns the response."
+    notes: "Imports the cloud session locally, then sends the prompt to the imported session."
+  - mode: non_interactive
+    invocation: "kilo run --attach http://localhost:4096 --session <session-id> \"follow-up prompt\""
+    accepts_prompt: true
+    selection: id
+    notes: "Uses a running server instead of the embedded server path; Basic auth can be supplied with `--username` and `--password`."
   - mode: headless_server
-    invocation: "POST /session/:id/message { parts: [...] }"
+    invocation: "POST /session/{sessionID}/message"
     accepts_prompt: true
     selection: id
-    notes: "Send a message to an existing session through the headless server and wait for the assistant response. Endpoint inherited from OpenCode upstream."
+    notes: "Request body requires `parts`; optional fields include `model`, `agent`, `tools`, `format`, `system`, `variant`, and `noReply`."
   - mode: headless_server
-    invocation: "POST /session/:id/fork { messageID? }"
+    invocation: "POST /session/{sessionID}/fork"
     accepts_prompt: false
     selection: id
-    notes: "Fork an existing session at an optional message ID through the server API. Endpoint inherited from OpenCode upstream."
+    notes: "Optional body field `messageID` forks at a specific message point."
   - mode: api
-    invocation: "client.session.prompt({ path: { id }, body: { parts: [...] } })"
+    invocation: "createKiloClient({ baseUrl }).session.prompt({ sessionID, parts: [...] })"
     accepts_prompt: true
     selection: id
-    notes: "SDK method to send a follow-up prompt into an existing session. SDK is inherited from OpenCode upstream."
+    notes: "Kilo-native SDK call for programmatic follow-up."
 state_storage:
   - location: local
     os: macos
     path: "~/.local/share/kilo/kilo.db"
     format: SQLite
-    retention: "Controlled by internal pruning; shared conversations persist until unshared."
-    notes: "Observed on macOS. The database is the authoritative session store for the local server."
+    retention: "Local rows persist until deleted, uninstalled with data removal, or changed by internal migration/pruning."
+    notes: "Verified on macOS with `kilo debug paths`; this host's real user data is under `/Users/ken/.local/share/kilo`, not `~/.kilo`."
   - location: local
     os: linux
     path: "~/.local/share/kilo/kilo.db"
     format: SQLite
-    retention: "Controlled by internal pruning; shared conversations persist until unshared."
-    notes: "Inferred from XDG-style paths observed on macOS and standard Node.js app conventions."
+    retention: "Local rows persist until deleted, uninstalled with data removal, or changed by internal migration/pruning."
+    notes: "Inferred from Kilo's XDG-style path behavior and official Linux support; not locally verified."
   - location: local
     os: windows
     path: "%LOCALAPPDATA%\\kilo\\kilo.db"
     format: SQLite
-    retention: "Controlled by internal pruning; shared conversations persist until unshared."
-    notes: "Inferred from standard Node.js app conventions; not verified by local inspection."
-  - location: local
-    os: all
-    path: "<data-dir>/snapshot/ and <data-dir>/storage/"
-    format: "proprietary (snapshots and auxiliary storage)"
-    retention: "Same as database"
-    notes: "Additional session artifacts (file snapshots, tool output, exported data) live alongside the database. Direct parsing is unsupported."
+    retention: "Local rows persist until deleted, uninstalled with data removal, or changed by internal migration/pruning."
+    notes: "Inferred from common Windows app-data resolution for the same Kilo global path abstraction; not locally verified."
   - location: server
-    os: all
-    path: "Kilo Cloud Agent / Kilo Gateway"
+    path: "Kilo Cloud Agent / Kilo account"
     format: "cloud session record"
-    retention: "Inactive cloud agent sessions are deleted after 7 days during beta; expired sessions remain accessible via the CLI."
-    notes: "Cloud sessions can be fetched and resumed locally with --cloud-fork. Remote mode syncs local sessions to the cloud dashboard."
+    retention: "Cloud Agent beta documentation says inactive sessions are deleted after 7 days; expired sessions remain accessible via the CLI."
+    notes: "Cloud sessions can be imported locally with `--cloud-fork`; Remote Connections require the local CLI to keep running."
 resume_scope:
   project_scoped: true
   cwd_scoped: true
-  worktree_aware: false
+  worktree_aware: true
   all_projects_supported: true
   branch_filtering: false
-  notes: "Sessions have a projectId and directory. --continue lists sessions and picks the first root session, which can surprise users when unrelated directories share a project record. The API and picker can access sessions across all projects. Cloud-fork extends scope to cloud-hosted sessions."
+  notes: "Default session listing is current project/runtime scoped and root-session filtered. `kilo session list --all` widens to all projects. Current source uses Kilo project-family/worktree-aware filters, but there is no documented git branch filter."
 branching_checkpointing:
   branch_supported: true
   checkpoint_supported: true
-  fork_invocation: "kilo --session <id> --fork or kilo run --session <id> --fork; POST /session/:id/fork"
-  checkpoint_invocation: "POST /session/:id/revert { messageID, partID? } or /undo /redo in TUI"
+  fork_invocation: "kilo --session <id> --fork; kilo run --session <id> --fork <prompt>; POST /session/{sessionID}/fork"
+  checkpoint_invocation: "POST /session/{sessionID}/revert; POST /session/{sessionID}/unrevert; TUI undo/redo surfaces"
   preserves_original: true
-  notes: "Forking creates a new session record and copies message history, leaving the original intact. Revert rewinds conversation state within the same session; undo/redo operate on file edits. The session table schema includes parent_id for forks and revert for checkpoint state."
+  notes: "Fork creates a new `session` row and copies message/part history with new IDs, remapping assistant parent IDs and compaction pointers. Revert records `session.revert` and writes session diffs; it is refused while the session is busy."
 restored_state:
   transcript: true
   tool_results: true
-  approvals: unknown
+  approvals: session_only
   model: overridable
   cwd: configurable
   env: current_process
-  notes: "Transcript and tool results are loaded from the local session database. --model and --dir can override the original choices at resume time. Environment comes from the launching process, not the session. The session table has a permission column, but whether it is fully restored on resume is not explicitly documented."
+  notes: "Transcript, reasoning, text, step, and tool parts are loaded from SQLite. Session rows can store agent, model, permission, directory, path, metadata, and revert state. `--model`, `--agent`, `--variant`, and `--dir` can override launch behavior; environment comes from the current process."
 hitl_resume:
   supported: true
-  question_capture: "Subscribe to server SSE events via client.event.subscribe() or poll GET /session/status; question and permission requests block the session until answered."
-  answer_injection: "POST /session/:id/permissions/:permissionID { response, remember? } answers a permission request; POST /session/:id/message sends a user reply into a session waiting on a question tool."
-  limitations: "Stock kilo run disables the question tool and auto-rejects runtime permission prompts, so it cannot broker HITL. Use the server/SDK API, remote mode, or Cloud Agent for human-in-the-loop workflows."
+  question_capture: "GET /event or `client.event.subscribe()` emits `question.asked` and `permission.asked`; `GET /question` and `GET /permission` list pending requests."
+  answer_injection: "`POST /question/{requestID}/reply`, `POST /question/{requestID}/reject`, SDK `question.reply()`, SDK `question.reject()`, SDK `permission.reply()`, or the deprecated `POST /session/{sessionID}/permissions/{permissionID}`."
+  limitations: "Plain non-interactive `kilo run` denies question/plan/interactive-terminal permissions and auto-rejects permission prompts unless `--auto` or `--dangerously-skip-permissions` is used. For real HITL, use TUI, IDE, Remote Connections, or a server/SDK broker."
 interruption_recovery:
   crash_resume: true
   ctrl_c_resume: true
-  pending_tool_resume: true
+  pending_tool_resume: false
   pending_approval_resume: true
-  limitations: "Sessions are persisted continuously to the local SQLite database, so crash, Ctrl+C, terminal close, and process kill leave the session resumable. Pending questions/permissions recover if the server process is still running; if the server is killed, resuming from the DB restores the conversation but may reset in-flight approval/question state."
+  limitations: "Persisted transcript state survives crash, Ctrl+C, terminal close, and process kill. In-flight runners, pending questions, pending permissions, and background jobs are process memory; they remain answerable only while the owning server/runtime is alive. SessionRunState rejects concurrent busy operations with SessionBusyError for routes such as revert/delete, but multiple attached clients can observe the same session."
 observability:
   stream_events:
-    - "sessionID in every kilo run --format json event"
-    - "server SSE event stream (client.event.subscribe)"
-    - "GET /session/status returns per-session status"
+    - "`kilo run --format json` emits records with `type`, `timestamp`, and `sessionID`."
+    - "GET /event streams SSE events; SDK operationId is `event.subscribe`."
+    - "GET /session/status returns per-session status values."
+    - "GET /question and GET /permission expose pending HITL requests."
+    - "`kilo session list --format json --all` exposes session IDs without parsing SQLite."
+    - "`kilo export --sanitize <sessionID>` exposes stable transcript shape without sensitive text."
   hook_events:
-    - "plugin event hook receives session lifecycle events"
+    - "Kilo plugin/TUI event surfaces use session, message, part, question, permission, and status events."
   failure_modes:
-    - "auto-rejected permission in kilo run"
-    - "session abort via POST /session/:id/abort"
-  notes: "The JSON stream is the most reliable CLI capture surface. The server exposes health, session list, session status, and event endpoints for programmatic monitoring. kilo session list --format json is the stablest non-stream source of IDs."
+    - "Session not found for missing explicit IDs."
+    - "SessionBusyError for operations that require an idle session."
+    - "QuestionRejectedError / Permission rejection when HITL requests are declined or disposed."
+    - "Headless subagent permission denial to avoid unattended hangs."
+  notes: "Logs live under the Kilo data log directory reported by `kilo debug paths`; logs identify run/server activity, while session identity is best captured from JSON streams, session list/export, or server events."
 quirks:
-  - "kilo run in default mode does not print a dedicated session-id banner; scripts must use --format json or session list."
-  - "kilo run explicitly disables the question tool and auto-rejects permission prompts, making it unsuitable for human-in-the-loop resumption."
-  - "--continue resolves by listing sessions and picking the first root session, which can select the wrong session when multiple directories map to the same projectId."
-  - "Forking copies message history into a new session; long sessions can make fork slow."
-  - "Shared sessions sync conversation history to Kilo servers; disabling sharing via config keeps data local."
-  - "The SQLite database and auxiliary storage formats are internal and not stable for direct parsing; use export/import or the API for structured access."
-  - "macOS stores data under ~/.local/share/kilo rather than ~/Library, following XDG-style paths."
-  - "--cloud-fork requires the session to be available from Kilo Cloud / Gateway and is only usable with --session."
-  - "kilo run --replay and --replay-limit control whether resumed interactive history is replayed to the model; defaults to false."
+  - "There is no `~/.kilo` session store on this host; Kilo uses XDG-style paths such as `~/.local/share/kilo/kilo.db`."
+  - "The current source and installed help are Kilo-native; SDK examples use `createKiloClient` from `@kilocode/sdk`, not the old OpenCode client name."
+  - "`kilo run` default output does not print a dedicated session-id banner; use `--format json`, `kilo session list --format json`, or `kilo export`."
+  - "`kilo run --continue` selects the first root session returned by `session.list()` for the current scope; use `--session` when automation must target an exact session."
+  - "`--cloud-fork` is mutually exclusive with `--fork` and `--continue`, and requires `--session`."
+  - "`kilo run --replay` and `--replay-limit` apply only to `--interactive`; they are not non-interactive transcript replay controls."
+  - "Plain non-interactive runs deny question, interactive_terminal, plan_enter, and plan_exit permissions, and auto-reject normal permission asks unless auto-approval flags are used."
+  - "The SQLite schema and storage directories are internal; direct parsing is useful evidence but should not be Claudine's integration contract."
+  - "Current local transcript sample had two sessions, four messages, and five parts; it included user text, assistant text, reasoning, and step-start parts but no completed tool-result part."
 gaps:
-  - "Exact concurrency semantics when two clients resume/send messages to the same session simultaneously are not documented."
-  - "Whether approval state (always-allow settings, per-session permissions) is fully restored on resume is not explicitly documented."
-  - "Windows session storage paths are inferred, not verified by local inspection."
-  - "Retention sweep timing and behavior for active sessions are not documented."
-  - "The exact OpenAPI/SSE endpoint paths and SDK methods are inherited from OpenCode upstream and not republished in Kilo docs."
-  - "Whether kilo run --format json emits sessionID on every event was not locally verified with a live run."
-changes: []
+  - "Windows storage path is inferred rather than locally observed."
+  - "Exact cloud-session server retention beyond the Cloud Agent beta statement is not documented."
+  - "Whether all per-session permission rules should be treated as restored approvals for Claudine automation needs provider testing with a real permission prompt."
+  - "The concurrency behavior for two simultaneous prompt submissions to the same session is not fully documented, beyond busy-state guards in route-level operations."
+  - "Live model execution of `kilo run --format json` was not performed; JSON `sessionID` emission was verified from current source."
+changes:
+  - "Updated research from Kilo CLI 7.3.45 help, current public source commit 419ff008ef180dd7076f679a89442883ba8f8d86, official docs, generated OpenAPI, and local Kilo state."
+  - "Replaced OpenCode-inherited SDK wording with Kilo-native `@kilocode/sdk` / `createKiloClient` APIs."
+  - "Confirmed real local state under `/Users/ken/.local/share/kilo/kilo.db`, with two observed `ses_...` sessions and transcript rows in `message` and `part` tables."
+  - "Recorded current `kilo run` safety behavior: questions are denied, normal permission asks are auto-rejected, `--auto` and `--dangerously-skip-permissions` alter approval handling, and headless subagent asks are denied instead of hanging."
+  - "Added current `--replay` / `--replay-limit` scope, cloud-fork validation, worktree-aware session lookup, and Kilo-native question/permission endpoints."
 requires_claudine_update: true
-reason: "Kilo Code is on the Claudine research roster but is not yet a code-supported provider. The verified server_session continuity model, Kilo-specific cloud-fork and remote-mode resume paths, and confirmed local storage paths should feed provider metadata and wrapper design."
+reason: "Kilo remains on the research roster but is not a compiled Claudine provider. Claudine's future Kilo wrapper should use Kilo-native SDK/HTTP surfaces, capture `sessionID` from JSON or session-list output, avoid `kilo run` for HITL brokerage, and model current headless permission behavior."
 ---
+
+# Kilo Code Session Resume
 
 ## Overview
 
-Kilo Code's session resume is a first-class, local-server-backed feature inherited from its OpenCode upstream, with Kilo-specific extensions for cloud sessions and remote connections. Every session is stored in a local SQLite database (`kilo.db`) that is owned by a Kilo server process; the TUI, `kilo run`, the SDK, and the HTTP API are all clients of that server. Resume means reattaching to the same session record and appending new turns, not replaying a standalone transcript file. The CLI supports interactive resumption (`--continue`, `--session`, `/sessions`), scriptable non-interactive follow-up (`kilo run --session <id> <message>`), full programmatic control through the headless server and SDK, and Kilo-specific cloud session resumption via `--cloud-fork`.
+Kilo Code has first-class resume support across the TUI, scriptable `kilo run`, attached/headless server mode, SDK/HTTP clients, IDE extensions, and Cloud Agent surfaces. Local CLI resume is not a loose chat-history export: it continues a persisted session record identified by a `ses_...` ID, loaded by an embedded, daemon, or explicit Kilo server and backed by a local SQLite database.
+
+For Claudine, the main integration risk is not finding a resume command; it is targeting the right session and choosing the right surface. `kilo run --session <id> <prompt>` is suitable for simple non-interactive continuation, while human-in-the-loop continuation needs the server/SSE/SDK path because plain `kilo run` deliberately denies questions and auto-rejects permission prompts unless configured for auto-approval.
 
 ## Resume Semantics
 
-A Kilo "session" is a persisted conversation record in the local SQLite database, identified by a stable `ses_...` ID. The authoritative state lives in the database and the currently running server process. When you resume, the client asks the server for the session, loads its message history, and continues from the last turn. Because the TUI itself is a client to the server, resuming the same session from multiple clients is possible and will share the same underlying record. Cloud sessions can be fetched and resumed locally, and remote mode can sync local sessions to the Kilo Cloud Agent dashboard.
+A Kilo session is a persisted local runtime record in `kilo.db`, with transcript rows in `message` and `part` tables and auxiliary artifacts under the Kilo data directory. The server/runtime is responsible for loading that state, appending new user and assistant messages, publishing session events, and tracking busy/idle state. Cloud Agent sessions are separate cloud records that can be continued in Cloud Agents or imported locally with `--cloud-fork`.
+
+The applicable resume patterns are continue latest, resume by handle, interactive picker, non-interactive follow-up, server-side/local-server session, branch/fork, checkpoint/revert, recovery resume, and human-in-the-loop resume through server events. Transcript export is observable and useful for validation, but an export is not itself the resume mechanism unless it is imported back into Kilo. Memory/config files and project instructions are context sources, not prior-session continuation.
 
 ## Supported Modes
 
@@ -263,216 +287,220 @@ A Kilo "session" is a persisted conversation record in the local SQLite database
 | Interactive CLI | `kilo --continue` | No | Latest root session |
 | Interactive CLI | `kilo --session <id>` | No | Exact session ID |
 | Interactive CLI | `kilo --session <id> --fork` | No | Exact session ID, then fork |
-| Interactive CLI | `kilo --session <id> --cloud-fork` | No | Cloud session ID |
-| Interactive CLI | `/sessions` (alias `/resume`, `/continue`) | No | Picker |
+| Interactive CLI | `kilo --session <id> --cloud-fork` | No | Cloud session ID, then local import |
+| Attached TUI | `kilo attach <url> --session <id>` | No | Exact session ID on running server |
+| TUI picker | `/sessions`, `/resume`, `/continue` | No | Picker |
 | Non-interactive CLI | `kilo run --continue <message>` | Yes | Latest root session |
 | Non-interactive CLI | `kilo run --session <id> <message>` | Yes | Exact session ID |
-| Non-interactive CLI | `kilo run --session <id> --fork <message>` | Yes | Exact session ID, fork first |
-| Non-interactive CLI | `kilo run --session <id> --cloud-fork <message>` | Yes | Cloud session ID |
-| Headless server | `kilo serve` / `kilo web` / `kilo daemon` | Yes | ID or picker |
-| HTTP/API | `POST /session/:id/message` | Yes | Exact session ID |
-| SDK | `client.session.prompt({ path: { id }, body: { parts } })` | Yes | Exact session ID |
-| IDE | VS Code / JetBrains extension | No | Picker |
+| Non-interactive CLI | `kilo run --session <id> --fork <message>` | Yes | Exact session ID, then fork |
+| Non-interactive CLI | `kilo run --attach <url> --session <id> <message>` | Yes | Exact session ID on running server |
+| Headless server/API | `POST /session/{sessionID}/message` | Yes | Exact session ID |
+| SDK | `createKiloClient().session.prompt()` | Yes | Exact session ID |
+| IDE/Cloud | Extension sessions / Cloud Agents Recent Sessions | Human UI | Picker |
 
-`kilo run` also supports `--attach <url>` to send a prompt through a running server rather than starting a new local process.
+Sessions created by non-interactive `kilo run` are normal persisted sessions and can be resumed by ID or by `--continue` if they are the latest root session in scope. The TUI picker is human-oriented; Claudine should not attempt to automate it when a direct ID or API route is available.
 
 ## Session ID Capture
 
-Stable session identifiers use the `ses_<base62>` format. Capture surfaces:
+Stable session IDs use the `ses_...` shape. Reliable capture surfaces are:
 
-- **`kilo run --format json`**: every emitted JSON event includes `sessionID` (inherited from OpenCode; not locally verified with a live run).
-- **`kilo session list --format json`**: returns an array of `{ id, title, updated, created, projectId, directory, project }`.
-- **`kilo export [sessionID]`**: exports the full session payload as JSON; without an ID it prompts for selection.
-- **Local database**: `kilo.db` in the Kilo data directory holds session records.
-- **TUI picker**: shows titles and timestamps, not raw IDs.
+- `kilo run --format json`: current source emits each JSON record with `type`, `timestamp`, and `sessionID`.
+- `kilo session list --format json --all`: locally returned objects with `id`, `title`, `updated`, `created`, `projectId`, `directory`, and `project`.
+- `kilo export --sanitize <sessionID>`: writes `info.id`, `messages[].info.sessionID`, and `parts[].sessionID`.
+- Local SQLite: `session.id` is the primary key, and `message.session_id` / `part.session_id` link transcript rows.
+- TUI: the session switcher shows a human list; use it for humans, not automation.
+
+On this host, `kilo session list --format json --all` found two real sessions under `/Users/ken`: `ses_273de4d0cffewNgA2v0GJo0w5o` and `ses_273e3588dffefCDh7Mb6fA972k`. Both were project `global`, directory `/Users/ken`, and stored with Kilo session version `7.2.0`; the installed CLI is `7.3.45`.
 
 ## Resume Invocation
 
-Continue the latest session interactively:
+Continue latest interactively:
 
 ```bash
 kilo --continue
 ```
 
-Resume a specific session interactively:
+Resume a specific local session interactively:
 
 ```bash
 kilo --session ses_273de4d0cffewNgA2v0GJo0w5o
 ```
 
-Branch while resuming:
+Fork while resuming:
 
 ```bash
 kilo --session ses_273de4d0cffewNgA2v0GJo0w5o --fork
 ```
 
-Resume a cloud session locally:
+Import and continue a cloud session locally:
 
 ```bash
-kilo --session ses_<cloud-id> --cloud-fork
+kilo --session ses_<cloud-session-id> --cloud-fork
 ```
 
-Send a follow-up non-interactively:
+Send a non-interactive follow-up:
 
 ```bash
 kilo run --session ses_273de4d0cffewNgA2v0GJo0w5o "what is the next step?"
 ```
 
-Continue the latest non-interactive session:
+Continue latest non-interactively:
 
 ```bash
 kilo run --continue "finish the task"
 ```
 
-Attach to a running server and resume:
+Attach to an explicit server and continue:
 
 ```bash
 kilo run --attach http://localhost:4096 --session ses_273de4d0cffewNgA2v0GJo0w5o "next step"
 ```
 
-Resume via the headless server and SDK:
-
-```bash
-kilo serve --port 4096
-```
+Programmatic follow-up:
 
 ```typescript
-import { createOpencodeClient } from "@opencode-ai/sdk"
-const client = createOpencodeClient({ baseUrl: "http://localhost:4096" })
+import { createKiloClient } from "@kilocode/sdk"
+
+const client = createKiloClient({ baseUrl: "http://localhost:4096" })
 await client.session.prompt({
-  path: { id: "ses_273de4d0cffewNgA2v0GJo0w5o" },
-  body: { parts: [{ type: "text", text: "what is the next step?" }] },
+  sessionID: "ses_273de4d0cffewNgA2v0GJo0w5o",
+  parts: [{ type: "text", text: "what is the next step?" }],
 })
 ```
 
+The current OpenAPI route for follow-up is `POST /session/{sessionID}/message`, not `POST /session/{sessionID}/prompt`. The request body requires `parts` and can also carry model, agent, tool, output-format, system-prompt, variant, and editor-context fields.
+
 ## Session Lookup Scope
 
-Sessions are associated with a `projectId` and a `directory`. The default `--continue` lookup lists sessions and picks the first root session, which can be surprising when multiple working directories share a project record. The API and TUI picker can widen to all projects. There is no documented git-branch or worktree filtering for resume. `--cloud-fork` extends scope to sessions stored in Kilo Cloud / Gateway.
+Session lookup is project/runtime scoped by default. `kilo run --continue` calls `session.list()` and picks the first root session; current source filters by project and directory through Kilo's project-family/worktree-aware session filters. `kilo session list --all` widens lookup to all projects and includes project metadata in JSON output.
+
+There is no documented git branch selector. Worktree awareness exists in source via Kilo project-family handling and session `path`, but branch filtering does not. Cloud-fork lookup is separate: it imports a cloud session by ID, then resumes the imported local session.
 
 ## State Storage
 
-Resumable state is local and server-side in the same process, with optional cloud persistence.
+Kilo uses XDG-style data paths on this macOS host; there is no `~/.kilo` session store. `HOME=/Users/ken kilo debug paths` reported:
 
-| OS | Path |
-|----|------|
-| macOS | `~/.local/share/kilo/kilo.db` |
-| Linux (inferred) | `~/.local/share/kilo/kilo.db` |
-| Windows (inferred) | `%LOCALAPPDATA%\kilo\kilo.db` |
+| Category | Path |
+|----------|------|
+| home | `/Users/ken` |
+| data | `/Users/ken/.local/share/kilo` |
+| log | `/Users/ken/.local/share/kilo/log` |
+| repos | `/Users/ken/.local/share/kilo/repos` |
+| cache | `/Users/ken/.cache/kilo` |
+| config | `/Users/ken/.config/kilo` |
+| state | `/Users/ken/.local/state/kilo` |
+| tmp | `/var/folders/.../T/kilo` |
 
-Global paths observed on macOS:
+The local resumable state database is `/Users/ken/.local/share/kilo/kilo.db`. A separate session-export database, logs, `snapshot/`, `storage/session_diff/`, and `repos/` live beside it. The observed `storage/session_diff/ses_...json` files were empty arrays for the two sample sessions.
 
-```
-data   ~/.local/share/kilo
-state  ~/.local/state/kilo
-config ~/.config/kilo
-cache  ~/.cache/kilo
-log    ~/.local/share/kilo/log
-tmp    /var/folders/.../kilo
-```
+The observed SQLite tables included `session`, `message`, `part`, `session_message`, `permission`, `project`, `todo`, `event`, and migration/control tables. Important `session` columns include `id`, `project_id`, `parent_id`, `slug`, `directory`, `path`, `title`, `version`, `share_url`, summary fields, `revert`, `permission`, `workspace_id`, `agent`, `model`, cost/token fields, and timestamps. `message.data` stores message metadata as JSON; `part.data` stores text, reasoning, step, tool, and other part JSON.
 
-Additional artifacts (snapshots, tool output, exported JSON) live under `<data-dir>/snapshot/`, `<data-dir>/storage/`, `<data-dir>/tool-output/`, and a separate `session-export.db`. The SQLite schema and auxiliary formats are internal and may change between releases; scripts should use `kilo export`, `kilo import`, or the HTTP/SDK API for stable access.
-
-The `session` table schema includes `project_id`, `parent_id` (for forks), `directory`, `revert` (for checkpoint state), `permission`, `agent`, and `model` columns.
-
-Cloud Agent sessions are stored in Kilo Cloud; inactive sessions are deleted after 7 days during beta, but expired sessions remain accessible via the CLI.
+The format is internal. Claudine can use local inspection for diagnostics, but should prefer CLI JSON, export/import, and HTTP/SDK APIs for integration.
 
 ## Restored State
 
-Resuming restores:
+Resume restores conversation transcript and message parts from SQLite. The local sample transcript contained user text parts, assistant reasoning/text parts, a `step-start` part with a snapshot hash, assistant `path.cwd` / `path.root`, model/provider metadata, and API error metadata in a failed session. Completed tool results were not present in the sample, but Kilo stores tool parts in the same `part` table and streams them as `message.part.updated`.
 
-- The full conversation transcript and tool results from the database.
-- The working directory from the session record, overridable with `--dir`.
-- The model from the session record, overridable with `--model` or the API `model` field.
+Session rows can store agent, model, permission rules, directory, relative path, metadata, summary, and revert state. Resume can override launch behavior with `--model`, `--agent`, `--variant`, and `--dir`; environment variables are from the current process. Pending in-memory runners, questions, permissions, and background jobs are not equivalent to transcript state and only remain pending while the owning runtime/server remains alive.
 
-Resuming does not restore the environment of the original session; it uses the environment of the process that runs the resume command. Approval-state restore behavior is not explicitly documented, although a `permission` column exists in the session table.
+Resume appends to the same session unless `--fork` is used. Fork creates a new session row and copies message/part history with new IDs, leaving the original intact.
 
 ## Branching and Checkpoints
 
-Branching creates a copy of the conversation and leaves the original intact:
+Kilo supports session forking and revert-style checkpoints.
 
-- CLI: `kilo --session <id> --fork` or `kilo run --session <id> --fork <message>`.
-- API: `POST /session/:id/fork { messageID? }`.
-- SDK: `client.session.fork({ path: { id }, body: { messageID? } })`.
+- CLI fork: `kilo --session <id> --fork` or `kilo run --session <id> --fork <message>`.
+- API fork: `POST /session/{sessionID}/fork`, with optional `messageID`.
+- API revert: `POST /session/{sessionID}/revert`, with `messageID` and optional `partID`.
+- API unrevert: `POST /session/{sessionID}/unrevert`.
 
-Checkpointing within a session is available via:
+Current source copies transcript rows into the fork with new message/part IDs, remaps assistant parent IDs and compaction tail pointers, and preserves/imports cumulative session diffs when present. Revert records `session.revert`, computes diffs, restores snapshots, and refuses to run while the session is busy.
 
-- TUI: `/undo` and `/redo` for file edits.
-- API: `POST /session/:id/revert { messageID, partID? }` and `POST /session/:id/unrevert`.
+Kilo also supports session list, delete, export, import, share, and picker-based switching. Shared session docs describe read-only share links and forked copies for collaborators.
 
 ## Human-in-the-Loop Resume
 
-Kilo supports human-in-the-loop resumption, but **not** through stock `kilo run`. That command disables the `question` tool and auto-rejects runtime permission prompts. For Claudine-style brokering:
+Kilo has server-level HITL primitives:
 
-1. Start or attach to a Kilo server (`kilo serve`, `kilo daemon`, or SDK `createOpencode()`).
-2. Create or identify a session via `client.session.create()` or `client.session.list()`.
-3. Subscribe to events via `client.event.subscribe()`.
-4. When a `permission.asked` or `question.asked` event arrives, capture it.
-5. Answer through `POST /session/:id/permissions/:permissionID` or by sending a user message into the session.
-6. The session continues from the same `sessionID`.
+- `GET /event` / `client.event.subscribe()` for `question.asked`, `question.replied`, `question.rejected`, `permission.asked`, and permission reply events.
+- `GET /question`, `POST /question/{requestID}/reply`, and `POST /question/{requestID}/reject`.
+- `GET /permission` and SDK `permission.reply()`.
+- Deprecated compatibility route `POST /session/{sessionID}/permissions/{permissionID}` with `response: "once" | "always" | "reject"`.
 
-Remote mode and Cloud Agent can also surface questions/permissions for answering elsewhere.
+Plain `kilo run` is not the right HITL broker. In non-interactive mode it adds session permission rules denying `question`, `interactive_terminal`, `plan_enter`, and `plan_exit`; when permission asks occur, it auto-rejects them unless `--auto` or `--dangerously-skip-permissions` is set. Current source also marks unattended headless root sessions so child subagent permission asks fail instead of blocking forever. For Claudine-style "ask elsewhere, inject answer, continue same session", use an explicit server/SDK, TUI/IDE, Remote Connections, or Cloud Agent.
 
 ## Interruption Recovery
 
-Because session state is persisted continuously to the local SQLite database, sessions survive most interruptions:
+Persisted transcript state survives crash, Ctrl+C, terminal close, and process kill because session/message/part rows are written to SQLite. Resume with `--session` is safest after interruption; `--continue` can work but depends on current lookup scope and recency.
 
-- **Crash / terminal close / process kill**: the database remains and the session can be resumed.
-- **Ctrl+C**: the session is preserved; resume with `--continue` or `--session`.
-- **Pending tool call / approval / question**: if the server process is still running, the pending request remains blocked until answered. If the server is killed, resuming from the DB restores the conversation but may reset in-flight interactive state.
+In-flight work is different. `SessionRunState` tracks busy runners in memory and cancels them when the owning runtime is disposed. Pending questions and permissions are also in memory; service finalizers reject/dismiss them when the instance is disposed. If the server remains alive, pending HITL can be answered later through server APIs. If the process is killed, the transcript remains resumable but the pending deferred question/approval does not remain live as the same in-memory request.
+
+Concurrent client observation is normal because the TUI, attached clients, and SDK can subscribe to the same server events. Concurrent writes to the same session are not fully documented. Route-level operations such as revert guard against busy sessions with `SessionBusyError`; Claudine should serialize follow-up prompts per session unless Kilo documents stronger guarantees.
 
 ## Observability
 
-Surfaces that expose session identity or resumability:
+Useful observability surfaces:
 
-- **`kilo run --format json`**: every event carries `sessionID` (inherited from OpenCode).
-- **`kilo session list --format json`**: lists all sessions with IDs, titles, and directories.
-- **`kilo export [sessionID]`**: dumps session data as JSON.
-- **Server SSE stream**: `GET /event` and SDK `client.event.subscribe()` stream lifecycle and request events.
-- **Server session status**: `GET /session/status` returns `{ [sessionID]: SessionStatus }`.
-- **Server health**: `GET /global/health` returns version and liveness.
-- **`kilo debug paths`**: shows global data, config, cache, state, and log paths.
+- `kilo debug paths`: authoritative local data/config/cache/log paths for the active HOME.
+- `kilo session list --format json --all`: scriptable session ID discovery.
+- `kilo export --sanitize <sessionID>`: safe transcript-shape inspection.
+- `kilo run --format json`: final/stream event records with `sessionID`.
+- `GET /event`: SSE stream for session, message, part, question, permission, network, and status events.
+- `GET /session/status`: per-session lifecycle state.
+- `GET /question` and `GET /permission`: pending HITL request lists.
+- Kilo logs under the data log directory.
+
+The local logs are useful for runtime diagnosis, but session IDs should be captured from CLI JSON, session list/export, or server events rather than log parsing.
 
 ## Quirks and Gaps
 
 Quirks:
 
-- `kilo run` does not print a dedicated session ID in default mode; use `--format json` or `session list`.
-- `kilo run` is intentionally non-interactive and will not broker questions or permissions.
-- `--continue` can select an unexpected session when multiple directories share a project record.
-- Forking copies full message history; very long sessions may be slow to fork.
-- Shared sessions upload conversation history to Kilo servers; keep sharing disabled for local-only data.
-- Direct parsing of `kilo.db` or auxiliary storage files is unsupported and unstable.
-- macOS stores data under `~/.local/share/kilo` rather than `~/Library`.
-- `--cloud-fork` is only usable with `--session` and requires the cloud session to be accessible.
-- `kilo run --replay` and `--replay-limit` control whether resumed interactive history is replayed to the model.
+- No `~/.kilo` state existed on this host; the actual Kilo data was under `/Users/ken/.local/share/kilo`.
+- The active tool session HOME (`/Users/ken/.claudine`) had its own empty Kilo database. Research used `/Users/ken` for real session evidence.
+- Current Kilo SDK/docs use `createKiloClient`; older OpenCode names are stale for Kilo integration.
+- `--cloud-fork` cannot be combined with `--fork` or `--continue`, and requires `--session`.
+- `--replay` / `--replay-limit` are interactive-only; they are not a non-interactive transcript replay mechanism.
+- Direct SQLite parsing is unsupported and may break across Kilo versions.
+- `kilo run --continue` can pick the wrong session for automation if the current scope contains multiple roots; prefer explicit IDs.
 
 Gaps:
 
-- Exact concurrency guarantees when two clients write to the same session are not documented.
-- Whether approval state is fully restored on resume is not explicitly documented.
-- Windows session storage paths are inferred from Node.js conventions, not locally verified.
-- Retention sweep timing and behavior for active sessions are not documented.
-- Exact OpenAPI/SSE endpoint paths and SDK methods are inherited from OpenCode and not republished in Kilo docs.
-- Whether `kilo run --format json` emits `sessionID` on every event was not locally verified with a live run.
+- Windows storage path remains inferred.
+- Exact cloud retention beyond the 7-day inactive Cloud Agent beta statement is not documented.
+- Approval restoration needs a live permission-prompt test before Claudine treats `session.permission` as a fully durable approval state.
+- Concurrent prompt-submission semantics are not documented beyond busy guards on some operations.
+- Live model execution of `kilo run --format json` was not performed in this research run; source proves the emitted JSON shape.
 
 ## Claudine Integration Notes
 
-For Claudine's lifecycle `resume` action and future HITL broker:
+For a future Kilo provider wrapper, Claudine should capture `sessionID` as early as possible from `kilo run --format json`, `kilo session list --format json --all`, or server session creation. Store explicit IDs for lifecycle `resume`; treat `--continue` as a human convenience or fallback only.
 
-- Capture `sessionID` from `kilo run --format json` or from `kilo session list --format json`.
-- Use `kilo run --session <id> "<follow-up>"` for simple non-interactive continuation.
-- Do **not** rely on `kilo run` for human-in-the-loop; instead run or attach to a Kilo server and use the SDK/HTTP API.
-- Subscribe to server events to detect `permission.asked` and `question.asked`, and answer through the appropriate API endpoints.
-- Treat the SQLite database and snapshot directories as internal storage; use export/import or the API for structured access.
-- Be aware of Kilo-specific extensions: `--cloud-fork` for cloud sessions, `kilo daemon`/`kilo console` for persistent servers, and `kilo run --attach` for reusing an existing server.
-- When resuming after failure, be aware that model and directory can be overridden but approval-state restore is undocumented.
+For simple lifecycle `resume`, invoke:
+
+```bash
+kilo run --session "$SESSION_ID" "$FOLLOW_UP"
+```
+
+For HITL resume, do not depend on plain `kilo run`. Start or attach to a server, subscribe to `event.subscribe`, capture `question.asked` / `permission.asked`, route the prompt to the human, then reply through question/permission APIs. Claudine should serialize prompts per session and handle `SessionBusyError` as "same session already running" rather than blindly retrying.
+
+For lifecycle `retry`, a fork can preserve the original session while testing a corrective prompt. For `proxy`, Kilo's `kilo run --attach` and HTTP API are better fits than parsing TUI output. For recovery after crash or Ctrl+C, use explicit `--session` when a session ID was captured; use `--continue` only when Claudine can tolerate scope/recency ambiguity.
+
+## Changelog
+
+- 2026-07-03: Refreshed against Kilo CLI 7.3.45 help, official docs, current public source commit `419ff008ef180dd7076f679a89442883ba8f8d86`, generated OpenAPI, and local state under `/Users/ken/.local/share/kilo`.
+- 2026-07-03: Replaced older OpenCode-inherited SDK wording with Kilo-native `@kilocode/sdk` / `createKiloClient` APIs and exact current routes.
+- 2026-07-03: Added local evidence from `kilo.db`, sanitized export, session-list JSON, storage directories, and actual transcript row shapes.
+- 2026-07-03: Added current non-interactive permission behavior, headless child-session denial, `--auto`, `--dangerously-skip-permissions`, and interactive-only replay flags.
+- 2026-07-03: Clarified worktree-aware lookup, cloud-fork validation, HITL APIs, and interruption limits for in-memory pending requests.
 
 ## Sources
 
 - [Kilo Code CLI docs](https://kilo.ai/docs/code-with-ai/platforms/cli)
 - [Kilo Code CLI command reference](https://kilo.ai/docs/code-with-ai/platforms/cli-reference)
+- [Kilo Code Sessions & Sharing](https://kilo.ai/docs/collaborate/sessions-sharing)
+- [Kilo Code CLI Runtime Architecture](https://kilo.ai/docs/contributing/architecture/cli-runtime)
 - [Kilo Code Cloud Agent docs](https://kilo.ai/docs/code-with-ai/platforms/cloud-agent)
 - [Kilo Code GitHub repository](https://github.com/Kilo-Org/kilocode)
-- [OpenCode CLI docs](https://opencode.ai/docs/cli) (Kilo CLI is an OpenCode fork)
-- [OpenCode Server docs](https://opencode.ai/docs/server)
-- [OpenCode SDK docs](https://opencode.ai/docs/sdk)
+- Local inspection: `kilo --version` (`7.3.45`), `kilo --help`, `kilo run --help`, `kilo session list --help`, `kilo debug paths`, `kilo session list --format json --all`, `kilo export --sanitize <sessionID>`, and `/Users/ken/.local/share/kilo/kilo.db`.
+- Local source inspection: `/tmp/kilocode-research` at commit `419ff008ef180dd7076f679a89442883ba8f8d86`, especially `packages/opencode/src/cli/cmd/run.ts`, `packages/opencode/src/cli/cmd/session.ts`, `packages/opencode/src/session/session.ts`, `packages/opencode/src/session/session.sql.ts`, `packages/opencode/src/question/index.ts`, `packages/opencode/src/permission/index.ts`, `packages/opencode/src/kilocode/cloud-session.ts`, and `packages/sdk/openapi.json`.
