@@ -1,0 +1,34 @@
+# SimplifiedSchema for the streaming research topic.
+#
+# Captures provider response streaming protocols for Claudine's stream::protocol
+# models and parser factory.
+$schema:
+    created: date
+    last_updated: date(required)
+    agent: string(required)
+    model: string(required)
+
+    docs: url
+    support: enum(first_class,partial,none,unknown; required)
+
+    # CLI switches and modes that enable streaming output.
+    cli_params: "{ flag: string(required), value: string, description: string(required), example: string }[]"
+
+    # Transport/framing format.
+    transport: "{ medium: enum(stdout,stderr,http_sse,websocket,file,other,unknown; required), framing: enum(jsonl,ndjson,sse,json,text,binary,other,unknown; required), ordering: string, buffering: string, notes: string }"
+
+    # Event inventory and field semantics.
+    events: "{ native_event: string(required), claudine_event: enum(output_text,reasoning,tool_call,tool_result,file_change,plan_update,subagent_start,subagent_stop,usage,error,info,warning,session_start,session_end,unknown,other; required), fields: string[], required_fields: string[], notes: string }[]"
+
+    # Tool call/result correlation and IDs.
+    correlation: "{ tool_call_id: string, parent_id: string, session_id: string, step_id: string, notes: string }"
+
+    # Usage/model metadata emitted in-stream.
+    metadata: "{ model_field: string, provider_field: string, usage_fields: string[], cost_fields: string[], notes: string }"
+
+    # Parser caveats: noisy stderr, malformed JSON, partial chunks, retry events.
+    parser_notes: string[]
+
+    changes: string[]
+    requires_claudine_update: boolean(required)
+    reason: string
