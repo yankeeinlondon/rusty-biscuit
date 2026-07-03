@@ -23,8 +23,11 @@ success:
               - error: "research file was not updated"
         - when: "frontmatter(file, 'last_updated') == ctx.today"
           action:
-              - info: "The resume research on **{{state.name}}** completed successfully: {{ link(file) }}"
-              - message: "🎉  the resume research on **{{state.name}}** completed successfully"
+              - info: "The **Resume** research on **{{state.name}}** completed successfully: {{ link(file) }}"
+              - message: "🎉  the **Resume** research on **{{state.name}}** completed successfully"
+failure:
+    message: "💥 the Resume research on **{{state.name}}** failed to complete!"
+    warn: "The Resume research on **{{state.name}}** failed to complete! (err: {{err.message}})"
 ---
 
 ## Skills

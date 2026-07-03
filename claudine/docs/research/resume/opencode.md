@@ -1,270 +1,425 @@
 ---
-prompt: |-
-        Research the abilities of OpenCode CLI to "resume" a session.
-        - How is the session ID captured in an interactive session?
-        - How is the session ID captured in a non-interactive session?
-        - How can the CLI be leveraged to "resume" with a session id?
-        - Does the interactive environment provide a slash command or some other means of resuming?
-        - Does this OpenCode CLI provide hooks which can stop session execution on an interactive/human-in-the-loop prompt and capture the question? 
-
-                - If yes, describe how OpenCode CLI could receive interactive prompts (questions, tool call permissions, etc.) during a non-interactive session which would allow Claudine to receive the question, pose the question itself, and then resume with an answer.
-
-        - What quirks or complications does OpenCode CLI pose for developers working with the resume functionality?
-        - Is the "resumable" content stored locally at all or the only local thing a caller get's a session ID to reference the session state on the server?
-
-        All research and observations should be written to the body of this Markdown document while preserving the Frontmatter data. The Markdown should all be standards based and isomorphic. Tables should be Markdown tables. Links should be Markdown links.
-
-        If any data visuals are thought to be important you should feel free to use Mermaid.js charts by adding in a mermaidjs code block.
-
-        Provide a summary -- a paragraph and some bullet points are an ideal length for the summary -- of this document to STDOUT.
-last_updated: 2026-04-02
+$schema: ./_schema.yaml
+created: 2026-04-02
+last_updated: 2026-07-02
+agent: opencode
+model: kimi-for-coding/k2p7
+docs: https://opencode.ai/docs/cli
+support: first_class
+continuity_model: server_session
+resume_modes:
+  - mode: interactive
+    supported: true
+    mechanisms:
+      - "opencode --continue"
+      - "opencode --session <id>"
+      - "opencode --fork"
+      - "TUI slash commands /sessions /resume /continue"
+      - "TUI session picker (Ctrl+X L)"
+    accepts_followup_prompt: false
+    selection_methods:
+      - latest
+      - id
+      - picker
+      - all_projects
+    notes: "Follow-up prompts are typed inside the resumed TUI session. The picker shows titles, not raw IDs."
+  - mode: non_interactive
+    supported: true
+    mechanisms:
+      - "opencode run --continue <message>"
+      - "opencode run --session <id> <message>"
+      - "opencode run --session <id> --fork <message>"
+    accepts_followup_prompt: true
+    selection_methods:
+      - latest
+      - id
+    notes: "The only scriptable CLI surface that sends a new prompt into an existing session. --continue picks the most recent root session from the current project."
+  - mode: headless_server
+    supported: true
+    mechanisms:
+      - "opencode serve"
+      - "opencode web"
+      - "opencode attach <url> --session <id>"
+    accepts_followup_prompt: true
+    selection_methods:
+      - latest
+      - id
+      - picker
+    notes: "The local headless server owns the authoritative session store. Clients attach via HTTP/SDK and can send follow-up prompts through the message API."
+  - mode: ide
+    supported: true
+    mechanisms:
+      - "OpenCode IDE extensions"
+      - "ACP-compatible editors (Zed, JetBrains, Neovim) via opencode acp"
+    accepts_followup_prompt: false
+    selection_methods:
+      - picker
+      - latest
+    notes: "IDE/ACP surfaces maintain their own view of session history; this research focuses on CLI and server behavior."
+  - mode: api
+    supported: true
+    mechanisms:
+      - "HTTP OpenAPI server at http://hostname:port"
+      - "@opencode-ai/sdk client.session.prompt()"
+      - "@opencode-ai/sdk client.event.subscribe()"
+    accepts_followup_prompt: true
+    selection_methods:
+      - id
+    notes: "Programmatic resume and follow-up are first-class via the server API and SDK."
+session_id_capture:
+  - surface: json_stream
+    field: sessionID
+    format: "ses_<base62>"
+    notes: "Present on every JSON event emitted by opencode run --format json."
+  - surface: cli_command
+    field: id
+    format: "ses_<base62>"
+    notes: "opencode session list --format json returns objects with id, title, updated, created, projectId, and directory."
+  - surface: session_file
+    field: id
+    format: "SQLite row in opencode.db"
+    notes: "The session database lives in the OpenCode data directory. Session IDs are stable primary keys in the local database, not derived from filenames."
+  - surface: interactive_ui
+    field: title
+    format: string
+    notes: "The TUI session picker shows session titles and timestamps, not raw IDs. Raw IDs are exposed through the external session list or export commands."
+  - surface: log_file
+    field: run
+    format: hex
+    notes: "stderr logs identify the run instance, not the session. Session ID must be captured from the JSON stream or session list."
+resume_invocations:
+  - mode: interactive
+    invocation: "opencode --continue"
+    accepts_prompt: false
+    selection: latest
+    notes: "Resumes the most recent root session for the current project/directory in the TUI."
+  - mode: interactive
+    invocation: "opencode --session <session-id>"
+    accepts_prompt: false
+    selection: id
+    notes: "Opens the TUI on the specified session."
+  - mode: interactive
+    invocation: "opencode --session <session-id> --fork"
+    accepts_prompt: false
+    selection: id
+    notes: "Forks the specified session into a new session, then opens it in the TUI."
+  - mode: interactive
+    invocation: "/sessions (alias /resume, /continue)"
+    accepts_prompt: false
+    selection: picker
+    notes: "Inside the TUI, opens the session selector."
+  - mode: non_interactive
+    invocation: "opencode run --continue <message>"
+    accepts_prompt: true
+    selection: latest
+    notes: "Sends a follow-up message into the most recent root session and returns the response."
+  - mode: non_interactive
+    invocation: "opencode run --session <session-id> <message>"
+    accepts_prompt: true
+    selection: id
+    notes: "Sends a follow-up message into the specified session and returns the response."
+  - mode: non_interactive
+    invocation: "opencode run --session <session-id> --fork <message>"
+    accepts_prompt: true
+    selection: id
+    notes: "Forks the session, sends the message into the new session, and returns the response."
+  - mode: headless_server
+    invocation: "POST /session/:id/message { parts: [...] }"
+    accepts_prompt: true
+    selection: id
+    notes: "Send a message to an existing session through the headless server and wait for the assistant response."
+  - mode: headless_server
+    invocation: "POST /session/:id/fork { messageID? }"
+    accepts_prompt: false
+    selection: id
+    notes: "Fork an existing session at an optional message ID through the server API."
+  - mode: api
+    invocation: "client.session.prompt({ path: { id }, body: { parts: [...] } })"
+    accepts_prompt: true
+    selection: id
+    notes: "SDK method to send a follow-up prompt into an existing session."
+state_storage:
+  - location: local
+    os: macos
+    path: "~/.local/share/opencode/opencode.db"
+    format: SQLite
+    retention: "Controlled by OPENCODE_DISABLE_PRUNE and internal pruning; shared conversations persist until unshared."
+    notes: "Observed on macOS. The database is the authoritative session store for the local server."
+  - location: local
+    os: linux
+    path: "~/.local/share/opencode/opencode.db"
+    format: SQLite
+    retention: "Controlled by OPENCODE_DISABLE_PRUNE and internal pruning; shared conversations persist until unshared."
+    notes: "Inferred from XDG-style paths observed on macOS and standard Node.js app conventions."
+  - location: local
+    os: windows
+    path: "%LOCALAPPDATA%\\opencode\\opencode.db"
+    format: SQLite
+    retention: "Controlled by OPENCODE_DISABLE_PRUNE and internal pruning; shared conversations persist until unshared."
+    notes: "Inferred from standard Node.js app conventions; not verified by local inspection."
+  - location: local
+    os: all
+    path: "<data-dir>/snapshot/ and <data-dir>/storage/"
+    format: "proprietary (snapshots and auxiliary storage)"
+    retention: "Same as database"
+    notes: "Additional session artifacts (file snapshots, tool output, exported data) live alongside the database. Direct parsing is unsupported."
+resume_scope:
+  project_scoped: true
+  cwd_scoped: true
+  worktree_aware: false
+  all_projects_supported: true
+  branch_filtering: false
+  notes: "Sessions have a projectId and directory. --continue lists sessions and picks the first root session, which can surprise users when unrelated directories share a project record. The API and picker can access sessions across all projects."
+branching_checkpointing:
+  branch_supported: true
+  checkpoint_supported: true
+  fork_invocation: "opencode --session <id> --fork or POST /session/:id/fork"
+  checkpoint_invocation: "POST /session/:id/revert { messageID, partID? } or /undo /redo in TUI"
+  preserves_original: true
+  notes: "Forking creates a new session record and copies message history, leaving the original intact. Revert rewinds conversation state within the same session; undo/redo operate on file edits."
+restored_state:
+  transcript: true
+  tool_results: true
+  approvals: unknown
+  model: overridable
+  cwd: configurable
+  env: current_process
+  notes: "Transcript and tool results are loaded from the local session database. --model and --dir can override the original choices at resume time. Environment comes from the launching process, not the session. Approval restore behavior is not explicitly documented."
+hitl_resume:
+  supported: true
+  question_capture: "Subscribe to server SSE events via client.event.subscribe() or poll GET /session/status; question and permission requests block the session until answered."
+  answer_injection: "POST /session/:id/permissions/:permissionID { response, remember? } answers a permission request; POST /session/:id/message sends a user reply into a session waiting on a question tool."
+  limitations: "Stock opencode run disables the question tool and auto-rejects runtime permission prompts, so it cannot broker HITL. Use the server/SDK API for human-in-the-loop workflows."
+interruption_recovery:
+  crash_resume: true
+  ctrl_c_resume: true
+  pending_tool_resume: true
+  pending_approval_resume: true
+  limitations: "Sessions are persisted continuously to the local SQLite database, so crash, Ctrl+C, terminal close, and process kill leave the session resumable. Pending questions/permissions recover if the server process is still running; if the server is killed, resuming from the DB restores the conversation but may reset in-flight approval/question state."
+observability:
+  stream_events:
+    - "sessionID in every opencode run --format json event"
+    - "server SSE event stream (client.event.subscribe)"
+    - "GET /session/status returns per-session status"
+  hook_events:
+    - "plugin event hook receives session lifecycle events"
+  failure_modes:
+    - "auto-rejected permission in opencode run"
+    - "session abort via POST /session/:id/abort"
+  notes: "The JSON stream is the most reliable CLI capture surface. The server exposes health, session list, session status, and event endpoints for programmatic monitoring."
+quirks:
+  - "opencode run in default mode does not print a dedicated session-id banner; scripts must use --format json or session list."
+  - "opencode run explicitly disables the question tool and auto-rejects permission prompts, making it unsuitable for human-in-the-loop resumption."
+  - "--continue resolves by listing sessions and picking the first root session, which can select the wrong session when multiple directories map to the same projectId."
+  - "Forking copies message history into a new session; long sessions can make fork slow."
+  - "Shared sessions sync conversation history to OpenCode servers; disabling sharing via config or OPENCODE_AUTO_SHARE keeps data local."
+  - "The SQLite database and auxiliary storage formats are internal and not stable for direct parsing; use export/import or the API for structured access."
+gaps:
+  - "Exact concurrency semantics when two clients resume/send messages to the same session simultaneously are not documented."
+  - "Whether approval state (always-allow settings, per-session permissions) is fully restored on resume is not explicitly documented."
+  - "Windows session storage paths are inferred, not verified by local inspection."
+  - "Retention sweep timing and behavior for active sessions are not documented."
+changes:
+  - "2026-07-02: Replaced free-form frontmatter with schema-validated fields."
+  - "2026-07-02: Updated against OpenCode CLI 1.17.13 and current server/API docs."
+  - "2026-07-02: Classified continuity model as server_session (local SQLite-backed server) rather than transcript replay."
+  - "2026-07-02: Added headless_server and api resume modes with exact HTTP/SDK invocations."
+  - "2026-07-02: Documented that opencode run disables question tool and auto-rejects permissions, so HITL requires server/SDK."
+requires_claudine_update: true
+reason: "The refreshed schema, server_session continuity model, and verified HITL path via server/SDK (rather than opencode run) should feed into Claudine's lifecycle resume action, session-id capture logic, and future human-in-the-loop broker implementation for OpenCode."
 ---
 
-# OpenCode CLI Session Resume Research
+## Overview
 
-## Summary
+OpenCode's session resume is a first-class, local-server-backed feature. Every session is stored in a local SQLite database (`opencode.db`) that is owned by an OpenCode server process; the TUI, `opencode run`, the SDK, and the HTTP API are all clients of that server. Resume means reattaching to the same session record and appending new turns, not replaying a standalone transcript file. The CLI supports interactive resumption (`--continue`, `--session`, `/sessions`), scriptable non-interactive follow-up (`opencode run --session <id> <message>`), and full programmatic control through the headless server and SDK.
 
-OpenCode does support resuming prior sessions, but the capabilities are split across three layers: CLI flags, TUI commands, and the SDK/server API. The important practical distinction is that `opencode run` is resumable but not truly human-in-the-loop: it can continue or fork sessions, and it can expose the `sessionID` in JSON event output, but it intentionally disables question-style prompts and auto-rejects runtime permission prompts. For a Claudine-style wrapper that wants to intercept questions or approval requests and then resume, the correct integration point is the OpenCode server or SDK event stream, not the stock `opencode run` command.
+## Resume Semantics
 
-- Interactive resume is available through `--continue`, `--session`, `--fork`, and the TUI slash command `/sessions` with aliases `/resume` and `/continue`.
-- Non-interactive resume is available through `opencode run --continue` or `opencode run --session <id>`, and `--format json` exposes `sessionID` in emitted JSON events.
-- The server and SDK support both pending permission requests and pending question requests, but the plugin docs only document permission hooks, not question hooks.
-- Session state is stored locally, not just remotely: the main session database lives in the OpenCode data directory, with additional storage files alongside it.
+An OpenCode "session" is a persisted conversation record in the local SQLite database, identified by a stable `ses_...` ID. The authoritative state lives in the database and the currently running server process. When you resume, the client asks the server for the session, loads its message history, and continues from the last turn. Because the TUI itself is a client to the server, resuming the same session from multiple clients is possible and will share the same underlying record.
 
-## Scope and Source Baseline
+## Supported Modes
 
-This research is based on the current OpenCode docs and the current `anomalyco/opencode` source tree at commit [`5e1b5135276294e3740d4d0ca560b53b5563f582`](https://github.com/anomalyco/opencode/tree/5e1b5135276294e3740d4d0ca560b53b5563f582), inspected on April 2, 2026.
+| Mode | Entry point | Follow-up prompt | Selector |
+|------|-------------|------------------|----------|
+| Interactive CLI | `opencode --continue` | No | Latest root session |
+| Interactive CLI | `opencode --session <id>` | No | Exact session ID |
+| Interactive CLI | `/sessions` (alias `/resume`, `/continue`) | No | Picker |
+| Interactive CLI | `Ctrl+X L` | No | Picker |
+| Non-interactive CLI | `opencode run --continue <message>` | Yes | Latest root session |
+| Non-interactive CLI | `opencode run --session <id> <message>` | Yes | Exact session ID |
+| Headless server | `opencode serve` / `opencode web` | Yes | ID or picker |
+| HTTP/API | `POST /session/:id/message` | Yes | Exact session ID |
+| SDK | `client.session.prompt({ path: { id }, body: { parts } })` | Yes | Exact session ID |
+| IDE/ACP | `opencode acp` | No | Picker |
 
-## Direct Answers
+## Session ID Capture
 
-| Question                                                                                                                     | Answer                                                                                                                                                                                                                                                                                                                                         |
-|------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| How is the session ID captured in an interactive session?                                                                    | Usually by listing or exporting sessions rather than from a dedicated “copy session id” UI. The TUI can navigate existing sessions via `/sessions`, but the most reliable raw-ID capture methods are `opencode session list --format json`, `opencode export [sessionID]`, or the TUI transcript export, which includes `**Session ID:** ...`. |
-| How is the session ID captured in a non-interactive session?                                                                 | `opencode run --format json` includes `sessionID` on every emitted JSON event. Without JSON mode, the CLI does not print a dedicated session-id banner, so callers need to capture it through session listing, export, or by driving the SDK directly.                                                                                         |
-| How can the CLI resume with a session id?                                                                                    | `opencode --session <id>`, `opencode run --session <id> "..."`, and `opencode attach <url> --session <id>` all resume a specific session. `--continue` resumes the latest root session, and `--fork` clones the chosen session into a new session before continuing.                                                                           |
-| Does the interactive environment provide a slash command or another means of resuming?                                       | Yes. The TUI exposes `/sessions` with aliases `/resume` and `/continue`, plus keybind `Ctrl+X L`.                                                                                                                                                                                                                                              |
-| Does OpenCode provide hooks that can stop session execution on an interactive prompt and capture the question?               | At the server/API level, yes: both permission and question requests block until replied to. At the plugin-hook level, permission events are documented, but question events are not documented in the plugin docs.                                                                                                                             |
-| Can Claudine receive interactive prompts during a non-interactive session, ask the human itself, and resume with the answer? | Not with stock `opencode run`. That command denies the `question` tool and auto-rejects runtime permission requests. Yes with the server/SDK layer: subscribe to events, detect `question.asked` or `permission.asked`, answer through the API, then let the session continue.                                                                 |
-| Is resumable content stored locally?                                                                                         | Yes. Session records are stored locally in OpenCode’s data directory, including the SQLite database and auxiliary storage files. A session ID is not the only local artifact.                                                                                                                                                                  |
+Stable session identifiers use the `ses_<base62>` format. Capture surfaces:
 
-## How Session IDs Are Created and Stored
+- **`opencode run --format json`**: every emitted JSON event includes `sessionID`.
+- **`opencode session list --format json`**: returns an array of `{ id, title, updated, created, projectId, directory }`.
+- **`opencode export [sessionID]`**: exports the full session payload as JSON; without an ID it prompts for selection.
+- **Local database**: `opencode.db` in the OpenCode data directory holds session records.
+- **TUI picker**: shows titles and timestamps, not raw IDs.
 
-OpenCode creates session IDs locally when a session is created. In the session service, `createNext()` assigns `id: SessionID.descending(...)` and immediately publishes `session.created` for that new record ([source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/session/index.ts#L379-L405)).
+## Resume Invocation
 
-The resumable state is also stored locally:
+Continue the latest session interactively:
 
-| Artifact                        | Location                                                      | Evidence                                                                                                                                                                                                                                                                                                   |
-|---------------------------------|---------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Main session DB                 | XDG data dir, typically `~/.local/share/opencode/opencode.db` | [`Global.Path.data`](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/global/index.ts#L7-L35), [`Database.Path`](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/storage/db.ts#L30-L44) |
-| Auxiliary storage JSON          | XDG data dir, typically `~/.local/share/opencode/storage/...` | [`Storage` layer](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/storage/storage.ts#L219-L247)                                                                                                                                                  |
-| Exportable full session payload | stdout from `opencode export [sessionID]`                     | [`export.ts`](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/cli/cmd/export.ts#L10-L88)                                                                                                                                                         |
-
-The practical implication is that a bare `sessionID` only works if you are talking to the same OpenCode data store. In local CLI usage that means the same machine/profile; in `attach` mode it means the remote server that owns the session data.
-
-## Interactive Session ID Capture
-
-The TUI supports resume-oriented flags directly: `--continue`, `--session`, and `--fork` are documented for the main TUI and for `attach` mode ([CLI docs](https://opencode.ai/docs/cli/), [tui thread source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/cli/cmd/tui/thread.ts#L81-L114), [attach source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/cli/cmd/tui/attach.ts#L23-L49)).
-
-Inside the TUI, resume is primarily session-picker driven rather than raw-ID driven:
-
-- `/sessions` is the TUI slash command for switching sessions.
-- `/resume` and `/continue` are aliases for that same command.
-- `Ctrl+X L` opens the same session list.
-- The home tips explicitly advertise `/sessions` and `Ctrl+X L` for continuing prior conversations ([tips source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/cli/cmd/tui/feature-plugins/home/tips-view.tsx#L64-L67), [command registration](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/cli/cmd/tui/app.tsx#L447-L461)).
-
-For raw ID capture during an interactive session, the reliable paths I found are:
-
-- `opencode session list --format json`, which emits `id`, `title`, `updated`, `created`, `projectId`, and `directory` ([source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/cli/cmd/session.ts#L74-L159)).
-- `opencode export [sessionID]`, which can also prompt you to select a session and uses `session.id` as the selected value ([source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/cli/cmd/export.ts#L21-L82)).
-- TUI transcript export, because the generated Markdown transcript includes a `**Session ID:** ...` line ([transcript source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/cli/cmd/tui/util/transcript.ts#L32-L35), [session export action](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx#L845-L855)).
-
-I did **not** find a dedicated TUI slash command whose purpose is “copy current session id”.
-
-## Non-Interactive Session ID Capture
-
-`opencode run` supports `--continue`, `--session`, `--fork`, and `--format json` ([source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/cli/cmd/run.ts#L381-L393)).
-
-Its non-interactive session selection logic is:
-
-1. If `--continue` is set, call `sdk.session.list()` and pick the first root session.
-2. Else if `--session <id>` is set, use that `id`.
-3. Else create a new session and use the returned `result.data?.id`.
-
-That is implemented directly in `run.ts` ([source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/cli/cmd/run.ts#L381-L393)).
-
-For capture:
-
-- In `--format json`, every emitted event line includes `sessionID` in the JSON object ([source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/cli/cmd/run.ts#L433-L439)).
-- In default format, there is no dedicated “created session `<id>`” line.
-- That gap is visible enough that there is an open feature request for exactly this: [Issue #17221: output session_id after a cli run](https://github.com/anomalyco/opencode/issues/17221).
-
-So the cleanest machine-readable capture path today is `opencode run --format json ...`.
-
-## How Resume Works
-
-The CLI surface is straightforward:
-
-| Mode                                          | Command                                |
-|-----------------------------------------------|----------------------------------------|
-| Resume last interactive session               | `opencode --continue`                  |
-| Resume specific interactive session           | `opencode --session <id>`              |
-| Resume specific remote session                | `opencode attach <url> --session <id>` |
-| Resume last non-interactive/root session      | `opencode run --continue "..."`        |
-| Resume specific non-interactive session       | `opencode run --session <id> "..."`    |
-| Branch from a prior session before continuing | add `--fork`                           |
-
-Forking is a real clone operation, not just a pointer switch. The session service creates a new session, then copies messages and parts into it, and gives the new session a `(fork #n)` title suffix ([fork implementation](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/session/index.ts#L511-L546)).
-
-```mermaid
-flowchart LR
-    A[Existing session ID] --> B[Resume in place]
-    A --> C[Fork first]
-    B --> D[opencode --session <id>]
-    B --> E[opencode run --session <id>]
-    B --> F[opencode attach <url> --session <id>]
-    C --> G[--fork]
-    G --> H[New session cloned from prior history]
+```bash
+opencode --continue
 ```
 
-## Slash Commands and Other Interactive Resume UX
+Resume a specific session interactively:
 
-The interactive environment does provide a slash-command-based resume path:
+```bash
+opencode --session ses_0d98dfb69ffeScBxUnWWLfhCAl
+```
 
-- `/sessions`
-- alias `/resume`
-- alias `/continue`
+Branch while resuming:
 
-That opens the session selector rather than asking for a raw session ID ([source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/cli/cmd/tui/app.tsx#L447-L461)).
+```bash
+opencode --session ses_0d98dfb69ffeScBxUnWWLfhCAl --fork
+```
 
-So the TUI does support resume, but mostly as “pick a previous conversation” instead of “paste an ID”.
+Send a follow-up non-interactively:
 
-## Human-in-the-Loop Prompts: What Exists
+```bash
+opencode run --session ses_0d98dfb69ffeScBxUnWWLfhCAl "what is the next step?"
+```
 
-OpenCode has **two** separate pause-and-wait mechanisms.
+Continue the latest non-interactive session:
 
-### Permission prompts
+```bash
+opencode run --continue "finish the task"
+```
 
-Permission requests are modeled as pending requests with events:
+Resume via the headless server and SDK:
 
-- `permission.asked`
-- `permission.replied`
+```bash
+opencode serve --port 4096
+```
 
-The permission service blocks until a reply is received ([service source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/permission/index.ts#L166-L264)).
+```typescript
+import { createOpencodeClient } from "@opencode-ai/sdk"
+const client = createOpencodeClient({ baseUrl: "http://localhost:4096" })
+await client.session.prompt({
+  path: { id: "ses_0d98dfb69ffeScBxUnWWLfhCAl" },
+  body: { parts: [{ type: "text", text: "what is the next step?" }] },
+})
+```
 
-The server exposes:
+## Session Lookup Scope
 
-- `GET /permission`
-- `POST /permission/{requestID}/reply`
+Sessions are associated with a `projectId` and a `directory`. The default `--continue` lookup lists sessions and picks the first root session, which can be surprising when multiple working directories share a project record. The API and TUI picker can widen to all projects. There is no documented git-branch or worktree filtering for resume.
 
-([route source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/server/routes/permission.ts#L9-L68))
+## State Storage
 
-### Question prompts
+Resumable state is local and server-side in the same process.
 
-Questions are modeled separately:
+| OS | Path |
+|----|------|
+| macOS / Linux | `~/.local/share/opencode/opencode.db` |
+| Windows (inferred) | `%LOCALAPPDATA%\opencode\opencode.db` |
 
-- `question.asked`
-- `question.replied`
-- `question.rejected`
+Additional artifacts (snapshots, tool output, exported JSON) live under `<data-dir>/snapshot/`, `<data-dir>/storage/`, and `<data-dir>/tool-output/`. The SQLite schema and auxiliary formats are internal and may change between releases; scripts should use `opencode export`, `opencode import`, or the HTTP/SDK API for stable access.
 
-The question service also blocks until a reply or rejection arrives ([service source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/question/index.ts#L131-L194)).
+## Restored State
 
-The server exposes:
+Resuming restores:
 
-- `GET /question`
-- `POST /question/{requestID}/reply`
-- `POST /question/{requestID}/reject`
+- The full conversation transcript and tool results from the database.
+- The working directory from the session record, overridable with `--dir`.
+- The model from the session record, overridable with `--model` or the API `model` field.
 
-([route source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/server/routes/question.ts#L10-L99))
+Resuming does not restore the environment of the original session; it uses the environment of the launching process. Approval-state restore behavior is not explicitly documented.
 
-The question tool itself calls `Question.ask(...)` and waits for answers before returning control to the model ([tool source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/tool/question.ts#L6-L32)). It is enabled for CLI/app/desktop clients by default in the tool registry ([registry source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/tool/registry.ts#L115-L139)).
+## Branching and Checkpoints
 
-## Can Claudine Broker the Prompt and Then Resume?
+Branching creates a copy of the conversation and leaves the original intact:
 
-### Stock `opencode run`: no
+- CLI: `opencode --session <id> --fork` or `opencode run --session <id> --fork <message>`.
+- API: `POST /session/:id/fork { messageID? }`.
+- SDK: `client.session.fork({ path: { id }, body: { messageID? } })`.
 
-The stock `run` command is explicitly designed to avoid interactive pauses:
+Checkpointing within a session is available via:
 
-- It creates a session permission ruleset that denies `question`, `plan_enter`, and `plan_exit` ([source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/cli/cmd/run.ts#L357-L373)).
-- If a runtime `permission.asked` event still occurs, it auto-rejects it rather than surfacing it for external handling ([source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/cli/cmd/run.ts#L544-L556)).
+- TUI: `/undo` and `/redo` for file edits.
+- API: `POST /session/:id/revert { messageID, partID? }` and `POST /session/:id/unrevert`.
 
-So if Claudine shells out to `opencode run`, OpenCode will **not** naturally stop and hand over question prompts for Claudine to broker.
+## Human-in-the-Loop Resume
 
-### Server/SDK driven orchestration: yes
+OpenCode supports human-in-the-loop resumption, but **not** through stock `opencode run`. That command disables the `question` tool and auto-rejects runtime permission prompts. For Claudine-style brokering:
 
-The SDK and server do provide everything needed for a Claudine broker loop:
+1. Start or attach to an OpenCode server (`opencode serve` or SDK `createOpencode()`).
+2. Create or identify a session via `client.session.create()` or `client.session.list()`.
+3. Subscribe to events via `client.event.subscribe()`.
+4. When a `permission.asked` or `question.asked` event arrives, capture it.
+5. Answer through `POST /session/:id/permissions/:permissionID` or by sending a user message into the session.
+6. The session continues from the same `sessionID`.
 
-1. Start or attach to an OpenCode server.
-2. Create or load a session with `client.session.create()` or `client.session.list()/get()`.
-3. Subscribe to real-time events with `client.event.subscribe()` ([SDK docs](https://opencode.ai/docs/sdk/), [SDK session/event docs](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/web/src/content/docs/sdk.mdx#L299-L321), [event docs](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/web/src/content/docs/sdk.mdx#L447-L462)).
-4. When `question.asked` arrives, present the question through Claudine, then call `client.question.reply(...)` or `client.question.reject(...)` ([generated SDK](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/sdk/js/src/v2/gen/sdk.gen.ts#L2539-L2639)).
-5. When `permission.asked` arrives, present the permission request, then call `client.permission.reply(...)` ([generated SDK](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/sdk/js/src/v2/gen/sdk.gen.ts#L2423-L2536)).
-6. Let the blocked OpenCode session continue from the same `sessionID`.
+## Interruption Recovery
 
-That architecture is a better fit than wrapping `opencode run`.
+Because session state is persisted continuously to the local SQLite database, sessions survive most interruptions:
 
-## Hooks vs Events: Important Distinction
+- **Crash / terminal close / process kill**: the database remains and the session can be resumed.
+- **Ctrl+C**: the session is preserved; resume with `--continue` or `--session`.
+- **Pending tool call / approval / question**: if the server process is still running, the pending request remains blocked until answered. If the server is killed, resuming from the DB restores the conversation but may reset in-flight interactive state.
 
-If “hooks” means plugin hooks, the answer is only partially yes.
+## Observability
 
-The plugin docs explicitly list:
+Surfaces that expose session identity or resumability:
 
-- `permission.asked`
-- `permission.replied`
+- **`opencode run --format json`**: every event carries `sessionID`.
+- **`opencode session list --format json`**: lists all sessions with IDs, titles, and directories.
+- **`opencode export [sessionID]`**: dumps session data as JSON.
+- **Server SSE stream**: `GET /event` and SDK `client.event.subscribe()` stream lifecycle and request events.
+- **Server session status**: `GET /session/status` returns `{ [sessionID]: SessionStatus }`.
+- **Server health**: `GET /global/health` returns version and liveness.
 
-but do **not** list `question.asked` or other question events ([plugin docs](https://opencode.ai/docs/plugins/), [source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/web/src/content/docs/plugins.mdx#L142-L189)).
+## Quirks and Gaps
 
-However, the generated SDK event types clearly include both `EventPermissionAsked` and `EventQuestionAsked` ([types source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/sdk/js/src/v2/gen/types.gen.ts#L112-L124), [question event types](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/sdk/js/src/v2/gen/types.gen.ts#L189-L224)).
+Quirks:
 
-That creates a practical integration rule:
+- `opencode run` does not print a dedicated session ID in default mode; use `--format json` or `session list`.
+- `opencode run` is intentionally non-interactive and will not broker questions or permissions.
+- `--continue` can select an unexpected session when multiple directories share a project record.
+- Forking copies full message history; very long sessions may be slow to fork.
+- Shared sessions upload conversation history to OpenCode servers; keep `share: disabled` or `OPENCODE_AUTO_SHARE=false` for local-only data.
+- Direct parsing of `opencode.db` or auxiliary storage files is unsupported and unstable.
 
-- For permission prompts, plugin hooks may be enough.
-- For question prompts, use the SSE/API/SDK surface, not the plugin docs alone.
+Gaps:
 
-## Quirks and Complications for Developers
+- Exact concurrency guarantees when two clients write to the same session are not documented.
+- Whether approval state is fully restored on resume is not explicitly documented.
+- Windows session storage paths are inferred from Node.js conventions, not locally verified.
+- Retention sweep timing and behavior for active sessions are not documented.
 
-| Quirk                                                                    | Why it matters                                                                                                                                                                                                                                                                                                |
-|--------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `opencode run` does not print a dedicated new session ID in default mode | Scripts need `--format json`, `session list`, or SDK orchestration. See [Issue #17221](https://github.com/anomalyco/opencode/issues/17221).                                                                                                                                                                   |
-| `opencode run` is resumable, but intentionally non-interactive           | It denies `question` and auto-rejects permissions, so it is a poor fit for human-in-the-loop brokering.                                                                                                                                                                                                       |
-| Resume scoping can be surprising                                         | `--continue` resolves by listing sessions and taking a root session. Users have reported scope/path surprises, including [Issue #18890](https://github.com/anomalyco/opencode/issues/18890) and [Issue #20238](https://github.com/anomalyco/opencode/issues/20238).                                           |
-| Forking is a full history clone                                          | The implementation copies all messages and parts, so long sessions can make `/fork` or `--fork` slower. That matches [Issue #16311](https://github.com/anomalyco/opencode/issues/16311).                                                                                                                      |
-| Plugin docs under-document question interception                         | Permission events are documented; question events exist in the SDK/event model but are not documented as plugin events.                                                                                                                                                                                       |
-| ACP integrations were version-sensitive around questions                 | There have been ACP question-hang fixes such as [Issue #17920](https://github.com/anomalyco/opencode/issues/17920), [PR #17921](https://github.com/anomalyco/opencode/pull/17921), and [PR #20017](https://github.com/anomalyco/opencode/pull/20017). If Claudine talks through ACP, version testing matters. |
+## Claudine Integration Notes
 
-## Practical Recommendation for Claudine
+For Claudine's lifecycle `resume` action and future HITL broker:
 
-For Claudine, the safest design is:
+- Capture `sessionID` from `opencode run --format json` or from `opencode session list --format json`.
+- Use `opencode run --session <id> "<follow-up>"` for simple non-interactive continuation.
+- Do **not** rely on `opencode run` for human-in-the-loop; instead run or attach to an OpenCode server and use the SDK/HTTP API.
+- Subscribe to server events to detect `permission.asked` and `question.asked`, and answer through the appropriate API endpoints.
+- Treat the SQLite database and snapshot directories as internal storage; use export/import or the API for structured access.
+- When resuming after failure, be aware that model and directory can be overridden but approval-state restore is undocumented.
 
-- Do **not** rely on `opencode run` if you need mid-session human answers.
-- Run or attach to an OpenCode server.
-- Use the JS SDK or raw HTTP API.
-- Treat `sessionID` as a stable handle into a locally persisted session store.
-- Subscribe to SSE events.
-- Intercept `question.asked` and `permission.asked`.
-- Reply through `question.reply/reject` or `permission.reply`.
-- Resume on the same `sessionID`.
+## Changelog
 
-That keeps OpenCode’s actual session state intact while letting Claudine own the human conversation.
+- 2026-07-02: Converted to schema-validated frontmatter.
+- 2026-07-02: Updated against OpenCode CLI 1.17.13 and current server/API documentation.
+- 2026-07-02: Reclassified continuity model as `server_session` (local SQLite-backed server) rather than transcript replay.
+- 2026-07-02: Added headless server, HTTP API, and SDK resume modes with exact invocations.
+- 2026-07-02: Documented that `opencode run` disables the question tool and auto-rejects permissions, so HITL workflows require the server/SDK surface.
+- 2026-07-02: Added local storage paths, observability surfaces, and gaps around concurrency and approval-state restore.
 
 ## Sources
 
-- [OpenCode CLI docs](https://opencode.ai/docs/cli/)
-- [OpenCode SDK docs](https://opencode.ai/docs/sdk/)
-- [OpenCode Plugins docs](https://opencode.ai/docs/plugins/)
-- [TUI flags in source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/cli/cmd/tui/thread.ts#L81-L114)
-- [TUI slash resume command in source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/cli/cmd/tui/app.tsx#L447-L461)
-- [Non-interactive `run` resume logic in source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/cli/cmd/run.ts#L357-L556)
-- [Session list CLI source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/cli/cmd/session.ts#L74-L159)
-- [Export CLI source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/cli/cmd/export.ts#L10-L88)
-- [Question service source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/question/index.ts#L35-L220)
-- [Permission service source](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/permission/index.ts#L43-L264)
-- [Question routes](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/server/routes/question.ts#L10-L99)
-- [Permission routes](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/server/routes/permission.ts#L9-L68)
-- [Generated SDK question and permission clients](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/sdk/js/src/v2/gen/sdk.gen.ts#L2423-L2639)
-- [Generated event types for `permission.asked` and `question.asked`](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/sdk/js/src/v2/gen/types.gen.ts#L112-L224)
-- [Local storage paths](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/global/index.ts#L7-L35), [database path](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/storage/db.ts#L30-L44), [storage dir](https://github.com/anomalyco/opencode/blob/5e1b5135276294e3740d4d0ca560b53b5563f582/packages/opencode/src/storage/storage.ts#L219-L247)
-- [Issue #17221: output session_id after a cli run](https://github.com/anomalyco/opencode/issues/17221)
-- [Issue #18890: Sessions from different non-git directories are mixed when using --continue](https://github.com/anomalyco/opencode/issues/18890)
-- [Issue #20238: Session list missing in TUI mode](https://github.com/anomalyco/opencode/issues/20238)
-- [Issue #16311: `/fork` is incredibly slow for long sessions](https://github.com/anomalyco/opencode/issues/16311)
-- [Issue #17920: Question tool hangs in ACP mode](https://github.com/anomalyco/opencode/issues/17920)
+- [OpenCode CLI docs](https://opencode.ai/docs/cli)
+- [OpenCode Server docs](https://opencode.ai/docs/server)
+- [OpenCode SDK docs](https://opencode.ai/docs/sdk)
+- [OpenCode Share docs](https://opencode.ai/docs/share)
+- [OpenCode ACP docs](https://opencode.ai/docs/acp)
+- [OpenCode GitHub repository](https://github.com/anomalyco/opencode)

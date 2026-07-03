@@ -36,7 +36,7 @@ $schema:
     resume_invocations: "{ mode: enum(interactive,non_interactive,headless_server,ide,api,both; required), invocation: string(required), accepts_prompt: boolean, selection: enum(latest,id,name,index,picker,all_projects,worktree,branch,pr,unknown,other), notes: string }[]"
 
     # Local/server persistence of resumable state.
-    state_storage: "{ location: enum(local,server,both,none,unknown; required), os: enum(macos,linux,windows,all), path: string, format: string, retention: string, notes: string }[]"
+    state_storage: "{ location: enum(local,server,both,none,unknown; required), os: enum(macos,linux,windows), path: string, format: string, retention: string, notes: string }[]"
 
     # Scope rules for finding resumable sessions.
     resume_scope: "{ project_scoped: boolean, cwd_scoped: boolean, worktree_aware: boolean, all_projects_supported: boolean, branch_filtering: boolean, notes: string }"
