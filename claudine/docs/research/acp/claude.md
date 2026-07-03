@@ -1,111 +1,123 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-02
-last_updated: 2026-07-02
-agent: opencode
-model: kimi-for-coding/k2p7
+last_updated: 2026-07-03
+agent: open_code
+model: minimax/MiniMax-M3
 docs: https://code.claude.com/docs/en/overview
 acp_docs: https://agentclientprotocol.com/
 repo: https://github.com/anthropics/claude-code
 support: adapter
 launch_modes:
+  - command: npx -y @agentclientprotocol/claude-agent-acp@latest
+    args: []
+    transport: stdio
+    adapter: "@agentclientprotocol/claude-agent-acp (TypeScript) — the official community adapter, now under the agentclientprotocol org"
+    notes: "Official-recommended launch. The package was renamed from @zed-industries/claude-agent-acp in v0.24.0 (April 2026) and is maintained at github.com/agentclientprotocol/claude-agent-acp. Spawns the underlying `claude` CLI via the Claude Agent SDK and translates ACP JSON-RPC to/from the SDK's NDJSON stream."
+  - command: npx -y @zed-industries/claude-agent-acp@latest
+    args: []
+    transport: stdio
+    adapter: "@zed-industries/claude-agent-acp (TypeScript) — Zed-published alias used November 2024–April 2026 (versions 0.17.0 through 0.23.x)"
+    notes: "Still works for now (npm keeps the old name available), but the canonical name is the @agentclientprotocol one. Same adapter under both names."
   - command: npx -y @zed-industries/claude-code-acp@latest
     args: []
     transport: stdio
-    adapter: Zed Claude Code ACP (TypeScript)
-    notes: Spawns the official Zed adapter as a stdio subprocess. The adapter launches the `claude` CLI internally and translates ACP JSON-RPC to the Claude Agent SDK protocol.
-  - command: cargo install claude-code-acp-rs
+    adapter: "@zed-industries/claude-code-acp (TypeScript) — original packaging, pinned to v0.16.2 max"
+    notes: "DEPRECATED. The Rust SDK preset `AcpAgent::zed_claude_code()` still calls this exact command, so anyone relying on the SDK preset is silently running a July-2025-era adapter (v0.16.2 at best), missing 31+ releases of improvements (auth/logout, fast mode, refusal fallback, 1M-context inference, cancellation, tool_call-before-permission, etc.). Workaround: use `AcpAgent::from_str(\"npx -y @agentclientprotocol/claude-agent-acp@latest\")` instead."
+  - command: cargo install claude-code-acp-rs && claude-code-acp-rs
     args: []
     transport: stdio
-    adapter: claude-code-acp-rs (Rust)
-    notes: Community Rust adapter that uses `sacp` and `agent-client-protocol-schema` internally. Install once, then run the binary as the ACP agent process.
+    adapter: claude-code-acp-rs (Rust, community)
+    notes: "Community Rust bridge. The crates.io name `claude-code-acp-rs` could not be fetched through the crates.io API at research time, so version, last update, and current maintenance status are `unknown`. Use with caution."
   - command: claude
     args: []
     transport: other
     adapter: none
-    notes: The main `claude` CLI has no native `--acp` or `acp serve` mode. Anthropic closed the ACP feature request as not planned because community adapters exist.
+    notes: "Negative probe: `claude --acp` returns `error: unknown option '--acp'`, and `claude acp` returns `unknown command \"acp\"` with a did-you-mean pointing at `claude mcp`. The `claude` CLI is a Bun-bundled JavaScript binary (BUILD_TIME 2026-07-03) and ships no native ACP entry point. Anthropic closed the upstream feature request anthropics/claude-code#6686 as `not planned` because community adapters exist."
 protocol_versions:
-  - "v1"
+  - "v1 (schema 1.1.0)"
 capabilities:
   - capability: initialize
     support: supported
-    notes: Standard ACP `initialize` handshake with capability negotiation and client info.
+    notes: "Standard ACP `initialize` handshake with `ProtocolVersion` negotiation, `ClientCapabilities`, `Implementation`, and `authMethods`. The Anthropic/Anthropic Agent SDK adapter advertises `authMethods` (Claude login, Console login, Bedrock gateway) so the client knows what `authenticate` flows are available."
   - capability: authenticate
-    support: partial
-    notes: Auth is handled by the underlying `claude` CLI, not ACP directly. The adapter passes through whatever session/token the CLI has.
+    support: supported
+    notes: "`authenticate` request added to schema v1.1.0 (alongside the existing `auth_required` error path on `session/new`). Adapter landed ACP logout in v0.53.0 (2026-06-29) and added refusal-fallback consent dialog support in v0.55.0 (2026-07-02)."
   - capability: session_new
     support: supported
-    notes: "`session/new` creates a conversation session tied to a working directory."
+    notes: "`session/new` creates a conversation session tied to a working directory (`cwd` is required and must be an absolute path). New in v1.1.0 schema: `additionalDirectories` (absolute paths) and `mcpServers`."
   - capability: session_load
     support: supported
-    notes: "`session/load` resumes an existing Claude Code session when the adapter and CLI support it."
-  - capability: session_prompt
-    support: supported
-    notes: "`session/prompt` is the primary turn-taking method."
+    notes: "`session/load` resumes an existing Claude Code session, agent must advertise `loadSession`. Adapter streams the conversation history back as notifications."
   - capability: session_cancel
     support: supported
-    notes: "`session/cancel` is a notification that stops the current turn."
+    notes: "`session/cancel` is a notification that stops the current turn; the agent responds with `StopReason::Cancelled`. Supports protocol-level `$/cancel_request` for cancelling any pending request (added in v1.1.0; adapter support landed in v0.50.0 with force-cancellation on SDK query hang in v0.41.0)."
+  - capability: session_prompt
+    support: supported
+    notes: "`session/prompt` is the primary turn-taking request. `prompt` is `ContentBlock[]`; the agent is required to accept `Text` and `ResourceLink`, and may accept `Image`/`Audio`/`EmbeddedContext` if it advertises those `promptCapabilities`."
+  - capability: session_modes
+    support: supported
+    notes: "Schema v1.1.0 formal `session/set_mode` and `current_mode_update` notification. Adapter emits initial `modes` in `NewSessionResponse`/`LoadSessionResponse` (effort_level aka thought_level, model, permission_mode, fast mode) and emits `current_mode_update` (and the new session title update) at turn end."
   - capability: streaming
     support: supported
-    notes: "`session/update` notifications stream text, tool calls, plans, and mode changes."
+    notes: "`session/update` notifications stream `agent_message_chunk`, `agent_thought_chunk`, `user_message_chunk`, `tool_call`, `tool_call_update`, `plan`, `current_mode_update`, `available_commands_update`, and `config_option_update`. Updates are fire-and-forget JSON-RPC notifications (no `id`); group by `ContentChunk.message_id`."
   - capability: permissions
-    support: supported
-    notes: Reverse request `session/request_permission` is used for tool-call approval.
+    support: partial
+    notes: "`session/request_permission` reverse request is fully supported. CRITICAL CHANGE since v0.18.0: the adapter now delegates tool dispatch to Claude's BUILT-IN tools and no longer issues `fs/*` or `terminal/*` reverse requests even when the client advertises those capabilities. Clients still see permission prompts for write/Bash/etc., but file reads/writes and command execution happen in the SDK, not through the client. The documentation that framed those as \"delegated to the client\" is no longer accurate."
   - capability: fs_read
-    support: supported
-    notes: "`fs/read_text_file` reverse request when the client advertises filesystem read capability."
+    support: unsupported
+    notes: "Adapter (v0.18.0+) sends a read content `tool_call` instead of `fs/read_text_file`. The schema v1.1.0 method still exists and is supported by the SDK, but the official adapter does not use it — clients should not advertise `fs.readTextFile: true` expecting it to be honored by this adapter."
   - capability: fs_write
-    support: supported
-    notes: "`fs/write_text_file` reverse request when the client advertises filesystem write capability."
+    support: unsupported
+    notes: "Same as fs_read — the adapter surfaces writes via Claude's native Write/Edit tool calls rather than `fs/write_text_file`."
   - capability: terminal
-    support: supported
-    notes: Full `terminal/*` lifecycle (create, output, wait_for_exit, kill, release) is delegated to the client.
+    support: unsupported
+    notes: "Adapter (v0.18.0+) surfaces Bash/PowerShell calls via Claude's built-in Bash tool rather than `terminal/create`. CLI commands can still appear in the agent transcript (and the adapter supports interactive/background terminals) but they bypass the ACP reverse-request lifecycle."
   - capability: mcp
-    support: partial
-    notes: Claude Code itself supports MCP servers; the ACP adapter may expose tools prefixed with `mcp__acp__`. MCP-over-ACP is unstable in the spec.
+    support: supported
+    notes: "Schema v1.1.0 supports `mcpCapabilities.http` and `mcpCapabilities.sse`. Clients can pass an `McpServer[]` in `session/new`. The adapter also exposes Claude-Code MCP servers over `claude mcp` (the `claude` CLI manages them itself; this is the legacy MCP path used when not running under ACP)."
   - capability: plans
+    support: supported
+    notes: "`Plan` session update emitted when the agent writes a plan; the TypeScript adapter errors out in pure plan-mode (where the user reviews a plan before executing) because the Claude Agent SDK does not fully support plan mode. Normal streaming of plan entries as the agent works is fine."
+  - capability: media
     support: partial
-    notes: "`plan` session updates are emitted, but the Claude Agent SDK does not fully support plan mode and the TypeScript adapter errors out in plan mode."
+    notes: "`promptCapabilities.image` and `promptCapabilities.audio` are negotiated; the underlying Claude Agent SDK accepts images. MCP-tool output that is an image is now surfaced (v0.48.0 fixed dropped Bash image output)."
   - capability: extensions
     support: supported
-    notes: ACP `ext_method` / `ext_notification` can be used for adapter-specific extensions.
+    notes: "ACP `ext_method` / `ext_notification` / `_meta` fields are supported. Adapter currently uses `_meta` for Claude-specific extensions (e.g. `acp.mcp_elicitation`, experimental `additionalDirectories`, raw SDK passthrough)."
 reverse_requests:
   - method: session/request_permission
     purpose: permission
     client_must_handle: true
-    notes: Required for any tool-call approval flow. The client must present options and return a selected option ID or cancellation.
+    notes: "Required for any tool-call approval flow. The client must present options and return a selected `option_id` via `RequestPermissionOutcome::Selected`, or `RequestPermissionOutcome::Cancelled` if the user cancels."
   - method: fs/read_text_file
     purpose: fs_read
-    client_must_handle: true
-    notes: Required if the client advertises filesystem read capability. The client reads the requested absolute path and returns content.
+    client_must_handle: false
+    notes: "Optional. The official `@agentclientprotocol/claude-agent-acp` adapter no longer issues this request (built-in tool path since v0.18.0). Implement only if you intend to support other agents, or as best-effort for older adapter versions."
   - method: fs/write_text_file
     purpose: fs_write
-    client_must_handle: true
-    notes: Required if the client advertises filesystem write capability. The client writes content to the requested absolute path.
+    client_must_handle: false
+    notes: "Optional. Same caveat as fs_read."
   - method: terminal/create
     purpose: terminal_create
-    client_must_handle: true
-    notes: Required if the client advertises terminal capability. Spawns a host command and returns a terminal ID.
+    client_must_handle: false
+    notes: "Optional. Adapter prefers built-in Bash tool since v0.18.0."
   - method: terminal/output
     purpose: terminal_output
-    client_must_handle: true
-    notes: Returns current stdout/stderr and exit status for a terminal handle without blocking.
+    client_must_handle: false
+    notes: "Optional; only relevant if terminal/create is used."
   - method: terminal/wait_for_exit
     purpose: terminal_wait
-    client_must_handle: true
-    notes: Blocks until the terminal command exits and returns its final exit status.
+    client_must_handle: false
+    notes: "Optional; only relevant if terminal/create is used."
   - method: terminal/kill
     purpose: terminal_kill
-    client_must_handle: true
-    notes: Terminates the command but keeps the terminal handle valid for output retrieval.
+    client_must_handle: false
+    notes: "Optional; only relevant if terminal/create is used."
   - method: terminal/release
     purpose: terminal_kill
-    client_must_handle: true
-    notes: Releases the terminal handle and kills the command if still running. Must be called to avoid resource leaks.
-  - method: ext_method
-    purpose: other
     client_must_handle: false
-    notes: Optional extension requests specific to the adapter; clients can reject unsupported extension methods.
+    notes: "Optional; only relevant if terminal/create is used. ALWAYS call release on any terminal handle the adapter returned, to avoid handle leaks."
 permission_model:
   mechanism: session/request_permission reverse request
   timeout: client-defined
@@ -114,15 +126,15 @@ permission_model:
     - allow_once
     - allow_always
     - reject_once
-  notes: The client presents the options from the request and returns the selected option ID. If the prompt turn is cancelled, the client must respond with Cancelled.
+  notes: "The client receives the tool call details, optional allowed/denied category context, and a list of `PermissionOption` entries. Reply with one selected optionId or Cancelled. On `session/cancel`, the client MUST respond Cancelled to any pending permission requests (per schema v1.1.0)."
 filesystem_model:
   read_methods:
-    - fs/read_text_file
+    - fs/read_text_file (theoretical; not issued by current adapter)
   write_methods:
-    - fs/write_text_file
+    - fs/write_text_file (theoretical; not issued by current adapter)
   path_base: absolute paths only
   sandboxing: client-side; the client decides whether to enforce a project-root boundary
-  notes: ACP requires absolute paths and 1-based line numbers. The client is responsible for sandboxing and validating paths before reading or writing.
+  notes: "ACP requires absolute paths and 1-based line numbers. With the current TypeScript adapter, reads/writes are performed by Claude's built-in tools (Read/Edit/Write) inside the agent process — the client has no opportunity to sandbox paths at the filesystem boundary. Path policy must be enforced through Claude's permission system (settings.json rules, sandbox settings)."
 terminal_model:
   supported: true
   methods:
@@ -131,11 +143,11 @@ terminal_model:
     - terminal/wait_for_exit
     - terminal/kill
     - terminal/release
-  shell: depends on host; Claude Code uses Bash on macOS/Linux and PowerShell on Windows when Git for Windows is absent
-  cwd: absolute path supplied in CreateTerminalRequest
-  streaming: polled via terminal/output
-  cancellation: terminal/kill or terminal/release
-  notes: The client must track terminal handles, reap processes, and always release handles. Output is byte-limited and truncated from the beginning when the limit is exceeded.
+  shell: "depends on host; Claude Code uses Bash on macOS/Linux and PowerShell on Windows when Git for Windows is absent"
+  cwd: "absolute path supplied in CreateTerminalRequest"
+  streaming: "polled via terminal/output"
+  cancellation: "terminal/kill or terminal/release"
+  notes: "Schema-level support is complete; the TypeScript adapter does NOT use these methods (it executes commands through Claude's built-in Bash tool). Implement these handlers only as a matter of general ACP completeness for other adapters, or to support older versions of the TypeScript adapter (pre-v0.18.0)."
 streaming_model:
   update_methods:
     - session/update
@@ -149,161 +161,218 @@ streaming_model:
   plan_events:
     - plan
   error_events:
-    - session/update does not carry errors; JSON-RPC errors are returned on the request channel
-  notes: Updates are fire-and-forget notifications with no id. Use the ContentChunk.message_id field to group chunks belonging to the same message.
+    - "session/update does not carry errors; JSON-RPC errors are returned on the request channel"
+    - "$/cancel_request (v1.1.0) cancels in-flight requests from either side"
+  notes: "Updates are fire-and-forget notifications with no `id`. Use the `ContentChunk.message_id` field to group chunks belonging to the same message. v0.53.0 fixed the order so the `tool_call` arrives BEFORE the `session/request_permission` reverse request — clients should be prepared to show the tool call detail along with the prompt."
 auth_setup:
   required: true
   mechanisms:
-    - Claude Code login prompt on first use
-    - ANTHROPIC_API_KEY for API-key auth
-    - Pre-authenticated Claude Code session state
-  headless_notes: For fully headless ACP operation, set ANTHROPIC_API_KEY or ensure the Claude Code CLI has already completed OAuth and stored its session. The adapter itself does not add new auth flows.
-  notes: The adapter inherits authentication from the underlying `claude` CLI. In CI or daemon contexts, use an API key and avoid interactive OAuth.
+    - "Claude Code login prompt on first use (interactive OAuth)"
+    - "ANTHROPIC_API_KEY for API-key auth"
+    - "Pre-authenticated Claude Code session state (~/.claude/)"
+    - "Bedrock, Vertex, Foundry via dedicated env vars"
+    - "Bedrock gateway authentication via awsAuthRefresh (added to adapter v0.34.0)"
+    - "`authMethods` advertised by the adapter at initialize (Claude login, Console login, Bedrock) so the client can request `authenticate` directly"
+  headless_notes: "For fully headless ACP operation, set ANTHROPIC_API_KEY or ensure the Claude Code CLI has already completed OAuth and stored its session. The adapter inherits whatever auth the CLI has, but now also exposes an `authenticate` method so a headless client can drive login itself rather than relying on the agent to fail with `auth_required`."
+  notes: "Bedrock `awsAuthRefresh` config can write human-readable status messages to stdout and corrupt the adapter's NDJSON stream — known and documented quirk; remove the setting or filter non-JSON lines. Adapter added TUI login for remote environments in v0.26.0."
 env_vars:
   - name: ANTHROPIC_API_KEY
-    effect: Allows the Claude CLI to authenticate without interactive login.
-  - name: CLAUDE_CODE_DEBUG
-    effect: Enables adapter/CLI debug logging; usually emitted to stderr to avoid corrupting the stdio JSON-RPC stream.
-  - name: NO_BROWSER
-    effect: Removes browser-based auth paths from advertised methods; useful in headless environments.
+    effect: "Allows the Claude CLI to authenticate without interactive login."
   - name: ANTHROPIC_BASE_URL
-    effect: Optional proxy or alternative endpoint for Anthropic API calls.
+    effect: "Optional proxy or alternative endpoint for Anthropic API calls."
+  - name: ANTHROPIC_MODEL
+    effect: "Pin a specific model for the session (the adapter prioritizes this over settings.model)."
+  - name: ANTHROPIC_SMALL_FAST_MODEL
+    effect: "Pin the small/fast model used for haiku-class tasks."
+  - name: ANTHROPIC_DEFAULT_OPUS_MODEL / ANTHROPIC_DEFAULT_SONNET_MODEL
+    effect: "Pin a specific Opus/Sonnet version (1M-context suffix is auto-normalized)."
+  - name: CLAUDE_CODE_DEBUG
+    effect: "Enables adapter/CLI debug logging; emitted to stderr to avoid corrupting stdio JSON-RPC."
+  - name: NO_BROWSER
+    effect: "Removes browser-based auth paths from advertised methods; useful in headless environments."
+  - name: CLAUDE_CODE_SHELL
+    effect: "Override the shell used by Claude Code; if set to bash/zsh and executable, used preferentially."
+  - name: CLAUDE_CONFIG_DIR
+    effect: "Override where Claude Code keeps config files (the adapter reads this for settings.json / managed-settings.json)."
+  - name: CLAUDE_CODE_EXECUTABLE
+    effect: "Override the binary path used by the Claude Agent SDK inside the adapter (useful for self-hosted/static binaries)."
   - name: awsAuthRefresh
-    effect: When configured in Claude Code settings, can cause human-readable status messages to be written to stdout and corrupt the NDJSON stream.
+    effect: "When configured in Claude Code settings, can also write human-readable status messages to stdout and corrupt the NDJSON stream. Adapter added Bedrock gateway support in v0.34.0."
+  - name: CLAUDECODE=1
+    effect: "Appended to terminal commands spawned by the adapter to match default Claude Code behavior."
 rust_client:
   crate: agent-client-protocol
   connection_type: AcpAgent subprocess over stdio (JSON-RPC)
   localset_required: false
   reverse_request_handlers:
     - session/request_permission
-    - fs/read_text_file
-    - fs/write_text_file
-    - terminal/create
-    - terminal/output
-    - terminal/wait_for_exit
-    - terminal/kill
-    - terminal/release
-  desktop_streaming_pattern: tokio::sync::mpsc from the notification handler to the UI thread; run the ACP client on a dedicated tokio runtime
-  notes: As of agent-client-protocol 1.0.1 the SDK is Send/Sync and no longer requires tokio::task::LocalSet. Use AcpAgent::zed_claude_code() for the Zed adapter or AcpAgent::from_str for a custom adapter binary.
+  desktop_streaming_pattern: "tokio::sync::mpsc from the notification handler to the UI thread; run the ACP client on a dedicated tokio runtime"
+  notes: "agent-client-protocol 1.0.1 (June 29, 2026) is the current Rust SDK. The connection is `Send`/`Sync`, so `tokio::task::LocalSet` is no longer required. AcpAgent::zed_claude_code() PRESET IS STALE — it shells to the deprecated `@zed-industries/claude-code-acp@latest` npm package, which is pinned to v0.16.2 and lacks every improvement since. Prefer `AcpAgent::from_str(\"npx -y @agentclientprotocol/claude-agent-acp@latest\")` until upstream updates the preset. Other v1.0.1 sub-crates: agent-client-protocol-derive, agent-client-protocol-schema (=1.1.0), agent-client-protocol-cookbook, agent-client-protocol-conductor, agent-client-protocol-http, agent-client-protocol-polyfill, agent-client-protocol-rmcp, agent-client-protocol-trace-viewer."
 compatibility:
   - client: Zed
     status: works
-    issue: none
-    workaround: Use the built-in Claude Code via ACP support; adapter is fetched automatically.
+    issue: "Zed remains the canonical client; the Zed adapter was renamed alongside this package in April 2026."
+    workaround: "Zed's built-in \"Claude Code\" integration fetches the adapter from the new namespace automatically."
   - client: JetBrains IDEs
     status: partial
-    issue: Requires `~/.jetbrains/acp.json` configuration and a separately installed adapter.
-    workaround: Point the registry to the `@zed-industries/claude-agent-acp` stdio command.
+    issue: "Requires `~/.jetbrains/acp.json` configuration and a separately installed adapter."
+    workaround: "Point the registry at the `@agentclientprotocol/claude-agent-acp` stdio command (the `@zed-industries/...` name may still work via npm aliases)."
   - client: Neovim (CodeCompanion)
     status: works
-    issue: none
-    workaround: Configure the adapter as a stdio MCP/ACP agent.
+    issue: "none known"
+    workaround: "Configure the adapter as a stdio ACP agent."
   - client: agent-client-protocol Rust SDK 0.9.x
-    status: partial
-    issue: Connection futures were !Send and required LocalSet.
-    workaround: Upgrade to agent-client-protocol 1.0.1 or later.
+    status: broken
+    issue: "Connection futures were !Send and required LocalSet."
+    workaround: "Upgrade to agent-client-protocol 1.0.1 or later."
+  - client: agent-client-protocol Rust SDK 1.0.x
+    status: works
+    issue: "AcpAgent::zed_claude_code() preset points to a deprecated npm package (`@zed-industries/claude-code-acp` ≤ v0.16.2), missing 31+ adapter releases."
+    workaround: "Build the AcpAgent manually via `AcpAgent::from_str` with the current npm name, or wait for the next SDK release to refresh the preset."
 recent_changes:
+  - date: 2026-07-02
+    version: "@agentclientprotocol/claude-agent-acp v0.55.0"
+    change: "Added refusal-fallback consent dialog support; bumped Claude Agent SDK to 0.3.198. Adapter now flagged `cancelled` instead of `end_turn` on session interruption."
+    impact: "Clients can implement a refusal fallback when the model refuses to act; cancellation mapping is now distinct from end-of-turn so UIs can show different visuals."
+  - date: 2026-06-30
+    version: "adapter v0.54.0 / v0.54.1"
+    change: "Fast-mode session config support and a fix applying modelOverrides when resolving the availableModels allowlist."
+    impact: "Clients can expose a 'fast mode' toggle through ACP `SessionConfigOption`."
   - date: 2026-06-29
-    version: agent-client-protocol 1.0.1 / schema 1.2.0
-    change: Official Rust SDK released with Send/Sync connections and a builder-based API.
-    impact: Removes the LocalSet requirement; enables standard tokio::spawn and easier desktop-app integration.
+    version: "adapter v0.53.0"
+    change: "Added ACP `logout` request handling. Bumped Claude Agent SDK to 0.3.195."
+    impact: "Adapter can now clear the local session credentials when a client asks it to."
   - date: 2026-06-29
-    version: agent-client-protocol 1.0.1
-    change: AcpAgent gained preset constructors for Zed Claude Code, Zed Codex, and Google Gemini.
-    impact: Launching the Zed Claude adapter is now a single line in Rust.
+    version: "agent-client-protocol-v1.0.1 + agent-client-protocol-schema 1.1.0"
+    change: "Official Rust SDK reached 1.0.x; Send/Sync connection types; builder-based API; preset constructors `AcpAgent::zed_claude_code()`, `zed_codex()`, `google_gemini()`. Schema bumped to 1.1.0 which adds `authenticate`/`logout`, `session/close`/`delete`/`list`/`resume`, `AgentAuthCapabilities`, `SessionCapabilities`, `SessionConfigOption`, and protocol-level `$/cancel_request`."
+    impact: "All of the Rust code samples in the prior research used legacy MessageHandler APIs; modern code uses `Client::builder().on_receive_request(...).on_receive_notification(...).connect_with(transport, async move |cx| { ... })`. Schema version is **1.1.0**, not 1.2.0 as the prior research recorded."
+  - date: 2026-06-25
+    version: "adapter v0.52.0"
+    change: "Added `--version`/`-v` flag handling and pushed session title updates at turn end."
+    impact: "Version discovery is now over a single command. Clients can render session titles as they update over time."
+  - date: 2026-06-23
+    version: "adapter v0.50.0"
+    change: "Added ACP request cancellation signals (`$/cancel_request`)."
+    impact: "The agent can now propagate cancellation to any in-flight request rather than only to the active prompt turn."
+  - date: 2026-04-15
+    version: "adapter v0.24.0"
+    change: "Repository moved from `zed-industries/claude-agent-acp` to `agentclientprotocol/claude-agent-acp` and the npm package renamed to `@agentclientprotocol/claude-agent-acp`."
+    impact: "Custom deployment scripts that hard-coded the older namespace need to update."
 quirks:
-  - The `claude` CLI has no native ACP mode; every ACP integration requires an adapter bridge.
-  - AWS Bedrock auth refresh can write human-readable status to stdout and corrupt the adapter's NDJSON stream. Remove `awsAuthRefresh` or filter non-JSON lines.
-  - Initialization can take longer than 30 seconds; use a 60-second timeout for `initialize`.
-  - Claude may call `Edit` instead of the adapter's `mcp__acp__Edit`, causing changes not to appear in the editor's diff view.
-  - New sessions may default to Haiku instead of Sonnet; set the model explicitly in session config or environment.
-  - Plan mode errors out in the TypeScript adapter because the Claude Agent SDK does not fully support it yet.
-  - The TypeScript adapter sometimes needs a manual `sdk.mjs` path patch after reinstall.
-  - Relative paths and 0-based indexing are common mistakes; ACP requires absolute paths and 1-based line numbers.
-  - Terminal handle leaks occur if `terminal/release` is skipped.
+  - "Claude Code's `claude` CLI has no native ACP mode. Verified on 2.1.200 (BUILD_TIME 2026-07-03): `claude --acp` → `error: unknown option '--acp'`; `claude acp` → `unknown command \"acp\"` (did-you-mean `claude mcp`). No fix is expected — anthropics/claude-code#6686 closed as `not planned`."
+  - "The Rust SDK preset `AcpAgent::zed_claude_code()` invokes `npx -y @zed-industries/claude-code-acp@latest`, a package whose last release was v0.16.2 in 2025. Pinned to that ancient version, it is missing auth methods, fast mode, refusal fallback, session/delete, 1M-context inference, `$/cancel_request` handling, and many other improvements. Use `AcpAgent::from_str(...)` with the new namespace instead."
+  - "`v0.18.0` of the adapter (`Switch over to built-in Claude tools`) deliberately stopped replicating ACP filesystem/terminal reverse requests. Even if a client advertises `fs.readTextFile: true` and `terminal: true`, the adapter handles read/write/execute internally through the Claude Agent SDK. Implement those handlers as a general ACP client, but do not expect them to fire with the current adapter."
+  - "`$` permission requests fire BEFORE the corresponding `session/update` for the tool call lands in some versions of the adapter; v0.53.0 fixed the ordering so `tool_call` arrives first. Both orderings are seen in the wild depending on adapter version."
+  - "AWS Bedrock auth refresh (`awsAuthRefresh`) writes human-readable status messages to stdout and corrupts the NDJSON stream. Remove that setting or filter non-JSON lines."
+  - "Plan-mode error in pure plan-mode (where the user reviews a plan before executing it) because the Claude Agent SDK's plan mode is not yet first-class. Streaming plan entries as the agent works is unaffected."
+  - "Sessions default to `haiku` (or whatever the user's Default resolves to) on first launch; expose a SessionConfigOption or set `ANTHROPIC_MODEL` explicitly."
+  - "Terminal handle leaks occur if `terminal/release` is skipped — relevant even for the current adapter because the Claude-built-in Bash tool can fail to terminate a process inside an MCP server that itself uses the terminal reverse request."
+  - "`session/cancel` requires the client to reply with `Cancelled` to any pending `session/request_permission` reverse requests, per schema v1.1.0."
+  - "Relative paths and 0-based indexing are common integration bugs — ACP requires absolute paths and 1-based line numbers."
 gaps:
-  - No official Anthropic-maintained ACP adapter; reliance on Zed/community bridges.
-  - No documented headless auth flow specific to ACP; auth is inherited from the CLI's existing mechanisms.
-  - Plan-mode behavior is incomplete.
-  - MCP-over-ACP is unstable and adapter-specific.
+  - "No official Anthropic-maintained ACP adapter; reliance on Zed/community bridges under the new `agentclientprotocol` organization."
+  - "Status of the `claude-code-acp-rs` Rust community adapter: crate could not be looked up through the public crates.io API at research time, so version, last update, maintenance state are `unknown`. The skill catalog at `.claude/skills/acp/claude.md` (the ACP topic summary) still records it as a viable alternative."
+  - "Plan-mode (review-before-execute) support is incomplete in the TypeScript adapter because the Claude Agent SDK does not fully implement plan mode."
+  - "MCP-over-ACP tooling is unstable across adapters — `promptCapabilities` / `McpServer` arrays only became standardized in schema 1.1.0."
+  - "The TypeScript adapter's exact support for schema v1.1.0 fields such as `session/resume`, `session/list`, `session/close`, `session/delete`, `additionalDirectories`, and `AgentAuthCapabilities` is documented in the schema but not surfaced in the adapter changelog — empirical verification required before treating them as usable through this adapter."
 changes:
-  - Refreshed for agent-client-protocol 1.0.1 API.
-  - Updated Rust examples to use the builder/ConnectionTo API instead of the 0.9.x MessageHandler API.
-  - Removed the !Send/LocalSet guidance because 1.0.1 is Send/Sync.
-  - Added `Claudine Integration Notes` and `Changelog` sections.
+  - "Confirmed Claude Code's `claude` binary (2.1.200) has no native ACP entry point; updated all launch-mode evidence with exact error strings and a Bun-bundle note."
+  - "Updated adapter references: the official TypeScript adapter was renamed from `@zed-industries/claude-agent-acp` to `@agentclientprotocol/claude-agent-acp` as of v0.24.0 (April 2026); the repository moved to github.com/agentclientprotocol/claude-agent-acp. Old npm names still resolve but are tracked under the new namespace."
+  - "Noted that the Rust SDK preset `AcpAgent::zed_claude_code()` is stale (still calls the deprecated `@zed-industries/claude-code-acp@latest` package, pinned to v0.16.2) and recommended `AcpAgent::from_str` as the workaround."
+  - "Corrected schema version from 1.2.0 (incorrectly recorded in prior research) to 1.1.0 (current)."
+  - "Reflected schema v1.1.0 additions: `authenticate`/`logout`, `session/close`/`delete`/`list`/`resume`, `$/cancel_request`, `AgentAuthCapabilities`, `SessionCapabilities`, `SessionConfigOption`, `additionalDirectories`. Marked `fs_*` and `terminal/*` reverse requests as `unsupported` because the adapter v0.18.0+ delegates tool dispatch to Claude's built-in tools."
+  - "Recorded adapter feature launches since the prior research: v0.52 title-update, v0.53 ACP logout, v0.54 fast mode, v0.55 refusal-fallback consent dialog, v0.50 cancellation, v0.43 elicitation, v0.48 Bash image output & agent-selection dropdown, v0.36 session/delete & additionalDirectories, v0.34 Bedrock gateway auth."
+  - "Cross-checked protocol versions: agent-client-protocol 1.0.1 depends on agent-client-protocol-schema =1.1.0 (not 1.2.0)."
+  - "Marked the v0.18.0 'drop client fs/terminal reverse requests' change as a behavioral reversal that prior research did not capture — clients used to expect those reverse requests, but they no longer arrive with the current official adapter."
+  - "Marked the v0.53.0 'tool_call before permission request' fix as a UI-ordering change that clients depending on a specific `session/request_permission` vs `session/update` ordering may need to handle both."
+  - "Recorded ad-hoc errors from `claude --acp` and `claude acp` as direct evidence the binary has no ACP entry point."
 requires_claudine_update: true
-reason: Claude Code ACP support is adapter-based and differs from native ACP providers. Claudine's future ACP client/adapter work needs dedicated launch-mode detection, reverse-request routing, permission policy integration, and terminal handle management for this provider.
+reason: "Claude Code ACP support is still adapter-based, but the official adapter and the Rust SDK have both moved on in ways that affect Claudine's wiring: the npm namespace moved to @agentclientprotocol, the Rust SDK preset still references the deprecated npm name, the adapter no longer uses filesystem or terminal reverse requests (so Claudine's permission and shell-audit layers need to plug into Claude Code's built-in tools via session/request_permission rather than via fs/terminal handlers), and the protocol gained authenticate/logout/session-modes capabilities that future Claudine launcher detection and capability negotiation will need to model."
 ---
 
 ## Overview
 
-Claude Code is Anthropic's agentic coding assistant. As of July 2026 it does **not** implement the Agent Client Protocol (ACP) natively in its main `claude` CLI binary. Anthropic closed the [feature request (#6686)](https://github.com/anthropics/claude-code/issues/6686) as `not_planned` because community adapter implementations already exist.
+Claude Code is Anthropic's agentic coding assistant. As of Claude Code 2.1.200 (BUILD_TIME 2026-07-03, the version installed at research time) it does **not** implement the Agent Client Protocol natively in its main `claude` CLI binary. Direct probes return `error: unknown option '--acp'` and `unknown command "acp"`; Anthropic closed the upstream feature request [anthropics/claude-code#6686](https://github.com/anthropics/claude-code/issues/6686) as `not planned` because community adapter implementations exist.
 
-ACP support for Claude Code is therefore provided by **adapter/bridge** processes that translate between:
+ACP support is therefore provided by an **adapter/bridge** process that translates between:
 
-1. **ACP** — JSON-RPC 2.0 over stdio, spoken by editors and ACP clients.
-2. **Claude Agent SDK protocol** — the proprietary NDJSON-over-stdio protocol used by the `claude` CLI binary.
+1. **ACP** — JSON-RPC 2.0 over stdio (the standard transport), spoken by editors and ACP clients. Schema v1.1.0.
+2. **Claude Agent SDK protocol** — the proprietary NDJSON-over-stdio interface used by the `@anthropic-ai/claude-agent-sdk` runtime, which in turn launches the `claude` CLI binary.
 
-The best-known adapter is Zed's TypeScript package `@zed-industries/claude-agent-acp`. A Rust alternative, `claude-code-acp-rs`, is also available and uses `sacp` plus `agent-client-protocol-schema` internally.
-
-For Claudine's future ACP client/adapter work this means Claude Code must be treated as an **adapter-launched provider**: the client spawns the adapter, negotiates ACP capabilities, and must be prepared to handle all agent-to-client reverse requests for permissions, filesystem access, and terminal execution.
+The canonical adapter today is the TypeScript package `@agentclientprotocol/claude-agent-acp`, maintained in the [`agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) repository (formerly `zed-industries/claude-agent-acp`, formerly `@zed-industries/claude-code-acp`). It currently sits at **v0.55.0** (released 2026-07-02). A community Rust bridge `claude-code-acp-rs` is referenced in the rust-acp skill, but its crates.io listing could not be retrieved during this research, so its current status is `unknown`.
 
 ## Launching ACP
 
-### Zed TypeScript adapter
+### Recommended: the official TypeScript adapter
 
 ```bash
-npx -y @zed-industries/claude-code-acp@latest
+npx -y @agentclientprotocol/claude-agent-acp@latest
 ```
 
-The adapter launches the `claude` CLI as a subprocess, translates ACP JSON-RPC requests to Claude Agent SDK calls, and converts SDK stream events back to ACP `session/update` notifications. All ACP traffic uses newline-delimited JSON-RPC 2.0 over stdio; stderr is reserved for adapter/CLI logs.
+Launching this binary opens a stdio JSON-RPC v1 stream using the schema at [`agentclientprotocol.com/protocol/schema`](https://agentclientprotocol.com/protocol/schema). The adapter launches the `claude` CLI via the Claude Agent SDK, translates incoming ACP requests to SDK calls, and forwards SDK stream events back as ACP `session/update` notifications. stderr is reserved for adapter/CLI logs to avoid corrupting the JSON-RPC stream.
 
-### Rust adapter
+### Legacy npm names that still work
 
 ```bash
-cargo install claude-code-acp-rs
-claude-code-acp-rs
+npx -y @zed-industries/claude-agent-acp@latest   # alias through v0.24.0
+npx -y @zed-industries/claude-code-acp@latest   # pinned to ≤ v0.16.2
 ```
 
-This is a community Rust implementation of the same bridge pattern.
+The first alias was renamed in the same move that put the package under the new `agentclientprotocol` namespace; both names resolve. The second resolves to an adapter that is over a year stale (released before rename to `@zed-industries/claude-agent-acp`).
+
+> **The Rust SDK preset `AcpAgent::zed_claude_code()` is broken.** At `agent-client-protocol 1.0.1` it still runs `npx -y @zed-industries/claude-code-acp@latest`, which pins to the 0.16.2 epoch. Use `AcpAgent::from_str("npx -y @agentclientprotocol/claude-agent-acp@latest")` to get a current adapter from Rust.
 
 ### No native launch mode
 
-The `claude` CLI itself does not accept `--acp`, `acp serve`, or similar flags. Any documentation or issue that implies otherwise refers to the adapter layer, not the primary binary.
+Direct verification on a freshly installed Claude Code 2.1.200:
+
+```text
+$ claude --acp
+error: unknown option '--acp'
+
+$ claude acp
+✘ unknown command "acp"
+  └ Did you mean claude mcp?
+
+Run claude --help to list commands, or claude -p "acp" to send as a prompt.
+```
+
+The `claude` binary itself is a Bun-bundled JavaScript application (the Mach-O `__BUN` segment is present in the Mach-O loadable image). Anthropic has not announced and does not appear to be planning native ACP support.
 
 ## Protocol and Capabilities
 
 ### Transport and framing
 
-- **Transport**: stdio pipes between the ACP client and the adapter.
+- **Transport**: stdio pipes between the ACP client and the adapter. (`agent-client-protocol-http` is available in the Rust SDK for HTTP/WebSocket transports, but the official TypeScript adapter only speaks stdio.)
 - **Framing**: newline-delimited JSON-RPC 2.0.
 - **Encoding**: UTF-8.
-- **Direction**: client sends requests/notifications to the agent; agent sends responses and reverse requests back to the client.
+- **Direction**: client sends requests/notifications to the agent; the agent sends responses, reverse requests, and protocol notifications to the client.
 
 ### Supported protocol version
 
-Both adapters target ACP **v1**. The official `agent-client-protocol` Rust crate also supports an opt-in `unstable_protocol_v2` feature, but Claude Code adapters currently negotiate v1.
+Both the TypeScript adapter (v0.55.0) and the official Rust SDK (`agent-client-protocol 1.0.1` depending on `agent-client-protocol-schema =1.1.0`) negotiate **ACP v1 / schema 1.1.0**. The Rust crate exposes an opt-in `unstable_protocol_v2` feature, but neither adapter nor Claude's Agent SDK use it.
 
 ### Capability surface
 
 | Area | Status | Notes |
 |------|--------|-------|
-| `initialize` | supported | Standard handshake with `ClientCapabilities` and `Implementation`. |
-| `session/new`, `session/load`, `session/cancel` | supported | Normal session lifecycle. |
-| `session/prompt` | supported | Main turn-taking request with streaming response. |
-| `session/request_permission` | supported | Reverse request for tool approvals. |
-| `fs/read_text_file`, `fs/write_text_file` | supported | Only when client advertises filesystem capabilities. |
-| `terminal/*` | supported | Only when client advertises terminal capability. |
-| `session/update` streaming | supported | Text, tool, plan, and mode updates. |
-| MCP | partial | Claude Code itself supports MCP; the adapter exposes tools prefixed `mcp__acp__`. |
-| Plan mode | partial | `plan` updates stream, but the TypeScript adapter errors in plan mode. |
-| `ext_method` / `ext_notification` | supported | Adapter-specific extensions. |
+| `initialize` / `authenticate` / `logout` | supported | Schema v1.1.0 trio. Adapter advertises `authMethods` for Claude login, Console login, and Bedrock; clients drive an `authenticate` round-trip instead of waiting for `auth_required`. |
+| `session/new` / `session/load` / `session/prompt` / `session/cancel` | supported | Normal session lifecycle. |
+| `session/resume` / `session/list` / `session/close` / `session/delete` | partial | Schema v1.1.0 supports these; adapter support is partial — `session/delete` is in v0.36+, the others are visible in `NewSessionResponse`/`LoadSessionResponse` payloads but not always presented as client-facing methods. |
+| `session/set_mode` / `session/set_config_option` | supported | Schema v1.1.0 first-class. Adapter emits initial `modes` (effort_level/thought_level, model, permission_mode, fast) and changes via `current_mode_update`. |
+| `session/request_permission` | supported | Reverse request for tool approvals; v0.53.0 fixed ordering so `tool_call` arrives before the request. |
+| `fs/read_text_file` / `fs/write_text_file` / `terminal/*` | unsupported (by current adapter) | Adapter v0.18.0+ delegates reads/writes/execution to Claude's built-in tools and does NOT issue these reverse requests. Implement as a general client; do not expect traffic from this provider. |
+| `session/update` streaming | supported | Text, thought, tool call/update, plan, mode/config/commands updates. |
+| MCP (`mcpCapabilities.http` / `mcpCapabilities.sse`) | supported | Schema v1.1.0. Adapter v0.27 exposes raw SDK messages to clients, v0.43 experimental elicitation. MCP server management remains possible via `claude mcp` CLI outside ACP. |
+| Plan mode | partial | Normal plan streaming works; pure review-before-execute plan mode errors because the Claude Agent SDK does not yet fully support it. |
+| `ext_method` / `ext_notification` / `_meta` | supported | Adapter currently uses `_meta` for Claude-specific extras such as `acp.mcp_elicitation`, `additionalDirectories`, raw SDK passthrough. |
+| Protocol-level `$/cancel_request` | supported | Schema v1.1.0. Adapter v0.50.0 added cancellation handling; v0.41.0 added force-cancellation on SDK query hang. |
 
 ## Reverse Requests
 
-Because the agent process has no direct filesystem or terminal access, it sends reverse requests to the client. The following reverse requests must be handled by a Claudine ACP client when the corresponding capability is advertised.
+Because the canonical adapter (v0.18.0+) delegates filesystem reads, filesystem writes, and command execution to Claude's built-in tools, **only one reverse request is reliably observed in practice**: `session/request_permission`. The remaining entries below are kept for schema completeness and for clients that want to support other agents in the same code path.
 
-### Permission requests
+### Permission requests (required)
 
 ```json
 {
@@ -314,65 +383,54 @@ Because the agent process has no direct filesystem or terminal access, it sends 
     "sessionId": "sess_abc123",
     "toolCall": {
       "toolCallId": "call_xyz",
-      "title": "Write to /home/user/project/config.json",
-      "kind": "edit"
+      "title": "Edit src/auth.rs",
+      "kind": "edit",
+      "content": [...]
     },
     "options": [
       {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
-      {"optionId": "always", "name": "Always Allow", "kind": "allow_always"},
+      {"optionId": "always", "name": "Always allow", "kind": "allow_always"},
       {"optionId": "deny", "name": "Deny", "kind": "reject_once"}
     ]
   }
 }
 ```
 
-The client must respond with `RequestPermissionOutcome::Selected` containing the chosen `option_id`, or `RequestPermissionOutcome::Cancelled`.
+Respond with `RequestPermissionOutcome::Selected` (chosen `optionId`) or `RequestPermissionOutcome::Cancelled`.
 
-### Filesystem requests
-
-Only sent when the client advertises filesystem capabilities:
+### Filesystem and terminal requests (schema-completeness only)
 
 ```json
-{"jsonrpc":"2.0","id":43,"method":"fs/read_text_file","params":{"sessionId":"sess_abc123","path":"/project/src/main.rs","line":10,"limit":50}}
+{"jsonrpc":"2.0","id":43,"method":"fs/read_text_file","params":{"sessionId":"sess_abc123","path":"/project/src/main.rs","line":10,"limit":50,"sessionId":"sess_abc123"}}
 ```
 
 ```json
-{"jsonrpc":"2.0","id":44,"method":"fs/write_text_file","params":{"sessionId":"sess_abc123","path":"/project/config.json","content":"new content..."}}
+{"jsonrpc":"2.0","id":44,"method":"terminal/create","params":{"sessionId":"sess_abc123","command":"cargo","args":["build"],"cwd":"/project","env":[{"name":"RUST_LOG","value":"info"}],"outputByteLimit":1048576}}
 ```
 
-### Terminal requests
-
-Only sent when the client advertises terminal capability:
-
-```json
-{"jsonrpc":"2.0","id":45,"method":"terminal/create","params":{"sessionId":"sess_abc123","command":"cargo","args":["build"],"cwd":"/project"}}
-```
-
-Lifecycle: `terminal/create` → `terminal/output` / `terminal/wait_for_exit` → `terminal/kill` (optional) → `terminal/release`.
+Lifecycle: `terminal/create` → `terminal/output` / `terminal/wait_for_exit` → `terminal/kill` (optional) → `terminal/release`. Schemas for these end up in clients that wire up general ACP, but the current `claude-agent-acp` adapter will not initiate them.
 
 ## Permissions, Filesystem, and Terminal
 
 ### Permission policy
 
-- The client is the authority for every tool call.
-- There is no implicit default policy; the client must respond to each `session/request_permission`.
-- If the user cancels the current turn, the client must still answer pending permission requests with `Cancelled`.
+- The client is the authority for every tool call requiring approval. There is no implicit default — every `session/request_permission` must receive a `Selected` or `Cancelled` response.
+- On `session/cancel`, the client MUST respond with `Cancelled` to any in-flight `session/request_permission` requests (schema v1.1.0 specification).
+- The `kind` field of `PermissionOptionKind` accepts `allow_once`, `allow_always`, `reject_once`, and `reject_always` (Claude's setting system typically renders `allow_always` as a settings.json rule).
 
 ### Filesystem policy
 
-- ACP paths must be absolute and line numbers are 1-based.
-- The client enforces its own sandbox, typically by verifying the requested path is within the project root.
-- Read and write are the only filesystem reverse requests in ACP v1.
+With the current `claude-agent-acp` adapter, reads and writes happen *inside* the Claude Agent SDK process and never reach the client. Path policy, sandboxing, and redaction must be implemented through Claude Code's own permission and sandboxing systems (`settings.json`, `--permission-mode`, `sandbox.*` settings) rather than at the ACP boundary.
+
+When `fs/read_text_file` and `fs/write_text_file` are implemented for general ACP support: paths must be absolute and 1-based line numbers; the client enforces sandboxing (typically by checking that the requested path lies inside the project root); reads and writes are the only filesystem reverse requests in ACP v1.
 
 ### Terminal policy
 
-- The client receives the full command, arguments, environment variables, and working directory.
-- The client decides whether to allow the command (often via the same permission UI that handles `session/request_permission`).
-- The client is responsible for process lifecycle, output buffers, truncation, and handle cleanup.
+Same story as filesystem: the Claude Agent SDK runs commands through its built-in Bash tool. For general ACP support: the client receives the full command, arguments, environment variables, and working directory, then decides whether to allow the command (often via the same permission UI as `session/request_permission`) and is responsible for process lifecycle, output buffers, byte-limit truncation (truncating from the beginning when `outputByteLimit` is exceeded, at a character boundary), and the always-call `terminal/release` discipline.
 
 ## Streaming and UI Integration
 
-Streaming happens through `session/update` notifications. Common update types include:
+Streaming flows through `session/update` notifications. Common update variants:
 
 | Update | Purpose |
 |--------|---------|
@@ -381,45 +439,61 @@ Streaming happens through `session/update` notifications. Common update types in
 | `UserMessageChunk` | User message replay during session load. |
 | `ToolCall` | A new tool call has started. |
 | `ToolCallUpdate` | Tool progress, status change, or final result. |
-| `Plan` | Multi-step execution plan. |
-| `AvailableCommandsUpdate` | Slash commands available in the session. |
-| `CurrentModeUpdate` | Session mode change. |
+| `Plan` | Multi-step plan entry (live streaming, not review-mode). |
+| `AvailableCommandsUpdate` | Slash commands the agent advertises. |
+| `CurrentModeUpdate` | Mode change. |
 | `ConfigOptionUpdate` | Session config option change. |
 
-Because these are notifications, the client must route them into its UI event loop. A Rust desktop app typically uses `tokio::sync::mpsc` to forward updates from the ACP runtime thread to the UI framework (Tauri, iced, etc.).
+Notifications are fire-and-forget — group by `ContentChunk.message_id` to disambiguate parallel streams. Route these events into whatever the host UI's event loop is; a desktop bridge usually means `tokio::sync::mpsc` between the ACP runtime and the UI framework thread.
+
+`$/cancel_request` (schema v1.1.0) is the protocol-level cancellation signal — distinct from `session/cancel`, which only cancels the active prompt turn.
 
 ## Authentication and Setup
 
-Before an ACP session can run headlessly, the underlying `claude` CLI must be authenticated. Options:
+The TypeScript adapter inherits the `claude` CLI's auth posture and additionally advertises an `authMethods` array at initialize. The supported methods:
 
-1. **Interactive login** — run `claude` once and complete OAuth in a browser.
-2. **API key** — set `ANTHROPIC_API_KEY` so the CLI can authenticate without a browser.
-3. **Pre-existing session** — reuse cached Claude Code credentials.
+1. **Interactive login** — run `claude` once and complete OAuth in a browser, or let the adapter prompt via `authenticate`.
+2. **`ANTHROPIC_API_KEY`** — set the env var to authenticate without a browser.
+3. **Pre-existing session** — reuse cached Claude Code credentials in `~/.claude/`.
+4. **Bedrock, Vertex, Foundry** — env vars (`CLAUDE_CODE_USE_BEDROCK=1`, etc.) and the dedicated Bedrock gateway authentication added to the adapter in v0.34.0.
+5. **TUI login for remote environments** — added in adapter v0.26.0.
+6. **`NO_BROWSER=1`** — removes the interactive browser flow from advertised methods.
 
-In CI or daemon contexts, prefer `ANTHROPIC_API_KEY`. The adapter does not provide its own authentication mechanism; it inherits whatever auth the CLI has.
+For headless automation (CI, daemon contexts), use `ANTHROPIC_API_KEY`. The adapter does not add a new auth channel of its own — it lets the client pick one of the advertised methods and authenticate normally.
 
 ## Compatibility, Quirks, and Workarounds
 
-1. **No native ACP mode** — every integration requires an adapter. Do not expect a future `claude acp serve` command.
-2. **Stdout pollution with AWS Bedrock** — if `awsAuthRefresh` is enabled, the CLI writes human-readable status to stdout and corrupts the NDJSON stream. Remove that setting or filter non-JSON lines.
-3. **Initialization timeout** — the adapter can take longer than 30 seconds to initialize. Use a 60-second timeout or more.
-4. **Missing `mcp__acp__Edit`** — Claude sometimes calls `Edit` instead of the adapter's prefixed tool, so changes may not appear in the editor's diff view. This is an adapter-level mapping issue.
-5. **Default model fallback** — sessions may default to Haiku instead of Sonnet. Set the model explicitly in session configuration or environment variables.
-6. **Plan mode errors** — the TypeScript adapter errors out in plan mode because the Claude Agent SDK does not fully support it.
-7. **SDK pathing bug** — `@zed-industries/claude-agent-acp` may need a manual patch to `sdk.mjs` after reinstall (`entrypoints/cli.js` → `claude-code/cli.js`).
-8. **Path and indexing mistakes** — ACP requires absolute paths and 1-based line numbers. Relative paths and 0-based indexing are common integration bugs.
-9. **Terminal handle leaks** — always call `terminal/release` when a terminal is no longer needed.
-10. **Historical `!Send` SDK** — `agent-client-protocol` 0.9.x required `tokio::task::LocalSet`. This was resolved in 1.0.1; modern code can use standard `tokio::spawn`.
+1. **No native ACP mode** — every integration is an adapter bridge. Confirmed via `claude --acp` / `claude acp` on Claude Code 2.1.200.
+2. **Rust preset pins an old adapter** — `AcpAgent::zed_claude_code()` from `agent-client-protocol 1.0.1` invokes the deprecated `@zed-industries/claude-code-acp@latest` (≤ v0.16.2), missing 31+ releases. Use `AcpAgent::from_str("npx -y @agentclientprotocol/claude-agent-acp@latest")` until upstream refreshes the preset.
+3. **Dropped filesystem/terminal reverse requests** (adapter v0.18.0) — clients that adapted to the prior behavior must now rely on Claude Code's own permission UI; `fs/read_text_file` and `terminal/create` no longer arrive from the official adapter.
+4. **Tool call ordering** — pre-v0.53.0, `session/request_permission` could arrive before the corresponding `session/update`. The ordering was fixed in v0.53.0; both orderings are seen depending on adapter version.
+5. **Stdout pollution with AWS Bedrock** — `awsAuthRefresh` writes human-readable status messages to stdout and corrupts the NDJSON stream. Remove the setting or filter non-JSON lines.
+6. **Initialization timeout** — the adapter can take longer than 30 seconds to initialize; use a 60-second timeout for `initialize` to absorb first-launch OAuth prompting.
+7. **Default model fallback** — sessions may default to Haiku. Set a model explicitly via `ANTHROPIC_MODEL` or a `SessionConfigOption`.
+8. **Plan-mode error in pure plan-mode** — the Claude Agent SDK does not fully implement review-plan-before-execute. Live plan streaming as the agent works is fine.
+9. **Terminal handle leaks** — always call `terminal/release` when a `terminal/*` reverse request returns a `TerminalId`. This is also relevant because Claude's built-in Bash tool can fire from inside an MCP server that itself uses `terminal/create`.
+10. **`session/cancel` semantics** — on receiving `session/cancel`, the client MUST respond `Cancelled` to any pending `session/request_permission` (schema v1.1.0). Forgetting to do so deadlocks the protocol.
+11. **Path and indexing mistakes** — ACP requires absolute paths and 1-based line numbers. Relative paths and 0-based indexing are common integration bugs.
 
 ## Recent Changes
 
-- **2026-06-29**: `agent-client-protocol` 1.0.1 and `agent-client-protocol-schema` 1.2.0 shipped. The Rust SDK is now Send/Sync and uses a builder API.
-- **2026-06-29**: `AcpAgent::zed_claude_code()` was added, making it trivial to launch the Zed Claude adapter from Rust.
-- Earlier 2026: Zed adapter fixes for parallel command updates, relative patch paths, and other adapter-specific issues. See the `claude-agent-acp` issue tracker for details.
+- **2026-07-02**: `@agentclientprotocol/claude-agent-acp` **v0.55.0** — refusal-fallback consent dialog, bumped Claude Agent SDK to 0.3.198, cancellation marker distinction (cancelled vs end_turn).
+- **2026-06-30**: Adapter v0.54.0/v0.54.1 — fast-mode session config; modelOverrides correctly applied to availableModels allowlist.
+- **2026-06-29**: Adapter v0.53.0 — first-class ACP `logout` request handling; SDK bump to Claude Agent SDK 0.3.195; `tool_call` now emitted before `session/request_permission`.
+- **2026-06-29**: `agent-client-protocol-v1.0.1` + `agent-client-protocol-schema 1.1.0` — Rust SDK reaches 1.0; connection types are Send/Sync; preset constructors for Zed Claude, Zed Codex, Google Gemini; **schema is 1.1.0** (not 1.2.0 as the prior research recorded).
+- **2026-06-25**: Adapter v0.52.0 — `--version` flag; session title updates pushed at turn end.
+- **2026-06-23**: Adapter v0.50.0 — `$/cancel_request` propagation; v0.41.0 force-cancellation on SDK query hang.
+- **2026-06-19**: Adapter v0.48.0 — agent-selection dropdown in config options; Bash tool image output surfaced; deduplicated streamed assistant blocks; update to new ACP SDK patterns.
+- **2026-06-09**: Adapter v0.43.0 — experimental elicitation; ACP SDK update to 0.25.0.
+- **2026-05-18**: Adapter v0.36.0 — experimental `session/delete`; `additionalDirectories` schema field for `session/new`.
+- **2026-05-15**: Adapter v0.34.0 — Bedrock gateway authentication.
+- **2026-04 (v0.24.0)**: **Repository moved from `zed-industries/claude-agent-acp` to `agentclientprotocol/claude-agent-acp`**; npm package renamed from `@zed-industries/claude-agent-acp` to `@agentclientprotocol/claude-agent-acp`.
+- **2026-03-26 / v0.22.0**: Adapter v0.22.0 — stable `session/list` method via `ListSessionsRequest`; explicit `session/close`; meta param for testing additional directories.
+- **Earlier 2026**: Bumped Claude Agent SDK continuously; v0.18.0 dropped replicated ACP filesystem/terminal tool wrappers in favor of Claude's built-in tools.
 
 ## Rust Client Example
 
-This example uses `agent-client-protocol` 1.0.1 with the Zed Claude adapter.
+This example uses `agent-client-protocol 1.0.1` with the *new* adapter namespace:
 
 ```toml
 [dependencies]
@@ -437,10 +511,13 @@ use agent_client_protocol::schema::{
     },
 };
 use agent_client_protocol::{AcpAgent, Client};
+use std::str::FromStr;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let agent = AcpAgent::zed_claude_code();
+    // IMPORTANT: AcpAgent::zed_claude_code() points at the deprecated npm package.
+    // Build it explicitly with the current namespace so the adapter is recent.
+    let agent = AcpAgent::from_str("npx -y @agentclientprotocol/claude-agent-acp@latest")?;
 
     Client
         .builder()
@@ -478,14 +555,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     version: "0.1.0".into(),
                 });
 
-            let init_response = connection
-                .send_request(init)
-                .block_task()
-                .await?;
+            let init_response = connection.send_request(init).block_task().await?;
             eprintln!("Agent: {:?}", init_response.agent_info);
 
+            if !init_response.auth_methods.is_empty() {
+                eprintln!("Agent offers auth: {:?}", init_response.auth_methods);
+            }
+
             let session = connection
-                .send_request(NewSessionRequest::new(std::env::current_dir()?))
+                .send_request(
+                    NewSessionRequest::new(std::env::current_dir()?, vec![]),
+                )
                 .block_task()
                 .await?;
 
@@ -510,7 +590,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Rust Reverse Request Handling
 
-The client can handle permission, filesystem, and terminal reverse requests with `on_receive_request`. The example below auto-approves reads but prompts for everything else.
+The adapter only reliably issues `session/request_permission` (per the v0.18.0+ delegation to built-in tools). The example handles permission and still implements `fs/read_text_file` / `fs/write_text_file` for general ACP completeness:
 
 ```rust
 use agent_client_protocol::schema::v1::{
@@ -531,6 +611,7 @@ fn sandbox(path: &Path, root: &Path) -> anyhow::Result<PathBuf> {
 async fn handle_permission(
     request: RequestPermissionRequest,
 ) -> anyhow::Result<RequestPermissionResponse> {
+    // Pick the most permissive single-shot option.
     let option_id = request
         .options
         .first()
@@ -580,7 +661,7 @@ async fn handle_write(
 }
 ```
 
-Register the handlers on the builder before `connect_with`:
+Register handlers on the builder before `connect_with`:
 
 ```rust
 Client
@@ -609,7 +690,7 @@ Client
 
 ## Rust Host Command Handling
 
-A full terminal handler tracks spawned processes in a map and responds to each terminal reverse request.
+The adapter delegates command execution to Claude's built-in Bash tool, so a full Claude client does not need to implement `terminal/*`. For general ACP support, the boilerplate is the same as any `agent-client-protocol` 1.0.1 client:
 
 ```rust
 use agent_client_protocol::schema::v1::{
@@ -648,7 +729,7 @@ impl TerminalManager {
     async fn next_id(&self) -> TerminalId {
         let mut id = self.next_id.lock().await;
         *id += 1;
-        format!("term_{}", id).into()
+        format!("term_{}", *id).into()
     }
 }
 
@@ -685,14 +766,15 @@ async fn handle_create_terminal(
 }
 ```
 
-The remaining handlers follow the same pattern: look up the `TerminalId`, operate on the `Child`, and return the corresponding response. Always implement `terminal/release` and kill the process if it is still running.
+The remaining handlers follow the same pattern: look up the `TerminalId`, operate on the `Child`, and return the corresponding response. Always implement `terminal/release` and kill the process if it is still running — handle leaks are a frequent production foot-gun.
 
 ## Rust Desktop Streaming Bridge
 
-To stream ACP events into a desktop UI, run the ACP client on a dedicated thread and forward `SessionNotification` values through an `mpsc` channel.
+To stream ACP events into a desktop UI, run the ACP client on a dedicated thread and forward `SessionNotification` values through an `mpsc` channel. Use the *current* adapter namespace:
 
 ```rust
 use tokio::sync::mpsc;
+use std::str::FromStr;
 
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
@@ -701,6 +783,7 @@ pub enum AgentEvent {
     ToolCallStarted { id: String, title: String },
     ToolCallFinished { id: String, status: String },
     PermissionRequest { request_id: String, title: String, options: Vec<(String, String)> },
+    ModeUpdate(String),
     TurnComplete { stop_reason: String },
     Error(String),
 }
@@ -718,7 +801,10 @@ pub fn spawn_agent(
             .expect("tokio runtime");
 
         rt.block_on(async move {
-            let agent = AcpAgent::zed_claude_code();
+            // Pin a known-good adapter version instead of `@latest` in production.
+            let agent = AcpAgent::from_str(
+                "npx -y @agentclientprotocol/claude-agent-acp@^0.55.0",
+            )?;
 
             Client
                 .builder()
@@ -755,7 +841,7 @@ pub fn spawn_agent(
                         .await?;
 
                     let session = connection
-                        .send_request(NewSessionRequest::new(project_dir))
+                        .send_request(NewSessionRequest::new(project_dir, vec![]))
                         .block_task()
                         .await?;
 
@@ -839,37 +925,36 @@ fn agent_subscription(
 
 Claudine currently wraps agentic CLIs through lifecycle hooks and event normalization, not through ACP. Adding ACP-based Claude Code support would require:
 
-1. **Adapter launch detection** — detect `npx -y @zed-industries/claude-code-acp@latest`, `claude-code-acp-rs`, or a user-configured adapter binary.
-2. **Capability negotiation** — advertise filesystem and terminal capabilities only when Claudine's policy engine permits them for the current repo.
-3. **Reverse-request routing** — implement handlers for `session/request_permission`, `fs/*`, and `terminal/*` and route them through Claudine's existing `permissions`/`protect` layers.
-4. **Streaming bridge** — forward `session/update` notifications into Claudine's event pipeline so that TTS, sound effects, logging, and messenger actions can trigger.
-5. **Terminal isolation** — ensure that commands spawned via `terminal/create` respect Claudine's shell-audit, timeout, and deny-list rules.
-6. **Headless auth** — require `ANTHROPIC_API_KEY` or verified pre-authentication before allowing non-interactive ACP launches.
+1. **Launch detection** — detect one of three npm package shapes (`@agentclientprotocol/claude-agent-acp` preferred; `@zed-industries/claude-agent-acp` legacy alias; never `@zed-industries/claude-code-acp`). The `claude-code-acp-rs` crate is a fourth candidate if its maintenance state can be verified.
+2. **Capability negotiation** — because the official adapter no longer honors `fs.readTextFile` / `terminal: true` (v0.18.0+), Claudine's permission and shell-audit layers must plug into Claude Code's *own* permission UI via `session/request_permission`. Advertise `fs`/`terminal` capabilities anyway for forward-compatibility with adapters and proxy chains.
+3. **Rust preset workaround** — until upstream updates `AcpAgent::zed_claude_code()`, Claudine's Rust launcher should call `AcpAgent::from_str("npx -y @agentclientprotocol/claude-agent-acp@latest")` (or pin a known version) so clients get a current adapter.
+4. **Reverse-request routing** — only `session/request_permission` reliably fires; route it through Claudine's existing `permissions`/`protect` machinery. Optionally implement `fs/*` and `terminal/*` as general ACP clients for other providers sharing the same code path.
+5. **Streaming bridge** — forward `session/update` notifications into Claudine's lifecycle pipeline so TTS, sound effects, logging, and messenger actions can react. Group updates by `ContentChunk.message_id`. Also handle the schema v1.1.0 protocol notifications (`current_mode_update`, `available_commands_update`, `config_option_update`) and tool-call ordering quirks (tool_call before permission in v0.53.0+).
+6. **Terminal isolation** — when `terminal/create` does fire (older adapter or other agents), enforce Claudine's shell-audit, timeout, and deny-list rules before the command runs. Track handles and always call `release`.
+7. **Headless auth** — require `ANTHROPIC_API_KEY` or pre-authenticated session before allowing non-interactive ACP launches; honor `authMethods` from the adapter and drive `authenticate`/`logout` rather than waiting on `auth_required`.
+8. **Schema versioning** — verify on every launch whether the negotiated `ProtocolVersion` matches what Claudine's handlers expect (currently schema 1.1.0); preserve an `unstable_protocol_v2` feature flag for tracking upstream work.
 
-Because Claude Code has no native ACP mode, Claudine should treat it as an **adapter-launched provider** with a higher integration cost than providers that ship ACP natively.
+Because Claude Code has no native ACP mode and the most-trusted adapter has just changed namespace and lost its filesystem/terminal reverse requests, Claudine should treat it as an **adapter-launched provider** with a higher integration cost than providers that ship ACP natively.
 
 ## Changelog
 
-- **2026-07-02**: Refreshed research for current ACP ecosystem and `agent-client-protocol` 1.0.1.
-- **2026-07-02**: Replaced legacy 0.9.x Rust examples with builder/ConnectionTo API examples.
-- **2026-07-02**: Added `Claudine Integration Notes` and populated all schema frontmatter fields.
+- **2026-07-03**: Refreshed for current Claude Code (2.1.200), `@agentclientprotocol/claude-agent-acp` (v0.55.0), and `agent-client-protocol` 1.0.1 / schema 1.1.0. Added direct-probe evidence that the `claude` binary has no `--acp` flag and no `acp` command. Corrected the prior schema version record (`1.2.0` → `1.1.0`). Documented the April-2026 GitHub org move and npm rename. Recorded the v0.18.0 delegation reversal that ended filesystem/terminal reverse requests through the official adapter. Flagged the `AcpAgent::zed_claude_code()` preset as stale and pointed to `AcpAgent::from_str` as the workaround.
+- **2026-07-02**: Initial release of this research document (per the prior `claudine sequence` run).
 
 ## Sources
 
-- [Claude Code Documentation](https://code.claude.com/docs/en/overview)
-- [Claude Code ACP Feature Request (#6686)](https://github.com/anthropics/claude-code/issues/6686)
-- [Agent Client Protocol Specification](https://agentclientprotocol.com/)
-- [ACP GitHub Repository](https://github.com/agentclientprotocol/agent-client-protocol)
-- [ACP Rust SDK (docs.rs)](https://docs.rs/agent-client-protocol/latest/agent_client_protocol/)
-- [ACP Schema Crate (docs.rs)](https://docs.rs/agent-client-protocol-schema/latest/agent_client_protocol_schema/)
-- [Rust SDK Client Example](https://github.com/agentclientprotocol/rust-sdk/blob/main/src/agent-client-protocol/examples/yolo_one_shot_client.rs)
-- [Zed Claude Code ACP Adapter](https://github.com/zed-industries/claude-agent-acp)
-- [claude-code-acp-rs (Rust adapter)](https://crates.io/crates/claude-code-acp-rs)
-- [Zed Blog: Claude Code via ACP](https://zed.dev/blog/claude-code-via-acp)
-- [JetBrains ACP Docs](https://www.jetbrains.com/help/ai-assistant/acp.html)
-- [Claude Agent SDK Overview](https://platform.claude.com/docs/en/agent-sdk/overview)
-- [Zed adapter JSON parsing issue (#69)](https://github.com/zed-industries/claude-agent-acp/issues/69)
-- [Zed initialization timeout issue (#43819)](https://github.com/zed-industries/zed/issues/43819)
-- [Zed missing Edit tool issue (#49525)](https://github.com/zed-industries/zed/issues/49525)
-- [Zed default model issue (#41578)](https://github.com/zed-industries/zed/issues/41578)
-- [Zed plan mode issue (#172)](https://github.com/zed-industries/claude-agent-acp/issues/172)
+- [Claude Code documentation](https://code.claude.com/docs/en/overview)
+- [`anthropics/claude-code` repository](https://github.com/anthropics/claude-code) (closed-source CLI; CHANGELOG is the public surface)
+- [`anthropics/claude-code` CHANGELOG (raw)](https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md)
+- [Issue #6686 — Feature Request: Add support for Agent Client Protocol (ACP), closed as `not planned`](https://github.com/anthropics/claude-code/issues/6686)
+- [Agent Client Protocol specification](https://agentclientprotocol.com/)
+- [ACP schema reference (v1.1.0)](https://agentclientprotocol.com/protocol/schema)
+- [ACP Rust SDK (agentclientprotocol/rust-sdk) v1.0.1](https://github.com/agentclientprotocol/rust-sdk/releases/tag/v1.0.1)
+- [`agent-client-protocol` crate on docs.rs (1.0.1)](https://docs.rs/agent-client-protocol/1.0.1/agent_client_protocol/) — `AcpAgent::zed_claude_code()` preset at `role/acp/acp_agent.rs`
+- [`agent-client-protocol-schema` 1.1.0](https://docs.rs/agent-client-protocol-schema/1.1.0/agent_client_protocol_schema/)
+- [`agentclientprotocol/claude-agent-acp` (the official adapter, formerly `zed-industries/claude-agent-acp`)](https://github.com/agentclientprotocol/claude-agent-acp)
+- [`@agentclientprotocol/claude-agent-acp` on npm](https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp)
+- [Adapter CHANGELOG (raw)](https://raw.githubusercontent.com/agentclientprotocol/claude-agent-acp/main/CHANGELOG.md)
+- [Claude Agent SDK overview](https://platform.claude.com/docs/en/agent-sdk/overview)
+- [Rust SDK Client Example (yolo_one_shot_client.rs)](https://github.com/agentclientprotocol/rust-sdk/blob/main/src/agent-client-protocol/examples/yolo_one_shot_client.rs)
+- [Adapter issue tracker — for known-quirks context](https://github.com/agentclientprotocol/claude-agent-acp/issues)

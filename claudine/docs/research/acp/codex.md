@@ -1,9 +1,9 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-02
-last_updated: 2026-07-02
-agent: opencode
-model: kimi-for-coding/k2p7
+last_updated: 2026-07-03
+agent: open_code
+model: minimax/MiniMax-M3
 docs: https://developers.openai.com/codex/cli
 acp_docs: https://agentclientprotocol.com/
 repo: https://github.com/openai/codex
@@ -12,174 +12,226 @@ launch_modes:
   - command: npx -y @agentclientprotocol/codex-acp
     args: []
     transport: stdio
-    adapter: "@agentclientprotocol/codex-acp (ACP org TypeScript adapter)"
+    adapter: "@agentclientprotocol/codex-acp (ACP-org TypeScript adapter; bundles @openai/codex)"
     notes: >-
-      Current recommended adapter. Built on the Codex App Server, it starts Codex
-      internally and translates ACP JSON-RPC to Codex operations. Stderr is reserved
-      for adapter/Codex logs; stdout carries newline-delimited JSON-RPC.
+      Current recommended adapter (v1.1.0, 2026-07-02). Spawns the bundled Codex App
+      Server over a private JSON-RPC channel and translates ACP JSON-RPC to/from it.
+      Stderr is reserved for adapter/Codex logs; stdout carries newline-delimited
+      JSON-RPC. Adapter name resolves at runtime to the value of `acp.agent({name})`
+      — the agent advertises `name: "@agentclientprotocol/codex-acp", title: "Codex"`.
   - command: npx -y @zed-industries/codex-acp
     args: []
     transport: stdio
-    adapter: Zed codex-acp (Rust)
+    adapter: "@zed-industries/codex-acp (DEPRECATED, pinned to v0.16.0)"
     notes: >-
-      Legacy Zed-maintained adapter. As of mid-2026 development has moved to the
-      agentclientprotocol/codex-acp repo; use the ACP-org package for new installs.
+      Legacy Zed-maintained adapter. npm description: "DEPRECATED — This package has
+      been replaced by @agentclientprotocol/codex-acp." Last published 2026-06-08.
+      The Zed repo's `main` branch remains accessible but has no tags after v0.16.0.
   - command: codex
     args: []
     transport: other
     adapter: none
     notes: >-
-      The main Codex CLI binary has no native `--acp` or `acp serve` mode. It exposes
-      `codex app-server --listen stdio://` for app-server protocol traffic, but that
-      is not ACP and is not the transport used by the ACP adapter.
+      The main Codex CLI binary (v0.142.5 installed locally) has no native ACP mode.
+      Direct probes on 0.142.5: `codex --acp` → "unexpected argument '--acp'";
+      `codex acp` → "unrecognized subcommand 'acp'". `codex app-server --listen
+      stdio://` exposes the Codex App Server protocol, but that is a separate JSONL
+      protocol, not ACP, and the adapter speaks it over a private channel rather
+      than via the CLI's stdio surface.
 protocol_versions:
-  - "v1"
+  - "v1 (agent-client-protocol-schema 1.1.0)"
 capabilities:
   - capability: initialize
     support: supported
-    notes: Standard ACP `initialize` handshake with capability negotiation and client info.
+    notes: >-
+      Standard ACP `initialize` handshake with `ProtocolVersion` (1),
+      `ClientCapabilities`, `Implementation`, and `authMethods`. Adapter emits
+      `agentInfo` with `name: "@agentclientprotocol/codex-acp"`, `title: "Codex"`,
+      `version: "1.1.0"` (from the bundled package.json).
   - capability: authenticate
     support: supported
     notes: >-
-      Adapter advertises `chatgpt`, `codex-api-key`, and `openai-api-key` methods.
-      Clients call `authenticate` when the adapter requires auth.
+      Three advertised auth methods: `api-key` (always), `chat-gpt` (unless
+      `NO_BROWSER=1`), and `gateway` (only when client opts in via
+      `clientCapabilities.auth._meta.gateway === true`). API key is supplied via
+      `_meta["api-key"].apiKey` in the `AuthenticateRequest`.
   - capability: session_new
     support: supported
-    notes: "`session/new` creates a conversation session tied to a working directory."
+    notes: >-
+      `session/new` creates a conversation session tied to a working directory.
+      Accepts optional `additionalDirectories` (absolute paths) and `mcpServers`.
+      Response includes initial `models`, `modes`, and `configOptions` (mode, model,
+      reasoning effort, and fast-mode toggle when supported by the chosen model).
   - capability: session_load
     support: supported
-    notes: "`session/load` resumes an existing Codex session when the session id is known."
+    notes: >-
+      `session/load` resumes an existing session by id. Capability advertised
+      (`loadSession: true`). Streams the conversation history back as
+      `session/update` notifications before the response.
   - capability: session_prompt
     support: supported
-    notes: "`session/prompt` is the primary turn-taking method."
+    notes: >-
+      `session/prompt` is the primary turn-taking method. `prompt` is
+      `ContentBlock[]`; the adapter advertises
+      `promptCapabilities.embeddedContext: true` and `promptCapabilities.image: true`.
+      Cancellation is supported via the request signal.
   - capability: session_cancel
     support: supported
-    notes: "`session/cancel` stops the current turn."
+    notes: >-
+      `session/cancel` is a notification that stops the current turn. Adapter also
+      handles protocol-level `$/cancel_request` (forwarded to the request signal)
+      so any in-flight request to the adapter can be aborted.
   - capability: session_modes
     support: supported
-    notes: "`session/set_mode` switches between read-only, agent, and agent-full-access modes."
+    notes: >-
+      Three modes: `read-only` (requires approval to edit/run), `agent` (workspace
+      write, no network), and `agent-full-access` (danger-full-access, network on).
+      Initial mode configurable via `INITIAL_AGENT_MODE` env var. Switch with
+      `session/set_mode`; agent emits `current_mode_update` notifications.
   - capability: streaming
     support: supported
-    notes: "`session/update` notifications stream text, tool calls, plans, and mode changes."
+    notes: >-
+      `session/update` notifications stream text, thoughts, tool calls, plan, mode,
+      commands, and config-option changes. Adapter also streams tool progress,
+      file changes, MCP tool calls, terminal output, web search, image
+      generation, image view, token usage, and review events.
   - capability: permissions
     support: supported
-    notes: Reverse request `session/request_permission` is used for tool-call and command approval.
+    notes: >-
+      Reverse request `session/request_permission` is used for command execution,
+      file change, MCP elicitation, and permissions-profile approvals. Approval
+      options include `allow_once`/`allow_always`/`reject_once` plus Codex-specific
+      decisions such as execpolicy amendment and network policy amendment.
   - capability: fs_read
-    support: supported
-    notes: "`fs/read_text_file` reverse request when the client advertises filesystem read capability."
+    support: unsupported
+    notes: >-
+      The adapter does not register an `fs/read_text_file` handler. Filesystem
+      reads happen inside the Codex App Server process via Codex's own tools.
+      Clients advertising `fs.readTextFile: true` will not see reverse requests
+      from this adapter.
   - capability: fs_write
-    support: supported
-    notes: "`fs/write_text_file` reverse request when the client advertises filesystem write capability."
+    support: unsupported
+    notes: >-
+      Same as fs_read — writes go through Codex's built-in tools, not via
+      `fs/write_text_file` reverse requests.
   - capability: terminal
-    support: supported
+    support: unsupported
     notes: >-
-      Full `terminal/*` lifecycle (create, output, wait_for_exit, kill, release) is
-      delegated to the client.
+      The adapter does not register `terminal/*` handlers. Commands run inside
+      the Codex App Server and surface as tool calls (`kind: "execute"`) with
+      streamed progress. Output bytes are carried in
+      `_meta.terminal_output_delta` (default) or `_meta.terminal_output`
+      (when client opts in via `clientCapabilities._meta.terminal_output: true`).
   - capability: mcp
-    support: supported
+    support: partial
     notes: >-
-      Client-provided MCP servers over command-based stdio config and HTTP transport.
-      Codex itself supports MCP servers and the adapter exposes them through ACP.
+      `mcpCapabilities.http: true`, `acp: false`, `sse: false`. Clients may pass
+      HTTP-transport MCP servers in `session/new` (`mcpServers`) and Codex will
+      manage them. SSE and ACP-protocol MCP servers are not exposed through the
+      adapter. Codex-side MCP servers (managed via `codex mcp`) remain accessible
+      through Codex's own tool surface.
   - capability: media
     support: supported
     notes: >-
-      Images can be attached to prompts. The adapter also reports image-generation and
-      image-view events through `session/update`.
+      Images are accepted in `promptCapabilities.image`. Image generation and
+      image view surface as `tool_call`/`tool_call_update` events via
+      `session/update`.
   - capability: plans
     support: supported
-    notes: Plan events are emitted as `session/update` notifications with `plan` updates.
-  - capability: extensions
-    support: partial
     notes: >-
-      ACP `_meta` fields and underscore-prefixed custom methods can be used for
-      adapter-specific extensions, but Codex-specific extensions are not formally
-      documented outside the adapter source.
+      Adapter emits `plan` events as `session/update` notifications. Plan items
+      from thread history are replayed on `session/load`.
+  - capability: extensions
+    support: supported
+    notes: >-
+      Adapter registers three extension methods: `authentication/status`,
+      `authentication/logout`, and the legacy `session/set_model`. `_meta`
+      fields are used to carry Codex-specific data (e.g. `codex` approval params,
+      `is_mcp_tool_approval`, `terminal_output_delta`).
 reverse_requests:
   - method: session/request_permission
     purpose: permission
     client_must_handle: true
     notes: >-
-      Required for any tool-call approval flow. The client must present options and
-      return a selected option ID or cancellation.
+      Required for every approval flow. The client must present the supplied
+      `options` (allow_once/allow_always/reject_once plus any Codex-specific
+      decision variants) and reply with `Selected` carrying the chosen
+      `option_id`, or `Cancelled`.
   - method: fs/read_text_file
     purpose: fs_read
-    client_must_handle: true
+    client_must_handle: false
     notes: >-
-      Required if the client advertises filesystem read capability. The client reads
-      the requested absolute path and returns content.
+      Not issued by the current adapter. Implement only as a matter of general
+      ACP completeness.
   - method: fs/write_text_file
     purpose: fs_write
-    client_must_handle: true
+    client_must_handle: false
     notes: >-
-      Required if the client advertises filesystem write capability. The client writes
-      content to the requested absolute path.
+      Not issued by the current adapter. Implement only as a matter of general
+      ACP completeness.
   - method: terminal/create
     purpose: terminal_create
-    client_must_handle: true
+    client_must_handle: false
     notes: >-
-      Required if the client advertises terminal capability. Spawns a host command and
-      returns a terminal ID.
+      Not issued by the current adapter.
   - method: terminal/output
     purpose: terminal_output
-    client_must_handle: true
+    client_must_handle: false
     notes: >-
-      Returns current stdout/stderr and exit status for a terminal handle without
-      blocking.
+      Not issued by the current adapter.
   - method: terminal/wait_for_exit
     purpose: terminal_wait
-    client_must_handle: true
+    client_must_handle: false
     notes: >-
-      Blocks until the terminal command exits and returns its final exit status.
+      Not issued by the current adapter.
   - method: terminal/kill
     purpose: terminal_kill
-    client_must_handle: true
+    client_must_handle: false
     notes: >-
-      Terminates the command but keeps the terminal handle valid for output retrieval.
+      Not issued by the current adapter.
   - method: terminal/release
     purpose: terminal_kill
-    client_must_handle: true
+    client_must_handle: false
     notes: >-
-      Releases the terminal handle and kills the command if still running. Must be
-      called to avoid resource leaks.
+      Not issued by the current adapter.
 permission_model:
   mechanism: session/request_permission reverse request
   timeout: client-defined
-  default_policy: no default; every tool call requiring approval must receive a Selected or Cancelled response
+  default_policy: no default; every approval request must receive a Selected or Cancelled response
   approval_values:
     - allow_once
     - allow_always
     - reject_once
-    - reject_always
   notes: >-
-    The client presents the options from the request and returns the selected option
-    ID. If the prompt turn is cancelled, the client must respond with Cancelled. Codex
-    CLI itself supports `--ask-for-approval never | on-request | untrusted` and
-    sandbox modes, but over ACP these are negotiated per request.
+    Codex approval flows are richer than the generic ACP surface. Beyond
+    allow/reject choices, the adapter may include Codex-specific decisions via
+    `_meta.codex` on the option (execpolicy amendment, network policy amendment,
+    root-grant, MCP tool-call approval with persist scope). Clients may either
+    surface those to the user as raw options or render them as plain
+    allow/reject buttons. On `session/cancel` or protocol-level `$/cancel_request`,
+    the adapter propagates the abort signal to in-flight permission requests.
 filesystem_model:
-  read_methods:
-    - fs/read_text_file
-  write_methods:
-    - fs/write_text_file
-  path_base: absolute paths only
-  sandboxing: client-side; the client decides whether to enforce a project-root boundary
+  read_methods: []
+  write_methods: []
+  path_base: not applicable — adapter does not invoke client filesystem reverse requests
+  sandboxing: client-side via project-root policy; Codex also enforces sandbox mode
   notes: >-
-    ACP requires absolute paths and 1-based line numbers. The client is responsible
-    for sandboxing and validating paths before reading or writing.
+    The Codex adapter does not delegate file I/O to the client. Path and sandbox
+    policy is enforced by Codex's sandbox modes (`read-only`, `workspace-write`,
+    `danger-full-access`) and the client's per-project approval rules.
 terminal_model:
-  supported: true
-  methods:
-    - terminal/create
-    - terminal/output
-    - terminal/wait_for_exit
-    - terminal/kill
-    - terminal/release
-  shell: depends on host; Codex uses the system shell configured by the adapter/Codex runtime
-  cwd: absolute path supplied in CreateTerminalRequest
-  streaming: polled via terminal/output
-  cancellation: terminal/kill or terminal/release
+  supported: false
+  methods: []
+  shell: not applicable — commands run inside the Codex App Server
+  cwd: not applicable
+  streaming: not applicable
+  cancellation: not applicable
   notes: >-
-    The client must track terminal handles, reap processes, and always release handles.
-    Output is byte-limited and truncated from the beginning when the limit is exceeded.
+    The current adapter does not invoke `terminal/*` reverse requests. Tool
+    executions surface as `tool_call` events with `kind: "execute"`; output
+    deltas are delivered through `_meta.terminal_output_delta` (or
+    `_meta.terminal_output` when negotiated). Implement terminal handlers as a
+    general ACP client but do not expect them to fire with this adapter.
 streaming_model:
   update_methods:
     - session/update
@@ -193,145 +245,291 @@ streaming_model:
   plan_events:
     - plan
   error_events:
-    - session/update does not carry errors; JSON-RPC errors are returned on the request channel
+    - "JSON-RPC errors are returned on the request channel; notifications are fire-and-forget"
   notes: >-
-    Updates are fire-and-forget notifications with no id. Codex additionally emits
-    shell command, file change, permission request, MCP tool call, terminal output,
-    reasoning, image generation, image view, token usage, and review events.
+    Updates are fire-and-forget notifications with no `id`. Text chunks include
+    `messageId` (added in adapter v1.1.0) so clients can group parallel chunks.
+    Mode changes surface via `current_mode_update`; slash command availability
+    via `available_commands_update`; config option changes via
+    `config_option_update`. Codex-specific tool kinds: command execution,
+    file change, MCP tool call, dynamic tool call, collab agent tool call,
+    web search, image generation, image view.
 auth_setup:
   required: true
   mechanisms:
-    - ChatGPT OAuth login
-    - Device code authentication (beta, for headless)
-    - CODEX_API_KEY
-    - OPENAI_API_KEY
-    - Custom OpenAI-compatible gateway when opted in
+    - "ChatGPT OAuth login (methodId: chat-gpt)"
+    - "API key via methodId: api-key and _meta[api-key].apiKey"
+    - "Custom OpenAI-compatible gateway (methodId: gateway, capability-gated)"
   headless_notes: >-
-    For fully headless ACP operation, set OPENAI_API_KEY or CODEX_API_KEY, or seed
-    `~/.codex/auth.json` from a machine that already completed ChatGPT login. Set
-    NO_BROWSER=1 to hide browser-based auth from advertised methods.
+    For headless operation, set `CODEX_API_KEY` (preferred) or `OPENAI_API_KEY`
+    so the adapter can authenticate without a browser. Set `NO_BROWSER=1` to
+    remove the `chat-gpt` method from the advertised list. Seed `~/.codex/auth.json`
+    from a machine that completed ChatGPT login if running in a headless
+    environment without API keys.
   notes: >-
-    The adapter inherits authentication from the underlying Codex runtime. In CI or
-    daemon contexts, API keys are recommended.
+    Adapter reads auth from `~/.codex/auth.json` via the bundled Codex runtime.
+    ChatGPT tokens auto-refresh; corrupted `auth.json` triggers automatic logout
+    (LLM-28118 fix).
 env_vars:
-  - name: OPENAI_API_KEY
-    effect: Fallback API key used when the API-key auth method is selected.
   - name: CODEX_API_KEY
-    effect: Preferred API key; takes precedence over OPENAI_API_KEY for API-key auth.
+    effect: Preferred API key for the `api-key` auth method. Takes precedence over OPENAI_API_KEY.
+  - name: OPENAI_API_KEY
+    effect: Fallback API key for the `api-key` auth method.
   - name: NO_BROWSER
-    effect: Hides browser-based ChatGPT auth from advertised auth methods.
+    effect: Removes the `chat-gpt` method from advertised auth methods.
   - name: CODEX_PATH
-    effect: Runs a specific Codex executable instead of the bundled package dependency.
+    effect: Run a specific Codex executable instead of the bundled `@openai/codex`.
   - name: CODEX_CONFIG
     effect: JSON object merged into the Codex session config.
   - name: MODEL_PROVIDER
-    effect: Model provider passed to Codex for new sessions.
+    effect: Model provider id passed to Codex for new sessions (e.g. `openai`, `custom-gateway`).
   - name: DEFAULT_AUTH_REQUEST
-    effect: ACP auth request JSON used when Codex requires authentication.
+    effect: ACP `AuthenticateRequest` JSON used when Codex requires authentication on first turn.
   - name: INITIAL_AGENT_MODE
-    effect: "Initial mode id: read-only, agent, or agent-full-access."
+    effect: "Initial `AgentMode` id: `read-only`, `agent`, or `agent-full-access`."
   - name: APP_SERVER_LOGS
-    effect: Directory for adapter logs.
+    effect: Directory where adapter/Codex App Server logs are written.
   - name: CODEX_ACCESS_TOKEN
-    effect: Provides a ChatGPT or Codex access token for trusted automation.
+    effect: Direct ChatGPT/Codex access token for trusted automation.
   - name: CODEX_HOME
-    effect: Root for Codex state, including config, auth, logs, and sessions.
+    effect: Root for Codex state (config, auth, logs, sessions).
 rust_client:
   crate: agent-client-protocol
   connection_type: AcpAgent subprocess over stdio (JSON-RPC)
   localset_required: false
   reverse_request_handlers:
     - session/request_permission
-    - fs/read_text_file
-    - fs/write_text_file
-    - terminal/create
-    - terminal/output
-    - terminal/wait_for_exit
-    - terminal/kill
-    - terminal/release
   desktop_streaming_pattern: >-
-    tokio::sync::mpsc from the notification handler to the UI thread; run the ACP
-    client on a dedicated tokio runtime.
+    `tokio::sync::mpsc` from the notification handler to the UI thread; run the
+    ACP client on a dedicated tokio runtime. Connection is `Send`/`Sync` as of
+    agent-client-protocol 1.0.1.
   notes: >-
-    As of agent-client-protocol 1.0.1 the SDK is Send/Sync and no longer requires
-    tokio::task::LocalSet. Use AcpAgent::from_str("npx -y @agentclientprotocol/codex-acp")
-    to launch the current recommended adapter.
+    Use `AcpAgent::from_str("npx -y @agentclientprotocol/codex-acp")` to launch
+    the current adapter. The crate's preset helpers may point at the deprecated
+    `@zed-industries/codex-acp` package; check before relying on a preset.
+    Terminal/fs reverse requests are not used by this adapter but should be
+    wired in as a general ACP client.
 compatibility:
   - client: Zed
     status: works
-    issue: none
-    workaround: Use the built-in Codex via ACP support; the adapter is fetched automatically.
+    issue: >-
+      Zed ships the Codex integration via ACP; the legacy `@zed-industries/codex-acp`
+      package was maintained by Zed before being moved to the `agentclientprotocol`
+      org in mid-2026.
+    workaround: Use Zed's built-in Codex integration; the adapter is fetched automatically.
   - client: JetBrains IDEs
     status: partial
-    issue: Requires `~/.jetbrains/acp.json` configuration and a separately installed adapter.
-    workaround: Point the registry to the `@agentclientprotocol/codex-acp` stdio command.
+    issue: >-
+      Session config options (`SessionConfigOption`) are intentionally disabled for
+      JetBrains 2026.1 due to upstream issues (LLM-28118); the adapter detects the
+      client by name and skips config-option emission. The rest of the protocol
+      works.
+    workaround: Upgrade to a JetBrains release after 2026.1 once the upstream issue is resolved.
   - client: Neovim (CodeCompanion)
     status: works
-    issue: none
-    workaround: Configure the adapter as a stdio ACP agent.
+    issue: none known
+    workaround: Configure the adapter as a stdio ACP agent via CodeCompanion's ACP support.
   - client: agent-client-protocol Rust SDK 0.9.x
     status: broken
-    issue: Connection futures were !Send and required LocalSet; API has changed.
+    issue: Connection futures were `!Send` and required `tokio::task::LocalSet`.
     workaround: Upgrade to agent-client-protocol 1.0.1 or later.
+  - client: agent-client-protocol Rust SDK 1.0.1
+    status: works
+    issue: None known. Schema is 1.1.0.
+    workaround: None.
 recent_changes:
   - date: 2026-07-02
     version: "@agentclientprotocol/codex-acp v1.1.0"
     change: >-
-      Development moved from zed-industries/codex-acp to agentclientprotocol/codex-acp.
-      The new adapter is built on the Codex App Server and is the recommended install.
+      ACP SDK bumped to v1.1.0. Added message IDs to text session chunks,
+      boolean Fast mode config option support, completed image generation items
+      surfaced as tool calls, goal changes emitted as session metadata, vscode-jsonrpc
+      upgraded to v9. Bundled `@openai/codex` bumped to 0.142.5.
     impact: >-
-      New installs should use `npx -y @agentclientprotocol/codex-acp` instead of the
-      Zed package.
+      Clients can group text chunks by `messageId`. Clients that advertise
+      `session.configOptions.boolean` receive a boolean Fast mode toggle instead
+      of the legacy select. Image generation completion is now visible as a tool
+      call rather than a free-floating event.
   - date: 2026-06-29
-    version: agent-client-protocol 1.0.1 / schema 1.1.0
-    change: Official Rust SDK released with Send/Sync connections and a builder-based API.
+    version: "@agentclientprotocol/codex-acp v1.0.2"
+    change: >-
+      Bundled `@openai/codex` bumped to 0.142.3 and 0.142.4. Added `/goal` slash
+      command support. Fixed skill listing to use session cwd. Removed Fast mode
+      config option for models that don't support it.
     impact: >-
-      Removes the LocalSet requirement; enables standard tokio::spawn and easier
-      desktop-app integration.
+      New `/goal` slash command is advertised via `available_commands_update`.
+      Fast mode config no longer appears when the active model lacks `fast`
+      support.
+  - date: 2026-06-26
+    version: "@agentclientprotocol/codex-acp v1.0.1"
+    change: >-
+      ACP SDK bumped to 1.0.0. Added ACP request cancellation (`$/cancel_request`)
+      handling. Mapped collab agent tool call events to `tool_call`. API-key auth
+      now reads from `CODEX_API_KEY` / `OPENAI_API_KEY` env vars. Auto-skips
+      ChatGPT login when already authenticated.
+    impact: >-
+      Adapter honors protocol-level `$/cancel_request` notifications. Collab agent
+      tool calls (sub-agent activity) now appear in the ACP transcript.
+  - date: 2026-06-23
+    version: "@agentclientprotocol/codex-acp v1.0.0"
+    change: >-
+      First stable v1 release. Added `session/delete`, more informative
+      permission approvals, embedded resource blob handling in prompts,
+      `additionalDirectories` support, reasoning events streamed as agent
+      thoughts, automatic logout on corrupted auth.json, and `session_config`
+      negotiation. Bundled `@openai/codex` bumped to 0.139.0–0.141.0 across the
+      cycle.
+    impact: >-
+      Stable v1.x contract. `agentCapabilities.sessionCapabilities.delete: {}`
+      and `additionalDirectories: {}` are now advertised. Corrupted auth.json
+      triggers `logout` and surfaces a re-auth error to the client.
   - date: 2026-06-08
     version: "@zed-industries/codex-acp v0.16.0"
-    change: Final major Zed release before maintenance hand-off.
-    impact: Existing Zed-adapter installs continue to work but will not receive new features.
+    change: >-
+      Final Zed-maintained release before the migration to the `agentclientprotocol`
+      org. npm description later updated to mark the package deprecated.
+    impact: >-
+      Existing installs keep working but receive no further updates; new installs
+      should use `@agentclientprotocol/codex-acp`.
 quirks:
-  - The Codex CLI has no native ACP mode; every ACP integration requires an adapter bridge.
-  - The recommended adapter package moved from `@zed-industries/codex-acp` to `@agentclientprotocol/codex-acp`; old package references may stop getting updates.
-  - "`NO_BROWSER=1` removes ChatGPT OAuth from advertised auth methods, which can break flows that expect a browser sign-in."
-  - API key auth is only recommended for headless/CI environments; ChatGPT subscription features are unavailable with API keys.
-  - Initialization can take longer than 30 seconds; use a 60-second timeout for `initialize`.
-  - Relative paths and 0-based indexing are common mistakes; ACP requires absolute paths and 1-based line numbers.
-  - Terminal handle leaks occur if `terminal/release` is skipped.
-  - The adapter is TypeScript/npm-based, so a Node.js runtime is required even when the client is written in Rust.
-  - The bundled `@openai/codex` dependency in the npm package may lag behind the latest Codex CLI release; use `CODEX_PATH` to pin a newer binary.
-  - Custom OpenAI-compatible gateways require client opt-in to the gateway auth capability.
+  - >-
+    Codex CLI has no native ACP mode. Direct probes on the installed
+    `codex-cli 0.142.5`: `codex --acp` returns "unexpected argument '--acp'";
+    `codex acp` returns "unrecognized subcommand 'acp'". The only protocol-mode
+    subcommand is `codex app-server --listen stdio://`, which speaks the Codex
+    App Server protocol (not ACP) and is what the adapter uses internally over
+    a private stdio channel.
+  - >-
+    Auth method names changed between the legacy Zed adapter and the current
+    ACP-org adapter. The legacy docs used `chatgpt`, `codex-api-key`, and
+    `openai-api-key`; the current adapter advertises `api-key`, `chat-gpt`,
+    and `gateway`. `api-key` is supplied via `_meta["api-key"].apiKey` and
+    the adapter picks up the value from `CODEX_API_KEY` / `OPENAI_API_KEY` env
+    vars if set.
+  - >-
+    `gateway` auth is capability-gated: it appears in `authMethods` only when
+    the client opts in by sending `clientCapabilities.auth._meta.gateway: true`
+    in `initialize`. It uses `_meta["gateway"]` with `baseUrl`, `headers`, and
+    optional `providerName`.
+  - >-
+    `mcpCapabilities.acp: false` and `mcpCapabilities.sse: false` — the adapter
+    only honours HTTP-transport MCP servers passed via `session/new`. SSE and
+    ACP-transport MCP servers are not exposed through this adapter.
+  - >-
+    Fast mode is conditional: `createFastModeConfigOption` only emits the
+    `fast-mode` config option when `modelSupportsFast` returns true for the
+    current model. Clients may see Fast mode appear or disappear as the active
+    model changes.
+  - >-
+    JetBrains 2026.1 clients have session config options intentionally disabled
+    (`isSessionConfigEnabled()` returns false for `clientInfo.name === ...`),
+    so `SessionConfigOption` payloads are absent for that client class until
+    the upstream issue (LLM-28118) is resolved.
+  - >-
+    Corrupted `~/.codex/auth.json` triggers an automatic logout via
+    `codexAcpClient.logout()`. The next request that needs auth fails with
+    `RequestError.authRequired()` unless `DEFAULT_AUTH_REQUEST` is set.
+  - >-
+    The adapter bundles `@openai/codex ^0.142.5` by default; if a client wants
+    a different Codex binary, set `CODEX_PATH`. The bundled version is
+    intentionally pinned — versions other than the one specified in
+    `package.json` may not be compatible.
+  - >-
+    The adapter enforces a 2-second grace period between stdin close and
+    `codex` SIGKILL: if stdin closes, the adapter closes the Codex process'
+    stdin, then kills it after 2s if it has not exited.
+  - >-
+    Stderr is reserved for adapter/Codex logs (2 KB rolling tail retained for
+    crash diagnostics). Clients should never write to the adapter's stderr.
+  - >-
+    `INITIAL_AGENT_MODE` env var is honoured only at session creation; it
+    does not retroactively change the mode of an existing session.
 gaps:
-  - No official OpenAI-maintained ACP adapter; reliance on the ACP-org/Zed bridge.
-  - No documented headless auth flow specific to ACP; auth is inherited from the CLI's existing mechanisms.
-  - Codex-specific session config options and slash commands are not exhaustively documented as ACP surface area.
-  - MCP-over-ACP behavior is supported but not formally standardized beyond the adapter implementation.
+  - >-
+    No official OpenAI-maintained ACP adapter; the canonical adapter is
+    maintained by the ACP org. The legacy `@zed-industries/codex-acp` package
+    is deprecated.
+  - >-
+    Empirical MCP-over-ACP behavior beyond the `http: true` capability is not
+    formally documented outside the adapter source.
+  - >-
+    Codex-specific extension methods (`authentication/status`,
+    `authentication/logout`, `session/set_model`) are documented only in the
+    adapter source; they are not part of the published ACP spec.
+  - >-
+    Tool call payload formats for Codex-specific kinds (collab agent, web
+    search, image generation, image view) are not formally documented; clients
+    must consume them from the adapter source.
 changes:
-  - Refreshed for the new `@agentclientprotocol/codex-acp` adapter location.
-  - Updated Rust examples to use agent-client-protocol 1.0.1 builder/ConnectionTo API.
-  - Removed the !Send/LocalSet guidance because 1.0.1 is Send/Sync.
-  - Added `Claudine Integration Notes` and `Changelog` sections.
-  - Populated all schema frontmatter fields.
+  - >-
+    Verified `codex` CLI 0.142.5 has no native ACP entry point; recorded exact
+    error strings for `codex --acp` and `codex acp`.
+  - >-
+    Corrected the auth method catalog: prior research listed `chatgpt`,
+    `codex-api-key`, `openai-api-key`. The current adapter advertises
+    `api-key`, `chat-gpt`, and `gateway` (capability-gated).
+  - >-
+    Documented new auth method: `gateway` for custom OpenAI-compatible
+    gateways, surfaced only when client opts in via
+    `clientCapabilities.auth._meta.gateway === true`.
+  - >-
+    Recorded session config options: the adapter emits `mode`, `model`,
+    `reasoning effort`, and (when supported) `fast-mode` as
+    `SessionConfigOption` entries. Boolean fast-mode support is detected via
+    `clientCapabilities.session.configOptions.boolean`.
+  - >-
+    Clarified that `fs/read_text_file`, `fs/write_text_file`, and the
+    `terminal/*` reverse requests are NOT issued by the current adapter. Path
+    and terminal policy is enforced inside the Codex App Server.
+  - >-
+    Clarified `mcpCapabilities` flags: only `http: true`; `acp: false` and
+    `sse: false`.
+  - >-
+    Recorded the JetBrains 2026.1 session_config disablement (LLM-28118) as
+    an in-adapter workaround.
+  - >-
+    Added three extension methods (`authentication/status`,
+    `authentication/logout`, legacy `session/set_model`) to the protocol
+    surface.
+  - >-
+    Documented `INITIAL_AGENT_MODE`, `APP_SERVER_LOGS`, `MODEL_PROVIDER`, and
+    `DEFAULT_AUTH_REQUEST` env vars as first-class adapter knobs.
+  - >-
+    Confirmed legacy `@zed-industries/codex-acp` v0.16.0 is the last Zed
+    release (2026-06-08) and the npm description marks it deprecated.
+  - >-
+    Confirmed `@agentclientprotocol/codex-acp` v1.1.0 (2026-07-02) is the
+    current adapter; bundled `@openai/codex` is 0.142.5 (matching the locally
+    installed Codex CLI version).
 requires_claudine_update: true
 reason: >-
-  Codex CLI ACP support is adapter-based and differs from native ACP providers.
-  Claudine's future ACP client/adapter work needs dedicated launch-mode detection,
-  reverse-request routing, permission policy integration, and terminal handle
-  management for this provider.
+  Codex CLI ACP support is adapter-based and continues to evolve on a separate
+  cadence from the underlying Codex CLI. To wire Codex into Claudine's lifecycle
+  pipeline over ACP, Claudine needs launch-mode detection for both
+  `@agentclientprotocol/codex-acp` and the deprecated `@zed-industries/codex-acp`;
+  capability negotiation that includes session config options (mode, model,
+  reasoning effort, fast mode) and HTTP-only MCP; reverse-request routing for
+  the single reverse request the adapter actually issues (`session/request_permission`
+  with Codex-specific approval options like execpolicy and network policy
+  amendments); permission policy integration for the three Codex modes
+  (`read-only`, `agent`, `agent-full-access`); and headless auth detection
+  (API key vs ChatGPT OAuth vs custom gateway).
 ---
+
+# Codex CLI and the Agent Client Protocol
 
 ## Overview
 
-Codex CLI is OpenAI's local coding agent. As of July 2026 it does **not** implement the Agent Client Protocol (ACP) natively in its main `codex` binary. Instead, ACP support is provided by an **adapter/bridge** process that translates between:
+Codex CLI is OpenAI's local coding agent. As of **Codex CLI 0.142.5** (the version installed at research time, 2026-07-02), the main `codex` binary **does not implement the Agent Client Protocol natively**. Direct probes on the installed binary return `unexpected argument '--acp'` for `codex --acp` and `unrecognized subcommand 'acp'` for `codex acp` — the only protocol-mode subcommand the binary ships is `codex app-server --listen stdio://`, which speaks the Codex App Server protocol (a separate JSONL protocol), not ACP.
 
-1. **ACP** — JSON-RPC 2.0 over stdio, spoken by editors and ACP clients.
-2. **Codex runtime operations** — executed through the Codex App Server or the Codex CLI subprocess.
+ACP support is therefore provided by an **adapter/bridge** process that translates between:
 
-The recommended adapter is now maintained by the ACP project itself at [`agentclientprotocol/codex-acp`](https://github.com/agentclientprotocol/codex-acp) and distributed on npm as `@agentclientprotocol/codex-acp`. Zed's earlier Rust adapter, [`zed-industries/codex-acp`](https://github.com/zed-industries/codex-acp), is in maintenance mode and its README points new installs to the ACP-org package.
+1. **ACP** — JSON-RPC 2.0 over stdio, schema v1 (1.1.0), spoken by editors and ACP clients.
+2. **Codex App Server protocol** — a private JSON-RPC stream the adapter opens against the bundled Codex runtime.
 
-For Claudine's future ACP client/adapter work this means Codex CLI must be treated as an **adapter-launched provider**: the client spawns the adapter, negotiates ACP capabilities, and must be prepared to handle all agent-to-client reverse requests for permissions, filesystem access, and terminal execution.
+The canonical adapter today is the TypeScript package [`@agentclientprotocol/codex-acp`](https://github.com/agentclientprotocol/codex-acp), currently at **v1.1.0** (released 2026-07-02). It bundles `@openai/codex ^0.142.5` as its Codex runtime and advertises itself over ACP as `name: "@agentclientprotocol/codex-acp", title: "Codex", version: "1.1.0"`. The earlier Rust adapter, [`@zed-industries/codex-acp`](https://github.com/zed-industries/codex-acp), shipped its last release **v0.16.0** on 2026-06-08 and is now flagged **DEPRECATED** on npm with the message *"This package has been replaced by @agentclientprotocol/codex-acp."*
+
+For Claudine's future ACP client/adapter work this means Codex CLI must be treated as an **adapter-launched provider**: the client spawns the adapter, negotiates ACP capabilities, and must be prepared to handle the single reverse request the adapter actively issues — `session/request_permission` — with Codex-specific approval semantics (execpolicy amendments, network policy amendments, MCP tool-call persistence scopes).
 
 ## Launching ACP
 
@@ -341,56 +539,71 @@ For Claudine's future ACP client/adapter work this means Codex CLI must be treat
 npx -y @agentclientprotocol/codex-acp
 ```
 
-The adapter starts the Codex App Server internally, translates ACP JSON-RPC requests into Codex operations, and maps Codex events back to ACP `session/update` notifications. All ACP traffic uses newline-delimited JSON-RPC 2.0 over stdio; stderr is reserved for adapter/Codex logs.
+The adapter bundles `@openai/codex ^0.142.5`, opens a private JSON-RPC channel against the bundled Codex App Server, and translates ACP requests to/from it. All ACP traffic uses newline-delimited JSON-RPC 2.0 over stdio; **stderr is reserved for adapter/Codex logs** and a 2 KB rolling tail is kept for crash diagnostics. The adapter enforces a 2-second grace period between stdin close and a `codex` SIGKILL.
 
-### Legacy Zed adapter
+Standalone single-file binaries (`codex-acp-<arch>-<os>`) are published in the GitHub release artifacts and can be unzipped and invoked directly when Node.js is unavailable. Building them locally requires `bun`.
+
+### Legacy Zed adapter (deprecated)
 
 ```bash
 npx -y @zed-industries/codex-acp
 ```
 
-This was the original Rust implementation. It still works but is no longer the recommended path for new installs.
+The Zed-published adapter remains resolvable on npm (last release v0.16.0, 2026-06-08) but the npm description explicitly marks it **DEPRECATED** in favor of `@agentclientprotocol/codex-acp`. The Zed `codex-acp` repository's `main` branch has no tags after v0.16.0 and is no longer receiving feature work.
 
 ### No native launch mode
 
-The `codex` CLI itself does not accept `--acp`, `acp serve`, or similar flags. The `codex app-server --listen stdio://` command exposes the Codex App Server protocol, but that is a separate JSONL protocol, not ACP. ACP clients must use the adapter.
+Direct probes on `codex-cli 0.142.5`:
+
+```text
+$ codex --acp
+error: unexpected argument '--acp' found
+
+$ codex acp
+error: unrecognized subcommand 'acp'
+
+Usage: codex [OPTIONS] [PROMPT]
+       codex [OPTIONS] <COMMAND] [ARGS]
+```
+
+The `codex app-server --listen stdio://` subcommand exposes the **Codex App Server protocol** (a separate JSONL protocol, not ACP). The adapter consumes that protocol over a private channel — it does not proxy ACP JSON-RPC over `codex app-server --listen`.
 
 ## Protocol and Capabilities
 
 ### Transport and framing
 
 - **Transport**: stdio pipes between the ACP client and the adapter.
-- **Framing**: newline-delimited JSON-RPC 2.0.
+- **Framing**: newline-delimited JSON-RPC 2.0 (`vscode-jsonrpc ^9`).
 - **Encoding**: UTF-8.
-- **Direction**: client sends requests/notifications to the agent; agent sends responses and reverse requests back to the client.
+- **Direction**: client sends requests/notifications to the adapter; the adapter sends responses, reverse requests, notifications, and the `@agentclientprotocol/sdk` internal log lines on stderr.
 
 ### Supported protocol version
 
-The adapter targets ACP **v1**.
+Both the adapter (v1.1.0) and the underlying `@agentclientprotocol/sdk` (v1.1.0) negotiate **ACP v1 / schema 1.1.0**. The adapter reports `protocolVersion: acp.PROTOCOL_VERSION` (= 1) in its `initialize` response.
 
 ### Capability surface
 
 | Area | Status | Notes |
 |------|--------|-------|
-| `initialize` | supported | Standard handshake with `ClientCapabilities` and `Implementation`. |
-| `authenticate` | supported | Methods advertised include ChatGPT, `codex-api-key`, and `openai-api-key`. |
-| `session/new`, `session/load`, `session/cancel` | supported | Normal session lifecycle; load resumes an existing session. |
-| `session/prompt` | supported | Main turn-taking request with streaming response. |
-| `session/set_mode` | supported | Switches between read-only, agent, and agent-full-access modes. |
-| `session/request_permission` | supported | Reverse request for tool and command approvals. |
-| `fs/read_text_file`, `fs/write_text_file` | supported | Only when client advertises filesystem capabilities. |
-| `terminal/*` | supported | Only when client advertises terminal capability. |
-| `session/update` streaming | supported | Text, tool, plan, and mode updates. |
-| MCP | supported | Client-provided MCP servers over stdio config and HTTP transport. |
-| Images | supported | Image inputs, image generation, and image view events. |
-| Plan mode | supported | Plan events stream as `plan` updates. |
-| Extensions | partial | `_meta` fields and underscore-prefixed custom methods available. |
+| `initialize` / `authenticate` / `logout` | supported | Advertises `agentCapabilities.auth.logout: {}`; `logout` request is handled. |
+| `session/new` / `session/load` / `session/prompt` / `session/cancel` | supported | `cancel` is a notification; protocol-level `$/cancel_request` is also honored (forwarded to the request signal). |
+| `session/resume` / `session/list` / `session/close` / `session/delete` | supported | Advertised in `agentCapabilities.sessionCapabilities`. |
+| `session/set_mode` / `session/set_config_option` | supported | Three modes (read-only, agent, agent-full-access). Config options: mode, model, reasoning effort, fast mode (when model supports it). |
+| `session/request_permission` | supported | The only reverse request the adapter actively issues. Carries Codex-specific decisions (`allow_once`, `allow_always`, execpolicy amendment, network policy amendment, MCP tool approval with persist scope). |
+| `fs/read_text_file` / `fs/write_text_file` / `terminal/*` | unsupported (by current adapter) | The adapter does not register handlers for these methods. Reads, writes, and command execution happen inside the Codex App Server via Codex's own tools. |
+| `session/update` streaming | supported | Text, thoughts, tool calls, plans, mode/commands/config updates, plus Codex-specific kinds. |
+| MCP (`mcpCapabilities.http: true`, `acp: false`, `sse: false`) | partial | HTTP-transport MCP servers passed in `session/new` are accepted; ACP-protocol and SSE MCP servers are not exposed through the adapter. |
+| Image (`promptCapabilities.image: true`) | supported | Image inputs, image generation completion (`tool_call`), and image view events. |
+| Embedded context (`promptCapabilities.embeddedContext: true`) | supported | |
+| Plan events | supported | `plan` session-update variant emitted; plan items replayed on `session/load`. |
+| Extension methods (`authentication/status`, `authentication/logout`, legacy `session/set_model`) | supported | Underscore-free extension methods used by older clients. |
+| Protocol-level `$/cancel_request` | supported | Adapter propagates the abort signal to in-flight requests and pending permission prompts. |
 
 ## Reverse Requests
 
-Because the agent process has no direct filesystem or terminal access, it sends reverse requests to the client. The following reverse requests must be handled by a Claudine ACP client when the corresponding capability is advertised.
+The current adapter registers **exactly one reverse request method** for clients: `session/request_permission`. The remaining entries below are kept for schema completeness and for clients that want to wire up general ACP support for other agents sharing the same code path.
 
-### Permission requests
+### Permission requests (required)
 
 ```json
 {
@@ -401,113 +614,115 @@ Because the agent process has no direct filesystem or terminal access, it sends 
     "sessionId": "sess_abc123",
     "toolCall": {
       "toolCallId": "call_xyz",
-      "title": "Write to /home/user/project/config.json",
-      "kind": "edit"
+      "title": "Run `cargo build`",
+      "kind": "execute",
+      "status": "pending",
+      "rawInput": { "command": "cargo build", "cwd": "/project" }
     },
     "options": [
-      {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
-      {"optionId": "always", "name": "Always Allow", "kind": "allow_always"},
-      {"optionId": "deny", "name": "Deny", "kind": "reject_once"}
-    ]
+      { "optionId": "allow_once", "name": "Allow Once", "kind": "allow_once" },
+      { "optionId": "allow_session", "name": "Allow for Session", "kind": "allow_always" },
+      { "optionId": "apply_execpolicy_amendment", "name": "Allow Commands Starting With `cargo build`", "kind": "allow_always" },
+      { "optionId": "decline", "name": "Reject", "kind": "reject_once" }
+    ],
+    "_meta": { "codex": { "params": { ... } } }
   }
 }
 ```
 
-The client must respond with `RequestPermissionOutcome::Selected` containing the chosen `option_id`, or `RequestPermissionOutcome::Cancelled`.
+The client must respond with `RequestPermissionOutcome::Selected` carrying the chosen `option_id`, or `RequestPermissionOutcome::Cancelled`. On `session/cancel` or `$/cancel_request`, the adapter propagates the abort signal and pending permission prompts may return errors instead of responses.
 
-### Filesystem requests
-
-Only sent when the client advertises filesystem capabilities:
+### Filesystem and terminal requests (schema-completeness only)
 
 ```json
 {"jsonrpc":"2.0","id":43,"method":"fs/read_text_file","params":{"sessionId":"sess_abc123","path":"/project/src/main.rs","line":10,"limit":50}}
 ```
 
 ```json
-{"jsonrpc":"2.0","id":44,"method":"fs/write_text_file","params":{"sessionId":"sess_abc123","path":"/project/config.json","content":"new content..."}}
+{"jsonrpc":"2.0","id":44,"method":"terminal/create","params":{"sessionId":"sess_abc123","command":"cargo","args":["build"],"cwd":"/project","outputByteLimit":1048576}}
 ```
 
-### Terminal requests
-
-Only sent when the client advertises terminal capability:
-
-```json
-{"jsonrpc":"2.0","id":45,"method":"terminal/create","params":{"sessionId":"sess_abc123","command":"cargo","args":["build"],"cwd":"/project"}}
-```
-
-Lifecycle: `terminal/create` → `terminal/output` / `terminal/wait_for_exit` → `terminal/kill` (optional) → `terminal/release`.
+These schemas are stable for general ACP clients but the current `codex-acp` adapter does not initiate them. Implement them as general ACP clients; do not expect traffic from this provider.
 
 ## Permissions, Filesystem, and Terminal
 
 ### Permission policy
 
-- The client is the authority for every tool call.
-- There is no implicit default policy; the client must respond to each `session/request_permission`.
-- If the user cancels the current turn, the client must still answer pending permission requests with `Cancelled`.
+- The client is the authority for every approval request. There is no implicit default policy — every `session/request_permission` must receive a `Selected` or `Cancelled` response.
+- Approval options go beyond the generic `allow_once` / `allow_always` / `reject_once` triple. The adapter can include Codex-specific decisions (execpolicy amendment for command patterns, network policy amendment for host allow/block, MCP tool-call approval with `persist: session | always`) via `_meta.codex` on the option. Clients may either surface them as raw option buttons or render them as plain allow/reject.
+- On `session/cancel` or `$/cancel_request`, the adapter cancels any in-flight permission requests via the request signal.
 
 ### Filesystem policy
 
-- ACP paths must be absolute and line numbers are 1-based.
-- The client enforces its own sandbox, typically by verifying the requested path is within the project root.
-- Read and write are the only filesystem reverse requests in ACP v1.
+The adapter does not delegate file I/O to the client. Reads and writes happen inside the Codex App Server via Codex's own tools, governed by the active sandbox mode (`read-only`, `workspace-write`, or `danger-full-access`). Clients enforce their own project-root boundary; the adapter enforces the configured sandbox.
+
+When `fs/read_text_file` / `fs/write_text_file` are implemented as a matter of general ACP client support: paths must be absolute, line numbers are 1-based, and the client validates paths before reading or writing.
 
 ### Terminal policy
 
-- The client receives the full command, arguments, environment variables, and working directory.
-- The client decides whether to allow the command, often via the same permission UI that handles `session/request_permission`.
-- The client is responsible for process lifecycle, output buffers, truncation, and handle cleanup.
+The adapter does not delegate command execution to the client. Commands run inside the Codex App Server, surfaced as `tool_call` events with `kind: "execute"` and streamed progress via `tool_call_update`. Output bytes flow through `_meta.terminal_output_delta` (the default) or `_meta.terminal_output` (when negotiated via `clientCapabilities._meta.terminal_output: true`).
+
+When `terminal/*` is implemented as a matter of general ACP client support: the client receives the full command, arguments, environment, and working directory, decides whether to allow it, and is responsible for process lifecycle, output buffers, byte-limit truncation (truncating from the beginning when `outputByteLimit` is exceeded), and the always-call `terminal/release` discipline.
 
 ## Streaming and UI Integration
 
-Streaming happens through `session/update` notifications. Common update types include:
+Streaming flows through `session/update` notifications. The adapter maps Codex App Server events to ACP session-update variants.
 
 | Update | Purpose |
 |--------|---------|
-| `AgentMessageChunk` | Incremental assistant text. |
-| `AgentThoughtChunk` | Internal reasoning / extended thinking. |
-| `UserMessageChunk` | User message replay during session load. |
-| `ToolCall` | A new tool call has started. |
+| `AgentMessageChunk` | Incremental assistant text. Carries `messageId` (added in v1.1.0) for chunk grouping. |
+| `AgentThoughtChunk` | Reasoning / extended thinking. |
+| `UserMessageChunk` | User message replay during `session/load`. |
+| `ToolCall` | A new tool call has started. Codex kinds: `execute`, `edit`, `search`, `fetch`, `other`, plus image/imageGen/collab/dynamic. |
 | `ToolCallUpdate` | Tool progress, status change, or final result. |
-| `Plan` | Multi-step execution plan. |
-| `AvailableCommandsUpdate` | Slash commands available in the session. |
+| `Plan` | Multi-step plan entry. |
+| `AvailableCommandsUpdate` | Slash commands available in the session (e.g. `/status`, `/mcp`, `/skills`, `/review`, `/review-branch`, `/review-commit`, `/compact`, `/goal`, `/logout`). |
 | `CurrentModeUpdate` | Session mode change. |
 | `ConfigOptionUpdate` | Session config option change. |
 
-Because these are notifications, the client must route them into its UI event loop. A Rust desktop app typically uses `tokio::sync::mpsc` to forward updates from the ACP runtime thread to the UI framework (Tauri, iced, etc.).
+Codex also streams shell command execution, file change, permission request, MCP tool call, terminal output delta, reasoning, image generation, image view, web search, token usage, and review events. Notifications are fire-and-forget — group by `messageId` to disambiguate parallel streams.
+
+A Rust desktop app typically uses `tokio::sync::mpsc` to forward updates from the ACP runtime thread to the UI framework (Tauri, iced, etc.).
 
 ## Authentication and Setup
 
-Before an ACP session can run headlessly, the underlying Codex runtime must be authenticated. Options:
+The adapter inherits Codex CLI's authentication posture and additionally advertises an `authMethods` array at `initialize`. The advertised methods:
 
-1. **Interactive login** — run `codex login` and complete OAuth in a browser, or use device code auth with `codex login --device-auth`.
-2. **API key** — set `CODEX_API_KEY` or `OPENAI_API_KEY` so the runtime can authenticate without a browser.
-3. **Access token** — pipe `CODEX_ACCESS_TOKEN` to `codex login --with-access-token` for trusted automation.
-4. **Pre-existing session** — copy `~/.codex/auth.json` from a machine that already completed login.
+1. **`api-key`** (always advertised) — supply the key via `_meta["api-key"].apiKey` in the `AuthenticateRequest`. The adapter picks up `CODEX_API_KEY` (preferred) or `OPENAI_API_KEY` from the environment if no explicit key is supplied.
+2. **`chat-gpt`** (advertised unless `NO_BROWSER=1`) — standard ChatGPT OAuth login. Corrupted `~/.codex/auth.json` triggers automatic logout and the next request fails with `RequestError.authRequired()`.
+3. **`gateway`** (advertised only when `clientCapabilities.auth._meta.gateway === true`) — custom OpenAI-compatible gateway. The `AuthenticateRequest` carries `_meta["gateway"]` with `baseUrl`, `headers`, and optional `providerName`.
 
-In CI or daemon contexts, prefer API keys and set `NO_BROWSER=1` to hide browser-based auth. The adapter does not provide its own authentication mechanism; it inherits whatever auth the Codex runtime has.
+For headless operation: set `CODEX_API_KEY` (or `OPENAI_API_KEY`); set `NO_BROWSER=1` to remove the ChatGPT method from advertised options; or seed `~/.codex/auth.json` from a machine that already completed ChatGPT login. The `codex login --device-auth` headless flow is also available through the underlying Codex CLI.
 
 ## Compatibility, Quirks, and Workarounds
 
-1. **No native ACP mode** — every integration requires an adapter. Do not expect a future `codex acp serve` command.
-2. **Adapter migration** — the recommended package moved from `@zed-industries/codex-acp` to `@agentclientprotocol/codex-acp`. Update launch commands and registry configs.
-3. **Node.js dependency** — even Rust clients must spawn a Node.js/npm process to run the adapter.
-4. **API key vs ChatGPT feature gap** — API key auth is headless-friendly but lacks ChatGPT workspace features; ChatGPT auth requires a browser or device code flow.
-5. **Initialization timeout** — the adapter can take longer than 30 seconds to initialize. Use a 60-second timeout or more.
-6. **Path and indexing mistakes** — ACP requires absolute paths and 1-based line numbers. Relative paths and 0-based indexing are common integration bugs.
-7. **Terminal handle leaks** — always call `terminal/release` when a terminal is no longer needed.
-8. **Bundled Codex lag** — the npm package bundles a `@openai/codex` dependency that may lag behind the latest CLI release. Use `CODEX_PATH` to override.
-9. **Historical `!Send` SDK** — `agent-client-protocol` 0.9.x required `tokio::task::LocalSet`. This was resolved in 1.0.1; modern code can use standard `tokio::spawn`.
-10. **NO_BROWSER side effect** — setting this hides ChatGPT auth from the adapter's advertised methods, which can confuse clients that try to use it.
+1. **No native ACP mode** — direct probes on Codex CLI 0.142.5 confirm `codex --acp` / `codex acp` are rejected. ACP clients must use the adapter.
+2. **Adapter namespace moved** — `@zed-industries/codex-acp` is deprecated. New installs should use `@agentclientprotocol/codex-acp`.
+3. **No `fs/*` or `terminal/*` reverse requests** — the adapter delegates file I/O and command execution to the Codex App Server. Implement those handlers as general ACP clients; do not expect them to fire with this provider.
+4. **Auth method names changed** — current adapter advertises `api-key` (was `codex-api-key` / `openai-api-key`), `chat-gpt` (was `chatgpt`), and a new capability-gated `gateway` method.
+5. **Gateway auth is capability-gated** — clients must opt in via `clientCapabilities.auth._meta.gateway: true` to receive the `gateway` method in `authMethods`.
+6. **JetBrains 2026.1 has session_config disabled** — the adapter detects this client class by `clientInfo.name` and omits `SessionConfigOption` payloads until upstream LLM-28118 is resolved.
+7. **Fast mode is conditional** — appears only when `modelSupportsFast(currentModel)` returns true. Clients may see the option appear or disappear as the active model changes.
+8. **MCP capabilities are narrow** — only `mcpCapabilities.http: true`; `acp: false` and `sse: false`. ACP-protocol MCP servers cannot pass through this adapter.
+9. **Initialization timeout** — the adapter can take more than 30 seconds to initialize on first launch (especially when ChatGPT OAuth prompts appear). Use a 60-second timeout for `initialize`.
+10. **Path and indexing mistakes** — ACP requires absolute paths and 1-based line numbers. Relative paths and 0-based indexing are common integration bugs (relevant for general ACP support; this adapter does not invoke file reverse requests).
+11. **Stdout pollution** — the adapter writes structured JSON-RPC to stdout and adapter/Codex logs to stderr; never write to the adapter's stderr.
+12. **Bundled Codex version** — `@openai/codex ^0.142.5` is bundled in the npm package; use `CODEX_PATH` to override with a different binary. The bundled version is intentionally pinned.
+13. **Corrupted auth.json** — automatically logs out and surfaces `RequestError.authRequired()` on the next request unless `DEFAULT_AUTH_REQUEST` is set.
+14. **Adapter stdin close → Codex SIGKILL** — if the client closes stdin, the adapter closes Codex's stdin and SIGKILLs the process after a 2-second grace period.
 
 ## Recent Changes
 
-- **2026-07-02**: `@agentclientprotocol/codex-acp` v1.1.0 shipped as the new official adapter location, built on the Codex App Server.
-- **2026-06-29**: `agent-client-protocol` 1.0.1 and `agent-client-protocol-schema` 1.1.0 shipped. The Rust SDK is now Send/Sync and uses a builder API.
-- **2026-06-08**: `@zed-industries/codex-acp` v0.16.0 was the final major Zed release before maintenance hand-off to the ACP org.
+- **2026-07-02** (`@agentclientprotocol/codex-acp` **v1.1.0**) — ACP SDK v1.1.0; `messageId` added to text session chunks; boolean Fast mode config option support; completed image generation items surfaced as `tool_call`; goal changes emitted as session metadata; `vscode-jsonrpc` upgraded to v9; bundled `@openai/codex` bumped to 0.142.5.
+- **2026-06-29** (`v1.0.2`) — bundled `@openai/codex` bumped to 0.142.3 and 0.142.4; `/goal` slash command support; fixed skill listing to use session cwd; removed Fast mode config for models that don't support it.
+- **2026-06-26** (`v1.0.1`) — ACP SDK bumped to 1.0.0; ACP request cancellation (`$/cancel_request`) handling; collab agent tool call events mapped to `tool_call`; API-key auth reads from `CODEX_API_KEY` / `OPENAI_API_KEY` env vars; auto-skip ChatGPT login when already authenticated.
+- **2026-06-23** (`v1.0.0`) — first stable v1 release. Added `session/delete`, more informative permission approvals, embedded resource blob handling, `additionalDirectories` support, reasoning events streamed as agent thoughts, automatic logout on corrupted auth.json, and `session_config` negotiation. Bundled Codex bumped to 0.139.0–0.141.0 over the cycle.
+- **2026-06-08** (`@zed-industries/codex-acp` **v0.16.0**) — final Zed-maintained release before migration to the `agentclientprotocol` org. npm description later updated to mark the package deprecated.
+- **Earlier 2026 (v0.0.41–v0.0.46)** — auth logout capability advertised; gateway auth gated by client capabilities; Fast mode introduced; `/status`, `/mcp`, `/skills`, `/review*`, `/compact` slash commands; `session/close`; session config options (mode, model, reasoning effort); migrate to ACP SDK 0.28 API; thread-history routing fixed in v0.0.44.
 
 ## Rust Client Example
 
-This example uses `agent-client-protocol` 1.0.1 with the current recommended adapter.
+This example uses `agent-client-protocol 1.0.1` with the current `@agentclientprotocol/codex-acp` adapter:
 
 ```toml
 [dependencies]
@@ -520,17 +735,21 @@ anyhow = "1"
 use agent_client_protocol::schema::{
     ProtocolVersion,
     v1::{
-        ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest,
-        SessionNotification, TextContent,
+        ClientCapabilities, ContentBlock, Implementation,
+        InitializeRequest, NewSessionRequest, PromptRequest, SessionNotification,
+        TextContent,
     },
 };
 use agent_client_protocol::{AcpAgent, Client};
+use std::str::FromStr;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Use the explicit FromStr form to bypass any preset that may point at the
+    // deprecated `@zed-industries/codex-acp` package.
     let agent = AcpAgent::from_str("npx -y @agentclientprotocol/codex-acp")?;
 
-    agent_client_protocol::Client
+    Client
         .builder()
         .name("claudine-codex-client")
         .on_receive_notification(
@@ -551,14 +770,26 @@ async fn main() -> anyhow::Result<()> {
             agent_client_protocol::on_receive_notification!(),
         )
         .connect_with(agent, |connection| async move {
-            let init_response = connection
-                .send_request(InitializeRequest::new(ProtocolVersion::V1))
-                .block_task()
-                .await?;
+            // The Codex adapter ignores fs/terminal capabilities, but we advertise
+            // them anyway for forward-compatibility with other agents sharing this
+            // client.
+            let caps = ClientCapabilities::new()
+                .terminal(true);
+
+            let init = InitializeRequest::new(ProtocolVersion::V1)
+                .client_capabilities(caps)
+                .client_info(Implementation {
+                    name: "claudine".into(),
+                    title: Some("Claudine".into()),
+                    version: "0.1.0".into(),
+                });
+
+            let init_response = connection.send_request(init).block_task().await?;
             eprintln!("Agent: {:?}", init_response.agent_info);
+            eprintln!("Auth methods: {:?}", init_response.auth_methods);
 
             let session = connection
-                .send_request(NewSessionRequest::new(std::env::current_dir()?))
+                .send_request(NewSessionRequest::new(std::env::current_dir()?, vec![]))
                 .block_task()
                 .await?;
 
@@ -583,81 +814,35 @@ async fn main() -> anyhow::Result<()> {
 
 ## Rust Reverse Request Handling
 
-The client can handle permission, filesystem, and terminal reverse requests with `on_receive_request`. The example below auto-approves reads but prompts for everything else.
+The current Codex adapter only issues `session/request_permission`. The example below auto-approves a safe allow_once option but lets the user pick from the supplied options in a real UI:
 
 ```rust
 use agent_client_protocol::schema::v1::{
-    ReadTextFileRequest, ReadTextFileResponse, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
-    WriteTextFileRequest, WriteTextFileResponse,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SelectedPermissionOutcome,
 };
-use std::path::{Path, PathBuf};
-
-fn sandbox(path: &Path, root: &Path) -> anyhow::Result<PathBuf> {
-    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    if !canonical.starts_with(root) {
-        anyhow::bail!("path {} is outside project root {}", canonical.display(), root.display());
-    }
-    Ok(canonical)
-}
 
 async fn handle_permission(
     request: RequestPermissionRequest,
 ) -> anyhow::Result<RequestPermissionResponse> {
+    // Pick the first `allow_once` option as a safe default; the UI can replace this.
     let option_id = request
         .options
-        .first()
+        .iter()
+        .find(|o| matches!(o.kind, agent_client_protocol::PermissionOptionKind::AllowOnce))
         .map(|o| o.option_id.clone())
+        .or_else(|| request.options.first().map(|o| o.option_id.clone()))
         .unwrap_or_default();
 
     Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
         SelectedPermissionOutcome::new(option_id),
     )))
 }
-
-async fn handle_read(
-    request: ReadTextFileRequest,
-    root: PathBuf,
-) -> anyhow::Result<ReadTextFileResponse> {
-    let path = sandbox(&request.path, &root)?;
-    let content = tokio::fs::read_to_string(&path).await?;
-
-    let filtered = match (request.line, request.limit) {
-        (Some(start), Some(limit)) => content
-            .lines()
-            .skip((start as usize).saturating_sub(1))
-            .take(limit as usize)
-            .collect::<Vec<_>>()
-            .join("\n"),
-        (Some(start), None) => content
-            .lines()
-            .skip((start as usize).saturating_sub(1))
-            .collect::<Vec<_>>()
-            .join("\n"),
-        _ => content,
-    };
-
-    Ok(ReadTextFileResponse { content: filtered })
-}
-
-async fn handle_write(
-    request: WriteTextFileRequest,
-    root: PathBuf,
-) -> anyhow::Result<WriteTextFileResponse> {
-    let path = sandbox(&request.path, &root)?;
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-    tokio::fs::write(&path, &request.content).await?;
-    Ok(WriteTextFileResponse {})
-}
 ```
 
-Register the handlers on the builder before `connect_with`:
+Register the handler on the builder before `connect_with`:
 
 ```rust
-let project_root = std::env::current_dir()?;
-
 Client
     .builder()
     .on_receive_request(
@@ -666,26 +851,11 @@ Client
         },
         agent_client_protocol::on_receive_request!(),
     )
-    .on_receive_request(
-        move |request: ReadTextFileRequest, responder, _cx| {
-            let root = project_root.clone();
-            async move { responder.respond(handle_read(request, root).await?) }
-        },
-        agent_client_protocol::on_receive_request!(),
-    )
-    .on_receive_request(
-        move |request: WriteTextFileRequest, responder, _cx| {
-            let root = project_root.clone();
-            async move { responder.respond(handle_write(request, root).await?) }
-        },
-        agent_client_protocol::on_receive_request!(),
-    )
-    // ... notification handler and connect_with
 ```
 
 ## Rust Host Command Handling
 
-A full terminal handler tracks spawned processes in a map and responds to each terminal reverse request.
+The current Codex adapter does not issue `terminal/*` reverse requests. For general ACP client support (other agents, or future Codex adapter versions), wire up terminal handlers as follows:
 
 ```rust
 use agent_client_protocol::schema::v1::{
@@ -724,7 +894,7 @@ impl TerminalManager {
     async fn next_id(&self) -> TerminalId {
         let mut id = self.next_id.lock().await;
         *id += 1;
-        format!("term_{}", id).into()
+        format!("term_{}", *id).into()
     }
 }
 
@@ -761,14 +931,15 @@ async fn handle_create_terminal(
 }
 ```
 
-The remaining handlers follow the same pattern: look up the `TerminalId`, operate on the `Child`, and return the corresponding response. Always implement `terminal/release` and kill the process if it is still running.
+The remaining handlers (`terminal/output`, `terminal/wait_for_exit`, `terminal/kill`, `terminal/release`) follow the same pattern: look up the `TerminalId`, operate on the `Child`, and return the corresponding response. Always implement `terminal/release` and kill the process if it is still running — handle leaks are a frequent production foot-gun.
 
 ## Rust Desktop Streaming Bridge
 
-To stream ACP events into a desktop UI, run the ACP client on a dedicated thread and forward `SessionNotification` values through an `mpsc` channel.
+To stream ACP events into a desktop UI, run the ACP client on a dedicated thread and forward `SessionNotification` values through an `mpsc` channel. Use the current adapter namespace:
 
 ```rust
 use tokio::sync::mpsc;
+use std::str::FromStr;
 
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
@@ -777,6 +948,8 @@ pub enum AgentEvent {
     ToolCallStarted { id: String, title: String },
     ToolCallFinished { id: String, status: String },
     PermissionRequest { request_id: String, title: String, options: Vec<(String, String)> },
+    ModeUpdate(String),
+    CommandsUpdate(Vec<String>),
     TurnComplete { stop_reason: String },
     Error(String),
 }
@@ -794,10 +967,9 @@ pub fn spawn_agent(
             .expect("tokio runtime");
 
         rt.block_on(async move {
-            let agent = AcpAgent::from_str("npx -y @agentclientprotocol/codex-acp")
-                .expect("spawn adapter");
+            let agent = AcpAgent::from_str("npx -y @agentclientprotocol/codex-acp")?;
 
-            agent_client_protocol::Client
+            Client
                 .builder()
                 .on_receive_notification(
                     {
@@ -832,7 +1004,7 @@ pub fn spawn_agent(
                         .await?;
 
                     let session = connection
-                        .send_request(NewSessionRequest::new(project_dir))
+                        .send_request(NewSessionRequest::new(project_dir, vec![]))
                         .block_task()
                         .await?;
 
@@ -914,39 +1086,55 @@ fn agent_subscription(
 
 ## Claudine Integration Notes
 
-Claudine currently wraps agentic CLIs through lifecycle hooks and event normalization, not through ACP. Adding ACP-based Codex CLI support would require:
+Claudine currently wraps Codex CLI through lifecycle hooks and event normalization, not through ACP. Adding ACP-based Codex CLI support would require:
 
-1. **Adapter launch detection** — detect `npx -y @agentclientprotocol/codex-acp`, legacy `@zed-industries/codex-acp`, or a user-configured adapter binary.
-2. **Capability negotiation** — advertise filesystem and terminal capabilities only when Claudine's policy engine permits them for the current repo.
-3. **Reverse-request routing** — implement handlers for `session/request_permission`, `fs/*`, and `terminal/*` and route them through Claudine's existing `permissions`/`protect` layers.
-4. **Streaming bridge** — forward `session/update` notifications into Claudine's event pipeline so that TTS, sound effects, logging, and messenger actions can trigger.
-5. **Terminal isolation** — ensure that commands spawned via `terminal/create` respect Claudine's shell-audit, timeout, and deny-list rules.
-6. **Headless auth** — require `CODEX_API_KEY`/`OPENAI_API_KEY` or verified pre-authentication before allowing non-interactive ACP launches.
+1. **Adapter launch detection** — detect one of two npm package shapes (`@agentclientprotocol/codex-acp` preferred; `@zed-industries/codex-acp` legacy, deprecated). Allow a user-configured adapter binary path for standalone bundles. Avoid `AcpAgent` presets that point at the deprecated npm name.
+2. **Capability negotiation** — advertise HTTP-only MCP support (`mcpCapabilities.http: true`, `acp: false`, `sse: false`). Surface session config options (mode, model, reasoning effort, fast mode) so Claudine can present them in its UI. Opt in to the `gateway` auth capability only when the user has configured a custom OpenAI-compatible gateway.
+3. **Reverse-request routing** — only `session/request_permission` reliably fires. Route it through Claudine's existing `permissions` / `protect` machinery. Render Codex-specific approval options (execpolicy amendments, network policy amendments, MCP tool-call persist scopes) either as raw buttons or as plain allow/reject; the choice affects how much of the Codex policy surface the user controls.
+4. **Mode mapping** — translate the three Codex modes (`read-only`, `agent`, `agent-full-access`) into Claudine's per-project approval tiers. Honour `INITIAL_AGENT_MODE` for first-session launches.
+5. **Streaming bridge** — forward `session/update` notifications into Claudine's event pipeline so TTS, sound effects, logging, and messenger actions can trigger. Group text chunks by `messageId` (added in v1.1.0) and dispatch `current_mode_update`, `available_commands_update`, and `config_option_update` to the lifecycle stack.
+6. **Headless auth** — require `CODEX_API_KEY` / `OPENAI_API_KEY` or a verified pre-authenticated `~/.codex/auth.json` before allowing non-interactive ACP launches. Honour `NO_BROWSER=1` to drop the ChatGPT method.
+7. **Adapter stdin close** — ensure the Codex lifecycle is terminated cleanly; the adapter SIGKILLs Codex 2 seconds after stdin close, so ensure all spawned processes are reaped.
 
-Because Codex CLI has no native ACP mode, Claudine should treat it as an **adapter-launched provider** with a higher integration cost than providers that ship ACP natively.
+Because Codex CLI has no native ACP mode and the recommended adapter is a TypeScript/npm bridge, Claudine should treat it as an **adapter-launched provider** with a higher integration cost than providers that ship ACP natively.
 
 ## Changelog
 
-- **2026-07-02**: Refreshed research for current ACP ecosystem and the new `@agentclientprotocol/codex-acp` adapter.
-- **2026-07-02**: Replaced legacy 0.9.x Rust examples with builder/ConnectionTo API examples using agent-client-protocol 1.0.1.
-- **2026-07-02**: Added `Claudine Integration Notes` and populated all schema frontmatter fields.
-- **2026-07-02**: Documented adapter migration from Zed to the ACP org.
+- **2026-07-03**: Refreshed for Codex CLI 0.142.5 and `@agentclientprotocol/codex-acp` v1.1.0. Verified the `codex` binary has no native ACP entry point; recorded exact error strings for `codex --acp` and `codex acp`. Corrected the auth method catalog (`api-key` / `chat-gpt` / `gateway` instead of the prior `chatgpt` / `codex-api-key` / `openai-api-key`). Documented the new `gateway` capability-gated auth method, the four `SessionConfigOption` kinds (mode, model, reasoning effort, fast mode), the JetBrains 2026.1 session_config disablement, the HTTP-only `mcpCapabilities` flags, the absence of `fs/*` / `terminal/*` reverse requests, the three extension methods (`authentication/status`, `authentication/logout`, legacy `session/set_model`), and the full env-var catalog (`INITIAL_AGENT_MODE`, `APP_SERVER_LOGS`, `MODEL_PROVIDER`, `DEFAULT_AUTH_REQUEST`). Confirmed `@zed-industries/codex-acp` v0.16.0 is the final Zed release (2026-06-08) and is marked deprecated on npm.
 
 ## Sources
 
 - [Codex CLI Documentation](https://developers.openai.com/codex/cli)
-- [Codex CLI Command Reference](https://developers.openai.com/codex/cli/reference)
+- [`openai/codex` Repository](https://github.com/openai/codex)
+- [Codex App Server protocol](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md)
 - [Codex Authentication Docs](https://developers.openai.com/codex/auth)
-- [Codex Environment Variables](https://developers.openai.com/codex/environment-variables)
-- [Codex Non-interactive Mode](https://developers.openai.com/codex/noninteractive)
+- [Codex Slash Commands](https://developers.openai.com/codex/cli/slash-commands)
 - [Agent Client Protocol Specification](https://agentclientprotocol.com/)
 - [ACP Agents Overview](https://agentclientprotocol.com/overview/agents)
-- [ACP Protocol v1 Overview](https://agentclientprotocol.com/protocol/v1/overview.md)
-- [ACP Tool Calls](https://agentclientprotocol.com/protocol/v1/tool-calls.md)
-- [ACP File System](https://agentclientprotocol.com/protocol/v1/file-system.md)
-- [ACP Terminals](https://agentclientprotocol.com/protocol/v1/terminals.md)
-- [ACP Rust SDK (docs.rs)](https://docs.rs/agent-client-protocol/latest/agent_client_protocol/)
-- [ACP Rust SDK Repository](https://github.com/agentclientprotocol/rust-sdk)
-- [Rust SDK yolo_one_shot_client example](https://github.com/agentclientprotocol/rust-sdk/blob/main/src/agent-client-protocol/examples/yolo_one_shot_client.rs)
-- [Official ACP Codex Adapter](https://github.com/agentclientprotocol/codex-acp)
-- [Zed Codex ACP Adapter (legacy)](https://github.com/zed-industries/codex-acp)
+- [ACP Protocol v1 Overview](https://agentclientprotocol.com/protocol/v1/overview)
+- [ACP Tool Calls](https://agentclientprotocol.com/protocol/v1/tool-calls)
+- [ACP File System](https://agentclientprotocol.com/protocol/v1/file-system)
+- [ACP Terminals](https://agentclientprotocol.com/protocol/v1/terminals)
+- [ACP Extension Methods](https://agentclientprotocol.com/protocol/v1/extensibility)
+- [ACP Rust SDK (docs.rs)](https://docs.rs/agent-client-protocol/1.0.1/agent_client_protocol/)
+- [`agentclientprotocol/rust-sdk` Repository](https://github.com/agentclientprotocol/rust-sdk)
+- [Rust SDK yolo_one_shot_client Example](https://github.com/agentclientprotocol/rust-sdk/blob/main/src/agent-client-protocol/examples/yolo_one_shot_client.rs)
+- [`@agentclientprotocol/codex-acp` Adapter](https://github.com/agentclientprotocol/codex-acp) — current
+- [`@agentclientprotocol/codex-acp` on npm](https://www.npmjs.com/package/@agentclientprotocol/codex-acp)
+- [Adapter README (raw)](https://raw.githubusercontent.com/agentclientprotocol/codex-acp/main/README.md)
+- [Adapter `readme-dev.md`](https://raw.githubusercontent.com/agentclientprotocol/codex-acp/main/readme-dev.md)
+- [Adapter `package.json`](https://raw.githubusercontent.com/agentclientprotocol/codex-acp/main/package.json)
+- [Adapter Source — `index.ts`](https://github.com/agentclientprotocol/codex-acp/blob/main/src/index.ts)
+- [Adapter Source — `CodexAcpServer.ts`](https://github.com/agentclientprotocol/codex-acp/blob/main/src/CodexAcpServer.ts)
+- [Adapter Source — `CodexAuthMethod.ts`](https://github.com/agentclientprotocol/codex-acp/blob/main/src/CodexAuthMethod.ts)
+- [Adapter Source — `CodexApprovalHandler.ts`](https://github.com/agentclientprotocol/codex-acp/blob/main/src/CodexApprovalHandler.ts)
+- [Adapter Source — `CodexElicitationHandler.ts`](https://github.com/agentclientprotocol/codex-acp/blob/main/src/CodexElicitationHandler.ts)
+- [Adapter Source — `CodexCommands.ts`](https://github.com/agentclientprotocol/codex-acp/blob/main/src/CodexCommands.ts)
+- [Adapter Source — `AgentMode.ts`](https://github.com/agentclientprotocol/codex-acp/blob/main/src/AgentMode.ts)
+- [Adapter Source — `FastModeConfig.ts`](https://github.com/agentclientprotocol/codex-acp/blob/main/src/FastModeConfig.ts)
+- [Adapter Source — `TerminalOutputMode.ts`](https://github.com/agentclientprotocol/codex-acp/blob/main/src/TerminalOutputMode.ts)
+- [Adapter Source — `AcpExtensions.ts`](https://github.com/agentclientprotocol/codex-acp/blob/main/src/AcpExtensions.ts)
+- [Adapter Releases](https://github.com/agentclientprotocol/codex-acp/releases)
+- [Legacy `@zed-industries/codex-acp` (deprecated)](https://github.com/zed-industries/codex-acp)
+- [`@zed-industries/codex-acp` v0.16.0 Release](https://github.com/zed-industries/codex-acp/releases/tag/v0.16.0)
+- [ACP Schema Reference](https://agentclientprotocol.com/protocol/schema)
