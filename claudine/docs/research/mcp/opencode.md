@@ -45,12 +45,13 @@ config_files:
       resolved per the XDG Base Directory Specification.
   - os: windows
     scope: user
-    path: "%APPDATA%\\opencode\\opencode.json"
+    path: "%USERPROFILE%\\.config\\opencode\\opencode.json"
     format: json
     notes: |
-      Windows user-level config path. The docs do not explicitly enumerate
-      Windows paths for the OpenCode user config; this is the XDG-equivalent
-      inferred from the cross-platform `~/.config` convention.
+      Windows user-level config path. OpenCode resolves its config dir
+      home-relative (`~/.config/opencode`) on every OS — on Windows that is
+      the literal `.config` directory under the user profile, NOT %APPDATA%
+      (cross-validated against the agent-cli topic's host-evidence records).
   - os: macos
     scope: user
     path: "~/.config/opencode/opencode.jsonc"
@@ -67,7 +68,7 @@ config_files:
       `.jsonc` are loaded; later wins for conflicting keys.
   - os: windows
     scope: user
-    path: "%APPDATA%\\opencode\\opencode.jsonc"
+    path: "%USERPROFILE%\\.config\\opencode\\opencode.jsonc"
     format: jsonc
     notes: |
       JSON-with-comments variant of the Windows user config.
@@ -86,7 +87,7 @@ config_files:
       Legacy Linux user-level config still loaded by v1.17.13.
   - os: windows
     scope: user
-    path: "%APPDATA%\\opencode\\config.json"
+    path: "%USERPROFILE%\\.config\\opencode\\config.json"
     format: json
     notes: "Legacy Windows user-level config still loaded by v1.17.13."
   - os: macos
@@ -104,7 +105,7 @@ config_files:
     notes: "Linux TUI-only settings — same role as macOS."
   - os: windows
     scope: user
-    path: "%APPDATA%\\opencode\\tui.json"
+    path: "%USERPROFILE%\\.config\\opencode\\tui.json"
     format: jsonc
     notes: "Windows TUI-only settings — same role as macOS/Linux."
   - os: macos
@@ -121,9 +122,9 @@ config_files:
     notes: "Legacy single-dot config location on Linux — same as macOS."
   - os: windows
     scope: user
-    path: "~/.opencode/opencode.json"
+    path: "%USERPROFILE%\\.opencode\\opencode.json"
     format: json
-    notes: "Legacy single-dot config location on Windows — same as macOS/Linux."
+    notes: "Legacy single-dot config location on Windows (home-relative, same layout as macOS/Linux)."
   - os: macos
     scope: user
     path: "~/.opencode/opencode.jsonc"
@@ -136,9 +137,9 @@ config_files:
     notes: "JSONC variant of the Linux legacy single-dot location."
   - os: windows
     scope: user
-    path: "~/.opencode/opencode.jsonc"
+    path: "%USERPROFILE%\\.opencode\\opencode.jsonc"
     format: jsonc
-    notes: "JSONC variant of the Windows legacy single-dot location."
+    notes: "JSONC variant of the Windows legacy single-dot location (home-relative)."
   - os: macos
     scope: repo
     path: "<project>/opencode.json"
@@ -320,9 +321,9 @@ config_files:
     notes: "Linux OAuth credential store path — same as macOS."
   - os: windows
     scope: other
-    path: "%LOCALAPPDATA%\\opencode\\mcp-auth.json"
+    path: "%USERPROFILE%\\.local\\share\\opencode\\mcp-auth.json"
     format: json
-    notes: "Windows OAuth credential store path (XDG-equivalent)."
+    notes: "Windows OAuth credential store path — OpenCode's data dir is home-relative `.local/share/opencode` on every OS, not %LOCALAPPDATA%."
 cli_params:
   - flag: "opencode mcp add [name]"
     description: |
@@ -697,6 +698,7 @@ gaps:
     user-facing resource selection UI) is documented; the public surface
     is the internal `McpCatalog`.
 changes:
+  - "Curation edit (2026-07-03): corrected Windows config_files paths — OpenCode resolves config/data dirs home-relative on every OS, so the user config is %USERPROFILE%\\.config\\opencode\\ (not %APPDATA%) and the OAuth store is %USERPROFILE%\\.local\\share\\opencode\\ (not %LOCALAPPDATA%); legacy single-dot paths rewritten in Windows form. Cross-validated against the agent-cli topic's host-evidence records."
   - "Confirmed `support: runtime_injection` is the strongest single path for Claudine — `OPENCODE_CONFIG_CONTENT` is the documented one-run mechanism; persistent-config import/export is a secondary story."
   - "Confirmed the server-side capability declaration in source (`packages/opencode/src/mcp/index.ts:2420–2442`): only `roots` is enabled; `sampling`, `elicitation`, and `tasks` are commented out with links to upstream GitHub issues. Prior research recorded these as `unknown`."
   - "Confirmed `roots` is implemented end-to-end: `client.setRequestHandler(ListRootsRequestSchema, ...)` returns the project directory as a `file://` URI. Added in v1.17.7."

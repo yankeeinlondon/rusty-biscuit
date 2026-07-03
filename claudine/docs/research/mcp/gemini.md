@@ -1,654 +1,578 @@
 ---
 $schema: ./_schema.yaml
 created: 2025-04-13
-last_updated: 2026-07-02
-agent: open_code
-model: kimi-for-coding/k2p7
+last_updated: 2026-07-03
+agent: codex
+model: default
 docs: https://www.geminicli.com/docs/tools/mcp-server/
 support: import_sync
 protocol:
   versions: ["unknown"]
   transports: [stdio, sse, streamable_http]
   lifecycle: |
-    MCP servers are discovered once at Gemini CLI startup. Stdio servers are
-    spawned as local subprocesses; SSE and Streamable HTTP clients open remote
-    connections. Servers that fail to connect are marked DISCONNECTED and are not
-    automatically reconnected. The public docs do not describe dynamic
-    list_changed capability refresh.
+    Gemini CLI connects configured MCP servers during startup or explicit reload, tracks CONNECTING/CONNECTED/DISCONNECTED state, and can restart all or one server through its MCP client manager. Source inspection of v0.46.0 shows it registers server notification handlers for tools, resources, and prompts list changes, refreshes the relevant registry, coalesces overlapping refreshes, and sends roots/list_changed notifications when workspace directories change. Failed servers are marked disconnected and can be retried through /mcp reload, mcp manager restart paths, or config/extension reload.
   notes: |
-    Transport is selected by the presence of config keys: `command` for stdio,
-    `url` for SSE, and `httpUrl` for Streamable HTTP. An optional `type` field
-    accepts `"stdio"`, `"sse"`, or `"http"`. The settings schema also contains a
-    `tcp` property, but the official MCP documentation only describes the three
-    transports above. The docs do not state an explicit MCP protocol version;
-    the only version reference is a link to the 2025-06-18 schema in the
-    "Instructions" section.
+    The public docs do not state a protocol version date. The bundled MCP SDK contains schemas through roots, sampling/createMessage, and elicitation/create, while Gemini CLI's active client registers only roots as a client capability. Transport is inferred from `httpUrl`, `url`, or `command`; `type` can be `stdio`, `sse`, or `http`. The settings schema contains a `tcp` field, but neither docs nor active transport selection use it as a supported provider transport.
 config_files:
-  - os: all
+  - os: macos
     scope: user
     path: "~/.gemini/settings.json"
     format: json
-    notes: |
-      User-scope MCP servers live in the top-level `mcpServers` object. The same
-      file holds general Gemini CLI settings.
-  - os: all
+    notes: "Top-level `mcpServers` and `mcp` policy. Local host probe on 2026-07-03 found no `mcpServers` key in `/Users/ken/.gemini/settings.json`."
+  - os: linux
+    scope: user
+    path: "~/.gemini/settings.json"
+    format: json
+    notes: "Top-level `mcpServers` and `mcp` policy."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.gemini\\settings.json"
+    format: json
+    notes: "Top-level `mcpServers` and `mcp` policy."
+  - os: macos
     scope: repo
     path: ".gemini/settings.json"
     format: json
-    notes: |
-      Project-scope MCP servers. Loaded only when the workspace is trusted
-      (when Folder Trust is enabled) or when trust is bypassed.
+    notes: "Project-scope settings. Project MCP servers are gated by folder trust."
   - os: linux
-    scope: system
-    path: "/etc/gemini-cli/system-defaults.json"
+    scope: repo
+    path: ".gemini/settings.json"
     format: json
-    notes: |
-      System-wide baseline defaults. Lowest precedence for single-value
-      settings; objects like `mcpServers` are merged.
+    notes: "Project-scope settings. Project MCP servers are gated by folder trust."
+  - os: windows
+    scope: repo
+    path: ".gemini\\settings.json"
+    format: json
+    notes: "Project-scope settings. Project MCP servers are gated by folder trust."
+  - os: macos
+    scope: local
+    path: "~/.gemini/config/mcp_config.json"
+    format: json
+    notes: "Standard MCP-client or remote-skill MCP config file referenced by the official MCP docs. Local host probe found the file present but empty."
+  - os: linux
+    scope: local
+    path: "~/.gemini/config/mcp_config.json"
+    format: json
+    notes: "Standard MCP-client or remote-skill MCP config file referenced by the official MCP docs."
+  - os: windows
+    scope: local
+    path: "%USERPROFILE%\\.gemini\\config\\mcp_config.json"
+    format: json
+    notes: "Standard MCP-client or remote-skill MCP config file referenced by the official MCP docs."
+  - os: macos
+    scope: user
+    path: "~/.gemini/mcp-server-enablement.json"
+    format: json
+    notes: "Per-server enabled/disabled state; local host probe found it missing, meaning no persisted enablement overrides."
+  - os: linux
+    scope: user
+    path: "~/.gemini/mcp-server-enablement.json"
+    format: json
+    notes: "Per-server enabled/disabled state."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.gemini\\mcp-server-enablement.json"
+    format: json
+    notes: "Per-server enabled/disabled state."
+  - os: macos
+    scope: user
+    path: "~/.gemini/mcp-oauth-tokens.json"
+    format: json
+    notes: "Remote MCP OAuth token store; local host probe found it missing."
+  - os: linux
+    scope: user
+    path: "~/.gemini/mcp-oauth-tokens.json"
+    format: json
+    notes: "Remote MCP OAuth token store."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.gemini\\mcp-oauth-tokens.json"
+    format: json
+    notes: "Remote MCP OAuth token store."
+  - os: macos
+    scope: user
+    path: "~/.gemini/trustedFolders.json"
+    format: json
+    notes: "Folder-trust decisions; local host probe found five entries."
+  - os: linux
+    scope: user
+    path: "~/.gemini/trustedFolders.json"
+    format: json
+    notes: "Folder-trust decisions."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.gemini\\trustedFolders.json"
+    format: json
+    notes: "Folder-trust decisions."
   - os: macos
     scope: system
     path: "/Library/Application Support/GeminiCli/system-defaults.json"
     format: json
-    notes: |
-      macOS system-wide baseline defaults.
+    notes: "System baseline defaults; lower precedence than user and repo settings."
+  - os: linux
+    scope: system
+    path: "/etc/gemini-cli/system-defaults.json"
+    format: json
+    notes: "System baseline defaults; lower precedence than user and repo settings."
   - os: windows
     scope: system
     path: "C:\\ProgramData\\gemini-cli\\system-defaults.json"
     format: json
-    notes: |
-      Windows system-wide baseline defaults.
-  - os: linux
-    scope: managed
-    path: "/etc/gemini-cli/settings.json"
-    format: json
-    notes: |
-      System-wide override settings. Highest precedence for single-value
-      settings; `mcpServers` objects are merged.
+    notes: "System baseline defaults; lower precedence than user and repo settings."
   - os: macos
     scope: managed
     path: "/Library/Application Support/GeminiCli/settings.json"
     format: json
-    notes: |
-      macOS system-wide override settings.
+    notes: "System override settings; highest precedence among local settings files."
+  - os: linux
+    scope: managed
+    path: "/etc/gemini-cli/settings.json"
+    format: json
+    notes: "System override settings; highest precedence among local settings files."
   - os: windows
     scope: managed
     path: "C:\\ProgramData\\gemini-cli\\settings.json"
     format: json
-    notes: |
-      Windows system-wide override settings.
-  - os: all
+    notes: "System override settings; highest precedence among local settings files."
+  - os: macos
     scope: plugin
     path: "<extension-root>/gemini-extension.json"
     format: json
-    notes: |
-      Extensions can bundle MCP servers under their `mcpServers` object. User
-      and project `settings.json` can override extension server definitions.
-  - os: all
-    scope: user
-    path: "~/.gemini/mcp-server-enablement.json"
+    notes: "Extensions can bundle `mcpServers`; all MCP server options are supported except `cwd`."
+  - os: linux
+    scope: plugin
+    path: "<extension-root>/gemini-extension.json"
     format: json
-    notes: |
-      Tracks per-server enabled/disabled state, including `--session` changes.
-  - os: all
-    scope: user
-    path: "~/.gemini/mcp-oauth-tokens.json"
+    notes: "Extensions can bundle `mcpServers`; all MCP server options are supported except `cwd`."
+  - os: windows
+    scope: plugin
+    path: "<extension-root>\\gemini-extension.json"
     format: json
-    notes: |
-      Stores OAuth tokens for remote MCP servers.
-  - os: all
-    scope: user
-    path: "~/.gemini/trustedFolders.json"
-    format: json
-    notes: |
-      Records trusted/untrusted folder decisions when Folder Trust is enabled.
+    notes: "Extensions can bundle `mcpServers`; all MCP server options are supported except `cwd`."
 cli_params:
   - flag: "gemini mcp add [options] <name> <commandOrUrl> [args...]"
-    description: "Adds a persistent MCP server to user or project settings.json."
-    example: "gemini mcp add --transport http secure-api https://api.example.com/mcp/"
+    description: "Adds a persistent MCP server to user or project config; `--scope user|project` chooses destination and `--transport/--type stdio|sse|http` chooses transport."
+    example: "gemini mcp add --scope user --transport http api https://example.com/mcp"
+  - flag: "gemini mcp remove <name> --scope user|project"
+    description: "Removes a persistent MCP server from the selected settings file."
   - flag: "gemini mcp list"
-    description: "Lists configured MCP servers, their configuration, and connection status."
-  - flag: "gemini mcp remove <name>"
-    description: "Removes an MCP server from settings.json."
-    example: "gemini mcp remove my-server --scope user"
+    description: "Lists configured MCP servers and status."
   - flag: "gemini mcp enable <name> [--session]"
-    description: "Enables a disabled MCP server. --session applies only to the current run."
+    description: "Enables a server; `--session` clears a session-only disable without editing persistent config."
   - flag: "gemini mcp disable <name> [--session]"
-    description: "Disables an MCP server. --session applies only to the current run."
-  - flag: "--allowed-mcp-server-names <names>"
-    description: "Comma-separated list of server names allowed to connect for this run."
-    example: "gemini --allowed-mcp-server-names fs,github -p 'use tools'"
-  - flag: "/mcp auth [server-name]"
-    description: "Interactive slash command to authenticate with an OAuth-enabled MCP server."
-  - flag: "/mcp reload"
-    description: "Reloads all MCP servers and re-discovers available tools."
-  - flag: "/mcp list | /mcp desc | /mcp schema"
-    description: "Interactive slash commands to inspect servers, tools, and schemas."
+    description: "Disables a server; `--session` applies only to the current process."
+  - flag: "--allowed-mcp-server-names"
+    description: "Comma-separated or repeated server-name allowlist for the current session; it overrides configured MCP allow/exclude lists for connection filtering."
+    example: "gemini --allowed-mcp-server-names github,docs -p \"summarize\""
   - flag: "--skip-trust"
-    description: "Bypasses the folder-trust dialog in headless/automated environments."
-  - flag: "--sandbox / GEMINI_SANDBOX"
-    description: "Enables sandboxing for built-in tools; does not sandbox MCP stdio servers."
+    description: "Bypasses the folder-trust prompt for the current session, allowing project MCP config in headless or automated runs."
+  - flag: "--acp"
+    description: "Starts ACP mode; MCP behavior is separate from persistent settings and is driven by the ACP client/server path."
+  - flag: "/mcp auth [server-name]"
+    description: "Interactive OAuth authentication for remote MCP servers."
+  - flag: "/mcp reload"
+    description: "Restarts MCP clients and re-discovers tools, prompts, and resources."
+  - flag: "/mcp list | /mcp desc | /mcp schema"
+    description: "Interactive MCP inspection commands for servers, descriptions, and schemas."
 env_vars:
   - name: GEMINI_CLI_HOME
-    effect: |
-      Relocates the entire Gemini CLI state directory (default `~/.gemini`).
-      Useful for isolating state in CI or shared environments.
+    effect: "Relocates Gemini CLI user state root; Gemini stores `.gemini` under this directory. This enables one-run MCP injection by pointing a process at a temporary home containing generated config."
   - name: GEMINI_CLI_SYSTEM_SETTINGS_PATH
-    effect: |
-      Overrides the path to the system-wide override settings file.
+    effect: "Overrides the managed/system settings file path."
   - name: GEMINI_CLI_SYSTEM_DEFAULTS_PATH
-    effect: |
-      Overrides the path to the system-wide baseline defaults file.
+    effect: "Overrides the system defaults file path."
   - name: GEMINI_CLI_TRUSTED_FOLDERS_PATH
-    effect: |
-      Overrides the path to the trusted-folders JSON file.
+    effect: "Overrides the trusted-folders file path used by folder trust."
   - name: GEMINI_CLI_TRUST_WORKSPACE
-    effect: |
-      Set to `true` to trust the current workspace for the session without an
-      interactive dialog.
+    effect: "When `true`, trusts the current workspace for the session and allows project MCP servers to connect."
   - name: GEMINI_SANDBOX
-    effect: |
-      Enables tool sandboxing (e.g., `true`, `docker`, `runsc`). Applies to
-      built-in tool execution, not to MCP server subprocesses.
+    effect: "Enables Gemini CLI tool sandboxing. It changes overall execution posture and can affect MCP server reachability, but docs warn MCP servers are separate processes and must be sandbox-compatible."
   - name: SANDBOX_MOUNTS
-    effect: |
-      Comma-separated extra host mounts when sandboxing is enabled.
+    effect: "Extra host mounts for sandboxed Gemini CLI execution; relevant when MCP servers need files reachable from sandboxed built-in tools."
   - name: SANDBOX_FLAGS
-    effect: |
-      Extra flags passed to the container runtime when sandboxing is enabled.
+    effect: "Additional flags for sandbox command setup; relevant to MCP only through sandbox compatibility."
 server_schema:
   transports: ["stdio", "sse", "streamable_http"]
-  command_fields: ["command", "args", "env", "cwd", "timeout", "trust", "description", "includeTools", "excludeTools"]
-  http_fields: ["url", "httpUrl", "headers", "timeout", "trust", "description", "includeTools", "excludeTools", "oauth", "authProviderType", "targetAudience", "targetServiceAccount"]
-  env_shape: |
-    `env` is an object mapping variable names to string values. Values support
-    `$VAR`, `${VAR}`, `${VAR:-default}` expansion on all platforms, and `%VAR%`
-    on Windows. Undefined variables without a default expand to an empty string.
-  auth_shape: |
-    Remote servers support OAuth 2.0 (`oauth` object with dynamic discovery,
-    pre-registered `clientId`/`clientSecret`, `scopes`, `redirectUri`, etc.),
-    Google Application Default Credentials (`authProviderType: google_credentials`),
-    service-account impersonation for IAP (`authProviderType: service_account_impersonation`),
-    or static `headers`. OAuth tokens are stored in
-    `~/.gemini/mcp-oauth-tokens.json`.
-  notes: |
-    Server id is the map key under `mcpServers`. Transport is normally inferred
-    from the presence of `command`, `url`, or `httpUrl`; `type` may be provided
-    explicitly. The `includeTools` and `excludeTools` arrays use camelCase in
-    the settings schema and official docs (`includeTools`/`excludeTools`), not
-    hyphenated names.
+  command_fields: ["command", "args", "env", "cwd", "timeout", "trust", "description", "includeTools", "excludeTools", "type", "extension"]
+  http_fields: ["url", "httpUrl", "headers", "timeout", "trust", "description", "includeTools", "excludeTools", "oauth", "authProviderType", "targetAudience", "targetServiceAccount", "type"]
+  env_shape: "`env` is an object mapping variable names to string values. Values support `$VAR`, `${VAR}`, and Windows `%VAR%`; undefined variables resolve to an empty string. The docs describe expansion primarily for the `env` block."
+  auth_shape: "Remote `url` and `httpUrl` servers can use static `headers`, OAuth dynamic discovery or explicit `oauth` settings, `authProviderType: google_credentials`, or `authProviderType: service_account_impersonation` with `targetAudience` and `targetServiceAccount`. OAuth tokens are stored in `~/.gemini/mcp-oauth-tokens.json`."
+  notes: "A server definition is the value under `mcpServers.<name>`. One of `command`, `url`, or `httpUrl` is required for active connection. `type` values are `stdio`, `sse`, and `http`. `excludeTools` takes precedence over `includeTools`. The schema contains `tcp`, but active transport docs and source do not expose it as supported."
 server_capabilities:
   tools: full
   resources: partial
   prompts: full
-  tool_list_changed: false
+  tool_list_changed: true
   resource_subscribe: false
-  resource_list_changed: false
-  prompt_list_changed: false
-  notes: |
-    Tools are fully exposed to the model with FQNs like `mcp_{serverName}_{toolName}`.
-    Resources are discovered and surfaced in `/mcp` and can be referenced with
-    `@server://resource/path`; the model can also invoke built-in
-    `list_mcp_resources` and `read_mcp_resource`. Prompts are exposed as slash
-    commands. Dynamic `list_changed` refresh is not documented.
+  resource_list_changed: true
+  prompt_list_changed: true
+  notes: "Tools are model-controlled and registered as `mcp_{serverName}_{toolName}`. Resources are discovered, listed in `/mcp`, available through `@server://...`, and exposed through built-in `list_mcp_resources` and `read_mcp_resource` tools; resource templates and subscriptions are not implemented in the documented surface. Prompts are registered in the prompt registry and exposed as slash commands. Source inspection shows list-changed handlers for tools, resources, and prompts."
 client_capabilities:
-  roots: none
+  roots: full
   sampling: none
   elicitation: none
-  notes: |
-    The public documentation does not describe support for MCP roots/list,
-    sampling/createMessage, or elicitation/completion.
+  notes: "Gemini CLI v0.46.0 registers MCP client capabilities with `roots: { listChanged: true }`, answers `roots/list` from workspace directories, and emits `notifications/roots/list_changed` on directory changes. The MCP SDK includes sampling and elicitation schemas, but active Gemini MCP client setup does not register those capabilities or handlers."
 tool_surface:
-  discovery: |
-    `tools/list` is called for each configured server at startup. Tool names are
-    sanitized to Gemini API rules and namespaced as `mcp_{serverName}_{toolName}`.
-    Conflicts across servers are resolved by last-registration-wins.
-  filtering: |
-    Per-server `includeTools`/`excludeTools`; global `mcp.allowed` and
-    `mcp.excluded` server lists; `--allowed-mcp-server-names` at runtime; and
-    Policy Engine TOML rules using `mcpName` or FQN wildcards. A `deny` policy
-    removes the tool from the model's memory entirely.
-  approval: |
-    Per-server `trust: true` bypasses confirmation. Otherwise the default policy
-    engine prompts the user. In non-interactive mode an `ask_user` decision is
-    treated as `deny`.
-  result_handling: |
-    Tool results are formatted into `llmContent` for the model and
-    `returnDisplay` for the user. No native MCP result sanitization or size
-    limits are documented.
-  annotations_trusted: |
-    Tool annotations are not described as trusted policy inputs.
-  notes: |
-    Server names should avoid underscores because the policy parser splits FQNs
-    on the first underscore after the `mcp_` prefix.
+  discovery: "On startup, `/mcp reload`, extension load, or MCP manager restart, Gemini connects each allowed/trusted server, calls `tools/list`, transforms nullable schema shapes for Gemini API compatibility, and registers tools as FQNs."
+  filtering: "Per-server `includeTools`/`excludeTools`, top-level `mcp.allowed` and `mcp.excluded`, session `--allowed-mcp-server-names`, disabled-server state, extension activation, folder trust, and Policy Engine rules using `mcpName` or FQN/wildcards."
+  approval: "Server `trust: true` bypasses prompts. Otherwise MCP tools use the same policy/confirmation pipeline as native tools; non-interactive mode cannot ask and treats required confirmation as denial. Read-only annotations are passed into policy metadata but should not be treated as a security boundary."
+  result_handling: "MCP tool calls use `tools/call` with a progress token. Success and error responses are returned as function responses for the model; errors are wrapped as `isError: true`. The CLI can truncate/mask general tool output through its context-management settings, but no MCP-specific prompt-injection scanner is documented."
+  annotations_trusted: "Tool annotations are ingested, including `readOnlyHint`, and policy code can match annotation metadata. They come from the server and should be treated as hints, not trusted proof."
+  notes: "Server names should avoid underscores because FQN policy parsing splits after the `mcp_` prefix."
 resource_surface:
   supported: true
-  uri_schemes: []
+  uri_schemes: ["server-qualified MCP resource URIs such as @server://resource/path"]
+  templates: false
   subscriptions: false
-  exposure_model: |
-    Resources discovered via `resources/list` appear in `/mcp`. Users reference
-    them with `@server://resource/path`, which triggers `resources/read`. The
-    model can also use the built-in `list_mcp_resources` and `read_mcp_resource`
-    tools.
-  notes: |
-    Resource templates and subscriptions are not documented.
+  exposure_model: "Application-controlled context. Users can reference MCP resources with `@server://...`; the model can discover/read resources through built-in `list_mcp_resources` and `read_mcp_resource` tools."
+  notes: "Source lists resources through paginated `resources/list` and reads exact URIs through `resources/read`; resource templates and subscribe/unsubscribe are not described in docs or active source paths."
 prompt_surface:
   supported: true
-  invocation: |
-    Discovered prompts appear as slash commands (e.g., `/poem-writer`). Arguments
-    are supplied as named flags (`--title="X"`) or positionally.
-  arguments: |
-    Named flags or positional values are passed to the server's `prompts/get`.
-  exposure_model: |
-    User-invoked slash commands only; prompts are not autonomously invoked by
-    the model.
-  notes: |
-    Prompt list changes require restarting the session or running `/mcp reload`.
+  invocation: "Discovered MCP prompts are registered as slash commands."
+  arguments: "Arguments are accepted as named flags or positional command arguments, converted to strings, and sent to `prompts/get`."
+  exposure_model: "User-controlled templates. The user invokes a slash command; prompts are not automatic model tools."
+  notes: "Prompt list changes can refresh dynamically through `notifications/prompts/list_changed` or manually with `/mcp reload`."
 sync_behavior:
   import_supported: true
   export_supported: true
   apply_supported: true
-  merge_strategy: deep
-  notes: |
-    Claudine can read `~/.gemini/settings.json` and `.gemini/settings.json`,
-    normalize server definitions, and write them back. `mcpServers` objects are
-    merged across system defaults, user, workspace, and system overrides; when
-    the same server name appears at multiple levels, the highest-precedence
-    definition wins (system overrides > workspace > user > system defaults).
-    `gemini mcp add/remove/enable/disable` provide a supported apply path.
+  merge_strategy: shallow
+  notes: "Claudine can import from and export to user/project `settings.json` and should also recognize `~/.gemini/config/mcp_config.json` for standard MCP-client/remote-skill config. `gemini mcp add/remove/enable/disable` is the supported apply path for normal settings. Gemini's settings schema marks `mcpServers` as shallow-merge across settings layers; the MCP manager then securely merges same-name extension/settings definitions with includeTools intersection, excludeTools union, and env object merge. Managed admin remote settings can inject allowed and required MCP config."
 runtime_injection:
-  supported: false
-  mechanism: |
-    Gemini CLI has no native flag or environment variable for loading MCP
-    servers for a single run without mutating persistent config. Claudine
-    wrappers can emulate one-run injection by launching `gemini` with a shadow
-    HOME directory containing `.gemini/settings.json`.
-  limitations: |
-    A shadow HOME replaces the user's normal `~/.gemini` for that process, so
-    sidecars such as `mcp-oauth-tokens.json` and `mcp-server-enablement.json`
-    must be copied into the shadow home if they are needed. OAuth flows still
-    require an interactive browser.
+  supported: true
+  mechanism: "Set `GEMINI_CLI_HOME` to a temporary directory containing generated `.gemini/settings.json` and launch `gemini` for that run; optionally combine with `--allowed-mcp-server-names` and `GEMINI_CLI_TRUST_WORKSPACE=true` or `--skip-trust`."
+  limitations: "This relocates all Gemini CLI state for the process, so OAuth tokens, enablement state, trusted folders, auth state, and other sidecars must be copied or deliberately omitted. There is no narrow `--mcp-config` flag for a single injected server. OAuth browser flows remain unsuitable for headless one-run injection."
 authorization:
   oauth: true
-  credential_storage: |
-    OAuth tokens are stored in `~/.gemini/mcp-oauth-tokens.json` and refreshed
-    automatically when refresh tokens are available.
-  token_scope: |
-    Per remote server URL. Client secrets may be supplied via the `oauth` object
-    or CLI flags.
-  stdio_secret_delivery: |
-    Secrets are delivered through the per-server `env` object or via env-var
-    expansion inside config values. The host process environment is inherited
-    but sensitive patterns (`*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*KEY*`,
-    `*AUTH*`, `*CREDENTIAL*`) are redacted unless explicitly listed in `env`.
-  notes: |
-    OAuth flows require a local browser and redirect listener on
-    `http://localhost:<port>/oauth/callback`; they do not work in headless
-    environments. Static `headers.Authorization` is supported but discouraged
-    for shared repo config.
+  credential_storage: "Remote MCP OAuth tokens are stored in `~/.gemini/mcp-oauth-tokens.json`; Google credentials and service-account impersonation use Application Default Credentials. Static headers live in config."
+  token_scope: "Token records are keyed per MCP server name and use discovered or configured client/audience/scope data; service account impersonation binds to target audience and target service account."
+  stdio_secret_delivery: "Stdio secrets should be passed via explicit per-server `env` values, usually with environment-variable expansion. Gemini redacts sensitive inherited host environment variables unless explicitly configured."
+  notes: "OAuth requires a browser and localhost redirect listener. Claudine can avoid reading or writing secrets by preserving opaque sidecar files and generating env references rather than literal secret values."
 security:
-  tool_filtering: |
-    Per-server `includeTools`/`excludeTools`; global `mcp.allowed`/`mcp.excluded`;
-    `--allowed-mcp-server-names`; and Policy Engine rules using `mcpName` or
-    FQN wildcards.
-  server_trust: |
-    When Folder Trust is enabled, project-scope MCP servers do not connect in
-    untrusted folders. `--skip-trust` or `GEMINI_CLI_TRUST_WORKSPACE=true`
-    bypasses the dialog for the session. System-level `mcpServers` and
-    `mcp.allowed` can enforce a corporate catalog.
-  env_sanitization: |
-    Host environment variables matching sensitive patterns are redacted from
-    MCP stdio server subprocesses. Only variables explicitly listed in a
-    server's `env` object are guaranteed to be passed through.
-  sandbox_interaction: |
-    MCP stdio server subprocesses run as ordinary local processes and are not
-    isolated by Gemini CLI's tool sandbox, which applies to built-in tools such
-    as shell and file operations.
-  response_filtering: |
-    No native MCP response sanitization is documented. Claudine's `protect`
-    layer should treat MCP tool results as untrusted.
-  notes: |
-    OAuth tokens are stored in the user home, not the OS keychain. Admin
-    policies in `/etc/gemini-cli/policies` (Linux), `/Library/Application
-    Support/GeminiCli/policies` (macOS), or `C:\ProgramData\gemini-cli\policies`
-    (Windows) can enforce organization-wide rules.
+  tool_filtering: "Per-server tool include/exclude, server allow/exclude lists, session allowlist, enablement state, extension activity, and Policy Engine allow/deny/ask rules."
+  server_trust: "Folder trust gates project MCP servers; `--skip-trust` and `GEMINI_CLI_TRUST_WORKSPACE=true` bypass for a session. Admin controls can disable MCP, allowlist MCP config, or inject required remote MCP servers."
+  env_sanitization: "MCP stdio subprocesses inherit a sanitized environment with sensitive patterns removed; explicit `env` entries are trusted and passed through."
+  sandbox_interaction: "MCP servers run as separate local processes or remote transports. Gemini docs call out sandbox compatibility problems; sandboxing is not documented as a containment boundary around stdio MCP subprocesses."
+  response_filtering: "No MCP-specific prompt-injection filter is documented. General tool output truncation/masking may apply before context insertion, but Claudine should treat all MCP responses as untrusted."
+  notes: "Roots are advertised to servers and reflect workspace directories, but roots are not a filesystem sandbox. Sampling and elicitation are not offered, so no user-consent gate for those MCP client capabilities is present."
 gaps:
-  - |
-    The official docs do not state which MCP protocol version Gemini CLI
-    implements, only an indirect link to the 2025-06-18 schema.
-  - |
-    Dynamic capability refresh (`list_changed` notifications) is not documented.
-  - |
-    Auto-reconnect behavior for failed SSE/HTTP servers is not documented.
-  - |
-    Resource URI templates and subscriptions are not documented.
-  - |
-    Roots, sampling, and elicitation support are not documented.
-  - |
-    Gemini CLI provides no native one-run MCP config flag or environment
-    variable.
-  - |
-    Whether MCP stdio server subprocesses are included in tool sandboxing is
-    not explicitly stated.
-  - |
-    Native MCP response size limits and prompt-injection filtering are not
-    documented.
-changes: []
+  - "The public docs do not state the MCP protocol version date implemented by Gemini CLI."
+  - "The settings schema includes `tcp`, but no official doc or active transport branch proves TCP/WebSocket support."
+  - "Resource templates and resource subscriptions are not documented or observed in active v0.46.0 source paths."
+  - "The precise maximum MCP tool-result size and interaction with general truncation/masking settings is not documented as MCP-specific behavior."
+  - "ACP-mode MCP exposure is under-documented in the public Gemini CLI docs; source/docs distinguish ACP mode but not a complete MCP import/export surface for Claudine."
+  - "Admin remote settings can inject MCP config, but the external distribution mechanism and local persistence are not fully documented in public sources."
+changes:
+  - "Corrected runtime injection from unsupported shadow-HOME emulation to supported `GEMINI_CLI_HOME` one-run state relocation."
+  - "Reclassified client roots support from none to full for `roots/list` plus `roots/list_changed` based on v0.46.0 source inspection."
+  - "Updated dynamic notification support: tools, resources, and prompts list-changed notifications are handled and refresh registries."
+  - "Added `~/.gemini/config/mcp_config.json` based on bundled docs and local host probe."
+  - "Replaced invalid `os: all` records with per-OS config file records."
+  - "Recorded local host probes: real user settings contain no `mcpServers`, `mcp_config.json` is empty, enablement and MCP OAuth token files are absent, and trusted folders exist."
 requires_claudine_update: true
 reason: |
-  Claudine's Gemini import/export currently uses non-standard hyphenated field
-  names (`include-tools`/`exclude-tools`) and omits documented server fields
-  such as `cwd`, `headers`, `oauth`, `authProviderType`, `httpUrl`, `type`,
-  `description`, `timeout`, and `trust`. The importer also reads a
-  non-documented `transport` key instead of the documented `type`/`url`/`httpUrl`
-  inference. Update import/export/runtime injection to match the Gemini
-  settings.schema.json and MCP server docs.
+  Claudine's Gemini MCP metadata should be updated to support native one-run injection through `GEMINI_CLI_HOME`, client roots capability, dynamic list_changed refresh flags, and the additional `~/.gemini/config/mcp_config.json` import surface. Existing generated metadata that says runtime injection is unsupported or roots/list_changed are absent would now be stale.
 ---
 
-# MCP Support in Gemini CLI
+# Gemini CLI MCP Support
 
 ## Overview
 
-Gemini CLI supports the [Model Context Protocol (MCP)](https://modelcontextprotocol.io) as a first-class extension mechanism. MCP servers add external tools, resources, and prompt templates to the Gemini model. Servers can be local stdio processes, remote SSE endpoints, or Streamable HTTP endpoints. Configuration is persisted in JSON settings files, managed through both `gemini mcp` CLI commands and interactive `/mcp` slash commands.
+Gemini CLI has first-class MCP support through persistent JSON settings, `gemini mcp` management commands, interactive `/mcp` commands, extension-bundled servers, managed/admin config, and one-run state relocation through `GEMINI_CLI_HOME`. For Claudine, the strongest integration path is `import_sync`: read/write Gemini-shaped config, prefer `gemini mcp` commands where practical, and use `GEMINI_CLI_HOME` only for wrapper-time injection.
 
-This document maps Gemini CLI's MCP behavior to the schema used by Claudine's MCP catalog and provider wrappers.
+Surface inventory: tools and prompts are exposed strongly; resources are exposed through user `@server://...` references and built-in resource tools; roots are implemented as a client capability; sampling and elicitation are not offered by Gemini CLI's active MCP client setup.
+
+Local inspection on 2026-07-03 used Gemini CLI `0.46.0`. The real `/Users/ken/.gemini/settings.json` has no `mcpServers` key, `/Users/ken/.gemini/config/mcp_config.json` exists but is empty, `/Users/ken/.gemini/mcp-server-enablement.json` and `/Users/ken/.gemini/mcp-oauth-tokens.json` are absent, and `/Users/ken/.gemini/trustedFolders.json` exists.
 
 ## Protocol and Transports
 
-Gemini CLI supports three MCP transports:
+Gemini CLI documents three MCP transports:
 
-| Transport | Configuration keys | Status |
-| :-------- | :----------------- | :----- |
-| `stdio` | `command` (and `args`, `env`, `cwd`) | Primary |
-| `sse` | `url` | Supported |
-| `streamable_http` | `httpUrl` | Supported |
+| Transport | Config keys | Notes |
+| --- | --- | --- |
+| stdio | `command`, `args`, `env`, `cwd` | Local subprocess JSON-RPC over stdin/stdout. |
+| SSE | `url`, optional `type: "sse"` | Legacy remote Server-Sent Events transport. |
+| Streamable HTTP | `httpUrl`, optional `type: "http"` | Modern remote HTTP streaming transport. |
 
-Transport selection is normally inferred from the presence of `command`, `url`, or `httpUrl`. An optional `type` field can be set to `"stdio"`, `"sse"`, or `"http"` to be explicit.
+Transport selection is inferred from `httpUrl`, then `url`, then `command`; `type` can make the intent explicit. The settings schema includes `tcp`, but the public docs and active source paths do not show it as a supported transport.
 
-Lifecycle behavior:
+The docs do not state a protocol version date. Source inspection shows the bundled MCP SDK contains schemas for modern client/server features including roots, sampling, and elicitation, but Gemini CLI registers only roots as an active client capability.
 
-- Servers are discovered once at startup.
-- Stdio servers are spawned as local child processes.
-- SSE and Streamable HTTP servers open remote connections.
-- Failed connections mark the server as `DISCONNECTED`.
-- The public documentation does not describe automatic reconnection or dynamic `list_changed` refresh.
+Session lifecycle:
 
-The documentation does not explicitly state an MCP protocol version date; the only version reference is a link to the [2025-06-18 schema](https://modelcontextprotocol.io/specification/2025-06-18/schema#initializeresult) in the "Instructions" section.
+- Configured servers connect at startup when MCP is enabled and the folder is trusted.
+- `/mcp reload` and MCP manager restart paths disconnect and rediscover servers.
+- Extension load/unload can start or stop extension-owned MCP servers.
+- Failed connections are marked disconnected and diagnostics are deduplicated unless the user explicitly opens MCP status.
+- Gemini listens for `notifications/tools/list_changed`, `notifications/resources/list_changed`, and `notifications/prompts/list_changed`, then refreshes the corresponding registry.
+- Gemini advertises `roots.listChanged` and emits `notifications/roots/list_changed` when workspace directories change.
 
 ## Configuration
 
-MCP servers are configured in the top-level `mcpServers` object of a `settings.json` file. There are four configuration layers:
+Persistent MCP config lives primarily in JSON settings files:
 
-| Layer | File | Precedence |
-| :---- | :--- | :--------- |
-| System defaults | `/etc/gemini-cli/system-defaults.json` (Linux), `/Library/Application Support/GeminiCli/system-defaults.json` (macOS), `C:\ProgramData\gemini-cli\system-defaults.json` (Windows) | Lowest |
-| User | `~/.gemini/settings.json` | Overrides system defaults |
-| Workspace (project) | `.gemini/settings.json` | Overrides user settings |
-| System overrides | `/etc/gemini-cli/settings.json` (Linux), `/Library/Application Support/GeminiCli/settings.json` (macOS), `C:\ProgramData\gemini-cli\settings.json` (Windows) | Highest |
+| OS | Scope | Path | Notes |
+| --- | --- | --- | --- |
+| macOS | user | `~/.gemini/settings.json` | Top-level `mcpServers` and `mcp`. |
+| Linux | user | `~/.gemini/settings.json` | Same shape. |
+| Windows | user | `%USERPROFILE%\.gemini\settings.json` | Same shape. |
+| macOS | repo | `.gemini/settings.json` | Project scope; folder-trust gated. |
+| Linux | repo | `.gemini/settings.json` | Project scope; folder-trust gated. |
+| Windows | repo | `.gemini\settings.json` | Project scope; folder-trust gated. |
+| macOS | local | `~/.gemini/config/mcp_config.json` | Standard MCP-client or remote-skill MCP config. |
+| Linux | local | `~/.gemini/config/mcp_config.json` | Same shape. |
+| Windows | local | `%USERPROFILE%\.gemini\config\mcp_config.json` | Same shape. |
+| macOS | system defaults | `/Library/Application Support/GeminiCli/system-defaults.json` | Low precedence. |
+| Linux | system defaults | `/etc/gemini-cli/system-defaults.json` | Low precedence. |
+| Windows | system defaults | `C:\ProgramData\gemini-cli\system-defaults.json` | Low precedence. |
+| macOS | managed | `/Library/Application Support/GeminiCli/settings.json` | Highest local settings precedence. |
+| Linux | managed | `/etc/gemini-cli/settings.json` | Highest local settings precedence. |
+| Windows | managed | `C:\ProgramData\gemini-cli\settings.json` | Highest local settings precedence. |
+| all | plugin | `<extension-root>/gemini-extension.json` | Extension `mcpServers`; all options except `cwd`. |
 
-For single-value settings, higher layers override lower layers. For the `mcpServers` object, definitions are merged; if the same server name appears at multiple layers, the highest-precedence definition wins. The `GEMINI_CLI_SYSTEM_SETTINGS_PATH` and `GEMINI_CLI_SYSTEM_DEFAULTS_PATH` environment variables can relocate the system files.
+Sidecars:
 
-Additional sidecar files:
+- `~/.gemini/mcp-server-enablement.json` stores per-server enabled/disabled state.
+- `~/.gemini/mcp-oauth-tokens.json` stores remote MCP OAuth tokens.
+- `~/.gemini/trustedFolders.json` stores folder-trust decisions.
 
-- `~/.gemini/mcp-server-enablement.json` — per-server enabled/disabled state.
-- `~/.gemini/mcp-oauth-tokens.json` — stored OAuth tokens for remote servers.
-- `~/.gemini/trustedFolders.json` — folder-trust decisions.
+MCP-specific commands and switches:
 
-Global MCP policy can be set with the top-level `mcp` object:
+- `gemini mcp add [options] <name> <commandOrUrl> [args...]`
+- `gemini mcp remove <name> --scope user|project`
+- `gemini mcp list`
+- `gemini mcp enable <name> [--session]`
+- `gemini mcp disable <name> [--session]`
+- `--allowed-mcp-server-names`
+- `--skip-trust`
+- `/mcp auth [server-name]`
+- `/mcp reload`
+- `/mcp list`, `/mcp desc`, `/mcp schema`
 
-- `mcp.serverCommand` — a global command to start a server.
-- `mcp.allowed` — server-name allowlist.
-- `mcp.excluded` — server-name denylist.
+MCP-affecting environment variables:
+
+- `GEMINI_CLI_HOME`
+- `GEMINI_CLI_SYSTEM_SETTINGS_PATH`
+- `GEMINI_CLI_SYSTEM_DEFAULTS_PATH`
+- `GEMINI_CLI_TRUSTED_FOLDERS_PATH`
+- `GEMINI_CLI_TRUST_WORKSPACE`
+- `GEMINI_SANDBOX`, `SANDBOX_MOUNTS`, `SANDBOX_FLAGS` for sandbox posture and compatibility.
 
 ## Server Definition Shape
 
-A server definition under `mcpServers` looks like:
+A single server definition is the object under `mcpServers.<serverName>`:
 
 ```json
 {
-  "mcpServers": {
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
-      "env": { "SOME_VAR": "$SOME_VAR" },
-      "cwd": "./mcp-servers",
-      "timeout": 600000,
-      "trust": false,
-      "includeTools": ["read_file"],
-      "excludeTools": ["delete_file"]
-    },
-    "remote": {
-      "httpUrl": "https://api.example.com/mcp",
-      "headers": { "Authorization": "Bearer ${API_TOKEN}" },
-      "oauth": { "scopes": ["read"] },
-      "timeout": 30000
-    }
+  "command": "node",
+  "args": ["server.js"],
+  "env": {
+    "API_KEY": "$API_KEY"
+  },
+  "cwd": "./mcp",
+  "timeout": 30000,
+  "trust": false,
+  "includeTools": ["search"],
+  "excludeTools": ["delete"],
+  "description": "Example stdio server"
+}
+```
+
+Remote examples use either `url` for SSE or `httpUrl` for Streamable HTTP:
+
+```json
+{
+  "httpUrl": "https://example.com/mcp",
+  "headers": {
+    "Authorization": "Bearer ${MCP_TOKEN}"
+  },
+  "oauth": {
+    "enabled": true,
+    "scopes": ["read"]
+  },
+  "authProviderType": "dynamic_discovery",
+  "timeout": 30000,
+  "trust": false
+}
+```
+
+Required active fields: one of `command`, `url`, or `httpUrl`. Optional fields include `type`, `args`, `headers`, `env`, `cwd`, `timeout`, `trust`, `description`, `includeTools`, `excludeTools`, `oauth`, `authProviderType`, `targetAudience`, `targetServiceAccount`, and extension metadata. `excludeTools` wins over `includeTools`.
+
+Environment values support `$VAR`, `${VAR}`, and Windows `%VAR%`; undefined variables resolve to an empty string. The docs recommend env references instead of hardcoded secrets.
+
+## Tools, Resources, and Prompts
+
+Tools are model-controlled. Gemini calls `tools/list`, filters tools, sanitizes Gemini API schema details, and registers each tool as:
+
+```text
+mcp_{serverName}_{toolName}
+```
+
+Filtering happens before model exposure through:
+
+- `includeTools` and `excludeTools`.
+- `mcp.allowed` and `mcp.excluded`.
+- `--allowed-mcp-server-names`.
+- Per-server enablement state.
+- Folder trust and extension activation.
+- Policy Engine rules using `mcpName` or FQN/wildcard matching.
+
+Approval uses the same confirmation and policy path as native tools. `trust: true` bypasses confirmation for that server. In non-interactive mode, a tool that needs confirmation cannot ask the user and is denied. Tool annotations, including `readOnlyHint`, are passed into metadata and can inform policy, but they originate from the server and should be treated as hints.
+
+Tool results are sent back as function responses. Server-side call errors are wrapped with `isError: true`. The source passes MCP progress tokens and maps progress notifications to Gemini events. No MCP-specific prompt-injection scanner is documented.
+
+Resources are application-controlled context. Gemini calls paginated `resources/list`, registers resources, displays them in `/mcp`, offers them in `@` completion, and reads exact URIs with `resources/read`. Users can write `@server://resource/path`; the model can also call built-in `list_mcp_resources` and `read_mcp_resource`. Resource templates and subscriptions are not documented or observed.
+
+Prompts are user-controlled templates. Gemini calls `prompts/list`, registers prompts as slash commands, and invokes them through `prompts/get`. Arguments are converted to strings and passed by name. Prompts are not automatic model tools.
+
+Gemini handles `tools/list_changed`, `resources/list_changed`, and `prompts/list_changed` notifications and refreshes the affected registry.
+
+## Roots, Sampling, and Elicitation
+
+Roots are supported. Gemini registers:
+
+```json
+{
+  "roots": {
+    "listChanged": true
   }
 }
 ```
 
-### Field reference
+It answers `roots/list` from the current workspace context directories, returning file URLs with basename labels. It emits `notifications/roots/list_changed` when the workspace directory set changes.
 
-| Field | Applies to | Description |
-| :---- | :--------- | :---------- |
-| `command` | stdio | Executable to spawn |
-| `args` | stdio | Argument array |
-| `env` | stdio | Environment variable map |
-| `cwd` | stdio | Working directory |
-| `url` | sse | SSE endpoint URL |
-| `httpUrl` | streamable_http | Streamable HTTP endpoint URL |
-| `headers` | remote | Static HTTP header map |
-| `timeout` | all | Request timeout in ms (default 600,000) |
-| `trust` | all | Bypass tool-call confirmation prompts |
-| `description` | all | Human-readable description |
-| `includeTools` | all | Tool allowlist |
-| `excludeTools` | all | Tool denylist (takes precedence over `includeTools`) |
-| `oauth` | remote | OAuth configuration object |
-| `authProviderType` | remote | `dynamic_discovery`, `google_credentials`, or `service_account_impersonation` |
-| `targetAudience` | remote | IAP OAuth client ID |
-| `targetServiceAccount` | remote | Service account email to impersonate |
+Sampling is not supported in the active Gemini MCP client. The SDK schema is bundled, but the client does not register `sampling` capability or a `sampling/createMessage` handler.
 
-### Environment variable expansion
-
-String values in `env`, `command`, `args`, `url`, `httpUrl`, and `headers` support `$VAR`, `${VAR}`, and `${VAR:-default}` expansion on all platforms, and `%VAR%` on Windows. Undefined variables without a default expand to an empty string.
-
-## Tools, Resources, and Prompts
-
-### Tools
-
-MCP tools are fully exposed to the Gemini model. Each tool is registered with a fully qualified name:
-
-```
-mcp_{serverName}_{toolName}
-```
-
-Tool discovery:
-
-- `tools/list` is called for each server at startup.
-- Tool schemas are sanitized for the Gemini API.
-- Name collisions are resolved by last-registration-wins.
-
-Tool approval:
-
-- `trust: true` on a server bypasses confirmation.
-- The Policy Engine can `allow`, `deny`, or `ask_user` per server/tool.
-- In non-interactive mode, `ask_user` is treated as `deny`.
-
-Tool filtering:
-
-- Per-server `includeTools`/`excludeTools`.
-- Global `mcp.allowed`/`mcp.excluded` server lists.
-- `--allowed-mcp-server-names` at runtime.
-- Policy Engine TOML rules using `mcpName` or FQN wildcards such as `mcp_server_*`.
-
-### Resources
-
-Gemini CLI discovers and surfaces MCP resources:
-
-- `resources/list` results appear in `/mcp`.
-- Users reference resources with `@server://resource/path` syntax.
-- The CLI calls `resources/read` and injects the content into the conversation.
-- Built-in tools `list_mcp_resources` and `read_mcp_resource` are also available to the model.
-
-Resource templates and subscriptions are not documented.
-
-### Prompts
-
-MCP prompts are exposed as slash commands:
-
-- A prompt named `poem-writer` is invoked as `/poem-writer`.
-- Arguments are passed as named flags (`--title="X" --mood="Y"`) or positionally.
-- The CLI calls `prompts/get` and sends the resulting prompt to the model.
-
-Prompts are user-invoked only; the model does not autonomously invoke them.
-
-## Roots, Sampling, and Elicitation
-
-The public Gemini CLI documentation does not describe support for:
-
-- MCP `roots/list` or workspace-root boundaries.
-- MCP `sampling/createMessage` (server-requested LLM calls).
-- MCP `completion/complete` (elicitation / structured user input).
-
-Claudine should treat these client capabilities as **none** until documentation proves otherwise.
+Elicitation is not supported in the active Gemini MCP client. The SDK schema is bundled, but the client does not register `elicitation` capability or a handler. Because sampling and elicitation are absent, there is no Gemini consent prompt for those MCP client capabilities.
 
 ## Import, Export, and Sync
 
-Claudine can treat Gemini CLI as an `import_sync` provider:
+Claudine can import Gemini MCP config from:
 
-- **Import**: read `~/.gemini/settings.json` and `.gemini/settings.json` and normalize `mcpServers` entries into the MCP catalog.
-- **Export**: write provider-shaped JSON back to those files.
-- **Apply**: use `gemini mcp add`, `gemini mcp remove`, `gemini mcp enable`, and `gemini mcp disable` to mutate configuration through the supported CLI.
+- `~/.gemini/settings.json`
+- project `.gemini/settings.json`
+- `~/.gemini/config/mcp_config.json` where relevant
+- extension manifests for read-only catalog awareness
 
-Merge semantics:
+Claudine can export provider-shaped config to user or project settings. For normal apply operations, prefer `gemini mcp add`, `gemini mcp remove`, `gemini mcp enable`, and `gemini mcp disable` where they cover the desired mutation. Direct JSON writes are still needed for fields the command surface does not expose.
 
-- `mcpServers` objects are merged across system defaults, user, workspace, and system overrides.
-- Same-name servers are replaced whole from the highest-precedence layer.
-- Extension-bundled servers can be overridden by user/workspace `settings.json`.
+Gemini settings mark `mcpServers` as shallow-merge across settings layers. Higher-precedence same-name server definitions replace scalar fields. At runtime, the MCP manager has additional secure merge behavior for extension/settings overlaps: `includeTools` is intersected, `excludeTools` is unioned, and `env` objects are merged.
+
+Admin and managed settings can disable MCP, provide allowlisted config, or inject required remote MCP servers.
 
 ## Runtime Injection
 
-Gemini CLI does **not** provide a native flag or environment variable for loading MCP servers for a single run without mutating persistent config. The supported non-persistent option is `gemini mcp enable <name> --session` / `gemini mcp disable <name> --session`, which only affects enablement state.
+Gemini has a native state-root override:
 
-For Claudine wrappers, one-run injection can be emulated by:
+```bash
+GEMINI_CLI_HOME=/tmp/claudine-gemini-home gemini --allowed-mcp-server-names docs -p "..."
+```
 
-1. Creating a shadow HOME directory.
-2. Writing the desired `.gemini/settings.json` with the `mcpServers` object.
-3. Launching `gemini` with `HOME` (or equivalent) pointing at the shadow directory.
-4. Copying sidecars such as `mcp-oauth-tokens.json` and `mcp-server-enablement.json` if needed.
+For one-run injection, Claudine can create a temporary directory, write `.gemini/settings.json`, set `GEMINI_CLI_HOME`, and launch Gemini. Add `GEMINI_CLI_TRUST_WORKSPACE=true` or `--skip-trust` when project config must be trusted in a non-interactive run.
 
 Limitations:
 
-- The shadow HOME replaces the user's normal config for that process.
-- OAuth authentication still requires an interactive browser.
-- `--allowed-mcp-server-names` can restrict which injected servers connect.
+- The override relocates all Gemini state, not only MCP config.
+- OAuth tokens, enablement state, trusted folders, auth state, and other sidecars must be copied or intentionally omitted.
+- There is no narrow `--mcp-config` flag for a single run.
+- Browser OAuth is still not headless-safe.
 
 ## Authorization and Credentials
 
-Gemini CLI supports multiple authentication patterns for remote MCP servers:
+Remote MCP authorization differs by transport:
 
-| Pattern | Where configured | Credential storage |
-| :------ | :--------------- | :----------------- |
-| Static header | `headers` | In config file (not recommended for shared repos) |
-| OAuth dynamic discovery | `oauth` object (omit details) | `~/.gemini/mcp-oauth-tokens.json` |
-| OAuth pre-registered | `oauth.clientId` + client secret | `~/.gemini/mcp-oauth-tokens.json` |
-| Google credentials | `authProviderType: google_credentials` | Application Default Credentials |
-| Service account impersonation | `authProviderType: service_account_impersonation` + `targetAudience`/`targetServiceAccount` | Application Default Credentials |
+| Pattern | Config | Storage |
+| --- | --- | --- |
+| Static header | `headers` | Provider config file. |
+| OAuth dynamic discovery | `oauth.enabled` or 401-triggered discovery | `~/.gemini/mcp-oauth-tokens.json`. |
+| OAuth explicit client | `oauth.clientId`, `oauth.clientSecret`, endpoints, scopes | Token sidecar plus config. |
+| Google ADC | `authProviderType: "google_credentials"` | Application Default Credentials. |
+| Service account impersonation | `authProviderType: "service_account_impersonation"`, `targetAudience`, `targetServiceAccount` | Application Default Credentials and generated token. |
 
-OAuth details:
+OAuth opens a browser and receives a localhost callback. It is not suitable for headless runs unless already authenticated and sidecars are available.
 
-- `/mcp auth [server-name]` runs the OAuth flow interactively.
-- Tokens are stored in `~/.gemini/mcp-oauth-tokens.json` and refreshed automatically.
-- OAuth requires a browser and a localhost redirect; it does not work in headless mode.
-
-For stdio servers, secrets should be passed through the per-server `env` object or via env-var expansion, not committed in config files.
+Stdio servers should receive secrets through explicit `env` entries and environment expansion. Gemini sanitizes inherited environment variables matching sensitive patterns, while explicit `env` entries are treated as user consent to share those values.
 
 ## Security Model
 
-### Trust and allowlisting
+Gemini's MCP security posture is layered:
 
-- When Folder Trust is enabled, project-scope `.gemini/settings.json` is ignored in untrusted folders, and MCP servers do not connect.
-- `gemini mcp list` shows stdio servers as `Disconnected` in untrusted folders.
-- `--skip-trust` or `GEMINI_CLI_TRUST_WORKSPACE=true` bypasses the trust dialog for the session.
-- `mcp.allowed` can enforce a server allowlist; omitting it allows any configured server.
-
-### Environment and sandboxing
-
-- Stdio servers inherit the host process environment minus sensitive patterns (`*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*KEY*`, `*AUTH*`, `*CREDENTIAL*`).
-- Variables must be explicitly listed in a server's `env` object to guarantee they are passed through.
-- The built-in tool sandbox (Seatbelt, Docker, gVisor, etc.) applies to built-in tool execution, not to MCP stdio server subprocesses.
-
-### Response handling
-
-- No native MCP response sanitization is documented.
-- Claudine's `protect` layer should scan MCP tool results defensively.
+- Server filtering: `mcp.allowed`, `mcp.excluded`, session `--allowed-mcp-server-names`, enablement state, extension activation, and admin settings.
+- Tool filtering: `includeTools`, `excludeTools`, and Policy Engine rules.
+- Trust gates: project MCP config does not connect unless the folder is trusted or trust is bypassed.
+- Approval: MCP tool calls ride the same permission model as native tools; `trust: true` bypasses prompts for a server.
+- Environment: stdio MCP subprocesses receive sanitized inherited env plus explicit `env`.
+- Admin controls: managed settings can disable MCP, define allowed config, or require remote MCP servers.
+- Roots: servers can ask for workspace roots, but roots do not sandbox file access by themselves.
+- Sandbox: Gemini's tool sandbox is not documented as containing stdio MCP subprocesses. Docs warn MCP servers are separate processes and may fail when sandboxing changes the environment.
+- Responses: no MCP-specific prompt-injection filtering is documented; tool results should be treated as untrusted content.
 
 ## Mode-Specific Behavior
 
-### Interactive mode
+Interactive mode exposes `/mcp` commands, OAuth auth flows, status/details/schema inspection, enable/disable commands, and reload.
 
-- `/mcp` opens a panel showing connected servers, tools, resources, and prompts.
-- `/mcp auth` runs OAuth flows.
-- `/mcp enable`, `/mcp disable`, `/mcp reload` manage servers during the session.
-- Folder Trust dialogs appear for untrusted projects.
+Non-interactive mode (`-p` or `--prompt`) can use configured MCP servers. It cannot complete OAuth browser flows or interactive confirmations; approvals that require asking the user are denied. Use `--skip-trust` or `GEMINI_CLI_TRUST_WORKSPACE=true` for trusted project config in automation.
 
-### Headless / non-interactive mode (`-p`)
+ACP mode is a separate provider mode. The CLI exposes `--acp`, but public docs do not describe a complete Claudine-style import/export surface for MCP inside ACP mode. Treat ACP MCP behavior as separate from persistent `settings.json` sync.
 
-- OAuth flows cannot complete; pre-authenticated or header-based servers are required.
-- If Folder Trust is enabled and the folder is untrusted, the CLI exits with `FatalUntrustedWorkspaceError` unless `--skip-trust` or `GEMINI_CLI_TRUST_WORKSPACE=true` is set.
-- `ask_user` policy decisions are treated as `deny`.
-- `--allowed-mcp-server-names` can restrict which configured servers connect.
+IDE integration uses MCP over HTTP for the IDE companion path. That is an integration channel, not the normal user `mcpServers` catalog.
 
-### ACP mode (`--acp`)
-
-- In ACP mode the client can register its own MCP server during the `initialize` handshake.
-- Gemini CLI connects to that server, discovers tools, and exposes them to the model.
-- This is a distinct path from persistent `settings.json` configuration.
+Extension mode can add and remove extension-owned MCP servers dynamically. If a user/project setting defines the same server name as an extension, Gemini merges/overrides according to source precedence and extension ownership rules.
 
 ## Failure Modes
 
-| Failure | Behavior |
-| :------ | :--------- |
-| Server fails to start | Marked `DISCONNECTED` in `/mcp` and `gemini mcp list`; connection errors are silent at startup unless diagnostics are triggered |
-| Stdio server exits | Not automatically reconnected; `/mcp reload` or restart required |
-| HTTP/SSE transient error | No documented auto-retry or reconnect behavior |
-| Auth error (401) | OAuth flow triggered if configured; otherwise server marked as needing auth |
-| Tool timeout | Aborted after per-server `timeout` (default 10 minutes) |
-| No tools discovered | Connection closed; server may show as connected but provide no tools |
-| Untrusted project | MCP servers do not connect; stdio servers shown as `Disconnected` |
-| STDERR | Captured and logged; INFO-level messages are filtered |
+| Failure | Observed or documented behavior |
+| --- | --- |
+| Missing active fields | Server is skipped because no `command`, `url`, or `httpUrl` is present. |
+| Connection failure | Status becomes `DISCONNECTED`; diagnostic is logged and usually surfaced as a hint unless the user is interacting with `/mcp`. |
+| 401 remote auth | Gemini attempts OAuth discovery/flow when possible; otherwise it asks for `/mcp auth`. |
+| No prompts or tools | Legacy discovery path treats a server with no prompts or tools as an error; manager/resource-aware paths still maintain resource registries. |
+| `tools/list` method missing | Treated as no tools rather than fatal. |
+| `resources/list` or `prompts/list` missing | Treated as absent where method-not-found is detected. |
+| Tool call error | Returned to the model as an MCP function response with `isError: true`. |
+| Tool timeout | Uses per-server `timeout`, default 600,000 ms. |
+| Stdio stderr | Captured and logged; docs say INFO messages are filtered. |
+| List-change burst | Refreshes are coalesced; if a refresh is already running, Gemini marks a pending refresh and loops once complete. |
+| Untrusted folder | Configured project MCP servers do not connect. |
 
 ## Gaps
 
-- Explicit MCP protocol version date is not stated.
-- Dynamic `list_changed` capability refresh is not documented.
-- Auto-reconnect behavior for remote servers is not documented.
-- Resource templates and subscriptions are not documented.
-- Roots, sampling, and elicitation support are not documented.
-- No native one-run runtime injection mechanism exists.
-- Whether MCP stdio servers run inside the tool sandbox is not explicit.
-- Native MCP response size limits and prompt-injection filtering are not documented.
+- The public docs do not state Gemini CLI's MCP protocol version date.
+- `tcp` exists in the settings schema, but no official docs or active transport branch confirm it as supported.
+- Resource templates and subscriptions are not documented or observed in active source paths.
+- MCP-specific maximum output size and exact interaction with general truncation/masking are not documented.
+- ACP-mode MCP behavior is under-documented for Claudine import/export/sync.
+- Managed remote admin MCP settings are visible in source, but the public docs do not fully describe local persistence or distribution mechanics.
 
 ## Claudine Integration Notes
 
-- Treat Gemini CLI as `support: import_sync`. Claudine can read and write `~/.gemini/settings.json` and `.gemini/settings.json`, and can apply changes through `gemini mcp add/remove/enable/disable`.
-- Map Claudine's normalized catalog to Gemini's `mcpServers` object, preserving the documented field names:
-  - Use `includeTools` and `excludeTools` (camelCase), not hyphenated names.
-  - Support `cwd`, `headers`, `oauth`, `authProviderType`, `httpUrl`, `type`, `description`, `timeout`, and `trust`.
-  - Do not rely on a non-documented `transport` key; infer or emit `type`/`url`/`httpUrl`/`command`.
-- For one-run wrappers, use a shadow HOME containing `.gemini/settings.json`; there is no native `--mcp-config` equivalent.
-- Honor folder trust: do not assume `.gemini/settings.json` servers are active until the workspace is trusted or trust is bypassed.
-- Defensively scan MCP tool results in the `protect` layer; Gemini CLI does not provide native response sanitization.
+Claudine should import and export Gemini's native camelCase server fields exactly: `includeTools`, `excludeTools`, `httpUrl`, `authProviderType`, `targetAudience`, and `targetServiceAccount`. Do not generate hyphenated field names.
+
+For runtime wrappers, prefer `GEMINI_CLI_HOME` with a temporary state root over mutating real user or repo config. Preserve or copy OAuth and enablement sidecars only when explicitly needed. Avoid reading token contents unless the user asks for credential migration.
+
+Catalog metadata should mark tools, prompts, roots, and list_changed notifications as supported; mark resource templates, resource subscriptions, sampling, and elicitation as unsupported or unknown as described above.
+
+Treat MCP tool results as untrusted. Gemini's `readOnlyHint` and other annotations are useful for policy UX, but Claudine should not treat them as proof of safety.
+
+## Changelog
+
+- 2026-07-03: Refreshed against Gemini CLI `0.46.0`, official docs, bundled docs/source, `gemini mcp --help`, and local `/Users/ken/.gemini` probes. Corrected runtime injection, roots, list_changed notifications, `mcp_config.json`, per-OS config records, and host-observed empty/missing MCP sidecars.
 
 ## Sources
 
-- [Gemini CLI MCP server integration](https://www.geminicli.com/docs/tools/mcp-server/)
-- [Gemini CLI MCP resource tools](https://www.geminicli.com/docs/tools/mcp-resources/)
-- [Gemini CLI configuration reference](https://www.geminicli.com/docs/reference/configuration/)
-- [Gemini CLI command reference](https://www.geminicli.com/docs/reference/commands/)
-- [Gemini CLI policy engine](https://www.geminicli.com/docs/reference/policy-engine/)
-- [Gemini CLI sandboxing](https://www.geminicli.com/docs/cli/sandbox/)
-- [Gemini CLI trusted folders](https://www.geminicli.com/docs/cli/trusted-folders/)
-- [Gemini CLI enterprise configuration](https://www.geminicli.com/docs/cli/enterprise/)
-- [Gemini CLI ACP mode](https://www.geminicli.com/docs/cli/acp-mode/)
-- [Gemini CLI settings.schema.json](https://raw.githubusercontent.com/google-gemini/gemini-cli/main/schemas/settings.schema.json)
-- [Gemini CLI source repository](https://github.com/google-gemini/gemini-cli)
+- [Gemini CLI MCP server docs](https://www.geminicli.com/docs/tools/mcp-server/)
+- [Gemini CLI configuration docs](https://www.geminicli.com/docs/reference/configuration/)
+- [Gemini CLI commands reference](https://www.geminicli.com/docs/reference/commands/)
+- [Gemini CLI policy engine docs](https://www.geminicli.com/docs/reference/policy-engine/)
+- [Gemini CLI extensions reference](https://www.geminicli.com/docs/extensions/reference/)
+- [Gemini CLI enterprise controls](https://www.geminicli.com/docs/admin/enterprise-controls/)
+- [Gemini CLI trusted folders docs](https://www.geminicli.com/docs/cli/trusted-folders/)
+- [Gemini CLI repository](https://github.com/google-gemini/gemini-cli)
+- Observed on host: `gemini --version` returned `0.46.0`; `gemini mcp --help`, `gemini mcp add --help`, `gemini mcp list --help`, `gemini mcp remove --help`, `gemini mcp enable --help`, and `gemini mcp disable --help`.
+- Observed on host: `/Users/ken/.gemini/settings.json`, `/Users/ken/.gemini/config/mcp_config.json`, `/Users/ken/.gemini/trustedFolders.json`, and missing `/Users/ken/.gemini/mcp-server-enablement.json` plus `/Users/ken/.gemini/mcp-oauth-tokens.json`.
+- Observed in installed package: `/Users/ken/.nvm/versions/node/v22.20.0/lib/node_modules/@google/gemini-cli/bundle/docs/tools/mcp-server.md`.
+- Observed in installed package: `/Users/ken/.nvm/versions/node/v22.20.0/lib/node_modules/@google/gemini-cli/bundle/docs/tools/mcp-resources.md`.
+- Observed in installed package: `/Users/ken/.nvm/versions/node/v22.20.0/lib/node_modules/@google/gemini-cli/bundle/docs/reference/configuration.md`.
+- Observed in installed package: `/Users/ken/.nvm/versions/node/v22.20.0/lib/node_modules/@google/gemini-cli/bundle/chunk-G33JEOEV.js` for roots, notification handlers, discovery, OAuth storage, resources, prompts, tool calls, and MCP manager behavior.
+- Observed in installed package: `/Users/ken/.nvm/versions/node/v22.20.0/lib/node_modules/@google/gemini-cli/bundle/chunk-MKQJU6N7.js` for settings schema and merge strategy.
+- Observed in installed package: `/Users/ken/.nvm/versions/node/v22.20.0/lib/node_modules/@google/gemini-cli/bundle/gemini-LOO67E54.js` for `--allowed-mcp-server-names`, trust, and sandbox-related CLI behavior.
