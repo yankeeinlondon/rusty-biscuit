@@ -35,7 +35,7 @@ $schema:
     cli_switches: "{ flag: string(required), value: string, scope: string[], default: string, description: string(required), example: string, notes: string }[]"
 
     # Config discovery exposed by the CLI itself.
-    config_files: "{ os: enum(macos,linux,windows,all; required), scope: enum(user,repo,system,env,other; required), path: string(required), format: enum(json,jsonc,yaml,toml,ini,text,other), notes: string }[]"
+    config_files: "{ os: enum(macos,linux,windows; required), scope: enum(user,repo,system,env,other; required), path: string(required), format: enum(json,jsonc,yaml,toml,ini,text,other), notes: string }[]"
     # General CLI/runtime environment variables not owned by a more specific
     # topic such as model-config, permissions, mcp, logging, or streaming. Keep
     # `effect` prose for first-pass research; after the topic fleets, derive

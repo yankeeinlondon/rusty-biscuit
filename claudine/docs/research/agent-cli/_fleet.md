@@ -1,8 +1,6 @@
 ---
 sequence: "@claudine/docs/providers.yaml"
 file: "{{ctx.repo_root}}/claudine/docs/research/agent-cli/{{state.file}}"
-agent: opencode
-model: kimi-for-coding/k2p7
 yolo: true
 update: "{{file_exists(file) && !markdown_body_empty(file)}}"
 initialize:
@@ -13,14 +11,14 @@ initialize:
               - skip
 success:
     stack:
-        - when: "frontmatter(file, 'last_updated') != ctx.today"
+        - when: "file_exists(file) && frontmatter(file, 'last_updated') != ctx.today"
           action:
               - stderr: "The step reported success but <b>{{file}}</b> was not updated — <code>last_updated</code> is not {{ctx.today}}."
               - error: "research file was not updated"
-        - when: "frontmatter(file, 'last_updated') == ctx.today"
+        - when: "file_exists(file) && frontmatter(file, 'last_updated') == ctx.today"
           action: 
-              - info: "The Agent CLI research on **{{state.name}}** completed successfully: {{ link(file) }}"
-              - message: "🎉  the Agent CLI research on **{{state.name}}** completed successfully"
+              - info: "The **Agent CLI** research on **{{state.name}}** completed successfully: {{ link(file) }}"
+              - message: "🎉  the **Agent CLI** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the Agent CLI research on **{{state.name}}** failed to complete!"
     warn: "The Agent CLI research on **{{state.name}}** failed to complete! (err: {{err.message}})"
@@ -176,11 +174,21 @@ config_files:
     path: "~/.codex/config.toml"
     format: toml
     notes: "Primary user config."
-  - os: all
+  - os: linux
+    scope: user
+    path: "~/.codex/config.toml"
+    format: toml
+    notes: "Primary Linux user config; verify exact provider behavior."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.codex\\config.toml"
+    format: toml
+    notes: "Primary Windows user config; verify exact provider behavior."
+  - os: macos
     scope: repo
     path: ".codex/config.toml"
     format: toml
-    notes: "Repo-local config if supported."
+    notes: "Repo-local config if supported; add Linux and Windows records explicitly."
 ```
 
 ### Environment Variables

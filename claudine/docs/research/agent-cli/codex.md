@@ -1,1152 +1,840 @@
 ---
-homepage: https://github.com/openai/codex
-docs: https://developers.openai.com/codex/cli/
-cli_docs: https://developers.openai.com/codex/cli/reference/
+$schema: ./_schema.yaml
+created: 2026-07-02
+last_updated: 2026-07-02
+agent: codex
+model: default
+latest_version: "0.142.5"
+homepage: https://developers.openai.com/codex/cli
+repo: https://github.com/openai/codex
+docs: https://developers.openai.com/codex/
+cli_docs: https://developers.openai.com/codex/cli/reference
+binaries:
+  - os: all
+    binary: codex
+    alt_binaries: []
+    notes: "Primary executable. Local inspection on macOS found /Users/ken/.bun/bin/codex reporting codex-cli 0.142.5."
+  - os: windows
+    binary: codex.exe
+    alt_binaries: ["codex.cmd"]
+    notes: "The native command is documented as codex; .exe/.cmd shims are expected for Windows standalone/npm installs but were not locally inspected."
+install_methods:
+  - os: macos
+    method: standalone_binary
+    command: "curl -fsSL https://chatgpt.com/codex/install.sh | sh"
+    notes: "Official standalone installer for macOS and Linux. Rerun to upgrade standalone installs."
+  - os: linux
+    method: standalone_binary
+    command: "curl -fsSL https://chatgpt.com/codex/install.sh | sh"
+    notes: "Official standalone installer for macOS and Linux. Rerun to upgrade standalone installs."
+  - os: windows
+    method: standalone_binary
+    command: "powershell -ExecutionPolicy ByPass -c 'irm https://chatgpt.com/codex/install.ps1 | iex'"
+    notes: "Official Windows standalone installer."
+  - os: all
+    method: npm
+    command: "npm install -g @openai/codex"
+    notes: "Documented package-manager install. Windows npm may expose a command shim."
+  - os: macos
+    method: brew
+    command: "brew install --cask codex"
+    notes: "Documented Homebrew cask install."
+  - os: all
+    method: standalone_binary
+    command: "download from https://github.com/openai/codex/releases/latest"
+    notes: "Release archives are platform-specific; macOS/Linux archives contain a platform-named executable that users commonly rename to codex."
+subcommands:
+  - name: interactive
+    description: "Default mode when no subcommand is supplied; launches the terminal UI, optionally with an initial prompt."
+    non_interactive: false
+    notes: "Accepts global flags and image attachments; first run may prompt for authentication."
+  - name: exec
+    description: "Runs Codex non-interactively and exits."
+    non_interactive: true
+    notes: "Alias: e. Reads prompt from argv, stdin, or '-' and can emit JSONL with --json."
+  - name: review
+    description: "Runs a code review non-interactively."
+    non_interactive: true
+    notes: "Locally present in 0.142.5 help; supports uncommitted/base/commit review scopes."
+  - name: login
+    description: "Manages authentication."
+    non_interactive: false
+    notes: "OAuth/device flows are interactive; --with-api-key and --with-access-token read secrets from stdin."
+  - name: logout
+    description: "Removes stored authentication credentials."
+    non_interactive: false
+    notes: "May mutate CODEX_HOME auth state."
+  - name: mcp
+    description: "Manages external MCP servers."
+    non_interactive: false
+    notes: "Subcommands include list, get, add, remove, login, and logout. list/get support --json."
+  - name: plugin
+    description: "Manages Codex plugins."
+    non_interactive: false
+    notes: "Subcommands include add, list, marketplace, and remove. add/list support --json."
+  - name: mcp-server
+    description: "Starts Codex as an MCP server over stdio."
+    non_interactive: true
+    notes: "Intended for another agent or MCP client to consume Codex."
+  - name: app-server
+    description: "Runs the experimental local app server or related tooling."
+    non_interactive: true
+    notes: "Can listen on stdio, WebSocket, Unix socket, or off; also exposes schema/binding generation commands."
+  - name: remote-control
+    description: "Manages the app-server daemon with remote control enabled."
+    non_interactive: true
+    notes: "Experimental."
+  - name: app
+    description: "Launches the Codex desktop app or opens the app installer if missing."
+    non_interactive: false
+    notes: "Locally present in 0.142.5 help; not useful for headless wrappers."
+  - name: completion
+    description: "Generates shell completion scripts."
+    non_interactive: true
+    notes: "Supported shells: bash, zsh, fish, power-shell, and elvish."
+  - name: update
+    description: "Checks for and applies a Codex CLI update when supported by the installed release."
+    non_interactive: false
+    notes: "Mutates installation; debug builds only print guidance."
+  - name: doctor
+    description: "Generates diagnostic reports for installation, config, auth, runtime, Git, terminal, app-server, and thread inventory."
+    non_interactive: true
+    notes: "Use --json for a redacted machine-readable report."
+  - name: sandbox
+    description: "Runs arbitrary commands inside a Codex-provided sandbox."
+    non_interactive: true
+    notes: "Platform behavior differs: macOS Seatbelt, Linux Landlock/seccomp, Windows native sandbox."
+  - name: debug
+    description: "Debugging tools."
+    non_interactive: true
+    notes: "debug models prints the raw model catalog as JSON; --bundled avoids refresh."
+  - name: apply
+    description: "Applies the latest diff produced by a Codex Cloud task to the local working tree."
+    non_interactive: true
+    notes: "Alias: a. Mutates the working tree."
+  - name: resume
+    description: "Resumes a previous interactive session."
+    non_interactive: false
+    notes: "Picker by default; can use --last."
+  - name: archive
+    description: "Archives a saved session by id or session name."
+    non_interactive: true
+    notes: "Mutates saved session state."
+  - name: delete
+    description: "Permanently deletes a saved session by id or session name."
+    non_interactive: true
+    notes: "Destructive state mutation."
+  - name: unarchive
+    description: "Restores an archived session by id or session name."
+    non_interactive: true
+    notes: "Mutates saved session state."
+  - name: fork
+    description: "Forks a previous interactive session into a new thread."
+    non_interactive: false
+    notes: "Picker by default; can use --last."
+  - name: cloud
+    description: "Browses or executes Codex Cloud tasks from the terminal."
+    non_interactive: true
+    notes: "Experimental. Subcommands include exec, status, list, apply, and diff."
+  - name: exec-server
+    description: "Runs the experimental standalone exec-server service."
+    non_interactive: true
+    notes: "Locally present in 0.142.5 help."
+  - name: features
+    description: "Inspects and mutates feature flags."
+    non_interactive: true
+    notes: "list is read-only; enable/disable persist changes in config.toml."
+  - name: execpolicy
+    description: "Evaluates execpolicy rule files."
+    non_interactive: true
+    notes: "Documented in the official reference, but not present in local 0.142.5 top-level help."
+cli_switches:
+  - flag: --config
+    value: "<key=value>"
+    scope: ["global", "config"]
+    default: ""
+    description: "Override a configuration value for this invocation; dotted paths are supported and values parse as TOML when possible."
+    example: "codex -c model='gpt-5.5'"
+    notes: "Short form: -c. Command-line overrides take precedence over config.toml."
+  - flag: --enable
+    value: "<FEATURE>"
+    scope: ["global", "features"]
+    default: ""
+    description: "Enable a feature flag for this invocation."
+    example: "codex --enable experimental_feature"
+    notes: "Repeatable; equivalent to -c features.<name>=true."
+  - flag: --disable
+    value: "<FEATURE>"
+    scope: ["global", "features"]
+    default: ""
+    description: "Disable a feature flag for this invocation."
+    example: "codex --disable experimental_feature"
+    notes: "Repeatable; equivalent to -c features.<name>=false."
+  - flag: --strict-config
+    value: ""
+    scope: ["global", "config"]
+    default: "false"
+    description: "Error when config.toml contains fields this Codex version does not recognize."
+    example: "codex --strict-config"
+    notes: "Supported by runtime commands such as codex, exec, review, resume, fork, app-server, mcp-server, and exec-server."
+  - flag: --remote
+    value: "<ADDR>"
+    scope: ["interactive", "remote"]
+    default: ""
+    description: "Connect the TUI to a remote app-server endpoint."
+    example: "codex --remote ws://127.0.0.1:1455"
+    notes: "Accepted forms include ws://host:port, wss://host:port, unix://, and unix://PATH."
+  - flag: --remote-auth-token-env
+    value: "<ENV_VAR>"
+    scope: ["interactive", "remote"]
+    default: ""
+    description: "Read a bearer token from an environment variable for remote WebSocket authentication."
+    example: "codex --remote wss://example.test --remote-auth-token-env CODEX_REMOTE_TOKEN"
+    notes: "Requires --remote."
+  - flag: --image
+    value: "<FILE>..."
+    scope: ["interactive", "exec", "input"]
+    default: ""
+    description: "Attach one or more image files to the initial prompt."
+    example: "codex -i screenshot.png 'implement this design'"
+    notes: "Short form: -i. Docs also describe comma-separated paths."
+  - flag: --model
+    value: "<MODEL>"
+    scope: ["interactive", "exec", "model_selection"]
+    default: "config/default"
+    description: "Select the model the agent should use."
+    example: "codex -m gpt-5.5 'summarize this repo'"
+    notes: "Short form: -m."
+  - flag: --oss
+    value: ""
+    scope: ["interactive", "exec", "model_selection"]
+    default: "false"
+    description: "Use the local open-source model provider."
+    example: "codex --oss"
+    notes: "Equivalent to selecting the oss model provider; docs mention Ollama validation."
+  - flag: --local-provider
+    value: "<OSS_PROVIDER>"
+    scope: ["interactive", "exec", "model_selection"]
+    default: "config/default"
+    description: "Select the local provider to use with open-source models."
+    example: "codex --oss --local-provider ollama"
+    notes: "Local 0.142.5 help lists lmstudio and ollama."
+  - flag: --profile
+    value: "<NAME>"
+    scope: ["global", "config"]
+    default: ""
+    description: "Layer $CODEX_HOME/<name>.config.toml on top of the base user config."
+    example: "codex --profile work"
+    notes: "Short form: -p. The features command does not accept --profile."
+  - flag: --sandbox
+    value: "read-only | workspace-write | danger-full-access"
+    scope: ["interactive", "exec", "permissions"]
+    default: "read-only"
+    description: "Select the sandbox policy for model-generated shell commands."
+    example: "codex exec --sandbox workspace-write 'run tests'"
+    notes: "Short form: -s."
+  - flag: --dangerously-bypass-approvals-and-sandbox
+    value: ""
+    scope: ["interactive", "exec", "permissions"]
+    default: "false"
+    description: "Run without approval prompts or sandboxing."
+    example: "codex exec --dangerously-bypass-approvals-and-sandbox 'run in an external sandbox'"
+    notes: "Alias: --yolo in official docs. Wrapper should only use inside an external sandbox."
+  - flag: --dangerously-bypass-hook-trust
+    value: ""
+    scope: ["interactive", "exec", "hooks"]
+    default: "false"
+    description: "Run enabled hooks without requiring persisted hook trust for this invocation."
+    example: "codex exec --dangerously-bypass-hook-trust 'run vetted automation'"
+    notes: "Intended only for automation that already vets hook sources."
+  - flag: --cd
+    value: "<DIR>"
+    scope: ["interactive", "exec", "review", "sandbox", "working_directory"]
+    default: "current directory"
+    description: "Set the working directory or workspace root before executing the task."
+    example: "codex exec -C /repo 'summarize'"
+    notes: "Short form: -C."
+  - flag: --add-dir
+    value: "<DIR>"
+    scope: ["interactive", "exec", "permissions"]
+    default: ""
+    description: "Grant additional directories write access alongside the main workspace."
+    example: "codex --sandbox workspace-write --add-dir ../shared"
+    notes: "Repeatable."
+  - flag: --ask-for-approval
+    value: "untrusted | on-failure | on-request | never"
+    scope: ["interactive", "permissions"]
+    default: "config/default"
+    description: "Configure when the model requires human approval before executing a command."
+    example: "codex --ask-for-approval on-request"
+    notes: "Short form: -a. on-failure is deprecated; exec help does not expose this flag."
+  - flag: --search
+    value: ""
+    scope: ["interactive", "tools"]
+    default: "cached"
+    description: "Enable live web search."
+    example: "codex --search 'research this dependency'"
+    notes: "Official docs describe live search as TUI-oriented."
+  - flag: --no-alt-screen
+    value: ""
+    scope: ["interactive", "terminal"]
+    default: "false"
+    description: "Disable alternate screen mode and keep TUI output inline."
+    example: "codex --no-alt-screen"
+    notes: "Overrides tui.alternate_screen for the run."
+  - flag: --skip-git-repo-check
+    value: ""
+    scope: ["exec", "working_directory"]
+    default: "false"
+    description: "Allow codex exec to run outside a Git repository."
+    example: "codex exec --skip-git-repo-check 'inspect this folder'"
+    notes: "Local 0.142.5 exec-specific flag."
+  - flag: --ephemeral
+    value: ""
+    scope: ["exec", "state"]
+    default: "false"
+    description: "Run without persisting session files to disk."
+    example: "codex exec --ephemeral 'summarize'"
+    notes: "Useful for CI or privacy-sensitive wrapper runs."
+  - flag: --ignore-user-config
+    value: ""
+    scope: ["exec", "config"]
+    default: "false"
+    description: "Do not load $CODEX_HOME/config.toml while still using CODEX_HOME for auth."
+    example: "codex exec --ignore-user-config 'run with defaults'"
+    notes: "Exec-specific."
+  - flag: --ignore-rules
+    value: ""
+    scope: ["exec", "permissions"]
+    default: "false"
+    description: "Do not load user or project execpolicy .rules files."
+    example: "codex exec --ignore-rules 'run task'"
+    notes: "Exec-specific."
+  - flag: --output-schema
+    value: "<FILE>"
+    scope: ["exec", "output"]
+    default: ""
+    description: "Path to a JSON Schema file describing the model's final response shape."
+    example: "codex exec --output-schema schema.json -o result.json 'extract metadata'"
+    notes: "Constrained final output."
+  - flag: --color
+    value: "always | never | auto"
+    scope: ["exec", "output"]
+    default: "auto"
+    description: "Control ANSI color in exec output."
+    example: "codex exec --color never 'summarize'"
+    notes: "Exec-specific."
+  - flag: --json
+    value: ""
+    scope: ["exec", "doctor", "mcp", "plugin", "cloud", "output"]
+    default: "false"
+    description: "Emit machine-readable JSON or JSONL where supported."
+    example: "codex exec --json 'summarize'"
+    notes: "exec emits JSONL events; doctor emits a JSON report; mcp/plugin/cloud subcommands emit JSON documents."
+  - flag: --output-last-message
+    value: "<FILE>"
+    scope: ["exec", "output"]
+    default: ""
+    description: "Write the final assistant message to a file."
+    example: "codex exec --json -o final.md 'summarize'"
+    notes: "Short form: -o."
+  - flag: --uncommitted
+    value: ""
+    scope: ["review"]
+    default: "false"
+    description: "Review staged, unstaged, and untracked changes."
+    example: "codex review --uncommitted"
+    notes: "Review-specific."
+  - flag: --base
+    value: "<BRANCH>"
+    scope: ["review"]
+    default: ""
+    description: "Review changes against the given base branch."
+    example: "codex review --base main"
+    notes: "Review-specific."
+  - flag: --commit
+    value: "<SHA>"
+    scope: ["review"]
+    default: ""
+    description: "Review the changes introduced by a commit."
+    example: "codex review --commit HEAD"
+    notes: "Review-specific."
+  - flag: --title
+    value: "<TITLE>"
+    scope: ["review"]
+    default: ""
+    description: "Set an optional commit title to display in the review summary."
+    example: "codex review --title 'Auth cleanup'"
+    notes: "Review-specific."
+  - flag: --with-api-key
+    value: ""
+    scope: ["login", "auth"]
+    default: "false"
+    description: "Read an API key from stdin for persisted login."
+    example: "printenv OPENAI_API_KEY | codex login --with-api-key"
+    notes: "Avoid interactive prompts but consumes a secret from stdin."
+  - flag: --with-access-token
+    value: ""
+    scope: ["login", "auth"]
+    default: "false"
+    description: "Read an access token from stdin for persisted login."
+    example: "printenv CODEX_ACCESS_TOKEN | codex login --with-access-token"
+    notes: "Avoid interactive prompts but consumes a secret from stdin."
+  - flag: --device-auth
+    value: ""
+    scope: ["login", "auth"]
+    default: "false"
+    description: "Use device authentication."
+    example: "codex login --device-auth"
+    notes: "Likely interactive/browser-adjacent; local help has no detailed description."
+  - flag: --listen
+    value: "stdio:// | ws://IP:PORT | unix:// | unix://PATH | off"
+    scope: ["app-server"]
+    default: "stdio://"
+    description: "Select the app-server transport endpoint."
+    example: "codex app-server --listen ws://127.0.0.1:1455"
+    notes: "Official reference also mentions local development/debugging."
+  - flag: --stdio
+    value: ""
+    scope: ["app-server"]
+    default: "false"
+    description: "Use stdio as the app-server transport."
+    example: "codex app-server --stdio"
+    notes: "Equivalent to --listen stdio://."
+  - flag: --analytics-default-enabled
+    value: ""
+    scope: ["app-server"]
+    default: "false"
+    description: "Default analytics to enabled for first-party app-server clients unless disabled in config."
+    example: "codex app-server --analytics-default-enabled"
+    notes: "App-server-specific."
+  - flag: --ws-auth
+    value: "capability-token | signed-bearer-token"
+    scope: ["app-server", "remote"]
+    default: ""
+    description: "Select WebSocket auth mode for non-loopback app-server listeners."
+    example: "codex app-server --listen ws://0.0.0.0:1455 --ws-auth capability-token"
+    notes: "Requires matching token/secret configuration."
+  - flag: --ws-token-file
+    value: "<PATH>"
+    scope: ["app-server", "remote"]
+    default: ""
+    description: "Absolute path to the capability-token file."
+    example: "codex app-server --ws-token-file /secure/token"
+    notes: "App-server-specific."
+  - flag: --ws-token-sha256
+    value: "<HEX>"
+    scope: ["app-server", "remote"]
+    default: ""
+    description: "Hex-encoded SHA-256 digest of the capability token."
+    example: "codex app-server --ws-token-sha256 <hex>"
+    notes: "App-server-specific."
+  - flag: --ws-shared-secret-file
+    value: "<PATH>"
+    scope: ["app-server", "remote"]
+    default: ""
+    description: "Absolute path to the shared secret file for signed JWT bearer tokens."
+    example: "codex app-server --ws-shared-secret-file /secure/secret"
+    notes: "App-server-specific."
+  - flag: --ws-issuer
+    value: "<ISSUER>"
+    scope: ["app-server", "remote"]
+    default: ""
+    description: "Expected issuer for signed JWT bearer tokens."
+    example: "codex app-server --ws-issuer https://issuer.example"
+    notes: "App-server-specific."
+  - flag: --ws-audience
+    value: "<AUDIENCE>"
+    scope: ["app-server", "remote"]
+    default: ""
+    description: "Expected audience for signed JWT bearer tokens."
+    example: "codex app-server --ws-audience codex"
+    notes: "App-server-specific."
+  - flag: --ws-max-clock-skew-seconds
+    value: "<SECONDS>"
+    scope: ["app-server", "remote"]
+    default: ""
+    description: "Maximum clock skew when validating signed JWT bearer tokens."
+    example: "codex app-server --ws-max-clock-skew-seconds 60"
+    notes: "App-server-specific."
+  - flag: --all
+    value: ""
+    scope: ["doctor"]
+    default: "false"
+    description: "Expand long lists in detailed human-readable doctor output."
+    example: "codex doctor --all"
+    notes: "Doctor-specific."
+  - flag: --ascii
+    value: ""
+    scope: ["doctor"]
+    default: "false"
+    description: "Use ASCII status labels and separators in human-readable doctor output."
+    example: "codex doctor --ascii"
+    notes: "Doctor-specific."
+  - flag: --no-color
+    value: ""
+    scope: ["doctor"]
+    default: "false"
+    description: "Disable ANSI color in human-readable doctor output."
+    example: "codex doctor --no-color"
+    notes: "Doctor-specific."
+  - flag: --summary
+    value: ""
+    scope: ["doctor"]
+    default: "false"
+    description: "Show grouped check rows and the final count summary only."
+    example: "codex doctor --summary"
+    notes: "Doctor-specific."
+  - flag: --bundled
+    value: ""
+    scope: ["debug models"]
+    default: "false"
+    description: "Skip refresh and dump only the bundled model catalog shipped with this binary."
+    example: "codex debug models --bundled"
+    notes: "Prints JSON to stdout."
+  - flag: --env
+    value: "<KEY=VALUE>"
+    scope: ["mcp add"]
+    default: ""
+    description: "Set an environment variable when launching a stdio MCP server."
+    example: "codex mcp add server --env KEY=value -- command"
+    notes: "Only valid with stdio MCP servers; repeatable."
+  - flag: --url
+    value: "<URL>"
+    scope: ["mcp add"]
+    default: ""
+    description: "Register a streamable HTTP MCP server instead of a stdio command."
+    example: "codex mcp add docs --url https://mcp.example"
+    notes: "Mutually exclusive with COMMAND."
+  - flag: --bearer-token-env-var
+    value: "<ENV_VAR>"
+    scope: ["mcp add"]
+    default: ""
+    description: "Read a bearer token environment variable for a streamable HTTP MCP server."
+    example: "codex mcp add docs --url https://mcp.example --bearer-token-env-var MCP_TOKEN"
+    notes: "Only valid with streamable HTTP servers."
+  - flag: --oauth-client-id
+    value: "<CLIENT_ID>"
+    scope: ["mcp add"]
+    default: ""
+    description: "Set an OAuth client identifier for a streamable HTTP MCP server."
+    example: "codex mcp add docs --url https://mcp.example --oauth-client-id client"
+    notes: "Requires --url."
+  - flag: --oauth-resource
+    value: "<RESOURCE>"
+    scope: ["mcp add", "mcp login"]
+    default: ""
+    description: "Set the OAuth resource parameter to include during MCP login."
+    example: "codex mcp add docs --url https://mcp.example --oauth-resource resource"
+    notes: "Requires --url for add."
+  - flag: --scopes
+    value: "<scope1,scope2>"
+    scope: ["mcp login"]
+    default: ""
+    description: "Set OAuth scopes when logging into a streamable HTTP MCP server."
+    example: "codex mcp login docs --scopes read,write"
+    notes: "Only for servers that support OAuth."
+  - flag: --marketplace
+    value: "<MARKETPLACE>"
+    scope: ["plugin add", "plugin list"]
+    default: ""
+    description: "Select a configured plugin marketplace."
+    example: "codex plugin list --marketplace debug"
+    notes: "Short form: -m."
+  - flag: --available
+    value: ""
+    scope: ["plugin list"]
+    default: "false"
+    description: "Include uninstalled marketplace plugins in JSON output."
+    example: "codex plugin list --available --json"
+    notes: "Requires or is useful with --json."
+  - flag: --permissions-profile
+    value: "<NAME>"
+    scope: ["sandbox"]
+    default: ""
+    description: "Apply a named permissions profile from the active configuration stack."
+    example: "codex sandbox --permissions-profile ci -- echo ok"
+    notes: "Short form: -P."
+  - flag: --include-managed-config
+    value: ""
+    scope: ["sandbox"]
+    default: "false"
+    description: "Include managed requirements while resolving an explicit permissions profile."
+    example: "codex sandbox --permissions-profile ci --include-managed-config -- echo ok"
+    notes: "Requires --permissions-profile."
+  - flag: --allow-unix-socket
+    value: "<PATH>"
+    scope: ["sandbox", "macos"]
+    default: ""
+    description: "Allow sandboxed commands to bind or connect AF_UNIX sockets rooted at this path."
+    example: "codex sandbox --allow-unix-socket ./sock -- command"
+    notes: "Local macOS help lists this flag; repeatable."
+  - flag: --log-denials
+    value: ""
+    scope: ["sandbox", "macos"]
+    default: "false"
+    description: "Capture macOS sandbox denials via log stream and print them after exit."
+    example: "codex sandbox --log-denials -- command"
+    notes: "macOS-specific."
+config_files:
+  - os: all
+    scope: user
+    path: "$CODEX_HOME/config.toml"
+    format: toml
+    notes: "Primary durable user config. Default CODEX_HOME is ~/.codex."
+  - os: all
+    scope: user
+    path: "$CODEX_HOME/<profile-name>.config.toml"
+    format: toml
+    notes: "Profile layer selected with --profile/-p."
+  - os: all
+    scope: repo
+    path: ".codex/config.toml"
+    format: toml
+    notes: "Project-scoped override loaded only for trusted projects. Provider/auth/telemetry/notification/profile keys are ignored in project-local config."
+  - os: all
+    scope: user
+    path: "$CODEX_HOME/auth.json"
+    format: json
+    notes: "Stored authentication state; public docs discuss auth under CODEX_HOME but do not present this as a user-editable config file."
+  - os: all
+    scope: user
+    path: "$CODEX_HOME/rules/default.rules"
+    format: other
+    notes: "User execpolicy rules."
+  - os: all
+    scope: repo
+    path: ".codex/rules/"
+    format: other
+    notes: "Project execpolicy rules directory."
+  - os: all
+    scope: user
+    path: "$CODEX_HOME/AGENTS.override.md"
+    format: text
+    notes: "Global override instructions discovered before global AGENTS.md."
+  - os: all
+    scope: user
+    path: "$CODEX_HOME/AGENTS.md"
+    format: text
+    notes: "Global instructions."
+  - os: all
+    scope: repo
+    path: "AGENTS.md"
+    format: text
+    notes: "Project instructions discovered from the repository root to cwd."
+  - os: all
+    scope: system
+    path: "requirements.toml"
+    format: toml
+    notes: "Managed requirements/config reference exists in official config docs; exact discovery path depends on managed deployment and was not locally proven."
+env_vars:
+  - name: CODEX_HOME
+    effect: "Sets the root for Codex state, including config, auth, logs, sessions, skills, and standalone package metadata. Default is ~/.codex; the directory must already exist when overridden."
+  - name: CODEX_SQLITE_HOME
+    effect: "Sets where SQLite-backed CLI/app-server state is stored. The sqlite_home config option takes precedence."
+  - name: CODEX_NON_INTERACTIVE
+    effect: "Installer-only variable that skips installer prompts when set to 1, true, or yes."
+  - name: CODEX_INSTALL_DIR
+    effect: "Standalone installer variable that changes where the visible codex command is installed."
+  - name: CODEX_API_KEY
+    effect: "Provides an API key for a single codex exec run; documented as supported only by codex exec."
+  - name: CODEX_ACCESS_TOKEN
+    effect: "Provides a ChatGPT or Codex access token for CLI/app-server/trusted automation; for persisted login, pipe it to codex login --with-access-token."
+  - name: CODEX_CA_CERTIFICATE
+    effect: "Points HTTPS/login/WebSocket clients at a PEM CA bundle and takes precedence over SSL_CERT_FILE."
+  - name: SSL_CERT_FILE
+    effect: "Fallback PEM CA bundle path when CODEX_CA_CERTIFICATE is unset."
+  - name: RUST_LOG
+    effect: "Controls Rust log filtering and verbosity. codex exec defaults to error output unless a more verbose value is set."
+machine_introspection:
+  - command: "codex debug models"
+    purpose: models
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: true
+    notes: "Prints the raw model catalog Codex sees. May refresh from configured sources."
+  - command: "codex debug models --bundled"
+    purpose: models
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: true
+    notes: "Dumps only the bundled model catalog shipped with the binary; locally verified on 0.142.5."
+  - command: "codex doctor --json"
+    purpose: doctor
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: false
+    notes: "Emits a redacted support report with schemaVersion, codexVersion, check statuses, and local diagnostics."
+  - command: "codex mcp list --json"
+    purpose: mcp
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: true
+    notes: "Lists configured MCP servers."
+  - command: "codex mcp get <name> --json"
+    purpose: mcp
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: true
+    notes: "Shows a specific MCP server configuration."
+  - command: "codex plugin list --json"
+    purpose: plugins
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: true
+    notes: "Lists installed plugins."
+  - command: "codex plugin list --available --json"
+    purpose: plugins
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: true
+    notes: "Includes uninstalled marketplace plugins in the JSON output."
+  - command: "codex plugin add <plugin[@marketplace]> --json"
+    purpose: plugins
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: false
+    notes: "Installs a plugin and returns a JSON result; mutates config/cache."
+  - command: "codex app-server generate-json-schema"
+    purpose: config_schema
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: true
+    notes: "Generates JSON Schema for the app-server protocol; experimental."
+  - command: "codex app-server generate-ts"
+    purpose: config_schema
+    machine_readable: true
+    output_format: text
+    useful_for_codegen: true
+    notes: "Generates TypeScript bindings for the app-server protocol; experimental."
+  - command: "codex features list"
+    purpose: capabilities
+    machine_readable: false
+    output_format: text
+    useful_for_codegen: false
+    notes: "Shows known feature flags, maturity stage, and effective state; no --json was found."
+  - command: "codex cloud list --json"
+    purpose: other
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: false
+    notes: "Cloud task introspection is documented/available under experimental cloud commands, but requires account/cloud state."
+  - command: "codex cloud status <task-id> --json"
+    purpose: other
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: false
+    notes: "Cloud task status introspection; requires account/cloud state."
+wrapper_notes:
+  - "Use `codex exec`/`codex e` for headless task execution. It reads stdin when the prompt is omitted or `-`, appends piped stdin when a prompt is also supplied, and exits after completion."
+  - "`codex exec --json` writes JSONL events to stdout. Official safety guidance recommends pairing `--json` with `--output-last-message` in CI to capture both progress and the final assistant text."
+  - "`CODEX_API_KEY` is documented as supported only by `codex exec`; wrappers should set it narrowly for the child process rather than job-wide when running repository-controlled code."
+  - "`CODEX_HOME` overrides require an existing directory. Local probes with a nonexistent CODEX_HOME produced warnings or config-load failures before/around otherwise machine-readable output."
+  - "Piping large Codex JSON output into a reader that closes early, such as `head`, can trigger a Rust broken-pipe panic message. Wrappers should drain stdout/stderr or terminate intentionally."
+  - "Login, MCP OAuth login, update, plugin install/remove, feature enable/disable, and session delete/archive commands mutate user state and may prompt or require a TTY/browser."
+  - "Interactive `codex` may prompt for first-run authentication. Prefer pre-authenticated CODEX_HOME, `CODEX_API_KEY` for exec, or explicit stdin-based login flows for automation."
+  - "`--dangerously-bypass-approvals-and-sandbox`/`--yolo` removes both approval prompts and sandboxing; only use when Claudine or the host already supplies the sandbox boundary."
+  - "Project `.codex/config.toml` is loaded only for trusted projects and cannot override machine-local provider/auth/telemetry/notification/profile keys."
+  - "Official reference documents `execpolicy`, but local 0.142.5 top-level help did not expose it. Treat it as a documentation/source caveat until reverified."
+changes: []
+requires_claudine_update: true
+reason: "Existing Codex research was pre-schema and stale; current public/local CLI surface adds schema fields, version 0.142.5, install paths, command/flag inventory, machine introspection commands, and wrapper caveats that should update generated provider metadata and wrappers."
 ---
 
 # Codex CLI
 
-OpenAI Codex CLI is an open-source, Rust-based coding agent that runs locally in the terminal. It can read, change, and run code on the host machine. Codex is included with ChatGPT Plus, Pro, Business, Edu, and Enterprise plans, or can be used with an API key at standard per-token rates. Binary name: `codex`. Configuration lives in `~/.codex/config.toml` (TOML format).
+## Overview
 
-Repository: https://github.com/openai/codex
+Codex CLI is OpenAI's open-source terminal coding agent. The official CLI docs describe it as a local terminal client that can inspect repositories, edit files, and run commands. The public executable is `codex`.
 
----
+This research was verified on 2026-07-02 against the official OpenAI Developers docs, the public `openai/codex` repository, and local CLI inspection. The locally installed binary at `/Users/ken/.bun/bin/codex` reported `codex-cli 0.142.5`, matching the latest GitHub release visible during research.
 
-## Model Specification
+## Installation and Binaries
 
-**CLI flag:** `-m` / `--model <MODEL>`
+The primary command is `codex` on macOS, Linux, and Windows. The standalone Windows installer and npm installs are expected to create platform-specific shims such as `codex.exe` or `codex.cmd`, but the official command spelling remains `codex`.
 
-```bash
-codex -m gpt-5.5 "refactor the auth module"
-codex exec -m gpt-5.4 "summarize the repo"
-```
+Official installation methods:
 
-**Config file (`~/.codex/config.toml`):**
+| OS | Method | Command |
+| --- | --- | --- |
+| macOS/Linux | standalone installer | `curl -fsSL https://chatgpt.com/codex/install.sh \| sh` |
+| macOS/Linux | unattended standalone installer | `curl -fsSL https://chatgpt.com/codex/install.sh \| CODEX_NON_INTERACTIVE=1 sh` |
+| Windows | standalone installer | `powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 \| iex"` |
+| all | npm | `npm install -g @openai/codex` |
+| macOS | Homebrew | `brew install --cask codex` |
+| all | release archive | download from the latest GitHub release |
 
-```toml
-model = "gpt-5.5"
-```
+Standalone installer defaults are controlled by `CODEX_INSTALL_DIR`: `~/.local/bin` on macOS/Linux and `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin` on Windows. The standalone package cache remains under `$CODEX_HOME/packages/standalone`.
 
-**Default model:** If no model is specified via CLI flag or config file, Codex automatically defaults to the current recommended model (currently `gpt-5.5`). The config key `model` sets the persistent default. When OpenAI deprecates a model, Codex performs automatic migration and records it under `[notice.model_migrations]` in `config.toml`.
+## Subcommands
 
-**Recommended models:**
+Local 0.142.5 help exposes these top-level commands:
 
-| Model | Use case |
-|---|---|
-| `gpt-5.5` | Primary model for complex coding, computer use, knowledge work, and research (newest frontier) |
-| `gpt-5.4` | Fallback when `gpt-5.5` is not yet available |
-| `gpt-5.3-codex-spark` | Extra fast tasks (ChatGPT Pro subscribers, research preview) |
+`exec`, `review`, `login`, `logout`, `mcp`, `plugin`, `mcp-server`, `app-server`, `remote-control`, `app`, `completion`, `update`, `doctor`, `sandbox`, `debug`, `apply`, `resume`, `archive`, `delete`, `unarchive`, `fork`, `cloud`, `exec-server`, `features`, and `help`.
 
-**Interactive switching:** Use the `/model` slash command during an active TUI session to change the model mid-session.
+The default `codex` mode launches the interactive terminal UI. `codex exec` is the primary non-interactive wrapper entry point. `codex review` is also non-interactive for code review. `doctor --json`, `debug models`, `mcp list/get --json`, and plugin JSON modes are useful state-discovery surfaces.
 
-**Local/OSS models:** The `--oss` flag selects a local open-source model provider (requires Ollama running). Equivalent config:
+The official command reference also lists `codex execpolicy`, but local 0.142.5 top-level help did not expose that command. Treat `execpolicy` as a documented-but-not-locally-present caveat until the source or a newer binary is rechecked.
 
-```toml
-model_provider = "oss"
-```
+## CLI Switch Inventory
 
-**Profiles:** Named profiles under `[profiles.<name>]` can set different models per workflow, activated with `-p <name>` / `--profile <name>`.
+The frontmatter contains the switch inventory with scope, values, defaults where documented or locally printed, examples, and wrapper notes.
 
----
+Important wrapper-facing groups:
 
-## Non-interactive Engagement
+- Global/config: `--config/-c`, `--enable`, `--disable`, `--strict-config`, `--profile/-p`.
+- Runtime/model: `--model/-m`, `--oss`, `--local-provider`, `--image/-i`.
+- Permissions: `--sandbox/-s`, `--ask-for-approval/-a`, `--add-dir`, `--dangerously-bypass-approvals-and-sandbox`/`--yolo`, `--dangerously-bypass-hook-trust`.
+- Non-interactive exec: `--skip-git-repo-check`, `--ephemeral`, `--ignore-user-config`, `--ignore-rules`, `--output-schema`, `--color`, `--json`, `--output-last-message/-o`.
+- Machine-readable state: `doctor --json`, `mcp list/get --json`, `plugin list/add --json`, `debug models`.
+- App-server/remote: `--listen`, `--stdio`, `--remote`, `--remote-auth-token-env`, `--ws-*`.
 
-Non-interactive mode is fully supported through the `codex exec` subcommand (alias: `codex e`). There are several ways to run non-interactively:
+## Configuration Discovery
 
-### 1. `codex exec` with inline prompt
+Codex uses TOML for durable configuration. User config lives at `$CODEX_HOME/config.toml`, defaulting to `~/.codex/config.toml`. Profiles live next to it as `$CODEX_HOME/<profile-name>.config.toml` and are selected with `--profile/-p`.
 
-The primary non-interactive method. Streams progress to stderr; writes only the final agent message to stdout.
+Project-local `.codex/config.toml` files are loaded only for trusted projects. Official docs state that project config cannot override machine-local provider, auth, app request metadata, notification, profile selection, or telemetry routing keys; those belong in user-level config.
 
-```bash
-codex exec "summarize the repository structure"
-codex exec "generate release notes" | tee release-notes.md
-```
+Instruction discovery includes `$CODEX_HOME/AGENTS.override.md`, `$CODEX_HOME/AGENTS.md`, and project `AGENTS.md` files walked from repository root to the current directory. Execpolicy rules are discovered from `$CODEX_HOME/rules/default.rules` and `.codex/rules/`.
 
-### 2. Piping prompt from stdin
+## Environment Variables
 
-When the prompt argument is omitted or set to `-`, instructions are read from stdin.
+General public variables from the official environment-variable reference are recorded in frontmatter. `CODEX_HOME`, `CODEX_SQLITE_HOME`, installer variables, auth/network variables, and `RUST_LOG` are the relevant wrapper-level variables.
 
-```bash
-echo "explain the auth flow" | codex exec -
-cat instructions.txt | codex exec
-```
+Do not treat arbitrary provider API key names as fixed Codex env vars. Codex can read provider-specific secrets through configured `env_key` names, but those belong to model-provider configuration rather than the general CLI surface.
 
-### 3. JSONL event stream (`--json`)
+## Machine Introspection
 
-Produces machine-readable newline-delimited JSON events (thread.started, turn.started, turn.completed, item.*) suitable for programmatic consumption.
+Useful machine-readable commands:
 
-```bash
-codex exec --json "summarize the repo" | jq
-```
+| Command | Format | Use |
+| --- | --- | --- |
+| `codex debug models` | JSON | Effective/raw model catalog. |
+| `codex debug models --bundled` | JSON | Bundled model catalog shipped with the binary. |
+| `codex doctor --json` | JSON | Redacted diagnostic report and installed version. |
+| `codex mcp list --json` | JSON | Configured MCP servers. |
+| `codex mcp get <name> --json` | JSON | One MCP server definition. |
+| `codex plugin list --json` | JSON | Installed plugins. |
+| `codex plugin list --available --json` | JSON | Marketplace plugin inventory. |
+| `codex app-server generate-json-schema` | JSON | App-server protocol schema. |
+| `codex app-server generate-ts` | TypeScript text | App-server protocol bindings. |
 
-### 4. Output to file (`-o` / `--output-last-message`)
+`codex features list` is useful for diagnostics but no JSON mode was found. `codex cloud` commands may have JSON modes useful for cloud task state, but they require account/cloud state and are not stable wrapper metadata.
 
-Writes the agent's final message to a specified file, useful for downstream scripting.
+## Wrapper Notes
 
-```bash
-codex exec -o result.md "triage open issues"
-```
+Use `codex exec` for automated runs. It can read an inline prompt, read stdin, or use `-` as a stdin prompt sentinel. For CI, prefer `--json` plus `--output-last-message` so the wrapper can consume progress events while preserving the final assistant message.
 
-### 5. Structured output (`--output-schema`)
+Authentication and state handling need care. `CODEX_API_KEY` is documented for one `codex exec` run only. `CODEX_HOME` is powerful but must point to an existing directory; invalid homes can produce warnings or config-load errors that interfere with clean parsing. Login, OAuth, update, plugin mutation, feature mutation, and delete/archive commands should be considered interactive or stateful unless explicitly wrapped.
 
-Constrains the final response to match a JSON Schema, producing validated structured data.
-
-```bash
-codex exec --output-schema ./schema.json -o ./metadata.json "extract project metadata"
-```
-
-### 6. Ephemeral mode (`--ephemeral`)
-
-Runs without persisting session files to disk. Useful in CI/CD where session history is unwanted.
-
-```bash
-codex exec --ephemeral "run tests and report"
-```
-
-### 7. Session resume in exec mode
-
-Continue a previous session non-interactively:
-
-```bash
-codex exec resume --last "fix the race conditions you found"
-codex exec resume <SESSION_ID> "apply the suggested changes"
-codex exec resume --all --last "continue from any directory"
-```
-
-**Limitations:**
-- The `--search` flag (live web search) is only available in interactive TUI mode, not in `exec`.
-- The `--ask-for-approval` / `-a` flag is not available on `exec` (approval policy is effectively `never` since there is no human present).
-
----
-
-## Subscription versus Per Call API
-
-Codex CLI supports two authentication and billing models:
-
-**Subscription (ChatGPT sign-in):** Authenticate via `codex login` using ChatGPT OAuth or device auth. Usage is included in your ChatGPT Plus ($20/month), Pro ($200/month), Business ($30/user/month), or Enterprise plan. Subscription plans include usage limits within shared five-hour windows. Local tasks average ~5 credits per message.
-
-**Per-call API key:** Authenticate with an API key via `codex login --with-api-key` or set the `CODEX_API_KEY` environment variable (primarily for `codex exec` in CI/CD). API usage is billed at standard per-token rates. API key access does not include cloud features (GitHub code review integrations, Slack).
-
-**Launching non-interactive sessions:**
-
-```bash
-# Subscription (requires prior `codex login`)
-codex exec "your task here"
-
-# API key for CI/CD
-CODEX_API_KEY=sk-... codex exec --json "triage open bug reports"
-```
-
-Both modes use the same CLI interface; the billing model is determined by the authentication method.
-
----
-
-## System Prompt
-
-Codex uses a layered instruction system built from multiple sources, concatenated at session start:
-
-### AGENTS.md (primary project instructions)
-
-Codex discovers and concatenates `AGENTS.md` files walking from the git root to the current directory. Files closer to the working directory override earlier ones.
-
-- **Global scope:** `~/.codex/AGENTS.override.md`, then `~/.codex/AGENTS.md`
-- **Project scope:** Walk from git root to cwd, checking override files first, then regular files
-- Maximum size controlled by `project_doc_max_bytes` (default: 32 KiB)
-- Fallback filenames configurable via `project_doc_fallback_filenames`
-
-### model_instructions_file (full replacement)
-
-Replaces the built-in instructions entirely with a custom file:
-
-```toml
-model_instructions_file = "custom-instructions.md"
-```
-
-Relative paths are resolved relative to the `.codex/` directory containing the config.
-
-### developer_instructions (inline supplement)
-
-Additional developer instructions injected into the session context:
-
-```toml
-developer_instructions = "Always use TypeScript strict mode. Prefer functional patterns."
-```
-
-**Claudine integration:** Claudine uses `-c developer_instructions="..."` for append mode (inline, subject to a 64 KB argv cap) and `-c model_instructions_file=<path>` for replace mode (scoped temp file). The persistent provider state directory (`~/.codex/`) remains fully visible to the child; no HOME redirect is used. If append exceeds the argv cap, the wrap fails with a clear message directing the user to `--replace-system-prompt`.
-
-### Personality
-
-Controls communication style for models that support it:
-
-```toml
-personality = "pragmatic"  # "none" | "friendly" | "pragmatic"
-```
-
-### Precedence
-
-The instruction chain is rebuilt on every run. Empty files are skipped. The merge order is: global override -> global base -> project root -> subdirectories (closest to cwd wins).
-
----
-
-## Permissions
-
-Codex uses two independent permission axes: **sandbox policy** (filesystem/network access) and **approval policy** (human confirmation).
-
-### Sandbox Policy
-
-Controls what the agent's shell commands can access. Set via `-s` / `--sandbox` or config key `sandbox_mode`.
-
-| Value | Behavior |
-|---|---|
-| `read-only` | Default. No filesystem writes, no network. |
-| `workspace-write` | Write access to workspace + `$TMPDIR` + `~/.codex/memories`. Network configurable. |
-| `danger-full-access` | Unrestricted filesystem and network. |
-
-Fine-tune `workspace-write` in config:
-
-```toml
-[sandbox_workspace_write]
-network_access = true
-writable_roots = ["/tmp/build-output"]
-exclude_slash_tmp = false
-```
-
-### Approval Policy
-
-Controls when Codex pauses for human confirmation. Set via `-a` / `--ask-for-approval` or config key `approval_policy`.
-
-| Value | Behavior |
-|---|---|
-| `untrusted` | Only trusted commands (ls, cat, sed, etc.) run automatically; others prompt. |
-| `on-request` | The model decides when to ask. Recommended for interactive runs. |
-| `never` | Never prompts. Failures go directly back to the model. Recommended for non-interactive runs. |
-
-> **Note:** `on-failure` is deprecated; prefer `on-request` for interactive runs or `never` for non-interactive runs.
-
-### Convenience aliases
-
-| Flag | Equivalent |
-|---|---|
-| `--full-auto` | `-a on-request --sandbox workspace-write` |
-| `--dangerously-bypass-approvals-and-sandbox` (alias: `--yolo`) | Skip all confirmations and sandboxing. Only for externally sandboxed environments. |
-
-### Execution Rules
-
-Codex supports Starlark-based rule files that control which commands can run outside the sandbox:
-
-- **User rules:** `~/.codex/rules/default.rules`
-- **Project rules:** `.codex/rules/` directory
-- Decisions: `allow`, `prompt`, `forbidden` (most restrictive wins)
-- Test rules: `codex execpolicy check --pretty --rules <file> -- <command>`
-
-### Trust levels
-
-Per-project trust in config:
-
-```toml
-[projects."/path/to/repo"]
-trust_level = "trusted"
-```
-
----
-
-## Thinking Level
-
-Codex supports configurable reasoning effort for models that use the Responses API.
-
-**Config key:** `model_reasoning_effort`
-
-```toml
-model_reasoning_effort = "high"
-```
-
-**Supported levels:** `minimal`, `low`, `medium`, `high`, `xhigh`
-
-**CLI override:**
-
-```bash
-codex -c model_reasoning_effort='"xhigh"' "solve this complex bug"
-codex exec -c model_reasoning_effort='"low"' "quick formatting fix"
-```
-
-**Related config keys:**
-
-| Key | Values | Description |
-|---|---|---|
-| `model_reasoning_effort` | `minimal` / `low` / `medium` / `high` / `xhigh` | Reasoning depth for supported models |
-| `model_reasoning_summary` | `auto` / `concise` / `detailed` / `none` | Reasoning summary detail level |
-| `model_supports_reasoning_summaries` | `true` / `false` | Force reasoning metadata on/off |
-| `model_verbosity` | `low` / `medium` / `high` | Response verbosity (Responses API) |
-| `show_raw_agent_reasoning` | `true` / `false` | Surface raw reasoning content |
-| `hide_agent_reasoning` | `true` / `false` | Suppress reasoning events in TUI and exec output |
-
-These can also be set per-profile:
-
-```toml
-[profiles.fast]
-model_reasoning_effort = "low"
-model_verbosity = "low"
-
-[profiles.deep]
-model_reasoning_effort = "xhigh"
-model_reasoning_summary = "detailed"
-```
-
----
-
-## Logging
-
-### TUI log
-
-The interactive TUI writes a log file at:
-
-```
-~/.codex/log/codex-tui.log
-```
-
-### Session transcripts
-
-Session history is stored in a date-partitioned directory structure:
-
-```
-~/.codex/sessions/<YYYY>/<MM>/<DD>/<session-uuid>/
-```
-
-Controlled by config:
-
-```toml
-[history]
-persistence = "save-all"   # "save-all" | "none"
-max_bytes = 10485760       # optional cap on history.jsonl
-```
-
-### History file
-
-Conversation summaries are appended to:
-
-```
-~/.codex/history.jsonl
-```
-
-### Shell snapshots
-
-Shell environment snapshots are stored in:
-
-```
-~/.codex/shell_snapshots/
-```
-
-### OpenTelemetry
-
-For production observability, Codex supports OpenTelemetry export:
-
-```toml
-[otel]
-exporter = "otlp-http"      # "none" | "otlp-http" | "otlp-grpc"
-environment = "production"
-log_user_prompt = false
-```
-
----
-
-## CLI Switch Summary
-
-### Subcommands
-
-| Subcommand | Alias | Maturity | Description |
-|---|---|---|---|
-| *(default)* | | Stable | Launch the interactive terminal UI (TUI) |
-| `exec` | `e` | Stable | Run Codex non-interactively; streams results to stdout or JSONL |
-| `exec resume` | | Stable | Resume a previous exec session non-interactively |
-| `apply` | `a` | Stable | Apply the latest diff from a Codex Cloud task via `git apply` |
-| `resume` | | Stable | Resume a previous interactive session (picker or `--last`) |
-| `fork` | | Stable | Fork a previous interactive session into a new thread |
-| `login` | | Stable | Authenticate via ChatGPT OAuth, device auth, or API key |
-| `login status` | | Stable | Show current login status |
-| `logout` | | Stable | Remove stored authentication credentials |
-| `completion` | | Stable | Generate shell completion scripts (bash, zsh, fish, power-shell, elvish) |
-| `features` | | Stable | Inspect and manage feature flags |
-| `features list` | | Stable | List known features with stage and effective state |
-| `features enable` | | Stable | Enable a feature in config.toml |
-| `features disable` | | Stable | Disable a feature in config.toml |
-| `app` | | Stable | Launch the Codex desktop app (macOS/Windows) |
-| `cloud` | | Experimental | Browse Codex Cloud tasks interactively |
-| `cloud exec` | | Experimental | Submit a new Codex Cloud task without the TUI |
-| `cloud list` | | Experimental | List Codex Cloud tasks with filtering and pagination |
-| `app-server` | | Experimental | Launch the Codex app server for local development or debugging |
-| `mcp` | | Experimental | Manage MCP (Model Context Protocol) servers |
-| `mcp list` | | Experimental | List configured MCP servers |
-| `mcp get` | | Experimental | Get details for an MCP server |
-| `mcp add` | | Experimental | Add an MCP server |
-| `mcp remove` | | Experimental | Remove an MCP server |
-| `mcp login` | | Experimental | Authenticate with an MCP server (OAuth) |
-| `mcp logout` | | Experimental | Remove MCP server credentials |
-| `mcp-server` | | Experimental | Run Codex as an MCP server (stdio transport) |
-| `execpolicy` | | Experimental | Evaluate execpolicy rule files |
-| `execpolicy check` | | Experimental | Check whether a command would be allowed, prompted, or blocked |
-| `sandbox` | | Experimental | Run commands within a Codex-provided sandbox |
-| `sandbox macos` | | Experimental | Run a command under macOS Seatbelt |
-| `sandbox linux` | | Experimental | Run a command under Linux Landlock+seccomp |
-| `sandbox windows` | | Experimental | Run a command under Windows restricted token |
-| `plugin marketplace` | | Experimental | Manage plugin marketplaces |
-| `plugin marketplace add` | | Experimental | Add a plugin marketplace (Git or local source) |
-| `plugin marketplace remove` | | Experimental | Remove a plugin marketplace |
-| `plugin marketplace upgrade` | | Experimental | Refresh one or all Git marketplaces |
-| `debug app-server send-message-v2` | | Experimental | Send one message through app-server's V2 test client |
-
-### Global switches
-
-Available on the default TUI command, `resume`, and `fork`. Place global flags after the subcommand.
-
-#### `--model` / `-m` `<MODEL>`
-
-Override the model set in configuration.
-
-- **Default:** The value of `model` in `config.toml` (currently defaults to `gpt-5.5`)
-- **Example:**
-
-```bash
-codex -m gpt-5.5 "refactor the auth module"
-codex exec -m gpt-5.4 "summarize the repo"
-```
-
-#### `--config` / `-c` `<key=value>`
-
-Override a configuration value for this invocation. Values parse as JSON if possible; otherwise the literal string is used. Repeatable.
-
-- **Default:** Values from `~/.codex/config.toml`
-- **Example:**
-
-```bash
-codex -c model_reasoning_effort='"xhigh"' "complex task"
-codex exec -c sandbox_mode='"workspace-write"' "fix tests"
-```
-
-#### `--profile` / `-p` `<NAME>`
-
-Configuration profile name to load from `~/.codex/config.toml`.
-
-- **Default:** No profile (uses root config)
-- **Example:**
-
-```bash
-codex -p fast "quick formatting fix"
-codex -p deep "architect a new module"
-```
-
-#### `--image` / `-i` `<path[,path...]>`
-
-Attach one or more image files to the initial prompt. Separate multiple paths with commas or repeat the flag.
-
-- **Default:** No images
-- **Example:**
-
-```bash
-codex -i screenshot.png "Explain this error"
-codex -i img1.png,img2.jpg "Summarize these diagrams"
-codex exec -i mockup.png "implement this design"
-```
-
-#### `--sandbox` / `-s` `<read-only | workspace-write | danger-full-access>`
-
-Select the sandbox policy for model-generated shell commands.
-
-- **Default:** `read-only` (unless overridden by `--full-auto` or config)
-- **Example:**
-
-```bash
-codex --sandbox read-only "explore the codebase"
-codex --sandbox workspace-write "fix the failing tests"
-codex --sandbox danger-full-access "run the deployment"
-```
-
-#### `--ask-for-approval` / `-a` `<untrusted | on-request | never>`
-
-Control when Codex pauses for human approval before running a command.
-
-- **Default:** Varies by mode (interactive: typically `untrusted`; non-interactive: effectively `never`)
-- **Note:** `on-failure` is deprecated; prefer `on-request` for interactive runs or `never` for non-interactive runs.
-- **Example:**
-
-```bash
-codex -a untrusted "explore the repo"
-codex -a on-request "refactor the module"
-codex -a never "batch fix lint errors"
-```
-
-#### `--full-auto`
-
-Shortcut for low-friction local work: sets `--ask-for-approval on-request` and `--sandbox workspace-write`.
-
-- **Default:** Off
-- **Example:**
-
-```bash
-codex --full-auto "fix all lint warnings"
-codex exec --full-auto "run the test suite and fix failures"
-```
-
-#### `--dangerously-bypass-approvals-and-sandbox` / `--yolo`
-
-Run every command without approvals or sandboxing. Only use inside an externally hardened environment.
-
-- **Default:** Off
-- **Example:**
-
-```bash
-codex --yolo "set up the development environment"
-codex exec --yolo "install deps and run migrations"
-```
-
-#### `--cd` / `-C` `<path>`
-
-Set the working directory for the agent before it starts processing your request.
-
-- **Default:** Current working directory
-- **Example:**
-
-```bash
-codex --cd ~/projects/my-app "explain the architecture"
-codex exec --cd ~/projects/api "generate openapi spec"
-```
-
-#### `--add-dir` `<path>`
-
-Grant additional directories write access alongside the main workspace. Repeat for multiple paths.
-
-- **Default:** Only the workspace root is writable (in `workspace-write` mode)
-- **Example:**
-
-```bash
-codex --cd apps/frontend --add-dir ../backend --add-dir ../shared "update the API client"
-```
-
-#### `--search`
-
-Enable live web search (sets `web_search = "live"` instead of the default `"cached"`).
-
-- **Default:** Web search uses cached mode (pre-indexed results from an OpenAI-maintained index). When using `--yolo` or another full-access sandbox setting, web search defaults to live results.
-- **Config alternative:** `web_search = "live"` or `web_search = "disabled"` in config.toml
-- **Example:**
-
-```bash
-codex --search "find the latest React best practices"
-```
-
-#### `--oss`
-
-Use the local open source model provider. Equivalent to `-c model_provider="oss"`. Validates that Ollama is running.
-
-- **Default:** Off (uses OpenAI API)
-- **Example:**
-
-```bash
-codex --oss "explain this function"
-```
-
-#### `--enable` `<feature>`
-
-Force-enable a feature flag. Translates to `-c features.<name>=true`. Repeatable.
-
-- **Default:** Feature flags from config
-- **Example:**
-
-```bash
-codex --enable unified_exec "run the migration"
-```
-
-#### `--disable` `<feature>`
-
-Force-disable a feature flag. Translates to `-c features.<name>=false`. Repeatable.
-
-- **Default:** Feature flags from config
-- **Example:**
-
-```bash
-codex --disable shell_snapshot "debug a timing issue"
-```
-
-#### `--no-alt-screen`
-
-Disable alternate screen mode for the TUI. Overrides `tui.alternate_screen` for this run. Useful inside multiplexers like Zellij where alternate screen can cause rendering issues.
-
-- **Default:** Alternate screen enabled
-- **Example:**
-
-```bash
-codex --no-alt-screen
-```
-
-#### `--remote` `<ws://host:port | wss://host:port>`
-
-Connect the interactive TUI to a remote app-server WebSocket endpoint. Supported for `codex`, `codex resume`, and `codex fork`; other subcommands reject remote mode.
-
-- **Default:** No remote connection (local mode)
-- **Example:**
-
-```bash
-codex --remote ws://127.0.0.1:4500
-codex --remote wss://codex-devbox.example.com:4500 --remote-auth-token-env CODEX_REMOTE_AUTH_TOKEN
-```
-
-#### `--remote-auth-token-env` `<ENV_VAR>`
-
-Read a bearer token from this environment variable and send it when connecting with `--remote`. Tokens are only sent over `wss://` URLs or `ws://` URLs whose host is `localhost`, `127.0.0.1`, or `::1`.
-
-- **Default:** No auth token
-- **Requires:** `--remote`
-- **Example:**
-
-```bash
-export CODEX_REMOTE_AUTH_TOKEN="$(ssh devbox 'cat ~/.codex/codex-app-server-token')"
-codex --remote wss://codex-devbox.example.com:4500 \
-  --remote-auth-token-env CODEX_REMOTE_AUTH_TOKEN
-```
-
-#### `--help` / `-h`
-
-Print help text and exit.
-
-#### `--version` / `-V`
-
-Print version and exit.
-
-#### Positional: `PROMPT`
-
-Optional text instruction to start the session. Omit to launch the TUI without a pre-filled message.
-
-```bash
-codex "Explain this codebase to me"
-codex
-```
-
-### `codex exec` switches
-
-Run Codex non-interactively (alias: `codex e`).
-
-#### `--json` / `--experimental-json`
-
-Print newline-delimited JSON events instead of formatted text.
-
-- **Default:** Formatted text output
-- **Example:**
-
-```bash
-codex exec --json "summarize the repo" | jq
-```
-
-#### `--output-last-message` / `-o` `<path>`
-
-Write the agent's final message to a file. Useful for downstream scripting.
-
-- **Default:** Final message written to stdout only
-- **Example:**
-
-```bash
-codex exec -o result.md "triage open issues"
-codex exec --json -o summary.txt "generate release notes"
-```
-
-#### `--output-schema` `<path>`
-
-JSON Schema file describing the expected final response shape. Codex validates tool output against it.
-
-- **Default:** No schema validation
-- **Example:**
-
-```bash
-codex exec --output-schema ./schema.json -o ./metadata.json "extract project metadata"
-```
-
-#### `--color` `<always | never | auto>`
-
-Control ANSI color in stdout.
-
-- **Default:** `auto` (colors when stdout is a TTY)
-- **Example:**
-
-```bash
-codex exec --color never "fix lint" > output.txt
-codex exec --color always "explain module" | less -R
-```
-
-#### `--ephemeral`
-
-Run without persisting session rollout files to disk. Useful in CI/CD.
-
-- **Default:** Session files persisted to `~/.codex/sessions/`
-- **Example:**
-
-```bash
-codex exec --ephemeral "run tests and report"
-```
-
-#### `--skip-git-repo-check`
-
-Allow running outside a Git repository (useful for one-off directories).
-
-- **Default:** Codex requires a Git repository
-- **Example:**
-
-```bash
-codex exec --skip-git-repo-check "organize these files"
-```
-
-#### `--cd` / `-C` `<path>`
-
-Set the workspace root before executing the task. (Also available as a global flag.)
-
-- **Default:** Current working directory
-- **Example:**
-
-```bash
-codex exec --cd ~/projects/api "generate docs"
-```
-
-#### `--dangerously-bypass-approvals-and-sandbox` / `--yolo`
-
-Bypass approval prompts and sandboxing for non-interactive execution. Dangerous -- only use inside an isolated runner.
-
-- **Default:** Off
-- **Example:**
-
-```bash
-codex exec --yolo "install deps and run all tests"
-```
-
-#### `--full-auto`
-
-Apply the low-friction automation preset (`workspace-write` sandbox and `on-request` approvals) in non-interactive mode.
-
-- **Default:** Off
-- **Example:**
-
-```bash
-codex exec --full-auto "fix all lint warnings"
-```
-
-#### `--image` / `-i` `<path[,path...]>`
-
-Attach images to the first message. Repeatable; supports comma-separated lists. (Also available as a global flag.)
-
-- **Default:** No images
-- **Example:**
-
-```bash
-codex exec -i mockup.png "implement this design"
-```
-
-#### `--model` / `-m` `<string>`
-
-Override the configured model for this run. (Also available as a global flag.)
-
-- **Default:** Value from `config.toml`
-- **Example:**
-
-```bash
-codex exec -m gpt-5.5 "architect a solution"
-```
-
-#### `--oss`
-
-Use the local open source provider (requires a running Ollama instance). (Also available as a global flag.)
-
-- **Default:** Off
-
-#### `--profile` / `-p` `<string>`
-
-Select a configuration profile defined in config.toml. (Also available as a global flag.)
-
-- **Default:** No profile
-
-#### `--sandbox` / `-s` `<read-only | workspace-write | danger-full-access>`
-
-Sandbox policy for model-generated commands. (Also available as a global flag.)
-
-- **Default:** Value from `config.toml`
-
-#### `--config` / `-c` `<key=value>`
-
-Inline configuration override for the non-interactive run (repeatable). (Also available as a global flag.)
-
-- **Default:** Values from `config.toml`
-
-#### Positional: `PROMPT`
-
-Initial instruction for the task. Use `-` to pipe the prompt from stdin.
-
-```bash
-codex exec "fix the CI failure"
-echo "explain auth" | codex exec -
-```
-
-#### `codex exec resume` switches
-
-Resume a previous exec session by ID or `--last`.
-
-| Switch | Type | Description |
-|---|---|---|
-| `--last` | flag | Resume the most recent conversation from the current working directory |
-| `--all` | flag | Include sessions outside the current working directory when selecting the most recent session |
-| `-i` / `--image` | `path[,path...]` | Attach one or more images to the follow-up prompt |
-| Positional: `SESSION_ID` | `uuid` | Resume the specified session. Omit and use `--last` to continue the most recent session |
-| Positional: `PROMPT` | `string` | Optional follow-up instruction sent immediately after resuming |
-
-```bash
-codex exec resume --last "fix the race conditions you found"
-codex exec resume --all --last "continue from any directory"
-codex exec resume 7f9f9a2e-1b3c-4c7a-9b0e-... "implement the plan"
-```
-
-### `codex resume` switches
-
-Continue a previous interactive session.
-
-| Switch | Type | Description |
-|---|---|---|
-| `--last` | flag | Skip the picker and resume the most recent conversation from the current working directory |
-| `--all` | flag | Include sessions outside the current working directory |
-| Positional: `SESSION_ID` | `uuid` | Resume the specified session |
-
-```bash
-codex resume                    # interactive picker
-codex resume --last             # most recent in cwd
-codex resume --all --last       # most recent anywhere
-codex resume abc123-def456      # specific session
-```
-
-### `codex fork` switches
-
-Fork a previous interactive session into a new thread, preserving the original transcript.
-
-| Switch | Type | Description |
-|---|---|---|
-| `--last` | flag | Skip the picker and fork the most recent conversation |
-| `--all` | flag | Show sessions beyond the current working directory |
-| Positional: `SESSION_ID` | `uuid` | Fork the specified session |
-
-```bash
-codex fork                      # interactive picker
-codex fork --last               # fork most recent
-codex fork abc123-def456        # fork specific session
-```
-
-### `codex login` switches
-
-Authenticate Codex using ChatGPT OAuth, device auth, or an API key piped over stdin.
-
-| Switch | Description |
-|---|---|
-| `--device-auth` | Use OAuth device code flow instead of launching a browser window (useful for headless environments) |
-| `--with-api-key` | Read an API key from stdin |
-
-```bash
-codex login                                # browser-based OAuth
-codex login --device-auth                  # headless device code flow
-printenv OPENAI_API_KEY | codex login --with-api-key
-```
-
-`codex login status` prints the active authentication mode and exits with `0` when logged in. No flags.
-
-### `codex logout` switches
-
-No flags. Removes saved credentials for both API key and ChatGPT authentication.
-
-```bash
-codex logout
-```
-
-### `codex apply` switches
-
-Apply the most recent diff from a Codex Cloud task to your local repository.
-
-| Switch | Type | Description |
-|---|---|---|
-| Positional: `TASK_ID` | `string` | Identifier of the Codex Cloud task whose diff should be applied |
-
-```bash
-codex apply abc123-task-id
-codex a abc123-task-id       # alias
-```
-
-Exits non-zero if `git apply` fails (e.g., due to conflicts).
-
-### `codex cloud` switches
-
-#### `codex cloud` (interactive picker)
-
-No flags. Opens an interactive picker to browse active or finished tasks.
-
-#### `codex cloud exec`
-
-Submit a new Codex Cloud task directly.
-
-| Switch | Type | Description |
-|---|---|---|
-| `--env` | `ENV_ID` | Target Codex Cloud environment identifier (required). Use `codex cloud` to list options. |
-| `--attempts` | `1-4` | Number of assistant attempts (best-of-N). Default: `1`. |
-| Positional: `QUERY` | `string` | Task prompt. If omitted, Codex prompts interactively for details. |
-
-```bash
-codex cloud exec --env my-env "Summarize open bugs"
-codex cloud exec --env my-env --attempts 3 "Optimize the query"
-```
-
-#### `codex cloud list`
-
-List recent Codex Cloud tasks with optional filtering and pagination.
-
-| Switch | Type | Description |
-|---|---|---|
-| `--env` | `ENV_ID` | Filter tasks by environment identifier |
-| `--limit` | `1-20` | Maximum number of tasks to return. Default: server default. |
-| `--cursor` | `string` | Pagination cursor returned by a previous request |
-| `--json` | flag | Emit machine-readable JSON instead of plain text |
-
-```bash
-codex cloud list
-codex cloud list --env my-env --limit 10 --json
-```
-
-### `codex app` switches
-
-Launch Codex Desktop from the terminal on macOS or Windows.
-
-| Switch | Type | Description |
-|---|---|---|
-| `--download-url` | `url` | Advanced override for the Codex desktop installer URL |
-| Positional: `PATH` | `path` | Workspace path for Codex Desktop. On macOS, opens this path; on Windows, prints the path. |
-
-```bash
-codex app                    # launch desktop app
-codex app ~/projects/myapp   # launch with workspace path
-```
-
-### `codex app-server` switches
-
-Launch the Codex app server locally. Primarily for development and debugging.
-
-| Switch | Type | Description |
-|---|---|---|
-| `--listen` | `stdio:// \| ws://IP:PORT` | Transport listener URL. Default: `stdio://`. Use `ws://IP:PORT` to expose a WebSocket endpoint for remote clients. |
-| `--ws-auth` | `capability-token \| signed-bearer-token` | Authentication mode for WebSocket clients. If omitted, auth is disabled; non-local listeners warn during startup. |
-| `--ws-token-file` | `absolute path` | File containing the shared capability token. Required with `--ws-auth capability-token`. |
-| `--ws-shared-secret-file` | `absolute path` | File containing the HMAC shared secret for signed JWT bearer tokens. Required with `--ws-auth signed-bearer-token`. Secret must be at least 32 bytes. |
-| `--ws-issuer` | `string` | Expected `iss` claim for signed bearer tokens. Requires `--ws-auth signed-bearer-token`. |
-| `--ws-audience` | `string` | Expected `aud` claim for signed bearer tokens. Requires `--ws-auth signed-bearer-token`. |
-| `--ws-max-clock-skew-seconds` | `number` | Clock skew allowance when validating signed bearer token `exp` and `nbf` claims. |
-
-```bash
-codex app-server --listen stdio://                                # JSONL over stdio
-codex app-server --listen ws://127.0.0.1:4500                    # WebSocket, localhost
-codex app-server --listen ws://0.0.0.0:4500 \
-  --ws-auth capability-token --ws-token-file ~/.codex/token      # With auth
-codex app-server --listen ws://0.0.0.0:4500 \
-  --ws-auth signed-bearer-token --ws-shared-secret-file ~/.codex/secret \
-  --ws-issuer my-issuer --ws-audience my-audience                # JWT auth
-```
-
-### `codex completion` switches
-
-Generate shell completion scripts. Output prints to stdout.
-
-| Switch | Type | Description |
-|---|---|---|
-| Positional: `SHELL` | `bash \| zsh \| fish \| power-shell \| elvish` | Shell to generate completions for |
-
-```bash
-codex completion bash
-codex completion zsh
-codex completion fish
-codex completion power-shell
-```
-
-Install example for zsh:
-
-```bash
-eval "$(codex completion zsh)"
-```
-
-### `codex features` switches
-
-Manage feature flags stored in `~/.codex/config.toml`.
-
-| Subcommand | Usage | Description |
-|---|---|---|
-| `list` | `codex features list` | Show known feature flags, their maturity stage, and their effective state |
-| `enable` | `codex features enable <feature>` | Persistently enable a feature flag. Respects the active `--profile` |
-| `disable` | `codex features disable <feature>` | Persistently disable a feature flag. Respects the active `--profile` |
-
-```bash
-codex features list
-codex features enable unified_exec
-codex features disable shell_snapshot
-```
-
-### `codex mcp` switches
-
-Manage Model Context Protocol servers.
-
-#### `codex mcp add <name>`
-
-| Switch | Type | Description |
-|---|---|---|
-| `--url` | `https://...` | Register a streamable HTTP server. Mutually exclusive with `COMMAND...`. |
-| `--env` | `KEY=VALUE` | Environment variable assignments for a stdio server. Repeatable. |
-| `--bearer-token-env-var` | `ENV_VAR` | Environment variable whose value is sent as a bearer token for HTTP servers |
-| Positional: `COMMAND...` | args | Executable plus arguments to launch the MCP server (stdio transport). Provide after `--`. |
-
-```bash
-codex mcp add my-server -- npx my-mcp-server
-codex mcp add my-server --url https://mcp.example.com
-codex mcp add my-server --bearer-token-env-var MY_TOKEN --url https://mcp.example.com
-```
-
-#### `codex mcp get <name>`
-
-| Switch | Type | Description |
-|---|---|---|
-| `--json` | flag | Print the raw config entry |
-
-#### `codex mcp list`
-
-| Switch | Type | Description |
-|---|---|---|
-| `--json` | flag | Machine-readable output |
-
-#### `codex mcp login <name>`
-
-| Switch | Type | Description |
-|---|---|---|
-| `--scopes` | `scope1,scope2` | Scopes requested during OAuth login for a streamable HTTP server |
-
-#### `codex mcp logout <name>`
-
-No flags. Removes stored OAuth credentials.
-
-#### `codex mcp remove <name>`
-
-No flags. Deletes a stored MCP server definition.
-
-### `codex mcp-server` switches
-
-No additional flags. Runs Codex as an MCP server over stdio. Inherits global configuration overrides. Exits when the downstream client closes the connection.
-
-```bash
-codex mcp-server
-npx @modelcontextprotocol/inspector codex mcp-server
-```
-
-### `codex execpolicy` switches
-
-Evaluate execpolicy rule files and see whether a command would be allowed, prompted, or blocked.
-
-#### `codex execpolicy check`
-
-| Switch | Type | Description |
-|---|---|---|
-| `--pretty` | flag | Pretty-print the JSON result |
-| `-r` / `--rules` | `path` (repeatable) | Path to an execpolicy rule file. Provide multiple flags to combine rules. |
-| Positional: `COMMAND...` | args | Command to be checked against the specified policies |
-
-```bash
-codex execpolicy check --pretty --rules ./my.rules -- rm -rf /
-codex execpolicy check -r base.rules -r extra.rules -- npm install
-```
-
-### `codex sandbox` switches
-
-Run arbitrary commands inside Codex-provided sandboxes.
-
-#### `codex sandbox macos` (alias: `codex debug seatbelt`)
-
-| Switch | Type | Description |
-|---|---|---|
-| `-c` / `--config` | `key=value` | Configuration overrides (repeatable) |
-| `--full-auto` | flag | Grant write access to workspace and `/tmp` without approvals |
-| `--log-denials` | flag | Log denied sandbox operations |
-| Positional: `COMMAND...` | args | Command to execute under macOS Seatbelt |
-
-```bash
-codex sandbox macos --full-auto -- python script.py
-```
-
-#### `codex sandbox linux` (alias: `codex debug landlock`)
-
-| Switch | Type | Description |
-|---|---|---|
-| `-c` / `--config` | `key=value` | Configuration overrides (repeatable) |
-| `--full-auto` | flag | Grant write access to workspace and `/tmp` |
-| Positional: `COMMAND...` | args | Command to execute under Landlock+seccomp |
-
-```bash
-codex sandbox linux --full-auto -- python script.py
-```
-
-#### `codex sandbox windows`
-
-| Switch | Type | Description |
-|---|---|---|
-| `--full-auto` | flag | Grant write access to workspace and temp directories |
-| Positional: `COMMAND...` | args | Command to execute under Windows restricted token |
-
-```bash
-codex sandbox windows --full-auto -- python script.py
-```
-
-### `codex plugin marketplace` switches
-
-Manage plugin marketplaces from Git or local sources.
-
-#### `codex plugin marketplace add <source>`
-
-Source can be: GitHub shorthand (`owner/repo` or `owner/repo@ref`), HTTP/HTTPS Git URL, SSH Git URL, or a local directory.
-
-| Switch | Type | Description |
-|---|---|---|
-| `--ref` | `REF` | Pin a specific Git ref |
-| `--sparse` | `PATH` | Sparse checkout path (repeatable, Git sources only) |
-
-```bash
-codex plugin marketplace add my-org/plugins
-codex plugin marketplace add my-org/plugins --ref v1.0 --sparse path/to/dir
-```
-
-#### `codex plugin marketplace remove <marketplace-name>`
-
-No flags. Removes a configured marketplace.
-
-#### `codex plugin marketplace upgrade [marketplace-name]`
-
-No flags. Refreshes one configured Git marketplace, or all when no name is provided.
-
-### `codex debug app-server send-message-v2` switches
-
-Send one message through app-server's V2 thread/turn flow.
-
-| Switch | Type | Description |
-|---|---|---|
-| Positional: `USER_MESSAGE` | `string` | Message text to send through the built-in V2 test-client flow |
-
-```bash
-codex debug app-server send-message-v2 "Hello, test message"
-```
-
----
+Wrappers should drain stdout/stderr or control termination explicitly. Local probing showed that closing stdout early with `head` can surface a Rust broken-pipe panic message.
 
 ## Sources
 
-- [Codex CLI GitHub Repository](https://github.com/openai/codex)
-- [Codex CLI Features](https://developers.openai.com/codex/cli/features/)
-- [Codex CLI Command Line Options Reference](https://developers.openai.com/codex/cli/reference/)
-- [Codex Config Basics](https://developers.openai.com/codex/config-basic/)
-- [Codex Advanced Configuration](https://developers.openai.com/codex/config-advanced/)
-- [Codex Configuration Reference](https://developers.openai.com/codex/config-reference/)
-- [Codex Sample Configuration](https://developers.openai.com/codex/config-sample/)
-- [Codex Non-interactive Mode](https://developers.openai.com/codex/noninteractive/)
-- [Codex Models](https://developers.openai.com/codex/models/)
-- [Codex Pricing](https://developers.openai.com/codex/pricing/)
-- [Codex Rules](https://developers.openai.com/codex/rules/)
-- [Codex AGENTS.md](https://developers.openai.com/codex/guides/agents-md/)
-- [Codex Authentication](https://developers.openai.com/codex/auth/)
-- [Codex Remote Connections](https://developers.openai.com/codex/remote-connections/)
+- [Codex CLI overview](https://developers.openai.com/codex/cli)
+- [Codex CLI command reference](https://developers.openai.com/codex/cli/reference)
+- [Codex config reference](https://developers.openai.com/codex/config-reference)
+- [Codex environment variables](https://developers.openai.com/codex/environment-variables)
+- [Codex non-interactive mode](https://developers.openai.com/codex/noninteractive)
+- [openai/codex GitHub repository](https://github.com/openai/codex)
+- Local inspection: `codex --version`, `codex --help`, and selected subcommand help against `codex-cli 0.142.5` on macOS.

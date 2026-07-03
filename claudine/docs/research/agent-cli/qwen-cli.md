@@ -1,942 +1,909 @@
 ---
-homepage: https://qwen.ai/
-docs: https://qwenlm.github.io/qwen-code-docs/
-cli_docs: https://qwenlm.github.io/qwen-code-docs/en/users/overview
+$schema: ./_schema.yaml
+created: 2026-07-02
+last_updated: 2026-07-02
+agent: codex
+model: default
+latest_version: "0.19.5"
+homepage: https://qwen.ai/qwencode
 repo: https://github.com/QwenLM/qwen-code
-npm: https://www.npmjs.com/package/@qwen-code/qwen-code
-last_researched: 2026-04-27
+docs: https://qwenlm.github.io/qwen-code-docs/
+cli_docs: https://qwenlm.github.io/qwen-code-docs/en/users/overview/
+binaries:
+  - os: all
+    binary: qwen
+    alt_binaries: []
+    notes: "npm package bin map exposes qwen. Standalone installers and Homebrew docs also use qwen."
+  - os: windows
+    binary: qwen
+    alt_binaries: ["qwen.cmd", "qwen.ps1"]
+    notes: "npm on Windows normally creates .cmd and PowerShell shims for package bins; official docs do not prove standalone shim filenames beyond the qwen command."
+install_methods:
+  - os: macos
+    method: standalone_binary
+    command: "curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash"
+    notes: "Official README documents this as the primary Linux/macOS installer."
+  - os: linux
+    method: standalone_binary
+    command: "curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash"
+    notes: "Official README documents this as the primary Linux/macOS installer."
+  - os: windows
+    method: standalone_binary
+    command: "irm https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.ps1 | iex"
+    notes: "Official README documents this PowerShell installer for Windows."
+  - os: all
+    method: npm
+    command: "npm install -g @qwen-code/qwen-code@latest"
+    notes: "Requires Node.js 22+ as of npm package 0.19.5."
+  - os: macos
+    method: brew
+    command: "brew install qwen-code"
+    notes: "Official README documents Homebrew for macOS and Linux."
+  - os: linux
+    method: brew
+    command: "brew install qwen-code"
+    notes: "Official README documents Homebrew for macOS and Linux."
+  - os: all
+    method: source
+    command: "git clone https://github.com/QwenLM/qwen-code.git && cd qwen-code && npm install && npm install -g ."
+    notes: "Common source install path; useful for wrapper inspection, but official quick install paths are standalone, npm, and Homebrew."
+subcommands:
+  - name: "[query..]"
+    description: "Default command. Launches the interactive CLI with no prompt, or runs a positional prompt as a one-shot task unless --prompt-interactive is used."
+    non_interactive: true
+    notes: "The same command is also the interactive TUI entry point when no prompt is supplied and stdin is a TTY."
+  - name: "mcp"
+    description: "Manages MCP servers."
+    non_interactive: false
+    notes: "Subcommands: add, remove, list, reconnect, approve, reject. add/remove/approve/reject mutate settings or approval state."
+  - name: "extensions"
+    description: "Manages Qwen Code extensions."
+    non_interactive: false
+    notes: "Subcommands include install, uninstall, list, update, disable, enable, link, new, settings, and sources."
+  - name: "auth"
+    description: "Removed legacy command that prints migration guidance."
+    non_interactive: true
+    notes: "Use interactive /auth, environment variables, CLI auth/model flags, or edit ~/.qwen/settings.json."
+  - name: "hooks"
+    description: "Placeholder command for hook management; directs users to /hooks in interactive mode."
+    non_interactive: false
+    notes: "Alias: hook. No useful non-interactive output was observed."
+  - name: "channel"
+    description: "Manages messaging channel daemon integration."
+    non_interactive: false
+    notes: "Subcommands: start, stop, status, pairing, configure-weixin. Channel flows may be long-running or interactive."
+  - name: "review"
+    description: "Internal helpers used by the /review skill."
+    non_interactive: true
+    notes: "Subcommands include fetch-pr, pr-context, load-rules, presubmit, and cleanup. Intended as implementation detail, not general wrapper entry point."
+  - name: "serve"
+    description: "Runs Qwen Code as a local HTTP daemon."
+    non_interactive: true
+    notes: "Long-running experimental daemon. Bearer token is optional for loopback by default and controlled by --token/QWEN_SERVER_TOKEN."
+  - name: "sessions"
+    description: "Manages saved Qwen Code sessions."
+    non_interactive: true
+    notes: "sessions list supports JSON Lines output with --json."
+cli_switches:
+  - flag: --help
+    value: ""
+    scope: ["global"]
+    default: "false"
+    description: "Shows help."
+    example: "qwen --help"
+    notes: "Short form: -h."
+  - flag: --version
+    value: ""
+    scope: ["global"]
+    default: "false"
+    description: "Prints the CLI version."
+    example: "qwen --version"
+    notes: "Short form: -v."
+  - flag: --telemetry
+    value: ""
+    scope: ["global", "telemetry"]
+    default: "settings/env dependent"
+    description: "Enables telemetry."
+    example: "qwen --telemetry \"summarize\""
+    notes: "Deprecated in favor of telemetry.enabled in settings.json."
+  - flag: --telemetry-target
+    value: "local | gcp"
+    scope: ["global", "telemetry"]
+    default: "settings/env dependent"
+    description: "Sets the telemetry target label."
+    example: "qwen --telemetry-target local"
+    notes: "Deprecated in favor of telemetry.target in settings.json."
+  - flag: --telemetry-otlp-endpoint
+    value: "<URL>"
+    scope: ["global", "telemetry"]
+    default: "settings/env dependent"
+    description: "Sets the OTLP endpoint for telemetry."
+    example: "qwen --telemetry-otlp-endpoint http://localhost:4317"
+    notes: "Deprecated in favor of telemetry.otlpEndpoint in settings.json."
+  - flag: --telemetry-otlp-protocol
+    value: "grpc | http"
+    scope: ["global", "telemetry"]
+    default: "grpc"
+    description: "Sets the OTLP protocol."
+    example: "qwen --telemetry-otlp-protocol http"
+    notes: "Deprecated in favor of telemetry.otlpProtocol in settings.json."
+  - flag: --telemetry-log-prompts
+    value: ""
+    scope: ["global", "telemetry"]
+    default: "settings/env dependent"
+    description: "Enables or disables logging prompts for telemetry."
+    example: "qwen --telemetry-log-prompts"
+    notes: "Deprecated in favor of telemetry.logPrompts in settings.json."
+  - flag: --telemetry-outfile
+    value: "<PATH>"
+    scope: ["global", "telemetry"]
+    default: "settings/env dependent"
+    description: "Writes telemetry output to a file."
+    example: "qwen --telemetry-outfile ./qwen-telemetry.jsonl"
+    notes: "Deprecated in favor of telemetry.outfile in settings.json."
+  - flag: --debug
+    value: ""
+    scope: ["global", "diagnostics"]
+    default: "false"
+    description: "Runs in debug mode."
+    example: "qwen --debug \"diagnose\""
+    notes: "Short form: -d."
+  - flag: --bare
+    value: ""
+    scope: ["global", "isolation"]
+    default: "false"
+    description: "Skips implicit startup auto-discovery and honors only explicit CLI inputs."
+    example: "qwen --bare \"summarize\""
+    notes: "Useful for wrappers that want to suppress context, extensions, MCP, and other implicit state."
+  - flag: --safe-mode
+    value: ""
+    scope: ["global", "isolation"]
+    default: "false"
+    description: "Disables customizations such as context files, hooks, extensions, skills, MCP servers, custom subagents, permission rules, and settings-sourced approval overrides."
+    example: "qwen --safe-mode \"reproduce this bug\""
+    notes: "Also documented as settable via QWEN_CODE_SAFE_MODE=true."
+  - flag: --proxy
+    value: "<URL>"
+    scope: ["global", "network"]
+    default: "settings/env dependent"
+    description: "Sets the proxy for Qwen Code."
+    example: "qwen --proxy http://localhost:7890"
+    notes: "Deprecated in favor of proxy in settings.json; HTTPS_PROXY/HTTP_PROXY are also honored."
+  - flag: --insecure
+    value: ""
+    scope: ["global", "network"]
+    default: "false"
+    description: "Skips TLS certificate verification for API connections."
+    example: "qwen --insecure \"test local provider\""
+    notes: "Equivalent to QWEN_TLS_INSECURE=1; weakens TLS security for API, OAuth, MCP, and child-process HTTPS."
+  - flag: --chat-recording
+    value: ""
+    scope: ["global", "sessions"]
+    default: "true"
+    description: "Enables chat recording to disk; when false, history is not saved and --continue/--resume will not work."
+    example: "qwen --no-chat-recording \"one-off\""
+    notes: "Boolean yargs option supports --no-chat-recording."
+  - flag: --model
+    value: "<MODEL>"
+    scope: ["default", "model_selection"]
+    default: "auth/settings/env dependent"
+    description: "Selects the model."
+    example: "qwen --model qwen3-coder-plus \"inspect this repo\""
+    notes: "Short form: -m."
+  - flag: --prompt
+    value: "<PROMPT>"
+    scope: ["default", "non_interactive"]
+    default: ""
+    description: "Supplies a prompt; appended to stdin content if stdin is provided."
+    example: "qwen --prompt \"summarize\""
+    notes: "Short form: -p. Deprecated in favor of positional prompt, but still present in 0.19.5."
+  - flag: --prompt-interactive
+    value: "<PROMPT>"
+    scope: ["default", "interactive"]
+    default: ""
+    description: "Executes the provided prompt and continues in interactive mode."
+    example: "qwen --prompt-interactive \"start by reading README\""
+    notes: "Short form: -i. Cannot be combined with --prompt or --json-schema."
+  - flag: --system-prompt
+    value: "<TEXT>"
+    scope: ["default", "prompting"]
+    default: ""
+    description: "Overrides the main session system prompt for this run."
+    example: "qwen \"review\" --system-prompt \"You are a strict reviewer.\""
+    notes: "Loaded context files such as QWEN.md are still appended after this override."
+  - flag: --append-system-prompt
+    value: "<TEXT>"
+    scope: ["default", "prompting"]
+    default: ""
+    description: "Appends instructions to the main session system prompt for this run."
+    example: "qwen \"review\" --append-system-prompt \"Focus on regressions.\""
+    notes: "Can be combined with --system-prompt."
+  - flag: --sandbox
+    value: ""
+    scope: ["default", "sandbox"]
+    default: "false"
+    description: "Runs in a sandbox."
+    example: "qwen --sandbox \"run tests\""
+    notes: "Short form: -s. QWEN_SANDBOX overrides the CLI flag and settings."
+  - flag: --sandbox-image
+    value: "<IMAGE>"
+    scope: ["default", "sandbox"]
+    default: "ghcr.io/qwenlm/qwen-code:0.19.5"
+    description: "Selects the sandbox image URI."
+    example: "qwen --sandbox --sandbox-image ghcr.io/qwenlm/qwen-code:0.19.5"
+    notes: "Deprecated in favor of tools.sandboxImage in settings.json."
+  - flag: --yolo
+    value: ""
+    scope: ["default", "permissions"]
+    default: "false"
+    description: "Auto-approves all actions."
+    example: "qwen --yolo \"apply the fix\""
+    notes: "Short form: -y. Does not enable sandboxing; wrappers should prefer --approval-mode=yolo if they need an explicit mode value."
+  - flag: --approval-mode
+    value: "plan | default | auto-edit | auto | yolo"
+    scope: ["default", "permissions"]
+    default: "default"
+    description: "Sets approval behavior for tool execution."
+    example: "qwen --approval-mode plan \"make a plan\""
+    notes: "Cannot be combined with --yolo. Untrusted folders force modes other than default/plan back to default."
+  - flag: --acp
+    value: ""
+    scope: ["default", "protocol"]
+    default: "false"
+    description: "Starts the agent in ACP mode."
+    example: "qwen --acp"
+    notes: "Stable replacement for hidden --experimental-acp. Not compatible with --json-schema."
+  - flag: --experimental-lsp
+    value: ""
+    scope: ["default", "lsp"]
+    default: "false"
+    description: "Enables experimental LSP features for code intelligence."
+    example: "qwen --experimental-lsp"
+    notes: "Requires language servers."
+  - flag: --channel
+    value: "VSCode | ACP | SDK | CI | desktop"
+    scope: ["default", "integration"]
+    default: ""
+    description: "Sets a channel identifier."
+    example: "qwen --channel CI \"run checks\""
+    notes: "Useful for integration identity."
+  - flag: --allowed-mcp-server-names
+    value: "<NAME>[,<NAME>...]"
+    scope: ["default", "mcp"]
+    default: ""
+    description: "Restricts allowed MCP server names for the session."
+    example: "qwen --allowed-mcp-server-names filesystem,github \"work\""
+    notes: "Can be repeated or comma-separated."
+  - flag: --mcp-config
+    value: "<JSON_OR_PATH>"
+    scope: ["default", "mcp"]
+    default: ""
+    description: "Injects MCP server configuration as inline JSON or a path to a JSON file."
+    example: "qwen --mcp-config ./mcp.json \"use tools\""
+    notes: "Expected shape includes {\"mcpServers\": {...}}."
+  - flag: --allowed-tools
+    value: "<TOOL>[,<TOOL>...]"
+    scope: ["default", "permissions"]
+    default: ""
+    description: "Allows tools to run without confirmation."
+    example: "qwen --allowed-tools read_file,grep \"inspect\""
+    notes: "Declared twice in source with equivalent array/coerce behavior; can be repeated or comma-separated."
+  - flag: --extensions
+    value: "<EXT>[,<EXT>...]"
+    scope: ["default", "extensions"]
+    default: "all extensions"
+    description: "Selects extensions to use for the session."
+    example: "qwen --extensions none \"ignore extensions\""
+    notes: "Short form: -e. Docs mention special value none to disable all extensions."
+  - flag: --list-extensions
+    value: ""
+    scope: ["default", "extensions"]
+    default: "false"
+    description: "Lists available extensions and exits."
+    example: "qwen --list-extensions"
+    notes: "Short form: -l. Output format is human text, not documented JSON."
+  - flag: --include-directories
+    value: "<PATH>[,<PATH>...]"
+    scope: ["default", "context"]
+    default: ""
+    description: "Adds directories to include in workspace context."
+    example: "qwen --include-directories ../lib,../cli \"inspect both\""
+    notes: "Alias: --add-dir. Docs state a maximum of 5 directories."
+  - flag: --openai-logging
+    value: ""
+    scope: ["default", "diagnostics"]
+    default: "settings dependent"
+    description: "Enables OpenAI API call logging."
+    example: "qwen --openai-logging \"debug provider\""
+    notes: "Overrides the enableOpenAILogging setting."
+  - flag: --openai-logging-dir
+    value: "<PATH>"
+    scope: ["default", "diagnostics"]
+    default: "logs/openai"
+    description: "Sets the OpenAI API log directory."
+    example: "qwen --openai-logging --openai-logging-dir ~/qwen-logs"
+    notes: "Supports absolute paths, relative paths, and ~ expansion."
+  - flag: --openai-api-key
+    value: "<KEY>"
+    scope: ["default", "auth"]
+    default: "env/settings dependent"
+    description: "Sets an OpenAI API key for authentication."
+    example: "qwen --openai-api-key \"$OPENAI_API_KEY\" \"run\""
+    notes: "Model-provider detail; included because source exposes it as CLI surface."
+  - flag: --openai-base-url
+    value: "<URL>"
+    scope: ["default", "auth"]
+    default: "env/settings dependent"
+    description: "Sets an OpenAI-compatible base URL."
+    example: "qwen --openai-base-url http://localhost:11434/v1 --model qwen3-coder"
+    notes: "Model-provider detail; included because source exposes it as CLI surface."
+  - flag: --screen-reader
+    value: ""
+    scope: ["default", "accessibility"]
+    default: "false"
+    description: "Enables screen reader mode."
+    example: "qwen --screen-reader"
+    notes: "Adjusts TUI behavior."
+  - flag: --input-format
+    value: "text | stream-json"
+    scope: ["default", "io"]
+    default: "text"
+    description: "Selects stdin input protocol."
+    example: "qwen --input-format stream-json --output-format stream-json"
+    notes: "stream-json input requires --output-format stream-json."
+  - flag: --output-format
+    value: "text | json | stream-json"
+    scope: ["default", "io"]
+    default: "text"
+    description: "Selects CLI output format."
+    example: "qwen --output-format stream-json \"run task\""
+    notes: "Short form: -o. json emits a buffered JSON array; stream-json emits JSONL events."
+  - flag: --include-partial-messages
+    value: ""
+    scope: ["default", "io"]
+    default: "false"
+    description: "Includes partial assistant messages in stream-json output."
+    example: "qwen -o stream-json --include-partial-messages \"write\""
+    notes: "Requires --output-format stream-json."
+  - flag: --json-fd
+    value: "<FD>"
+    scope: ["default", "dual_output"]
+    default: ""
+    description: "Writes structured JSON event output to a supplied file descriptor while the TUI renders normally."
+    example: "spawn qwen with fd 3 and pass --json-fd 3"
+    notes: "Mutually exclusive with --json-file; caller must configure spawn stdio."
+  - flag: --json-file
+    value: "<PATH>"
+    scope: ["default", "dual_output"]
+    default: "settings dependent"
+    description: "Writes structured JSON event output to a file, FIFO, or /dev/fd/N."
+    example: "qwen --json-file ./events.jsonl"
+    notes: "Mutually exclusive with --json-fd."
+  - flag: --json-schema
+    value: "<JSON_OR_@PATH>"
+    scope: ["default", "structured_output"]
+    default: ""
+    description: "Requires the final headless output to conform to a JSON Schema."
+    example: "qwen \"summarize\" --json-schema @./schema.json"
+    notes: "Headless only. Rejected with --prompt-interactive, --input-format stream-json, --acp, or no prompt/stdin."
+  - flag: --input-file
+    value: "<PATH>"
+    scope: ["default", "dual_output"]
+    default: "settings dependent"
+    description: "Reads remote JSONL input commands from a file for bidirectional sync."
+    example: "qwen --input-file ./commands.jsonl"
+    notes: "The TUI watches the file and processes external commands."
+  - flag: --continue
+    value: ""
+    scope: ["default", "sessions"]
+    default: "false"
+    description: "Resumes the most recent session for the current project."
+    example: "qwen --continue \"next\""
+    notes: "Short form: -c. Cannot be combined with --resume or --session-id."
+  - flag: --resume
+    value: "<SESSION_ID>"
+    scope: ["default", "sessions"]
+    default: ""
+    description: "Resumes a specific session by ID, or shows a picker when used without an ID."
+    example: "qwen --resume 123e4567-e89b-12d3-a456-426614174000 \"continue\""
+    notes: "Short form: -r. Cannot be combined with --continue or --session-id."
+  - flag: --session-id
+    value: "<UUID>"
+    scope: ["default", "sessions"]
+    default: "generated"
+    description: "Specifies a session ID for a new run."
+    example: "qwen --session-id 123e4567-e89b-12d3-a456-426614174000 \"run\""
+    notes: "Must be UUID-shaped; not valid with --continue or --resume."
+  - flag: --fork-session
+    value: ""
+    scope: ["default", "sessions"]
+    default: "false"
+    description: "Creates a forked session from a resumed session."
+    example: "qwen --continue --fork-session \"try alternate fix\""
+    notes: "Requires --continue or --resume."
+  - flag: --worktree
+    value: "[SLUG_OR_PR]"
+    scope: ["default", "git"]
+    default: ""
+    description: "Starts the session inside a git worktree under <repoRoot>/.qwen/worktrees/<slug>/."
+    example: "qwen --worktree my-feature \"implement\""
+    notes: "Accepts a slug, bare flag for auto-generation, #123, or a GitHub pull-request URL. Interactive exit dialog may prompt to keep/remove."
+  - flag: --max-session-turns
+    value: "<N>"
+    scope: ["default", "limits"]
+    default: "settings dependent or unlimited"
+    description: "Limits session turns."
+    example: "qwen --max-session-turns 8 \"run bounded task\""
+    notes: "Useful for CI budgets."
+  - flag: --max-wall-time
+    value: "<DURATION>"
+    scope: ["default", "limits"]
+    default: "settings dependent or unlimited"
+    description: "Sets a run-level wall-clock budget for headless or unattended runs."
+    example: "qwen --max-wall-time 10m \"run bounded task\""
+    notes: "Accepts seconds or duration strings such as 30s, 5m, 1h. Aborts with exit code 55 when exceeded."
+  - flag: --max-tool-calls
+    value: "<N>"
+    scope: ["default", "limits"]
+    default: "-1"
+    description: "Limits cumulative tool calls for a run."
+    example: "qwen --max-tool-calls 20 \"inspect\""
+    notes: "-1/unset means unlimited; 0 means no tool calls. Aborts with exit code 55 when exceeded."
+  - flag: --core-tools
+    value: "<TOOL>[,<TOOL>...]"
+    scope: ["default", "tools"]
+    default: "settings dependent"
+    description: "Restricts registered core tools."
+    example: "qwen --core-tools read_file,grep"
+    notes: "Whitelist semantics; not the same as auto-approval."
+  - flag: --exclude-tools
+    value: "<TOOL>[,<TOOL>...]"
+    scope: ["default", "tools"]
+    default: "settings dependent"
+    description: "Excludes tools."
+    example: "qwen --exclude-tools shell,write_file \"inspect only\""
+    notes: "Can be repeated or comma-separated."
+  - flag: --disabled-slash-commands
+    value: "<NAME>[,<NAME>...]"
+    scope: ["default", "slash_commands"]
+    default: "settings/env dependent"
+    description: "Hides or disables slash commands."
+    example: "qwen --disabled-slash-commands auth,mcp,extensions"
+    notes: "Merged with settings and QWEN_DISABLED_SLASH_COMMANDS; matched case-insensitively."
+  - flag: --auth-type
+    value: "openai | anthropic | qwen-oauth | gemini | vertex-ai"
+    scope: ["default", "auth"]
+    default: "env/settings dependent"
+    description: "Selects authentication/provider protocol."
+    example: "qwen --auth-type openai --model qwen3-coder-plus"
+    notes: "Qwen OAuth is configured interactively; CI/headless should use API-key/provider environment variables."
+  - flag: --scope
+    value: "user | project"
+    scope: ["mcp add"]
+    default: "user"
+    description: "Selects where an MCP server is stored."
+    example: "qwen mcp add --scope project local python -m server"
+    notes: "Short form: -s."
+  - flag: --transport
+    value: "stdio | sse | http"
+    scope: ["mcp add"]
+    default: "stdio"
+    description: "Selects MCP transport."
+    example: "qwen mcp add --transport http my-server http://localhost:3000/mcp"
+    notes: "Short form: -t."
+  - flag: --env
+    value: "KEY=value"
+    scope: ["mcp add"]
+    default: ""
+    description: "Adds environment variables for an MCP server."
+    example: "qwen mcp add -e TOKEN=abc local node server.js"
+    notes: "Short form: -e."
+  - flag: --header
+    value: "NAME: value"
+    scope: ["mcp add"]
+    default: ""
+    description: "Adds HTTP headers for SSE/HTTP MCP transports."
+    example: "qwen mcp add -H \"X-Api-Key: abc\" --transport http remote http://localhost:3000/mcp"
+    notes: "Short form: -H."
+  - flag: --timeout
+    value: "<MS>"
+    scope: ["mcp add"]
+    default: ""
+    description: "Sets MCP server connection timeout in milliseconds."
+    example: "qwen mcp add --timeout 30000 local python -m server"
+    notes: ""
+  - flag: --trust
+    value: ""
+    scope: ["mcp add"]
+    default: "false"
+    description: "Trusts an MCP server and bypasses all tool-call confirmation prompts for it."
+    example: "qwen mcp add --trust local python -m server"
+    notes: "Wrapper caveat: mutates persistent trust/permission behavior."
+  - flag: --description
+    value: "<TEXT>"
+    scope: ["mcp add"]
+    default: ""
+    description: "Sets the MCP server description."
+    example: "qwen mcp add --description \"Local tools\" local python -m server"
+    notes: ""
+  - flag: --include-tools
+    value: "<TOOL>[,<TOOL>...]"
+    scope: ["mcp add"]
+    default: "all tools"
+    description: "Includes only selected MCP tools."
+    example: "qwen mcp add --include-tools search,fetch remote http://localhost:3000/mcp"
+    notes: ""
+  - flag: --exclude-tools
+    value: "<TOOL>[,<TOOL>...]"
+    scope: ["mcp add"]
+    default: "none"
+    description: "Excludes selected MCP tools."
+    example: "qwen mcp add --exclude-tools write_file local python -m server"
+    notes: "Also exists as a default-command tool exclusion flag."
+  - flag: --oauth-client-id
+    value: "<ID>"
+    scope: ["mcp add"]
+    default: ""
+    description: "Sets OAuth client ID for MCP server authentication."
+    example: "qwen mcp add --transport http --oauth-client-id id remote http://localhost:3000/mcp"
+    notes: "Only for sse/http transports."
+  - flag: --oauth-client-secret
+    value: "<SECRET>"
+    scope: ["mcp add"]
+    default: ""
+    description: "Sets OAuth client secret for MCP server authentication."
+    example: "qwen mcp add --transport http --oauth-client-secret secret remote http://localhost:3000/mcp"
+    notes: "Only for sse/http transports."
+  - flag: --oauth-redirect-uri
+    value: "<URI>"
+    scope: ["mcp add"]
+    default: "http://localhost:7777/oauth/callback"
+    description: "Sets OAuth redirect URI for MCP authentication."
+    example: "qwen mcp add --transport sse --oauth-redirect-uri https://example.com/oauth/callback remote https://example.com/sse"
+    notes: "Remote/cloud environments must configure a public callback; localhost will not work there."
+  - flag: --oauth-authorization-url
+    value: "<URL>"
+    scope: ["mcp add"]
+    default: ""
+    description: "Sets OAuth authorization URL for MCP authentication."
+    example: "qwen mcp add --transport http --oauth-authorization-url https://provider.example.com/authorize remote http://localhost:3000/mcp"
+    notes: "Only for sse/http transports."
+  - flag: --oauth-token-url
+    value: "<URL>"
+    scope: ["mcp add"]
+    default: ""
+    description: "Sets OAuth token URL for MCP authentication."
+    example: "qwen mcp add --transport http --oauth-token-url https://provider.example.com/token remote http://localhost:3000/mcp"
+    notes: "Only for sse/http transports."
+  - flag: --oauth-scopes
+    value: "<SCOPE>[,<SCOPE>...]"
+    scope: ["mcp add"]
+    default: ""
+    description: "Sets OAuth scopes for MCP authentication."
+    example: "qwen mcp add --transport http --oauth-scopes scope1,scope2 remote http://localhost:3000/mcp"
+    notes: "Only for sse/http transports."
+  - flag: --all
+    value: ""
+    scope: ["mcp approve", "mcp reject", "extensions update"]
+    default: "false"
+    description: "Applies the operation to all matching items."
+    example: "qwen mcp approve --all"
+    notes: "For extensions update, updates all extensions; for MCP approval, approves/rejects all gated servers."
+  - flag: --json
+    value: ""
+    scope: ["sessions list"]
+    default: "false"
+    description: "Outputs sessions as JSON Lines."
+    example: "qwen sessions list --json"
+    notes: "Primary machine-readable state command found in the CLI."
+  - flag: --limit
+    value: "<N>"
+    scope: ["sessions list"]
+    default: "20"
+    description: "Limits the number of sessions shown."
+    example: "qwen sessions list --json --limit 100"
+    notes: "Invalid values coerce back to 20."
+  - flag: --token
+    value: "<TOKEN>"
+    scope: ["serve"]
+    default: "QWEN_SERVER_TOKEN or none on loopback"
+    description: "Sets bearer token for the local HTTP daemon."
+    example: "qwen serve --token \"$QWEN_SERVER_TOKEN\""
+    notes: "serve-specific help/docs expose this; token can also come from QWEN_SERVER_TOKEN."
+  - flag: --require-auth
+    value: ""
+    scope: ["serve"]
+    default: "false"
+    description: "Requires bearer auth even on loopback."
+    example: "qwen serve --require-auth --token \"$QWEN_SERVER_TOKEN\""
+    notes: "Useful on shared developer hosts and CI runners."
+config_files:
+  - os: all
+    scope: user
+    path: "~/.qwen/settings.json"
+    format: json
+    notes: "Primary user settings file. QWEN_HOME changes the global config directory, so this becomes <QWEN_HOME>/settings.json."
+  - os: all
+    scope: repo
+    path: ".qwen/settings.json"
+    format: json
+    notes: "Project settings file in the project root. Ignored when the workspace is untrusted."
+  - os: linux
+    scope: system
+    path: "/etc/qwen-code/settings.json"
+    format: json
+    notes: "System settings file. QWEN_CODE_SYSTEM_SETTINGS_PATH can override this path."
+  - os: windows
+    scope: system
+    path: "C:\\ProgramData\\qwen-code\\settings.json"
+    format: json
+    notes: "System settings file. QWEN_CODE_SYSTEM_SETTINGS_PATH can override this path."
+  - os: macos
+    scope: system
+    path: "/Library/Application Support/QwenCode/settings.json"
+    format: json
+    notes: "System settings file. QWEN_CODE_SYSTEM_SETTINGS_PATH can override this path."
+  - os: linux
+    scope: system
+    path: "/etc/qwen-code/system-defaults.json"
+    format: json
+    notes: "System defaults file. QWEN_CODE_SYSTEM_DEFAULTS_PATH can override this path."
+  - os: windows
+    scope: system
+    path: "C:\\ProgramData\\qwen-code\\system-defaults.json"
+    format: json
+    notes: "System defaults file. QWEN_CODE_SYSTEM_DEFAULTS_PATH can override this path."
+  - os: macos
+    scope: system
+    path: "/Library/Application Support/QwenCode/system-defaults.json"
+    format: json
+    notes: "System defaults file. QWEN_CODE_SYSTEM_DEFAULTS_PATH can override this path."
+  - os: all
+    scope: env
+    path: "~/.qwen/.env"
+    format: text
+    notes: "Global dotenv file loaded from QWEN_HOME when set; wins over project .env files."
+  - os: all
+    scope: repo
+    path: ".qwen/.env"
+    format: text
+    notes: "Project-scoped dotenv file. Docs recommend this over .env to avoid conflicts."
+  - os: all
+    scope: repo
+    path: ".env"
+    format: text
+    notes: "Project dotenv file; some variables such as DEBUG and DEBUG_MODE are excluded by default."
+  - os: all
+    scope: repo
+    path: ".mcp.json"
+    format: json
+    notes: "Project MCP server file; gated servers require qwen mcp approve/reject state."
+  - os: all
+    scope: user
+    path: "~/.qwen/QWEN.md"
+    format: text
+    notes: "Global context file. Actual filename can be changed by context.fileName."
+  - os: all
+    scope: repo
+    path: "QWEN.md"
+    format: text
+    notes: "Hierarchical project context file loaded from current directory and parents according to context settings."
+  - os: all
+    scope: repo
+    path: ".qwen/sandbox.Dockerfile"
+    format: text
+    notes: "Custom project sandbox image Dockerfile used when BUILD_SANDBOX=1."
+  - os: macos
+    scope: repo
+    path: ".qwen/sandbox-macos-<profile>.sb"
+    format: text
+    notes: "Custom macOS Seatbelt profile selected with SEATBELT_PROFILE."
+  - os: all
+    scope: user
+    path: "~/.qwen/mcp-oauth-tokens.json"
+    format: json
+    notes: "Default plaintext MCP OAuth token store, mode 0600."
+  - os: all
+    scope: user
+    path: "~/.qwen/mcp-oauth-tokens-v2.json"
+    format: json
+    notes: "Encrypted MCP OAuth token store used when QWEN_CODE_FORCE_ENCRYPTED_FILE_STORAGE=true and keychain-backed storage is unavailable."
+env_vars:
+  - name: QWEN_HOME
+    effect: "Overrides the global configuration directory, defaulting to ~/.qwen."
+  - name: QWEN_RUNTIME_DIR
+    effect: "Overrides runtime output directory for conversations, logs, todos, and daemon debug files."
+  - name: QWEN_SANDBOX
+    effect: "Enables or selects sandbox provider; accepts true, false, docker, podman, sandbox-exec, or a custom command."
+  - name: QWEN_SANDBOX_IMAGE
+    effect: "Overrides sandbox image selection."
+  - name: SEATBELT_PROFILE
+    effect: "Selects the macOS sandbox-exec Seatbelt profile."
+  - name: BUILD_SANDBOX
+    effect: "Builds a custom sandbox image from .qwen/sandbox.Dockerfile when set."
+  - name: SANDBOX_FLAGS
+    effect: "Injects extra flags into docker or podman sandbox commands."
+  - name: SANDBOX_SET_UID_GID
+    effect: "Controls host UID/GID mapping in container sandbox mode."
+  - name: QWEN_SANDBOX_PROXY_COMMAND
+    effect: "Configures sandbox proxy command behavior."
+  - name: QWEN_CODE_SAFE_MODE
+    effect: "Enables safe mode when CLI flags cannot be passed."
+  - name: QWEN_CODE_SUPPRESS_YOLO_WARNING
+    effect: "Suppresses the warning emitted for headless YOLO runs without sandboxing."
+  - name: QWEN_CODE_UNATTENDED_RETRY
+    effect: "Enables persistent retry for transient 429/529 API capacity errors, with stderr heartbeat keepalives."
+  - name: QWEN_CODE_MAX_OUTPUT_TOKENS
+    effect: "Overrides the default maximum output tokens per model response."
+  - name: QWEN_DISABLED_SLASH_COMMANDS
+    effect: "Adds comma-separated slash commands to hide/disable."
+  - name: QWEN_CODE_LANG
+    effect: "Overrides UI language."
+  - name: QWEN_CODE_LEGACY_MCP_BLOCKING
+    effect: "Restores synchronous MCP discovery before UI/prompt startup."
+  - name: QWEN_CODE_FORCE_ENCRYPTED_FILE_STORAGE
+    effect: "Uses encrypted/keychain-backed storage for MCP OAuth tokens where available."
+  - name: QWEN_CODE_MCP_APPROVALS_PATH
+    effect: "Overrides path for MCP approval state."
+  - name: QWEN_TLS_INSECURE
+    effect: "Disables TLS certificate verification when set to 1."
+  - name: NO_COLOR
+    effect: "Disables color output."
+  - name: FORCE_HYPERLINK
+    effect: "Overrides OSC 8 hyperlink auto-detection."
+  - name: QWEN_DISABLE_HYPERLINKS
+    effect: "Disables OSC 8 clickable hyperlinks."
+  - name: DEBUG
+    effect: "Enables debug mode when true/1; excluded from project .env by default."
+  - name: DEBUG_MODE
+    effect: "Enables debug mode when true/1; excluded from project .env by default."
+  - name: HTTPS_PROXY
+    effect: "Proxy fallback when proxy is not set by CLI/settings."
+  - name: HTTP_PROXY
+    effect: "Proxy fallback when proxy is not set by CLI/settings."
+  - name: NO_BROWSER
+    effect: "Prevents browser-opening behavior in integrations that honor the noBrowser config."
+  - name: CLI_TITLE
+    effect: "Customizes the CLI title."
+  - name: QWEN_SERVER_TOKEN
+    effect: "Bearer token source for qwen serve and SDK clients."
+  - name: QWEN_SERVE_PROMPT_DEADLINE_MS
+    effect: "Default server-side deadline for qwen serve prompt requests."
+  - name: QWEN_SERVE_WRITER_IDLE_TIMEOUT_MS
+    effect: "Idle deadline for qwen serve SSE writers."
+  - name: QWEN_SERVE_DEBUG
+    effect: "Enables extra qwen serve bridge debug breadcrumbs."
+  - name: QWEN_DAEMON_LOG_FILE
+    effect: "Disables qwen serve daemon file logging when set to 0/false/off/no."
+  - name: QWEN_SERVE_CDP_TUNNEL_OVER_WS
+    effect: "Signals that browser automation is routed through the CDP tunnel, disabling computer-use tools."
+machine_introspection:
+  - command: "qwen sessions list --json --limit 100"
+    purpose: other
+    machine_readable: true
+    output_format: jsonl
+    useful_for_codegen: false
+    notes: "Lists saved sessions as JSON Lines with sessionId, startTime, mtime, prompt, gitBranch, customTitle, titleSource, filePath, and cwd."
+  - command: "qwen --list-extensions"
+    purpose: plugins
+    machine_readable: false
+    output_format: text
+    useful_for_codegen: false
+    notes: "Lists available extensions and exits, but no JSON mode was found."
+  - command: "qwen mcp list"
+    purpose: mcp
+    machine_readable: false
+    output_format: text
+    useful_for_codegen: false
+    notes: "Lists configured MCP servers. No JSON mode was found in the 0.19.5 command builder."
+  - command: "qwen serve + GET /capabilities"
+    purpose: capabilities
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: true
+    notes: "Not a single CLI introspection command; requires starting the HTTP daemon and calling its API with bearer auth when configured."
+wrapper_notes:
+  - "Use the positional prompt for headless runs; --prompt still works in 0.19.5 but is deprecated."
+  - "For stream parsing, prefer --output-format stream-json. --output-format json buffers a JSON array until completion."
+  - "--json-schema changes headless text output to a single JSON.stringify(payload) line and exposes structured_result in json/stream-json result events."
+  - "--json-schema is rejected with --prompt-interactive, --input-format stream-json, --acp, or no prompt/stdin."
+  - "--json-fd and --json-file provide dual structured event output while the normal UI remains on stdout; --json-fd requires explicit fd plumbing in the spawn call."
+  - "Non-interactive runs wait for MCP discovery to settle before sending the first prompt; interactive runs let MCP servers come online progressively."
+  - "--bare and --safe-mode are useful wrapper isolation controls. safe-mode disables settings-sourced approval mode and sandbox settings, while explicit --approval-mode/--yolo still apply."
+  - "--yolo or --approval-mode=yolo does not enable sandboxing. Headless YOLO without sandbox prints a stderr warning unless QWEN_CODE_SUPPRESS_YOLO_WARNING=1."
+  - "Untrusted folders force approval modes other than default/plan back to default and ignore project .qwen/settings.json."
+  - "--worktree can prompt on exit to keep or remove the worktree; avoid it for unattended wrappers unless that behavior is acceptable."
+  - "auth is a removed legacy command. Use interactive /auth, env vars, CLI OpenAI flags, or settings.json for scripted setup."
+  - "Qwen OAuth cannot be fully configured by env vars alone; CI/headless should use API-key auth such as OpenAI-compatible settings."
+  - "The latest npm package requires Node.js >=22.0.0; older docs and installations may still mention Node.js 20+."
+  - "Local PATH inspection on this host found qwen 0.15.6, older than npm latest 0.19.5, so wrappers should not infer current surface from an arbitrary installed binary."
+changes: []
+requires_claudine_update: true
+reason: "The existing Qwen research file used legacy frontmatter and lacked the current 0.19.5 CLI surface, including qwen as the binary, Node >=22 npm requirement, standalone installers, --bare/--safe-mode, JSON/stream-json output, dual-output flags, structured-output flags, sessions JSONL introspection, serve mode, and changed auth behavior."
 ---
 
 # Qwen Code CLI
 
-Qwen Code is an open-source AI agent from Alibaba that runs in the terminal. It is forked from Gemini CLI and adapted with customized prompts and function-calling protocols optimized for the Qwen3-Coder model family. Installed via npm (`npm i -g @qwen-code/qwen-code@latest`) or Homebrew (`brew install qwen-code`). Requires Node.js 20+.
+## Overview
 
-**Notable:** Qwen OAuth (free tier) was **discontinued on April 15, 2026**. Users must now authenticate via Alibaba Cloud Coding Plan (subscription), API key (OpenAI/Anthropic/Gemini-compatible), or local models (Ollama/vLLM).
+Qwen Code is Alibaba/Qwen's terminal coding agent. It is distributed as the `@qwen-code/qwen-code` npm package, standalone installers, and a Homebrew formula, and exposes the `qwen` command. The latest npm package observed on 2026-07-02 is `0.19.5`; local PATH inspection found an older `qwen 0.15.6`, so the structured inventory above is based on the latest npm package metadata and unpacked `0.19.5` CLI bundle, with official docs used as cross-checks.
 
-## Model Specification
+The default command is both the TUI entry point and the headless execution entry point. Supplying a positional prompt or `--prompt` runs one-shot non-interactively; `--prompt-interactive` starts with a prompt and then remains interactive.
 
-**CLI flag:** `-m, --model <model-name>`
+## Installation and Binaries
 
-```bash
-qwen -m qwen3.6-plus
-```
+The public binary is `qwen`. npm exposes `bin.qwen`, and official standalone/Homebrew examples also use `qwen`.
 
-**Default model resolution** (highest to lowest priority):
+Official install paths:
 
-1. `--model` CLI flag
-2. `OPENAI_MODEL` environment variable
-3. `model.name` in `~/.qwen/settings.json`
-4. The model associated with the active auth type
+- Linux/macOS standalone: `curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash`
+- Windows standalone: `irm https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.ps1 | iex`
+- npm: `npm install -g @qwen-code/qwen-code@latest`
+- Homebrew: `brew install qwen-code`
 
-**Interactive switching:** Use the `/model` command inside a session to switch between all configured models. Use `/model --fast <model>` to set a lighter model for prompt suggestions.
+The current npm package declares Node.js `>=22.0.0`. Older local installations or third-party docs may mention Node.js 20+, but npm metadata for `0.19.5` is stricter.
 
-**Configuring additional models** in `~/.qwen/settings.json`:
+## Subcommands
 
-```json
-{
-  "modelProviders": {
-    "openai": [
-      {
-        "id": "qwen3.6-plus",
-        "name": "Qwen3.6-Plus",
-        "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "envKey": "DASHSCOPE_API_KEY"
-      }
-    ]
-  },
-  "model": {
-    "name": "qwen3.6-plus"
-  }
-}
-```
+Top-level commands in `0.19.5` are:
 
-Models from any OpenAI-compatible, Anthropic, Gemini, or Vertex AI provider can be added under the corresponding key in `modelProviders`. The `--auth-type` flag selects which provider protocol to use: `openai`, `anthropic`, `gemini`, or `vertex-ai` (`qwen-oauth` is no longer available).
+- `qwen [query..]`: default TUI/headless command.
+- `qwen mcp`: MCP server management.
+- `qwen extensions <command>`: extension management.
+- `qwen auth`: removed legacy command that prints migration guidance.
+- `qwen hooks` / `qwen hook`: hook management placeholder; use `/hooks` interactively.
+- `qwen channel`: messaging channel daemon management.
+- `qwen review`: internal helpers for the `/review` skill.
+- `qwen serve`: local HTTP daemon.
+- `qwen sessions`: saved session management.
 
-## Non-interactive Engagement
+ACP is a default-command mode via `qwen --acp`, not a top-level subcommand.
 
-Non-interactive (headless) mode is fully supported. There are several ways to run Qwen Code without the interactive TUI.
+## CLI Switch Inventory
 
-### Positional prompt (preferred)
+The complete switch inventory captured for Claudine is in frontmatter. The most wrapper-relevant switches are:
 
-```bash
-qwen "Explain the architecture of this project"
-```
+- Execution and model: `--model`, positional prompt, `--prompt`, `--prompt-interactive`, `--auth-type`.
+- Output protocols: `--output-format text|json|stream-json`, `--input-format text|stream-json`, `--include-partial-messages`, `--json-schema`, `--json-fd`, `--json-file`, `--input-file`.
+- Isolation and permissions: `--bare`, `--safe-mode`, `--sandbox`, `--approval-mode`, `--yolo`, `--allowed-tools`, `--exclude-tools`, `--core-tools`.
+- State and sessions: `--continue`, `--resume`, `--session-id`, `--fork-session`, `--chat-recording`, `qwen sessions list --json`.
+- Limits: `--max-session-turns`, `--max-wall-time`, `--max-tool-calls`.
+- MCP: `--mcp-config`, `--allowed-mcp-server-names`, plus `qwen mcp add` flags.
 
-The positional form runs the prompt as a one-shot task and exits. This is the current recommended approach.
+Unknowns: the official docs do not publish a stable JSON schema for stream-json event objects in the user CLI docs. The bundled structured-output docs document `structured_result` for `--json-schema`, but general stream event typing should be re-verified from source before codegen.
 
-### `-p, --prompt` flag
+## Configuration Discovery
 
-```bash
-qwen -p "Explain the architecture of this project"
-```
+Qwen discovers user, project, and system JSON settings. The documented files are `~/.qwen/settings.json`, project `.qwen/settings.json`, and per-OS system settings/defaults under `/etc/qwen-code`, `C:\ProgramData\qwen-code`, or `/Library/Application Support/QwenCode`. `QWEN_HOME` relocates global state, and `QWEN_CODE_SYSTEM_SETTINGS_PATH` / `QWEN_CODE_SYSTEM_DEFAULTS_PATH` override system paths.
 
-Functionally identical to the positional form.
+Project MCP can also come from `.mcp.json`; gated project/workspace MCP servers require `qwen mcp approve` or `qwen mcp reject`. Context is supplied through `QWEN.md` files by default, with the filename configurable in settings.
 
-### `-i, --prompt-interactive` flag
+## Environment Variables
 
-```bash
-qwen -i "Refactor the auth module"
-```
+The frontmatter lists general CLI/runtime variables that affect wrapper behavior. Model-provider secrets such as `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`, provider-specific keys, and GitHub Action-only variables are intentionally not exhaustively duplicated here because those belong in model-config or integration-specific research.
 
-Executes the prompt, then drops into the interactive TUI so you can continue the conversation.
+Important wrapper variables include `QWEN_HOME`, `QWEN_RUNTIME_DIR`, `QWEN_SANDBOX`, `QWEN_CODE_SAFE_MODE`, `QWEN_CODE_UNATTENDED_RETRY`, `QWEN_DISABLED_SLASH_COMMANDS`, `QWEN_CODE_LEGACY_MCP_BLOCKING`, `QWEN_TLS_INSECURE`, `NO_COLOR`, proxy variables, and `QWEN_SERVER_TOKEN`.
 
-### Piping stdin
+## Machine Introspection
 
-```bash
-cat src/main.rs | qwen "Review this code for bugs"
-echo "Explain Docker" | qwen
-git diff --staged | qwen "Write a commit message"
-```
+Useful machine-readable CLI state is limited. `qwen sessions list --json` emits JSON Lines and is the clearest direct introspection command found. `qwen mcp list` and `qwen --list-extensions` expose useful state but only as human-readable text in the observed command builders. `qwen serve` exposes HTTP JSON endpoints such as capabilities, but that requires launching the daemon and is not a single fire-and-exit CLI probe.
 
-Stdin content is prepended to the prompt. When using `--input-format stream-json`, stdin is reserved for the JSON protocol instead.
+Generic `qwen --help` and `qwen --version` were used for verification but are not listed as machine-introspection entries because they do not expose durable provider state.
 
-### System prompt overrides
+## Wrapper Notes
 
-```bash
-qwen -p "Review this patch" --system-prompt "You are a terse release reviewer."
-qwen -p "Review this patch" --append-system-prompt "Focus on concrete findings."
-```
+Use positional prompts for new headless wrapper calls because `--prompt` is deprecated. Use `--output-format stream-json` for streaming wrappers, or `--output-format json` only when buffered output is acceptable. For strict structured final output, `--json-schema` is useful but has important mode conflicts listed above.
 
-- `--system-prompt` replaces the built-in main-session prompt (context files like `QWEN.md` are still appended).
-- `--append-system-prompt` adds extra instructions after the built-in prompt and loaded context.
+For isolation, `--bare` and `--safe-mode` are valuable. Be careful with `--yolo`: it does not imply sandboxing, and Qwen warns on stderr in headless YOLO without sandbox. In untrusted folders, Qwen ignores project settings and forces risky approval modes back to default.
 
-**Claudine integration:** Claudine uses `--append-system-prompt` (append) and `--system-prompt` (replace) as the in-flight mechanisms for system prompt delivery. Both pass the prompt content inline as argv flags, so no temp files or HOME redirect are needed. The persistent provider state directory (`~/.qwen/`) remains fully visible to the child.
-
-### Output formats for automation
-
-| Flag | Format | Use case |
-|------|--------|----------|
-| `-o text` | Plain text (default) | Human-readable output |
-| `-o json` | Buffered JSON array | Programmatic processing |
-| `-o stream-json` | Line-delimited JSON | Real-time streaming |
-
-Use `--include-partial-messages` with `stream-json` to receive incremental assistant tokens.
-
-### Session resumption in headless mode
-
-```bash
-qwen --continue -p "What was the next step?"
-qwen --resume <sessionId> -p "Continue from here"
-```
-
-### Turn limits
-
-`--max-session-turns <N>` caps the number of agent turns, useful for CI budgets.
-
-### Limitations
-
-- Qwen OAuth cannot authenticate in headless/CI environments. Use API-KEY auth (`--auth-type openai`) with environment variables instead.
-- Headless mode does not support `--prompt-interactive` with stdin piping.
-
-## Subscription versus Per Call API
-
-**Alibaba Cloud Bailian Coding Plan (subscription):** Fixed monthly fee with higher quotas. Requires an active subscription from Alibaba Cloud ModelStudio. Uses a dedicated API key prefixed `sk-sp-`. Configure with:
-
-```bash
-export BAILIAN_CODING_PLAN_API_KEY="sk-sp-xxxxxxxxx"
-qwen --auth-type openai -m qwen3.6-plus
-```
-
-Coding Plan endpoint: `https://coding.dashscope.aliyuncs.com/v1`. Available models include `qwen3.6-plus`, `qwen3.5-plus`, `glm-4.7`, `kimi-k2.5`.
-
-**Third-party per-call API:** Use any OpenAI-compatible, Anthropic, or Gemini provider with their own per-token pricing. Set the appropriate environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`) and `--auth-type` flag.
-
-**Local models (Ollama/vLLM):** No API key needed. Configure local model endpoint in `settings.json` with `baseUrl` pointing to `http://localhost:11434/v1` (Ollama) or `http://localhost:8000/v1` (vLLM).
-
-For headless/CI non-interactive usage, Coding Plan keys, third-party API keys, and local models all work. The discontinued Qwen OAuth does not work in headless environments.
-
-## System Prompt
-
-Qwen Code uses hierarchical context files (defaulting to `QWEN.md`, configurable via `context.fileName` in settings) to supplement the system prompt.
-
-**File locations searched** (all found files are concatenated):
-
-1. `~/.qwen/QWEN.md` -- global user-level instructions
-2. `QWEN.md` files in the current directory and every parent directory up to the project root (`.git` boundary) or home directory
-
-**Behavior:** Context files are _supplements_ to the built-in system prompt, not full replacements. The built-in prompt remains; your instructions are appended.
-
-**Modularizing:** Import other markdown files within a context file using `@path/to/file.md` syntax.
-
-**Managing context at runtime:**
-
-- `/memory show` -- display the combined context currently loaded
-- `/memory refresh` -- force re-scan and reload of all context files
-- `/memory add <text>` -- add a line to the context for this session
-
-## Permissions
-
-**Default mode:** `default` -- requires manual approval for both file edits and shell commands.
-
-**Four approval modes** (set via `--approval-mode` flag or `Shift+Tab` cycling in TUI):
-
-| Mode | File edits | Shell commands | Risk level |
-|------|-----------|---------------|------------|
-| `plan` | Read-only | Not executed | Lowest |
-| `default` | Manual approval | Manual approval | Low |
-| `auto-edit` | Auto-approved | Manual approval | Medium |
-| `yolo` | Auto-approved | Auto-approved | Highest |
-
-**YOLO mode** is available via:
-
-- `--yolo` / `-y` CLI flag
-- `--approval-mode yolo`
-- `Shift+Tab` cycling in interactive mode
-- `permissions.defaultMode: "yolo"` in `.qwen/settings.json` (project-level)
-
-**Permissions system** (in `settings.json`):
-
-- `permissions.allow` -- rules for auto-approved tool calls
-- `permissions.ask` -- rules for tool calls that always require confirmation
-- `permissions.deny` -- rules for blocked tool calls (highest priority)
-
-Decision priority (highest first): `deny` > `ask` > `allow` > default/interactive mode.
-
-Rules use the format `"ToolName"` or `"ToolName(specifier)"`. Meta-categories: `Read` covers `read_file`, `grep_search`, `glob`, `list_directory`; `Edit` covers `edit`, `write_file`.
-
-**Sandbox mode:** `--sandbox` / `-s` runs the agent in a sandboxed environment. `--sandbox-image` specifies a custom container image.
-
-**MCP server trust:** `qwen mcp add --trust <name> <command>` bypasses tool confirmation for that server.
-
-## Thinking Level
-
-There is no dedicated CLI flag for thinking level. Thinking is configured through `settings.json`:
-
-```json
-{
-  "model": {
-    "generationConfig": {
-      "extra_body": {
-        "enable_thinking": true,
-        "thinking_budget": 4096
-      }
-    }
-  }
-}
-```
-
-**Notes:**
-
-- `enable_thinking` enables the model's chain-of-thought reasoning.
-- `thinking_budget` sets the maximum token budget for the reasoning phase. Values below 1024 are not recommended.
-- Qwen3-Coder (the flagship 480B MoE model) operates in non-thinking mode only. Thinking mode applies to other Qwen3 models like `qwen3.5-plus`.
-- Within an interactive session, you can toggle thinking per-turn using `/think` and `/no_think` prefixes in your prompt.
-
-## Logging
-
-**Session history:** Project-scoped JSONL files stored at `~/.qwen/projects/<sanitized-cwd>/chats/`. Controlled by `--chat-recording` (disable to prevent session persistence; `--continue` and `--resume` will not work).
-
-**OpenAI API logging:** Records request/response pairs as JSON files for debugging.
-
-- Enable: `--openai-logging` flag or `model.enableOpenAILogging` in settings
-- Directory: `--openai-logging-dir <path>` or `model.openAILoggingDir` in settings (default: `logs/openai` relative to cwd)
-
-**Debug mode:** `-d, --debug` enables verbose debug output to stderr.
-
-**Telemetry:** Configurable via `telemetry.*` settings in `settings.json`. Supports local and GCP targets with OTLP export. Privacy opt-out: `privacy.usageStatisticsEnabled: false`.
-
-## Features
-
-### Slash commands (interactive)
-
-| Command | Description |
-|---------|-------------|
-| `/help` | Display available commands |
-| `/clear` | Clear conversation history (`Ctrl+L`) |
-| `/compress` | Compress history to save tokens |
-| `/stats` | Show current session statistics |
-| `/context` | Show context window usage breakdown |
-| `/model` | Switch model in current session |
-| `/model --fast <model>` | Set lighter model for prompt suggestions |
-| `/auth` | Change authentication method |
-| `/approval-mode <mode>` | Set approval mode |
-| `/plan [task]` | Enter plan mode (or `/plan exit`) |
-| `/mcp` | List configured MCP servers and tools |
-| `/tools` | Display available tool list |
-| `/skills` | List and run available skills |
-| `/extensions` | List active extensions |
-| `/review` | Code review with 5 parallel agents |
-| `/loop <interval> <prompt>` | Run a prompt on a recurring schedule |
-| `/btw <question>` | Quick side question without affecting main conversation |
-| `/copy` | Copy last output to clipboard |
-| `/memory` | Manage instruction context |
-| `/bug` | Submit a bug report |
-| `/quit` or `/exit` | Exit Qwen Code |
-
-### Custom commands
-
-Markdown files in `~/.qwen/commands/` (global) or `.qwen/commands/` (project). Subdirectories create colon-separated names (e.g., `.qwen/commands/git/commit.md` becomes `/git:commit`). Support `{{args}}` parameter injection, `!{shell command}` dynamic content, and `@{file}` content injection.
-
-### IDE integration
-
-- **VS Code:** [Qwen Code Companion extension](https://marketplace.visualstudio.com/items?itemName=qwenlm.qwen-code-vscode-ide-companion) (sidebar integration)
-- **Zed:** Native LSP/agent integration
-- **JetBrains:** Editor support for IntelliJ/PyCharm/etc.
-
-### Channels (messaging platform access)
-
-Qwen Code can be accessed through Telegram, WeChat, and DingTalk channels for conversational coding assistance outside the terminal.
-
-### SubAgents
-
-Built-in sub-agent system for parallel task execution and context sharing between agent forks.
-
-### Skills
-
-Agent Skills (GA since Feb 2026) provide specialized workflows. Skills live in `.qwen/skills/` directories, each containing a `SKILL.md`. Enable with `--experimental-skills` (now GA, flag may still be accepted).
-
-### Hooks
-
-Hooks allow running custom commands before/after tool executions. Configured in `settings.json`.
-
-## CLI Options
-
-### Subcommands
-
-| Subcommand | Description |
-|------------|-------------|
-| `qwen [query..]` | Launch interactive session (default). Positional text runs as one-shot prompt. |
-| `qwen auth` | Interactive authentication setup |
-| `qwen auth qwen-oauth` | Authenticate with Qwen OAuth (deprecated) |
-| `qwen auth coding-plan` | Authenticate with Alibaba Cloud Coding Plan |
-| `qwen auth coding-plan --region china --key sk-sp-...` | Non-interactive Coding Plan setup |
-| `qwen auth status` | Show current authentication status |
-| `qwen mcp` | Manage MCP servers |
-| `qwen mcp add <name> <commandOrUrl> [args..]` | Add an MCP server (stdio, sse, or http transport) |
-| `qwen mcp remove <name>` | Remove an MCP server |
-| `qwen mcp list` | List configured MCP servers |
-| `qwen extensions install <source>` | Install extension from git URL, local path, or marketplace |
-| `qwen extensions uninstall <name>` | Uninstall an extension |
-| `qwen extensions list` | List installed extensions |
-| `qwen extensions update [name] [--all]` | Update one or all extensions |
-| `qwen extensions disable [--scope] <name>` | Disable an extension |
-| `qwen extensions enable [--scope] <name>` | Enable an extension |
-| `qwen extensions link <path>` | Link extension from local path (live updates) |
-| `qwen extensions new <path> [template]` | Scaffold a new extension |
-| `qwen extensions settings <command>` | Manage extension settings |
-
-### Switches
-
-| Flag | Description |
-|------|-------------|
-| `-m, --model <string>` | Model to use for the session |
-| `-p, --prompt <string>` | Run in headless mode with given prompt |
-| `-i, --prompt-interactive <string>` | Execute prompt then continue interactively |
-| `-y, --yolo` | Auto-approve all tool calls (YOLO mode) |
-| `--approval-mode <mode>` | Set approval mode: `plan`, `default`, `auto-edit`, `yolo` |
-| `-s, --sandbox` | Run in sandbox |
-| `--sandbox-image <string>` | Custom sandbox container image |
-| `-c, --continue` | Resume the most recent session for current project |
-| `-r, --resume [id]` | Resume a specific session by ID (no ID shows picker) |
-| `--max-session-turns <n>` | Maximum number of session turns |
-| `-o, --output-format <fmt>` | Output format: `text`, `json`, `stream-json` |
-| `--input-format <fmt>` | Input format: `text`, `stream-json` |
-| `--include-partial-messages` | Include partial messages in stream-json output |
-| `--system-prompt <string>` | Override the built-in main session system prompt |
-| `--append-system-prompt <string>` | Append extra instructions to the system prompt |
-| `-d, --debug` | Enable debug mode |
-| `-a, --all-files` | Include all files in context |
-| `-e, --extensions <list>` | Extensions to use (default: all). Use `-e none` to disable all. |
-| `-l, --list-extensions` | List available extensions and exit |
-| `--allowed-tools <list>` | Tools to allow without confirmation |
-| `--exclude-tools <list>` | Tools to exclude |
-| `--core-tools <list>` | Core tool paths |
-| `--allowed-mcp-server-names <list>` | Allowed MCP server names |
-| `--include-directories <list>` | Additional workspace directories (max 5) |
-| `--auth-type <type>` | Auth type: `openai`, `anthropic`, `gemini`, `vertex-ai` |
-| `--openai-api-key <string>` | OpenAI API key |
-| `--openai-base-url <string>` | Custom OpenAI-compatible base URL |
-| `--openai-logging` | Enable OpenAI API call logging |
-| `--openai-logging-dir <path>` | Directory for OpenAI API logs |
-| `--tavily-api-key <string>` | Tavily API key for web search |
-| `--google-api-key <string>` | Google Custom Search API key |
-| `--google-search-engine-id <string>` | Google Custom Search Engine ID |
-| `--web-search-default <provider>` | Default web search provider: `dashscope`, `tavily`, `google` |
-| `--chat-recording` | Enable/disable chat recording to disk |
-| `--checkpointing` | Enable file edit checkpointing |
-| `--acp` | Start agent in ACP (Agent Client Protocol) mode |
-| `--experimental-lsp` | Enable experimental LSP support |
-| `--experimental-skills` | Enable Skills feature |
-| `--channel <string>` | Channel identifier: `VSCode`, `ACP`, `SDK`, `CI` |
-| `--screen-reader` | Enable screen reader accessibility mode |
-| `--vlm-switch-mode <mode>` | VLM behavior on image input: `once`, `session`, `persist` |
-| `--proxy <string>` | HTTP proxy |
-| `--telemetry` | Enable telemetry |
-| `--telemetry-target <target>` | Telemetry target: `local`, `gcp` |
-| `--telemetry-otlp-endpoint <url>` | OTLP endpoint for telemetry |
-| `--telemetry-otlp-protocol <proto>` | OTLP protocol: `grpc`, `http` |
-| `--telemetry-log-prompts` | Log prompts in telemetry |
-| `--telemetry-outfile <path>` | Redirect telemetry output to file |
-| `--show-memory-usage` | Display current memory usage |
-| `-v, --version` | Show version number |
-| `-h, --help` | Show help |
-
-## CLI Switch Summary
-
-### `-m, --model <string>`
-
-Specifies the model to use for the session.
-
-**Default:** Determined by auth type; typically `qwen3-coder-plus` or `qwen3.6-plus` for Alibaba Cloud.
-
-```bash
-qwen -m qwen3.6-plus
-qwen -m claude-sonnet-4-20250514
-qwen -m gemini-2.5-pro
-```
-
-### `-p, --prompt <string>`
-
-Run in headless (non-interactive) mode. The agent processes the prompt and exits without launching the TUI. Ideal for scripts, CI/CD, and one-shot automation.
-
-**Default:** Not set (interactive mode launches).
-
-```bash
-qwen -p "Explain the architecture of this project"
-qwen -p "Find bugs in the auth module" --output-format json
-```
-
-### `-i, --prompt-interactive <string>`
-
-Execute the prompt, then drop into the interactive TUI to continue the conversation. Cannot be combined with stdin piping.
-
-**Default:** Not set.
-
-```bash
-qwen -i "Refactor the auth module"
-```
-
-### `--system-prompt <string>`
-
-Override the built-in main session system prompt for this run only. Loaded context files (`QWEN.md`, etc.) are still appended after the override. Can be combined with `--append-system-prompt`.
-
-**Default:** Not set (uses built-in system prompt).
-
-```bash
-qwen -p "Review this patch" --system-prompt "You are a terse release reviewer. Report only blocking issues."
-```
-
-### `--append-system-prompt <string>`
-
-Append extra instructions to the main session system prompt. Applied after the built-in prompt and loaded context files. Can be combined with `--system-prompt`.
-
-**Default:** Not set.
-
-```bash
-qwen -p "Review this patch" --append-system-prompt "Be terse and focus on concrete findings."
-qwen -p "Summarize" --system-prompt "You are a migration planner." --append-system-prompt "Return exactly three bullets."
-```
-
-### `-y, --yolo`
-
-Enable YOLO mode, which automatically approves all tool calls including file edits and shell commands. Equivalent to `--approval-mode yolo`. Cannot be combined with `--approval-mode`.
-
-**Default:** Not set (default approval mode).
-
-```bash
-qwen -y -p "Run the test suite, fix failures, and commit"
-```
-
-### `--approval-mode <mode>`
-
-Set the approval mode for tool usage. Cannot be used together with `--yolo`.
-
-**Default:** `default`
-
-**Possible values:**
-- `plan` -- read-only analysis, no file modifications or command execution
-- `default` -- require approval for file edits and shell commands
-- `auto-edit` -- auto-approve file edits, require approval for shell commands
-- `yolo` -- auto-approve all tool calls
-
-```bash
-qwen --approval-mode plan -p "Analyze this codebase"
-qwen --approval-mode auto-edit -p "Refactor the utils module"
-```
-
-### `-s, --sandbox`
-
-Run the agent in a sandboxed environment. On macOS, uses Seatbelt (`sandbox-exec`). On Linux, uses Docker/Podman containers.
-
-**Default:** Not set (no sandbox).
-
-```bash
-qwen -s -p "Analyze this untrusted code"
-```
-
-### `--sandbox-image <string>`
-
-Specify a custom container image for the sandbox. Only applies when `--sandbox` is enabled and running on a container-based sandbox (Linux).
-
-**Default:** Uses the built-in default container image.
-
-```bash
-qwen -s --sandbox-image "python:3.12-slim" -p "Run this Python script"
-```
-
-### `-c, --continue`
-
-Resume the most recent session for the current project. Restores conversation history, tool outputs, and chat-compression checkpoints before sending a new prompt. Requires chat recording to be enabled.
-
-**Default:** Not set (starts a new session).
-
-```bash
-qwen --continue -p "What was the next step?"
-qwen -c
-```
-
-### `-r, --resume [id]`
-
-Resume a specific session by ID. If no ID is provided, shows an interactive session picker.
-
-**Default:** Not set.
-
-```bash
-qwen --resume 123e4567-e89b-12d3-a456-426614174000 -p "Continue the refactor"
-qwen -r
-```
-
-### `--max-session-turns <n>`
-
-Cap the number of agent turns (user/model/tool interaction cycles). Useful for controlling costs in CI/CD pipelines. Set to `-1` for unlimited.
-
-**Default:** `-1` (unlimited).
-
-```bash
-qwen --max-session-turns 5 -p "Fix the lint errors"
-```
-
-### `-o, --output-format <fmt>`
-
-Set the output format for headless mode.
-
-**Default:** `text`
-
-**Possible values:**
-- `text` -- human-readable plain text
-- `json` -- buffered JSON array emitted at end of execution (machine-readable)
-- `stream-json` -- line-delimited JSON emitted as events occur (real-time streaming)
-
-```bash
-qwen -p "What is Kubernetes?" --output-format json
-qwen -p "Write code" --output-format stream-json --include-partial-messages
-```
-
-### `--input-format <fmt>`
-
-Set the input format consumed from standard input.
-
-**Default:** `text`
-
-**Possible values:**
-- `text` -- standard text input from stdin or command-line arguments
-- `stream-json` -- JSON message protocol via stdin for bidirectional SDK communication. Requires `--output-format stream-json`.
-
-```bash
-qwen --input-format stream-json --output-format stream-json
-```
-
-### `--include-partial-messages`
-
-Include partial assistant messages in `stream-json` output. Emits stream events (`message_start`, `content_block_delta`, etc.) for real-time UI updates. Requires `--output-format stream-json`.
-
-**Default:** Not set (partial messages excluded).
-
-```bash
-qwen -p "Write a Python script" --output-format stream-json --include-partial-messages
-```
-
-### `-d, --debug`
-
-Enable debug mode for verbose output to stderr. Useful for troubleshooting API requests, tool calls, and internal behavior.
-
-**Default:** Not set.
-
-```bash
-qwen -d -p "Explain this code"
-```
-
-### `-a, --all-files`
-
-Recursively include all files within the current directory as context for the prompt. Use sparingly on large projects as it consumes significant tokens.
-
-**Default:** Not set.
-
-```bash
-qwen -a -p "What does this project do?"
-```
-
-### `-e, --extensions <list>`
-
-Specify which extensions to load for the session. Can be specified multiple times. Use `-e none` to disable all extensions.
-
-**Default:** All available extensions are loaded.
-
-```bash
-qwen -e my-extension -e my-other-extension
-qwen -e none
-```
-
-### `-l, --list-extensions`
-
-List all available extensions and exit. Useful for discovering what extensions are installed.
-
-**Default:** Not set.
-
-```bash
-qwen -l
-```
-
-### `--allowed-tools <list>`
-
-A comma-separated list of tool names that bypass the confirmation dialog. Supports the same rule syntax as `permissions.allow`.
-
-**Default:** Not set.
-
-```bash
-qwen --allowed-tools "Bash(git status),Read"
-qwen -p "Run tests" --allowed-tools "Shell(npm run *)"
-```
-
-### `--exclude-tools <list>`
-
-A list of tool names to exclude from the session. Tools listed here will not be available to the model.
-
-**Default:** Not set.
-
-```bash
-qwen --exclude-tools "write_file,web_fetch"
-```
-
-### `--core-tools <list>`
-
-Restrict available built-in tools to an allowlist. All tools not in the list are disabled.
-
-**Default:** Not set (all core tools available).
-
-```bash
-qwen --core-tools "read_file,edit,run_shell_command"
-```
-
-### `--allowed-mcp-server-names <list>`
-
-Restrict which MCP servers are connected to by name. Overrides `mcp.allowed` and `mcp.excluded` settings.
-
-**Default:** Not set (all configured servers are connected).
-
-```bash
-qwen --allowed-mcp-server-names "puppeteer,filesystem"
-```
-
-### `--include-directories <list>`
-
-Include additional directories in the workspace context. Supports absolute paths, relative paths, and `~` expansion. Maximum of 5 directories.
-
-**Default:** Not set.
-
-```bash
-qwen --include-directories /path/to/project1,/path/to/project2
-qwen --include-directories ../shared-lib --include-directories ~/common-utils
-```
-
-### `--auth-type <type>`
-
-Select the authentication/provider protocol. This determines how API requests are formatted and which credentials are used.
-
-**Default:** Determined by `security.auth.selectedType` in settings.
-
-**Possible values:**
-- `openai` -- OpenAI-compatible API (Alibaba Cloud DashScope, OpenRouter, etc.)
-- `anthropic` -- Anthropic Claude models
-- `gemini` -- Google Gemini models
-- `vertex-ai` -- Google Vertex AI
-
-```bash
-qwen --auth-type openai
-qwen --auth-type anthropic
-```
-
-### `--openai-api-key <string>`
-
-Set the OpenAI-compatible API key directly on the command line. Overrides environment variables and settings.
-
-**Default:** Not set (uses `OPENAI_API_KEY` env var or `envKey` from settings).
-
-```bash
-qwen --openai-api-key "sk-xxxxxxxxx" -m gpt-4o
-```
-
-### `--openai-base-url <string>`
-
-Set a custom base URL for the OpenAI-compatible API endpoint. Overrides the provider's default URL.
-
-**Default:** Not set (uses provider default, e.g., `https://api.openai.com/v1`).
-
-```bash
-qwen --openai-base-url "https://dashscope.aliyuncs.com/compatible-mode/v1" --openai-api-key "sk-xxx"
-```
-
-### `--openai-logging`
-
-Enable logging of OpenAI API calls (requests and responses) to JSON files for debugging. Overrides `model.enableOpenAILogging` in settings.
-
-**Default:** Not set.
-
-```bash
-qwen --openai-logging --openai-logging-dir ~/qwen-logs
-```
-
-### `--openai-logging-dir <path>`
-
-Set the directory for OpenAI API log files. Supports absolute paths, relative paths, and `~` expansion.
-
-**Default:** `logs/openai` relative to current working directory.
-
-```bash
-qwen --openai-logging-dir "~/qwen-logs" --openai-logging
-qwen --openai-logging-dir "./api-logs"
-```
-
-### `--tavily-api-key <string>`
-
-Set the Tavily API key for web search functionality. Enables the `web_search` tool with Tavily as the provider.
-
-**Default:** Not set (uses `advanced.tavilyApiKey` from settings or DashScope for Qwen OAuth users).
-
-```bash
-qwen --tavily-api-key "tvly-xxxxxxxxx"
-```
-
-### `--google-api-key <string>`
-
-Set the Google Custom Search API key for web search functionality.
-
-**Default:** Not set.
-
-```bash
-qwen --google-api-key "AIza-xxxxxxxxx"
-```
-
-### `--google-search-engine-id <string>`
-
-Set the Google Custom Search Engine ID for web search functionality.
-
-**Default:** Not set.
-
-```bash
-qwen --google-search-engine-id "xxxxxxxxx"
-```
-
-### `--web-search-default <provider>`
-
-Set the default web search provider.
-
-**Default:** Determined by auth type (DashScope for Qwen users).
-
-**Possible values:** `dashscope`, `tavily`, `google`
-
-```bash
-qwen --web-search-default tavily --tavily-api-key "tvly-xxx"
-```
-
-### `--chat-recording`
-
-Enable or disable chat recording to disk. When disabled, sessions are not persisted and `--continue`/`--resume` will not work.
-
-**Default:** Enabled.
-
-```bash
-qwen --chat-recording=false -p "Quick question"
-```
-
-### `--checkpointing`
-
-Enable file edit checkpointing, allowing `/restore` to revert files to their state before a tool execution.
-
-**Default:** Determined by `general.checkpointing.enabled` in settings.
-
-```bash
-qwen --checkpointing
-```
-
-### `--acp`
-
-Start the agent in ACP (Agent Client Protocol) mode. Used for IDE/editor integrations (Zed, VS Code sidebar). Replaces the deprecated `--experimental-acp` flag.
-
-**Default:** Not set.
-
-```bash
-qwen --acp
-```
-
-### `--experimental-lsp`
-
-Enable experimental LSP (Language Server Protocol) support for code intelligence features (go-to-definition, find references, diagnostics). Requires language servers to be installed separately.
-
-**Default:** Not set.
-
-```bash
-qwen --experimental-lsp
-```
-
-### `--experimental-skills`
-
-Enable the Skills feature. Skills provide specialized workflows loaded from `.qwen/skills/` directories. (Note: Skills are now GA as of Feb 2026; this flag may still be accepted but is no longer required.)
-
-**Default:** Not set.
-
-```bash
-qwen --experimental-skills
-```
-
-### `--channel <string>`
-
-Set the channel identifier. Used to tag the session's origin for analytics and behavior customization.
-
-**Default:** Not set.
-
-**Possible values:** `VSCode`, `ACP`, `SDK`, `CI`
-
-```bash
-qwen --channel CI -p "Run the test suite"
-```
-
-### `--screen-reader`
-
-Enable screen reader accessibility mode. Adjusts the TUI for better compatibility with screen reading software.
-
-**Default:** Not set.
-
-```bash
-qwen --screen-reader
-```
-
-### `--vlm-switch-mode <mode>`
-
-Control the vision-language model behavior when image input is detected. Determines whether the agent switches to a vision-capable model and for how long.
-
-**Default:** Determined by settings.
-
-**Possible values:**
-- `once` -- switch for the current turn only
-- `session` -- switch for the remainder of the session
-- `persist` -- switch permanently until explicitly changed
-
-```bash
-qwen --vlm-switch-mode session
-```
-
-### `--proxy <string>`
-
-Set an HTTP proxy for API requests.
-
-**Default:** Not set.
-
-```bash
-qwen --proxy "http://localhost:7890"
-```
-
-### `--telemetry`
-
-Enable telemetry collection. Overrides `telemetry.enabled` in settings.
-
-**Default:** Not set.
-
-```bash
-qwen --telemetry
-```
-
-### `--telemetry-target <target>`
-
-Set the telemetry destination.
-
-**Default:** Not set.
-
-**Possible values:** `local`, `gcp`
-
-```bash
-qwen --telemetry --telemetry-target local
-```
-
-### `--telemetry-otlp-endpoint <url>`
-
-Set the OTLP endpoint for telemetry export.
-
-**Default:** Not set.
-
-```bash
-qwen --telemetry --telemetry-target local --telemetry-otlp-endpoint "http://localhost:4317"
-```
-
-### `--telemetry-otlp-protocol <proto>`
-
-Set the OTLP protocol for telemetry export.
-
-**Default:** `grpc`
-
-**Possible values:** `grpc`, `http`
-
-```bash
-qwen --telemetry --telemetry-otlp-protocol http
-```
-
-### `--telemetry-log-prompts`
-
-Enable logging of user prompts in telemetry data.
-
-**Default:** Not set.
-
-```bash
-qwen --telemetry --telemetry-log-prompts
-```
-
-### `--telemetry-outfile <path>`
-
-Redirect telemetry output to a file. Used when `telemetry-target` is `local`.
-
-**Default:** Not set.
-
-```bash
-qwen --telemetry --telemetry-target local --telemetry-outfile ./telemetry.log
-```
-
-### `--show-memory-usage`
-
-Display the current memory usage of the Qwen Code process.
-
-**Default:** Not set.
-
-```bash
-qwen --show-memory-usage
-```
-
-### `-v, --version`
-
-Display the version number and exit.
-
-```bash
-qwen -v
-qwen --version
-```
-
-### `-h, --help`
-
-Display help information about CLI arguments and exit.
-
-```bash
-qwen -h
-qwen --help
-```
+Auth setup changed: `qwen auth` is removed and prints instructions. Headless wrappers should use provider environment variables, CLI OpenAI-compatible flags, or settings files; Qwen OAuth needs interactive `/auth`.
 
 ## Sources
 
-- [QwenLM/qwen-code GitHub repository](https://github.com/QwenLM/qwen-code)
-- [Qwen Code documentation](https://qwenlm.github.io/qwen-code-docs/)
-- [Qwen Code settings reference](https://qwenlm.github.io/qwen-code-docs/en/users/configuration/settings/)
-- [Qwen Code authentication](https://qwenlm.github.io/qwen-code-docs/en/users/configuration/auth/)
-- [Qwen Code approval mode](https://qwenlm.github.io/qwen-code-docs/en/users/features/approval-mode/)
-- [Qwen Code headless mode](https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/)
-- [Qwen Code commands](https://qwenlm.github.io/qwen-code-docs/en/users/features/commands/)
-- [Qwen Code model providers](https://qwenlm.github.io/qwen-code-docs/en/users/configuration/model-providers/)
-- [Qwen3-Coder announcement](https://qwenlm.github.io/blog/qwen3-coder/)
-- [Qwen3-Coder model card](https://huggingface.co/Qwen/Qwen3-Coder-480B-A35B-Instruct)
+- [Qwen Code overview](https://qwenlm.github.io/qwen-code-docs/en/users/overview/)
+- [Qwen Code GitHub repository](https://github.com/QwenLM/qwen-code)
+- [@qwen-code/qwen-code npm package](https://www.npmjs.com/package/@qwen-code/qwen-code)
+- [Qwen Code configuration docs](https://qwenlm.github.io/qwen-code-docs/en/users/configuration/settings/)
+- [Qwen Code headless mode docs](https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/)
+- [Qwen Code commands docs](https://qwenlm.github.io/qwen-code-docs/en/users/features/commands/)
+- Local inspection of npm package `@qwen-code/qwen-code@0.19.5` and its bundled CLI/docs on 2026-07-02.

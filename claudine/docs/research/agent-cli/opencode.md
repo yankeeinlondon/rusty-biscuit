@@ -1,1013 +1,931 @@
 ---
-schema: ""
-schema_type: ""
-data_format: ndjson
-docs: https://opencode.ai/docs/cli/
-last_updated: 2026-05-12
+$schema: ./_schema.yaml
+created: 2026-05-12
+last_updated: 2026-07-02
+agent: codex
+model: default
+latest_version: "1.17.13"
+homepage: https://opencode.ai
+repo: https://github.com/anomalyco/opencode
+docs: https://opencode.ai/docs/
+cli_docs: https://opencode.ai/docs/cli/
+binaries:
+  - os: all
+    binary: opencode
+    alt_binaries: []
+    notes: "Primary command documented for macOS, Linux, and Windows package-manager installs. Local macOS inspection found /Users/ken/.opencode/bin/opencode reporting 1.17.13."
+  - os: windows
+    binary: opencode.exe
+    alt_binaries: ["opencode.cmd"]
+    notes: "The npm package exposes bin.opencode as bin/opencode.exe. Windows package managers install the opencode command; shim names depend on npm, Scoop, or Chocolatey."
+install_methods:
+  - os: macos
+    method: standalone_binary
+    command: "curl -fsSL https://opencode.ai/install | bash"
+    notes: "Official installer defaults to $HOME/.opencode/bin and can install a specific version with --version."
+  - os: linux
+    method: standalone_binary
+    command: "curl -fsSL https://opencode.ai/install | bash"
+    notes: "Official installer defaults to $HOME/.opencode/bin and downloads linux-x64/linux-arm64 archives, with baseline and musl variants when needed."
+  - os: windows
+    method: scoop
+    command: "scoop install opencode"
+    notes: "Documented Windows package-manager install."
+  - os: windows
+    method: chocolatey
+    command: "choco install opencode"
+    notes: "Documented Windows package-manager install. Chocolatey upgrades/uninstalls may require an elevated shell."
+  - os: macos
+    method: brew
+    command: "brew install anomalyco/tap/opencode"
+    notes: "README calls the tap formula recommended and always up to date."
+  - os: linux
+    method: brew
+    command: "brew install anomalyco/tap/opencode"
+    notes: "Homebrew on Linux is documented in the README."
+  - os: macos
+    method: brew
+    command: "brew install opencode"
+    notes: "Official Homebrew formula is documented but noted as updated less often than anomalyco/tap/opencode."
+  - os: linux
+    method: brew
+    command: "brew install opencode"
+    notes: "Official Homebrew formula is documented but noted as updated less often than anomalyco/tap/opencode."
+  - os: all
+    method: npm
+    command: "npm i -g opencode-ai@latest"
+    notes: "README says npm, bun, pnpm, or yarn can install the opencode-ai package globally."
+  - os: linux
+    method: package_manager
+    command: "sudo pacman -S opencode"
+    notes: "Documented Arch Linux stable package."
+  - os: linux
+    method: package_manager
+    command: "paru -S opencode-bin"
+    notes: "Documented Arch Linux AUR package for the latest release."
+subcommands:
+  - name: tui
+    description: "Default mode when no subcommand is supplied; starts the terminal UI for an optional project path."
+    non_interactive: false
+    notes: "Documented as opencode [project]."
+  - name: run
+    description: "Runs OpenCode with a message and exits unless direct interactive mode is requested."
+    non_interactive: true
+    notes: "Primary automation entry point. Supports --format json NDJSON output."
+  - name: attach
+    description: "Attaches a TUI or mini session to a running OpenCode server."
+    non_interactive: false
+    notes: "Requires a server URL and usually a TTY."
+  - name: acp
+    description: "Starts an ACP Agent Client Protocol server over stdin/stdout."
+    non_interactive: true
+    notes: "Uses NDJSON framing from the ACP SDK."
+  - name: mcp
+    description: "Manages MCP servers."
+    non_interactive: false
+    notes: "Subcommands include add, list/ls, auth, logout, and debug. OAuth flows are interactive."
+  - name: agent
+    description: "Creates and lists OpenCode agents."
+    non_interactive: false
+    notes: "agent create can be fully non-interactive only when path, description, mode, and permissions are supplied."
+  - name: plugin
+    description: "Installs a plugin and updates config."
+    non_interactive: false
+    notes: "Alias: plug. Mutates global or project config and may run package installation."
+  - name: pr
+    description: "Fetches and checks out a GitHub PR branch, then runs OpenCode."
+    non_interactive: false
+    notes: "Uses gh CLI and then launches the TUI."
+  - name: db
+    description: "Runs database tools or prints the database path."
+    non_interactive: true
+    notes: "db without a query opens sqlite3 interactively; db path and db <query> are suitable for automation."
+  - name: debug
+    description: "Runs debugging and troubleshooting commands."
+    non_interactive: true
+    notes: "Subcommands include config, paths, info, skill, scrap, lsp, rg, file, snapshot, startup, agent, v2, and wait."
+  - name: session
+    description: "Lists and deletes saved sessions."
+    non_interactive: true
+    notes: "session list supports --format json; delete mutates local state."
+  - name: models
+    description: "Lists available models, optionally for one provider."
+    non_interactive: true
+    notes: "Outputs provider/model lines; --verbose prints JSON metadata after each line."
+  - name: providers
+    description: "Manages provider authentication and configuration."
+    non_interactive: false
+    notes: "Source exposes provider auth flows; most login flows prompt."
+  - name: console
+    description: "Manages OpenCode console account login, logout, org switch, org listing, and opening the console."
+    non_interactive: false
+    notes: "Login uses browser/device-code style prompts."
+  - name: serve
+    description: "Starts a headless OpenCode HTTP server."
+    non_interactive: true
+    notes: "Long-running process. Warns when OPENCODE_SERVER_PASSWORD is unset."
+  - name: web
+    description: "Starts a server and opens the web interface."
+    non_interactive: false
+    notes: "Long-running and browser-opening."
+  - name: generate
+    description: "Generates the OpenCode OpenAPI document as JSON."
+    non_interactive: true
+    notes: "Useful for SDK/API schema inspection."
+  - name: stats
+    description: "Shows token usage and cost statistics."
+    non_interactive: true
+    notes: "Human-readable output; source does not expose a JSON flag."
+  - name: export
+    description: "Exports session data as JSON."
+    non_interactive: true
+    notes: "Optional --sanitize redacts sensitive transcript and file data."
+  - name: import
+    description: "Imports session data from a JSON file or share URL."
+    non_interactive: true
+    notes: "Mutates local session storage."
+  - name: github
+    description: "Manages the GitHub agent."
+    non_interactive: false
+    notes: "Subcommands include install and run; github run accepts --event and --token."
+  - name: completion
+    description: "Generates shell completion scripts."
+    non_interactive: true
+    notes: "Exposed by yargs completion."
+  - name: upgrade
+    description: "Upgrades OpenCode to the latest or a specified version."
+    non_interactive: false
+    notes: "Mutates installation and may prompt when the installation method is unknown."
+  - name: uninstall
+    description: "Uninstalls OpenCode and related files."
+    non_interactive: false
+    notes: "Use --force for non-interactive removal; destructive."
+cli_switches:
+  - flag: --help
+    value: ""
+    scope: ["global"]
+    default: "false"
+    description: "Shows help."
+    example: "opencode --help"
+    notes: "Short form: -h."
+  - flag: --version
+    value: ""
+    scope: ["global"]
+    default: "false"
+    description: "Prints the OpenCode version."
+    example: "opencode --version"
+    notes: "Short form: -v."
+  - flag: --print-logs
+    value: ""
+    scope: ["global", "logging"]
+    default: "false"
+    description: "Prints structured logs to stderr."
+    example: "opencode run --format json --print-logs --log-level INFO \"summarize\""
+    notes: "Sets OPENCODE_PRINT_LOGS=1 internally."
+  - flag: --log-level
+    value: "DEBUG | INFO | WARN | ERROR"
+    scope: ["global", "logging"]
+    default: "unknown"
+    description: "Selects log verbosity."
+    example: "opencode --log-level DEBUG debug info"
+    notes: "Sets OPENCODE_LOG_LEVEL internally."
+  - flag: --pure
+    value: ""
+    scope: ["global", "plugins"]
+    default: "false"
+    description: "Runs without external plugins."
+    example: "opencode --pure run \"inspect this repo\""
+    notes: "Sets OPENCODE_PURE=1 internally."
+  - flag: --continue
+    value: ""
+    scope: ["tui", "run", "attach", "session"]
+    default: "false"
+    description: "Continues the last session."
+    example: "opencode run --continue \"next step\""
+    notes: "Short form: -c."
+  - flag: --session
+    value: "<SESSION_ID>"
+    scope: ["tui", "run", "attach", "session"]
+    default: ""
+    description: "Continues a specific session."
+    example: "opencode run --session ses_abc \"continue\""
+    notes: "Short form: -s."
+  - flag: --fork
+    value: ""
+    scope: ["tui", "run", "attach", "session"]
+    default: "false"
+    description: "Forks before continuing a session."
+    example: "opencode run --session ses_abc --fork \"try another approach\""
+    notes: "Requires --continue or --session."
+  - flag: --prompt
+    value: "<TEXT>"
+    scope: ["tui", "input"]
+    default: ""
+    description: "Initial prompt to use in TUI mode."
+    example: "opencode --prompt \"review this repo\""
+    notes: "Documented on the TUI command."
+  - flag: --model
+    value: "<PROVIDER>/<MODEL>"
+    scope: ["tui", "run", "agent create", "model_selection"]
+    default: "config default"
+    description: "Selects the model."
+    example: "opencode run --model anthropic/claude-sonnet-4-5 \"fix tests\""
+    notes: "Short form: -m."
+  - flag: --agent
+    value: "<AGENT>"
+    scope: ["tui", "run"]
+    default: "config/default"
+    description: "Selects the primary agent."
+    example: "opencode run --agent build \"implement feature\""
+    notes: "Subagents are rejected for primary run selection."
+  - flag: --auto
+    value: ""
+    scope: ["tui", "run", "permissions"]
+    default: "false"
+    description: "Auto-approves permissions that are not explicitly denied."
+    example: "opencode run --auto \"apply the change\""
+    notes: "Dangerous for wrappers unless policy is constrained elsewhere."
+  - flag: --yolo
+    value: ""
+    scope: ["tui", "run", "permissions"]
+    default: "false"
+    description: "Hidden alias-like permission bypass used by source to enable auto approval."
+    example: "opencode run --yolo \"apply the change\""
+    notes: "Hidden; prefer --auto when documenting user-facing behavior."
+  - flag: --dangerously-skip-permissions
+    value: ""
+    scope: ["tui", "run", "permissions"]
+    default: "false"
+    description: "Hidden permission bypass used by source to enable auto approval."
+    example: "opencode run --dangerously-skip-permissions \"apply the change\""
+    notes: "Hidden and unsafe for general wrapper defaults."
+  - flag: --port
+    value: "<PORT>"
+    scope: ["tui", "run", "serve", "web", "acp", "network"]
+    default: "0"
+    description: "Port for the local server."
+    example: "opencode serve --port 4096"
+    notes: "Config server.port is used unless the CLI arg is explicitly set."
+  - flag: --hostname
+    value: "<HOST>"
+    scope: ["tui", "serve", "web", "acp", "network"]
+    default: "127.0.0.1"
+    description: "Hostname for the local server."
+    example: "opencode serve --hostname 0.0.0.0"
+    notes: "mDNS can default hostname to 0.0.0.0."
+  - flag: --mdns
+    value: ""
+    scope: ["tui", "serve", "web", "acp", "network"]
+    default: "false"
+    description: "Enables mDNS service discovery."
+    example: "opencode web --mdns"
+    notes: "Can be disabled with --no-mdns."
+  - flag: --mdns-domain
+    value: "<DOMAIN>"
+    scope: ["serve", "web", "acp", "network"]
+    default: "opencode.local"
+    description: "Sets the custom mDNS domain."
+    example: "opencode serve --mdns --mdns-domain workstation.local"
+    notes: ""
+  - flag: --cors
+    value: "<ORIGIN>"
+    scope: ["serve", "web", "acp", "network"]
+    default: "[]"
+    description: "Adds browser origins to allow for CORS."
+    example: "opencode serve --cors http://localhost:3000"
+    notes: "Repeatable."
+  - flag: --command
+    value: "<COMMAND>"
+    scope: ["run", "input"]
+    default: ""
+    description: "Runs a slash command, using the message as arguments."
+    example: "opencode run --command test"
+    notes: "Cannot be used with --mini."
+  - flag: --share
+    value: ""
+    scope: ["run", "sharing"]
+    default: "false"
+    description: "Shares the session."
+    example: "opencode run --share \"summarize\""
+    notes: "Also affected by config and OPENCODE_AUTO_SHARE."
+  - flag: --format
+    value: "default | json"
+    scope: ["run", "db", "session list", "output"]
+    default: "run: default; db: tsv; session list: table"
+    description: "Selects output format."
+    example: "opencode run --format json \"summarize\""
+    notes: "For run, json means NDJSON event lines. For db/session list, json means a JSON document."
+  - flag: --file
+    value: "<FILE>"
+    scope: ["run", "input"]
+    default: "[]"
+    description: "Attaches files to the message."
+    example: "opencode run --file screenshot.png \"analyze this\""
+    notes: "Short form: -f. Repeatable. Remote attach uploads local files up to 10 MiB and rejects local directories."
+  - flag: --title
+    value: "<TITLE>"
+    scope: ["run", "session"]
+    default: ""
+    description: "Sets the session title."
+    example: "opencode run --title \"CI failure\" \"debug tests\""
+    notes: "Empty value uses a truncated prompt."
+  - flag: --attach
+    value: "<URL>"
+    scope: ["run", "remote"]
+    default: ""
+    description: "Runs against a running OpenCode server."
+    example: "opencode run --attach http://localhost:4096 \"continue\""
+    notes: "Skips local instance loading."
+  - flag: --password
+    value: "<PASSWORD>"
+    scope: ["run", "attach", "auth"]
+    default: "OPENCODE_SERVER_PASSWORD"
+    description: "Basic auth password for a remote server."
+    example: "opencode attach http://localhost:4096 --password \"$OPENCODE_SERVER_PASSWORD\""
+    notes: "Short form: -p."
+  - flag: --username
+    value: "<USERNAME>"
+    scope: ["run", "attach", "auth"]
+    default: "OPENCODE_SERVER_USERNAME or opencode"
+    description: "Basic auth username for a remote server."
+    example: "opencode attach http://localhost:4096 --username opencode"
+    notes: "Short form: -u."
+  - flag: --dir
+    value: "<PATH>"
+    scope: ["run", "attach", "working_directory"]
+    default: "current directory"
+    description: "Directory to run in; interpreted as remote server path when attaching."
+    example: "opencode run --dir packages/app \"inspect\""
+    notes: "For local runs, OpenCode changes into the directory before running."
+  - flag: --variant
+    value: "<VARIANT>"
+    scope: ["run", "model_selection"]
+    default: ""
+    description: "Sets a provider-specific model variant such as reasoning effort."
+    example: "opencode run --variant high \"solve\""
+    notes: "Examples in source include high, max, and minimal."
+  - flag: --thinking
+    value: ""
+    scope: ["run", "output"]
+    default: "false for non-interactive run; true for mini"
+    description: "Shows thinking blocks."
+    example: "opencode run --thinking --format json \"solve\""
+    notes: "Reasoning events in run JSON are opt-in."
+  - flag: --interactive
+    value: ""
+    scope: ["run", "tui"]
+    default: "false"
+    description: "Runs in direct interactive split-footer mode."
+    example: "opencode run --interactive"
+    notes: "Short form: -i."
+  - flag: --mini
+    value: ""
+    scope: ["tui", "run", "attach"]
+    default: "false"
+    description: "Starts the minimal interactive interface."
+    example: "opencode --mini"
+    notes: "Hidden or restricted in some contexts; requires TTY stdout and cannot be used with --format json."
+  - flag: --no-replay
+    value: ""
+    scope: ["tui", "attach"]
+    default: "false"
+    description: "Disables mini session history replay on resume and resize."
+    example: "opencode attach http://localhost:4096 --mini --no-replay"
+    notes: "Requires --mini."
+  - flag: --replay-limit
+    value: "<N>"
+    scope: ["tui", "run", "attach"]
+    default: ""
+    description: "Caps visible mini replay to the newest N messages."
+    example: "opencode --mini --replay-limit 20"
+    notes: "Requires --mini and must be a positive integer."
+  - flag: --cwd
+    value: "<PATH>"
+    scope: ["acp"]
+    default: "process.cwd()"
+    description: "Working directory for the ACP server."
+    example: "opencode acp --cwd /repo"
+    notes: ""
+  - flag: --path
+    value: "<DIR>"
+    scope: ["agent create"]
+    default: "prompted global/project location"
+    description: "Directory path where the agent file should be generated."
+    example: "opencode agent create --path .opencode --description \"Review Rust\" --mode subagent --permissions read,grep"
+    notes: "The command appends agents/ under the supplied path."
+  - flag: --description
+    value: "<TEXT>"
+    scope: ["agent create"]
+    default: "prompted"
+    description: "Describes what the generated agent should do."
+    example: "opencode agent create --description \"Review Rust code\" --mode subagent --permissions read,grep"
+    notes: ""
+  - flag: --mode
+    value: "all | primary | subagent"
+    scope: ["agent create"]
+    default: "prompted"
+    description: "Sets the agent mode."
+    example: "opencode agent create --mode primary --description \"Build features\" --permissions bash,read,edit"
+    notes: ""
+  - flag: --permissions
+    value: "<CSV>"
+    scope: ["agent create"]
+    default: "all"
+    description: "Comma-separated permissions to allow."
+    example: "opencode agent create --permissions read,grep,glob"
+    notes: "Alias: --tools. Available permissions include bash, read, edit, glob, grep, webfetch, task, todowrite, websearch, lsp, and skill."
+  - flag: --global
+    value: ""
+    scope: ["plugin"]
+    default: "false"
+    description: "Installs a plugin in global config."
+    example: "opencode plugin opencode-wakatime --global"
+    notes: "Short form: -g."
+  - flag: --force
+    value: ""
+    scope: ["plugin", "uninstall"]
+    default: "false"
+    description: "For plugin, replaces an existing plugin version. For uninstall, skips confirmation prompts."
+    example: "opencode plugin opencode-wakatime --force"
+    notes: "Short form: -f."
+  - flag: --max-count
+    value: "<N>"
+    scope: ["session list"]
+    default: ""
+    description: "Limits session list to N most recent sessions."
+    example: "opencode session list --max-count 10 --format json"
+    notes: "Short form: -n."
+  - flag: --verbose
+    value: ""
+    scope: ["models"]
+    default: "false"
+    description: "Prints verbose model metadata."
+    example: "opencode models anthropic --verbose"
+    notes: "Model ids remain line-oriented; metadata is pretty JSON following each id."
+  - flag: --refresh
+    value: ""
+    scope: ["models"]
+    default: "false"
+    description: "Refreshes the models cache from models.dev."
+    example: "opencode models --refresh"
+    notes: "May use network and mutate cache."
+  - flag: --days
+    value: "<N>"
+    scope: ["stats"]
+    default: "all time"
+    description: "Shows stats for the last N days."
+    example: "opencode stats --days 7"
+    notes: "0 means today in source."
+  - flag: --tools
+    value: "<N>"
+    scope: ["stats"]
+    default: "all"
+    description: "Limits the number of tools displayed."
+    example: "opencode stats --tools 20"
+    notes: ""
+  - flag: --models
+    value: "[N]"
+    scope: ["stats"]
+    default: "hidden"
+    description: "Shows model statistics, optionally top N."
+    example: "opencode stats --models 10"
+    notes: ""
+  - flag: --project
+    value: "<PROJECT_ID>"
+    scope: ["stats"]
+    default: "all projects"
+    description: "Filters stats by project; empty string means current project."
+    example: "opencode stats --project \"\""
+    notes: ""
+  - flag: --sanitize
+    value: ""
+    scope: ["export"]
+    default: "false"
+    description: "Redacts sensitive transcript and file data."
+    example: "opencode export ses_abc --sanitize"
+    notes: ""
+  - flag: --event
+    value: "<EVENT>"
+    scope: ["github run"]
+    default: ""
+    description: "GitHub mock event to run the agent for."
+    example: "opencode github run --event pull_request"
+    notes: ""
+  - flag: --token
+    value: "<TOKEN>"
+    scope: ["github run"]
+    default: ""
+    description: "GitHub personal access token."
+    example: "opencode github run --token github_pat_..."
+    notes: "Avoid passing secrets in argv from wrappers."
+  - flag: --keep-config
+    value: ""
+    scope: ["uninstall"]
+    default: "false"
+    description: "Keeps configuration files during uninstall."
+    example: "opencode uninstall --keep-config --force"
+    notes: "Short form: -c."
+  - flag: --keep-data
+    value: ""
+    scope: ["uninstall"]
+    default: "false"
+    description: "Keeps session data and snapshots during uninstall."
+    example: "opencode uninstall --keep-data --force"
+    notes: "Short form: -d."
+  - flag: --dry-run
+    value: ""
+    scope: ["uninstall"]
+    default: "false"
+    description: "Shows what uninstall would remove without removing it."
+    example: "opencode uninstall --dry-run"
+    notes: ""
+  - flag: --method
+    value: "curl | npm | pnpm | bun | brew | choco | scoop"
+    scope: ["upgrade"]
+    default: "detected"
+    description: "Selects the installation method used for upgrade."
+    example: "opencode upgrade --method brew"
+    notes: "Short form: -m."
+config_files:
+  - os: all
+    scope: user
+    path: "~/.config/opencode/opencode.json"
+    format: json
+    notes: "Global config. OpenCode also accepts opencode.jsonc in config directories."
+  - os: all
+    scope: user
+    path: "~/.config/opencode/opencode.jsonc"
+    format: jsonc
+    notes: "Global JSONC config; docs show JSON/JSONC are supported."
+  - os: all
+    scope: user
+    path: "~/.config/opencode/tui.json"
+    format: json
+    notes: "Global TUI-specific config."
+  - os: all
+    scope: user
+    path: "~/.config/opencode/tui.jsonc"
+    format: jsonc
+    notes: "Global TUI-specific JSONC config."
+  - os: all
+    scope: repo
+    path: "opencode.json"
+    format: json
+    notes: "Project config. OpenCode starts in the current directory and traverses up to the nearest Git directory."
+  - os: all
+    scope: repo
+    path: "opencode.jsonc"
+    format: jsonc
+    notes: "Project JSONC config."
+  - os: all
+    scope: repo
+    path: "tui.json"
+    format: json
+    notes: "Project TUI-specific config alongside opencode.json."
+  - os: all
+    scope: repo
+    path: "tui.jsonc"
+    format: jsonc
+    notes: "Project TUI-specific JSONC config alongside opencode.json."
+  - os: all
+    scope: repo
+    path: ".opencode/"
+    format: other
+    notes: "Project directory for agents, commands, plugins, package.json dependencies, and related assets."
+  - os: all
+    scope: user
+    path: "~/.config/opencode/"
+    format: other
+    notes: "Global directory for agents, commands, plugins, package.json dependencies, and config files."
+  - os: all
+    scope: env
+    path: "$OPENCODE_CONFIG"
+    format: json
+    notes: "Custom config file loaded between global and project config; format may be JSON or JSONC based on file content."
+  - os: all
+    scope: env
+    path: "$OPENCODE_CONFIG_DIR"
+    format: other
+    notes: "Custom config directory searched for agents, commands, modes, and plugins."
+  - os: all
+    scope: env
+    path: "$OPENCODE_CONFIG_CONTENT"
+    format: json
+    notes: "Inline JSON config content loaded with highest normal precedence before managed settings."
+  - os: macos
+    scope: system
+    path: "/Library/Application Support/opencode/opencode.json"
+    format: json
+    notes: "Managed settings directory."
+  - os: macos
+    scope: system
+    path: "/Library/Application Support/opencode/opencode.jsonc"
+    format: jsonc
+    notes: "Managed settings directory."
+  - os: linux
+    scope: system
+    path: "/etc/opencode/opencode.json"
+    format: json
+    notes: "Managed settings directory."
+  - os: linux
+    scope: system
+    path: "/etc/opencode/opencode.jsonc"
+    format: jsonc
+    notes: "Managed settings directory."
+  - os: windows
+    scope: system
+    path: "%ProgramData%\\opencode\\opencode.json"
+    format: json
+    notes: "Managed settings directory."
+  - os: windows
+    scope: system
+    path: "%ProgramData%\\opencode\\opencode.jsonc"
+    format: jsonc
+    notes: "Managed settings directory."
+  - os: macos
+    scope: system
+    path: "/Library/Managed Preferences/<user>/ai.opencode.managed.plist"
+    format: other
+    notes: "macOS MDM managed preferences; keys map to opencode.json fields."
+  - os: macos
+    scope: system
+    path: "/Library/Managed Preferences/ai.opencode.managed.plist"
+    format: other
+    notes: "macOS MDM managed preferences; keys map to opencode.json fields."
+  - os: all
+    scope: user
+    path: "~/.local/share/opencode/auth.json"
+    format: json
+    notes: "Provider credentials are stored here after /connect according to provider docs."
+env_vars:
+  - name: OPENCODE_AUTO_SHARE
+    effect: "Automatically shares sessions."
+  - name: OPENCODE_GIT_BASH_PATH
+    effect: "Path to Git Bash on Windows; used to locate less.exe for paging and by Windows shell integration."
+  - name: OPENCODE_CONFIG
+    effect: "Sets a custom config file path."
+  - name: OPENCODE_TUI_CONFIG
+    effect: "Sets a custom TUI config file path."
+  - name: OPENCODE_CONFIG_DIR
+    effect: "Sets a custom config directory and overrides the global config path used by runtime services."
+  - name: OPENCODE_CONFIG_CONTENT
+    effect: "Provides inline JSON config content."
+  - name: OPENCODE_DISABLE_AUTOUPDATE
+    effect: "Disables automatic update checks."
+  - name: OPENCODE_DISABLE_PRUNE
+    effect: "Disables pruning of old data."
+  - name: OPENCODE_DISABLE_TERMINAL_TITLE
+    effect: "Disables automatic terminal title updates."
+  - name: OPENCODE_DISABLE_DEFAULT_PLUGINS
+    effect: "Disables default plugins."
+  - name: OPENCODE_DISABLE_LSP_DOWNLOAD
+    effect: "Disables automatic LSP server downloads."
+  - name: OPENCODE_DISABLE_AUTOCOMPACT
+    effect: "Disables automatic context compaction."
+  - name: OPENCODE_DISABLE_CLAUDE_CODE
+    effect: "Disables reading from .claude prompt and skills sources."
+  - name: OPENCODE_DISABLE_CLAUDE_CODE_PROMPT
+    effect: "Disables reading ~/.claude/CLAUDE.md."
+  - name: OPENCODE_DISABLE_CLAUDE_CODE_SKILLS
+    effect: "Disables loading .claude/skills."
+  - name: OPENCODE_DISABLE_MOUSE
+    effect: "Disables mouse capture in the TUI."
+  - name: OPENCODE_FAKE_VCS
+    effect: "Fakes the VCS provider for testing."
+  - name: OPENCODE_CLIENT
+    effect: "Sets the client identifier; defaults to cli and is set to acp by the ACP command."
+  - name: OPENCODE_ENABLE_EXA
+    effect: "Enables Exa web search tools."
+  - name: OPENCODE_SERVER_PASSWORD
+    effect: "Enables basic auth for serve/web and supplies the default remote password for attach/run."
+  - name: OPENCODE_SERVER_USERNAME
+    effect: "Overrides the basic auth username; default is opencode."
+  - name: OPENCODE_EXPERIMENTAL
+    effect: "Enables the experimental umbrella flag."
+  - name: OPENCODE_EXPERIMENTAL_ICON_DISCOVERY
+    effect: "Enables experimental icon discovery."
+  - name: OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT
+    effect: "Disables copy-on-select in the TUI."
+  - name: OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS
+    effect: "Sets the experimental default timeout for bash commands in milliseconds."
+  - name: OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX
+    effect: "Sets the experimental maximum output tokens for LLM responses."
+machine_introspection:
+  - command: "opencode debug config"
+    purpose: config_dump
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: true
+    notes: "Prints resolved merged configuration as JSON. Local inspection confirmed JSON output."
+  - command: "opencode debug paths"
+    purpose: env
+    machine_readable: false
+    output_format: text
+    useful_for_codegen: false
+    notes: "Prints resolved global paths for data, config, cache, state, logs, repos, temp, and bin; easy to parse but not structured JSON."
+  - command: "opencode debug skill"
+    purpose: capabilities
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: false
+    notes: "Lists available skills as JSON; useful for reports and wrapper diagnostics."
+  - command: "opencode models"
+    purpose: models
+    machine_readable: false
+    output_format: text
+    useful_for_codegen: true
+    notes: "Prints provider/model ids one per line. It is parseable but not a JSON contract."
+  - command: "opencode models --verbose"
+    purpose: models
+    machine_readable: false
+    output_format: text
+    useful_for_codegen: true
+    notes: "Prints provider/model ids plus pretty-printed JSON metadata; useful but awkward because ids and JSON blocks are interleaved."
+  - command: "opencode session list --format json"
+    purpose: other
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: false
+    notes: "Lists saved sessions with id, title, timestamps, project id, and directory."
+  - command: "opencode export <sessionID> --sanitize"
+    purpose: other
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: false
+    notes: "Exports redacted session data for diagnostics or replay tooling."
+  - command: "opencode db <query> --format json"
+    purpose: other
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: false
+    notes: "Runs arbitrary SQL against OpenCode's local database; useful for diagnostics but too unconstrained for normal wrapper metadata."
+  - command: "opencode db path"
+    purpose: other
+    machine_readable: false
+    output_format: text
+    useful_for_codegen: false
+    notes: "Prints the SQLite database path."
+  - command: "opencode generate"
+    purpose: config_schema
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: true
+    notes: "Generates the OpenCode server OpenAPI document as JSON."
+wrapper_notes:
+  - "Use opencode run for non-interactive prompts; opencode without a subcommand starts the TUI and expects a terminal."
+  - "opencode run --format json emits NDJSON, not a single JSON document."
+  - "The run JSON stream does not expose every internal lifecycle event. It is known to omit tool-start style events and a dedicated session-complete event; wrappers must treat process exit as terminal state."
+  - "Reasoning records in run JSON require --thinking."
+  - "For richer progress and provider/model lifecycle signals, pair --format json with --print-logs --log-level INFO and parse stderr carefully."
+  - "Successful runs can still write human/status output to stderr, especially share URLs, warnings, and logs when --print-logs is enabled."
+  - "Non-interactive run denies question and plan-enter/plan-exit permissions by default in source; --auto, hidden --yolo, and hidden --dangerously-skip-permissions bypass approval prompts and should not be wrapper defaults."
+  - "Interactive console/provider login, mcp auth, agent create without all required args, web, attach TUI, and default TUI modes require a TTY or browser/prompt flow."
+  - "serve and web are long-running. serve prints a warning and starts unsecured unless OPENCODE_SERVER_PASSWORD is set."
+  - "Config files are merged by precedence; wrappers that inject OPENCODE_CONFIG_CONTENT are intentionally overriding normal config at a high precedence layer."
+  - "OpenCode loads plugins from global/project config and plugin directories unless --pure or related disable env vars are used."
+  - "Project .opencode directories can trigger plugin/dependency behavior, including Bun package installation for plugin/custom-tool dependencies."
+  - "The standalone installer writes to ~/.opencode/bin by default, while XDG config/data/cache paths are used for runtime state."
+changes: []
+requires_claudine_update: true
+reason: "OpenCode current CLI surface differs from the stale agent-cli document: version is 1.17.13, schema frontmatter was missing, opencode run has additional wrapper-impacting flags, and machine introspection commands such as debug config, debug paths, models, session list, export, db, and generate should be reflected in Claudine provider metadata/wrappers."
 ---
 
-# OpenCode CLI Structured Output in Non-Interactive Sessions
-
-## ⚠ The "DONE-only" NDJSON Rule (Read First)
-
-OpenCode's `opencode run --format json` stream is **"DONE-only"** for tool
-and subagent lifecycle:
-
-- **No `tool_start`.** `tool_use` is emitted *only* after the tool reaches
-  `completed` / `error`. There is no paired request-side event on the wire.
-- **No native `task_started`.** The variant exists in the SDK but current
-  OpenCode releases do not emit it.
-- **No reliable session-complete event.** Token/cost data lives on
-  `step_finish`; the closing turn often goes silent on stdout for minutes.
-- **Often no `init` payload.** The run's primary provider/model identity
-  is frequently absent from stdout entirely.
-
-**Consumers cannot rely on stdout NDJSON alone** to observe an OpenCode
-run. The structured stderr stream (`--print-logs --log-level INFO`) is
-the second mandatory source for tool/subagent lifecycle, primary
-provider/model identity, and progress signal during long synthesis
-turns. Claudine treats this as a **Dual-Source Contract** and promotes
-selected stderr log records to first-class `SemanticEvent`s; see
-[`opencode-event-sources.md`](../../../../.claude/skills/claudine/opencode-event-sources.md)
-for the full mapping table.
-
-## Summary
-
-As of 2026-04-06, OpenCode's non-interactive structured output is the `opencode run --format json` mode documented at <https://opencode.ai/docs/cli/> and implemented in [`packages/opencode/src/cli/cmd/run.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/cli/cmd/run.ts). It writes one JSON object per line to stdout, so the wire format is newline-delimited JSON rather than a single JSON document.
-
-The stream is useful, but lightly specified. OpenCode does publish formal schemas for the underlying session/message/event model through an official OpenAPI 3.1.1 document and generated TypeScript types, but it does **not** publish a formal schema for the exact `opencode run --format json` envelope itself. The current CLI implementation emits a narrow subset of session activity as custom event records: `tool_use`, `step_start`, `step_finish`, `text`, `reasoning`, and `error`. That is enough for automation, but it is notably less expressive than the raw bus event system available to plugins.
-
-For automation, the practical split is:
-
-- Use `step_finish` to collect token and cost data.
-- Use `tool_use` to inspect completed or failed tool calls.
-- Use plugin hooks or the SDK event stream, not `opencode run --format json`, when you need model identity, permission prompts, user questions, or raw session lifecycle events.
-
-The biggest gaps today are the lack of a formal CLI stream schema, the lack of a dedicated session-complete event, and the fact that important human-in-the-loop signals are available to hooks but not surfaced in the CLI JSON stream.
-
-Beyond the NDJSON stream on stdout, OpenCode also writes a parallel diagnostic stream to **stderr**. That stream has two layers: a structured logger (off by default, opted into with `--print-logs` and tuned via `--log-level`) that emits `LEVEL  YYYY-MM-DDTHH:MM:SS +Nms key=value ... message` lines, and a smaller "human chrome" channel written through `UI.println`/`UI.error` that emits ANSI-styled banners, share URLs, warnings, and human-readable error messages. The structured layer is the **richest source of internal lifecycle metadata that OpenCode currently exposes** — for example, parent-vs-subagent session distinction (`mode=primary` vs `mode=subagent`), provider/model identity per LLM call, permission evaluations, retry-classified errors, and HTTP request spans. None of this is documented officially; the schema below was reconstructed from source plus real captures against opencode 1.14.48.
-
-## Schema
-
-### Bottom line
-
-There does not appear to be a provider-published formal schema for the **exact** output of `opencode run --format json`.
-
-What OpenCode **does** publish officially is:
-
-| Artifact | Schema language | URL | What it covers |
-| --- | --- | --- | --- |
-| Server API spec | OpenAPI 3.1.1 | <https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/sdk/openapi.json> | Official schema for server routes, raw bus events, messages, parts, permission requests, question requests, and related types |
-| Generated SDK types | TypeScript | <https://github.com/anomalyco/opencode/blob/dev/packages/sdk/js/src/v2/gen/types.gen.ts> | Generated client types such as `Part`, `ToolPart`, `StepFinishPart`, `EventSessionError`, `PermissionRequest`, and `QuestionRequest` |
-| Internal source-of-truth validators | TypeScript + Zod | <https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/session/message-v2.ts> | The runtime Zod definitions from which many message/part shapes are derived |
-
-Those official schemas are extremely useful because the CLI JSON stream embeds official `part` and `error` objects inside its envelope. The problem is that the **envelope** is only described by implementation code in `run.ts`, not by OpenAPI, JSON Schema, or a published TypeScript type.
-
-### Best available formal schema
-
-The best official formal schema I found is OpenCode's OpenAPI 3.1.1 document:
-
-- URL: <https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/sdk/openapi.json>
-- Schema language: `open-api`
-- Scope: underlying OpenCode session/message/event model, **not** the exact `opencode run --format json` line format
-
-Important relevant components inside that spec include:
-
-- `Part`
-- `ToolPart`
-- `StepStartPart`
-- `StepFinishPart`
-- `SnapshotPart`
-- `Event.message.part.updated`
-- `Event.session.error`
-- `Event.permission.asked`
-- `Event.question.asked`
-
-### Informal schema for the CLI NDJSON stream
-
-The following TypeScript-style shape is an **inference** from the current CLI implementation, not an official provider schema:
-
-```ts
-type RunJsonEvent =
-  | {
-      type: "tool_use"
-      timestamp: number
-      sessionID: string
-      part: ToolPart
-    }
-  | {
-      type: "step_start"
-      timestamp: number
-      sessionID: string
-      part: StepStartPart
-    }
-  | {
-      type: "step_finish"
-      timestamp: number
-      sessionID: string
-      part: StepFinishPart
-    }
-  | {
-      type: "text"
-      timestamp: number
-      sessionID: string
-      part: TextPart
-    }
-  | {
-      type: "reasoning"
-      timestamp: number
-      sessionID: string
-      part: ReasoningPart
-    }
-  | {
-      type: "error"
-      timestamp: number
-      sessionID: string
-      error:
-        | ProviderAuthError
-        | UnknownError
-        | MessageOutputLengthError
-        | MessageAbortedError
-        | StructuredOutputError
-        | ContextOverflowError
-        | ApiError
-    }
-```
-
-Important implementation details from the current source:
-
-- `timestamp` is produced with `Date.now()`, so it is an epoch-millisecond number.
-- `tool_use` is emitted only when a tool part reaches `completed` or `error`.
-- `reasoning` is emitted only when `--thinking` is enabled and the reasoning part is complete.
-- There is no `session.complete` or equivalent terminal JSON event in the current source.
-
-### Places checked for a formal schema
-
-I looked in all of the following places before concluding that the exact CLI envelope is undocumented:
-
-- Official CLI docs: <https://opencode.ai/docs/cli/>
-- Official SDK docs: <https://opencode.ai/docs/sdk/>
-- Official server docs: <https://opencode.ai/docs/server/>
-- Official plugins docs: <https://opencode.ai/docs/plugins/>
-- Official tools docs: <https://opencode.ai/docs/tools/>
-- Official repo OpenAPI spec: <https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/sdk/openapi.json>
-- Official generated TypeScript types: <https://github.com/anomalyco/opencode/blob/dev/packages/sdk/js/src/v2/gen/types.gen.ts>
-- Internal runtime schema source: <https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/session/message-v2.ts>
-- Current CLI implementation: <https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/cli/cmd/run.ts>
-- Community harness docs that consume this stream, including Cub and Harness
-
-The result is clear: OpenCode formally specifies the **embedded data model**, but not the exact `run --format json` NDJSON wrapper.
-
-## Documentation
-
-### Official documentation
-
-| Topic | URL | Notes |
-| --- | --- | --- |
-| CLI non-interactive mode | <https://opencode.ai/docs/cli/> | Documents `opencode run` and the `--format` flag |
-| SDK structured output | <https://opencode.ai/docs/sdk/> | Documents `format: { type: "json_schema", schema, retryCount }` for `session.prompt()` |
-| Plugin events and hooks | <https://opencode.ai/docs/plugins/> | Documents raw event names such as `session.error`, `permission.asked`, and `question.asked` plus `tool.execute.before/after` |
-| Built-in tools | <https://opencode.ai/docs/tools/> | Documents most public built-ins and their permission behavior |
-| Server routes | <https://opencode.ai/docs/server/> | Useful because the published SDK/server schemas are closer to the raw internal model than the CLI docs are |
-| OpenAPI spec | <https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/sdk/openapi.json> | Best formal source for event/message/part shapes |
-| Generated TypeScript types | <https://github.com/anomalyco/opencode/blob/dev/packages/sdk/js/src/v2/gen/types.gen.ts> | Best readable source for payload shapes without reading raw OpenAPI |
-
-### Third-party documentation and articles
-
-Long-form blog coverage of OpenCode's JSON stream is still sparse. The most useful third-party writeups I found were documentation from tools that integrate OpenCode as a subprocess:
-
-| Source | URL | Why it matters |
-| --- | --- | --- |
-| Cub harness docs | <https://docs.cub.tools/docs/guide/harnesses/opencode/> | Explains how another tool consumes `opencode run --format json`, especially `step_finish` for token accounting |
-| Harness docs | <https://www.harness.lol/docs> | Describes wrapping OpenCode's native stream into a provider-agnostic NDJSON format |
-| Cupcake OpenCode reference | <https://cupcake.eqtylab.io/reference/harnesses/opencode/> | Documents how OpenCode plugin hooks are mapped into a policy harness |
-
-These are valuable integration references, but they should be treated as secondary sources. They occasionally simplify or overgeneralize current OpenCode behavior.
-
-## CLI
-
-### Available output formats for non-interactive `run`
-
-For `opencode run`, the current CLI enumerates exactly two output formats:
+## Overview
 
-| Format | Meaning |
-| --- | --- |
-| `default` | Human-oriented formatted output |
-| `json` | Machine-oriented NDJSON stream of custom event objects |
-
-The CLI syntax is:
-
-```bash
-opencode run --format default "your prompt"
-opencode run --format json "your prompt"
-```
-
-The current source defines that flag in `packages/opencode/src/cli/cmd/run.ts` with:
-
-- `choices: ["default", "json"]`
-- `default: "default"`
+OpenCode is an open-source agentic coding CLI. The public command is `opencode`; running it without a subcommand starts the TUI, while `opencode run` is the primary non-interactive prompt mode documented for programmatic use.
 
-### What `json` actually means
+The latest release verified for this file is `1.17.13`, from npm and GitHub releases. Local macOS inspection found `/Users/ken/.opencode/bin/opencode` reporting `1.17.13`.
 
-Despite the docs calling this "raw JSON events", the implementation is not the full raw bus event stream. The CLI subscribes to the internal event bus, selects a handful of signals, then re-emits them as its own NDJSON records.
+The most wrapper-relevant surface is `opencode run --format json`, which emits newline-delimited JSON events on stdout. It is useful for automation but not a complete event bus. Wrappers should pair it with process-exit handling and, when richer lifecycle signals are needed, `--print-logs --log-level INFO` on stderr.
 
-Current emitted event types:
-
-- `tool_use`
-- `step_start`
-- `step_finish`
-- `text`
-- `reasoning`
-- `error`
-
-### Side effects and behavior changes when `--format json` is used
-
-| Behavior | Effect |
-| --- | --- |
-| Stdout becomes NDJSON | The primary result channel is machine-readable line output, not prose |
-| Human status output moves to stderr | Share URLs, warnings, and formatted UI messages still go to stderr because `UI.println()` writes there |
-| No dedicated completion event | Callers must infer completion from process exit and the last received events |
-| Tool start visibility is incomplete | The current formatter does not emit a generic "tool started" event for most tools |
-| Reasoning is opt-in | `reasoning` records only appear when `--thinking` is supplied |
-| Permission prompts are not exposed as JSON | `permission.asked` is handled internally and not emitted as structured stdout |
-
-### Related but different `--format` flags
-
-OpenCode also uses `--format json` on some non-streaming commands such as session/model listing, but those return regular JSON documents or tables rather than the NDJSON event stream used by `opencode run`.
-
-## Logging (STDERR Stream)
-
-OpenCode emits diagnostic output to **stderr** in non-interactive `run` mode. This is distinct from the NDJSON event stream on stdout described above and is the only place where many internal lifecycle signals are exposed — provider/model selection per call, session creation with `parentID` lineage, permission evaluations, retry-classified API errors, and HTTP span timings. There is no official documentation for this stream; the schema and examples here were reconstructed from source against opencode 1.14.48.
-
-### Three distinct stderr producers
-
-OpenCode `run` writes to stderr from exactly three sources, all of which can interleave in a single capture:
-
-| Producer | Source | Activation | Format |
-| --- | --- | --- | --- |
-| Structured logger | [`packages/core/src/util/log.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/core/src/util/log.ts) | `--print-logs` flag (off by default — writes go to a log file instead) | Plain-text `LEVEL  TIMESTAMP +Nms key=val ... message\n` |
-| UI helpers | [`packages/opencode/src/cli/ui.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/cli/ui.ts) | Always on; gated per call by `--format` | ANSI-colored prose with no timestamp; bare bytes via `process.stderr.write` |
-| Direct stderr writes | [`packages/opencode/src/index.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/index.ts) (~lines 127–155, 232–247) | First-run DB migration; top-level fatal fallback | Plain text; on TTY uses cursor and progress glyphs (`\x1b[?25l`, `■`); on pipe uses `sqlite-migration:N\n` lines |
-
-The structured logger is always created — when `--print-logs` is omitted, the same stream is written to a file under OpenCode's data dir instead of being redirected to stderr.
-
-### Activating the structured logger
-
-```bash
-opencode run --format json --print-logs --log-level INFO  "your prompt"   # default ~280 lines for a small session
-opencode run --format json --print-logs --log-level DEBUG "your prompt"   # adds verbose config-loading paths
-opencode run --format json --print-logs --log-level WARN  "your prompt"   # only WARN/ERROR (typically duplicate-skill notes)
-opencode run --format json --print-logs --log-level ERROR "your prompt"   # only ERROR (silent on success)
-```
-
-Source wiring (`packages/opencode/src/index.ts` ~lines 75–104):
-
-```ts
-.option("print-logs", { describe: "print logs to stderr", type: "boolean" })
-.option("log-level",  { type: "string", choices: ["DEBUG", "INFO", "WARN", "ERROR"] })
-.middleware(async (opts) => {
-  await Log.init({
-    print: process.argv.includes("--print-logs"),
-    dev:   Installation.isLocal(),
-    level: opts.logLevel ?? (Installation.isLocal() ? "DEBUG" : "INFO"),
-  })
-  Log.Default.info("opencode", { version, args, process_role, run_id })
-})
-```
-
-Default level is `INFO` for installed builds, `DEBUG` for `dev` checkouts. The first line written to the stream is always the `opencode` boot banner with `version`, `args`, `process_role`, and `run_id` — useful for parsers as a deterministic stream anchor.
-
-### Log line format
-
-Source: `build()` in `packages/core/src/util/log.ts` (lines ~113–139).
-
-The wire format is:
-
-```
-LEVEL  YYYY-MM-DDTHH:MM:SS +Nms key=value [key=value ...] [free-form message]\n
-```
-
-Notable details:
-
-- **Level token** is one of `DEBUG`, `INFO `, `WARN `, `ERROR` — every level is padded to **five characters** by trailing spaces so the prefix is fixed width. Followed by a single space (so the `LEVEL ` prefix is always six characters before the timestamp).
-- **Timestamp** is `new Date().toISOString().split(".")[0]` — second precision only, **no milliseconds, no trailing `Z`** (e.g. `2026-05-12T20:00:12`).
-- **Delta** is `+Nms` since the previous log line written by this process (not since the timestamped second).
-- **Tags** are space-joined `key=value` pairs from logger tags plus per-call extras. Object values are JSON-stringified inline (no internal newlines, but values may contain spaces if the inner JSON contains a space-bearing string). `Error` values are formatted via `formatError()` which concatenates `message + " Caused by: " + cause.message`.
-- **Free-form message** follows the tags and may be any prose (e.g. `created`, `loop`, `exiting loop`, `Sent HTTP response`, `stream`, `stream error`). It is always last on the line.
-- A single `\n` terminates the line; values **never** contain bare newlines because object serialization inlines and string messages are trusted.
-
-Conservative parse regex (matches all four levels, captures level/timestamp/delta/rest):
-
-```
-^(DEBUG|INFO |WARN |ERROR) (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}) \+(\d+)ms (.*)\n
-```
-
-### Tags catalog
-
-The `service` tag is the primary discriminator. Observed services in a single non-interactive run against opencode 1.14.48:
-
-| Service | What it logs |
-| --- | --- |
-| `default` | Boot banner (`opencode`), `creating instance`, `bootstrapping`, HTTP request spans (`http.method`, `http.url`, `http.status`, `logSpan.http.span.N`), instance disposal |
-| `file` | File subsystem init |
-| `project` | `directory=... fromDirectory` |
-| `db` | `opening database`, `applying migrations` (with `count` and `mode`) |
-| `config` | `loading` per config path; `DEBUG` adds `loading config from <path>` for `.opencode/*.json[c]` |
-| `plugin` | `loading internal plugin` (with `name=<obfuscated>`); `loading plugin` for external plugins (`path=file://...`) |
-| `bus` | `subscribing`/`publishing`/`unsubscribing` for every event type (very noisy — see Gotchas below) |
-| `lsp` | `all LSPs are disabled` or per-LSP startup |
-| `format` | `all formatters are disabled` or per-formatter startup |
-| `file.watcher` | `init` plus `platform=<os>` and `backend=<fs-events|inotify|...>` |
-| `session` | **Session-created records** with full metadata (see use cases) |
-| `session.prompt` | Per-step loop markers (`step=N loop`, `exiting loop`), `status=started/completed resolveTools` |
-| `session.processor` | Per-message processing (`messageID=...`) |
-| `provider` | Per-provider availability (`providerID=X found`), provider init spans |
-| `tool.registry` | Per-tool registration (`status=started/completed duration=N <toolName>`) — see warning about meaning below |
-| `shell-tool` | `shell=/bin/zsh shell tool using shell` |
-| `skill` | `init` plus `WARN duplicate skill name` for every skill collision |
-| `llm` | **Per-LLM-call provider/model identification** (see use cases) |
-| `permission` | **Permission evaluation results** (see use cases) |
-| `server` | Internal API server lifecycle and request errors (with stack traces for fatals) |
-| `share-next` | Share subscriber failures (carries Effect `Cause` tree) |
-| `image` | (Source-only — image attachment processing) |
-| `acp.session` | (Source-only — ACP integration) |
-
-Other recurring tag keys: `session.id`, `messageID`, `providerID`, `modelID`, `agent`, `mode`, `small`, `step`, `duration`, `cause`, `error`, `logSpan.<name>.span.<N>`.
-
-### What `tool.registry status=started/completed` does NOT mean
-
-This is the easiest log line to misread. `service=tool.registry status=started <name>` is logged **only** for tool **registration** at session startup, not for tool **invocation**. The duration on the completed line is the time to register the tool definition (typically `duration=0` or `duration=1`). Actual tool calls do not produce a `service=tool.registry` line. The only stderr signal for an actual tool invocation in INFO/DEBUG modes is the `service=session.prompt` loop transitions and any `service=permission ... evaluated` lines — the real per-call payload lives on stdout as `tool_use` events.
-
-### Default-format vs JSON-format stderr behavior
-
-| Behavior | `--format default` | `--format json` |
-| --- | --- | --- |
-| `> agent · modelID` start banner | Yes (once per session) | Suppressed |
-| Tool call inline lines (icon + title) | Yes | Suppressed (moves to stdout as `tool_use`) |
-| Completed text output | Stderr if stdout is a TTY; stdout otherwise | Suppressed (moves to stdout as `text` parts) |
-| Share URL line `~ <url>` | Yes | Yes (still printed via `UI.println`) |
-| Permission auto-reject warning `! permission requested: ...; auto-rejecting` | Yes | Yes |
-| Agent-not-found fallback `! agent "X" not found. Falling back to default agent` | Yes | Yes |
-| `UI.error("...")` for fatals (e.g. `Error: Model not found: ...`) | Yes | **Yes** — `UI.error` fires after `emit("error", ...)` writes to stdout (`emit` returns false when `args.format !== "json"` was the original intent, but the model-not-found path still hits `UI.error` via the top-level catch in `index.ts`) |
-| Structured logger output | Same in both formats (gated by `--print-logs`) | Same in both formats |
-
-### Stripping the structured-logger frame
-
-The structured logger uses bare ASCII; the UI helpers use ANSI SGR escapes (`\x1b[91m\x1b[1m` danger-bold, `\x1b[94m\x1b[1m` info-bold, `\x1b[93m\x1b[1m` warning-bold, `\x1b[90m` dim, `\x1b[0m` reset). A captured stream can be split into "structured" and "UI" by matching the level token at column 0 — any line that does not start with one of `DEBUG`, `INFO `, `WARN `, `ERROR` followed by a space is a UI helper or direct write, and should typically be SGR-stripped before further parsing.
-
-### Informal schema for the structured-log stream
-
-```ts
-type OpenCodeStderrLogLine = {
-  level: "DEBUG" | "INFO" | "WARN" | "ERROR"
-  timestamp: string          // "YYYY-MM-DDTHH:MM:SS", no millis, no Z
-  delta_ms: number           // ms since previous log line written by this process
-  service?: string           // e.g. "default" | "session" | "session.prompt" | "llm" | "tool.registry" | "permission" | "server" | "share-next" | "config" | "db" | ...
-  tags: Record<string, string | number | boolean | object>
-                             // free-form key=value pairs; object values are inline-JSON
-  message: string            // free-form trailing prose, e.g. "created" | "loop" | "exiting loop" | "stream" | "stream error" | "Sent HTTP response"
-}
-```
-
-Important tags carried by specific services:
-
-- `service=default` boot line: `version`, `args` (JSON array), `process_role`, `run_id` (UUID), trailing message `opencode`.
-- `service=session` created line: `id` (session ID), `slug`, `version`, `projectID`, `directory`, `path`, `parentID?` (only for subagent child sessions), `title`, `permission` (inline JSON array), `time` (inline JSON object), trailing message `created`.
-- `service=session.prompt`: `session.id`, `step`, `logSpan.http.span.N`, trailing message `loop` / `exiting loop` / `resolveTools` / status pairs.
-- `service=llm`: `providerID`, `modelID`, `session.id`, `small` (boolean), `agent`, `mode` (`primary` | `subagent`), trailing message `stream`. On failure: trailing message `stream error` and an additional `error=<JSON>` tag with the full AI SDK error object.
-- `service=permission`: `permission` (type, e.g. `task`, `read`, `write`), `pattern`, `action` (inline JSON), trailing message `evaluated`.
-- `service=server` error: `error=<ClassName>`, `cause=<ClassName>: <message>\n    at <stack>...`, trailing message `failed`.
-- `service=share-next` error: `type=<bus event type>`, `cause=<Effect Cause JSON>`, trailing message `share subscriber failed`.
-- `service=default` HTTP request: `http.method`, `http.url`, `http.status`, `logSpan.http.span.<N>` (duration in ms), trailing message `Sent HTTP response`.
-
-### Real-capture examples
-
-These lines are from a captured `--format json --print-logs --log-level INFO` run against opencode 1.14.48. Long inline-JSON fields are abbreviated with `…`.
-
-Boot banner:
-
-```
-INFO  2026-05-12T20:00:11 +97ms service=default version=1.14.48 args=["run","--format","json","--print-logs","--log-level","INFO","say hello in one word"] process_role=main run_id=48277674-19e5-40b6-b2b5-efa7577f08ea opencode
-```
-
-Session created (primary):
-
-```
-INFO  2026-05-12T20:00:12 +20ms service=session id=ses_1e23972b3ffe8QLhzuFpWS5bzd slug=happy-panda version=1.14.48 projectID=global directory=/private/tmp/oc-test path=private/tmp/oc-test title=New session - 2026-05-12T20:00:12.108Z permission=[{"permission":"question","pattern":"*","action":"deny"},{"permission":"plan_enter","pattern":"*","action":"deny"},{"permission":"plan_exit","pattern":"*","action":"deny"}] time={"created":1778616012108,"updated":1778616012108} created
-```
-
-LLM call (primary, title generation):
-
-```
-INFO  2026-05-12T20:00:12 +4ms service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_1e23972b3ffe8QLhzuFpWS5bzd small=true agent=title mode=primary stream
-```
-
-LLM call (primary, real work):
-
-```
-INFO  2026-05-12T20:00:12 +0ms service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_1e23972b3ffe8QLhzuFpWS5bzd small=false agent=build mode=primary stream
-```
-
-Step loop:
-
-```
-INFO  2026-05-12T20:00:12 +0ms service=session.prompt session.id=ses_1e23972b3ffe8QLhzuFpWS5bzd step=0 logSpan.http.span.4=55ms loop
-INFO  2026-05-12T20:00:19 +0ms service=session.prompt session.id=ses_1e23972b3ffe8QLhzuFpWS5bzd step=1 logSpan.http.span.4=7436ms loop
-INFO  2026-05-12T20:00:19 +1ms service=session.prompt session.id=ses_1e23972b3ffe8QLhzuFpWS5bzd logSpan.http.span.4=7437ms exiting loop
-```
-
-Provider rate-limit error from the Kimi backend (note the trailing `stream error` message and the massive inline `error=` payload that contains the full request body **and** the parsed retry classification):
-
-```
-ERROR 2026-05-12T20:02:20 +1967ms service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_1e237a304ffeqwr10bXJSRYGHJ small=false agent=build mode=primary error={"error":{"name":"AI_APICallError","url":"https://api.kimi.com/coding/v1/messages","requestBodyValues":{…},"responseBody":"{\"error\":{\"type\":\"rate_limit_error\",\"message\":\"The engine is currently overloaded, please try again later\"},\"type\":\"error\"}","isRetryable":true,"data":{"type":"error","error":{"type":"rate_limit_error","message":"The engine is currently overloaded, please try again later"}}}} stream error
-```
-
-Bad-model fatal (server + share-next both emit, then JSON stdout emits `{"type":"error",...}`):
-
-```
-ERROR 2026-05-12T20:05:54 +15ms service=server error=ProviderModelNotFoundError cause=ProviderModelNotFoundError: ProviderModelNotFoundError
-    at <anonymous> (/$bunfs/root/chunk-71tjptxz.js:519:65509)
-    at Provider.getModel (/$bunfs/root/chunk-jxv846wz.js:1900:1166)
-    ...stack frames... failed
-INFO  2026-05-12T20:05:54 +0ms service=default http.method=POST http.url=/session/ses_1e2343b5cffeGOb3bcdTjvh1wZ/message http.status=500 logSpan.http.span.4=99ms Sent HTTP response
-ERROR 2026-05-12T20:05:54 +0ms service=share-next type=message.updated cause={"_id":"Cause","failures":[{"_tag":"Die","defect":{"name":"ProviderModelNotFoundError","data":{"providerID":"nonexistent","modelID":"bogus-model","suggestions":[]}}}]} share subscriber failed
-```
-
-Bad-agent fallback (UI helper, **not** a structured log line — ANSI bytes shown verbatim):
+## Installation and Binaries
 
-```
-^[[93m^[[1m! ^[[0m agent "nonexistent-agent" not found. Falling back to default agent
-```
+The canonical binary name is `opencode` on all platforms. The npm package exposes `opencode`; Windows installations may surface `opencode.exe` or command shims depending on the installer.
 
-### Things that are NOT on stderr (even with `--log-level DEBUG`)
+Documented install paths and methods include:
 
-- **Token totals or per-message token usage** — token counts only appear in the JSON stdout `step_finish` part. No `service=llm` log line includes `tokens.input` / `tokens.output` / `cost` fields.
-- **Live tool invocation arguments and results** — those are only in stdout `tool_use` events. The stderr stream tells you when the parent session looped (`step=N loop`) and when a child session was created, but not which arguments the model passed to a tool.
-- **Rate-limit headroom or quota status** — there is no `service=quota` or `service=billing` stream. Cap-related signals only appear as provider error payloads inside the `error=` tag on `service=llm` ERROR lines, with provider-specific text.
-- **"Approaching plan cap" warnings** — no first-class signal, same as on stdout.
-- **Permission requests in interactive sense** — `service=permission ... evaluated` only logs decisions, not pending asks; in non-interactive `run` the engine pre-denies `question` / `plan_enter` / `plan_exit`, and other asks become UI-helper warnings (`! permission requested: ...; auto-rejecting`).
+- Standalone installer: `curl -fsSL https://opencode.ai/install | bash`.
+- npm package: `npm i -g opencode-ai@latest`; README also mentions bun, pnpm, and yarn.
+- macOS/Linux Homebrew: `brew install anomalyco/tap/opencode` or `brew install opencode`.
+- Windows: `scoop install opencode` or `choco install opencode`.
+- Arch Linux: `sudo pacman -S opencode` or `paru -S opencode-bin`.
 
-### Gotchas
+The standalone installer defaults to `$HOME/.opencode/bin`, supports `--version`, `--binary`, and `--no-modify-path`, and downloads OS/architecture-specific release archives.
 
-- **Bus chatter dominates INFO output.** In a non-trivial session, the majority of INFO lines are `service=bus type=message.part.delta publishing` and `service=bus type=message.part.updated publishing`. A 207-line stderr capture for a single tool call had ~150 of those. Filter `service=bus` aggressively unless you are debugging the bus itself.
-- **The `error=` payload can be tens of kilobytes per line.** AI SDK `AI_APICallError` objects include `requestBodyValues` with the full system prompt and message history. Parsers must allow very long single lines (no synthetic line wrap) and budget memory accordingly.
-- **Exit code is `0` even on fatal-looking errors.** A `ProviderModelNotFoundError` produces stderr `ERROR` lines, a stdout `{"type":"error",...}` event, and exits `0`. Do not use exit code as a success signal — inspect the JSON stream and/or look for ERROR-level lines.
-- **DEBUG adds very little above INFO in installed builds.** In 1.14.48, the only INFO→DEBUG delta observed was two extra `service=config loading config from <path>` lines. Most of the verbose detail OpenCode developers see is gated on `Installation.isLocal()` (dev checkouts), not on the `--log-level` flag.
-- **Timestamps have second precision only.** Sub-second ordering must use the `+Nms` delta.
-- **First-run DB migration prints non-log lines.** A fresh install emits `sqlite-migration:N\n` lines (or a TTY progress bar) before any structured log appears. Treat these as a one-shot pre-amble.
+## Subcommands
 
-### Logging Use Cases
+Public and source-registered top-level commands verified from docs, local help, and source are:
 
-These are the answers to the practical questions a wrapper needs to ask of the stderr stream, with the exact log lines that surface each signal.
+- `opencode [project]`: starts the TUI.
+- `opencode run [message..]`: non-interactive prompt execution, with optional direct interactive mode.
+- `opencode attach <url>`: attaches to a running OpenCode server.
+- `opencode acp`: starts an ACP server over stdin/stdout.
+- `opencode mcp`: manages MCP servers.
+- `opencode agent`: creates or lists agents.
+- `opencode plugin <module>` / `opencode plug <module>`: installs plugins and updates config.
+- `opencode session`: lists or deletes sessions.
+- `opencode models`: lists available provider/model ids.
+- `opencode providers`: manages provider auth/config flows.
+- `opencode console`: manages OpenCode console login, logout, org switching, org listing, and opening.
+- `opencode serve`: starts a headless HTTP server.
+- `opencode web`: starts a server and opens the web UI.
+- `opencode db`: queries or locates the local database.
+- `opencode debug`: troubleshooting commands.
+- `opencode generate`: emits the OpenAPI document.
+- `opencode stats`: token/cost statistics.
+- `opencode export` / `opencode import`: session data transfer.
+- `opencode github`: GitHub agent management.
+- `opencode pr`: checks out a GitHub PR then launches OpenCode.
+- `opencode completion`: shell completion generation.
+- `opencode upgrade` and `opencode uninstall`: installation management.
 
-#### 1. Subagent created and returned
+## CLI Switch Inventory
 
-Triggered when the parent agent calls the `task` tool. Sequence observed on stderr (all `INFO`):
+The structured frontmatter contains the switch inventory that matters to wrappers. The most important groups are:
 
-```
-service=permission permission=task pattern=<subagent-type> action={...} evaluated
-service=session id=ses_<CHILD> slug=<slug> version=<ver> projectID=<id> directory=<cwd> path=<rel> parentID=ses_<PARENT> title=<title> permission=[...] time={...} created
-service=session.prompt session.id=ses_<CHILD> step=0 logSpan.http.span.4=<Nms> loop
-service=session.prompt status=started resolveTools
-service=tool.registry status=started <tool> ... (per registered child tool)
-service=session.prompt status=completed duration=<N> resolveTools
-service=session.processor session.id=ses_<CHILD> messageID=msg_<...> process
-service=llm providerID=<X> modelID=<Y> session.id=ses_<CHILD> small=false agent=<subagent-name> mode=subagent stream
-service=session.prompt session.id=ses_<CHILD> step=1 logSpan.http.span.4=<Nms> loop
-service=session.prompt session.id=ses_<CHILD> logSpan.http.span.4=<Nms> exiting loop
-service=session.prompt session.id=ses_<PARENT> step=N logSpan.http.span.4=<Nms> loop   ← parent resumes
-```
+- Global: `--help`, `--version`, `--print-logs`, `--log-level`, `--pure`.
+- Non-interactive run: `--command`, `--continue`, `--session`, `--fork`, `--share`, `--model`, `--agent`, `--format`, `--file`, `--title`, `--attach`, `--password`, `--username`, `--dir`, `--port`, `--variant`, `--thinking`, `--interactive`, `--auto`.
+- Hidden or compatibility run flags: `--mini`, `--yolo`, `--dangerously-skip-permissions`, `--replay`, `--replay-limit`, `--demo`.
+- Server/network: `--port`, `--hostname`, `--mdns`, `--mdns-domain`, `--cors`, plus `--cwd` for `acp`.
+- Machine-readable state: `session list --format json`, `db --format json`, `export --sanitize`, and `generate`.
 
-The three definitive signals that distinguish a subagent from the primary session:
+`opencode run --format json` is the machine-output mode for prompt runs. `db --format json` and `session list --format json` emit regular JSON documents, not NDJSON.
 
-| Signal | Where | Discriminator |
-| --- | --- | --- |
-| Child session creation | `service=session ... created` | Has `parentID=ses_<PARENT>`; primary sessions never carry `parentID` |
-| LLM call mode | `service=llm ... mode=subagent stream` | Primary sessions emit `mode=primary` |
-| Agent identity | `service=llm ... agent=<name>` | `agent=build` is the primary work agent; `agent=title` is the auxiliary title generator; anything else (e.g. `agent=general`) is a subagent |
+## Configuration Discovery
 
-There is no explicit `subagent stopped` log line — completion is signaled by `service=session.prompt session.id=ses_<CHILD> ... exiting loop` followed immediately by the parent's next `loop` line. The corresponding JSON `tool_use` event for the `task` tool on stdout includes `metadata.sessionId` matching the child's session ID, which lets you cross-reference the two streams.
+OpenCode uses JSON or JSONC config. Documented config precedence is:
 
-Real captured example (Claude Haiku 4.5, `general` subagent):
+1. Remote config from `.well-known/opencode`.
+2. Global config, normally `~/.config/opencode/opencode.json`.
+3. Custom config from `OPENCODE_CONFIG`.
+4. Project config, `opencode.json` in the project.
+5. `.opencode` directories for agents, commands, and plugins.
+6. Inline config from `OPENCODE_CONFIG_CONTENT`.
 
-```
-INFO  2026-05-12T20:05:26 +160ms service=permission permission=task pattern=general action={"permission":"*","action":"allow","pattern":"*"} evaluated
-INFO  2026-05-12T20:05:26 +1ms   service=session id=ses_1e234a70dffeOCARJZRL9dhpHT slug=lucky-orchid version=1.14.48 projectID=global directory=/private/tmp/oc-test path=private/tmp/oc-test parentID=ses_1e234af48ffeViMPs5pMk6UhYk title=Count letters in 'banana' (@general subagent) permission=[…] time={…} created
-INFO  2026-05-12T20:05:26 +1ms   service=llm providerID=opencode modelID=claude-haiku-4-5 session.id=ses_1e234a70dffeOCARJZRL9dhpHT small=false agent=general mode=subagent stream
-INFO  2026-05-12T20:05:27 +1ms   service=session.prompt session.id=ses_1e234a70dffeOCARJZRL9dhpHT logSpan.http.span.4=3519ms exiting loop
-INFO  2026-05-12T20:05:27 +0ms   service=session.prompt session.id=ses_1e234af48ffeViMPs5pMk6UhYk step=1 logSpan.http.span.4=3590ms loop
-```
+Config files are merged rather than replaced. Later sources override conflicting keys while preserving non-conflicting settings.
 
-#### 2. Tool calling
+Global and project TUI-specific config use `tui.json` or `tui.jsonc`. Managed settings can be deployed under `/Library/Application Support/opencode/`, `/etc/opencode/`, or `%ProgramData%\\opencode`, and macOS can also use the `ai.opencode.managed` managed-preferences domain.
 
-The structured stderr stream does **not** log per-call tool invocations at INFO or DEBUG. `service=tool.registry` lines log only the tool **registration phase** at session bootstrap (with `duration=0`/`duration=1`), not the calls themselves. To observe actual tool calls you must either:
+Provider credentials added through `/connect` are documented as stored in `~/.local/share/opencode/auth.json`.
 
-- Read the **stdout NDJSON** `tool_use` events (the only place `tool`, `callID`, `input`, `output`, `metadata`, and `state.status` are exposed). This is the authoritative tool-call channel.
-- Or use the **plugin/hook layer** described earlier in this document — `tool.execute.before/after` plus raw `event` subscriptions are much richer than anything that lands in stderr.
+## Environment Variables
 
-What stderr **does** give you adjacent to tool calling:
+General wrapper-relevant variables include:
 
-| Signal | Meaning |
-| --- | --- |
-| `service=session.prompt ... step=N loop` | The parent went into another LLM step — usually because a tool result was added to the conversation |
-| `service=permission permission=<type> pattern=<arg> action={...} evaluated` | A permission for a tool argument was evaluated (allow/deny/auto-allow) |
-| UI helper line `! permission requested: <type> (<patterns>); auto-rejecting` | Non-interactive auto-reject for a tool that asked for permission (e.g. `bash`, `write`, `task`, etc.) |
-| `service=session.processor session.id=<X> messageID=<Y> process` | A new assistant message is being processed — usually follows a tool result |
+- `OPENCODE_CONFIG`, `OPENCODE_CONFIG_DIR`, and `OPENCODE_CONFIG_CONTENT` for config injection and discovery.
+- `OPENCODE_TUI_CONFIG` for TUI-specific config.
+- `OPENCODE_SERVER_PASSWORD` and `OPENCODE_SERVER_USERNAME` for server/attach authentication.
+- `OPENCODE_CLIENT` for client identity.
+- `OPENCODE_DISABLE_AUTOUPDATE`, `OPENCODE_DISABLE_PRUNE`, `OPENCODE_DISABLE_TERMINAL_TITLE`, `OPENCODE_DISABLE_AUTOCOMPACT`, `OPENCODE_DISABLE_MOUSE`, and `OPENCODE_GIT_BASH_PATH` for runtime behavior.
+- `OPENCODE_DISABLE_CLAUDE_CODE`, `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT`, and `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` for cross-provider prompt/skill loading behavior.
+- `OPENCODE_DISABLE_DEFAULT_PLUGINS`, `OPENCODE_ENABLE_EXA`, and the experimental variables listed in frontmatter for plugin/tool/UI behavior.
 
-So in practice: stderr tells you that a step boundary happened and that a permission was decided; stdout tells you *which tool* and *with what arguments*.
+Variables primarily owned by narrower topics, such as provider endpoint/model variables, permission policy injection, logging, MCP, and streaming, are not exhaustively duplicated here.
 
-#### 3. Provider rate-cap reached and approaching
+## Machine Introspection
 
-**Cap reached.** The stderr signal is an `ERROR` line on `service=llm` whose `error=` tag contains the AI SDK's classified error. The error JSON is the same structure that downstream emits as a `session.error` bus event and as the JSON-stdout `{"type":"error", ...}` envelope, but stderr exposes the **full raw provider response** including the original retry classification.
+Useful commands for Claudine wrappers and reports:
 
-Concrete pattern for an Anthropic-style rate cap:
+- `opencode debug config`: resolved config as JSON. Useful for provider metadata and wrapper diagnostics.
+- `opencode debug paths`: resolved data/config/cache/state/log/bin paths as text.
+- `opencode models`: provider/model ids, one per line.
+- `opencode models --verbose`: model ids plus JSON metadata blocks.
+- `opencode session list --format json`: saved sessions as JSON.
+- `opencode export <sessionID> --sanitize`: redacted session export as JSON.
+- `opencode db <query> --format json`: arbitrary database query output as JSON.
+- `opencode db path`: database path.
+- `opencode generate`: OpenAPI document as JSON.
+- `opencode debug skill`: available skills as JSON.
 
-```
-ERROR <ts> +<N>ms service=llm providerID=<P> modelID=<M> session.id=<S> small=<bool> agent=<A> mode=<primary|subagent> error={"error":{"name":"AI_APICallError","url":"<endpoint>","requestBodyValues":{…},"responseBody":"{\"error\":{\"type\":\"rate_limit_error\",\"message\":\"<vendor message>\"},…}","isRetryable":true|false,"data":{"type":"error","error":{"type":"<rate_limit_error|insufficient_quota|usage_not_included>","message":"<vendor message>"}}}} stream error
-```
-
-Fields a wrapper should inspect from inside the `error=` payload:
-
-- `error.name` — `AI_APICallError`, `ProviderAuthError`, or other AI SDK class name
-- `error.isRetryable` — boolean; `true` for rate-limit-style errors, useful to distinguish "wait and retry" from "stop"
-- `error.data.error.type` — `rate_limit_error` (engine overloaded / per-window rate cap), `insufficient_quota` (OpenAI-style billing cap), `usage_not_included` (subscription/plan cap)
-- `error.data.error.message` — provider-supplied human text; OpenCode does not normalize this further
-
-Observed at 2026-05-12 against Kimi:
-
-```
-ERROR 2026-05-12T20:02:20 +1967ms service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_1e237a304ffeqwr10bXJSRYGHJ small=false agent=build mode=primary error={…"responseBody":"{\"error\":{\"type\":\"rate_limit_error\",\"message\":\"The engine is currently overloaded, please try again later\"},\"type\":\"error\"}","isRetryable":true,…} stream error
-```
+Avoid treating `--help` and `--version` as machine introspection except for diagnostics; they do not expose stable provider state beyond version text.
 
-OpenCode retries internally, so on a sustained cap you typically see this line **repeated** (the capture above had 6 retries before giving up). The retry classifier lives in [`packages/opencode/src/session/retry.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/session/retry.ts) and emits no separate stderr text — counting `ERROR ... service=llm ... stream error` lines is the cheapest way for a wrapper to detect "we are being rate-limited" before the request finally fails.
+## Wrapper Notes
 
-**Cap approaching.** OpenCode does **not** surface a "cap approaching" signal anywhere — neither as a stderr log line nor as a JSON event. Provider-side soft warnings (e.g. Anthropic's `X-RateLimit-Remaining` headers, OpenAI usage warnings) are not propagated. The only way a wrapper can preview an upcoming cap is to track its own `step_finish.cost` totals from the JSON stream and apply a local threshold.
+Wrappers should invoke `opencode run` for non-interactive prompts. Running `opencode` without a subcommand starts the TUI.
 
-#### 4. Token usage
+`opencode run --format json` writes NDJSON events to stdout. The stream is not a formal complete schema for every OpenCode lifecycle signal. Current implementation-level behavior from the existing Claudine research and source inspection: tool events are completion-oriented, there is no dedicated completion event, and reasoning output requires `--thinking`.
 
-Not on stderr. The `service=llm` lines log model identity and stream success/failure, but never carry token counts. To get tokens, parse the JSON stdout `step_finish.part.tokens` (`input`, `output`, `reasoning`, `cache.read`, `cache.write`) and `step_finish.part.cost`. Each step emits one such record; summing them is the canonical way to get per-session totals because OpenCode does not emit a terminal session-summary event.
+Use process exit as the terminal signal. For richer lifecycle and provider/model progress, add `--print-logs --log-level INFO` and parse stderr as a second source. This makes stderr intentionally noisy even for successful runs.
 
-Adjacent stderr signals that help correlate token use to wall-clock time:
-
-- `service=session.prompt ... step=N loop` — marks the start of a step
-- `service=default http.method=POST http.url=/session/<id>/message http.status=200 logSpan.http.span.4=<Nms> Sent HTTP response` — marks the end of the prompt's HTTP request
+Non-interactive `run` adds deny rules for question and plan enter/exit permissions by default. `--auto`, hidden `--yolo`, and hidden `--dangerously-skip-permissions` remove permission friction and should be explicit opt-ins, not wrapper defaults.
 
-#### 5. Cleanest way to extract provider and model
+OpenCode loads global/project plugins and `.opencode` assets unless disabled. For deterministic wrapper runs, consider `--pure` and explicit config injection. Be aware that plugin/custom-tool dependencies can trigger Bun package installation.
 
-The single best line for provider/model identification is `service=llm`:
-
-```
-INFO  <ts> +<N>ms service=llm providerID=<P> modelID=<M> session.id=<S> small=<bool> agent=<A> mode=<primary|subagent> stream
-```
-
-Recommended extractor for Claudine:
+`serve` and `web` are long-running. `serve` warns when `OPENCODE_SERVER_PASSWORD` is missing; wrappers exposing remote attachment should set server credentials.
 
-- Match each stderr line against a regex that captures the structured prefix and the trailing `service=llm ... stream` shape.
-- Project the four fields the wrapper needs: `providerID`, `modelID`, `agent`, `mode`.
-- Treat the **first** `service=llm ... small=false mode=primary stream` line as the authoritative primary provider/model for the session. Earlier `small=true agent=title` lines reflect the auxiliary title-generation call (usually a smaller, faster model — e.g. `gpt-5-nano` even when the main agent runs on `claude-haiku-4-5`) and should be reported separately if reported at all.
-- For subagents, capture every `mode=subagent` line and pair it with the most recent `service=session ... parentID=... created` line to attribute the call to its child session ID.
+## Sources
 
-Suggested Rust extractor (illustrative, not authoritative):
-
-```rust
-// Per-line regex; fields are unordered in the source but stable in practice.
-// Allowing flexible ordering avoids breakage on logger refactors.
-const RE: &str = r"^(?P<level>DEBUG|INFO |WARN |ERROR) (?P<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}) \+(?P<delta>\d+)ms (?P<body>.*)$";
-
-fn extract_llm_call(body: &str) -> Option<LlmCall> {
-    if !body.starts_with("service=llm ") { return None; }
-    if !body.ends_with(" stream") && !body.ends_with(" stream error") { return None; }
-    let mut out = LlmCall::default();
-    for kv in body.split(' ') {
-        let (k, v) = kv.split_once('=')?;
-        match k {
-            "providerID" => out.provider = v.to_string(),
-            "modelID"    => out.model    = v.to_string(),
-            "agent"      => out.agent    = v.to_string(),
-            "mode"       => out.mode     = v.to_string(),  // "primary" | "subagent"
-            "small"      => out.small    = v == "true",
-            "session.id" => out.session  = v.to_string(),
-            _ => {}
-        }
-    }
-    Some(out)
-}
-```
-
-Why not parse the JSON stdout for this? The `step_finish` part on stdout includes `cost` and `tokens` but **no `providerID` / `modelID` field** — those identifiers are surfaced only as part of the `task` tool's child-session `metadata.model` (for subagents) and never at the top of the parent stream. The stderr `service=llm` line is OpenCode's only reliable top-of-stream announcement of "this call is being routed to provider X model Y".
-
-#### 6. Other useful signals for a wrapper
-
-| Need | Stderr signal |
-| --- | --- |
-| Session ID assigned | `service=session id=ses_<X> ... created` (first match wins for primary session) |
-| Project / repo OpenCode thinks it's in | `service=project directory=<path> fromDirectory` |
-| Permissions OpenCode actually enforces in this session | `permission=[...]` inline JSON inside the session-created line — non-interactive sessions show `question`/`plan_enter`/`plan_exit` denied by default; subagents add `task` deny and several `repo_*` denies |
-| HTTP timings end-to-end | `service=default http.method=... http.url=... http.status=... logSpan.http.span.N=<Nms> Sent HTTP response` (one per request, including `/session`, `/config`, `/event`, `/session/<id>/message`) |
-| Configuration files loaded | `service=config path=<path> loading` — useful to detect that the wrapper's intended config override was picked up |
-| Plugins loaded | `service=plugin name=<obfuscated> loading internal plugin` (built-ins) and `service=plugin path=file://<...> loading plugin` (external — readable path) |
-
-## Tools
-
-### Built-in tools currently available out of the box
-
-The official tools page documents these public built-ins:
-
-- `bash`
-- `edit`
-- `write`
-- `read`
-- `grep`
-- `glob`
-- `list`
-- `lsp` (experimental)
-- `apply_patch`
-- `skill`
-- `todowrite`
-- `webfetch`
-- `websearch`
-- `question`
-
-The current source-level registry also includes:
-
-- `task`
-- `codesearch`
-- `batch` (experimental)
-- `plan_exit` (experimental CLI plan mode)
-- `invalid` (internal fallback, not a user-facing tool)
-
-This is a good example of why the source is the stronger reference than the public tools page for integration work.
-
-### What the CLI JSON stream exposes for tool calls
-
-Current `opencode run --format json` behavior is asymmetric:
-
-| Phase | CLI JSON visibility | Hook visibility |
-| --- | --- | --- |
-| Before a tool runs | No general structured stdout event today | `tool.execute.before` and `event` hook both see it |
-| While a tool is running | Usually no structured stdout event; `task` gets special pretty-print handling only in default mode | `tool.execute.before`, internal part updates, and plugin `event` hook are richer |
-| After success | Yes, as `tool_use` with `part.type = "tool"` and `part.state.status = "completed"` | `tool.execute.after` and `event` hook both see it |
-| After failure | Yes, as `tool_use` with `part.state.status = "error"` | `tool.execute.after` may still observe the post-call state; raw `event` hook is the safer universal source |
-
-The important payload sits inside `part.state`:
-
-- `input`: the tool arguments the model used
-- `title`: the tool title shown by OpenCode
-- `output`: textual tool result
-- `metadata`: tool-specific structured metadata
-- `time`: start/end timestamps
-- `attachments`: optional attached files or images
-
-### Tool metadata examples
-
-#### `bash`
-
-`tool_use.part.state.metadata` includes:
-
-- `output`: preview of command output
-- `exit`: exit code
-- `description`: the tool description shown to the agent
-
-#### `read`
-
-`tool_use.part.state.metadata` includes:
-
-- `preview`: preview of the loaded content
-- `truncated`: whether the read was truncated
-- `loaded`: referenced system-reminder file paths that were injected
-
-#### `write`
-
-`tool_use.part.state.metadata` includes:
-
-- `diagnostics`: LSP diagnostics after the write
-- `filepath`: absolute file path
-- `exists`: whether the file already existed
-
-#### `edit`
-
-`tool_use.part.state.metadata` includes:
-
-- `diagnostics`
-- `diff`
-- `filediff` with before/after content and addition/deletion counts
-
-#### `task`
-
-`tool_use.part.state.metadata` includes:
-
-- `sessionId`: child session ID for the subagent run
-- `model`: `{ providerID, modelID }` used by the child agent
-
-#### `step_finish`
-
-Strictly speaking this is not a tool call, but it is the most important structured "after" record for accounting. It includes:
-
-- `cost`
-- `tokens.input`
-- `tokens.output`
-- `tokens.reasoning`
-- `tokens.cache.read`
-- `tokens.cache.write`
-- `reason`
-
-### Example NDJSON shapes
-
-These are representative examples reconstructed from the current source and official part schemas.
-
-#### Completed tool call
-
-```json
-{
-  "type": "tool_use",
-  "timestamp": 1775490000000,
-  "sessionID": "ses_123",
-  "part": {
-    "type": "tool",
-    "tool": "read",
-    "callID": "call_1",
-    "state": {
-      "status": "completed",
-      "input": {
-        "filePath": "/repo/src/lib.rs",
-        "offset": 1,
-        "limit": 200
-      },
-      "title": "src/lib.rs",
-      "output": "<path>/repo/src/lib.rs</path> ...",
-      "metadata": {
-        "preview": "pub fn example() { ... }",
-        "truncated": false,
-        "loaded": []
-      },
-      "time": {
-        "start": 1775490000100,
-        "end": 1775490000325
-      }
-    }
-  }
-}
-```
-
-#### Step accounting event
-
-```json
-{
-  "type": "step_finish",
-  "timestamp": 1775490001000,
-  "sessionID": "ses_123",
-  "part": {
-    "type": "step-finish",
-    "reason": "tool-calls",
-    "cost": 0.00123,
-    "tokens": {
-      "input": 1024,
-      "output": 220,
-      "reasoning": 0,
-      "cache": {
-        "read": 0,
-        "write": 0
-      }
-    }
-  }
-}
-```
-
-#### Failed tool call caused by permissions
-
-```json
-{
-  "type": "tool_use",
-  "timestamp": 1775490002000,
-  "sessionID": "ses_123",
-  "part": {
-    "type": "tool",
-    "tool": "write",
-    "state": {
-      "status": "error",
-      "input": {
-        "filePath": "/repo/.env",
-        "content": "SECRET=..."
-      },
-      "error": "Tool execution failed: The user has specified a rule which prevents you from using this specific tool call."
-    }
-  }
-}
-```
-
-## Use Cases
-
-### Plan Cap Approaching
-
-| Question | Answer |
-| --- | --- |
-| CLI JSON event type | No dedicated event type |
-| Best fallback | Possibly `error` or raw `session.status` retry messages, but only if the provider surfaces a useful string |
-| How to distinguish | Only by provider-specific message text; there is no normalized "cap approaching" field |
-| Remaining budget extractable? | No structured field today |
-| Reset window extractable? | No structured field today |
-| Hook exposure | No dedicated hook event either; the best hook fallback is raw `event` subscriptions for `session.error` or `session.status` |
-| Stream vs hook parity | Hooks are slightly richer because they preserve the raw event type and payload; the CLI JSON formatter does not surface retry/status events at all |
-
-Assessment: OpenCode does not currently formalize "plan cap approaching" as a first-class signal. If a provider emits a warning in plain text, callers must pattern-match on vendor-specific strings.
-
-### Plan Capped
-
-| Question | Answer |
-| --- | --- |
-| CLI JSON event type | Usually `error` |
-| Best raw event | `session.error` with `APIError` or `ProviderAuthError`, depending provider behavior |
-| How to distinguish | Inspect `error.name`, then inspect `error.data.message` and, when present, `error.data.responseBody` |
-| Remaining budget extractable? | Not in a normalized field |
-| Reset window extractable? | Not in a normalized field |
-| Hook exposure | Yes, via `event` hook on `session.error` |
-| Stream vs hook parity | Similar payload, but the hook sees the raw `session.error` object instead of the CLI envelope |
-
-Provider-specific notes:
-
-- OpenAI-style `insufficient_quota` is normalized by OpenCode to an `APIError` message that says quota was exceeded and billing should be checked.
-- OpenAI-style `usage_not_included` is normalized to an upgrade message for Codex access.
-
-That means "capped" is detectable only as a generic provider error, not as a standardized plan-window object.
-
-### No Funds
-
-| Question | Answer |
-| --- | --- |
-| CLI JSON event type | `error` |
-| Best raw event | `session.error` with `APIError` |
-| How to distinguish | Check `error.name === "APIError"` and inspect the provider-specific message or response body |
-| Normalized fields? | Only partially; OpenCode normalizes some OpenAI-style quota errors into friendlier text |
-| Hook exposure | Yes, via `event` hook on `session.error` |
-| Stream vs hook parity | Very close; the hook gets the original raw event, the CLI wraps it |
-
-Assessment: "no funds" is not a dedicated OpenCode event. It is a subclass of provider error handling.
-
-### Auth
-
-| Question | Answer |
-| --- | --- |
-| CLI JSON event type | `error` when auth fails |
-| Best raw event | `session.error` with `ProviderAuthError` |
-| How to distinguish | `error.name === "ProviderAuthError"` |
-| Can auth kind be detected? | Not from the current `opencode run --format json` stream |
-| Hook exposure | Yes, via `event` hook on `session.error` |
-| Stream vs hook parity | Same fundamental signal, but neither includes "API key vs OAuth vs subscription" as a structured field |
-
-Important nuance: older or abandoned community proposals exposed fields like `apiKeySource`, but the current `run` implementation does not.
-
-### Permissions: Can't Read File
-
-| Question | Answer |
-| --- | --- |
-| CLI JSON event type | Usually `tool_use` with `part.tool === "read"` and `part.state.status === "error"` |
-| Full path available? | Yes, via `part.state.input.filePath` for the attempted read |
-| Reason available? | Sometimes. Explicit deny usually becomes a generic permission-denied error string. Ask-mode rejection becomes a rejection/corrected message |
-| How to distinguish | Check `tool === "read"`, inspect `state.error`, and inspect `state.input.filePath` |
-| Hook exposure | Yes. `event` hook sees `permission.asked` for ask-mode reads; `tool.execute.before` sees raw args even earlier |
-| Stream vs hook parity | Hooks are richer. CLI JSON only shows the post-failure tool record; hooks can expose the permission request itself |
-
-Important source-level detail:
-
-- The read tool asks for permission `read`.
-- For reads, the raw permission request uses `patterns: [absolute_file_path]`.
-- Read permission metadata is empty, so the file path comes primarily from `patterns` or `tool.state.input.filePath`.
-
-### Permissions: Can't Write File
-
-| Question | Answer |
-| --- | --- |
-| CLI JSON event type | Usually `tool_use` with `tool` equal to `write`, `edit`, or `apply_patch`, and `state.status === "error"` |
-| Full path available? | Usually yes |
-| Reason available? | Sometimes; explicit deny becomes a generic permission-denied error string |
-| How to distinguish | Inspect `tool`, `state.input`, and `state.error` |
-| Hook exposure | Yes. `permission.asked` plus `tool.execute.before/after` are both relevant |
-| Stream vs hook parity | Hooks are significantly richer for write-like tools because metadata includes diffs and per-file details |
-
-Important tool differences:
-
-- `write`: `state.input.filePath` gives the absolute path; permission metadata includes `filepath` and `diff`.
-- `edit`: `state.input.filePath` gives the absolute path; permission metadata includes `filepath` and `diff`.
-- `apply_patch`: the path may be embedded in `patchText`, but permission metadata includes relative paths, total diff, and per-file details.
-
-### Tokens Consumed
-
-| Question | Answer |
-| --- | --- |
-| CLI JSON event type | `step_finish` |
-| Session total available directly? | No dedicated final total event in the current run formatter |
-| Granular data available? | Yes, per model step |
-| Cost basis available? | Yes, `part.cost` |
-| Hook exposure | Yes, via `message.part.updated` for `step-finish`, and `message.updated` for assistant-turn totals |
-| Stream vs hook parity | Hooks are richer because `message.updated` exposes final assistant-turn `cost` and `tokens` in addition to per-step accounting |
-
-The best current automation strategy is to sum every `step_finish.part.tokens` and `step_finish.part.cost` record you observe.
-
-### Model Used
-
-| Question | Answer |
-| --- | --- |
-| CLI JSON event type | No dedicated event in the current `run --format json` stream |
-| Can model be detected reliably from CLI JSON? | Not generally |
-| Hook exposure | Yes, via `message.updated` |
-| Raw hook fields | Assistant messages expose `providerID` and `modelID`; user messages expose `model.providerID` and `model.modelID` |
-| Stream vs hook parity | Hooks are much better; the CLI formatter drops model identity entirely |
-
-The default human formatter prints `agent · modelID` to stderr when the assistant starts, but that is not structured stdout data.
-
-### Human in the Loop
-
-| Question | Answer |
-| --- | --- |
-| Can the CLI JSON stream detect prompts/questions? | Not today |
-| Can the CLI JSON stream detect permission prompts? | Not as structured stdout; `run` handles them internally and writes warnings to stderr |
-| Hook exposure | Yes, strongly |
-| Relevant hook events | `question.asked`, `question.replied`, `question.rejected`, `permission.asked`, `permission.replied` |
-| Stream vs hook parity | Not close. Hooks expose full request payloads; CLI JSON exposes none of them |
-
-Current non-interactive behavior nuances:
-
-- `opencode run` creates sessions with `question`, `plan_enter`, and `plan_exit` denied.
-- That suppresses built-in primary-agent question/plan approval flows in non-interactive mode.
-- Built-in subagents also inherit `question: deny` by default from the agent defaults.
-- Custom agents or plugins can still create human-in-the-loop scenarios that the CLI JSON stream will not surface cleanly.
-
-For subagents specifically:
-
-- A `task` tool result can tell you that a child session existed and which model it used.
-- It does **not** expose live child-session `question.asked` or `permission.asked` events on stdout.
-- The plugin event bus is the only reliable structured source for those.
-
-### Injecting into Subagent Prompt
-
-| Question | Answer |
-| --- | --- |
-| First-class CLI support? | No |
-| Task-tool prompt field? | Yes, but it is controlled by the parent model when it calls `task` |
-| Caller-side runtime append field? | No dedicated flag or JSON-stream mechanism |
-| Hook workaround? | Partially, via system/message transformation hooks |
-| Stream vs hook parity | The CLI stream gives no help here; hooks are the only structured interception point |
-
-What is possible today:
-
-- The parent agent can include any text it wants in the `task` tool's `prompt`.
-- Agent definitions in `.opencode/agents/*.md` can inject persistent subagent instructions.
-- Global/project instructions and plugin hooks such as `experimental.chat.system.transform` and `chat.message` can modify session context more broadly.
-
-What is **not** available today:
-
-- A dedicated non-interactive CLI flag like "append this extra string to every subagent prompt".
-- A structured child-prompt injection field surfaced by `opencode run --format json`.
-
-## Gotchas
-
-### No formal schema for the exact CLI NDJSON envelope
-
-The official OpenAPI and TypeScript types are good, but they stop at the underlying message/event model. If your parser depends on the exact `run --format json` envelope, you are coding against implementation behavior in `run.ts`.
-
-### "Raw JSON events" is slightly misleading
-
-The CLI docs say `json` means raw JSON events. In practice, `opencode run --format json` emits a **filtered and reformatted** stream, not the full raw event bus. Critical signals like `message.updated`, `session.status`, `permission.asked`, and `question.asked` are omitted from stdout.
-
-### No session-complete event
-
-Community requests such as <https://github.com/anomalyco/opencode/issues/17221> explicitly ask for a terminal event containing the session ID, but the current formatter still does not emit one. Callers have to infer completion from process exit and the last observed events.
-
-### Tool start visibility is incomplete
-
-Open PR <https://github.com/anomalyco/opencode/pull/18249> exists specifically because current JSON mode does not provide good generic "tool started" visibility. If you need live progress bars or "tool is running" UX, the current stdout stream is weaker than the hook layer.
-
-### Docs and SDK examples have drifted
-
-Issue <https://github.com/anomalyco/opencode/issues/14875> reports that the SDK docs showed structured output under `structured_output`, while the current model stores it under `structured`. That kind of drift matters when you are generating parsers or adapters automatically.
-
-### Structured output and reasoning-model interactions have been brittle
-
-Issue <https://github.com/anomalyco/opencode/issues/15226> documents a real failure mode where `toolChoice: "required"` for structured output collided with thinking-enabled models. Open PR <https://github.com/anomalyco/opencode/pull/18450> exists to move toward native provider JSON-schema support.
-
-### Third-party harness docs can be outdated
-
-Some third-party documentation is useful but lags the source. For example:
-
-- Cub's OpenCode harness page assumes `opencode run` behaves like an auto-approve autonomous harness.
-- Cupcake's OpenCode reference simplifies plugin behavior into a smaller event model than OpenCode actually exposes.
-
-Treat those docs as integration notes, not as the source of truth.
-
-## Timeline
-
-The dates below focus on structured output in non-interactive or machine-consumable workflows.
-
-| Date | Event | Why it matters |
-| --- | --- | --- |
-| 2025-06-29 | PR #533 proposed an earlier `run --print` mode with `json` and `stream-json` outputs: <https://github.com/anomalyco/opencode/pull/533> | Useful historical context: OpenCode experimented with richer machine-readable non-interactive output before the current `--format json` shape |
-| 2025-10-31 | PR #3638 updated docs/source alignment for `opencode run --format json`: <https://github.com/anomalyco/opencode/pull/3638> | This is the earliest clear upstream evidence I found that the current `run --format json` mode was established and documented as "raw JSON events" |
-| 2025-12-16 | Feature request #5639 opened for SDK structured outputs: <https://github.com/anomalyco/opencode/issues/5639> | Marks explicit demand for schema-constrained structured output beyond plain JSON streaming |
-| 2026-02-12 | PR #8161 merged and shipped in release `v1.1.60`: <https://github.com/anomalyco/opencode/pull/8161>, <https://github.com/anomalyco/opencode/releases/tag/v1.1.60> | Official introduction of Claude Agent SDK-style structured outputs in the OpenCode SDK |
-| 2026-02-12 | Issue #13342 reported docs drift immediately after the structured-output merge: <https://github.com/anomalyco/opencode/issues/13342> | Shows that consumers had to track naming/details closely because documentation changed quickly |
-| 2026-02-24 | Issue #14875 reported the docs still used the wrong structured-output field name: <https://github.com/anomalyco/opencode/issues/14875> | Confirms that even after rollout, the documentation for structured output remained easy to misread |
-| 2026-02-26 | Issue #15226 documented a structured-output failure with thinking-enabled models: <https://github.com/anomalyco/opencode/issues/15226> | Highlights a real integration gotcha for machine-reliant callers |
-| 2026-03-19 | PR #18249 proposed emitting running `tool_use` events in JSON mode: <https://github.com/anomalyco/opencode/pull/18249> | Important for observability: it shows current JSON mode is still seen as incomplete by downstream integrators |
-| 2026-03-20 | PR #18450 proposed moving structured output to native `Output.object()` support: <https://github.com/anomalyco/opencode/pull/18450> | Signals likely future change in how structured output is implemented and possibly how failures look |
-| 2026-04-06 | Release `v1.3.16` fixed output token totals when reasoning tokens are separated: <https://github.com/anomalyco/opencode/releases/tag/v1.3.16> | Important for budget/accounting consumers who sum token usage from structured output |
-
+- [OpenCode CLI docs](https://opencode.ai/docs/cli/)
+- [OpenCode config docs](https://opencode.ai/docs/config/)
+- [OpenCode providers docs](https://opencode.ai/docs/providers/)
+- [OpenCode MCP docs](https://opencode.ai/docs/mcp-servers/)
+- [OpenCode plugins docs](https://opencode.ai/docs/plugins/)
+- [OpenCode troubleshooting docs](https://opencode.ai/docs/troubleshooting/)
+- [OpenCode GitHub repository](https://github.com/anomalyco/opencode)
+- [OpenCode releases](https://github.com/anomalyco/opencode/releases)
+- [OpenCode npm package metadata](https://www.npmjs.com/package/opencode-ai)
+- [OpenCode CLI entry source](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/index.ts)
+- [OpenCode run command source](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/cli/cmd/run.ts)
+- [OpenCode config path source](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/config/paths.ts)
+- [OpenCode global path source](https://github.com/anomalyco/opencode/blob/dev/packages/core/src/global.ts)
+- [OpenCode flag source](https://github.com/anomalyco/opencode/blob/dev/packages/core/src/flag/flag.ts)

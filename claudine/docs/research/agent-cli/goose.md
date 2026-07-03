@@ -1,1252 +1,1023 @@
 ---
+$schema: ./_schema.yaml
+created: 2026-04-27
+last_updated: 2026-07-02
+agent: codex
+model: default
+latest_version: "v1.41.0"
 homepage: https://goose-docs.ai/
-docs: https://goose-docs.ai/docs/guides/goose-cli-commands/
-cli_docs: https://goose-docs.ai/docs/guides/goose-cli-commands/
 repo: https://github.com/aaif-goose/goose
-schema:
-schema_type:
-data_format: json / ndjson
-latest_version: v1.32.0
-last_updated: 2026-04-27
+docs: https://goose-docs.ai/docs/
+cli_docs: https://goose-docs.ai/docs/guides/goose-cli-commands/
+binaries:
+  - os: macos
+    binary: goose
+    alt_binaries: []
+    notes: "Installed by the shell installer or Homebrew formula `block-goose-cli`; release asset names use `goose-<arch>-apple-darwin.tar.bz2`."
+  - os: linux
+    binary: goose
+    alt_binaries: []
+    notes: "Installed by the shell installer; release asset names include GNU, Vulkan, and musl variants."
+  - os: windows
+    binary: goose.exe
+    alt_binaries: ["goose"]
+    notes: "Native Windows release asset is `goose-x86_64-pc-windows-msvc.zip`; PowerShell and Git Bash/MSYS installs place the executable in a user bin directory."
+install_methods:
+  - os: macos
+    method: other
+    command: "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash"
+    notes: "Official CLI download script. Set `CONFIGURE=false` to skip the interactive configure step; set `GOOSE_VERSION` to pin a release."
+  - os: macos
+    method: brew
+    command: "brew install block-goose-cli"
+    notes: "Official Homebrew CLI formula."
+  - os: linux
+    method: other
+    command: "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash"
+    notes: "Official CLI download script. Supports `GOOSE_LINUX_VARIANT=standard|vulkan|musl` and `GOOSE_VERSION` pinning."
+  - os: windows
+    method: other
+    command: "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash"
+    notes: "Official Git Bash/MSYS2 install path. Native Windows installs default to a user bin directory."
+  - os: windows
+    method: other
+    command: "Invoke-WebRequest -Uri \"https://raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1\" -OutFile \"download_cli.ps1\"; .\\download_cli.ps1"
+    notes: "Official PowerShell installer. Supports `GOOSE_WINDOWS_VARIANT=standard|cuda`, `GOOSE_VERSION`, and `CONFIGURE=false`."
+subcommands:
+  - name: configure
+    description: "Configures providers, extensions, and other Goose settings interactively."
+    non_interactive: false
+    notes: "May open a browser for provider login and may prompt for credentials."
+  - name: info
+    description: "Prints Goose version, config paths, session storage, logs, optional config values, and optional provider check status."
+    non_interactive: true
+    notes: "`--verbose` prints merged config values as YAML-like text; `--check` performs a provider request."
+  - name: doctor
+    description: "Starts an interactive no-session diagnostic flow by sending `/doctor` into a Goose session."
+    non_interactive: false
+    notes: "Source-backed command; not a machine-readable doctor report."
+  - name: mcp
+    description: "Runs a bundled MCP server by name."
+    non_interactive: true
+    notes: "Server names are parsed by Goose MCP source; docs show usage as `goose mcp <name>`."
+  - name: acp
+    description: "Runs Goose as an ACP agent server over stdio."
+    non_interactive: true
+    notes: "Accepts `--with-builtin`."
+  - name: serve
+    description: "Starts an ACP server over HTTP and WebSocket."
+    non_interactive: true
+    notes: "Requires `GOOSE_SERVER__SECRET_KEY` unless `--dangerously-unauthenticated` is used."
+  - name: session
+    description: "Starts, resumes, forks, edits, lists, removes, imports, exports, or diagnoses interactive sessions."
+    non_interactive: false
+    notes: "Alias: `s`. Subcommands `list`, `export`, `import`, and `diagnostics` can be used non-interactively when identifiers are supplied."
+  - name: project
+    description: "Opens the last project directory."
+    non_interactive: false
+    notes: "Alias: `p`; may launch a file manager or change user focus."
+  - name: projects
+    description: "Lists recent project directories."
+    non_interactive: false
+    notes: "Alias: `ps`; source routes to an interactive project picker."
+  - name: run
+    description: "Executes a prompt, instruction file, stdin, or recipe and exits unless `--interactive` is supplied."
+    non_interactive: true
+    notes: "Primary wrapper entry point; supports `--output-format json` and `--output-format stream-json`."
+  - name: recipe
+    description: "Recipe utilities: validate, deeplink, open in Goose Desktop, and list."
+    non_interactive: true
+    notes: "`recipe open` launches Goose Desktop; `recipe list --format json` is machine-readable."
+  - name: skills
+    description: "Skill utilities."
+    non_interactive: true
+    notes: "Current source exposes `skills list` only."
+  - name: plugin
+    description: "Installs or updates Git-backed Goose plugins."
+    non_interactive: false
+    notes: "Runs Git/network operations and may be affected by credential prompts in Git."
+  - name: schedule
+    description: "Manages scheduled recipe jobs."
+    non_interactive: true
+    notes: "Alias: `sched`; `services-status` and `services-stop` are deprecated."
+  - name: gateway
+    description: "Manages external platform gateways such as Telegram."
+    non_interactive: false
+    notes: "Alias: `gw`; start/pair flows may require external credentials or user action."
+  - name: update
+    description: "Updates the Goose CLI."
+    non_interactive: false
+    notes: "Feature-gated in source; may run configuration after updating."
+  - name: term
+    description: "Terminal-integrated session helper with shell init, prompt run, and prompt-status info."
+    non_interactive: false
+    notes: "`term init` and `term info` are scriptable; `term run` sends prompts into a persistent terminal session."
+  - name: tui
+    description: "Launches the Goose terminal UI."
+    non_interactive: false
+    notes: "Feature-gated; resolves `GOOSE_TUI_SCRIPT` or runs npm/npx."
+  - name: local-models
+    description: "Searches, downloads, lists, and deletes local inference models."
+    non_interactive: true
+    notes: "Feature-gated; alias: `lm`."
+  - name: completion
+    description: "Generates shell completions."
+    non_interactive: true
+    notes: "Supports bash, elvish, fish, nu/nushell, powershell/pwsh, and zsh."
+  - name: review
+    description: "Reviews the current diff using Goose and optional `.agents/checks/*.md` subagent reviewers."
+    non_interactive: true
+    notes: "Source-backed command; may spawn orchestrated `goose run` subprocesses."
+  - name: validate-extensions
+    description: "Validates a bundled-extensions.json file."
+    non_interactive: true
+    notes: "Hidden source-backed command."
+cli_switches:
+  - flag: --help
+    value: ""
+    scope: ["global"]
+    default: "false"
+    description: "Prints help."
+    example: "goose --help"
+    notes: "Clap-generated global switch."
+  - flag: --version
+    value: ""
+    scope: ["global"]
+    default: "false"
+    description: "Prints installed Goose version."
+    example: "goose --version"
+    notes: "Clap-generated global switch."
+  - flag: -v, --verbose
+    value: ""
+    scope: ["info"]
+    default: "false"
+    description: "Shows detailed configuration settings, including merged config values."
+    example: "goose info --verbose"
+    notes: "Output is text, not declared JSON."
+  - flag: --check
+    value: ""
+    scope: ["info"]
+    default: "false"
+    description: "Tests provider connection and prints status."
+    example: "goose info --check"
+    notes: "Performs a real provider request."
+  - flag: --with-builtin
+    value: "<NAME[,NAME...]>"
+    scope: ["acp", "serve", "session", "run"]
+    default: ""
+    description: "Adds one or more bundled extensions by name."
+    example: "goose run --with-builtin developer -t \"summarize this repo\""
+    notes: "Comma-delimited in source; `serve` also allows repeated occurrences."
+  - flag: --host
+    value: "<HOST>"
+    scope: ["serve"]
+    default: "127.0.0.1"
+    description: "Host/interface for the ACP HTTP/WebSocket server."
+    example: "goose serve --host 127.0.0.1"
+    notes: ""
+  - flag: --port
+    value: "<PORT>"
+    scope: ["serve"]
+    default: "3284"
+    description: "Port for the ACP HTTP/WebSocket server."
+    example: "goose serve --port 3284"
+    notes: ""
+  - flag: --tls
+    value: ""
+    scope: ["serve"]
+    default: "false"
+    description: "Serves ACP over TLS."
+    example: "goose serve --tls --tls-cert-path cert.pem --tls-key-path key.pem"
+    notes: ""
+  - flag: --tls-cert-path
+    value: "<PATH>"
+    scope: ["serve"]
+    default: ""
+    description: "TLS certificate path for `goose serve`."
+    example: "goose serve --tls-cert-path cert.pem"
+    notes: ""
+  - flag: --tls-key-path
+    value: "<PATH>"
+    scope: ["serve"]
+    default: ""
+    description: "TLS private key path for `goose serve`."
+    example: "goose serve --tls-key-path key.pem"
+    notes: ""
+  - flag: --platform
+    value: "<cli|desktop>"
+    scope: ["serve"]
+    default: "cli"
+    description: "Selects the served Goose platform identity."
+    example: "goose serve --platform cli"
+    notes: "Source enum values are `cli` and `desktop`."
+  - flag: --dangerously-unauthenticated
+    value: ""
+    scope: ["serve"]
+    default: "false"
+    description: "Starts the ACP endpoint without requiring `GOOSE_SERVER__SECRET_KEY`."
+    example: "goose serve --dangerously-unauthenticated"
+    notes: "Wrapper should avoid setting this automatically."
+  - flag: --allowed-origin
+    value: "<ORIGIN>"
+    scope: ["serve"]
+    default: ""
+    description: "Allows an exact Origin value for ACP CORS; repeatable."
+    example: "goose serve --allowed-origin http://localhost:3000"
+    notes: "Replaces default loopback origins when supplied."
+  - flag: -n, --name
+    value: "<NAME>"
+    scope: ["session", "run", "session remove", "session export", "session diagnostics", "review/identifier"]
+    default: ""
+    description: "Names or identifies a Goose session."
+    example: "goose session --name my-project"
+    notes: "Shared identifier group."
+  - flag: --session-id
+    value: "<SESSION_ID>"
+    scope: ["session", "run", "session remove", "session export", "session diagnostics"]
+    default: ""
+    description: "Identifies a Goose session by ID."
+    example: "goose session --resume --session-id 20251108_2"
+    notes: "Alias: `--id` in source."
+  - flag: --path
+    value: "<PATH>"
+    scope: ["session", "run", "session remove", "session export", "session diagnostics"]
+    default: ""
+    description: "Legacy path-based session identifier."
+    example: "goose session --resume --path ./session.jsonl"
+    notes: "Kept for legacy JSONL/session import paths."
+  - flag: -r, --resume
+    value: ""
+    scope: ["session", "run"]
+    default: "false"
+    description: "Resumes a previous session or run."
+    example: "goose run --resume -t \"continue\""
+    notes: "With no identifier, source resumes the most recent session."
+  - flag: --fork
+    value: ""
+    scope: ["session"]
+    default: "false"
+    description: "Forks a previous session; requires `--resume`."
+    example: "goose session --resume --fork --history"
+    notes: ""
+  - flag: --edit
+    value: ""
+    scope: ["session"]
+    default: "false"
+    description: "Opens the session conversation in `$VISUAL`, `$EDITOR`, or `vi` before resuming; requires `--resume`."
+    example: "goose session --resume --session-id 20251108_2 --edit"
+    notes: "Requires an editor and is not suitable for non-interactive wrappers."
+  - flag: --history
+    value: ""
+    scope: ["session"]
+    default: "false"
+    description: "Shows previous messages when resuming a session."
+    example: "goose session --resume --history"
+    notes: "Requires `--resume`."
+  - flag: --debug
+    value: ""
+    scope: ["session", "run"]
+    default: "false"
+    description: "Shows complete tool responses, detailed parameters, and full paths."
+    example: "goose run --debug -t \"inspect failing tests\""
+    notes: "May expose sensitive data in output."
+  - flag: --max-tool-repetitions
+    value: "<NUMBER>"
+    scope: ["session", "run"]
+    default: ""
+    description: "Maximum consecutive identical tool calls allowed."
+    example: "goose run --max-tool-repetitions 3 -t \"fix loop\""
+    notes: ""
+  - flag: --max-turns
+    value: "<NUMBER>"
+    scope: ["session", "run"]
+    default: "1000"
+    description: "Maximum turns allowed without user input."
+    example: "goose run --max-turns 10 -t \"make a small change\""
+    notes: "Can also be controlled by `GOOSE_MAX_TURNS`."
+  - flag: --container
+    value: "<CONTAINER_ID>"
+    scope: ["session", "run"]
+    default: ""
+    description: "Runs extensions inside the specified Docker container."
+    example: "goose run --container devbox -t \"run tests\""
+    notes: "Requires Docker/container environment."
+  - flag: --with-extension
+    value: "<COMMAND>"
+    scope: ["session", "run"]
+    default: ""
+    description: "Adds stdio extensions from full commands; repeatable."
+    example: "goose run --with-extension \"npx -y @modelcontextprotocol/server-memory\" -t \"remember this\""
+    notes: "Command string may include env assignments and arguments."
+  - flag: --with-streamable-http-extension
+    value: "<URL>"
+    scope: ["session", "run"]
+    default: ""
+    description: "Adds streamable HTTP extensions; repeatable."
+    example: "goose run --with-streamable-http-extension \"http://localhost:8080/mcp\" -t \"use the server\""
+    notes: "Source parser also accepts `timeout=<seconds>` in the value."
+  - flag: --no-profile
+    value: ""
+    scope: ["session", "run"]
+    default: "false"
+    description: "Skips default profile extensions and uses only CLI-specified extensions."
+    example: "goose run --no-profile --with-builtin developer -t \"inspect\""
+    notes: ""
+  - flag: -f, --format
+    value: "<text|json>"
+    scope: ["session list"]
+    default: "text"
+    description: "Selects session list output format."
+    example: "goose session list --format json"
+    notes: "Machine-readable when `json`."
+  - flag: --ascending
+    value: ""
+    scope: ["session list"]
+    default: "false"
+    description: "Sorts sessions oldest first."
+    example: "goose session list --ascending"
+    notes: "Default order is descending/newest first."
+  - flag: -w, --working_dir
+    value: "<PATH>"
+    scope: ["session list"]
+    default: ""
+    description: "Filters sessions by working directory."
+    example: "goose session list --working_dir ~/src/project"
+    notes: "Short alias `-p` exists in source."
+  - flag: -l, --limit
+    value: "<NUMBER>"
+    scope: ["session list", "schedule sessions", "local-models search"]
+    default: ""
+    description: "Limits number of results."
+    example: "goose session list --limit 10"
+    notes: "`local-models search` defaults to 10."
+  - flag: -r, --regex
+    value: "<PATTERN>"
+    scope: ["session remove"]
+    default: ""
+    description: "Removes sessions matching a regex."
+    example: "goose session remove --regex \"project-.*\""
+    notes: "Removal can prompt for confirmation."
+  - flag: -o, --output
+    value: "<FILE>"
+    scope: ["session export", "session diagnostics"]
+    default: "stdout for export; diagnostics_<session_id>.json for diagnostics"
+    description: "Writes export or diagnostics output to a file."
+    example: "goose session export -n my-session --format json --output session.json"
+    notes: ""
+  - flag: --format
+    value: "<markdown|json|yaml>"
+    scope: ["session export"]
+    default: "markdown"
+    description: "Selects session export format."
+    example: "goose session export --session-id 20251108_4 --format json"
+    notes: "JSON and YAML are machine-readable."
+  - flag: --nostr
+    value: ""
+    scope: ["session export", "session import"]
+    default: "false"
+    description: "Publishes an encrypted Nostr session share link or treats import input as such."
+    example: "goose session export --format json --nostr"
+    notes: "Network side effects."
+  - flag: --relay
+    value: "<RELAY>"
+    scope: ["session export"]
+    default: ""
+    description: "Nostr relay URL; repeatable."
+    example: "goose session export --nostr --relay wss://relay.example"
+    notes: ""
+  - flag: -i, --instructions
+    value: "<FILE>"
+    scope: ["run"]
+    default: ""
+    description: "Path to an instruction file; use `-` for stdin."
+    example: "goose run --instructions -"
+    notes: "Conflicts with `--text` and `--recipe`."
+  - flag: -t, --text
+    value: "<TEXT>"
+    scope: ["run"]
+    default: ""
+    description: "Input text to provide directly to Goose."
+    example: "goose run --text \"summarize this repo\""
+    notes: "Conflicts with `--instructions` and `--recipe`."
+  - flag: --recipe
+    value: "<RECIPE_NAME|PATH>"
+    scope: ["run"]
+    default: ""
+    description: "Runs a recipe by configured name or file path."
+    example: "goose run --recipe ./recipe.yaml"
+    notes: "Conflicts with `--instructions` and `--text`."
+  - flag: --system
+    value: "<TEXT>"
+    scope: ["run"]
+    default: ""
+    description: "Adds system instructions for the run."
+    example: "goose run --system \"Be concise\" -t \"summarize\""
+    notes: "Conflicts with `--recipe`."
+  - flag: --params
+    value: "<KEY=VALUE>"
+    scope: ["run", "schedule add"]
+    default: ""
+    description: "Supplies recipe parameters; repeatable."
+    example: "goose run --recipe deploy.yaml --params env=prod"
+    notes: ""
+  - flag: --sub-recipe
+    value: "<RECIPE>"
+    scope: ["run"]
+    default: ""
+    description: "Includes additional sub-recipes; repeatable."
+    example: "goose run --recipe main.yaml --sub-recipe audit.yaml"
+    notes: ""
+  - flag: --explain
+    value: ""
+    scope: ["run"]
+    default: "false"
+    description: "Shows recipe title, description, and parameters."
+    example: "goose run --recipe build.yaml --explain"
+    notes: ""
+  - flag: --render-recipe
+    value: ""
+    scope: ["run"]
+    default: "false"
+    description: "Prints the rendered recipe instead of running it."
+    example: "goose run --recipe build.yaml --render-recipe"
+    notes: ""
+  - flag: -s, --interactive
+    value: ""
+    scope: ["run"]
+    default: "false"
+    description: "Continues in interactive mode after processing initial input."
+    example: "goose run -t \"start by inspecting failures\" --interactive"
+    notes: "Wrappers should avoid this for batch runs."
+  - flag: --no-session
+    value: ""
+    scope: ["run"]
+    default: "false"
+    description: "Runs without creating or using a session file."
+    example: "goose run --no-session --output-format stream-json -t \"summarize\""
+    notes: "Conflicts with `--resume`, `--name`, and `--path`."
+  - flag: --stats
+    value: ""
+    scope: ["run"]
+    default: "false"
+    description: "Prints generation statistics after the run completes."
+    example: "goose run --stats -t \"summarize\""
+    notes: ""
+  - flag: --scheduled-job-id
+    value: "<ID>"
+    scope: ["run"]
+    default: ""
+    description: "Associates a run with a scheduled job."
+    example: "goose run --scheduled-job-id daily-report --recipe report.yaml"
+    notes: "Hidden internal flag."
+  - flag: -q, --quiet
+    value: ""
+    scope: ["run", "review"]
+    default: "false"
+    description: "Suppresses non-response output."
+    example: "goose run --quiet -t \"answer only\""
+    notes: "Important when wrappers need clean text output."
+  - flag: --output-format
+    value: "<text|json|stream-json>"
+    scope: ["run"]
+    default: "text"
+    description: "Selects run output format."
+    example: "goose run --output-format stream-json -t \"summarize this repo\""
+    notes: "`stream-json` is newline-delimited JSON events."
+  - flag: --provider
+    value: "<PROVIDER>"
+    scope: ["run", "review"]
+    default: ""
+    description: "Overrides provider for the run or review."
+    example: "goose run --provider anthropic --model claude-sonnet-4-20250514 -t \"inspect\""
+    notes: "Overrides `GOOSE_PROVIDER` for the invocation."
+  - flag: --model
+    value: "<MODEL>"
+    scope: ["run", "review"]
+    default: ""
+    description: "Overrides model for the run or review."
+    example: "goose run --provider openai --model gpt-4.1 -t \"summarize\""
+    notes: "Overrides `GOOSE_MODEL` for the invocation."
+  - flag: -p, --param
+    value: "<KEY=VALUE>"
+    scope: ["recipe deeplink", "recipe open"]
+    default: ""
+    description: "Supplies recipe parameters; repeatable."
+    example: "goose recipe deeplink my-recipe --param env=prod"
+    notes: ""
+  - flag: --format
+    value: "<text|json>"
+    scope: ["recipe list"]
+    default: "text"
+    description: "Selects recipe list output format."
+    example: "goose recipe list --format json"
+    notes: "Machine-readable when `json`."
+  - flag: -v, --verbose
+    value: ""
+    scope: ["recipe list"]
+    default: "false"
+    description: "Shows verbose recipe information including descriptions."
+    example: "goose recipe list --verbose"
+    notes: ""
+  - flag: --auto-update
+    value: ""
+    scope: ["plugin install"]
+    default: "false"
+    description: "Marks an installed plugin for automatic update checks before plugin skills are loaded."
+    example: "goose plugin install --auto-update https://github.com/example/plugin.git"
+    notes: ""
+  - flag: --schedule-id
+    value: "<ID>"
+    scope: ["schedule add", "schedule remove", "schedule sessions", "schedule run-now"]
+    default: ""
+    description: "Identifies a scheduled recipe job."
+    example: "goose schedule run-now --schedule-id daily-report"
+    notes: "Alias: `--id` in source."
+  - flag: --cron
+    value: "<EXPR>"
+    scope: ["schedule add"]
+    default: ""
+    description: "Cron expression for a scheduled job."
+    example: "goose schedule add --schedule-id daily --cron \"0 9 * * *\" --recipe-source ./daily.yaml"
+    notes: ""
+  - flag: --recipe-source
+    value: "<PATH|BASE64>"
+    scope: ["schedule add"]
+    default: ""
+    description: "Recipe source path or base64-encoded recipe string."
+    example: "goose schedule add --schedule-id daily --cron \"0 9 * * *\" --recipe-source ./daily.yaml"
+    notes: ""
+  - flag: --bot-token
+    value: "<TOKEN>"
+    scope: ["gateway start"]
+    default: ""
+    description: "Gateway platform bot token."
+    example: "goose gateway start telegram --bot-token \"$TOKEN\""
+    notes: "Secret-bearing argument."
+  - flag: --canary
+    value: ""
+    scope: ["update"]
+    default: "false"
+    description: "Updates to the canary release instead of stable."
+    example: "goose update --canary"
+    notes: "Feature-gated update command."
+  - flag: -r, --reconfigure
+    value: ""
+    scope: ["update"]
+    default: "false"
+    description: "Forces reconfiguration during update."
+    example: "goose update --reconfigure"
+    notes: "May prompt interactively."
+  - flag: --bin-name
+    value: "<NAME>"
+    scope: ["completion"]
+    default: "goose"
+    description: "Uses a custom binary name in generated completions."
+    example: "goose completion zsh --bin-name goose"
+    notes: ""
+  - flag: -n, --name
+    value: "<NAME>"
+    scope: ["term init"]
+    default: ""
+    description: "Names the terminal-integrated session."
+    example: "goose term init zsh --name work"
+    notes: ""
+  - flag: --default
+    value: ""
+    scope: ["term init"]
+    default: "false"
+    description: "Makes Goose the default handler for unknown shell commands."
+    example: "goose term init zsh --default"
+    notes: "Supported for zsh, bash, and nu according to source help."
+  - flag: --prompt
+    value: "<FILE>"
+    scope: ["review"]
+    default: ""
+    description: "Path to a Markdown file with a custom base review prompt."
+    example: "goose review --prompt REVIEW.md"
+    notes: ""
+  - flag: --override-model
+    value: "<MODEL>"
+    scope: ["review"]
+    default: ""
+    description: "Forces every discovered review check to use a model."
+    example: "goose review --override-model claude-sonnet-4-20250514"
+    notes: ""
+  - flag: --turn-limit
+    value: "<N>"
+    scope: ["review"]
+    default: ""
+    description: "Default turn limit for orchestrated review subprocesses and checks."
+    example: "goose review --turn-limit 10"
+    notes: ""
+  - flag: --dry-run
+    value: ""
+    scope: ["review"]
+    default: "false"
+    description: "Prints the assembled review prompt and checks instead of running."
+    example: "goose review --dry-run"
+    notes: ""
+  - flag: --no-orchestrate
+    value: ""
+    scope: ["review"]
+    default: "false"
+    description: "Disables Rust-driven parallel review orchestration."
+    example: "goose review --no-orchestrate"
+    notes: ""
+  - flag: -i, --instructions
+    value: "<TEXT>"
+    scope: ["review"]
+    default: ""
+    description: "Additional free-form instructions to prepend to the review."
+    example: "goose review --instructions \"focus on regressions\""
+    notes: ""
+  - flag: -f, --files
+    value: "<FILE>..."
+    scope: ["review"]
+    default: ""
+    description: "Restricts review to specific files."
+    example: "goose review --files src/lib.rs"
+    notes: ""
+  - flag: -c, --check-filter
+    value: "<NAME>..."
+    scope: ["review"]
+    default: ""
+    description: "Runs only matching named review checks."
+    example: "goose review --check-filter security"
+    notes: ""
+  - flag: -s, --check-scope
+    value: "<DIR>"
+    scope: ["review"]
+    default: ""
+    description: "Alternate directory to search for `.agents/checks/*.md`."
+    example: "goose review --check-scope ."
+    notes: ""
+  - flag: --checks-only
+    value: ""
+    scope: ["review"]
+    default: "false"
+    description: "Skips the main correctness pass and only runs check subagents."
+    example: "goose review --checks-only"
+    notes: ""
+  - flag: --summary-only
+    value: ""
+    scope: ["review"]
+    default: "false"
+    description: "Prints only the diff summary and skips the full review."
+    example: "goose review --summary-only"
+    notes: ""
+  - flag: --severity
+    value: "<LEVEL>"
+    scope: ["review"]
+    default: "medium"
+    description: "Minimum severity to display."
+    example: "goose review --severity low"
+    notes: ""
+config_files:
+  - os: macos
+    scope: user
+    path: "~/.config/goose/config.yaml"
+    format: yaml
+    notes: "Official docs list this path; source currently uses platform app strategy with Block/goose for compatibility, so `goose info` is the safest way to discover the effective path."
+  - os: linux
+    scope: user
+    path: "~/.config/goose/config.yaml"
+    format: yaml
+    notes: "Official primary config path."
+  - os: windows
+    scope: user
+    path: "%APPDATA%\\Block\\goose\\config\\config.yaml"
+    format: yaml
+    notes: "Official primary Windows config path."
+  - os: linux
+    scope: system
+    path: "/etc/goose/config.yaml"
+    format: yaml
+    notes: "Source-backed system config path loaded before additional files and user config."
+  - os: macos
+    scope: system
+    path: "/etc/goose/config.yaml"
+    format: yaml
+    notes: "Source-backed Unix system config path loaded before additional files and user config."
+  - os: windows
+    scope: system
+    path: "%PROGRAMDATA%\\goose\\config.yaml"
+    format: yaml
+    notes: "Source-backed system config path; falls back to `C:\\ProgramData\\goose\\config.yaml` if PROGRAMDATA is unset."
+  - os: all
+    scope: env
+    path: "GOOSE_ADDITIONAL_CONFIG_FILES"
+    format: yaml
+    notes: "Source-backed path-list environment variable for additional config files; loaded after system config and before user config."
+  - os: macos
+    scope: user
+    path: "~/.config/goose/permission.yaml"
+    format: yaml
+    notes: "Tool permission levels configured by `goose configure`."
+  - os: linux
+    scope: user
+    path: "~/.config/goose/permission.yaml"
+    format: yaml
+    notes: "Tool permission levels configured by `goose configure`."
+  - os: windows
+    scope: user
+    path: "%APPDATA%\\Block\\goose\\config\\permission.yaml"
+    format: yaml
+    notes: "Tool permission levels configured by `goose configure`."
+  - os: macos
+    scope: user
+    path: "~/.config/goose/secrets.yaml"
+    format: yaml
+    notes: "Only used when file-based secret storage is active."
+  - os: linux
+    scope: user
+    path: "~/.config/goose/secrets.yaml"
+    format: yaml
+    notes: "Only used when file-based secret storage is active."
+  - os: windows
+    scope: user
+    path: "%APPDATA%\\Block\\goose\\config\\secrets.yaml"
+    format: yaml
+    notes: "Only used when file-based secret storage is active."
+  - os: all
+    scope: user
+    path: "~/.agents/plugins/"
+    format: other
+    notes: "Installed Goose plugins live under `.agents/plugins/<plugin-name>/`."
+  - os: all
+    scope: user
+    path: "~/.agents/skills/"
+    format: other
+    notes: "Goose skills are discovered from the shared agents skills directory."
+env_vars:
+  - name: GOOSE_PATH_ROOT
+    effect: "Overrides the root directory for Goose config, data, state, plugins, and agent files; useful for wrapper isolation and CI."
+  - name: GOOSE_ADDITIONAL_CONFIG_FILES
+    effect: "Adds extra YAML config files between system config and user config in precedence."
+  - name: GOOSE_DISABLE_KEYRING
+    effect: "Disables system keyring secret storage and forces file-based secret behavior when set or configured truthy."
+  - name: GOOSE_PROMPT_EDITOR
+    effect: "Uses an external editor for composing interactive prompts."
+  - name: GOOSE_CLI_THEME
+    effect: "Controls CLI markdown theme: light, dark, or ansi."
+  - name: GOOSE_CLI_LIGHT_THEME
+    effect: "Controls bat syntax theme used for light CLI markdown rendering."
+  - name: GOOSE_CLI_DARK_THEME
+    effect: "Controls bat syntax theme used for dark CLI markdown rendering."
+  - name: GOOSE_CLI_NEWLINE_KEY
+    effect: "Customizes the Ctrl+<key> shortcut used for newlines in CLI input."
+  - name: GOOSE_CLI_SHOW_THINKING
+    effect: "Shows model reasoning/thinking output in CLI responses when models expose it."
+  - name: GOOSE_RANDOM_THINKING_MESSAGES
+    effect: "Controls random thinking/progress messages in CLI output."
+  - name: GOOSE_CLI_SHOW_COST
+    effect: "Toggles display of model cost estimates in CLI output."
+  - name: GOOSE_MAX_CODE_BLOCK_LINES
+    effect: "Sets the line threshold before CLI code blocks are truncated."
+  - name: GOOSE_TRUNCATED_SHOW_LINES
+    effect: "Controls how many lines are shown before the truncated-lines marker."
+  - name: GOOSE_NO_CODE_TRUNCATION
+    effect: "Disables CLI code block truncation."
+  - name: GOOSE_SEARCH_PATHS
+    effect: "Prepends additional directories to PATH for extension commands."
+  - name: GOOSE_SHELL
+    effect: "Overrides the shell used for Developer extension shell commands."
+  - name: GOOSE_SERVER__SECRET_KEY
+    effect: "Shared secret required by `goose serve` unless started with `--dangerously-unauthenticated`."
+  - name: GOOSE_RECIPE_PATH
+    effect: "Additional recipe search directories; colon-separated on Unix and semicolon-separated on Windows."
+  - name: GOOSE_RECIPE_GITHUB_REPO
+    effect: "GitHub repository to search for recipes."
+  - name: GOOSE_RECIPE_RETRY_TIMEOUT_SECONDS
+    effect: "Global timeout for recipe success-check commands."
+  - name: GOOSE_RECIPE_ON_FAILURE_TIMEOUT_SECONDS
+    effect: "Global timeout for recipe on-failure commands."
+  - name: GOOSE_TERMINAL
+    effect: "Set by Goose when running commands so shell config and scripts can detect Goose execution."
+  - name: AGENT
+    effect: "Set to `goose` by Goose for cross-agent script compatibility."
+  - name: AGENT_SESSION_ID
+    effect: "Set in extension/shell contexts to the current Goose session ID."
+  - name: GOOSE_BIN_DIR
+    effect: "Installer-only variable overriding the target binary directory."
+  - name: GOOSE_VERSION
+    effect: "Installer-only variable pinning a specific Goose release."
+  - name: CANARY
+    effect: "Installer-only variable selecting canary release assets when set to true."
+  - name: CONFIGURE
+    effect: "Installer-only variable; `false` skips interactive `goose configure` after install."
+  - name: GOOSE_LINUX_VARIANT
+    effect: "Installer-only variable selecting Linux asset variant: standard, vulkan, or musl."
+  - name: GOOSE_WINDOWS_VARIANT
+    effect: "Installer-only variable selecting Windows asset variant: standard or cuda."
+  - name: INSTALL_OS
+    effect: "Installer-only override for OS detection: linux, windows, or darwin."
+  - name: HTTP_PROXY
+    effect: "Standard proxy variable used for Goose network connections."
+  - name: HTTPS_PROXY
+    effect: "Standard HTTPS proxy variable used for Goose network connections."
+  - name: NO_PROXY
+    effect: "Standard proxy bypass list."
+machine_introspection:
+  - command: "goose info --verbose"
+    purpose: config_dump
+    machine_readable: false
+    output_format: yaml
+    useful_for_codegen: false
+    notes: "Prints version, config/session/log paths, and merged config values. The config block is YAML-like but embedded in human text."
+  - command: "goose info --check"
+    purpose: doctor
+    machine_readable: false
+    output_format: text
+    useful_for_codegen: false
+    notes: "Checks provider/model configuration and performs a provider request; useful for diagnostics, not static metadata."
+  - command: "goose session list --format json"
+    purpose: other
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: false
+    notes: "Lists saved sessions and can be filtered by working directory and limit."
+  - command: "goose session export --session-id <id> --format json"
+    purpose: other
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: false
+    notes: "Exports one session as JSON when a stable session identifier is known."
+  - command: "goose session diagnostics --session-id <id> --output <file>"
+    purpose: doctor
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: false
+    notes: "Generates a diagnostics JSON file containing session, system, config, and log data; may include sensitive content."
+  - command: "goose recipe list --format json"
+    purpose: other
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: false
+    notes: "Lists available recipes from configured discovery sources."
+  - command: "goose skills list"
+    purpose: capabilities
+    machine_readable: false
+    output_format: text
+    useful_for_codegen: false
+    notes: "Lists skills available to the Goose agent; no JSON flag found in current source."
+  - command: "goose run --output-format json --no-session -t <prompt>"
+    purpose: other
+    machine_readable: true
+    output_format: json
+    useful_for_codegen: false
+    notes: "Returns a single JSON object after completion. Useful for wrapper execution, not provider metadata generation."
+  - command: "goose run --output-format stream-json --no-session -t <prompt>"
+    purpose: other
+    machine_readable: true
+    output_format: jsonl
+    useful_for_codegen: false
+    notes: "Streams event objects as newline-delimited JSON during a run."
+wrapper_notes:
+  - "Current official project location is AAIF (`aaif-goose/goose`, `goose-docs.ai`); older Block URLs may redirect or be stale."
+  - "No `goose` binary is installed on this host, so this research uses official docs and source rather than local help output."
+  - "`goose run --output-format stream-json` is the best wrapper surface for live event parsing; `json` emits one object after completion."
+  - "Stream event source currently defines top-level event types `message`, `notification`, `error`, and `complete`; notification payload fields are flattened."
+  - "`goose run --quiet` suppresses non-response output for text mode, but wrappers should prefer structured output for reliable parsing."
+  - "`goose configure`, `goose doctor`, `goose session --edit`, `goose update --reconfigure`, gateway flows, and plugin Git operations are interactive or may require external credentials."
+  - "The official install scripts run `goose configure` by default; wrappers and CI should set `CONFIGURE=false` for non-interactive installs."
+  - "Use `GOOSE_PATH_ROOT` to isolate config/data/state for tests or wrapper-managed runs."
+  - "`goose serve` requires `GOOSE_SERVER__SECRET_KEY` unless `--dangerously-unauthenticated` is supplied."
+  - "Session diagnostics and debug output can contain prompts, tool output, config, logs, paths, and secrets; do not collect them silently."
+  - "Windows native CLI support is x86_64 only in the current installer scripts; Windows ARM64 is rejected by the PowerShell installer."
+  - "Config path documentation and source are not perfectly aligned for macOS because source keeps Block app-strategy directories for backward compatibility; use `goose info` for the effective path."
+changes: []
+requires_claudine_update: true
+reason: "Goose's current CLI surface includes new commands and wrapper-relevant switches (`serve`, `doctor`, `plugin`, `skills`, `review`, `stream-json`, install/config isolation variables) that should be reflected in Claudine provider metadata and wrapper behavior."
 ---
 
-# Goose CLI Structured Output in Non-Interactive Sessions
+## Overview
 
-## Summary
+Goose is an open-source local AI agent with Desktop, CLI, and API surfaces. The project has moved from Block-owned URLs to the Agentic AI Foundation namespace: the current official repository is [aaif-goose/goose](https://github.com/aaif-goose/goose), and the current public docs are at [goose-docs.ai](https://goose-docs.ai/). The requested Block site still exists as a historical/migration entry point, but current release assets and install commands use the AAIF repository.
 
-Goose currently exposes two machine-readable output modes for `goose run`: batch `json` and streaming `stream-json`. The batch mode returns one JSON object after the run finishes. The streaming mode emits one JSON object per line as the run progresses, so it is functionally NDJSON even though the CLI flag is named `stream-json`.
+The current latest GitHub release observed during this research is `v1.41.0`, published from the AAIF repository. No local `goose` executable was present on this host, so the CLI inventory is based on official documentation and the current `clap` source in `crates/goose-cli/src/cli.rs`.
 
-Goose has moved from `block/goose` to [aaif-goose/goose](https://github.com/aaif-goose/goose) under the Agentic AI Foundation (AAIF) at the Linux Foundation. Documentation moved from `block.github.io/goose/` to [goose-docs.ai](https://goose-docs.ai/). The latest version is v1.32.0 (2026-04-23).
+## Installation and Binaries
 
-The important Claudine implication is that Goose does **not** publish a standalone JSON Schema or OpenAPI document for this wire format. The closest provider-owned formal specification is the Rust source: `StreamEvent` in `crates/goose-cli/src/session/mod.rs`, plus the reusable `Message`, `MessageContent`, `ActionRequiredData`, and `SystemNotificationContent` types in `crates/goose/src/conversation/message.rs`.
-
-The current source-backed stream envelope is narrower than some older docs and examples imply:
-
-- Current top-level stream events are only `message`, `notification`, `error`, and `complete`.
-- I did **not** find a current `model_change` event in Goose's mainline source.
-- Top-level stream event names use `snake_case`, but nested `message.content[]` item types and fields use `camelCase`.
-- `notification` events flatten their payload into the top level of the event object; they are not nested under `log` or `progress`.
-- Many high-value conditions Claudine cares about are exposed only as nested `message.content[]` variants or flattened log strings, not as dedicated top-level event types.
-
-For Claudine, the most robust integration strategy is:
-
-- Treat `stream-json` as the primary live integration surface.
-- Parse the outer event envelope first.
-- For `message` events, parse the nested Goose `Message` schema exactly.
-- Use `complete.total_tokens` as the only stable built-in session token total.
-- Expect several important cases, especially permissions, auth failures, and subagent activity, to require inference from tool calls, tool responses, or notification log strings.
-
-## CLI Switch Summary
-
-Source: `crates/goose-cli/src/cli.rs` in [aaif-goose/goose](https://github.com/aaif-goose/goose). Based on v1.32.0.
-
-### `goose run`
-
-Primary non-interactive / headless execution command. Combines all shared argument groups.
-
-| Flag | Short | Type | Default | Description |
-|---|---|---|---|---|
-| `--text` | `-t` | `String` | — | Input text to provide directly |
-| `--instructions` | `-i` | `String` | — | Path to instruction file. Use `-` for stdin |
-| `--recipe` | | `String` | — | Recipe name or full path to recipe file |
-| `--system` | | `String` | — | Additional system prompt |
-| `--params` | | `KEY=VALUE` (repeatable) | — | Dynamic parameters for recipe |
-| `--sub-recipe` | | `String` (repeatable) | — | Sub-recipe name or file path |
-| `--explain` | | `bool` | `false` | Show recipe title, description, and parameters |
-| `--render-recipe` | | `bool` | `false` | Print rendered recipe instead of running it |
-| `--name` | `-n` | `String` | — | Name for the session |
-| `--session-id` | (alias `--id`) | `String` | — | Session ID (e.g. `20250921_143022`) |
-| `--path` | | `PathBuf` | — | Legacy: path for session storage |
-| `--interactive` | `-s` | `bool` | `false` | Continue in interactive mode after processing input |
-| `--no-session` | | `bool` | `false` | Run without storing a session file |
-| `--resume` | `-r` | `bool` | `false` | Resume from a previous run |
-| `--debug` | | `bool` | `false` | Enable debug output (full content, no truncation) |
-| `--max-tool-repetitions` | | `u32` | — | Max consecutive identical tool calls |
-| `--max-turns` | | `u32` | `1000` | Max turns without user input |
-| `--container` | | `String` | — | Docker container ID for extension isolation |
-| `--with-extension` | | `String` (repeatable) | — | Add stdio extensions |
-| `--with-streamable-http-extension` | | `String` (repeatable) | — | Add Streamable HTTP extensions |
-| `--with-builtin` | | `String` (comma-delimited) | — | Add builtin extensions by name |
-| `--no-profile` | | `bool` | `false` | Don't load default extensions |
-| `--quiet` | `-q` | `bool` | `false` | Suppress non-response output |
-| `--output-format` | | `String` | `text` | Output format: `text`, `json`, `stream-json` |
-| `--provider` | | `String` | — | Override GOOSE_PROVIDER (e.g. `openai`, `anthropic`) |
-| `--model` | | `String` | — | Override GOOSE_MODEL (e.g. `gpt-4o`) |
-
-Examples:
+The executable is `goose` on macOS and Linux and `goose.exe` on native Windows. Official CLI installation is by the release download scripts or Homebrew on macOS:
 
 ```bash
-goose run -t "summarize this repo" --output-format json
-goose run -t "summarize this repo" --output-format stream-json
-goose run --recipe my-recipe.yaml --params env=production --params region=us-west-2
-goose run --provider anthropic --model claude-4-sonnet -t "initial prompt"
-goose run -i instructions.txt --no-session --output-format stream-json
-goose run -t "fix the tests" --max-turns 10 --interactive
-goose run --with-extension "npx -y @modelcontextprotocol/server-memory" -t "remember my coding style"
-goose run --with-builtin developer,computercontroller -t "analyze the repo"
+curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash
+curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash
+brew install block-goose-cli
 ```
 
-### `goose session` (alias: `goose s`)
+Windows has both Git Bash/MSYS and PowerShell installer paths. The PowerShell installer downloads `goose-x86_64-pc-windows-msvc.zip` by default and rejects Windows ARM64. The shell installer supports Linux, macOS, Windows-like shells, and WSL, with release-asset variants controlled by `GOOSE_LINUX_VARIANT` and `GOOSE_WINDOWS_VARIANT`.
 
-Start or resume interactive sessions.
+Install scripts run `goose configure` by default. Non-interactive installers should set `CONFIGURE=false`; reproducible CI installs should set `GOOSE_VERSION`.
 
-| Flag | Short | Type | Default | Description |
-|---|---|---|---|---|
-| `--name` | `-n` | `String` | — | Name for the session |
-| `--session-id` | | `String` | — | Session ID |
-| `--path` | | `PathBuf` | — | Legacy: path for session |
-| `--resume` | `-r` | `bool` | `false` | Resume a previous session |
-| `--fork` | | `bool` | `false` | Fork session (requires `--resume`) |
-| `--history` | | `bool` | `false` | Show previous messages on resume |
-| `--debug` | | `bool` | `false` | Enable debug output |
-| `--max-tool-repetitions` | | `u32` | — | Max consecutive identical tool calls |
-| `--max-turns` | | `u32` | `1000` | Max turns without user input |
-| `--container` | | `String` | — | Docker container ID |
-| `--with-extension` | | `String` (repeatable) | — | Add stdio extensions |
-| `--with-streamable-http-extension` | | `String` (repeatable) | — | Add Streamable HTTP extensions |
-| `--with-builtin` | | `String` | — | Add builtin extensions |
-| `--no-profile` | | `bool` | `false` | Don't load default extensions |
+## Subcommands
 
-Examples:
+Current top-level commands from docs and source:
+
+| Command | Alias | Purpose | Wrapper relevance |
+| --- | --- | --- | --- |
+| `configure` | | Interactive configuration for providers and extensions | TTY/browser/credential flow |
+| `info` | | Version, paths, config, optional provider check | Useful diagnostics; text output |
+| `doctor` | | Interactive setup diagnostic | Not machine-readable |
+| `mcp` | | Runs a bundled MCP server | Server process |
+| `acp` | | ACP agent server over stdio | Integration server |
+| `serve` | | ACP HTTP/WebSocket server | Requires secret unless unsafe flag used |
+| `session` | `s` | Interactive sessions plus list/remove/export/import/diagnostics | Mixed interactive and scriptable subcommands |
+| `project` | `p` | Opens last project directory | User-focus side effect |
+| `projects` | `ps` | Lists/selects recent projects | Source routes to interactive project picker |
+| `run` | | Non-interactive task execution | Primary wrapper entry point |
+| `recipe` | | Recipe validate/deeplink/open/list | `list --format json` is parseable |
+| `skills` | | Skill utilities | `skills list` only; text output |
+| `plugin` | | Install/update Git plugins | Network and possible Git credential prompts |
+| `schedule` | `sched` | Scheduled recipe jobs | Scriptable |
+| `gateway` | `gw` | External chat gateway management | Token and pairing flows |
+| `update` | | CLI self-update | Feature-gated; may configure interactively |
+| `term` | | Terminal-integrated sessions | Shell integration |
+| `tui` | | Text UI launcher | Feature-gated; node/npx resolution |
+| `local-models` | `lm` | Local inference model management | Feature-gated |
+| `completion` | | Shell completions | Scriptable |
+| `review` | | Diff review using Goose and `.agents/checks` | Scriptable but can spawn runs |
+| `validate-extensions` | | Hidden bundled-extension validator | Hidden |
+
+## CLI Switch Inventory
+
+The frontmatter `cli_switches` array contains the full source-backed switch inventory relevant to public and hidden top-level commands. Important wrapper switches are:
+
+- `goose run --output-format text|json|stream-json`, default `text`.
+- `goose run --no-session` to avoid persisted session state.
+- `goose run --provider <PROVIDER> --model <MODEL>` for per-run overrides.
+- `goose run --quiet` for cleaner text output.
+- `goose run --max-turns <NUMBER>` and `--max-tool-repetitions <NUMBER>` to bound long or looping runs.
+- `goose run --with-extension`, `--with-streamable-http-extension`, `--with-builtin`, and `--no-profile` to control extension surfaces.
+- `goose info --verbose` for human-readable effective config and paths.
+- `goose session list --format json`, `goose session export --format json`, and `goose recipe list --format json` for parseable inventory.
+
+## Configuration Discovery
+
+Official docs state the primary YAML config file is:
+
+- macOS/Linux: `~/.config/goose/config.yaml`
+- Windows: `%APPDATA%\Block\goose\config\config.yaml`
+
+Related files include `permission.yaml`, `secrets.yaml` when file-backed secret storage is active, `permissions/tool_permissions.json`, and `prompts/`. Source also loads a system YAML config first (`/etc/goose/config.yaml` on Unix, `%PROGRAMDATA%\goose\config.yaml` or `C:\ProgramData\goose\config.yaml` on Windows), then files from `GOOSE_ADDITIONAL_CONFIG_FILES`, then the user config.
+
+One caveat matters for wrappers: current source uses platform app-directory discovery with `Block/goose` kept for backward compatibility. The docs simplify this to `~/.config/goose/config.yaml` on macOS/Linux. A wrapper that needs the effective path should run `goose info` rather than hard-code one path.
+
+## Environment Variables
+
+General CLI/runtime variables are listed in frontmatter. Variables intentionally excluded from that list include provider endpoint/API key variables and model-selection variables that belong in the narrower model-config research topic, except where they directly affect install or wrapper isolation.
+
+High-impact wrapper variables:
+
+- `GOOSE_PATH_ROOT` isolates all Goose config/data/state directories.
+- `GOOSE_ADDITIONAL_CONFIG_FILES` adds layered config files.
+- `GOOSE_DISABLE_KEYRING` changes secret-storage behavior.
+- `GOOSE_PROMPT_EDITOR` can force editor-based prompting in interactive sessions.
+- `GOOSE_CLI_THEME`, `GOOSE_CLI_SHOW_THINKING`, `GOOSE_RANDOM_THINKING_MESSAGES`, and code truncation variables affect human output.
+- `GOOSE_SERVER__SECRET_KEY` is required for authenticated `goose serve`.
+- `CONFIGURE=false` prevents install scripts from launching interactive configuration.
+
+## Machine Introspection
+
+Goose has several useful parseable commands, but no single documented `doctor --json`, config-schema dump, model catalog dump, or tool catalog dump was found.
+
+Useful commands:
 
 ```bash
-goose session -n my-project
-goose session --resume -n my-project
-goose session --resume --fork --history
-goose session --with-extension "npx -y @modelcontextprotocol/server-memory"
-goose session --with-builtin developer --debug --max-turns 25
+goose info --verbose
+goose info --check
+goose session list --format json
+goose session export --session-id <id> --format json
+goose session diagnostics --session-id <id> --output <file>
+goose recipe list --format json
+goose run --output-format json --no-session -t "<prompt>"
+goose run --output-format stream-json --no-session -t "<prompt>"
 ```
 
-### `goose session list`
+`goose info --verbose` is especially useful for discovery but is not pure machine-readable output: it prints labeled sections and an indented YAML-like config block. `goose session diagnostics` is JSON but may include sensitive session/config/log content.
 
-| Flag | Short | Type | Default | Description |
-|---|---|---|---|---|
-| `--format` | `-f` | `String` | `text` | Output format: `text`, `json` |
-| `--ascending` | | `bool` | `false` | Sort oldest first |
-| `--working_dir` | `-w` (alias `-p`) | `PathBuf` | — | Filter by working directory |
-| `--limit` | `-l` | `usize` | — | Limit number of results |
+## Wrapper Notes
 
-### `goose session remove`
+Use `goose run --output-format stream-json --no-session -t ...` for live wrappers. Current stream source defines event variants `message`, `notification`, `error`, and `complete`; `notification` uses flattened `log` or `progress` payload data. Batch `json` is suitable for CI-style runs that only need final output.
 
-| Flag | Short | Type | Default | Description |
-|---|---|---|---|---|
-| `--session-id` | | `String` | — | Remove by session ID |
-| `--name` | `-n` | `String` | — | Remove by name |
-| `--regex` | `-r` | `String` | — | Remove sessions matching regex |
-| `--path` | | `PathBuf` | — | Remove by path (legacy) |
+Avoid interactive surfaces in wrappers unless a TTY flow is intentional: `configure`, `doctor`, `session --edit`, `run --interactive`, update reconfiguration, gateway pair/start flows, and plugin install/update can prompt, open browsers, or invoke Git/network credentials.
 
-### `goose session export`
+For isolated wrapper execution, set `GOOSE_PATH_ROOT` to a controlled directory and pass `--no-session` where persistence is not wanted. For clean text output, pass `--quiet`, but structured JSON modes are more reliable.
 
-| Flag | Short | Type | Default | Description |
-|---|---|---|---|---|
-| `--session-id` | | `String` | — | Export by session ID |
-| `--name` | `-n` | `String` | — | Export by name |
-| `--path` | | `PathBuf` | — | Export by path (legacy) |
-| `--output` | `-o` | `PathBuf` | stdout | Output file path |
-| `--format` | | `String` | `markdown` | Output format: `markdown`, `json`, `yaml` |
+## Changelog
 
-### `goose session diagnostics`
+Not an update-mode run; `changes` is empty.
 
-| Flag | Short | Type | Default | Description |
-|---|---|---|---|---|
-| `--session-id` | | `String` | — | Diagnostics by session ID |
-| `--name` | `-n` | `String` | — | Diagnostics by name |
-| `--path` | | `PathBuf` | — | Diagnostics by path (legacy) |
-| `--output` | `-o` | `PathBuf` | `diagnostics_{id}.zip` | Output path for diagnostics zip |
+## Sources
 
-### `goose configure`
-
-Interactive configuration. No flags.
-
-### `goose info`
-
-| Flag | Short | Type | Default | Description |
-|---|---|---|---|---|
-| `--verbose` | `-v` | `bool` | `false` | Show config.yaml, env vars, enabled extensions |
-| `--check` | | `bool` | `false` | Test provider connection and show status |
-
-### `goose update`
-
-| Flag | Short | Type | Default | Description |
-|---|---|---|---|---|
-| `--canary` | `-c` | `bool` | `false` | Update to canary version |
-| `--reconfigure` | | `bool` | `false` | Force re-configure during update |
-
-### `goose completion <SHELL>`
-
-| Arg | Type | Description |
-|---|---|---|
-| `<SHELL>` | enum: `bash`, `zsh`, `fish`, `powershell`, `elvish` | Shell to generate completions for |
-| `--bin-name` | `String` (default: `goose`) | Custom binary name |
-
-### `goose recipe`
-
-| Subcommand | Flags |
-|---|---|
-| `validate <RECIPE>` | positional recipe name/path |
-| `deeplink <RECIPE>` | `-p, --param KEY=VALUE` (repeatable) |
-| `open <RECIPE>` | `-p, --param KEY=VALUE` (repeatable) |
-| `list` | `--format text\|json` (default `text`), `-v, --verbose` |
-
-### `goose schedule` (alias: `goose sched`)
-
-| Subcommand | Flags |
-|---|---|
-| `add` | `--schedule-id` (required), `--cron` (required), `--recipe-source` (required) |
-| `list` | no flags |
-| `remove` | `--schedule-id` (required) |
-| `sessions` | `--schedule-id` (required), `-l, --limit` |
-| `run-now` | `--schedule-id` (required) |
-| `services-status` | no flags (deprecated) |
-| `services-stop` | no flags (deprecated) |
-| `cron-help` | no flags |
-
-### `goose serve`
-
-| Flag | Type | Default | Description |
-|---|---|---|---|
-| `--host` | `String` | `127.0.0.1` | Host to bind |
-| `--port` | `u16` | `3284` | Port to bind |
-| `--with-builtin` | `String` (repeatable) | — | Add builtin extensions |
-
-### `goose acp`
-
-Run goose as an ACP agent server over stdio.
-
-| Flag | Type | Default | Description |
-|---|---|---|---|
-| `--with-builtin` | `String` | — | Add builtin extensions |
-
-### `goose gateway` (alias: `goose gw`)
-
-| Subcommand | Flags |
-|---|---|
-| `status` | no flags |
-| `start <TYPE>` | `--bot-token` (required) |
-| `stop <TYPE>` | positional gateway type |
-| `pair <TYPE>` | positional gateway type |
-
-### `goose mcp <SERVER>`
-
-Run a bundled MCP server. Positional arg: server name (e.g. `auto-visualiser`, `computer-controller`, `memory`, `tutorial`).
-
-### `goose project` (alias `goose p`)
-
-Open last project. No flags.
-
-### `goose projects` (alias `goose ps`)
-
-List recent projects. No flags.
-
-### `goose term`
-
-| Subcommand | Flags |
-|---|---|
-| `init <SHELL>` | `-n, --name`, `--default` |
-| `run <PROMPT...>` | positional prompt words |
-| `info` | no flags |
-| `log <COMMAND>` | positional command (hidden) |
-
-### `goose local-models` (alias `goose lm`, feature-gated: `local-inference`)
-
-| Subcommand | Flags |
-|---|---|
-| `search <QUERY>` | `-l, --limit` (default `10`) |
-| `download <SPEC>` | positional `user/repo:quantization` |
-| `list` | no flags |
-| `delete <ID>` | positional model ID |
-
-### `goose bench`
-
-Evaluate system configuration across practical tasks. See [benchmarking tutorial](https://goose-docs.ai/docs/tutorials/benchmarking).
-
-### Interactive Session Slash Commands
-
-These are in-session commands (not subcommands):
-
-| Command | Description |
-|---|---|
-| `/help`, `/?` | Display help menu |
-| `/exit`, `/quit` | Exit session |
-| `/builtin <names>` | Add builtin extensions (comma-separated) |
-| `/extension <command>` | Add stdio extension |
-| `/clear` | Clear chat history |
-| `/compact` | Summarize conversation to reduce context |
-| `/mode <name>` | Set goose mode (`auto`, `approve`, `chat`, `smart_approve`) |
-| `/plan [text]` | Enter plan mode |
-| `/endplan` | Exit plan mode |
-| `/prompts [--extension <name>]` | List available prompts |
-| `/prompt <n> [--info] [key=value...]` | Get prompt info or execute prompt |
-| `/recipe [filepath]` | Generate recipe from conversation |
-| `/skills` | List available skills |
-| `/load-skill <names>` | Load skills by name |
-| `/edit [prefill]` | Open external editor for prompt |
-| `/r` | Toggle full tool output display |
-| `/t` | Cycle theme (light/dark/ansi) |
-| `/t <name>` | Set theme directly |
-
-## Schema
-
-### What Goose publishes today
-
-I did **not** find a standalone published schema artifact for Goose's non-interactive structured output:
-
-- No JSON Schema
-- No OpenAPI document for `goose run --output-format json`
-- No OpenAPI / AsyncAPI / JSON Schema for `goose run --output-format stream-json`
-- No published TypeScript type definition for the CLI wire format
-
-I checked:
-
-- Official docs: [CLI Commands](https://goose-docs.ai/docs/guides/goose-cli-commands/), [Running Tasks](https://goose-docs.ai/docs/guides/running-tasks/), [Using goose in Headless Mode for Automation](https://goose-docs.ai/docs/tutorials/headless-goose/), [MCP Elicitation](https://goose-docs.ai/docs/guides/mcp-elicitation/), [Customizing Prompt Templates](https://goose-docs.ai/docs/guides/prompt-templates/)
-- Current Goose source on GitHub
-- Release notes on GitHub
-- Broader searches for third-party formalizations, including searches targeted at Vercel AI SDK and LangChain repositories
-
-I did not find a respected third-party project that formalizes Goose's CLI output schema either.
-
-### Closest thing to a formal schema
-
-The closest provider-owned formal definitions are Rust `serde` types in Goose's source:
-
-- Top-level streaming envelope: [`StreamEvent`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
-- Batch output object: same file, `JsonOutput` and `JsonMetadata`
-- Shared message schema: [`Message`, `MessageMetadata`, `MessageContent`, `ActionRequiredData`, `SystemNotificationContent`, `SystemNotificationType`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/conversation/message.rs)
-- Tool request / response serialization rules: [`tool_result_serde.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/conversation/tool_result_serde.rs)
-- Developer shell tool output schema: [`ShellOutput`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/agents/platform_extensions/developer/shell.rs)
-
-Schema language used by those source definitions:
-
-- Rust structs/enums with `serde` serialization attributes
-- Some reusable subtypes also derive `ToSchema` / `JsonSchema`, but Goose does not publish a generated schema document for the CLI wire format itself
-
-### Current stream schema
-
-Top-level `stream-json` events are currently defined as:
-
-```json
-{"type":"message","message":{...}}
-{"type":"notification","extension_id":"...","message":"..."}
-{"type":"notification","extension_id":"...","progress":0.5,"total":1.0,"message":"..."}
-{"type":"error","error":"..."}
-{"type":"complete","total_tokens":1234}
-```
-
-Important details from current source:
-
-- Outer `type` values are `snake_case`
-- `notification` uses `#[serde(flatten)]`, so log/progress payloads are flattened into the event object
-- `complete.total_tokens` is optional
-
-### Current batch JSON schema
-
-Batch `json` mode currently returns one object:
-
-```json
-{
-  "messages": [
-    {
-      "id": null,
-      "role": "assistant",
-      "created": 1743999999,
-      "content": [],
-      "metadata": {
-        "userVisible": true,
-        "agentVisible": true
-      }
-    }
-  ],
-  "metadata": {
-    "total_tokens": 1234,
-    "status": "completed"
-  }
-}
-```
-
-### Nested `Message` / `MessageContent` gotcha
-
-The nested message schema uses `camelCase`, not `snake_case`.
-
-Examples:
-
-- `type: "toolRequest"`
-- `type: "toolResponse"`
-- `type: "actionRequired"`
-- `type: "systemNotification"`
-- `actionType: "toolConfirmation"`
-- `actionType: "elicitation"`
-- `notificationType: "creditsExhausted"`
-- `toolCall`, not `tool_call`
-- `toolResult`, not `tool_result`
-- `userVisible` / `agentVisible`, not `user_visible` / `agent_visible`
-
-That casing split between the outer envelope and inner message schema is easy to get wrong.
-
-### Tool request / response serialization
-
-`toolCall` and `toolResult` are serialized with explicit status wrappers:
-
-```json
-{
-  "type": "toolRequest",
-  "id": "call_123",
-  "toolCall": {
-    "status": "success",
-    "value": {
-      "name": "shell",
-      "arguments": {
-        "command": "pwd"
-      }
-    }
-  }
-}
-```
-
-```json
-{
-  "type": "toolResponse",
-  "id": "call_123",
-  "toolResult": {
-    "status": "success",
-    "value": {
-      "content": [
-        {
-          "type": "text",
-          "text": "..."
-        }
-      ]
-    }
-  }
-}
-```
-
-Or, on error:
-
-```json
-{
-  "type": "toolResponse",
-  "id": "call_123",
-  "toolResult": {
-    "status": "error",
-    "error": "Failed to write /path/file.txt: Permission denied (os error 13)"
-  }
-}
-```
-
-## Documentation
-
-### Official documentation
-
-The most relevant official docs for non-interactive structured output are:
-
-- [CLI Commands](https://goose-docs.ai/docs/guides/goose-cli-commands/)
-  - Documents `goose run`, `goose session`, `goose recipe`, `goose schedule`, `goose serve`, `goose acp`, `goose mcp`, `goose configure`, and more
-  - Documents `--output-format text|json|stream-json`
-  - Explicitly says `json` is for results after completion and `stream-json` is for events as they occur
-- [Run Tasks](https://goose-docs.ai/docs/guides/running-tasks/)
-  - Main official non-interactive task execution guide
-- [Using goose in Headless Mode for Automation](https://goose-docs.ai/docs/tutorials/headless-goose/)
-  - Best official explanation of non-interactive behavior, limitations, and automation gotchas
-- [MCP Elicitation](https://goose-docs.ai/docs/guides/mcp-elicitation/)
-  - Important for understanding structured human-in-the-loop requests
-- [goose Permission Modes](https://goose-docs.ai/docs/guides/goose-permissions/)
-  - Four modes: Auto (default), Approve, Smart Approve, Chat
-  - Important for understanding when tool confirmation requests can happen
-- [Customizing Prompt Templates](https://goose-docs.ai/docs/guides/prompt-templates/)
-  - Important for subagent prompt injection and customization
-- [ACP Providers](https://goose-docs.ai/docs/guides/acp-providers/)
-  - ACP adapters for Claude Code, Codex, Amp, and Pi as providers
-- [Subagents](https://goose-docs.ai/docs/guides/subagents/)
-  - Internal and external subagent lifecycle, configuration, and security constraints
-
-Official built-in extension docs that matter when interpreting tool events:
-
-- [Developer Extension](https://goose-docs.ai/docs/mcp/developer-mcp/)
-- [Computer Controller Extension](https://goose-docs.ai/docs/mcp/computer-controller-mcp/)
-- [Memory Extension](https://goose-docs.ai/docs/mcp/memory-mcp/)
-- [Tutorial Extension](https://goose-docs.ai/docs/mcp/tutorial-mcp/)
-- [Auto Visualiser Extension](https://goose-docs.ai/docs/mcp/autovisualiser-mcp/)
-
-### Release notes and changelog-style docs
-
-These are important because Goose's current stream behavior is clarified more by source and releases than by one dedicated schema doc:
-
-- [v1.25.0 release](https://github.com/aaif-goose/goose/releases/tag/v1.25.0)
-- [v1.26.0 release](https://github.com/aaif-goose/goose/releases/tag/v1.26.0)
-- [v1.27.0 release](https://github.com/aaif-goose/goose/releases/tag/v1.27.0)
-- [v1.29.0 release](https://github.com/aaif-goose/goose/releases/tag/v1.29.0)
-- [v1.30.0 release](https://github.com/aaif-goose/goose/releases/tag/v1.30.0)
-- [v1.31.0 release](https://github.com/aaif-goose/goose/releases/tag/v1.31.0)
-- [v1.32.0 release](https://github.com/aaif-goose/goose/releases/tag/v1.32.0)
-- [v1.17.0 release](https://github.com/aaif-goose/goose/releases/tag/v1.17.0)
-- [v1.0.30 release](https://github.com/aaif-goose/goose/releases/tag/v1.0.30)
-
-### Articles and tutorials worth reading
-
-These are the highest-signal public writeups I found that help explain or operationalize Goose's structured output surface:
-
-- [Using goose in Headless Mode for Automation](https://goose-docs.ai/docs/tutorials/headless-goose/)
-  - Best official prose guide for non-interactive usage
-- [goose v1.25.0 is here](https://github.com/aaif-goose/goose/releases/tag/v1.25.0)
-  - Explicitly mentions `stream-json` in provider integration work
-- [goose v1.27.0 is here](https://github.com/aaif-goose/goose/releases/tag/v1.27.0)
-  - Important because it adds a structured output schema for the Developer extension's `shell` tool
-- [goose v1.32.0](https://github.com/aaif-goose/goose/releases/tag/v1.32.0)
-  - ACP providers, skills system, terminal integration, gateway, local-models, auto-compaction, and many bug fixes
-
-### Documentation quality assessment
-
-Goose's documentation is good at explaining:
-
-- How to invoke structured output
-- What output modes exist
-- How headless mode behaves operationally
-- How elicitation and permissions behave conceptually
-
-It is weaker on:
-
-- Publishing a canonical machine-readable wire schema
-- Explaining exact serialized field names
-- Explaining the mixed `snake_case` / `camelCase` split
-- Clarifying what is flattened vs nested in `notification` events
-- Keeping examples aligned with the latest source in every case
-
-## CLI
-
-### Available output formats
-
-Goose currently accepts:
-
-| CLI value | Meaning | Best use |
-|---|---|---|
-| `text` | Human-oriented terminal rendering | Manual use |
-| `json` | One final JSON document after completion | Batch automation where progress is not needed |
-| `stream-json` | One JSON object per line as the run executes | Live orchestration, telemetry, wrappers, Claudine |
-
-### Syntax
-
-The switch is:
-
-```bash
-goose run --output-format <text|json|stream-json> ...
-```
-
-Examples:
-
-```bash
-goose run -t "summarize this repo" --output-format json
-```
-
-```bash
-goose run -t "summarize this repo" --output-format stream-json
-```
-
-Structured output can be combined with the usual non-interactive input methods:
-
-- `-t, --text`
-- `-i, --instructions <FILE>`
-- `-i -` for stdin
-- `--recipe ...`
-- `--system ...`
-- `--params KEY=VALUE`
-- `--sub-recipe ...`
-- `--provider ...` and `--model ...` to override provider/model
-- `--with-extension`, `--with-streamable-http-extension`, `--with-builtin` to add extensions
-- `--quiet` to suppress non-response output
-- `--interactive` to drop into a session after processing
-
-### Behavioral differences by format
-
-`text`
-
-- Renders human-friendly markdown and tool output
-- Not a stable machine contract
-
-`json`
-
-- Suppresses incremental progress rendering
-- Emits a single final JSON object
-- Includes the full stored conversation messages plus `metadata.total_tokens`
-
-`stream-json`
-
-- Emits line-delimited JSON events during execution
-- Emits `error` as JSON rather than plain stderr text
-- Ends with a `complete` event
-- Is the only mode suitable for real-time wrappers
-
-### Known side effects of switching formats
-
-- `stream-json` does **not** give you one valid JSON document. It gives you one JSON object per line.
-- `json` gives you the final conversation state, not a normalized event history.
-- `notification` payloads are flattened in `stream-json`.
-- Rich MCP/subagent payloads are sometimes reduced to formatted strings before they hit the stream.
-- Current stream output does not include provider/model identity.
-
-## Gotchas
-
-### 1. There is no published canonical JSON Schema
-
-If Claudine wants strict validation, it must derive it from Goose source or maintain its own adapter schema.
-
-Sources:
-
-- [CLI Commands](https://goose-docs.ai/docs/guides/goose-cli-commands/)
-- [`session/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
-
-### 2. Outer events are `snake_case`; nested messages are `camelCase`
-
-This is a real wire-format sharp edge:
-
-- Outer event: `{"type":"complete"}`
-- Nested content: `{"type":"toolRequest"}`
-- Nested action discriminator: `actionType`
-- Nested system notification discriminator: `notificationType`
-
-Sources:
-
-- [`session/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
-- [`message.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/conversation/message.rs)
-
-### 3. `notification` events flatten their payload
-
-Current source emits:
-
-```json
-{"type":"notification","extension_id":"developer","message":"..."}
-```
-
-and
-
-```json
-{"type":"notification","extension_id":"developer","progress":0.5,"total":1.0,"message":"..."}
-```
-
-not:
-
-```json
-{"type":"notification","log":{"message":"..."}}
-```
-
-This matters if Claudine already has code written against older examples.
-
-Source:
-
-- [`session/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
-
-### 4. Current source does not expose `model_change`
-
-Older Goose examples and some secondary research mention a `model_change` event. I did **not** find it in the current `StreamEvent` enum on mainline Goose as of 2026-04-27.
-
-Claudine should therefore treat model/provider detection as out-of-band unless pinned to an older Goose build that still emitted such an event.
-
-Source:
-
-- [`session/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
-
-### 5. Headless mode cannot answer questions
-
-Official headless docs are clear: non-interactive execution cannot provide clarification or approval during the run. That means `actionRequired` content is a blocker or failure mode for automation, not just informational metadata.
-
-Sources:
-
-- [Using goose in Headless Mode for Automation](https://goose-docs.ai/docs/tutorials/headless-goose/)
-- [MCP Elicitation](https://goose-docs.ai/docs/guides/mcp-elicitation/)
-- [goose Permission Modes](https://goose-docs.ai/docs/guides/goose-permissions/)
-
-### 6. Subagent and MCP notifications are sometimes downgraded to strings
-
-Current source formats several MCP logging notifications into strings before printing them to `stream-json`. Subagent tool requests get a formatted log line, not the original structured payload. Task execution notifications can also be flattened into prose-like log messages.
-
-This is the single biggest information-loss problem in Goose's live stream for Claudine.
-
-Source:
-
-- [`handle_mcp_notification` and `format_logging_notification`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
-
-### 7. Official tool docs lag the current Developer extension surface
-
-The current Developer extension source exposes `write`, `edit`, `shell`, and `tree`. Some official docs still describe an older tool surface such as `text_editor`, `analyze`, `screen_capture`, and `image_processor`.
-
-For Claudine's parser, source should be treated as more authoritative than prose docs when they disagree.
-
-Sources:
-
-- [Developer Extension docs](https://goose-docs.ai/docs/mcp/developer-mcp/)
-- [`developer/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/agents/platform_extensions/developer/mod.rs)
-
-## Timeline
-
-This timeline focuses on structured output and adjacent features that materially affect what Claudine can observe.
-
-| Date | Version | Event | Why it matters |
-|---|---|---|---|
-| 2025-06-27 | [v1.0.30](https://github.com/aaif-goose/goose/releases/tag/v1.0.30) | Subagents shipped | Subagent activity later becomes something stream consumers want to observe |
-| 2025-12-18 | [v1.17.0](https://github.com/aaif-goose/goose/releases/tag/v1.17.0) | MCP Elicitation support shipped | Introduces structured user-input requests that appear as `actionRequired` content |
-| 2026-02-18 | [v1.25.0](https://github.com/aaif-goose/goose/releases/tag/v1.25.0) | Release notes explicitly mention `stream-json` in provider integration work, including Gemini CLI and isolated `session_id` handling | Confirms `stream-json` is an important internal and external integration surface by this point |
-| 2026-02-26 | [v1.26.0](https://github.com/aaif-goose/goose/releases/tag/v1.26.0) | Release notes mention low-balance detection, stream subagent tool call docs, and stream-json event work | Important for Claudine's caps/funds/subagent monitoring story |
-| 2026-03-05 | [v1.27.0](https://github.com/aaif-goose/goose/releases/tag/v1.27.0) | Developer `shell` tool gains structured `{stdout, stderr}` output schema | Significant improvement in tool-response structure |
-| 2026-04-07 | — | Goose moves from Block to AAIF at the Linux Foundation | Repo moves to `aaif-goose/goose`, docs move to `goose-docs.ai` |
-| 2026-04-23 | [v1.32.0](https://github.com/aaif-goose/goose/releases/tag/v1.32.0) | ACP providers (Claude Code, Codex, Amp, Pi), skills system, `/skills` command, auto-compaction, gateway, local-models, terminal integration, `/edit` command, Novita AI provider, Kimi Code provider with OAuth | Major expansion of CLI surface and provider ecosystem |
-
-Timeline note:
-
-- I did **not** find a release note that cleanly identifies the original introduction date of `--output-format json` or `--output-format stream-json`.
-- The earliest explicit release-note mentions I found were in the February 2026 release stream above.
-
-## Tools
-
-### Built-in extensions shipped with Goose
-
-Current bundled built-ins from Goose's desktop extension manifest are:
-
-| Extension | Bundled | Enabled by default | Current tool surface |
-|---|---|---:|---|
-| `developer` | yes | yes | `write`, `edit`, `shell`, `tree` |
-| `computercontroller` | yes | no | `web_scrape`, `automation_script`, `computer_control`, `xlsx_tool`, `docx_tool`, `pdf_tool`, `cache` |
-| `autovisualiser` | yes | no | `render_sankey`, `render_radar`, `render_donut`, `render_treemap`, `render_chord`, `render_map`, `render_mermaid`, `show_chart` |
-| `memory` | yes | no | `remember_memory`, `retrieve_memories`, `remove_memory_category`, `remove_specific_memory` |
-| `tutorial` | yes | no | `load_tutorial` |
-
-Sources:
-
-- [`bundled-extensions.json`](https://raw.githubusercontent.com/aaif-goose/goose/main/ui/desktop/src/components/settings/extensions/bundled-extensions.json)
-- [`developer/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/agents/platform_extensions/developer/mod.rs)
-- [`computercontroller/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-mcp/src/computercontroller/mod.rs)
-- [`autovisualiser/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-mcp/src/autovisualiser/mod.rs)
-- [`memory/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-mcp/src/memory/mod.rs)
-- [`tutorial/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-mcp/src/tutorial/mod.rs)
-
-### What the stream exposes before and after tool calls
-
-For normal tool usage, Goose exposes tool activity inside `message` events:
-
-1. Assistant emits a `message` whose `content[]` contains one or more `toolRequest` items
-2. Later, Goose emits another `message` whose `content[]` contains matching `toolResponse` items
-3. The `id` field ties the request and response together
-
-This means the stream usually exposes:
-
-- Tool name
-- Tool arguments
-- Tool success vs error
-- Tool output, usually inside `toolResult.value.content[]`
-- Any provider metadata attached to the tool message
-
-### What the stream exposes around MCP notifications
-
-In addition to `toolRequest` / `toolResponse`, Goose emits `notification` events for MCP logs and progress.
-
-For those, the stream can expose:
-
-- `extension_id`
-- `message` for log-style notifications
-- `progress`, `total`, and optional `message` for progress notifications
-
-But the current CLI stream does **not** preserve every original MCP payload in full fidelity. Several notification types are converted into strings first.
-
-### Example: Developer `shell`
-
-Possible request:
-
-```json
-{
-  "type": "message",
-  "message": {
-    "role": "assistant",
-    "content": [
-      {
-        "type": "toolRequest",
-        "id": "call_1",
-        "toolCall": {
-          "status": "success",
-          "value": {
-            "name": "shell",
-            "arguments": {
-              "command": "cargo test -p claudine"
-            }
-          }
-        }
-      }
-    ]
-  }
-}
-```
-
-Possible response:
-
-```json
-{
-  "type": "message",
-  "message": {
-    "role": "user",
-    "content": [
-      {
-        "type": "toolResponse",
-        "id": "call_1",
-        "toolResult": {
-          "status": "success",
-          "value": {
-            "content": [
-              {
-                "type": "text",
-                "text": "{\"stdout\":\"...\",\"stderr\":\"\",\"exit_code\":0}"
-              }
-            ]
-          }
-        }
-      }
-    ]
-  }
-}
-```
-
-Important note:
-
-- The `shell` tool now has a structured output schema in source, but the message stream still carries that result inside Goose's generic tool-response container.
-- Consumers usually still need to parse the returned content payload.
-
-### Example: Memory tool
-
-Request:
-
-```json
-{
-  "type": "toolRequest",
-  "id": "call_mem_1",
-  "toolCall": {
-    "status": "success",
-    "value": {
-      "name": "remember_memory",
-      "arguments": {
-        "category": "coding_style",
-        "data": "Prefer ripgrep over grep",
-        "tags": ["cli", "search"],
-        "is_global": true
-      }
-    }
-  }
-}
-```
-
-Response:
-
-```json
-{
-  "type": "toolResponse",
-  "id": "call_mem_1",
-  "toolResult": {
-    "status": "success",
-    "value": {
-      "content": [
-        {
-          "type": "text",
-          "text": "Memory stored successfully"
-        }
-      ]
-    }
-  }
-}
-```
-
-### Example: Progress notification
-
-```json
-{
-  "type": "notification",
-  "extension_id": "computercontroller",
-  "progress": 0.5,
-  "total": 1.0,
-  "message": "Processing files..."
-}
-```
-
-### Claudine-specific tool observations
-
-- Tool correlation should key on `toolRequest.id` and `toolResponse.id`
-- `notification.extension_id` is useful, but often not enough by itself
-- For subagents, a lot of the most useful metadata is currently reduced to log strings
-- The best live observability still comes from combining:
-  - top-level `notification`
-  - nested `toolRequest`
-  - nested `toolResponse`
-  - final `complete.total_tokens`
-
-## Use Cases
-
-### Plan Cap Approaching
-
-I did **not** find a Goose-native dedicated structured event for "you are approaching your plan cap".
-
-What I found:
-
-- No top-level `stream-json` event dedicated to plan-cap warnings
-- No dedicated `MessageContent` variant for near-cap usage warnings
-- Official rate-limit / automation docs do not document a structured "approaching cap" signal
-
-Implications:
-
-- If a provider surfaces a near-cap warning, Goose may expose it only as:
-  - assistant text inside a `message`
-  - a flattened `notification.message`
-  - or a generic `error.error`
-- I found no stable structured field for:
-  - percentage remaining
-  - token amount remaining
-  - reset time / reset window
-
-Distinguishing signal:
-
-- None that is Goose-normalized today
-- Claudine would need provider-specific text matching
-
-Hook parity:
-
-- No
-- Goose's only true hook is `GOOSE_STATUS_HOOK` with `thinking` / `waiting`; it does not expose cap metadata
-
-### Plan Capped
-
-Goose does not appear to normalize generic provider plan caps into a dedicated top-level stream event.
-
-However, Goose **does** have a normalized `creditsExhausted` system notification, which is closer to "billing exhausted / no funds" than to "subscription plan window capped".
-
-What I found:
-
-- No dedicated "plan capped" outer event
-- No dedicated "plan capped" `MessageContent` discriminator
-- One dedicated system notification for exhausted credits:
-  - `type: "systemNotification"`
-  - `notificationType: "creditsExhausted"`
-  - optional `data.top_up_url`
-
-What Claudine should do:
-
-- Treat `creditsExhausted` as a strong "cannot continue for billing reasons" signal
-- Treat actual provider hard-cap / quota-window messages as text-pattern inference unless Goose adds a dedicated normalized event later
-
-Remaining amount / reset window:
-
-- Not exposed
-
-Hook parity:
-
-- No
-
-### No Funds
-
-This is the strongest current structured detection story Goose has for billing exhaustion.
-
-Primary signal:
-
-- `message` event
-- nested `message.content[]`
-- item with:
-  - `type: "systemNotification"`
-  - `notificationType: "creditsExhausted"`
-  - `msg`
-  - optional `data.top_up_url`
-
-How to distinguish it:
-
-- It is stronger than a generic error because Goose gives it its own typed system notification
-- The optional `top_up_url` is especially useful operationally
-
-What you can extract:
-
-- Yes: a user-facing message
-- Sometimes: a top-up URL
-- No: remaining balance
-- No: reset window
-
-Hook parity:
-
-- No
-
-Sources:
-
-- [`message.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/conversation/message.rs)
-- [`output.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/output.rs)
-- [v1.26.0 release](https://github.com/aaif-goose/goose/releases/tag/v1.26.0) mentions low-balance detection work
-
-### Auth
-
-I did **not** find a structured event that tells Claudine which auth mode the user is using, such as:
-
-- API key
-- subscription
-- OAuth
-- other device/browser flow
-
-What Goose exposes today:
-
-- Auth failures can surface as generic `error` events or message text
-- Some provider setup flows support auto-detection of provider from API key during onboarding, but that is setup behavior, not run-stream metadata
-- OAuth cleanup and provider auth improvements show up in release notes, not in the run stream
-
-What Claudine can reliably know from the stream:
-
-- Usually only that something auth-related failed, if the error text says so
-- Not the auth kind
-
-Hook parity:
-
-- No
-
-### Permissions: Can't Read File
-
-This is weaker than write detection.
-
-Important current-source caveat:
-
-- The current built-in Developer extension does **not** expose a first-class `read` tool
-- The current source tool surface is `write`, `edit`, `shell`, `tree`
-
-So read failures usually happen indirectly via:
-
-- `shell` commands like `cat`, `sed`, `rg`
-- `tree`
-- extension-specific tools such as `pdf_tool`, `docx_tool`, or `xlsx_tool`
-
-Detection story:
-
-- There is no Goose-native dedicated "read permission denied" event
-- Claudine must infer it from:
-  - the tool being called
-  - the tool arguments
-  - and the resulting error text
-
-Can the full path be identified?
-
-- Sometimes
-- Usually from:
-  - tool arguments
-  - echoed path in the error text
-
-Is a reason available?
-
-- Sometimes
-- Usually as plain text, for example an OS-level permission denied string
-
-How to distinguish it:
-
-- There is no single normalized event type
-- You distinguish it by matching a read-like tool call with a tool-response error message
-
-Hook parity:
-
-- No
-
-### Permissions: Can't Write File
-
-This is more detectable than read failure because current-source Developer tools include explicit write/edit tools.
-
-Primary signals:
-
-1. `message.content[]` item with `type: "toolRequest"` where:
-   - tool name is `write` or `edit`
-   - arguments include the target path
-2. Matching later `toolResponse` with the same `id`
-3. `toolResult.status == "error"` and error text indicating failure
-
-Current-source write/edit error strings include the path:
-
-- `Failed to write <path>: <reason>`
-- `Failed to read <path>: <reason>` for edit pre-read failures
-
-Can the full path be identified?
-
-- Usually yes
-- Best source is tool arguments
-- Fallback is the echoed path in the error string
-
-Is a reason available?
-
-- Yes, but as plain text, not a structured enum
-
-How to distinguish it:
-
-- Tool name is `write` / `edit`
-- Error text contains a write/read failure with the path and OS/library reason
-
-Hook parity:
-
-- No
-
-Sources:
-
-- [`developer/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/agents/platform_extensions/developer/mod.rs)
-- [`edit.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/agents/platform_extensions/developer/edit.rs)
-
-### Tokens Consumed
-
-Goose exposes only an overall session token total in the structured non-interactive output.
-
-Signals:
-
-- `stream-json`: final `complete.total_tokens`
-- `json`: final `metadata.total_tokens`
-
-What Goose does **not** expose in the run output:
-
-- per-turn token counts
-- per-message token counts
-- per-tool token counts
-- price / currency / cost basis
-
-Hook parity:
-
-- No
-
-Sources:
-
-- [`session/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
-
-### Model Used
-
-I did **not** find a current stable structured stream field for provider/model identity.
-
-Important current-source finding:
-
-- The current `StreamEvent` enum does not include `model_change`
-- Batch `json` output also does not include provider/model metadata
-
-That means:
-
-- Claudine cannot rely on the stream alone to know which model Goose used
-- Model/provider usually needs to be inferred from:
-  - command-line context
-  - environment/config
-  - or separate Goose logs/config files
-
-Do such events always fire?
-
-- I found no current-source event to rely on
-
-Nomenclature:
-
-- Not available from the run stream today
-
-Hook parity:
-
-- No
-
-### Human in the Loop
-
-#### Main session
-
-Yes. Goose exposes two structured main-session human-in-the-loop cases inside `message.content[]`.
-
-1. Tool confirmation
-
-```json
-{
-  "type": "actionRequired",
-  "data": {
-    "actionType": "toolConfirmation",
-    "id": "...",
-    "toolName": "...",
-    "arguments": {},
-    "prompt": "..."
-  }
-}
-```
-
-2. Elicitation
-
-```json
-{
-  "type": "actionRequired",
-  "data": {
-    "actionType": "elicitation",
-    "id": "...",
-    "message": "...",
-    "requestedSchema": {}
-  }
-}
-```
-
-And when a response is provided, Goose can emit:
-
-```json
-{
-  "type": "actionRequired",
-  "data": {
-    "actionType": "elicitationResponse",
-    "id": "...",
-    "userData": {}
-  }
-}
-```
-
-This is a strong integration point for Claudine because:
-
-- the question/prompt is structured
-- the requested schema is structured
-- tool confirmation includes the tool name and arguments
-
-#### Subagents
-
-I did **not** find equivalent reliable structured forwarding for subagent human-in-the-loop prompts into the parent stream.
-
-Current source strongly suggests:
-
-- parent stream receives subagent-related `notification` events
-- several notification types are flattened into log strings
-- raw child `actionRequired` payloads are not preserved as first-class stream events in the parent
-
-So:
-
-- Main session: yes, structured
-- Subagent: not reliably exposed in the parent stream as structured data
-
-Hook parity:
-
-- No
-- These are stream/message constructs, not status-hook events
-
-Sources:
-
-- [`message.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/conversation/message.rs)
-- [`session/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
-- [MCP Elicitation](https://goose-docs.ai/docs/guides/mcp-elicitation/)
-- [Headless Mode](https://goose-docs.ai/docs/tutorials/headless-goose/)
-
-### Injecting into Subagent Prompt
-
-Yes, but indirectly rather than through one dedicated "subagent prompt injection" CLI flag.
-
-What Goose gives you:
-
-- Global / user-overridden prompt templates, including:
-  - [`subagent_system.md`](https://github.com/aaif-goose/goose/blob/main/crates/goose/src/prompts/subagent_system.md)
-- Additional run-scoped system instructions via `goose run --system`
-- Project / user hints via `.goosehints` and `AGENTS.md`
-- Recipe and sub-recipe instructions
-
-What this means for Claudine:
-
-- If you want all subagents to inherit "you are running headless, do not ask for user input", the strongest native Goose mechanism is customizing `subagent_system.md`
-- If you want it only for one run, `--system` and repo hints help, but they are broader and less targeted than a dedicated subagent-only switch
-
-What I did **not** find:
-
-- A dedicated `goose run` flag whose sole purpose is "prepend this exact string to every subagent prompt"
-
-Operational recommendation for Claudine:
-
-- Use prompt-template customization for persistent policy
-- Use `--system` or repo hints for per-run policy
-- Still detect `actionRequired` in case a tool or extension asks anyway
-
-Hook parity:
-
-- Not applicable
-- This is a configuration / prompting capability, not a runtime event hook
-
-Sources:
-
-- [Customizing Prompt Templates](https://goose-docs.ai/docs/guides/prompt-templates/)
-- [Using goose in Headless Mode for Automation](https://goose-docs.ai/docs/tutorials/headless-goose/)
-- [Using Subagents](https://goose-docs.ai/docs/tutorials/subagents/)
-- [v1.27.0 release](https://github.com/aaif-goose/goose/releases/tag/v1.27.0) mentions restored subagent system-prompt behavior
+- [Goose homepage](https://goose-docs.ai/)
+- [Goose installation docs](https://goose-docs.ai/docs/getting-started/installation/)
+- [Goose CLI commands docs](https://goose-docs.ai/docs/guides/goose-cli-commands/)
+- [Running tasks guide](https://goose-docs.ai/docs/guides/running-tasks/)
+- [Configuration files guide](https://goose-docs.ai/docs/guides/config-files/)
+- [Environment variables guide](https://goose-docs.ai/docs/guides/environment-variables/)
+- [Goose repository](https://github.com/aaif-goose/goose)
+- [Goose CLI source](https://github.com/aaif-goose/goose/blob/main/crates/goose-cli/src/cli.rs)
+- [Goose session stream source](https://github.com/aaif-goose/goose/blob/main/crates/goose-cli/src/session/mod.rs)
+- [Goose config path source](https://github.com/aaif-goose/goose/blob/main/crates/goose/src/config/paths.rs)
+- [Latest release API result](https://github.com/aaif-goose/goose/releases/tag/v1.41.0)
