@@ -18,11 +18,11 @@ success:
               - error: "research file was not updated"
         - when: "frontmatter(file, 'last_updated') == ctx.today"
           action:
-              - info: "The usage research on **{{state.name}}** completed successfully: {{ link(file) }}"
-              - message: "🎉  the usage research on **{{state.name}}** completed successfully"
+              - info: "The **Usage** research on **{{state.name}}** completed successfully: {{ link(file) }}"
+              - message: "🎉  the **Usage** research on **{{state.name}}** completed successfully"
 failure:
-    message: "💥 the usage research on **{{state.name}}** failed to complete!"
-    warn: "The usage research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    message: "💥 the Usage research on **{{state.name}}** failed to complete!"
+    warn: "The Usage research on **{{state.name}}** failed to complete! (err: {{err.message}})"
 ---
 
 Being able to understand how much "usage" a subscription plan in it for the short term window (typically 5 hours) or the longer term (typically the week) is **VERY** valuable information. 
