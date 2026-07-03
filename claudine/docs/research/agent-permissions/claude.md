@@ -1,9 +1,9 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-01
-last_updated: 2026-07-02
-agent: open_code
-model: kimi-for-coding/k2p7
+last_updated: 2026-07-03
+agent: codex
+model: default
 
 cli_params:
   - param: permission-mode
@@ -31,6 +31,16 @@ cli_params:
     description: "Adds bypassPermissions to the interactive Shift+Tab mode cycle without starting in it. Useful when you want to begin in another mode and switch later."
     example: "claude --permission-mode plan --allow-dangerously-skip-permissions"
     example_description: "Starts in plan mode but lets you cycle into bypassPermissions later via Shift+Tab."
+  - param: agent
+    style: switch
+    description: "Select the agent/subagent definition for the current session, overriding the agent setting."
+    example: "claude --agent code-reviewer"
+    example_description: "Starts a session using the named agent definition and its tool restrictions."
+  - param: agents
+    style: switch
+    description: "Define custom subagents dynamically as JSON for the current session. Accepts the same field names as subagent frontmatter plus prompt."
+    example: 'claude --agents ''{"reviewer":{"description":"Reviews code","tools":"Read,Grep","prompt":"Review this change."}}'''
+    example_description: "Adds a session-scoped reviewer agent with a restricted tool list."
   - param: add-dir
     style: switch
     description: "Add additional working directories that Claude may read and edit. Files in these directories follow the same permission rules as the launch directory."
@@ -51,6 +61,16 @@ cli_params:
     description: "Only use MCP servers provided via --mcp-config, ignoring user, project, plugin, and claude.ai connector servers."
     example: "claude --strict-mcp-config --mcp-config ./ci-mcp.json"
     example_description: "Runs a locked-down session where only the explicitly supplied MCP servers load."
+  - param: channels
+    style: switch
+    description: "Enable MCP channel notification sources for the session. Takes space-separated plugin channel identifiers and requires claude.ai authentication."
+    example: "claude --channels plugin:alerts@team-marketplace"
+    example_description: "Lets the named channel plugin push events into this session."
+  - param: dangerously-load-development-channels
+    style: switch
+    description: "Enable non-allowlisted development channels for local testing. Accepts plugin:<name>@<marketplace> and server:<name> entries and prompts for confirmation."
+    example: "claude --dangerously-load-development-channels server:webhook"
+    example_description: "Temporarily loads a local development channel source."
   - param: permission-prompt-tool
     style: switch
     description: "In non-interactive mode, route permission prompts to the named MCP tool for programmatic approval."
@@ -76,6 +96,11 @@ cli_params:
     description: "Path to a settings JSON file or an inline JSON string. Values override the same keys in settings.json for this session; omitted keys keep their file-based values."
     example: "claude --settings ./ci-settings.json"
     example_description: "Applies a session-specific settings overlay without modifying persisted config files."
+  - param: worktree
+    style: switch
+    description: "Start Claude in an isolated git worktree under <repo>/.claude/worktrees/<name>. This isolates repository edits but is not a general OS sandbox."
+    example: "claude --worktree feature-auth"
+    example_description: "Runs the session in a dedicated git worktree for the current repository."
 
 env_vars:
   - name: CLAUDE_CODE_ENABLE_AUTO_MODE
@@ -104,10 +129,18 @@ env_vars:
     effect: "Idle timeout in milliseconds for remote MCP tool calls before the call aborts (default 300000). Affects MCP execution, not permission policy."
 
 config_files:
-  - os: all
-    user: ~/.claude/settings.json
+  - os: macos
+    user: .claude/settings.json
     repo: .claude/settings.json
-    notes: "Local project overrides live in .claude/settings.local.json. MCP servers are stored separately in ~/.claude.json (user/local scopes) and .mcp.json (project scope). Managed settings can be delivered via server, MDM plist/registry, or system managed-settings.json files."
+    notes: "User path is relative to $HOME. Local project overrides live in .claude/settings.local.json. User/local MCP state is stored in ~/.claude.json; project MCP servers are stored in .mcp.json. Endpoint-managed settings can also be delivered by macOS MDM profile or managed-settings.json."
+  - os: linux
+    user: .claude/settings.json
+    repo: .claude/settings.json
+    notes: "User path is relative to $HOME. Local project overrides live in .claude/settings.local.json. User/local MCP state is stored in ~/.claude.json; project MCP servers are stored in .mcp.json. Endpoint-managed settings can also be delivered by managed-settings.json."
+  - os: windows
+    user: .claude/settings.json
+    repo: .claude/settings.json
+    notes: "User path is relative to the Windows user profile directory. Local project overrides live in .claude/settings.local.json. User/local MCP state is stored in the profile's .claude.json; project MCP servers are stored in .mcp.json. Endpoint-managed settings can also be delivered by Windows registry policy or managed-settings.json."
 
 precedence:
   - source: managed settings
@@ -151,9 +184,9 @@ default_posture: "When nothing is configured, Claude Code starts in default perm
 
 cli_zero_permissions:
   supported: true
-  invocation: 'claude --permission-mode dontAsk --tools "" --disallowedTools "mcp__*"'
-  mechanism: "dontAsk mode auto-denies any tool call that would otherwise prompt; --tools \"\" removes all built-in tools from the session; --disallowedTools \"mcp__*\" removes any configured MCP tools from the model's context."
-  limitations: "MCP servers supplied later via --mcp-config can still load unless --strict-mcp-config is also used; project/user settings still load unless --bare or --setting-sources is used; managed settings always apply; read-only Bash commands are only relevant if Bash is in the tool list."
+  invocation: 'claude --bare --setting-sources user --permission-mode dontAsk --tools "" --disallowedTools "mcp__*" --strict-mcp-config'
+  mechanism: "dontAsk mode auto-denies any tool call that would otherwise prompt; --tools \"\" removes built-in tools from the session; --disallowedTools \"mcp__*\" removes configured MCP tools from the model context; --bare and --strict-mcp-config suppress most customizations and MCP discovery without mutating config."
+  limitations: "Managed settings always apply. User settings still load because --setting-sources user is retained; use --settings with an explicit temporary JSON overlay if Claudine needs to neutralize a user's allow rules. Additional permissions can be added back with --tools, --allowedTools, --mcp-config, and --settings in the same invocation."
 
 agent_permissions:
   allowed: true
@@ -181,6 +214,7 @@ policy_engine:
     - "Managed-only administrative controls such as allowManagedPermissionRulesOnly and disableBypassPermissionsMode are policy enforcement knobs outside the user-facing permission rule surface."
     - "Sandbox filesystem/network boundaries are OS-enforced and separate from the static allow/ask/deny rule surface."
     - "Read-only Bash commands, process wrappers, compound-command splitting, and symlink path pairs are hard-coded matching behaviors."
+    - "Tool visibility (--tools, subagent tools, skill visibility, plugin/customization loading, and built-in feature toggles) is adjacent to approval policy and needs first-class metadata distinct from allow/ask/deny."
 
 permission_entities:
   - entity: tool
@@ -251,12 +285,12 @@ approval_modes:
     non_interactive: true
     aliases: ["auto", "Auto mode"]
   - name: dontAsk
-    effect: "Auto-denies any tool call that would otherwise prompt. Only pre-approved allow rules and read-only Bash commands execute."
+    effect: "Auto-denies any tool call that would otherwise prompt. Only pre-approved allow rules and read-only Bash commands execute; MCP tools marked as requiring user interaction are denied even if an allow rule matches."
     interactive: true
     non_interactive: true
     aliases: ["dontAsk", "don't ask"]
   - name: bypassPermissions
-    effect: "Skips permission prompts and safety checks so tool calls execute immediately. Explicit ask rules and root/home removal circuit breakers still prompt."
+    effect: "Skips permission prompts and safety checks so tool calls execute immediately. Explicit ask rules, root/home removal circuit breakers, and MCP tools marked as requiring user interaction still prompt."
     interactive: true
     non_interactive: true
     aliases: ["bypassPermissions", "--dangerously-skip-permissions", "Bypass permissions"]
@@ -360,6 +394,8 @@ Permissions can be defined in three ways:
 1. **Configuration files** in `settings.json` at user, project, local, or managed scope.
 2. **CLI flags** passed at startup such as `--permission-mode`, `--allowedTools`, and `--disallowedTools`.
 3. **In-session controls** such as `/permissions`, `/config`, and the `Shift+Tab` mode selector.
+
+Local observation on 2026-07-03: this host has a `~/.claude/settings.json` file with `permissions.allow`, `permissions.deny`, `enabledPlugins`, `extraKnownMarketplaces`, `skipDangerousModePermissionPrompt`, and model/effort settings. The active repo has `.claude/settings.local.json`, but it was empty for scalar values relevant to this research. `~/.claude.json` exists and contains Claude Code state/cache/project keys, which matches the documented split where user/local MCP state is outside `settings.json`.
 
 The permission system evaluates rules in this order: deny rules first, then ask rules, then allow rules, and finally the active permission mode. A matching deny rule always wins over an allow rule, and rule specificity does not change that order. A broad deny rule like `Bash(aws *)` blocks every matching call, including calls that also match a narrower allow rule like `Bash(aws s3 ls)`.
 
@@ -471,10 +507,10 @@ In interactive sessions, you can still use `/permissions` to add allow rules on 
 The best **CLI-only, session-scoped** way to start from zero tools is documented in the frontmatter's `cli_zero_permissions` field:
 
 ```bash
-claude --permission-mode dontAsk --tools "" --disallowedTools "mcp__*"
+claude --bare --setting-sources user --permission-mode dontAsk --tools "" --disallowedTools "mcp__*" --strict-mcp-config
 ```
 
-This disables all built-in tools and removes any configured MCP tools from the model's context. You can then add back only what is needed with `--allowedTools`, `--tools`, or `--mcp-config` (subject to `--strict-mcp-config` if you want to prevent other MCP sources).
+This disables all built-in tools, denies configured MCP tools, and suppresses most customization and MCP discovery without mutating the user's provider config. You can then add back only what is needed with `--tools`, `--allowedTools`, `--mcp-config`, and a temporary `--settings` JSON overlay. Managed settings still apply, and user settings still load in the invocation above; a Claudine wrapper should supply a temporary settings overlay if it needs to neutralize user-scope allow rules.
 
 PolicyEngine can describe this use case by setting `SetApprovalMode(dontAsk)` and adding allow rules for the approved tool surface. It is ergonomic and provides coverage for the deterministic part of the policy. The gap is that PolicyEngine cannot force an interactive user to be asked; it can only report that the effective policy would deny the call. The actual ask-or-deny behavior is a runtime decision made by Claude Code's UI layer.
 
@@ -804,4 +840,5 @@ Auto mode in `-p` works, but if the classifier blocks an action repeatedly the s
 
 ## Changelog
 
+- 2026-07-03: Refreshed metadata for Codex/default run, split `config_files` into macOS/Linux/Windows records to satisfy `_schema.yaml`, verified the installed local CLI as Claude Code 2.1.200, inspected local `~/.claude` and repo `.claude` config shapes, added session-scoped `--agent`, `--agents`, channel, and worktree security-control flags, strengthened the CLI-only zero-permissions invocation, and updated `dontAsk`/`bypassPermissions` notes for MCP tools requiring user interaction.
 - 2026-07-02: Refreshed research against current Claude Code documentation. Added comprehensive coverage of sandboxing, trust/admin controls, MCP permissions, non-interactive behavior, protected paths, and expanded rule grammar including parameter matching and tool-name globs. Updated frontmatter to the full schema contract and flagged Claudine updates as required.

@@ -1,161 +1,225 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-01
-last_updated: 2026-07-02
-agent: open_code
-model: kimi-for-coding/k2p7
+last_updated: 2026-07-03
+agent: codex
+model: default
 
 cli_params:
   - param: approval-mode
     style: switch
-    description: Set the session approval mode. Values are default (prompt for approval), auto_edit (auto-approve edit tools), plan (read-only mode), and yolo (auto-approve all tools). Overrides general.defaultApprovalMode for this session.
+    description: Sets the session approval mode. Values are default, auto_edit, yolo, and plan. Overrides general.defaultApprovalMode for the session; yolo is CLI-only and cannot be stored as the default approval mode.
     example: gemini --approval-mode plan
-    example_description: Starts a read-only planning session where write operations require explicit approval.
+    example_description: Starts an interactive session in read-only Plan Mode.
   - param: yolo
     style: switch
-    description: Deprecated alias for --approval-mode=yolo. Auto-approves all tool actions for the session.
-    example: gemini -y -p "deploy to staging"
-    example_description: Runs a headless prompt with all permission prompts auto-approved.
+    description: Deprecated alias for --approval-mode=yolo. Auto-approves nearly all tool actions unless disabled by security.disableYoloMode or secure mode.
+    example: gemini -y -p "update the changelog"
+    example_description: Runs a non-interactive prompt with YOLO approval mode.
   - param: sandbox
     style: switch
-    description: Enable sandboxed execution. Accepts a boolean or a provider such as docker, podman, sandbox-exec, runsc, or lxc.
-    example: gemini -s -p "run the test suite"
-    example_description: Runs the session inside the default sandbox provider for the platform.
+    description: Enables sandboxing for this session. The CLI flag is boolean; provider selection can come from GEMINI_SANDBOX or settings.
+    example: gemini --sandbox -p "run npm test"
+    example_description: Runs a headless prompt with sandboxing enabled.
   - param: skip-trust
     style: switch
-    description: Trust the current workspace for this session, bypassing the folder trust dialog.
-    example: gemini --skip-trust -p "summarize"
-    example_description: Runs non-interactively in a folder without prompting for trust.
-  - param: include-directories
-    style: switch
-    description: Add additional directories to the workspace. Repeatable or comma-separated.
-    example: gemini --include-directories ../lib,../docs
-    example_description: Expands read/write scope to sibling directories for this session.
-  - param: allowed-mcp-server-names
-    style: switch
-    description: Restrict which configured MCP servers are available. Repeatable or comma-separated.
-    example: gemini --allowed-mcp-server-names github,slack
-    example_description: Only allows tools from the listed MCP servers for this session.
-  - param: allowed-tools
-    style: switch
-    description: Deprecated tools allowlist. Use the Policy Engine instead.
-    example: gemini --allowed-tools read_file
-    example_description: Legacy way to allow specific tools without confirmation.
+    description: Trusts the current workspace for this session by setting GEMINI_CLI_TRUST_WORKSPACE=true internally, bypassing the folder trust dialog.
+    example: gemini --skip-trust -p "summarize this repository"
+    example_description: Allows headless execution in a workspace that would otherwise require a trust prompt.
   - param: policy
     style: switch
-    description: Additional policy files or directories to load (User tier). Repeatable or comma-separated.
-    example: gemini --policy ./gemini-policies
-    example_description: Loads supplemental User-tier policy TOML files for this session.
+    description: Loads additional User-tier policy TOML files or directories. Takes comma-separated values or repeated flags.
+    example: gemini --policy ./gemini-policy.d
+    example_description: Adds supplemental per-session User-tier rules without editing ~/.gemini/policies.
   - param: admin-policy
     style: switch
-    description: Additional admin policy files or directories to load (Admin tier). Ignored if standard system policy directories already contain .toml files.
-    example: gemini --admin-policy /etc/gemini-cli/policies
-    example_description: Loads enterprise policy TOML files at Admin tier.
+    description: Loads additional Admin-tier policy TOML files or directories. Ignored when standard system policy directories already contain TOML files.
+    example: gemini --admin-policy /etc/gemini-cli/extra-policies
+    example_description: Adds supplemental Admin-tier rules for the session or wrapper environment.
+  - param: allowed-mcp-server-names
+    style: switch
+    description: Restricts configured MCP servers to the named server list for this session. Accepts comma-separated values or repeated flags.
+    example: gemini --allowed-mcp-server-names github,docs
+    example_description: Connects only the github and docs MCP servers.
+  - param: allowed-tools
+    style: switch
+    description: Deprecated tool allowlist. Accepts comma-separated values or repeated flags and creates temporary allow rules for matching tools.
+    example: gemini --allowed-tools read_file,glob
+    example_description: Legacy way to auto-allow selected tools without confirmation.
+  - param: exclude-tools
+    style: switch
+    description: Temporary tool blocklist exposed in current source. Accepts comma-separated values or repeated flags and creates temporary block rules; it is not listed in the packaged CLI reference table.
+    example: gemini --exclude-tools run_shell_command,write_file
+    example_description: Blocks shell execution and file writes for the session through the legacy tool-filter path.
+  - param: include-directories
+    style: switch
+    description: Adds additional directories to the workspace. Accepts comma-separated values or repeated flags and can expand file-tool and sandbox scope.
+    example: gemini --include-directories ../shared,../docs
+    example_description: Makes sibling shared and docs directories available to the session.
+  - param: extensions
+    style: switch
+    description: Selects which extensions to load for the session. Accepts comma-separated values or repeated flags; if omitted, all enabled extensions are used.
+    example: gemini --extensions corp-tools
+    example_description: Loads only the corp-tools extension, limiting extension-provided tools, MCP servers, hooks, and policies.
+  - param: list-extensions
+    style: switch
+    description: Lists available extensions and exits, useful for auditing extension surfaces before launch.
+    example: gemini --list-extensions
+    example_description: Prints extension inventory without starting a session.
   - param: prompt
     style: switch
-    description: Run in non-interactive (headless) mode with the given prompt. In this mode ask_user decisions become deny and interactive trust/approval dialogs are skipped.
-    example: gemini -p --approval-mode plan "explain the auth module"
-    example_description: Runs a headless read-only task where mutating tools are denied instead of prompted.
+    description: Runs in non-interactive headless mode with the given prompt. In this mode ask_user decisions are treated as deny and approval prompts cannot be answered.
+    example: gemini -p --approval-mode plan "summarize README.md"
+    example_description: Runs a headless read-only prompt.
+  - param: prompt-interactive
+    style: switch
+    description: Executes the provided prompt and continues in interactive mode, so approval and trust dialogs can still be displayed.
+    example: gemini -i "inspect the build scripts"
+    example_description: Starts interactively after the initial prompt.
+  - param: acp
+    style: switch
+    description: Starts the agent in ACP mode. This changes the client protocol surface and should be treated as an adjacent control surface for wrappers.
+    example: gemini --acp
+    example_description: Starts Gemini CLI in ACP mode.
+  - param: experimental-acp
+    style: switch
+    description: Deprecated alias for --acp.
+    example: gemini --experimental-acp
+    example_description: Starts the deprecated ACP entry path.
+  - param: output-format
+    style: switch
+    description: Sets output format to text, json, or stream-json. Stream-json is relevant to wrappers because non-interactive approvals cannot be answered in-band.
+    example: gemini -p "list files" --output-format stream-json
+    example_description: Runs headless and emits streaming JSON events.
+  - param: raw-output
+    style: switch
+    description: Disables sanitization of model output, including ANSI escape filtering. This is an output security-control switch rather than a tool permission.
+    example: gemini --raw-output --accept-raw-output-risk -p "print colored text"
+    example_description: Allows raw model output after acknowledging the risk.
+  - param: accept-raw-output-risk
+    style: switch
+    description: Suppresses the warning shown when --raw-output is used.
+    example: gemini --raw-output --accept-raw-output-risk -p "emit escape sequences"
+    example_description: Acknowledges raw-output risk for automation.
+  - param: mcp add --trust
+    style: switch
+    description: Trusts an MCP server at configuration time, bypassing tool-call confirmation prompts for that server.
+    example: gemini mcp add local-docs node server.js --trust
+    example_description: Adds a trusted stdio MCP server.
+  - param: mcp add --include-tools
+    style: switch
+    description: Adds an MCP server with a tool allowlist. Accepts a comma-separated list of MCP tool names.
+    example: gemini mcp add jira node jira.js --include-tools search,get_issue
+    example_description: Exposes only selected tools from the jira server.
+  - param: mcp add --exclude-tools
+    style: switch
+    description: Adds an MCP server with a tool blocklist. Excluded tools win over included tools.
+    example: gemini mcp add jira node jira.js --exclude-tools delete_issue
+    example_description: Hides a destructive MCP tool from the model.
 
 env_vars:
   - name: GEMINI_SANDBOX
-    effect: Enables sandboxing and optionally selects the provider (true, docker, podman, sandbox-exec, runsc, or lxc).
+    effect: "Enables sandboxing and optionally selects the backend: true, docker, podman, sandbox-exec, runsc, or lxc. Environment selection has precedence over settings files."
   - name: GEMINI_SANDBOX_IMAGE
-    effect: Specifies a custom container image for Docker or Podman sandboxing.
+    effect: Selects a custom Docker/Podman image or LXC container name for sandboxing.
+  - name: GEMINI_SANDBOX_PROXY_COMMAND
+    effect: Configures the sandbox proxy command used by proxied sandbox profiles.
   - name: GEMINI_CLI_TRUST_WORKSPACE
-    effect: When set to true, trusts the current workspace for the session, equivalent to --skip-trust.
+    effect: When true, trusts the current workspace for the session, equivalent to --skip-trust.
   - name: GEMINI_CLI_TRUSTED_FOLDERS_PATH
-    effect: Overrides the default path for the trusted folders registry (~/.gemini/trustedFolders.json).
+    effect: Overrides the path of trustedFolders.json.
   - name: GEMINI_CLI_SYSTEM_SETTINGS_PATH
     effect: Overrides the path to the system-wide settings override file.
   - name: GEMINI_CLI_SYSTEM_DEFAULTS_PATH
     effect: Overrides the path to the system-wide defaults file.
   - name: GEMINI_CLI_HOME
-    effect: Redirects all user-scoped config and state to a different directory, useful for isolation.
+    effect: Relocates Gemini CLI user state and config from ~/.gemini to a separate directory.
   - name: SEATBELT_PROFILE
-    effect: Selects a macOS Seatbelt sandbox profile (permissive-open, permissive-proxied, restrictive-open, restrictive-proxied, strict-open, strict-proxied).
+    effect: Selects a macOS Seatbelt profile such as permissive-open, permissive-proxied, restrictive-open, restrictive-proxied, strict-open, or strict-proxied.
   - name: SANDBOX_MOUNTS
-    effect: Comma-separated list of host:container:opts mounts to add to a container sandbox.
+    effect: Adds container sandbox mounts as comma-separated from:to:opts entries. Missing opts default to read-only.
   - name: SANDBOX_FLAGS
-    effect: Passes custom flags into the docker or podman sandbox command.
+    effect: Passes extra flags to Docker or Podman sandbox commands.
   - name: SANDBOX_SET_UID_GID
-    effect: Enables or disables host UID/GID mapping for Linux sandboxes.
+    effect: Forces or disables Linux UID/GID mapping in container sandboxes.
+  - name: SANDBOX_PORTS
+    effect: Exposes additional ports to the sandbox container.
+  - name: SANDBOX_ENV
+    effect: Passes comma-separated key=value environment variables into the sandbox.
   - name: BUILD_SANDBOX
-    effect: When set, builds a local sandbox image from .gemini/sandbox.Dockerfile automatically.
+    effect: Requests automatic local sandbox image build when running from source; npm installs require a prebuilt image.
   - name: DEBUG
-    effect: Enables debug logging; does not read DEBUG from project .env files.
+    effect: Enables debug logging. Project .env DEBUG is automatically excluded; use shell env or .gemini/.env for Gemini-specific debug.
+  - name: GEMINI_CLI
+    effect: Set to 1 in subprocesses launched by run_shell_command so child scripts can detect Gemini CLI execution.
 
 config_files:
-  - os: all
-    user: ~/.gemini/settings.json
-    repo: .gemini/settings.json
-    notes: User policies live in ~/.gemini/policies/*.toml. Workspace policies in .gemini/policies/*.toml are currently disabled. System override paths vary by OS.
-  - os: linux
-    user: ~/.gemini/settings.json
-    repo: .gemini/settings.json
-    notes: System defaults at /etc/gemini-cli/system-defaults.json; system overrides at /etc/gemini-cli/settings.json; Admin policies at /etc/gemini-cli/policies.
   - os: macos
-    user: ~/.gemini/settings.json
+    user: .gemini/settings.json
     repo: .gemini/settings.json
-    notes: System defaults at /Library/Application Support/GeminiCli/system-defaults.json; system overrides at /Library/Application Support/GeminiCli/settings.json; Admin policies at /Library/Application Support/GeminiCli/policies.
+    notes: User policies are in .gemini/policies/*.toml under the home directory. Admin settings are /Library/Application Support/GeminiCli/settings.json and system-defaults.json; Admin policies are /Library/Application Support/GeminiCli/policies.
+  - os: linux
+    user: .gemini/settings.json
+    repo: .gemini/settings.json
+    notes: User policies are in .gemini/policies/*.toml under the home directory. Admin settings are /etc/gemini-cli/settings.json and /etc/gemini-cli/system-defaults.json; Admin policies are /etc/gemini-cli/policies.
   - os: windows
-    user: ~/.gemini/settings.json
+    user: .gemini/settings.json
     repo: .gemini/settings.json
-    notes: System defaults at C:\ProgramData\gemini-cli\system-defaults.json; system overrides at C:\ProgramData\gemini-cli\settings.json; Admin policies at C:\ProgramData\gemini-cli\policies.
+    notes: User path is relative to %USERPROFILE%. Admin settings are C:\ProgramData\gemini-cli\settings.json and system-defaults.json; Admin policies are C:\ProgramData\gemini-cli\policies.
 
 precedence:
   - source: cli
-    scope: [approval_mode, sandbox, rules, mcp, tool_visibility, trust]
+    scope: [approval_mode, sandbox, policy_paths, mcp, tool_visibility, trust, output]
     merge_strategy: none
-    notes: CLI flags are temporary session overrides and beat environment variables and file config. --policy adds User-tier TOML; --admin-policy adds Admin-tier TOML unless standard system policy dirs already contain .toml files.
+    notes: CLI arguments are session-scoped and override environment variables and settings for the same scalar surface. --policy and --admin-policy add TOML policy sources rather than replacing all policy.
   - source: environment variables
-    scope: [sandbox, trust, config_paths]
+    scope: [sandbox, trust, config_paths, user_home, debug]
     merge_strategy: none
-    notes: GEMINI_SANDBOX, GEMINI_CLI_TRUST_WORKSPACE, and path overrides take precedence over settings files.
-  - source: system settings override file
-    scope: [settings, mcp_servers, tools, security]
-    merge_strategy: none
-    notes: System-wide settings.json overrides user and project settings for scalar values.
-  - source: project settings file
-    scope: [settings, mcp_servers, tools, security]
+    notes: Environment variables override settings files for their surfaces and can relocate user/system config paths.
+  - source: system_settings
+    scope: [settings, mcp, tool_visibility, sandbox, admin_controls]
     merge_strategy: shallow
-    notes: .gemini/settings.json overrides user settings. Arrays/objects like includeDirectories and mcpServers merge.
-  - source: user settings file
-    scope: [settings, mcp_servers, tools, security]
+    notes: System overrides have final precedence among settings files. Scalars replace lower scopes; arrays and objects are merged, with mcpServers of the same name taking the higher-precedence definition.
+  - source: project_config
+    scope: [settings, mcp, tool_visibility, sandbox, hooks, commands, skills]
     merge_strategy: shallow
-    notes: ~/.gemini/settings.json overrides system defaults. mcpServers merge by server name.
-  - source: system defaults file
+    notes: Project .gemini/settings.json overrides user settings but is ignored in untrusted folders.
+  - source: user_config
+    scope: [settings, mcp, tool_visibility, sandbox]
+    merge_strategy: shallow
+    notes: User settings override system defaults. The observed local ~/.gemini/settings.json had no permission policy rules; it configured auth selection, preview/session settings, shell color, ripgrep, and UI status.
+  - source: system_defaults
     scope: [settings]
-    merge_strategy: none
-    notes: Baseline machine-wide defaults; lowest precedence among settings files.
+    merge_strategy: shallow
+    notes: Lowest settings-file layer after application defaults.
   - source: admin_policy
     scope: [rules]
     merge_strategy: none
-    notes: Admin-tier TOML rules (standard system dirs or --admin-policy) have the highest rule priority, but are ignored if standard system dirs already contain .toml policies.
+    notes: Admin TOML rules have highest policy tier. Standard admin policy directories are subject to ownership/permission checks; supplemental --admin-policy is ignored when standard admin policy files exist.
   - source: user_policy
     scope: [rules]
     merge_strategy: none
-    notes: User-tier TOML rules in ~/.gemini/policies/*.toml. Higher priority wins within a tier.
-  - source: extension_policy
-    scope: [rules]
-    merge_strategy: none
-    notes: Policies contributed by extensions.
-  - source: default_policy
-    scope: [rules]
-    merge_strategy: none
-    notes: Built-in default TOML policies shipped with Gemini CLI.
+    notes: User TOML rules in ~/.gemini/policies/*.toml outrank Workspace, Extension, and Default policy rules.
   - source: workspace_policy
     scope: [rules]
     merge_strategy: none
-    notes: Project-level .gemini/policies/*.toml. Currently disabled per issue #18186.
+    notes: Documented tier for .gemini/policies/*.toml, but current docs warn that workspace policies are non-functional.
+  - source: extension_policy
+    scope: [rules, mcp, tool_visibility]
+    merge_strategy: shallow
+    notes: Extensions may contribute policy files, tools, MCP servers, commands, hooks, and skills. Local MCP overrides merge restrictively for tool include/exclude lists.
+  - source: default_policy
+    scope: [rules]
+    merge_strategy: none
+    notes: Built-in TOML policy files define read-only defaults, write prompts, Plan Mode, YOLO, non-interactive denial, discovered-tool defaults, subagent invocation, sandbox-default, and optional Conseca checker rules.
 
-default_posture: "When nothing is configured, Gemini CLI uses general.defaultApprovalMode='default': read-only tools run automatically, write and shell tools prompt for confirmation, folder trust is enabled (schema default true, though public docs currently disagree), sandboxing is off, and MCP servers require per-server trust or confirmation."
+default_posture: "With no CLI flags, env vars, user config, repo config, managed settings, policies, or trust state changes, Gemini CLI uses default approval mode: read-only/search/context tools are allowed, mutating tools and shell execution ask in interactive mode and are denied in headless mode. Sandboxing is off by default, while folder trust documentation conflicts: the trusted-folders guide says disabled by default, but the generated settings reference lists security.folderTrust.enabled defaulting to true."
 
 cli_zero_permissions:
   supported: true
-  invocation: gemini --approval-mode plan
-  mechanism: Plan mode is the most restrictive CLI-only session posture; it denies write and shell tools while keeping read-only tools available.
-  limitations: There is no CLI flag to hide or disable all built-in tools. Read-only tools (read_file, glob, grep_search, list_directory, google_web_search, etc.) still execute. To allow writes or shell commands the user must change approval mode or supply policy files. A deny-all policy file cannot be passed inline via CLI.
+  invocation: gemini --approval-mode plan --exclude-tools run_shell_command,write_file,replace,web_fetch,activate_skill
+  mechanism: CLI-only restrictive baseline using Plan Mode plus temporary block rules for the primary mutating and network-fetch tools. For absolute no-tools behavior, Claudine would need to add a temporary deny-all policy file with --policy.
+  limitations: There is no documented top-level --no-tools or empty built-in-tool allowlist flag. Plan Mode still exposes read/search/planning tools and allows plan-file writes under .gemini/tmp. Additional allow rules can be supplied only by deprecated --allowed-tools or by passing policy files; policy files cannot be authored inline on the command line.
 
 agent_permissions:
   allowed: true
@@ -165,345 +229,261 @@ agent_permissions:
 yolo:
   has_interactive_yolo: true
   has_non_interactive_yolo: true
-  mechanism: "--approval-mode=yolo (or deprecated --yolo/-y); can be blocked by security.disableYoloMode"
+  mechanism: "--approval-mode=yolo or deprecated --yolo/-y; blocked by security.disableYoloMode, admin.secureModeEnabled, or untrusted-folder restrictions"
 
 policy_engine:
   ergonomic: false
   provides_coverage: false
   gaps:
-    - TOML policy tier math (Admin/User/Default priority bases) is not represented in PolicyEngine's flat rule model.
-    - Regex-based argsPattern, commandRegex, and toolAnnotations matching are outside the canonical allow/ask/deny rule shape.
-    - Workspace policy tier exists in Gemini CLI but is currently non-functional.
-    - Sandboxing (GEMINI_SANDBOX, sandbox providers, Seatbelt profiles, toolSandboxing) is an orthogonal execution layer not modeled by PolicyEngine.
-    - Folder trust safe-mode overrides policy and disables project settings, .env, MCP servers, and auto-acceptance.
-    - MCP server trust, includeTools/excludeTools, and mcp.allowed/mcp.excluded lists are server-level controls beyond tool-level rules.
-    - tools.core allowlisting and deprecated tools.exclude blocklisting are separate from policy rules.
-    - security.disableYoloMode is an administrative lockout not expressed as a policy rule.
-    - ask_user decisions become deny in non-interactive mode, which is a runtime mapping rather than a static policy effect.
-    - Subagent scoping via the subagent policy field and the invoke_agent tool are not modeled.
-    - Sandbox-default.toml defines OS-enforced sandbox modes (plan/default/accepting_edits) with approvedTools lists that are outside static policy.
+    - Gemini's TOML policy tier math and dynamic settings-derived priority bands are more complex than Claudine's flat PolicyEngine model.
+    - Regex argsPattern, commandRegex, commandPrefix shorthand, toolAnnotations, modes, interactive matching, allowRedirection, and safety_checker hooks are not first-class PolicyEngine concepts.
+    - Gemini separates tool visibility from approval through tools.core, tools.exclude, policy deny-without-argsPattern, extension selection, and MCP include/exclude filters.
+    - Folder trust safe mode can disable project settings, custom commands, MCP servers, hooks, memory loading, and auto-acceptance outside normal rule evaluation.
+    - Sandbox state, sandbox expansion, tool-level sandboxing, OS/container backend choice, and network/mount controls are not represented as static permission rules.
+    - MCP server trust, OAuth, server allow/exclude filters, per-server tool filters, and extension override merge semantics require provider-specific modeling.
+    - Subagent invocation is governed both as invoke_agent and as virtual tool names, and rules can also be scoped by the calling subagent.
+    - Non-interactive mode changes ask_user into deny at runtime, which cannot be represented as a source-level static decision without context.
+    - Admin/system settings and secure mode can constrain user and repo settings in ways that are not ordinary policy overrides.
 
 permission_entities:
   - entity: tool
-    native_names: ["toolName", "tools.core", "tools.allowed", "tools.confirmationRequired", "tools.exclude", "--allowed-tools"]
-    notes: Built-in tools such as run_shell_command, read_file, write_file, replace, web_fetch, etc. tools.core is an allowlist of exposed tools; tools.exclude is deprecated.
+    native_names: ["toolName", "tools.core", "tools.exclude", "--allowed-tools", "--exclude-tools"]
+    notes: Built-in tools and discovered tools can be allowed, asked, denied, hidden, or filtered. Deprecated tools.allowed/tools.exclude still exist as compatibility surfaces.
   - entity: tool_group
-    native_names: []
-    notes: Gemini CLI does not expose explicit tool groups in policy; class names like ShellTool or ReadFileTool in tools.core act as coarse categories.
+    native_names: ["read-only tools", "write tools", "discovered_tool_*", "toolAnnotations"]
+    notes: Groups are mostly implicit through tool names, wildcards, annotations such as readOnlyHint, and built-in policy files.
   - entity: command
-    native_names: ["run_shell_command", "commandPrefix", "commandRegex"]
-    notes: commandPrefix matches the start of the command argument; commandRegex matches a regex against the JSON-encoded arguments.
+    native_names: ["run_shell_command", "commandPrefix", "commandRegex", "allowRedirection", "tools.core", "tools.exclude"]
+    notes: Shell policy can match prefix or regex, and redirection requires explicit rule permission unless YOLO allows it.
   - entity: path
-    native_names: ["argsPattern", "file_path", "dir_path", "safety_checker allowed-path"]
-    notes: Path constraints are expressed through regex on tool arguments or sandbox allowedPaths, not first-class path rules.
+    native_names: ["argsPattern", "file_path", "dir_path", "tools.sandboxAllowedPaths", "SANDBOX_MOUNTS", "includeDirectories"]
+    notes: Path policy is mostly regex over tool arguments plus sandbox/mount/workspace controls, not a separate path-rule language.
   - entity: workspace
-    native_names: ["includeDirectories", "--include-directories", "tools.sandboxAllowedPaths"]
-    notes: Additional directories expand where the session can read and write.
+    native_names: ["includeDirectories", "--include-directories", "security.folderTrust.enabled", "trustedFolders.json"]
+    notes: Workspace scope affects file access, memory discovery, project settings, and trust gating.
   - entity: mcp_server
-    native_names: ["mcp.allowed", "mcp.excluded", "--allowed-mcp-server-names", "mcpServers"]
-    notes: Server-level allowlist/blocklist and per-server trust. System settings definitions override user definitions by server name.
+    native_names: ["mcpServers", "mcp.allowed", "mcp.excluded", "--allowed-mcp-server-names", "trust"]
+    notes: Servers can be filtered, trusted, and merged by name across settings scopes.
   - entity: mcp_tool
-    native_names: ["mcpName", "toolName", "mcp_server_tool", "includeTools", "excludeTools"]
-    notes: MCP tools get FQNs mcp_{serverName}_{toolName}; policy rules can target mcpName with or without toolName. Avoid underscores in server names.
+    native_names: ["mcpName", "mcp_*", "mcp_server_*", "includeTools", "excludeTools"]
+    notes: MCP tools are registered as fully qualified names mcp_{serverName}_{toolName}; mcpName is the recommended policy field.
   - entity: mcp_resource
-    native_names: ["list_mcp_resources", "read_mcp_resource"]
-    notes: Resource discovery/reading is read-only and does not prompt by default, but depends on the server being permitted to connect.
+    native_names: ["list_mcp_resources", "read_mcp_resource", "@server://resource/path"]
+    notes: Resources are discovered and can be listed/read through built-in tools when the server connects.
   - entity: agent
-    native_names: ["invoke_agent"]
-    notes: Subagents are invoked through the invoke_agent tool.
+    native_names: ["invoke_agent", "remote agents"]
+    notes: Agent delegation is a tool call and remote agents can require user confirmation.
   - entity: subagent
-    native_names: ["subagent"]
-    notes: TOML policy rules can be scoped to a specific subagent name, or the subagent name can be used as a virtual toolName.
+    native_names: ["subagent", "agent_name", "complete_task"]
+    notes: Policy rules can target subagents as virtual tool names or scope tool calls by the executing subagent.
   - entity: mode
-    native_names: ["general.defaultApprovalMode", "--approval-mode", "modes"]
-    notes: Approval modes set the session baseline for approvals default, auto_edit, plan, yolo.
+    native_names: ["general.defaultApprovalMode", "--approval-mode", "default", "auto_edit", "plan", "yolo"]
+    notes: Modes select built-in policy behavior and can be used as rule conditions.
   - entity: approval_category
     native_names: ["allow", "ask_user", "deny"]
-    notes: Fine-grained rule decisions. ask_user maps to deny in non-interactive mode.
+    notes: ask_user becomes deny in non-interactive mode.
   - entity: sandbox
-    native_names: ["tools.sandbox", "security.toolSandboxing", "GEMINI_SANDBOX", "sandbox-default.toml"]
-    notes: Full-process sandbox is legacy; tool-level sandboxing isolates individual tool executions. Both are separate from the policy engine.
+    native_names: ["tools.sandbox", "security.toolSandboxing", "GEMINI_SANDBOX", "sandbox-default.toml", "sandbox_expansion_required"]
+    notes: Sandboxing is separate from approval policy and may be full-process or tool-level.
   - entity: hook
-    native_names: ["hooks.BeforeTool", "hooks.AfterTool"]
-    notes: Hooks can intercept tool calls such as enter_plan_mode and exit_plan_mode.
+    native_names: ["hooks", "hooksConfig.enabled", "gemini hooks migrate"]
+    notes: Hooks can intercept/observe CLI behavior and are disabled in untrusted-folder safe mode.
   - entity: extension
-    native_names: ["extensions", "blockGitExtensions", "allowedExtensions"]
-    notes: Extensions can contribute tools, MCP servers, and policies. security.blockGitExtensions and allowedExtensions restrict extension sources.
+    native_names: ["extensions", "--extensions", "security.blockGitExtensions", "security.allowedExtensions"]
+    notes: Extensions can contribute tools, MCP servers, hooks, skills, commands, and policies; extension source controls are security relevant.
   - entity: slash_command
-    native_names: ["/permissions", "/plan", "/mcp"]
-    notes: In-session commands for trust and mode management.
+    native_names: ["/permissions", "/mcp", "/tools", "/settings", "/agents reload", "/extensions reload"]
+    notes: Interactive commands can manage trust, inspect tools/MCP, reload resources, and change settings.
   - entity: unknown
-    native_names: ["security.enableConseca"]
-    notes: Context-aware security checker uses an LLM to dynamically generate and enforce policies.
+    native_names: ["security.enableConseca", "safety_checker"]
+    notes: Context-aware security and in-process safety checkers add dynamic decisions not expressible as plain static rules.
 
 approval_modes:
   - name: default
-    effect: Read-only tools run without approval; write, shell, web_fetch, activate_skill, and MCP tool calls prompt for confirmation.
+    effect: Read-only/search/context tools are allowed; file edits, shell, web_fetch, activate_skill, and many discovered or remote actions ask in interactive mode and deny in headless mode.
     interactive: true
     non_interactive: true
-    aliases: ["default"]
+    aliases: ["default", "general.defaultApprovalMode=default"]
   - name: auto_edit
-    effect: Auto-approves write_file, replace, and web_fetch when an in-process safety checker allows the path. Shell and other mutators still prompt.
+    effect: Auto-approves selected edit tools such as write_file and replace when safety checks allow the path; shell still asks unless separately allowed.
     interactive: true
     non_interactive: true
-    aliases: ["auto_edit"]
+    aliases: ["auto_edit", "autoEdit", "general.defaultApprovalMode=auto_edit"]
   - name: plan
-    effect: Read-only mode for research and design. Only read/search/planning tools are allowed; writes are limited to .md files in the plans directory. In non-interactive mode exit_plan_mode switches to yolo for implementation.
+    effect: Research/read-only mode. Denies most tools, asks for selected read-only MCP and web/skill tools in interactive mode, allows only specific plan-file writes under .gemini/tmp, and permits plan transitions according to interactive/headless policy.
     interactive: true
     non_interactive: true
-    aliases: ["plan"]
+    aliases: ["plan", "--approval-mode plan", "/plan"]
   - name: yolo
-    effect: All tools are auto-approved except ask_user and plan-mode transitions. Can be blocked by security.disableYoloMode.
+    effect: Allows all tools with redirection except ask_user and interactive plan-mode transitions, subject to trust, admin, sandbox, and explicit deny rules.
     interactive: true
     non_interactive: true
-    aliases: ["yolo", "--yolo", "-y"]
+    aliases: ["yolo", "--approval-mode yolo", "--yolo", "-y"]
 
 rule_model:
   decisions: ["allow", "ask_user", "deny"]
-  syntax: "TOML [[rule]] blocks with toolName, commandPrefix, commandRegex, argsPattern, mcpName, subagent, toolAnnotations, modes, interactive, priority, decision, denyMessage, and allowRedirection."
-  precedence: "Highest final priority wins. Tier bases: Admin 5, User 4, Workspace 3, Extension 2, Default 1; final priority = tier_base + (priority/1000). Settings-based dynamic rules are fixed in the User tier (4.1-4.95). Within a tier, higher numeric priority wins."
-  merge_semantics: "TOML rules are additive per tier; the highest-priority matching rule decides. mcpServers objects merge across settings scopes by server name. MCP includeTools arrays intersect when both sources provide lists; excludeTools arrays union; exclude always wins. tools.core replaces/limits the exposed built-in tool set."
-  matcher_semantics: "toolName supports * for any tool, mcp_* for any MCP tool, and mcp_server_* for a specific server. commandPrefix matches string start. commandRegex and argsPattern are regexes tested against the JSON-encoded tool arguments. toolAnnotations requires all listed key-value pairs to be present."
-  default_decision: "When no rule matches, the active approval mode decides: default asks for mutators and allows reads; plan denies most writes; yolo allows; non-interactive converts ask_user to deny."
+  syntax: "TOML [[rule]] blocks with toolName or toolName array, optional subagent, mcpName, toolAnnotations, argsPattern, commandPrefix, commandRegex, decision, priority 0-999, denyMessage, modes, interactive, allowRedirection, and optional safety_checker."
+  precedence: "Highest final priority wins. Current bundled policy comments and source use tier bases Default 1, Extension 2, Workspace 3, User 4, Admin 5, with final_priority = tier_base + priority/1000. Settings-derived dynamic rules occupy User-tier sub-bands such as 4.95 persistent always-allow, 4.9 MCP excluded, 4.4 CLI exclude-tools, 4.3 CLI allowed-tools, 4.2 MCP trust=true, and 4.1 MCP allowed."
+  merge_semantics: "Policy TOML rules are additive and conflict by priority, not by deep merge. Settings files merge by scope: scalars replace, arrays such as includeDirectories concatenate, objects such as mcpServers merge by key with higher-precedence definitions replacing lower ones. Extension MCP includeTools intersect, excludeTools union, and exclude wins."
+  matcher_semantics: "toolName supports * and MCP FQN wildcards; mcpName targets MCP servers and can be *. argsPattern and commandRegex are regular expressions over stable JSON argument strings. commandPrefix is prefix matching for shell commands. toolAnnotations requires all listed annotation key-values. modes accepts policy mode names, with docs using autoEdit while CLI uses auto_edit."
+  default_decision: "When no user/admin rule matches, built-in default policy files decide: read-only tools allow, write/shell/web_fetch/activate_skill ask in interactive and deny in headless, Plan Mode denies most actions, and YOLO allows nearly all actions."
 
 tool_visibility:
   supported: true
   mechanisms:
-    - "tools.core allowlist restricts which built-in tools are exposed to the model."
-    - "tools.exclude (deprecated) removes tools from discovery."
-    - "Policy deny rules without an argsPattern remove the tool from the model's memory entirely."
-    - "MCP includeTools/excludeTools filter tools per server."
-    - "Extensions can add or remove tools from the registry."
-  notes: "There is no CLI flag to hide built-in tools directly. --allowed-tools only adds allow rules and is deprecated. A tool denied by policy without argsPattern is hidden from the model context."
+    - "tools.core is an allowlist for all built-in tools and can narrow run_shell_command by command prefix."
+    - "tools.exclude and --exclude-tools are deprecated blocklist surfaces; blocklist entries take precedence over allowlist entries."
+    - "A policy deny rule without argsPattern excludes the denied tool from the model's memory."
+    - "MCP includeTools and excludeTools filter tools before exposure; excludeTools wins."
+    - "--extensions can limit extension-contributed tools, MCP servers, commands, hooks, skills, and policies for one session."
+  notes: "Tool visibility is distinct from approval. A visible tool may still ask, while a hidden tool is removed from the model's option set."
 
 sandbox:
   supported: true
-  modes: ["plan", "default", "accepting_edits"]
-  backends: ["macOS Seatbelt", "Docker/Podman", "Windows Native Sandbox", "gVisor/runsc (Linux)", "LXC/LXD (Linux, experimental)"]
-  filesystem_control: "Full-process sandbox mounts the workspace at the same absolute path inside the container and restricts writes outside it. Tool-level sandboxing isolates individual tool executions. Additional paths can be added via SANDBOX_MOUNTS, tools.sandboxAllowedPaths, or sandbox expansion requests."
-  network_control: "Seatbelt profiles choose between open/proxied network; container sandboxes can set tools.sandboxNetworkAccess. Corporate proxies can be configured via env vars or MCP server env."
-  notes: "tools.sandbox is labeled legacy full-process sandboxing in the settings schema. security.toolSandboxing is the newer tool-level sandbox and defaults to false. Sandboxing applies to tool/shell execution; built-in read-only file tools run outside the sandbox boundary."
+  modes: ["full-process tools.sandbox", "tool-level security.toolSandboxing", "sandbox-default modes: plan, default, accepting_edits", "sandbox expansion"]
+  backends: ["macOS Seatbelt", "Docker", "Podman", "Windows Native Sandbox", "gVisor/runsc on Linux", "LXC/LXD on Linux"]
+  filesystem_control: "Full-process/container sandboxing mounts the workspace at the same absolute path and limits access to the workspace plus configured mounts/allowed paths. macOS Seatbelt profiles range from write-restricted to strict read/write restriction. Windows Native Sandbox uses persistent Low Mandatory Level integrity changes."
+  network_control: "Sandbox defaults disable network in sandbox-default.toml. Seatbelt profiles choose open or proxied network. Container sandboxes can use proxy/network settings, SANDBOX_PORTS, SANDBOX_ENV, and custom flags."
+  notes: "Sandboxing is separate from approval mode. Dynamic sandbox expansion can ask for one-run path or network expansion when a command fails or is predicted to need extra access. Sandboxing reduces risk but does not eliminate all risk."
 
 trust_and_admin:
-  folder_trust: "security.folderTrust.enabled enables a trust dialog on first launch in a folder. Untrusted folders ignore project .gemini/settings.json, project .env, extension install/update/uninstall, auto-acceptance, automatic memory, MCP servers, and custom commands. The schema default is true, though public docs currently state it is disabled by default."
-  managed_policy: "System-wide system-defaults.json and settings.json provide baseline and override layers. Admin-tier TOML policies can be placed in standard system directories or loaded via --admin-policy. A wrapper script can enforce GEMINI_CLI_SYSTEM_SETTINGS_PATH. These are client-side controls and can be bypassed by a determined local administrator."
-  safe_mode: "An untrusted workspace runs in restricted safe mode. --skip-trust or GEMINI_CLI_TRUST_WORKSPACE=true trust the workspace for the session only."
-  notes: "Local observed config (~/.gemini/trustedFolders.json) shows folder trust in use even though the user's settings.json does not explicitly enable it, supporting the schema default of true."
+  folder_trust: "Folder trust stores decisions in ~/.gemini/trustedFolders.json by default. The trusted-folders guide says the feature is disabled by default, while the generated settings reference says security.folderTrust.enabled defaults to true; local observed trustedFolders.json exists and records TRUST_PARENT/TRUST_FOLDER entries. Untrusted safe mode ignores workspace settings and .env, blocks extension management, disables tool auto-acceptance and automatic memory, prevents MCP connections, and skips custom commands."
+  managed_policy: "System defaults and system overrides are JSON settings layers. Admin TOML policies live in OS-specific system directories or supplemental --admin-policy/adminPolicyPaths. Standard admin policy directories require secure ownership/permissions and supplemental admin policies are ignored if standard policy files exist."
+  safe_mode: "Headless untrusted workspaces exit with FatalUntrustedWorkspaceError when folder trust is enabled; --skip-trust or GEMINI_CLI_TRUST_WORKSPACE=true trusts only for the session. admin.secureModeEnabled also disables YOLO in source."
+  notes: "Enterprise docs explicitly classify system settings as policy-enforcement aids, not a foolproof local security boundary against users with local administrative privileges."
 
 mcp_permissions:
   supported: true
   server_filters:
-    - "mcp.allowed restricts which configured servers connect."
-    - "mcp.excluded disables specific servers."
-    - "--allowed-mcp-server-names restricts servers for one session."
-    - "System settings definitions of mcpServers override user/project definitions by server name."
+    - "mcp.allowed only connects listed configured servers."
+    - "mcp.excluded disables listed servers."
+    - "--allowed-mcp-server-names restricts servers for the session."
+    - "mcpServers definitions merge by server name, with higher-precedence settings replacing lower definitions."
   tool_filters:
-    - "Per-server includeTools allowlist and excludeTools blocklist."
-    - "Policy engine rules using mcpName and/or toolName."
-  trust_model: "mcpServers.<name>.trust=true bypasses confirmation for that server's tools. OAuth tokens are stored per user in ~/.gemini/mcp-oauth-tokens.json. Untrusted workspaces do not connect MCP servers."
-  notes: "MCP tools run outside the tool sandbox. stdio servers are subprocesses and inherit a redacted environment unless explicitly configured. Extension-provided MCP tool lists merge restrictively: excludeTools union, includeTools intersect."
+    - "includeTools exposes only selected tools from a server."
+    - "excludeTools hides selected tools and wins over includeTools."
+    - "Policy rules can use mcpName alone, mcpName plus toolName, mcpName='*', or MCP FQN wildcards."
+    - "mcp add --include-tools and --exclude-tools write server-specific filters."
+  trust_model: "mcpServers.<name>.trust=true bypasses confirmation for that server's tools. Interactive prompts can also allow once, always allow a tool, or always allow a server. Untrusted folders do not connect MCP servers."
+  notes: "MCP servers are external processes or remote endpoints. Stdio servers inherit a sanitized environment unless env is explicitly configured. OAuth remote servers store tokens under the Gemini user directory; current docs say mcp-oauth-tokens.json, while observed local state uses mcp-oauth-tokens-v2.json. MCP tools must be available inside the sandbox when sandboxing is enabled; otherwise they can fail."
 
-headless_behavior: In non-interactive -p mode, ask_user decisions are treated as deny, interactive trust and approval dialogs are skipped, and plan mode auto-approves enter_plan_mode/exit_plan_mode then switches to yolo for implementation. MCP servers requiring OAuth are unavailable. If folder trust is enabled and the workspace is untrusted, the CLI exits with FatalUntrustedWorkspaceError unless --skip-trust or GEMINI_CLI_TRUST_WORKSPACE is set.
+headless_behavior: "In -p/--prompt non-interactive mode, ask_user is treated as deny and approval/trust dialogs cannot be answered. If folder trust is enabled and the folder is untrusted, Gemini CLI exits with FatalUntrustedWorkspaceError unless --skip-trust or GEMINI_CLI_TRUST_WORKSPACE=true is used; OAuth MCP flows requiring a browser are not suitable for headless environments."
 
-approval_persistence: User choices to "Always allow" can be persisted when security.enablePermanentToolApproval is true; security.autoAddToPolicyByDefault makes this the default for low-risk tools in trusted workspaces. Folder trust and MCP server trust/OAuth tokens persist in ~/.gemini/trustedFolders.json and ~/.gemini/mcp-oauth-tokens.json.
+approval_persistence: "Interactive confirmation supports one-time approval, always allow a tool, and always allow a server. Permanent tool approvals are available only when security.enablePermanentToolApproval is true; autoAddToPolicyByDefault can make permanent approval the default for low-risk tools in trusted workspaces. Trust decisions persist in trustedFolders.json."
 
 protected_paths:
-  - "gha-creds-*.json (GitHub Actions credential files are denied by sandbox-default.toml)"
+  - "gha-creds-*.json"
 
-security_posture: Gemini CLI's default security is a client-side static policy engine with advisory prompts, not an OS-enforced sandbox. Optional OS-enforced sandboxing (Seatbelt, containers, gVisor) can isolate tool and shell execution. Folder trust and system settings provide gating and administrative layers, but all controls are client-side and can be bypassed by a malicious actor with local administrative rights. A context-aware security checker (security.enableConseca) can add an LLM-based guardrail.
+security_posture: "Gemini CLI combines advisory approval prompts, a static client-side policy engine, folder trust gating, managed settings/policy layers, and optional OS/container-enforced sandboxing. Without sandboxing it is not an OS security boundary; enterprise docs warn that local administrators can bypass managed settings."
 
 changes:
-  - "Added --policy CLI flag (User-tier policy loader) alongside existing --admin-policy."
-  - "Confirmed approval mode values are default, auto_edit, plan, and yolo; yolo remains CLI-only and can be blocked by security.disableYoloMode."
-  - "Verified policy tier bases from source: Default 1, Extension 2, Workspace 3, User 4, Admin 5; public docs contain an internal inconsistency calling Admin base 4."
-  - "Workspace policy tier (.gemini/policies/*.toml) remains disabled per issue #18186."
-  - "Documented conflict between schema default (true) and public docs (disabled by default) for security.folderTrust.enabled."
-  - "Separated legacy full-process sandbox (tools.sandbox) from tool-level sandboxing (security.toolSandboxing, default false)."
-  - "Added newly discovered security settings: disableAlwaysAllow, enablePermanentToolApproval, autoAddToPolicyByDefault, blockGitExtensions, allowedExtensions, environmentVariableRedaction, enableConseca."
-  - "Documented sandbox-default.toml sandbox modes (plan/default/accepting_edits) and approvedTools lists."
-  - "Identified subagent invocation tool as invoke_agent and the subagent policy-rule scoping field."
-  - "Documented MCP tool-filter merge semantics (excludeTools union, includeTools intersect) and extension override behavior."
-  - "Corrected cli_zero_permissions: no CLI flag can hide all tools; plan mode is the strongest CLI-only session lockdown."
-  - "Noted only gha-creds JSON is observed as a protected path in policy; no general protected-path list is documented."
-  - "Added sunset context: Gemini CLI is being replaced by Antigravity CLI for unpaid tier and Google One users."
+  - "Updated research against current npm @google/gemini-cli 0.49.0 while noting the locally installed gemini binary is 0.46.0."
+  - "Added schema-valid OS-specific config_files records and removed the old invalid os: all entry."
+  - "Added current source-observed top-level --exclude-tools, --acp, raw-output, and MCP add trust/include/exclude flags to cli_params."
+  - "Recorded local ~/.gemini as symlinks into ~/.claudine/.gemini and observed current settings/trustedFolders shape without reading credential or token contents."
+  - "Corrected zero-permissions guidance to use Plan Mode plus explicit temporary tool exclusions, and documented that true no-tools requires a temporary --policy file because there is no no-tools CLI flag."
+  - "Retained and clarified the folder trust documentation conflict: trusted-folders says disabled by default, settings reference says default true."
+  - "Refreshed built-in tool inventory to include current task tracker, topic, internal docs, planning, MCP resource, and subagent lifecycle tools."
+  - "Added current sandbox expansion, SANDBOX_PORTS, SANDBOX_ENV, GEMINI_SANDBOX_PROXY_COMMAND, Windows Native Sandbox, and tool-level sandboxing details."
+  - "Added current MCP OAuth/token, environment sanitization, per-server trust, includeTools/excludeTools, and restrictive extension merge semantics."
+  - "Confirmed workspace policy tier remains documented as non-functional and should not be used as current truth."
 
 requires_claudine_update: true
-reason: "Gemini CLI's permission surface combines approval modes, TOML policy tiers with fixed tier bases, regex/argsPattern rules, commandPrefix/commandRegex matching, toolAnnotations, sandbox modes and OS backends, folder trust state, MCP server filters and restrictive merge semantics, subagent scoping, settings-based dynamic rules with fixed sub-priorities, and the transition to Antigravity CLI. Claudine's PolicyEngine would need a Gemini-specific backend extension to accurately model these layers and mutate them via config/policy files."
+reason: "Claudine's PolicyEngine cannot accurately model Gemini CLI 0.49.0 without provider-specific extensions for rule tier math, dynamic settings-derived priorities, commandPrefix/commandRegex/argsPattern matching, safety checkers, tool visibility, folder trust safe mode, sandbox expansion/backends, MCP trust and filters, subagent scoping, and headless ask_user-to-deny behavior."
 ---
 
-# Gemini CLI Permissions
+# Gemini CLI Permissions and Security Controls
 
 ## Introduction to Gemini CLI Permissions
 
-Gemini CLI uses a layered permission model. The highest-level knob is the **approval mode**, which selects a broad posture such as read-only or auto-approve. Under that, the **Policy Engine** evaluates TOML rules that decide whether an individual tool call is allowed, denied, or requires user confirmation. Finally, **sandboxing** and **folder trust** provide isolation and trust-gating that can override or restrict what the policy engine would otherwise permit.
+Gemini CLI permissions are layered. The broad session posture is the approval mode (`default`, `auto_edit`, `plan`, or `yolo`). Fine-grained decisions come from the Gemini CLI Policy Engine, which loads TOML rules and returns `allow`, `ask_user`, or `deny` for matching tool calls. Separate security-control layers govern sandboxing, folder trust, extensions, MCP server/tool visibility, raw output, and system/admin settings.
 
-Permissions can be defined through:
+Configuration files can define permissions in two main formats:
 
-1. **Configuration files** — JSON `settings.json` at system, user, and project scopes, plus TOML policy files in `~/.gemini/policies/` (User tier) and system policy directories (Admin tier).
-2. **Environment variables** — such as `GEMINI_SANDBOX`, `GEMINI_CLI_TRUST_WORKSPACE`, and paths that relocate config files.
-3. **CLI flags** — such as `--approval-mode`, `--sandbox`, `--skip-trust`, `--policy`, and `--admin-policy`.
+- JSON settings files set approval defaults, sandbox settings, tool visibility, MCP filters, folder trust, extension controls, and admin controls.
+- TOML policy files define rule-level tool decisions with matchers for tools, commands, MCP servers, subagents, mode, interactivity, annotations, and arguments.
 
-### Approval modes
+Environment variables influence the same posture. `GEMINI_SANDBOX` enables/selects sandboxing, `GEMINI_CLI_TRUST_WORKSPACE=true` bypasses folder trust for one session, `GEMINI_CLI_HOME` relocates user state, and `GEMINI_CLI_SYSTEM_SETTINGS_PATH` or `GEMINI_CLI_SYSTEM_DEFAULTS_PATH` relocates system settings. Sandbox-specific variables such as `SEATBELT_PROFILE`, `SANDBOX_MOUNTS`, `SANDBOX_FLAGS`, `SANDBOX_PORTS`, and `SANDBOX_ENV` tune the execution sandbox.
 
-| Mode | Behavior |
-| :--- | :--- |
-| `default` | Read-only tools run automatically; write and shell tools ask for confirmation. |
-| `auto_edit` | Optimized for automated editing; certain write operations are auto-approved when a path safety checker passes. |
-| `plan` | Read-only mode for research and design; edits are limited to `.md` plan files. In non-interactive mode, exiting plan switches to `yolo` for implementation. |
-| `yolo` | All tools are auto-approved. Can only be enabled via CLI (`--approval-mode=yolo` or deprecated `--yolo`). Can be blocked with `security.disableYoloMode`. |
+The current package's CLI reference lists `--approval-mode`, `--yolo`, `--sandbox`, `--skip-trust`, `--allowed-mcp-server-names`, `--allowed-tools`, `--extensions`, `--include-directories`, `--prompt`, and output controls. Current bundled source also exposes `--policy`, `--admin-policy`, `--exclude-tools`, `--acp`, `--raw-output`, and `--accept-raw-output-risk`. CLI flags are session-scoped and have the highest precedence for their surfaces, followed by environment variables, then system override settings, project settings, user settings, system defaults, and hardcoded defaults. Policy TOML has its own tier system: Admin > User > Workspace > Extension > Default, though Workspace policy is documented as non-functional in current docs.
 
-The active mode can be set per session with `--approval-mode` or configured as `general.defaultApprovalMode` in `settings.json`. The value `yolo` is not allowed in `general.defaultApprovalMode`; it must be requested explicitly.
-
-### Policy Engine basics
-
-Policy rules are written in TOML and define a decision (`allow`, `deny`, or `ask_user`) for matching tool calls. Rules can match by `toolName`, `commandPrefix`, `commandRegex`, `argsPattern`, `mcpName`, `subagent`, `toolAnnotations`, `modes`, and `interactive`. Higher-priority rules win. The tiers are:
-
-| Tier | Base | Location |
-| :--- | :--- | :--- |
-| Default | 1 | Built-in policies shipped with Gemini CLI. |
-| Extension | 2 | Policies defined in extensions. |
-| Workspace | 3 | **Currently disabled.** `.gemini/policies/*.toml` has no effect. |
-| User | 4 | `~/.gemini/policies/*.toml` |
-| Admin | 5 | System directories or supplemental `--admin-policy` paths. |
-
-Final priority is computed as `tier_base + (toml_priority / 1000)`, so Admin rules always beat User rules, which beat Extension and Default rules.
-
-Settings-based and dynamic rules are also evaluated in the User tier with fixed sub-priorities:
-
-| Sub-priority | Source |
-| :--- | :--- |
-| 4.95 | Interactive "Always Allow" choices |
-| 4.9 | MCP excluded list |
-| 4.4 | CLI `--allowed-tools` blocks |
-| 4.3 | CLI `--allowed-tools` allows |
-| 4.2 | MCP servers with `trust: true` |
-| 4.1 | MCP allowed list |
-
-### CLI parameters and precedence
-
-The permission-related CLI parameters are listed in the frontmatter. In summary:
-
-- `--approval-mode <mode>` sets the session approval mode.
-- `--yolo` (deprecated) is an alias for `--approval-mode=yolo`.
-- `--sandbox` enables sandboxed execution.
-- `--skip-trust` bypasses the folder trust check.
-- `--include-directories` expands the workspace.
-- `--allowed-mcp-server-names` restricts which MCP servers load.
-- `--allowed-tools` is a deprecated tool allowlist.
-- `--policy` loads supplemental User-tier policy files.
-- `--admin-policy` loads supplemental Admin-tier policy files.
-
-Precedence is documented in the frontmatter. Key points:
-
-- CLI flags are temporary session overrides and beat environment variables and file config.
-- Environment variables beat all settings files.
-- The system settings override file has the final say among settings files.
-- Project settings override user settings, which override system defaults.
-- For policy rules, Admin-tier rules beat User-tier rules, which beat Extension and Default-tier rules. Workspace-tier policies are currently disabled.
-
-### Permission policy vs tool visibility
-
-Gemini CLI separates **which tools are visible to the model** from **which visible tools are pre-approved**.
-
-- **Approval policy** (`allow`/`ask_user`/`deny` rules, `--allowed-tools`, approval modes) decides whether a tool call runs and whether it prompts.
-- **Tool visibility** (`tools.core` allowlist, `tools.exclude`, policy deny rules without `argsPattern`, MCP `includeTools`/`excludeTools`) decides which tools appear in the model's context. A tool removed by a bare deny rule never appears in the prompt, so the model cannot choose to invoke it.
-
-For example, `tools.core = ["ReadFileTool", "GlobTool", "ShellTool(ls)"]` hides every built-in tool except the listed ones, while a policy allow rule for `run_shell_command` still leaves the shell tool visible but only auto-approves matching calls.
+Permission/approval policy is not the same as tool visibility. Approval policy decides whether a visible tool call runs automatically, prompts, or is denied. Visibility controls decide what the model sees at all: `tools.core`, `tools.exclude`, bare policy `deny` rules, MCP `includeTools`/`excludeTools`, `mcp.allowed`, `mcp.excluded`, and `--extensions` can remove tools or entire extension surfaces before the model can request them.
 
 ## Permissions Use Cases
 
 ### Default
 
-If no environment variable, config file, or CLI switch configures permissions, Gemini CLI starts in `default` approval mode. Read-only tools such as `read_file`, `glob`, `grep_search`, and `google_web_search` run without prompting, while `write_file`, `replace`, `run_shell_command`, `web_fetch`, and `activate_skill` require confirmation. Folder trust is enabled by default according to the settings schema, so first launch in a folder prompts a trust dialog. MCP servers are discovered but their tools still require confirmation unless the server is marked `trust: true`.
+If no environment variables, config files, trust state, or CLI switches provide permission guidance, Gemini CLI starts in `default` approval mode. Built-in read/search/context tools such as `read_file`, `read_many_files`, `glob`, `grep_search`, `list_directory`, `google_web_search`, `list_mcp_resources`, and `read_mcp_resource` are allowed by default. Mutating or externally risky tools such as `write_file`, `replace`, `run_shell_command`, `web_fetch`, and `activate_skill` ask in interactive mode and are denied in non-interactive mode.
 
-A PolicyEngine description of the default posture would be:
+Sandboxing is off by default. Folder trust is ambiguous in documentation: the trusted-folders page says disabled by default, while the generated settings reference says `security.folderTrust.enabled` defaults to `true`. The local machine has a populated `trustedFolders.json`, so trust is in active use locally, but the user settings file does not explicitly enable it.
 
-- `can_read(path)` → Allow for files under the workspace and included directories.
-- `can_write(path)` → Ask for paths in the workspace; behavior outside the workspace depends on sandbox and trust settings.
-- `can_execute(command)` → Ask for `run_shell_command`.
-- `can_access_domain(domain)` → Ask for `web_fetch`; `google_web_search` is allowed.
-- `can_use_mcp_server(server)` / `can_use_mcp_tool(server, tool)` → Ask unless the server is trusted.
-- `can_spawn_subagent(agent)` → Allow to invoke; subagent tool calls are checked individually.
+In Claudine's `PolicyEngine`, the default can be approximated as:
 
-This use case is only partially ergonomic in PolicyEngine. The engine can model the read/write/execute/network/MCP/agent axes, but Gemini CLI's default posture is also shaped by the active approval mode, sandbox state, and folder trust, none of which collapse cleanly into static allow/ask/deny rules.
+- Read/search/context tools: `allow`
+- File edits and shell commands: `ask` in interactive mode, `deny` in non-interactive mode
+- MCP server tools: `ask` unless trusted or covered by allow policy
+- Subagent invocation: `allow` for local subagents in default/auto-edit/yolo, with subagent tool calls checked separately
+
+That is not ergonomic. Claudine can express a simple allow/ask/deny posture, but Gemini CLI's real default also depends on approval mode, interactivity, trust state, built-in policies, dynamic settings-derived rules, and sandbox state. Without changes, PolicyEngine can describe the broad use case but cannot safely round-trip or mutate every provider-native permission surface.
 
 ### Whitelisting
 
-To start with the most restrictive CLI-only posture, use `plan` mode. In `plan` mode, the CLI is read-only by default and write operations are denied except for plan `.md` files.
+For a CLI-only, session-scoped locked-down launch, the best available baseline is:
 
 ```bash
-# Run a read-only exploration with no edits allowed
-gemini --approval-mode plan "explain the auth module"
-
-# Non-interactive read-only summary; ask_user becomes deny
-gemini -p --approval-mode plan "summarize README.md"
-
-# Allow only a specific MCP server for one session
-gemini --allowed-mcp-server-names github "list my open PRs"
+gemini --approval-mode plan --exclude-tools run_shell_command,write_file,replace,web_fetch,activate_skill
 ```
 
-For a file-based deny-by-default configuration, create a User-tier policy:
+This starts in Plan Mode and adds temporary exclusions for the main mutating and network-fetch tools. It does not hide every built-in tool. Read/search/context/planning tools remain available, and Plan Mode can still write approved `.md` plan files under `.gemini/tmp`.
+
+For a true deny-by-default baseline, use a temporary policy file and pass it with `--policy`:
 
 ```toml
-# ~/.gemini/policies/lockdown.toml
 [[rule]]
 toolName = "*"
 decision = "deny"
-priority = 100
+priority = 900
 
 [[rule]]
-toolName = "read_file"
+toolName = ["read_file", "glob", "grep_search", "list_directory"]
 decision = "allow"
-priority = 200
-
-[[rule]]
-toolName = "run_shell_command"
-commandPrefix = "git"
-decision = "ask_user"
-priority = 200
+priority = 950
 ```
 
-In interactive sessions, the `/permissions` command can change folder trust, but it cannot override a Policy Engine `deny` rule or an approval mode that forbids auto-approval.
+Then launch:
 
-PolicyEngine can describe this use case by setting an approval mode and adding allow rules for the approved surface. It is not fully ergonomic because Gemini CLI's strongest CLI-only lockdown (`plan`) still allows read-only tools, and there is no CLI flag to hide or disable all tools.
+```bash
+gemini --approval-mode plan --policy /tmp/claudine-gemini-policy.toml
+```
+
+Additional permissions can be granted with CLI flags or policy files:
+
+```bash
+gemini --approval-mode plan --allowed-mcp-server-names docs
+gemini --policy ./allow-git-status.toml
+gemini --allowed-tools read_file,glob
+gemini --extensions corp-readonly
+```
+
+PolicyEngine could model this as a deny-all base plus explicit allow/ask rules. It is still not ergonomic because Gemini CLI has no inline rule syntax and no documented `--no-tools` flag. Claudine would need to create temporary policy files and possibly isolate `GEMINI_CLI_HOME` to avoid mutating user config. Without changes, PolicyEngine cannot fully define a no-tools baseline for Gemini CLI using only current provider-native CLI switches.
 
 ### YOLO
 
-In Gemini CLI, YOLO mode is the `yolo` approval mode. A session can be put into this mode by:
+YOLO mode is available in interactive and non-interactive sessions through `--approval-mode=yolo`, `--approval-mode yolo`, `--yolo`, or `-y`. `--yolo` and `-y` are deprecated aliases. Source rejects simultaneous `--yolo` and `--approval-mode`.
 
-- Starting with `--approval-mode=yolo`.
-- Starting with the deprecated `--yolo` or `-y` flag.
-
-Availability:
-
-- **Interactive sessions**: yes, when started with one of the enabling flags.
-- **Non-interactive sessions**: yes, `gemini -p --approval-mode=yolo` works.
-- **Root/sudo on macOS and Linux**: no documented restriction. YOLO remains available to root unless an administrator disables it with `security.disableYoloMode`.
-
-When in `yolo` mode:
-
-- **Allowed**: almost all tool calls execute without prompting, including file edits, shell commands, web fetch, MCP tool calls, and subagent spawns. `allowRedirection` is implicitly enabled.
-- **Still constrained**: sandbox boundaries, folder trust safe-mode, and `security.disableYoloMode` still apply. A `security.disableYoloMode: true` setting blocks YOLO entirely.
-- **Not allowed**: `ask_user` still prompts in interactive mode, and `enter_plan_mode`/`exit_plan_mode` are denied in interactive `yolo` to avoid state conflicts.
+YOLO allows nearly all tools and sets `allowRedirection = true` for shell commands. The built-in `yolo.toml` still keeps `ask_user` as `ask_user` in interactive mode and denies interactive plan-mode transitions to avoid state conflicts. YOLO can be blocked by `security.disableYoloMode`, `admin.secureModeEnabled`, untrusted-folder restrictions, explicit higher-tier deny policy, and sandbox boundaries.
 
 ### Root User
 
-Gemini CLI does not document any special permission behavior when started as the root user. Unlike some other agentic CLIs, there is no published check that refuses YOLO mode or sandbox bypass based on UID. Root sessions can still use `--approval-mode=yolo` unless `security.disableYoloMode` is set, and sandboxing can still be enforced or disabled via flags and config.
+Current public docs and bundled source do not document special root-user behavior for Gemini CLI approvals. There is no documented UID-based refusal of YOLO mode. A root-run session can request YOLO unless an admin/security setting or policy disables it. Running as root raises the stakes of any non-sandboxed shell/file action; it does not make Gemini's advisory approval prompts an OS boundary.
 
 ### Configuring the Default
 
-Default permissions are configured through JSON and TOML files at several scopes:
+User-scope defaults live in `~/.gemini/settings.json` and `~/.gemini/policies/*.toml`. Repo-scope settings live in `.gemini/settings.json`; repo-scope policy files are documented as `.gemini/policies/*.toml` but currently non-functional. Admin settings and policies live in OS-specific system paths.
 
-- **User scope**: `~/.gemini/settings.json` applies across all projects.
-- **Repo/project scope**: `.gemini/settings.json` applies when running from that project directory.
-- **Policy scope**: `~/.gemini/policies/*.toml` for User-tier rules; system policy directories for Admin-tier rules.
-- **System scope**: `/etc/gemini-cli/settings.json` (Linux), `/Library/Application Support/GeminiCli/settings.json` (macOS), or `C:\ProgramData\gemini-cli\settings.json` (Windows) for machine-wide overrides.
-- **System defaults scope**: the corresponding `system-defaults.json` paths provide machine-wide baselines.
-
-Examples that illustrate the grammar:
+Example user settings:
 
 ```json
-// ~/.gemini/settings.json — user-wide defaults
 {
   "general": {
     "defaultApprovalMode": "plan"
@@ -515,237 +495,141 @@ Examples that illustrate the grammar:
 }
 ```
 
+Example tool visibility and MCP settings:
+
 ```json
-// .gemini/settings.json — repo-shared defaults
 {
   "tools": {
-    "sandbox": "docker",
-    "core": ["ReadFileTool", "GlobTool", "ShellTool(ls)"]
+    "core": ["read_file", "glob", "grep_search", "run_shell_command(git status)"]
   },
   "mcp": {
-    "allowed": ["corp-tools"]
-  }
-}
-```
-
-```toml
-# ~/.gemini/policies/user-defaults.toml
-[[rule]]
-toolName = "run_shell_command"
-commandPrefix = "npm"
-decision = "allow"
-priority = 100
-modes = ["default", "auto_edit"]
-
-[[rule]]
-toolName = "write_file"
-argsPattern = '"file_path":".*\\.env"'
-decision = "deny"
-priority = 200
-denyMessage = "Writing .env files is not allowed."
-```
-
-### Extending the Base
-
-Default permissions can be set at user scope and then narrowed or extended by narrower scopes.
-
-**Example 1: user allows a shell command, repo denies exposure of the shell tool.**
-
-User `~/.gemini/policies/user-defaults.toml`:
-
-```toml
-[[rule]]
-toolName = "run_shell_command"
-commandPrefix = "curl"
-decision = "allow"
-priority = 100
-```
-
-Repo `.gemini/settings.json`:
-
-```json
-{
-  "tools": {
-    "core": ["ReadFileTool", "GlobTool", "ShellTool(ls)"]
-  }
-}
-```
-
-Result: in the repository, only the allowlisted tools are available, so `curl` is effectively blocked because `run_shell_command` is no longer exposed to the model.
-
-**Example 2: user default mode, CLI override.**
-
-User `~/.gemini/settings.json`:
-
-```json
-{
-  "general": {
-    "defaultApprovalMode": "auto_edit"
-  }
-}
-```
-
-CLI:
-
-```bash
-gemini --approval-mode plan
-```
-
-Result: the session starts in `plan` mode. CLI flags override settings file values.
-
-**Example 3: user denies an MCP server, project allows a specific tool.**
-
-User `~/.gemini/policies/mcp.toml`:
-
-```toml
-[[rule]]
-mcpName = "third-party-analyzer"
-decision = "deny"
-priority = 100
-```
-
-Repo `.gemini/settings.json`:
-
-```json
-{
+    "allowed": ["corp-docs"]
+  },
   "mcpServers": {
-    "third-party-analyzer": {
-      "command": "/usr/local/bin/start-analyzer.sh",
-      "includeTools": ["code-search"]
+    "corp-docs": {
+      "command": "/opt/corp-docs/start.sh",
+      "includeTools": ["search", "read_doc"],
+      "trust": false
     }
   }
 }
 ```
 
-Result: the User-tier deny rule blocks all tools from the server regardless of the project `includeTools` list, because the policy rule outranks the settings-based include list.
+Example TOML policy:
+
+```toml
+[[rule]]
+toolName = "run_shell_command"
+commandPrefix = "git status"
+decision = "allow"
+priority = 200
+modes = ["default", "autoEdit"]
+
+[[rule]]
+toolName = ["write_file", "replace"]
+argsPattern = '"file_path":".*\\.env"'
+decision = "deny"
+priority = 900
+denyMessage = "Writing .env files is not allowed."
+```
+
+### Extending the Base
+
+User defaults can be narrowed by project settings or overridden by CLI flags. For example, a user can set `general.defaultApprovalMode = "auto_edit"` and a single Claudine wrapper run can use `gemini --approval-mode plan` without mutating the user's file.
+
+MCP settings merge by server name. A system settings file can define `mcp.allowed = ["corp-tools"]` and the canonical `mcpServers.corp-tools` command. A user cannot override that server definition at lower precedence, and a different user-defined server will be blocked if it is not in `mcp.allowed`.
+
+Tool visibility can also narrow a broader policy. A user policy might allow `run_shell_command` for `git`, but a project settings file with `tools.core = ["read_file", "glob"]` removes shell from the model's visible tool set in that project. In untrusted folders, project settings are ignored entirely, so this narrowing does not apply until the folder is trusted.
 
 ## Tools and Permissions
 
-Gemini CLI provides the following built-in tools. The "Default Policy" column indicates the Policy Engine decision in `default` approval mode.
+Gemini CLI's default built-in tools include:
 
-| Tool | Category | Default Policy | Notes |
-| :--- | :--- | :--- | :--- |
-| `run_shell_command` | Execution | `ask_user` | Requires confirmation by default. |
-| `glob` | File System | `allow` | Read-only search. |
-| `grep_search` | File System | `allow` | Read-only search. |
-| `list_directory` | File System | `allow` | Read-only directory listing. |
-| `read_file` | File System | `allow` | Reads text, images, audio, and PDF. |
-| `read_many_files` | File System | `allow` | Triggered by `@` file references. |
-| `replace` | File System | `ask_user` | File edits require confirmation. |
-| `write_file` | File System | `ask_user` | File writes require confirmation. |
-| `ask_user` | Interaction | `allow` | Prompts the user for clarification. |
-| `write_todos` | Interaction | `allow` | Internal task tracking. |
-| `list_mcp_resources` | MCP | `allow` | Discovers MCP resources. |
-| `read_mcp_resource` | MCP | `allow` | Reads MCP resources. |
-| `activate_skill` | Memory | `ask_user` | Loads an agent skill. |
-| `get_internal_docs` | Memory | `allow` | Retrieves CLI documentation. |
-| `enter_plan_mode` | Planning | `ask_user` / `allow` | Interactive asks; non-interactive allows. |
-| `exit_plan_mode` | Planning | `ask_user` / `allow` | Interactive asks; non-interactive allows. |
-| `complete_task` | System | `allow` | Subagent completion tool. |
-| `invoke_agent` | Subagent | `allow` | Invokes a subagent; target agent is checked individually. |
-| `tracker_create_task` | Task Tracking | `allow` | Experimental task tracker. |
-| `tracker_update_task` | Task Tracking | `allow` | Experimental task tracker. |
-| `tracker_get_task` | Task Tracking | `allow` | Experimental task tracker. |
-| `tracker_list_tasks` | Task Tracking | `allow` | Experimental task tracker. |
-| `tracker_add_dependency` | Task Tracking | `allow` | Experimental task tracker. |
-| `tracker_visualize` | Task Tracking | `allow` | Experimental task tracker. |
-| `update_topic` | Task Tracking | `allow` | Updates session topic/status. |
-| `google_web_search` | Web | `allow` | Google Search is allowed by default. |
-| `web_fetch` | Web | `ask_user` | Fetching arbitrary URLs requires confirmation. |
+| Category | Tools |
+| --- | --- |
+| Execution | `run_shell_command` |
+| File system | `glob`, `grep_search`, `list_directory`, `read_file`, `read_many_files`, `replace`, `write_file` |
+| Interaction | `ask_user`, `write_todos` |
+| Task tracker | `tracker_create_task`, `tracker_update_task`, `tracker_get_task`, `tracker_list_tasks`, `tracker_add_dependency`, `tracker_visualize` |
+| MCP resources | `list_mcp_resources`, `read_mcp_resource` |
+| Memory/internal docs | `activate_skill`, `get_internal_docs` |
+| Planning | `enter_plan_mode`, `exit_plan_mode` |
+| System/subagent | `complete_task`, `invoke_agent` |
+| Topic/status | `update_topic` |
+| Web | `google_web_search`, `web_fetch` |
 
-Permissions map to tool calls through the Policy Engine. Rules can target built-in tool names, MCP tool FQNs (`mcp_{serverName}_{toolName}`), or subagent names via the `invoke_agent` tool. In `plan` mode, write tools are heavily restricted; in `yolo` mode, a high-priority rule allows all tools.
+Permissions map to tool calls through the Policy Engine. Each tool call is matched against active rules. `toolName` can target exact built-in names, arrays of names, wildcards, MCP fully qualified names, discovered tool patterns, or subagent virtual names. Shell commands can be matched with `commandPrefix` or `commandRegex`. Tool arguments can be matched by regex through `argsPattern` against a stable JSON representation.
+
+Native permission entities include tools, implicit tool groups, shell commands, filesystem paths through arguments and sandbox mounts, workspaces, MCP servers, MCP tools, MCP resources, subagents, modes, approval decisions, sandboxes, hooks, extensions, and slash commands. Gemini CLI also has dynamic safety checker entities such as `allowed-path` and `conseca`.
+
+Rule decisions are `allow`, `ask_user`, and `deny`. `deny` rules without `argsPattern` hide the tool from model memory. `ask_user` prompts in interactive mode and becomes `deny` in headless mode. Priority resolves conflicts: the highest final priority wins. Tier base values in bundled policy comments and current source are Default 1, Extension 2, Workspace 3, User 4, Admin 5. The policy-engine docs contain stale example arithmetic for some tiers; the bundled policy files and source are internally consistent on Admin 5/User 4/Workspace 3/Extension 2/Default 1.
+
+Approvals can persist. One-time choices are session-local. "Always allow this tool/server" can create persistent dynamic allow rules when enabled. Mode-aware persistence expands to the current mode and more permissive modes, so a default-mode persistent approval applies to default, auto-edit, and YOLO, while a Plan Mode persistent approval applies to all modes.
 
 ## Sandboxing, Trust, and Administrative Controls
 
-### Sandboxing
+Sandbox mode is separate from approval mode. `--sandbox`, `GEMINI_SANDBOX`, or `tools.sandbox` enable full-process sandboxing. `security.toolSandboxing` enables tool-level sandboxing. Backends include macOS Seatbelt, Docker, Podman, Windows Native Sandbox, gVisor/runsc on Linux, and LXC/LXD on Linux. macOS profiles range from permissive write restrictions to strict read/write restrictions. Container sandboxes mount the workspace at the same absolute path. Windows Native Sandbox uses Low Mandatory Level integrity labels, which can persist after the session.
 
-Gemini CLI's sandbox is a separate layer from permission modes and rules. It provides OS-level isolation for tool and shell execution.
+Network control depends on backend and profile. Built-in `sandbox-default.toml` disables network for plan/default/accepting-edits modes. Seatbelt profiles have open and proxied variants. Container mode supports custom network, proxy, ports, env, flags, and mounts.
 
-- **Backends**: macOS uses Seatbelt (`sandbox-exec`); Linux/Windows use Docker/Podman; Windows also supports Windows Native Sandbox; Linux supports gVisor/runsc and LXC/LXD (experimental).
-- **Modes**: The internal `sandbox-default.toml` defines three sandbox modes that loosely mirror approval modes: `plan` (readonly, no network), `default` (writes restricted to workspace, network off), and `accepting_edits` (additional approved tools like `sed`, `awk`, `perl`).
-- **Full-process sandbox**: configured via `--sandbox`, `GEMINI_SANDBOX`, or `tools.sandbox`. The schema labels this as the legacy sandbox.
-- **Tool-level sandbox**: configured via `security.toolSandboxing` (default `false`). This isolates individual tool executions instead of the entire CLI process.
-- **Filesystem**: by default, sandboxed commands can write only to the workspace. Use `SANDBOX_MOUNTS`, `tools.sandboxAllowedPaths`, or sandbox expansion requests to widen access.
-- **Network**: controlled by Seatbelt profiles or `tools.sandboxNetworkAccess`. Corporate proxies can be configured via environment variables.
-- **Scope**: sandboxing applies to tool/shell execution. Built-in read-only file tools run outside this boundary.
+Sandbox expansion is a dynamic permission mechanism. If a sandboxed command fails because of restricted paths/network, or is predicted to need extra permissions, Gemini CLI can show a Sandbox Expansion Request. Approval applies to that specific run.
 
-Permissions and sandboxing are complementary:
+Folder trust gates project-local surfaces. Untrusted safe mode ignores `.gemini/settings.json` and project `.env`, blocks extension install/update/uninstall, disables tool auto-acceptance and automatic memory loading, prevents MCP servers from connecting, and skips custom commands. The `/permissions` slash command manages trust interactively; headless runs must use `--skip-trust` or `GEMINI_CLI_TRUST_WORKSPACE=true` when folder trust would otherwise prompt.
 
-- Permission rules block Gemini from attempting restricted actions.
-- Sandbox restrictions prevent shell/tool commands from reaching resources outside defined boundaries, even if a prompt injection bypasses the policy engine.
+Managed/admin controls include system defaults, system overrides, Admin policy TOML, `security.disableYoloMode`, extension source restrictions, authentication enforcement, and `admin.secureModeEnabled` in source. Enterprise docs explicitly warn these are not foolproof against users with local administrative privileges.
 
-### Trust and administrative controls
+The only provider-reserved protected file pattern observed in current bundled policy is `gha-creds-*.json`, denied by `sandbox-default.toml`.
 
-**Folder/project trust**: first-time launches in a folder prompt a trust dialog when `security.folderTrust.enabled` is true. The schema default is `true`, though public documentation currently states it is disabled by default. Untrusted folders ignore project `settings.json`, `.env` files, extension install/update/uninstall, tool auto-acceptance, automatic memory, MCP servers, and custom commands. Trust is saved in `~/.gemini/trustedFolders.json`.
-
-**Managed/admin policy**: system-wide `system-defaults.json` and `settings.json` provide baseline and override layers. Admin-tier TOML policies can be placed in standard system directories or loaded via `--admin-policy`. These supplemental policies are ignored if any `.toml` files exist in the standard system location, preventing flag-based bypass when central policy is established. A wrapper script can enforce `GEMINI_CLI_SYSTEM_SETTINGS_PATH`. The enterprise docs explicitly note these are client-side controls and can be bypassed by a determined local administrator.
-
-**Safe mode**: an untrusted workspace runs in restricted safe mode. `--skip-trust` or `GEMINI_CLI_TRUST_WORKSPACE=true` trust the workspace for the session only.
-
-### Protected paths
-
-The only provider-reserved path pattern observed in the built-in sandbox policy is GitHub Actions credential files:
-
-- `gha-creds-*.json` — denied by `sandbox-default.toml`.
-
-No general list of protected paths (such as `.git`, shell config, or `.env`) is documented or observed in the current policy files.
+Gemini CLI's honest security posture is a combination: advisory UX prompts, static client-side policy, trust gating, admin-managed settings, and optional OS/container-enforced sandboxing. Without sandboxing, the approval system is not an OS-enforced boundary.
 
 ## MCP and Permissions
 
-MCP servers extend Gemini CLI with external tools. Their configuration lives in the `mcpServers` object of `settings.json` and is governed by several permission layers.
+MCP permissions combine server filtering, tool filtering, trust, and policy rules.
 
-Permission controls for MCP:
+Server-level controls:
 
-- **Server allowlist**: the global `mcp.allowed` array restricts which configured servers connect. If it is set, servers not in the list are ignored.
-- **Server blocklist**: the global `mcp.excluded` array disables specific servers.
-- **Per-server trust**: `mcpServers.<name>.trust: true` bypasses confirmation for all tools from that server.
-- **Tool filtering**: `includeTools` exposes only listed tools; `excludeTools` removes listed tools and takes precedence over `includeTools`. When merging extension and local configs, `excludeTools` arrays are unioned and `includeTools` arrays are intersected.
-- **Environment redaction**: sensitive host environment variables are automatically redacted from MCP server processes unless explicitly listed in the server's `env` block.
-- **Policy Engine rules**: use `mcpName` to target a server, optionally combined with `toolName`, or `mcpName = "*"` for all servers.
-- **Folder trust**: when a workspace is untrusted, MCP servers do not connect at all, regardless of policy.
+- `mcp.allowed` allows only named configured servers.
+- `mcp.excluded` disables named servers.
+- `--allowed-mcp-server-names` restricts servers for one session.
+- `mcpServers.<name>.trust=true` bypasses confirmation for that server's tools.
 
-MCP tools are registered with fully qualified names of the form `mcp_{serverName}_{toolName}`. Avoid underscores in server names because the policy parser splits the FQN on the first underscore after `mcp_`.
+Tool-level controls:
 
-To make MCP safer:
+- `includeTools` exposes only selected tools.
+- `excludeTools` hides selected tools and wins over `includeTools`.
+- Policy rules can target `mcpName`, `mcpName` plus `toolName`, `mcpName = "*"`, or FQN wildcard syntax such as `mcp_*`.
 
-- Define approved servers in system `settings.json` and list them in `mcp.allowed`.
-- Use `includeTools` to expose only the tools a workflow needs.
-- Set `trust: false` by default and rely on Policy Engine rules or per-session approval.
-- Run in a sandbox so MCP server side effects are isolated from the host.
-- In untrusted workspaces, folder trust automatically disables MCP connections.
+MCP can be made safer by combining an allowlisted server catalog with per-server `includeTools`, untrusted `trust: false`, and policy rules that ask or deny by `mcpName`. Enterprise docs recommend defining canonical servers and `mcp.allowed` together; defining servers without `mcp.allowed` still lets users add unrelated servers.
+
+MCP resources are discovered with the server and accessed through `list_mcp_resources`, `read_mcp_resource`, or `@server://resource/path`. MCP tool schemas are sanitized before Gemini API use. Stdio MCP servers are separate subprocesses with environment sanitization; explicit `env` entries are treated as consent and are not redacted. OAuth remote MCP flows require browser/local redirect support and are unsuitable for headless environments. MCP servers must be available inside the sandbox when sandboxing is enabled, otherwise they can fail.
 
 ## Non-Interactive Behavior
 
-In non-interactive `-p` mode, Gemini CLI cannot show interactive permission prompts. Key behaviors:
+Non-interactive mode is triggered by `-p`/`--prompt` or a non-TTY/piped mode. Approval prompts cannot be answered there. Policy `ask_user` becomes `deny`; built-in non-interactive policy denies `ask_user`, `write_file`, `replace`, `run_shell_command`, `activate_skill`, and `web_fetch` when they would otherwise ask.
 
-- `ask_user` decisions are treated as `deny`.
-- Plan mode auto-approves `enter_plan_mode` and `exit_plan_mode`, then switches to `yolo` for implementation.
-- OAuth-enabled MCP servers are unavailable because they require a browser flow.
-- Security approval dialogs and folder trust dialogs are skipped. If folder trust is enabled and the workspace is untrusted, the CLI exits with `FatalUntrustedWorkspaceError` unless `--skip-trust` or `GEMINI_CLI_TRUST_WORKSPACE=true` is set.
-
-To avoid hangs, use `--approval-mode plan`, `--approval-mode yolo`, policy files, or restrict the tool surface via `tools.core` in settings.
-
-## Sources
-
-- [Gemini CLI homepage](https://geminicli.com/)
-- [Gemini CLI configuration reference](https://geminicli.com/docs/reference/configuration/)
-- [Policy engine reference](https://geminicli.com/docs/reference/policy-engine/)
-- [Tools reference](https://geminicli.com/docs/reference/tools/)
-- [Trusted folders](https://geminicli.com/docs/cli/trusted-folders/)
-- [Sandboxing](https://geminicli.com/docs/cli/sandbox/)
-- [Plan mode](https://geminicli.com/docs/cli/plan-mode/)
-- [Headless mode](https://geminicli.com/docs/cli/headless/)
-- [MCP servers](https://geminicli.com/docs/tools/mcp-server/)
-- [Enterprise configuration](https://geminicli.com/docs/cli/enterprise/)
-- [Gemini CLI GitHub repository](https://github.com/google-gemini/gemini-cli)
-- [settings.schema.json](https://raw.githubusercontent.com/google-gemini/gemini-cli/main/schemas/settings.schema.json)
-- [packages/core/src/policy/policies/read-only.toml](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/policy/policies/read-only.toml)
-- [packages/core/src/policy/policies/write.toml](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/policy/policies/write.toml)
-- [packages/core/src/policy/policies/plan.toml](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/policy/policies/plan.toml)
-- [packages/core/src/policy/policies/yolo.toml](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/policy/policies/yolo.toml)
-- [packages/core/src/policy/policies/sandbox-default.toml](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/policy/policies/sandbox-default.toml)
-- [packages/core/src/policy/policies/agents.toml](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/policy/policies/agents.toml)
+Gemini CLI does not expose a general programmatic approval channel for headless runs. A Claudine wrapper should avoid any posture that can require interactive approval unless it also supplies explicit allow/deny policy. If folder trust is enabled and the workspace is untrusted, headless execution exits with `FatalUntrustedWorkspaceError` unless trust is bypassed for the session.
 
 ## Changelog
 
-- 2026-07-02: Refreshed research against Gemini CLI v0.46.0, current documentation, source policy files, and settings schema. Added `--policy`, separated legacy and tool-level sandboxing, documented folder trust default conflict, added newly discovered security settings, corrected subagent invocation and MCP merge semantics, and noted the Gemini CLI to Antigravity CLI transition.
+- 2026-07-03: Refreshed against npm `@google/gemini-cli` 0.49.0, current bundled docs/source, observed local Gemini config, and schema requirements.
+- 2026-07-03: Added CLI surfaces missing from the previous document: `--exclude-tools`, `--acp`, raw-output controls, `--policy`, `--admin-policy`, and MCP add trust/include/exclude flags.
+- 2026-07-03: Replaced invalid `os: all` frontmatter with macOS/Linux/Windows-specific config file records.
+- 2026-07-03: Clarified that Plan Mode plus temporary exclusions is the strongest CLI-only lockdown, while true deny-all requires a temporary policy file passed with `--policy`.
+- 2026-07-03: Documented current sandbox expansion, Windows Native Sandbox, sandbox env vars, current MCP OAuth/trust/filter behavior, and the folder-trust docs conflict.
+- 2026-07-02: Previous research captured the merged permissions topic and identified PolicyEngine coverage gaps.
+
+## Sources
+
+- [Gemini CLI npm package `@google/gemini-cli`](https://www.npmjs.com/package/@google/gemini-cli)
+- [Gemini CLI repository](https://github.com/google-gemini/gemini-cli)
+- [Gemini CLI policy engine docs](https://geminicli.com/docs/reference/policy-engine)
+- [Gemini CLI CLI reference](https://geminicli.com/docs/cli/cli-reference)
+- [Gemini CLI settings docs](https://geminicli.com/docs/cli/settings)
+- [Gemini CLI configuration docs](https://geminicli.com/docs/reference/configuration)
+- [Gemini CLI sandbox docs](https://geminicli.com/docs/cli/sandbox)
+- [Gemini CLI trusted folders docs](https://geminicli.com/docs/cli/trusted-folders)
+- [Gemini CLI MCP server docs](https://geminicli.com/docs/tools/mcp-server)
+- [Gemini CLI tools reference](https://geminicli.com/docs/reference/tools)
+- [Gemini CLI shell tool docs](https://geminicli.com/docs/tools/shell)
+- [Gemini CLI enterprise controls docs](https://geminicli.com/docs/cli/enterprise)
+- [Gemini CLI subagents docs](https://geminicli.com/docs/core/subagents)
