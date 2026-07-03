@@ -1,404 +1,420 @@
 ---
-homepage: https://block.github.io/goose/
-docs: https://block.github.io/goose/docs/guides/config-files/
-hooks: https://block.github.io/goose/docs/guides/config-files/
+$schema: ./_schema.yaml
+created: "2026-07-03"
+last_updated: "2026-07-03"
+agent: open_code
+model: kimi-for-coding/k2p7
+homepage: https://goose-docs.ai/
+docs: https://goose-docs.ai/docs/category/guides
+hooks_docs: https://goose-docs.ai/docs/guides/context-engineering/hooks
+
+hooks:
+  - native_event: SessionStart
+    claudine_event: initialize
+    timing: pre
+    blocking: false
+    payload_schema: "event, session_id"
+    return_contract: "Exit 0 = no effect. Non-zero exits are logged but do not stop the session."
+    notes: "Fires only on the first user turn of a session (is_first_turn guard). No matcher support."
+  - native_event: SessionEnd
+    claudine_event: finalize
+    timing: post
+    blocking: false
+    payload_schema: "event, session_id"
+    return_contract: "No decision semantics; output is ignored."
+    notes: "Fires when a CLI session ends. Not guaranteed for every server-side session path."
+  - native_event: UserPromptSubmit
+    claudine_event: prompt
+    timing: pre
+    blocking: false
+    payload_schema: "event, session_id, matcher_context, message"
+    return_contract: "No decision semantics; output is ignored."
+    notes: "Fires before slash-command resolution and before the reply loop. matcher_context mirrors message."
+  - native_event: PreToolUse
+    claudine_event: tool_call
+    timing: pre
+    blocking: true
+    payload_schema: "event, session_id, matcher_context, tool_name, tool_input, working_dir"
+    return_contract: "Exit 0 = allow tool call. Exit 2 with reason on stderr, or stdout JSON {\"decision\":\"block\",\"reason\":\"...\"} = permanent policy denial."
+    notes: "Matcher tests against tool_name. Denial returns an internal error to the model with 'Do not retry; this is a policy denial'."
+  - native_event: PostToolUse
+    claudine_event: tool_result
+    timing: post
+    blocking: false
+    payload_schema: "event, session_id, matcher_context, tool_name, tool_input, working_dir"
+    return_contract: "No decision semantics; output is ignored."
+    notes: "Fires after a successful tool call. The tool_output field is declared but not populated by observed code."
+  - native_event: PostToolUseFailure
+    claudine_event: tool_result
+    timing: post
+    blocking: false
+    payload_schema: "event, session_id, matcher_context, tool_name, tool_input, working_dir"
+    return_contract: "No decision semantics; output is ignored."
+    notes: "Fires after a failed tool call (is_error = true or the tool returned an error)."
+  - native_event: BeforeReadFile
+    claudine_event: tool_call
+    timing: pre
+    blocking: false
+    payload_schema: "event, session_id, matcher_context, tool_name, tool_input, working_dir"
+    return_contract: "No decision semantics; output is ignored."
+    notes: "Fires after PreToolUse for read-category tools (local tool names: read/view/cat/read_file). matcher_context is the file path from tool_input.path|file|file_path."
+  - native_event: BeforeShellExecution
+    claudine_event: tool_call
+    timing: pre
+    blocking: false
+    payload_schema: "event, session_id, matcher_context, tool_name, tool_input, working_dir"
+    return_contract: "No decision semantics; output is ignored."
+    notes: "Fires after PreToolUse for shell-category tools (local tool names: shell/bash/exec/run). matcher_context is the command string from tool_input.command."
+  - native_event: AfterFileEdit
+    claudine_event: tool_result
+    timing: post
+    blocking: false
+    payload_schema: "event, session_id, matcher_context, tool_name, tool_input, working_dir"
+    return_contract: "No decision semantics; output is ignored."
+    notes: "Fires after successful write-category tools (local tool names: write/edit/patch/write_file/edit_file). matcher_context is the file path."
+  - native_event: AfterShellExecution
+    claudine_event: tool_result
+    timing: post
+    blocking: false
+    payload_schema: "event, session_id, matcher_context, tool_name, tool_input, working_dir"
+    return_contract: "No decision semantics; output is ignored."
+    notes: "Fires after successful shell-category tools. matcher_context is the command string."
+  - native_event: Stop
+    claudine_event: finalize
+    timing: pre
+    blocking: true
+    payload_schema: "event, session_id, last_assistant_message"
+    return_contract: "Exit 0 = allow turn to end. Exit 2 with reason on stderr, or stdout JSON {\"decision\":\"block\",\"reason\":\"...\"} = keep working."
+    notes: "Default cap of 8 consecutive blocks (GOOSE_STOP_HOOK_BLOCK_CAP). When the session exits without a final_output tool, the same Stop hook may fire non-blocking as a post event."
+
+config_files:
+  - os: macos
+    scope: user
+    path: "~/.agents/plugins/<plugin-name>/hooks/hooks.json"
+    format: json
+    notes: "User-scoped Open Plugins hook container. Auto-discovered at startup."
+  - os: linux
+    scope: user
+    path: "~/.agents/plugins/<plugin-name>/hooks/hooks.json"
+    format: json
+    notes: "User-scoped Open Plugins hook container. Auto-discovered at startup."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.agents\\plugins\\<plugin-name>\\hooks\\hooks.json"
+    format: json
+    notes: "User-scoped Open Plugins hook container. Auto-discovered at startup."
+  - os: macos
+    scope: repo
+    path: "<project>/.agents/plugins/<plugin-name>/hooks/hooks.json"
+    format: json
+    notes: "Project-scoped hook container; loaded when goose starts from that project."
+  - os: linux
+    scope: repo
+    path: "<project>/.agents/plugins/<plugin-name>/hooks/hooks.json"
+    format: json
+    notes: "Project-scoped hook container; loaded when goose starts from that project."
+  - os: windows
+    scope: repo
+    path: "<project>\\.agents\\plugins\\<plugin-name>\\hooks\\hooks.json"
+    format: json
+    notes: "Project-scoped hook container; loaded when goose starts from that project."
+  - os: macos
+    scope: managed
+    path: "<plugin-install-dir>/<plugin-name>/hooks/hooks.json"
+    format: json
+    notes: "Plugins installed via 'goose plugin install' land in the user plugin install directory (default ~/.agents/plugins on all OSes)."
+  - os: linux
+    scope: managed
+    path: "<plugin-install-dir>/<plugin-name>/hooks/hooks.json"
+    format: json
+    notes: "Plugins installed via 'goose plugin install' land in the user plugin install directory (default ~/.agents/plugins on all OSes)."
+  - os: windows
+    scope: managed
+    path: "<plugin-install-dir>\\<plugin-name>\\hooks\\hooks.json"
+    format: json
+    notes: "Plugins installed via 'goose plugin install' land in the user plugin install directory (default ~/.agents/plugins on all OSes)."
+  - os: macos
+    scope: user
+    path: "~/.config/goose/settings.json"
+    format: json
+    notes: "Plugin allow/block list (disabledPlugins / enabledPlugins) that gates hook discovery."
+  - os: linux
+    scope: user
+    path: "~/.config/goose/settings.json"
+    format: json
+    notes: "Plugin allow/block list (disabledPlugins / enabledPlugins) that gates hook discovery."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.config\\goose\\settings.json"
+    format: json
+    notes: "Plugin allow/block list (disabledPlugins / enabledPlugins) that gates hook discovery."
+  - os: macos
+    scope: repo
+    path: "<project>/.config/goose/settings.json"
+    format: json
+    notes: "Project-level disabledPlugins / enabledPlugins. Precedence: local > project > user."
+  - os: linux
+    scope: repo
+    path: "<project>/.config/goose/settings.json"
+    format: json
+    notes: "Project-level disabledPlugins / enabledPlugins. Precedence: local > project > user."
+  - os: windows
+    scope: repo
+    path: "<project>\\.config\\goose\\settings.json"
+    format: json
+    notes: "Project-level disabledPlugins / enabledPlugins. Precedence: local > project > user."
+  - os: macos
+    scope: repo
+    path: "<project>/.config/goose/settings.local.json"
+    format: json
+    notes: "Local project plugin settings; highest precedence among project settings."
+  - os: linux
+    scope: repo
+    path: "<project>/.config/goose/settings.local.json"
+    format: json
+    notes: "Local project plugin settings; highest precedence among project settings."
+  - os: windows
+    scope: repo
+    path: "<project>\\.config\\goose\\settings.local.json"
+    format: json
+    notes: "Local project plugin settings; highest precedence among project settings."
+  - os: macos
+    scope: user
+    path: "~/Library/Application Support/Block/goose/config/config.yaml"
+    format: yaml
+    notes: "Main goose config. The 'plugins' map persists per-plugin enabled: true/false state; disabling a plugin here also disables its hooks."
+  - os: linux
+    scope: user
+    path: "~/.config/goose/config.yaml"
+    format: yaml
+    notes: "Main goose config. The 'plugins' map persists per-plugin enabled: true/false state; disabling a plugin here also disables its hooks."
+  - os: windows
+    scope: user
+    path: "%APPDATA%\\Block\\goose\\config\\config.yaml"
+    format: yaml
+    notes: "Main goose config. The 'plugins' map persists per-plugin enabled: true/false state; disabling a plugin here also disables its hooks."
+
+cli_params:
+  - flag: "goose plugin install [--auto-update] <URL>"
+    description: "Install a git-backed plugin that may contain hooks/hooks.json."
+    example: "goose plugin install https://github.com/example/my-goose-plugin.git"
+  - flag: "goose plugin update <NAME>"
+    description: "Update an installed git-backed plugin by name."
+    example: "goose plugin update my-plugin"
+  - flag: "disabledPlugins (settings key)"
+    description: "List of plugin names to skip during discovery; disables all hooks from those plugins."
+    example: '"disabledPlugins": ["session-logger"]'
+  - flag: "enabledPlugins (settings key)"
+    description: "When present, only listed plugins are loaded (explicit allowlist)."
+    example: '"enabledPlugins": ["session-logger"]'
+
+payload_fields:
+  - native_event: "(common)"
+    field: "event"
+    type: string
+    meaning: "Native event name, e.g. PreToolUse or Stop."
+  - native_event: "(common)"
+    field: "session_id"
+    type: string
+    meaning: "Current goose session identifier."
+  - native_event: "(tool events)"
+    field: "matcher_context"
+    type: string
+    meaning: "String the rule's regex is tested against: tool_name for Pre/Post/Failure; file path for BeforeReadFile/AfterFileEdit; command string for Before/AfterShellExecution; prompt text for UserPromptSubmit."
+  - native_event: "(tool events)"
+    field: "tool_name"
+    type: string
+    meaning: "Full tool name (e.g. developer__shell)."
+  - native_event: "(tool events)"
+    field: "tool_input"
+    type: object
+    meaning: "Arguments passed to the tool as a JSON object."
+  - native_event: "(tool events)"
+    field: "working_dir"
+    type: string
+    meaning: "Session working directory at the time of the tool call."
+  - native_event: UserPromptSubmit
+    field: "message"
+    type: string
+    meaning: "The user-submitted prompt text."
+  - native_event: Stop
+    field: "last_assistant_message"
+    type: string
+    meaning: "Final assistant text for the turn, present when the assistant produced output before stopping."
+
+response_actions:
+  - action: allow
+    native_value: "Exit 0"
+    effect: "Proceed with the pending action (tool call or turn end)."
+  - action: block
+    native_value: 'Exit 2 with reason on stderr, OR stdout JSON {"decision":"block","reason":"..."}'
+    effect: "PreToolUse: deny the tool call permanently (model is told not to retry). Stop: prevent the turn from ending; a system notification and hidden user message are injected, and the agent continues. After 8 consecutive Stop blocks the cap overrides."
+  - action: other
+    native_value: "Any non-zero exit except 2, or timeout, or spawn failure"
+    effect: "Treated as Allow for blocking hooks; logged as a warning but never crashes the host tool or pending action."
+
+execution:
+  shell: "Hooks run as `sh -c <command>` on all platforms (flatpak builds use flatpak-spawn with `sh -c`). On Windows, `sh` must be available via Git Bash/MSYS2."
+  cwd: "No explicit working directory is set; the child inherits goose's current working directory, which is the session working directory."
+  env: "The hook process inherits goose's environment. PLUGIN_ROOT is always set to the plugin's root directory. On goose Desktop, PATH may be augmented with the user's login-shell PATH. GOOSE_TERMINAL=1 and AGENT=goose are set for shell commands invoked by goose, but not for hook commands themselves."
+  timeout: "Default 30 seconds per hook; overridden by the 'timeout' field in hooks.json."
+  stdin: "A single JSON document (HookContext) is written to stdin."
+  stdout: "For blocking hooks, if trimmed stdout starts with '{' and parses to {\"decision\":\"block\",\"reason\"}, it blocks. For non-blocking hooks stdout is ignored."
+  stderr: "On exit 2 for blocking hooks, stderr becomes the block reason. Other stderr is logged but not shown to the user."
+  notes: "Rules within an event are evaluated in load order; all matching rules run. Actions within a rule run in array order. Multiple plugins can match the same event; there is no deduplication. Hook failures are logged and never propagate."
+
+gaps:
+  - "The Open Plugins spec defines prompt and agent hook action types, but Goose source only implements command and silently ignores the others as of the observed code."
+  - "tool_output is a declared field in HookContext but is not populated by the observed post-tool hook code."
+  - "There is no CLI command to list, test, or validate hooks; the only hook-related CLI surface is plugin installation and the disabledPlugins/enabledPlugins settings keys."
+  - "There is no environment variable to disable all hooks globally; hooks are gated only by plugin enable/disable state (settings.json / config.yaml plugins map)."
+  - "SubagentStart and SubagentStop are listed in the Open Plugins spec and the Goose docs note they are 'not currently emitted'; no subagent lifecycle hooks fire."
+  - "Stop hooks can fire via emit_blocking (final_output / exit_chat paths) or emit non-blocking (other exit paths). The same hooks.json Stop rules participate in both, which means a Stop hook may run non-blocking if the session ends without a final_output tool."
+  - "On Windows, hook command execution relies on a POSIX sh in PATH; the documented Windows installers include Git Bash/MSYS2 but this is a portability caveat."
+  - "The user plugin settings.json path is hardcoded to .config/goose/settings.json under the home directory on all OSes in discovery.rs, whereas config.yaml uses etcetera platform paths. This is an observed inconsistency."
+
+changes: []
+requires_claudine_update: true
+reason: "Goose's hook surface uses a different event set and blocking contract than Claude Code. Claudine needs a Goose provider adapter that maps the 11 native events (plus the spec-only SubagentStart/Stop) into the unified lifecycle, preserves the event field as a provider discriminator for tool_call/tool_result collisions, handles the two blocking events (PreToolUse and Stop) with their native deny formats (exit 2 or stdout JSON decision:block), and respects the non-blocking fire-and-forget semantics for all other events. It also needs to know that only command actions are functional and that plugin discovery paths differ from Claude Code's settings.json model."
 ---
 
-# Goose CLI Hooks and Event Stream
+# Goose CLI Hooks
 
-Homepage: https://block.github.io/goose/
+## Overview
 
-Documentation: https://block.github.io/goose/docs/guides/config-files/
+Goose CLI implements lifecycle hooks through the [Open Plugins hooks specification](https://open-plugins.com/agent-builders/components/hooks). Hooks are *command* actions declared inside a plugin's `hooks/hooks.json` file. They are discovered automatically from user, project, and installed plugin directories at startup, and they receive a JSON event payload on stdin.
 
-## Scope
+As of the observed source, Goose only runs `type: "command"` hooks. The Open Plugins spec also defines `prompt` and `agent` action types, but Goose deserializes and ignores them. Hooks can **block** two actions (`PreToolUse` and `Stop`) and are **fire-and-forget observers** for everything else. They cannot mutate tool input, replace tool output, or auto-approve pending actions.
 
-This document covers the hook and event surfaces available in the Goose agentic CLI (Block's open-source AI agent). Goose does **not** have a traditional pre/post lifecycle hook system like Claude Code or Gemini CLI. Instead, it provides:
+## Native Hooks
 
-1. A **status hook** (`GOOSE_STATUS_HOOK`) that fires a shell command on agent state transitions.
-2. A **streaming JSON event feed** (`--output-format stream-json`) that emits structured events during `goose run`.
-3. A **batch JSON output** (`--output-format json`) for post-run consumption.
-4. **MCP notification forwarding** for extension and subagent progress.
+| Native event | Timing | Blocking | Matcher target | Notes |
+|--------------|--------|----------|----------------|-------|
+| `SessionStart` | pre | no | none | Fires on the first user turn only. |
+| `SessionEnd` | post | no | none | Fires when a CLI session ends. |
+| `UserPromptSubmit` | pre | no | prompt text | Fires before command resolution and the reply loop. |
+| `PreToolUse` | pre | yes | tool name | Can permanently deny a tool call. |
+| `PostToolUse` | post | no | tool name | Fires after successful tool calls. |
+| `PostToolUseFailure` | post | no | tool name | Fires after failed tool calls. |
+| `BeforeReadFile` | pre | no | file path | Fires after `PreToolUse` for read-category tools. |
+| `BeforeShellExecution` | pre | no | command string | Fires after `PreToolUse` for shell-category tools. |
+| `AfterFileEdit` | post | no | file path | Fires after successful write-category tools. |
+| `AfterShellExecution` | post | no | command string | Fires after successful shell-category tools. |
+| `Stop` | pre | yes | none | Can block the turn from ending; overridden after 8 consecutive blocks. |
 
-All integration points are **outbound-only** (observe, do not control). There is no mechanism to block, modify, or approve tool calls through hooks.
+The matcher is a regular expression. If omitted or empty, the rule matches every event of that type. Regex syntax follows the Rust `regex` crate; invalid regexes cause the rule to be skipped at load time.
+
+Only `PreToolUse` and `Stop` use `emit_blocking`. All other events use `emit`, which logs failures but never propagates them. A misbehaving hook cannot crash the host tool or the action that triggered it.
 
 ## Configuration
 
-### Config file locations
-
-Goose uses YAML configuration files. There is no project-scoped config file; all configuration is user-scoped.
-
-| File | Path (macOS/Linux) | Purpose |
-|------|-------------------|---------|
-| `config.yaml` | `~/.config/goose/config.yaml` | Provider, model, extensions, status hook, and general settings |
-| `permission.yaml` | `~/.config/goose/permission.yaml` | Tool permission levels (configured via CLI) |
-| `secrets.yaml` | `~/.config/goose/secrets.yaml` | API keys (file-based fallback when keyring unavailable) |
-| `tool_permissions.json` | `~/.config/goose/permissions/tool_permissions.json` | Runtime permission decisions |
-
-On Windows, the base directory is `%APPDATA%\Block\goose\config\`.
-
-Configuration priority (highest to lowest): environment variables, config file settings, default values.
-
-### Goosehints (context injection, not hooks)
-
-Goose has a `.goosehints` system for injecting context into the agent's system prompt. This is not a hook mechanism but is worth noting for completeness.
-
-| Location | Scope |
-|----------|-------|
-| `~/.config/goose/.goosehints` | Global (all sessions) |
-| `.goosehints` (any directory in hierarchy) | Project (local takes priority on conflict) |
-
-Goosehints are loaded at session start and become part of every request's system prompt. They support `@filename.md` syntax to include referenced files. The `CONTEXT_FILE_NAMES` environment variable (JSON array) can configure alternative filenames; the default is `["AGENTS.md", ".goosehints"]`.
-
-(https://block.github.io/goose/docs/guides/context-engineering/using-goosehints)
-
-### Example config.yaml with status hook
-
-```yaml
-# Model configuration
-GOOSE_PROVIDER: "anthropic"
-GOOSE_MODEL: "claude-4.5-sonnet"
-GOOSE_TEMPERATURE: 0.7
-
-# Status hook - shell command called with status arg
-GOOSE_STATUS_HOOK: "/path/to/my-status-handler.sh"
-
-# Tool execution mode
-GOOSE_MODE: "smart_approve"
-
-# Extensions
-extensions:
-  developer:
-    bundled: true
-    enabled: true
-    name: developer
-    timeout: 300
-    type: builtin
-```
-
-The `GOOSE_STATUS_HOOK` value is a shell command string. It can also be set as an environment variable.
-
-## Hook Events
-
-### `GOOSE_STATUS_HOOK`
-
-The only true "hook" in Goose. A shell command executed when the agent transitions between states.
-
-**Description:** Fires when the CLI transitions between waiting for user input and processing. The configured command is spawned in a background thread with the status string as an argument.
-
-**Event payload:**
-
-The hook command receives a single positional argument: the status string.
-
-```
-<hook_command> <status>
-```
-
-| Status | Meaning | When fired |
-|--------|---------|------------|
-| `waiting` | Agent is idle, awaiting user input | Before the input prompt is shown in interactive mode |
-| `thinking` | Agent is processing | After user input is accepted, before agent response processing begins |
-
-On Unix, the command is executed via `sh -c "<hook> <status>"`. On Windows, via `cmd /C "<hook> <status>"`.
-
-**Event response:**
-
-- Exit code: **ignored**. The CLI discards the result.
-- stdout: **suppressed** (redirected to null).
-- stderr: **suppressed** (redirected to null).
-- Effect on flow: **none**. This is entirely fire-and-forget. You cannot block, modify, or influence the agent loop.
-
-**Configuration:**
-
-Set in `~/.config/goose/config.yaml`:
-
-```yaml
-GOOSE_STATUS_HOOK: "/path/to/script.sh"
-```
-
-Or as an environment variable:
-
-```bash
-export GOOSE_STATUS_HOOK="/path/to/script.sh"
-```
-
-**Example handler:**
-
-```bash
-#!/bin/bash
-# my-status-handler.sh
-STATUS="$1"
-case "$STATUS" in
-  thinking)
-    # Update a status indicator
-    echo "$(date -Iseconds) THINKING" >> /tmp/goose-status.log
-    ;;
-  waiting)
-    echo "$(date -Iseconds) WAITING" >> /tmp/goose-status.log
-    ;;
-esac
-```
-
-**Gotchas:**
-
-1. The hook spawns on a separate thread, so there is no ordering guarantee relative to the agent's next action.
-2. stdout and stderr are both piped to null. If you need to capture output, write to a file or external service inside the script.
-3. The hook reads its command from `Config::global().get_param::<String>("GOOSE_STATUS_HOOK")`, meaning it respects the standard config priority (env var overrides config file).
-
-(Source: https://github.com/block/goose/blob/main/crates/goose-cli/src/session/output.rs)
-
-### Stream-JSON event: `message`
-
-**Description:** Emitted when the agent produces a response message (assistant turn) or when a tool response is generated.
-
-**Event payload:**
-
-```json
-{
-  "type": "message",
-  "message": {
-    "role": "assistant",
-    "content": [
-      { "type": "text", "text": "..." },
-      { "type": "tool_request", "id": "...", "tool_name": "...", "arguments": {} },
-      { "type": "tool_response", "id": "...", "output": "..." }
-    ]
-  }
-}
-```
-
-The `message` object is the full Goose `Message` struct (role + content array). Content items can include text, tool requests, tool responses, `action_required` prompts, and thinking/reasoning blocks.
-
-**Event response:** None. The stream is outbound-only; there is no return channel.
-
-**Gotchas:** Message events are only emitted in `stream-json` mode (`goose run --output-format stream-json`). In interactive `session` mode, messages are rendered to the terminal instead.
-
-### Stream-JSON event: `notification`
-
-**Description:** Emitted when an MCP extension or subagent sends a logging or progress notification.
-
-**Event payload (log variant):**
-
-```json
-{
-  "type": "notification",
-  "extension_id": "developer",
-  "log": {
-    "message": "Formatted log message string"
-  }
-}
-```
-
-**Event payload (progress variant):**
-
-```json
-{
-  "type": "notification",
-  "extension_id": "developer",
-  "progress": {
-    "progress": 0.5,
-    "total": 1.0,
-    "message": "Processing files..."
-  }
-}
-```
-
-The `extension_id` identifies which MCP extension or subagent produced the notification. The variant (`log` or `progress`) is determined by the MCP notification type (`LoggingMessageNotification` or `ProgressNotification`).
-
-**Event response:** None. Outbound-only.
-
-**Gotchas:**
-
-- Subagent tool request notifications (`type: "subagent_tool_request"` in the MCP data) are re-emitted as `notification` log events with a formatted message string rather than the raw structured payload. To get structured subagent tool call data, consume MCP notifications at the extension/client layer.
-- Task execution notifications (`type: "task_execution"`) with subtypes `line_output`, `tasks_update`, and `tasks_complete` are similarly flattened into formatted log strings rather than preserving the structured JSON. See the "Known gotchas" section below.
-
-### Stream-JSON event: `model_change`
-
-**Description:** Emitted when the active model or operating mode changes (e.g., switching between lead and worker models, or planner transitions).
-
-**Event payload:**
-
-```json
-{
-  "type": "model_change",
-  "model": "claude-4.5-sonnet",
-  "mode": "lead"
-}
-```
-
-**Event response:** None. Outbound-only. Informational.
-
-### Stream-JSON event: `error`
-
-**Description:** Emitted when an error occurs in the agent loop. After emitting this event, the CLI performs cleanup and eventually emits a `complete` event.
-
-**Event payload:**
-
-```json
-{
-  "type": "error",
-  "error": "Error description string"
-}
-```
-
-**Event response:** None. Outbound-only.
-
-**Gotchas:** Error events are rendered to stderr in non-stream-json modes. In stream-json mode, they appear in the JSON stream. A `complete` event always follows.
-
-### Stream-JSON event: `complete`
-
-**Description:** Marks the end of a `goose run` execution. Always the final event in the stream.
-
-**Event payload:**
-
-```json
-{
-  "type": "complete",
-  "total_tokens": 1250
-}
-```
-
-The `total_tokens` field is `null` if token tracking is unavailable for the session.
-
-**Event response:** None. Outbound-only.
-
-### Batch JSON output (`--output-format json`)
-
-Not a stream, but included for completeness. When using `goose run --output-format json`, the CLI outputs a single JSON object after the run completes:
-
-```json
-{
-  "messages": [
-    { "role": "user", "content": [...] },
-    { "role": "assistant", "content": [...] }
-  ],
-  "metadata": {
-    "total_tokens": 1250,
-    "status": "completed"
-  }
-}
-```
-
-This mode is best suited for CI pipelines where you want the final result rather than real-time events.
-
-## MCP Notification Payloads
-
-Goose forwards MCP notifications from extensions and subagents into both the CLI display and the stream-json output. These appear as `notification` stream events.
-
-### Subagent tool request notifications
-
-Emitted when a subagent issues a tool call. The raw MCP notification data includes:
-
-```json
-{
-  "type": "subagent_tool_request",
-  "subagent_id": "subagent-123",
-  "tool_call": {
-    "name": "developer__shell",
-    "arguments": { "command": "ls -la" }
-  }
-}
-```
-
-In stream-json mode, this is re-emitted as a `notification` log event with a formatted message string (not the raw structured data).
-
-(Source: https://github.com/block/goose/blob/main/crates/goose/src/agents/subagent_handler.rs)
-
-### Task execution notifications
-
-Structured updates about subagent task execution. The raw MCP notification data includes a `type: "task_execution"` field and a `subtype`:
-
-| Subtype | Fields | Purpose |
-|---------|--------|---------|
-| `line_output` | `task_id`, `output` | Real-time output from a running task |
-| `tasks_update` | `stats`, `tasks` | Periodic status update for all tasks |
-| `tasks_complete` | `stats`, `failed_tasks` | Final completion summary |
-
-The `stats` object contains: `total`, `pending`, `running`, `completed`, `failed` counts. Each `tasks` entry contains: `id`, `status`, `duration_secs`, `current_output`, `task_type`, `task_name`, `task_metadata`, `error`, `result_data`.
-
-In stream-json mode, these are converted to formatted log strings rather than emitting the raw structured event.
-
-(Sources: https://github.com/block/goose/blob/main/crates/goose/src/agents/subagent_execution_tool/notification_events.rs, https://github.com/block/goose/blob/main/crates/goose-cli/src/session/task_execution_display/mod.rs)
-
-### Progress and log notifications
-
-Standard MCP `ProgressNotification` and `LoggingMessageNotification` events from extensions. These are emitted as `notification` stream events with the `progress` or `log` variant respectively. See the `notification` event payload above.
-
-## Matcher System
-
-Goose does **not** have a matcher system. There is no mechanism to selectively fire hooks based on tool names, event types, or patterns. The `GOOSE_STATUS_HOOK` fires on every status transition. The stream-json events are emitted unconditionally when the output format is set to `stream-json`.
-
-If you need to filter events, do so in your consuming script or application by inspecting the `type` field of each JSON event.
-
-## Comparison with Other Agentic CLIs
-
-| Feature | Goose | Claude Code | Gemini CLI |
-|---------|-------|-------------|------------|
-| Pre-tool-use hooks | No | Yes | Yes |
-| Post-tool-use hooks | No | Yes | Yes |
-| Block/approve tool calls | No | Yes | Yes |
-| Modify tool input | No | Yes | Yes |
-| Status change notification | Yes (fire-and-forget) | Yes (via hooks) | Yes (via hooks) |
-| Streaming event output | Yes (stream-json) | No | No |
-| Batch JSON output | Yes (json) | No | No |
-| Config-based hook definition | Partial (status hook only) | Yes (JSON) | Yes (JSON) |
-| Matcher/filter system | No | Yes (regex) | Yes (regex) |
-| Return channel | No | Yes (stdin/stdout JSON) | Yes (stdin/stdout JSON) |
-
-## Known Gotchas and Workarounds
-
-### 1. Task execution notifications are flattened in stream-json
-
-**Problem:** The CLI formats `task_execution` notifications into human-readable log strings rather than emitting the raw structured JSON in stream-json mode.
-
-**Workaround:** Consume MCP notifications at the extension or client layer if you need structured task updates. Otherwise, parse the formatted log output with regex or string matching.
-
-### 2. `GOOSE_STATUS_HOOK` is fire-and-forget
-
-**Problem:** The hook runs asynchronously with stdout/stderr suppressed and exit codes ignored. You cannot block, modify, or respond to agent actions.
-
-**Workaround:** Use the stream-json event feed for richer, synchronous state observation. In the hook, write to a file, named pipe, or external service if you need state persistence or need to trigger downstream actions.
-
-### 3. Event schemas are not versioned
-
-**Problem:** The stream-json event set is defined in Rust code and may change between releases. Unknown fields or new event types can appear without notice.
-
-**Workaround:** Implement tolerant parsing: use `#[serde(deny_unknown_fields)]`-free deserialization, ignore unknown event types, and treat the stream as best-effort telemetry. The `StreamEvent` enum uses `#[serde(tag = "type", rename_all = "snake_case")]`, so the `type` field is the discriminator.
-
-### 4. Tool output may be filtered in CLI rendering
-
-**Problem:** The CLI can suppress low-priority tool output depending on `GOOSE_CLI_MIN_PRIORITY` and debug settings. Content items with priority below the threshold or with no priority (in non-debug mode) are skipped.
-
-**Workaround:** Run with `--debug` or set `GOOSE_CLI_MIN_PRIORITY=0` in config to see all tool output. Note that this only affects CLI rendering, not stream-json events.
-
-### 5. No project-scoped hook configuration
-
-**Problem:** Unlike Claude Code (`.claude/settings.json`) or Gemini CLI (`.gemini/settings.json`), Goose has no project-scoped config for hooks. The `GOOSE_STATUS_HOOK` is always user-global.
-
-**Workaround:** Use environment variables per project (e.g., via direnv or shell scripts), or have the hook script inspect the current working directory to apply project-specific logic.
-
-### 6. Stream-json mode only works with `goose run`
-
-**Problem:** The `--output-format stream-json` flag is only available on the `goose run` command (non-interactive task execution). Interactive `goose session` does not support structured event output.
-
-**Workaround:** For interactive monitoring, use the `GOOSE_STATUS_HOOK` for state transitions, or run `goose run` in headless mode for full event streaming.
-
-### 7. No hook for tool approval or permission decisions
-
-**Problem:** Goose has a `GOOSE_MODE` setting (`auto`, `approve`, `chat`, `smart_approve`) that controls tool approval, but there is no hook to programmatically approve or deny individual tool calls.
-
-**Workaround:** Set `GOOSE_MODE` globally. For fine-grained tool permissions, configure the `permission.yaml` file. There is no runtime hook-based approach.
+Hooks live inside a plugin directory under `<plugin-root>/hooks/hooks.json`. Plugins are discovered from:
+
+| Scope | macOS | Linux | Windows |
+|-------|-------|-------|---------|
+| User | `~/.agents/plugins/<plugin-name>/` | `~/.agents/plugins/<plugin-name>/` | `%USERPROFILE%\.agents\plugins\<plugin-name>\` |
+| Project | `<project>/.agents/plugins/<plugin-name>/` | `<project>/.agents/plugins/<plugin-name>/` | `<project>\.agents\plugins\<plugin-name>\` |
+| Installed | `~/.agents/plugins/<plugin-name>/` (default) | `~/.agents/plugins/<plugin-name>/` (default) | `%USERPROFILE%\.agents\plugins\<plugin-name>\` (default) |
+
+The `disabledPlugins` and `enabledPlugins` settings keys control which discovered plugins are active:
+
+| Scope | macOS | Linux | Windows |
+|-------|-------|-------|---------|
+| User | `~/.config/goose/settings.json` | `~/.config/goose/settings.json` | `%USERPROFILE%\.config\goose\settings.json` |
+| Project | `<project>/.config/goose/settings.json` | `<project>/.config/goose/settings.json` | `<project>\.config\goose\settings.json` |
+| Local project | `<project>/.config/goose/settings.local.json` | `<project>/.config/goose/settings.local.json` | `<project>\.config\goose\settings.local.json` |
+
+Precedence is local project > project > user. In addition, the main config file persists a `plugins` map with per-plugin `enabled: true/false` entries:
+
+| OS | Path |
+|----|------|
+| macOS | `~/Library/Application Support/Block/goose/config/config.yaml` |
+| Linux | `~/.config/goose/config.yaml` |
+| Windows | `%APPDATA%\Block\goose\config\config.yaml` |
+
+There are no CLI commands dedicated to listing, testing, or disabling hooks. The closest CLI surface is `goose plugin install <URL>` and `goose plugin update <NAME>`, which install or update git-backed plugins that may contain hooks.
+
+## Payloads and Responses
+
+Every hook receives a JSON object on stdin. The common fields are:
+
+- `event` — the native event name.
+- `session_id` — the current session identifier.
+
+Tool events add:
+
+- `matcher_context` — the string the regex matcher tests.
+- `tool_name` — the full tool name, e.g. `developer__shell`.
+- `tool_input` — the tool arguments as a JSON object.
+- `working_dir` — the session working directory.
+
+`UserPromptSubmit` adds `message` (the prompt text). `Stop` adds `last_assistant_message` when the assistant produced output. The `tool_output` field is declared in the context struct but is not populated by the observed post-tool hook code.
+
+For blocking events, the response contract is:
+
+| Exit / stdout | Meaning |
+|---------------|---------|
+| Exit 0 | Allow the pending action. |
+| Exit 2, reason on stderr | Block; stderr becomes the reason. |
+| Exit 2 with empty stderr | Block with default reason "denied by plugin hook". |
+| Stdout JSON `{"decision":"block","reason":"..."}` | Block with the supplied reason. |
+| Any other non-zero exit, timeout, or spawn failure | Treated as Allow and logged as a warning. |
+
+For `PreToolUse`, a block returns an internal error to the model instructing it not to retry. For `Stop`, a block injects a system notification and a hidden user message telling the model to address the issue before stopping again; after 8 consecutive blocks the turn ends anyway unless `GOOSE_STOP_HOOK_BLOCK_CAP` is raised.
+
+## Execution Semantics
+
+- **Shell**: Goose spawns `sh -c <command>` on all platforms. Flatpak builds use `flatpak-spawn` with `sh -c`. On Windows, `sh` must be on PATH, which the documented installers provide via Git Bash or MSYS2.
+- **Working directory**: No explicit `current_dir` is set; the hook inherits Goose's current working directory (the session working directory).
+- **Environment**: The hook inherits Goose's environment. `PLUGIN_ROOT` is always set to the plugin's root directory. On Goose Desktop, PATH may be augmented with the user's login-shell PATH.
+- **Timeout**: Default 30 seconds per hook; overridden by the `timeout` field in `hooks.json`.
+- **Stdin**: One JSON `HookContext` document.
+- **Stdout**: Parsed only for blocking hooks; if it starts with `{` and contains `{"decision":"block",...}`, the action is blocked. Otherwise stdout is ignored.
+- **Stderr**: Becomes the block reason on exit 2 for blocking hooks; otherwise logged but not shown to the user.
+- **Ordering**: Rules are evaluated in load order and all matching rules run. Actions inside a rule run in array order. There is no deduplication across plugins.
+
+## Claudine Mapping
+
+| Native event | Claudine event | Provider-specific payload to preserve |
+|--------------|----------------|---------------------------------------|
+| `SessionStart` | `initialize` | none |
+| `SessionEnd` | `finalize` | none |
+| `UserPromptSubmit` | `prompt` | `message` |
+| `PreToolUse` | `tool_call` | `tool_name`, `tool_input`, `working_dir` |
+| `BeforeReadFile` | `tool_call` | `event_kind="BeforeReadFile"`, `matcher_context` |
+| `BeforeShellExecution` | `tool_call` | `event_kind="BeforeShellExecution"`, `matcher_context` |
+| `PostToolUse` | `tool_result` | `tool_name`, `tool_input`, `working_dir` |
+| `PostToolUseFailure` | `tool_result` | `tool_name`, `tool_input`, `working_dir` |
+| `AfterFileEdit` | `tool_result` | `event_kind="AfterFileEdit"`, `matcher_context` |
+| `AfterShellExecution` | `tool_result` | `event_kind="AfterShellExecution"`, `matcher_context` |
+| `Stop` | `finalize` | `last_assistant_message` |
+
+Because several native events map to the same Claudine event, Claudine must preserve the native `event` name (and `matcher_context` where present) as a provider discriminator. `PreToolUse` and `Stop` are the only events that can block; all others are observer-only.
+
+## Gaps
+
+- The Open Plugins spec defines `prompt` and `agent` hook action types, but Goose source only implements `command` and silently ignores the others.
+- `tool_output` is declared in the payload struct but is not populated by the observed post-tool hook code.
+- There is no CLI command to list, test, or validate hooks.
+- There is no environment variable to disable all hooks globally.
+- `SubagentStart` and `SubagentStop` are listed in the Open Plugins spec but Goose does not emit them.
+- `Stop` hooks can fire via the blocking path (when a turn ends through the `final_output` tool or `exit_chat`) or the non-blocking path (other exits), so the same `Stop` rule may behave as either pre or post depending on how the turn ends.
+- On Windows, hook execution depends on a POSIX `sh` being available in PATH.
+- The plugin settings.json path is hardcoded to `.config/goose/settings.json` under the home directory on all OSes, while `config.yaml` uses platform-specific etcetera paths.
 
 ## Sources
 
-- Goose homepage: https://block.github.io/goose/
-- Configuration files guide: https://block.github.io/goose/docs/guides/config-files/
-- CLI commands reference: https://block.github.io/goose/docs/guides/goose-cli-commands/
-- Running tasks (output formats): https://block.github.io/goose/docs/guides/running-tasks/
-- Using goosehints: https://block.github.io/goose/docs/guides/context-engineering/using-goosehints
-- Using extensions: https://block.github.io/goose/docs/getting-started/using-extensions/
-- GitHub repository: https://github.com/block/goose
-- Source: `run_status_hook` implementation: https://github.com/block/goose/blob/main/crates/goose-cli/src/session/output.rs
-- Source: `StreamEvent` enum and event emission: https://github.com/block/goose/blob/main/crates/goose-cli/src/session/mod.rs
-- Source: `AgentEvent` enum: https://github.com/block/goose/blob/main/crates/goose/src/agents/agent.rs
-- Source: Subagent notifications: https://github.com/block/goose/blob/main/crates/goose/src/agents/subagent_handler.rs
-- Source: Task execution notifications: https://github.com/block/goose/blob/main/crates/goose/src/agents/subagent_execution_tool/notification_events.rs
+- Goose hooks documentation: <https://goose-docs.ai/docs/guides/context-engineering/hooks>
+- Open Plugins hooks spec: <https://open-plugins.com/agent-builders/components/hooks>
+- Goose hooks blog post: <https://goose-docs.ai/blog/2026/05/14/goose-hooks>
+- Goose CLI commands reference: <https://goose-docs.ai/docs/guides/goose-cli-commands>
+- Goose environment variables: <https://goose-docs.ai/docs/guides/environment-variables>
+- Goose configuration files: <https://goose-docs.ai/docs/guides/config-files>
+- Goose source, hooks implementation: <https://github.com/aaif-goose/goose/blob/main/crates/goose/src/hooks/mod.rs>
+- Goose source, hook event definitions and payload: <https://github.com/aaif-goose/goose/blob/main/crates/goose/src/hooks/mod.rs#L50-L172>
+- Goose source, blocking hook execution: <https://github.com/aaif-goose/goose/blob/main/crates/goose/src/hooks/mod.rs#L364-L452>
+- Goose source, PreToolUse blocking call site: <https://github.com/aaif-goose/goose/blob/main/crates/goose/src/agents/agent.rs#L1050-L1080>
+- Goose source, Stop hook blocking call site and cap: <https://github.com/aaif-goose/goose/blob/main/crates/goose/src/agents/agent.rs#L1939-L1962>
+- Goose source, plugin discovery and settings paths: <https://github.com/aaif-goose/goose/blob/main/crates/goose/src/plugins/discovery.rs>
+- Goose source, paths resolver: <https://github.com/aaif-goose/goose/blob/main/crates/goose/src/config/paths.rs>
+- Example hello-hooks plugin: <https://github.com/aaif-goose/goose/blob/main/examples/plugins/hello-hooks/hooks/hooks.json>

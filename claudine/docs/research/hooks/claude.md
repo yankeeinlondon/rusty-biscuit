@@ -1,9 +1,9 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-02
-last_updated: 2026-07-02
+last_updated: 2026-07-03
 agent: open_code
-model: default
+model: kimi-for-coding/k2p7
 homepage: https://www.anthropic.com/claude-code
 docs: https://code.claude.com/docs/en/overview
 hooks_docs: https://code.claude.com/docs/en/hooks
@@ -221,19 +221,49 @@ hooks:
     notes: "Matcher: clear|resume|logout|prompt_input_exit|bypass_permissions_disabled|other."
 
 config_files:
-  - os: all
+  - os: macos
     scope: user
     path: "~/.claude/settings.json"
     format: json
     notes: "User scope; lowest priority. Can include `hooks`, `disableAllHooks`, `permissions`. File watcher reloads edits live."
-  - os: all
+  - os: linux
+    scope: user
+    path: "~/.claude/settings.json"
+    format: json
+    notes: "User scope; lowest priority. Can include `hooks`, `disableAllHooks`, `permissions`. File watcher reloads edits live."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.claude\\settings.json"
+    format: json
+    notes: "User scope; lowest priority. Can include `hooks`, `disableAllHooks`, `permissions`. File watcher reloads edits live."
+  - os: macos
     scope: repo
     path: ".claude/settings.json"
     format: json
     notes: "Project scope; medium priority. Committed to git and shared with collaborators. The `$schema` line points to https://json.schemastore.org/claude-code-settings.json."
-  - os: all
+  - os: linux
+    scope: repo
+    path: ".claude/settings.json"
+    format: json
+    notes: "Project scope; medium priority. Committed to git and shared with collaborators. The `$schema` line points to https://json.schemastore.org/claude-code-settings.json."
+  - os: windows
+    scope: repo
+    path: ".claude\\settings.json"
+    format: json
+    notes: "Project scope; medium priority. Committed to git and shared with collaborators. The `$schema` line points to https://json.schemastore.org/claude-code-settings.json."
+  - os: macos
     scope: repo
     path: ".claude/settings.local.json"
+    format: json
+    notes: "Local scope; high priority (above project, below managed). Gitignored when Claude Code creates it. Hook additions here override project hooks."
+  - os: linux
+    scope: repo
+    path: ".claude/settings.local.json"
+    format: json
+    notes: "Local scope; high priority (above project, below managed). Gitignored when Claude Code creates it. Hook additions here override project hooks."
+  - os: windows
+    scope: repo
+    path: ".claude\\settings.local.json"
     format: json
     notes: "Local scope; high priority (above project, below managed). Gitignored when Claude Code creates it. Hook additions here override project hooks."
   - os: macos
@@ -271,24 +301,64 @@ config_files:
     path: "HKCU\\SOFTWARE\\Policies\\ClaudeCode"
     format: other
     notes: "Windows registry HKCU delivery; lowest policy priority, only used when no admin-level source exists."
-  - os: all
+  - os: macos
     scope: managed
     path: "Server-managed (claude.ai admin console or self-hosted Claude apps gateway)"
     format: json
     notes: "Server-side delivery at sign-in for cloud-managed policies."
-  - os: all
+  - os: linux
+    scope: managed
+    path: "Server-managed (claude.ai admin console or self-hosted Claude apps gateway)"
+    format: json
+    notes: "Server-side delivery at sign-in for cloud-managed policies."
+  - os: windows
+    scope: managed
+    path: "Server-managed (claude.ai admin console or self-hosted Claude apps gateway)"
+    format: json
+    notes: "Server-side delivery at sign-in for cloud-managed policies."
+  - os: macos
     scope: other
     path: "<plugin>/hooks/hooks.json"
     format: json
     notes: "Plugin-bundled hooks; loaded only when plugin is enabled (or force-enabled in managed settings enabledPlugins)."
-  - os: all
+  - os: linux
+    scope: other
+    path: "<plugin>/hooks/hooks.json"
+    format: json
+    notes: "Plugin-bundled hooks; loaded only when plugin is enabled (or force-enabled in managed settings enabledPlugins)."
+  - os: windows
+    scope: other
+    path: "<plugin>\\hooks\\hooks.json"
+    format: json
+    notes: "Plugin-bundled hooks; loaded only when plugin is enabled (or force-enabled in managed settings enabledPlugins)."
+  - os: macos
     scope: other
     path: "Skill or subagent YAML frontmatter (`hooks:`)"
     format: yaml
     notes: "Frontmatter-scoped hooks; live only while the skill or agent is active. Subagent `Stop` is automatically converted to `SubagentStop`."
-  - os: all
+  - os: linux
+    scope: other
+    path: "Skill or subagent YAML frontmatter (`hooks:`)"
+    format: yaml
+    notes: "Frontmatter-scoped hooks; live only while the skill or agent is active. Subagent `Stop` is automatically converted to `SubagentStop`."
+  - os: windows
+    scope: other
+    path: "Skill or subagent YAML frontmatter (`hooks:`)"
+    format: yaml
+    notes: "Frontmatter-scoped hooks; live only while the skill or agent is active. Subagent `Stop` is automatically converted to `SubagentStop`."
+  - os: macos
     scope: other
     path: "~/.claude.json"
+    format: json
+    notes: "OAuth session, per-project state (allowed tools, trust), and caches; not a hook-config location but holds MCP user/local config."
+  - os: linux
+    scope: other
+    path: "~/.claude.json"
+    format: json
+    notes: "OAuth session, per-project state (allowed tools, trust), and caches; not a hook-config location but holds MCP user/local config."
+  - os: windows
+    scope: other
+    path: "%USERPROFILE%\\.claude.json"
     format: json
     notes: "OAuth session, per-project state (allowed tools, trust), and caches; not a hook-config location but holds MCP user/local config."
 
@@ -332,6 +402,15 @@ cli_params:
   - flag: "allowedHttpHookUrls (managed-settings)"
     description: "Allowlist of URL patterns that HTTP hooks may target (`*` wildcard). Undefined = unrestricted, empty array = block all HTTP hooks. Arrays merge across settings sources."
     example: "\"allowedHttpHookUrls\": [\"https://hooks.example.com/*\"]"
+  - flag: "--safe-mode"
+    description: "Start with all customizations (CLAUDE.md, skills, plugins, hooks, MCP servers, custom commands/agents, output styles, workflows, custom themes, keybindings) disabled. Admin-managed policy settings still apply. Sets CLAUDE_CODE_SAFE_MODE=1."
+    example: "claude --safe-mode"
+  - flag: "--include-hook-events"
+    description: "Include all hook lifecycle events in the output stream. Only works with --output-format=stream-json."
+    example: "claude -p --output-format=stream-json --include-hook-events \"query\""
+  - flag: "--setting-sources <sources>"
+    description: "Comma-separated list of setting sources to load (user, project, local). Use it to skip scopes that would normally contribute hooks."
+    example: "claude --setting-sources user,project"
 
 payload_fields:
   - native_event: SessionStart
@@ -461,7 +540,7 @@ payload_fields:
   - native_event: (common)
     field: "permission_mode"
     type: string
-    meaning: "Active permission mode (every event)."
+    meaning: "Active permission mode (every event): default | plan | acceptEdits | dontAsk | bypassPermissions | auto."
   - native_event: (common)
     field: "hook_event_name"
     type: string
@@ -480,7 +559,7 @@ response_actions:
   - action: ask
     native_value: "{hookSpecificOutput.permissionDecision: 'ask', permissionDecisionReason}"
     effect: "PreToolUse: shows the permission dialog to the user as normal (overrides an `allow` decision)."
-  - action: defer
+  - action: other
     native_value: "{hookSpecificOutput.permissionDecision: 'defer'}"
     effect: "PreToolUse non-interactive `-p` mode only: exits the process with the tool call preserved so an Agent SDK wrapper can collect input and resume."
   - action: modify
@@ -511,7 +590,7 @@ response_actions:
 execution:
   shell: "Default is `sh -c` on macOS/Linux, Git Bash on Windows, or PowerShell when Git Bash is unavailable. The `shell` field on command hooks can pin to `\"bash\"` or `\"powershell\"`. Exec form (`args` set) bypasses the shell entirely and spawns the executable directly; path placeholders are substituted as plain strings with no quoting. On Windows, exec form requires a real `.exe`; `.cmd`/`.bat` shims must be invoked via shell form or `node` directly."
   cwd: "Handers run in the current working directory of the Claude Code session (the `cwd` field in the payload)."
-  env: "Claude Code's environment is exported to the spawned process. Path placeholders are also exported as env vars: `CLAUDE_PROJECT_DIR` (project root, set for stdio MCP servers and plugin LSP servers too), `CLAUDE_PLUGIN_ROOT` (plugin install dir), `CLAUDE_PLUGIN_DATA` (plugin persistent data dir). `CLAUDE_CODE_REMOTE` is `\"true\"` in remote web environments, unset in local CLI. `CLAUDE_CODE_BRIDGE_SESSION_ID` is set while the local session has an active Remote Control connection (v2.1.199+). `CLAUDE_ENV_FILE` is exposed ONLY in SessionStart hooks and is the file path Claude Code sources as a preamble to subsequent Bash commands (used to persist direnv-style env var changes)."
+  env: "Claude Code's environment is exported to the spawned process. Path placeholders are also exported as env vars: `CLAUDE_PROJECT_DIR` (project root, set for stdio MCP servers and plugin LSP servers too), `CLAUDE_PLUGIN_ROOT` (plugin install dir), `CLAUDE_PLUGIN_DATA` (plugin persistent data dir). `CLAUDE_CODE_REMOTE` is `\"true\"` in remote web environments, unset in local CLI. `CLAUDE_CODE_BRIDGE_SESSION_ID` is set while the local session has an active Remote Control connection (v2.1.199+). `CLAUDE_CODE_SIMPLE` is set to `\"1\"` by `--bare`, which skips hooks (and skills, plugins, MCP, auto-memory, CLAUDE.md). `CLAUDE_CODE_SAFE_MODE` is set to `\"1\"` by `--safe-mode`, which disables hooks and other customizations while still honoring managed policy. `CLAUDE_ENV_FILE` is exposed ONLY in SessionStart hooks and is the file path Claude Code sources as a preamble to subsequent Bash commands (used to persist direnv-style env var changes)."
   timeout: "Default 600s for command/http/mcp_tool; 30s for prompt; 60s for agent. UserPromptSubmit lowers command/http/mcp_tool defaults to 30s. MessageDisplay lowers command/http/mcp_tool defaults to 10s. Async hooks share the same 10-minute default. Per-handler override via the `timeout` field (seconds). Permissions.json `permissions.hookTimeLimitMs` may also apply."
   stdin: "JSON event payload (one document). For command hooks only; http hooks receive the same JSON as the POST body."
   stdout: "On exit 0: parsed as JSON output (top-level fields continue/stopReason/suppressOutput/systemMessage; event-specific `hookSpecificOutput`). Plain text becomes Claude context for UserPromptSubmit/SessionStart/Setup/UserPromptExpansion; becomes systemMessage on async hooks. Empty/non-JSON exit-0 is treated as 'no decision' — for PreToolUse this does NOT approve the call (the normal permission flow still applies)."
@@ -536,8 +615,10 @@ gaps:
   - "PermissionRequest hooks do NOT fire in non-interactive (`-p`) mode. Claudine's permission-event adapter for headless runs must use PreToolUse instead."
   - "`allowedHttpHookUrls` is a managed-policy allowlist for HTTP hooks; not modelled in other providers."
   - "Existing research file `claude-code.md` (1232 lines) duplicates this content but is missing all schema fields (`$schema`, `created`, `last_updated`, `agent`, `model`, `requires_claudine_update`, `reason`). The schema migration is a separate cleanup task."
+  - "Per-session hook-disable mechanisms (`--bare`/`CLAUDE_CODE_SIMPLE`, `--safe-mode`/`CLAUDE_CODE_SAFE_MODE`) and `--setting-sources` are not yet modeled as Claudine session gates; only the static `disableAllHooks` setting is represented."
 
 changes:
+  - "2026-07-03 — Refreshed against Claude Code v2.1.199 and official docs. Added `--safe-mode`, `--include-hook-events`, and `--setting-sources` CLI controls; split all `os: all` config_files records into per-OS (macOS/Linux/Windows) entries; mapped the native `defer` permissionDecision to `response_actions: other` because the schema action enum does not include `defer`; added `auto` to the `permission_mode` value set; documented `CLAUDE_CODE_SAFE_MODE` and `CLAUDE_CODE_SIMPLE` environment disables."
   - "Renamed target from `claude-code.md` to `claude.md` to match `claudine/docs/providers.yaml`."
   - "Added full SimplifiedSchema frontmatter (was missing on the existing `claude-code.md`)."
   - "Expanded event list from 14 to 34 (the 14 legacy events plus 20 new events documented in the current docs): Setup, UserPromptExpansion, PermissionDenied, PostToolBatch, MessageDisplay, TaskCreated, StopFailure, InstructionsLoaded, ConfigChange, CwdChanged, FileChanged, WorktreeCreate, WorktreeRemove, PostCompact, Elicitation, ElicitationResult."
@@ -549,7 +630,7 @@ changes:
   - "Captured Auto-update re-snapshot vs file-watcher live reload semantics (model and outputStyle still need restart)."
 
 requires_claudine_update: true
-reason: "Claude Code's hook surface has expanded from 14 to 34 events across 5 handler types (command/prompt/agent/http/mcp_tool). Claudine's adapter needs: (a) a per-event many-to-one map into the 16 unified events with documented disambiguation (e.g. PostToolUseFailure→tool_result, SessionStart/Setup/InstructionsLoaded→initialize, Stop/StopFailure/SessionEnd→finalize, MessageDisplay→notification with around-timing, WorktreeCreate/Elicitation/ElicitationResult→tool_call/notification with provider_extensions); (b) per-handler-type validators (TeammateIdle only accepts command; SessionStart's CLAUDE_ENV_FILE is one-of-a-kind); (c) a polymorphic tool_input schema with tool_name discriminator (Bash vs Write vs Edit vs WebFetch vs Task vs MCP); (d) legacy PreToolUse top-level decision/reason vs modern hookSpecificOutput.permissionDecision support; (e) matcher-rule parser handling exact words (`Edit|Write`), comma-separated lists (v2.1.191+), hyphens in exact set (v2.1.195+), JS RegExp, and per-event narrowing (FileChanged/StopFailure drop to `[A-Za-z0-9_|]`); (f) `if` field permission-rule pre-filter; (g) HTTP-hook allowlist policy (allowedHttpHookUrls) and mcp_tool-only-on-connected-servers semantics; (h) `permission_mode`, `notification_type`, `load_reason`, `stop_hook_active`, `agent_transcript_path` as typed subfields on payloads; (i) async/around timing semantics (MessageDisplay is `around`; Notification/FileChanged/CwdChanged/ConfigChange/PostCompact are effectively async fire-and-forget). The legacy 14-event research in claude-code.md should be deleted once the adapter migrates to this 34-event map."
+reason: "Claude Code's hook surface has expanded from 14 to 34 events across 5 handler types (command/prompt/agent/http/mcp_tool). Claudine's adapter needs: (a) a per-event many-to-one map into the 16 unified events with documented disambiguation (e.g. PostToolUseFailure→tool_result, SessionStart/Setup/InstructionsLoaded→initialize, Stop/StopFailure/SessionEnd→finalize, MessageDisplay→notification with around-timing, WorktreeCreate/Elicitation/ElicitationResult→tool_call/notification with provider_extensions); (b) per-handler-type validators (TeammateIdle only accepts command; SessionStart's CLAUDE_ENV_FILE is one-of-a-kind); (c) a polymorphic tool_input schema with tool_name discriminator (Bash vs Write vs Edit vs WebFetch vs Task vs MCP); (d) legacy PreToolUse top-level decision/reason vs modern hookSpecificOutput.permissionDecision support; (e) matcher-rule parser handling exact words (`Edit|Write`), comma-separated lists (v2.1.191+), hyphens in exact set (v2.1.195+), JS RegExp, and per-event narrowing (FileChanged/StopFailure drop to `[A-Za-z0-9_|]`); (f) `if` field permission-rule pre-filter; (g) HTTP-hook allowlist policy (allowedHttpHookUrls) and mcp_tool-only-on-connected-servers semantics; (h) `permission_mode`, `notification_type`, `load_reason`, `stop_hook_active`, `agent_transcript_path` as typed subfields on payloads; (i) async/around timing semantics (MessageDisplay is `around`; Notification/FileChanged/CwdChanged/ConfigChange/PostCompact are effectively async fire-and-forget); (j) per-session hook-disable toggles (`--bare`/`--safe-mode`/`--setting-sources` and the CLAUDE_CODE_SIMPLE/CLAUDE_CODE_SAFE_MODE env vars) that Claudine should surface when wrapping a Claude session. The legacy 14-event research in claude-code.md should be deleted once the adapter migrates to this 34-event map."
 ---
 
 # Claude Code hooks and events
@@ -654,7 +735,7 @@ Top-level `continue: false` overrides every event-specific decision and stops Cl
 | Plugin | `<plugin>/hooks/hooks.json` | same | Loaded when plugin enabled |
 | Skill / subagent frontmatter | `hooks:` block | same | Scoped to component lifetime |
 
-`/hooks` (in-session) opens a read-only browser. The `disableAllHooks` setting disables all hooks; managed hooks still run unless `disableAllHooks` is set in managed settings. `allowManagedHooksOnly` (managed only) blocks user/project/plugin hooks (except plugins force-enabled in `enabledPlugins`). `allowedHttpHookUrls` (managed) is the URL allowlist for HTTP hooks.
+`/hooks` (in-session) opens a read-only browser. The `disableAllHooks` setting disables all hooks; managed hooks still run unless `disableAllHooks` is set in managed settings. `allowManagedHooksOnly` (managed only) blocks user/project/plugin hooks (except plugins force-enabled in `enabledPlugins`). `allowedHttpHookUrls` (managed) is the URL allowlist for HTTP hooks. Per-session, `--bare` skips hooks and sets `CLAUDE_CODE_SIMPLE=1`; `--safe-mode` disables hooks and all other customizations while still honoring managed policy and sets `CLAUDE_CODE_SAFE_MODE=1`; `--setting-sources user,project,local` limits which settings files (and therefore which hooks) are loaded. `--include-hook-events` emits hook lifecycle events in `--output-format=stream-json` output.
 
 A live file watcher reloads most settings edits including `hooks` mid-session; the `ConfigChange` hook fires for each detected change. `model` and `outputStyle` still apply on the next restart.
 
@@ -785,7 +866,7 @@ In **shell form** (`args` absent), the `command` is passed to `sh -c` on macOS/L
 - **Shell** — defaults to `sh -c` on macOS/Linux, Git Bash on Windows, PowerShell when Git Bash is unavailable. Pin via the `shell` field (`"bash"` or `"powershell"`).
 - **Exec form** (`args` set) spawns the executable directly with no shell. Path placeholders are substituted as plain strings. On Windows, exec form requires a real `.exe` (`.cmd` / `.bat` shims from npm/npx/eslint must be invoked via `node` directly or in shell form).
 - **cwd** — handlers run in the session's current working directory.
-- **Environment** — Claude Code's env is exported; `CLAUDE_PROJECT_DIR`, `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA` are always set; `CLAUDE_CODE_REMOTE` is `"true"` in web environments (unset locally); `CLAUDE_CODE_BRIDGE_SESSION_ID` is set while a Remote Control connection is active (v2.1.199+); `CLAUDE_ENV_FILE` is exposed **only** to `SessionStart` hooks and is the file Claude Code sources as a Bash preamble to persist direnv-style env-var changes.
+- **Environment** — Claude Code's env is exported; `CLAUDE_PROJECT_DIR`, `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA` are always set; `CLAUDE_CODE_REMOTE` is `"true"` in web environments (unset locally); `CLAUDE_CODE_BRIDGE_SESSION_ID` is set while a Remote Control connection is active (v2.1.199+); `CLAUDE_CODE_SIMPLE` is set to `"1"` by `--bare` (hooks skipped); `CLAUDE_CODE_SAFE_MODE` is set to `"1"` by `--safe-mode` (hooks and other customizations disabled, managed policy still applies); `CLAUDE_ENV_FILE` is exposed **only** to `SessionStart` hooks and is the file Claude Code sources as a Bash preamble to persist direnv-style env-var changes.
 - **Timeout** — default 600s for `command`/`http`/`mcp_tool`, 30s for `prompt`, 60s for `agent`. `UserPromptSubmit` lowers command/http/mcp_tool defaults to 30s. `MessageDisplay` lowers it to 10s. Async hooks share the 10-minute default. Per-handler `timeout` field overrides.
 
 ### Stdin / stdout / stderr
@@ -856,9 +937,11 @@ CLAUDE_ENV_FILE writes from `SessionStart` should be modeled as a `permission` /
 8. **Per-event handler-type constraints** — `TeammateIdle` only accepts `type: command`; SessionStart's CLAUDE_ENV_FILE is unique to Claude; validate the handler type per event before dispatching.
 9. **Managed policy gates** — `allowManagedHooksOnly`, `allowedHttpHookUrls`, `disableAllHooks`, and `allowAllClaudeAiMcps` have no analogue on other providers; model as Claude-specific session gates.
 10. **Existing research file** — `claude-code.md` (1232 lines) duplicates this content but is missing all schema fields. It should be deleted once the adapter migrates to this 34-event map.
+11. **Per-session hook-disable toggles** — `--bare`/`CLAUDE_CODE_SIMPLE`, `--safe-mode`/`CLAUDE_CODE_SAFE_MODE`, and `--setting-sources` are not yet modeled as Claudine session gates; only the static `disableAllHooks` setting is represented.
 
 ## Changelog
 
+- **2026-07-03** — Refreshed against Claude Code v2.1.199 and official docs. Added `--safe-mode`, `--include-hook-events`, and `--setting-sources` as hook-affecting CLI controls; documented `CLAUDE_CODE_SAFE_MODE` and `CLAUDE_CODE_SIMPLE` environment disables; split all `os: all` config records into per-OS (macOS/Linux/Windows) entries; mapped native `permissionDecision: defer` to `response_actions: other` to comply with the schema action enum.
 - **2026-07-02** — Initial research for `claude.md`. Expanded event list from 14 to 34; added `http` and `mcp_tool` handler types; added `if` field, exec form, `shell` field, `asyncRewake`, and `allowedEnvVars`. Documented `permissionDecision: defer` (headless `-p` mode), `allowedHttpHookUrls` policy, HKCU/HKLM/macOS plist delivery, and `managed-settings.d/` drop-in support. Captured per-handler-type timeouts (command 600s, prompt 30s, agent 60s; UserPromptSubmit 30s override; MessageDisplay 10s override). Recorded auto-update model/outputStyle restart-only behavior and live-watcher reload for everything else.
 
 ## Sources
