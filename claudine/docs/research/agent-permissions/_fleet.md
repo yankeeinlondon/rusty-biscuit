@@ -104,7 +104,7 @@ Use this document structure:
         - give a few practical examples of how default permissions might be set but then part of that policy is overwritten by a narrower scope (repo config overriding user config, or CLI switches overriding both)
 - `## Tools and Permissions`
     - List out the tools that {{state.name}} provides by default
-    - Describe out permissions map to tool calls
+    - Describe how our permissions map to tool calls
     - Capture the provider's native permission entities: tool, tool group, command,
       filesystem path, workspace boundary, MCP server, MCP tool/resource, subagent/agent,
       mode, approval category, sandbox, hook, extension, slash command, or other
@@ -185,7 +185,9 @@ Follow these steps exactly:
             - `equals` when the format of the CLI is `yolo=true`
             - `switch` when the format of the CLI is `--yolo` or `--something <param>`
             - `positional` (note: rare that this would be used) if the parameter is not named but positional
-        - `description` - a prose description of what this CLI parameter does
+        - `description` - a prose description of what this CLI parameter does;
+          when the param takes a value, include the value shape here (e.g.
+          "takes a comma-separated rule list")
         - `example` - an example of using this parameter
         - `example_description` - describe the example you've provided
         - Include adjacent security-control switches here too: tool include/exclude
@@ -280,6 +282,7 @@ Follow these steps exactly:
     ::end-block
     - `requires_claudine_update` - set to true/false based on whether you believe there will be required code changes to **Claudine** based on the changes discovered in your research. 
         - If you respond with `true` then you must also set the `reason` frontmatter property to describe why you think that
+
 ## Output
 
 ::file @prompts/make-it-markdown.md
