@@ -31,10 +31,10 @@ $schema:
     # step will derive an enum once the fleet shows the stable categories.
     env_vars: "{ name: string(required), effect: string(required) }[]"
 
-    # Config files that define permissions. Use `os: all` only when the user/repo
-    # paths are the same on macOS, Linux, and Windows; otherwise write one record
-    # per OS. Relative user paths are from $HOME; repo paths are from repo root.
-    config_files: "{ os: enum(macos,linux,windows,all; required), user: string(required), repo: string(required), notes: string }[]"
+    # Config files that define permissions. File paths must be recorded separately
+    # for macOS, Linux, and Windows. Relative user paths are from $HOME; repo paths
+    # are from repo root.
+    config_files: "{ os: enum(macos,linux,windows; required), user: string(required), repo: string(required), notes: string }[]"
 
     # Ordered highest-to-lowest policy source precedence. Keep `scope` free-form
     # until the fleet teaches us the stable vocabulary; later tighten it to enums.

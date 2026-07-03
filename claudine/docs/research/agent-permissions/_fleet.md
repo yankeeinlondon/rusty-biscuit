@@ -30,8 +30,11 @@ success:
               - error: "research file was not updated"
         - when: "frontmatter(file, 'last_updated') == ctx.today"
           action:
-              - info: "The research on **{{state.name}}** completed successfully: {{ link(file) }}"
-              - message: "🎉  the research on **{{state.name}}** completed successfully"
+              - info: "The **Agent Permissions** research on **{{state.name}}** completed successfully: {{ link(file) }}"
+              - message: "🎉  the **Agent Permissions** research on **{{state.name}}** completed successfully"
+failure:
+    message: "💥 the Agent Permissions research on **{{state.name}}** failed to complete!"
+    warn: "The Agent Permissions research on **{{state.name}}** failed to complete! (err: {{err.message}})"
 ---
 
 ## Skills
@@ -194,9 +197,9 @@ Follow these steps exactly:
           that absence in the body.
     - `env_vars` - one record per environment variable that influences permissions: `name` and its `effect`
     - `config_files` - an array of dictionaries describing where permission
-      configuration can live. Use one `os: all` record only when the paths are the
-      same on macOS, Linux, and Windows; otherwise write separate records:
-        - `os` - one of `macos`, `linux`, `windows`, or `all`
+      configuration can live. File paths must be recorded separately for macOS, Linux,
+      and Windows; do not use `os: all` for path fields.
+        - `os` - one of `macos`, `linux`, or `windows`
         - `user` - the relative (typically relative to user's home dir) filepath to the configuration file used for user scoped permissions
         - `repo` - the relative (from repo root) filepath to the configuration file used for repo scoped permissions
         - `notes` - OS-specific path or config-scope caveats
