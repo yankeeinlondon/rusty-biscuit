@@ -15,7 +15,7 @@ $schema:
     support: enum(first_class,partial,convention_only,none,unknown; required)
 
     # Skill file locations by OS/scope.
-    locations: "{ os: enum(macos,linux,windows,all; required), scope: enum(user,repo,system,extension,other; required), path: string(required), notes: string }[]"
+    locations: "{ os: enum(macos,linux,windows; required), scope: enum(user,repo,system,extension,other; required), path: string(required), notes: string }[]"
 
     # File format and required/recognized metadata.
     format: "{ file_names: string[], frontmatter: boolean, required_fields: string[], optional_fields: string[], body_format: enum(markdown,yaml,json,toml,text,other,unknown), notes: string }"
