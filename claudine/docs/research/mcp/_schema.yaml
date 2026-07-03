@@ -22,10 +22,10 @@ $schema:
     # MCP protocol and transport coverage. Use protocol version dates when docs
     # expose them (for example 2025-06-18 or 2025-11-25); otherwise describe the
     # observed feature generation in notes.
-    protocol: "{ versions: string[], transports: enum(stdio,streamable_http,http_sse,sse,custom,unknown)[], lifecycle: string, notes: string }"
+    protocol: "{ versions: string[], transports: enum(stdio,streamable_http,http_sse,sse,websocket,custom,unknown)[], lifecycle: string, notes: string }"
 
     # MCP config files by OS/scope.
-    config_files: "{ os: enum(macos,linux,windows; required), scope: enum(user,repo,system,managed,plugin,other; required), path: string(required), format: enum(json,jsonc,yaml,toml,ini,text,other), notes: string }[]"
+    config_files: "{ os: enum(macos,linux,windows; required), scope: enum(user,repo,local,system,managed,plugin,remote,other; required), path: string(required), format: enum(json,jsonc,yaml,toml,ini,text,other), notes: string }[]"
 
     # CLI and env surfaces for MCP config.
     cli_params: "{ flag: string(required), description: string(required), example: string }[]"

@@ -223,7 +223,6 @@ tool_surface:
 resource_surface:
   supported: true
   uri_schemes: []
-  templates: unknown
   subscriptions: false
   exposure_model: |
     Resources discovered via `resources/list` appear in `/mcp`. Users reference
