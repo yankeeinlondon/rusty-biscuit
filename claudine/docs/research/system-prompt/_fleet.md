@@ -135,8 +135,10 @@ frontmatter as follows:
   - `example`: a working-looking invocation.
   - `notes`: precedence, mode-specific behavior, limitations, or undocumented behavior.
 - `config_sources` - non-CLI files or config surfaces that affect the effective prompt.
-  Use one record per OS/scope/path/mode combination:
-  - `os`: `macos`, `linux`, `windows`, or `all`.
+  Use one record per OS/scope/path/mode combination. File paths must be recorded
+  separately for macOS, Linux, and Windows — never use a single record claiming to
+  cover all OSes (Windows paths always differ):
+  - `os`: `macos`, `linux`, or `windows`.
   - `scope`: `user`, `repo`, `system`, `agent`, `subagent`, `extension`, `other`.
   - `path`: template path, such as `AGENTS.md`, `.provider/config.json`, or
     `~/.provider/agents/*.yaml`.

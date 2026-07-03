@@ -1,558 +1,664 @@
 ---
 $schema: ./_schema.yaml
-created: 2026-07-02
-last_updated: 2026-07-02
-agent: open_code
-model: minimax/MiniMax-M3
-docs: https://github.com/earendil-works/pi/tree/main/packages/coding-agent
+created: 2026-07-03
+last_updated: 2026-07-03
+agent: codex
+model: default
+docs: https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/usage.md
 system_prompt_docs: https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/system-prompt.ts
 append_support: native
 replace_support: native
 cli_params:
-  - flag: --system-prompt <text-or-file>
+  - flag: "--system-prompt <text>"
     mode: replace
-    value_shape: "string | file path"
-    description: "Replaces the default system prompt for the current invocation. If the value resolves to an existing file path, the file contents are loaded; otherwise it is used as inline text."
-    example: "pi --system-prompt ./prompts/researcher.md -p \"Summarize the repo\""
-    notes: "Precedence: --system-prompt > .pi/SYSTEM.md (project, if trusted) > ~/.pi/agent/SYSTEM.md (global) > built-in default. When set, AGENTS.md / CLAUDE.md context files are still appended under <project_context> along with skills and date/cwd."
-  - flag: --append-system-prompt <text-or-file>
+    value_shape: "inline text or file path"
+    description: "Replaces Pi's built-in coding-agent system prompt for the invocation. If the value names an existing file, Pi reads that file and uses its contents."
+    example: "pi --system-prompt /tmp/claudine-pi-system.md -p \"Summarize this repo\""
+    notes: "Highest replacement precedence. It replaces only the base prompt; append prompts, AGENTS.md/CLAUDE.md context files, skills, current date, and current working directory are still layered after it."
+  - flag: "--append-system-prompt <text>"
     mode: append
-    value_shape: "string | file path (repeatable)"
-    description: "Appends text or file contents to the default system prompt. May be passed multiple times; each occurrence accumulates in array order."
-    example: "pi --append-system-prompt ./prompts/persona.md --append-system-prompt \"Always answer in English.\""
-    notes: "Repeats are appended in array order. Each value is independently resolved as a file when it exists on disk. Always appended AFTER the built-in default, so it cannot override the 'You are an expert coding assistant' identity (see issue #6127)."
-  - flag: --no-context-files / -nc
+    value_shape: "inline text or file path; repeatable"
+    description: "Appends text or file contents to the system prompt for the invocation."
+    example: "pi --append-system-prompt /tmp/claudine-pi-append.md --append-system-prompt \"Prefer concise answers.\" -p \"Review src\""
+    notes: "Repeatable since 0.67.2. Pi joins multiple resolved append values with blank-line separation before adding later context and skill layers."
+  - flag: "--no-context-files, -nc"
     mode: disable
-    value_shape: "boolean"
-    description: "Disables discovery and loading of AGENTS.md and CLAUDE.md context files for this invocation."
-    example: "pi -nc -p \"Quick question\""
-    notes: "Does not disable SYSTEM.md or APPEND_SYSTEM.md resolution; those are still loaded if --system-prompt / --append-system-prompt are unset."
-  - flag: --no-skills / -ns
+    value_shape: "boolean switch"
+    description: "Disables AGENTS.md and CLAUDE.md context-file discovery and loading."
+    example: "pi --no-context-files --append-system-prompt /tmp/append.md -p \"Answer without repo instructions\""
+    notes: "Does not disable SYSTEM.md or APPEND_SYSTEM.md. It only removes the context-file layer."
+  - flag: "--no-skills, -ns"
     mode: disable
-    value_shape: "boolean"
-    description: "Disables skill discovery and loading. The <available_skills> block is omitted from the system prompt."
-    example: "pi -ns -p \"Review this PR\""
-    notes: "Explicit --skill paths still load. Skills only render in the prompt when the read tool is active (see Quirks)."
-  - flag: --no-extensions / -ne
-    mode: disable
-    value_shape: "boolean"
-    description: "Disables extension auto-discovery. Explicit -e paths still load."
-    example: "pi -ne -e ./scratch.ts -p \"Test\""
-    notes: "Affects all extension surfaces including before_agent_start system-prompt overrides and getSystemPromptOptions. Useful for isolating whether an extension is rewriting the effective prompt."
-  - flag: --approve / -a
+    value_shape: "boolean switch"
+    description: "Disables automatic skill discovery and loading."
+    example: "pi --no-skills -p \"No skill metadata in prompt\""
+    notes: "Explicit --skill paths still load. Skills appear in the system prompt only when the read tool is active and the skill is not hidden with disable-model-invocation."
+  - flag: "--skill <path>"
     mode: modify
-    value_shape: "boolean"
-    description: "Trusts project-local files for this run. Required in non-interactive modes to load .pi/SYSTEM.md, .pi/APPEND_SYSTEM.md, and project .pi/AGENTS.md."
-    example: "pi -a -p \"Audit\""
-    notes: "Without this in -p / --mode json / --mode rpc runs, the defaultProjectTrust setting ('ask' | 'always' | 'never') controls whether project-local resources are loaded."
-  - flag: --no-approve / -na
+    value_shape: "file or directory path; repeatable"
+    description: "Adds skill files or directories, causing visible skill metadata to be listed in the prompt's available-skills block."
+    example: "pi --skill ~/.claude/skills/review/SKILL.md -p \"Use the review skill\""
+    notes: "Additive even when --no-skills is used. Full skill bodies are loaded on demand by the model via read or by /skill:name."
+  - flag: "--extension <path>, -e <path>"
     mode: modify
-    value_shape: "boolean"
-    description: "Ignores project-local files for this run. Suppresses .pi/SYSTEM.md, .pi/APPEND_SYSTEM.md, project skills, and project AGENTS.md even when trust is otherwise granted."
-    example: "pi -na -p \"Run from user config only\""
-    notes: "Mirrors the 'never' defaultProjectTrust behavior at the CLI layer."
+    value_shape: "TypeScript extension file or directory path; repeatable"
+    description: "Loads an extension that can mutate or inspect the prompt through before_agent_start and before_provider_request hooks."
+    example: "pi -e ./prompt-customizer.ts -p \"Run with extension prompt logic\""
+    notes: "Explicit CLI extensions still load when --no-extensions is set. Extensions execute with local user permissions."
+  - flag: "--no-extensions, -ne"
+    mode: disable
+    value_shape: "boolean switch"
+    description: "Disables extension discovery, while preserving explicit -e/--extension paths."
+    example: "pi --no-extensions --append-system-prompt /tmp/append.md -p \"Isolate prompt behavior\""
+    notes: "Useful when wrapper behavior must avoid user/global or project extension prompt rewrites."
+  - flag: "--approve, -a"
+    mode: modify
+    value_shape: "boolean switch"
+    description: "Trusts project-local resources for this run, including .pi/SYSTEM.md, .pi/APPEND_SYSTEM.md, project .pi/extensions, .pi/skills, and .agents/skills."
+    example: "pi --approve -p \"Use trusted project prompt files\""
+    notes: "Important for non-interactive wrapper runs because print, JSON, and RPC modes do not prompt for project trust."
+  - flag: "--no-approve, -na"
+    mode: disable
+    value_shape: "boolean switch"
+    description: "Ignores project-local trust-gated resources for this run."
+    example: "pi --no-approve --append-system-prompt /tmp/append.md -p \"Ignore project .pi resources\""
+    notes: "Does not disable AGENTS.md/CLAUDE.md context files; use --no-context-files for that."
+  - flag: "--tools <tools>, -t <tools>"
+    mode: modify
+    value_shape: "comma-separated tool names"
+    description: "Restricts the active tool set; the active tools control tool snippets, tool-specific prompt guidelines, and whether skills are prompt-visible."
+    example: "pi --tools read,grep,find,ls -p \"Read-only review\""
+    notes: "If read is absent, Pi omits the skills layer because the model cannot load skill files."
+  - flag: "--exclude-tools <tools>, -xt <tools>"
+    mode: modify
+    value_shape: "comma-separated tool names"
+    description: "Disables selected tools; this can remove tool prompt snippets, related guidelines, and skill visibility."
+    example: "pi --exclude-tools bash -p \"No shell access\""
+    notes: "Applies to built-in, extension, and custom tools."
+  - flag: "--no-tools, -nt"
+    mode: disable
+    value_shape: "boolean switch"
+    description: "Disables all tools by default, affecting the built-in prompt's available-tools and skill layers."
+    example: "pi --no-tools -p \"Answer without tool use\""
+    notes: "Extensions can still affect prompt text unless extension loading is disabled."
+  - flag: "--no-builtin-tools, -nbt"
+    mode: disable
+    value_shape: "boolean switch"
+    description: "Disables built-in tools while preserving extension/custom tools, changing the prompt's tool list and guidelines."
+    example: "pi --no-builtin-tools -e ./tools.ts -p \"Use only extension tools\""
+    notes: "Custom tools can add promptSnippet and promptGuidelines that feed the default system prompt."
 config_sources:
   - os: macos
     scope: user
     path: "~/.pi/agent/SYSTEM.md"
     mode: replace
     format: markdown
-    notes: "Global replacement file on macOS. Loaded only when no --system-prompt CLI flag is given and no project .pi/SYSTEM.md exists."
+    notes: "Global base-prompt replacement. Used when --system-prompt is absent and no trusted project .pi/SYSTEM.md exists."
   - os: linux
     scope: user
     path: "~/.pi/agent/SYSTEM.md"
     mode: replace
     format: markdown
-    notes: "Global replacement file on Linux. Loaded only when no --system-prompt CLI flag is given and no project .pi/SYSTEM.md exists."
+    notes: "Global base-prompt replacement. Used when --system-prompt is absent and no trusted project .pi/SYSTEM.md exists."
   - os: windows
     scope: user
-    path: "~/.pi/agent/SYSTEM.md"
+    path: "%USERPROFILE%\\.pi\\agent\\SYSTEM.md"
     mode: replace
     format: markdown
-    notes: "Global replacement file on Windows. Loaded only when no --system-prompt CLI flag is given and no project .pi/SYSTEM.md exists."
+    notes: "Global base-prompt replacement. Used when --system-prompt is absent and no trusted project .pi/SYSTEM.md exists."
   - os: macos
     scope: repo
-    path: "./.pi/SYSTEM.md"
+    path: ".pi/SYSTEM.md"
     mode: replace
     format: markdown
-    notes: "Project replacement file (macOS). Loaded only when the project is trusted (--approve, saved trust, or defaultProjectTrust=always). Project path takes precedence over global."
+    notes: "Trusted project base-prompt replacement; takes precedence over the global file."
   - os: linux
     scope: repo
-    path: "./.pi/SYSTEM.md"
+    path: ".pi/SYSTEM.md"
     mode: replace
     format: markdown
-    notes: "Project replacement file (Linux). Loaded only when the project is trusted. Project path takes precedence over global."
+    notes: "Trusted project base-prompt replacement; takes precedence over the global file."
   - os: windows
     scope: repo
-    path: "./.pi/SYSTEM.md"
+    path: ".pi\\SYSTEM.md"
     mode: replace
     format: markdown
-    notes: "Project replacement file (Windows). Loaded only when the project is trusted. Project path takes precedence over global."
+    notes: "Trusted project base-prompt replacement; takes precedence over the global file."
   - os: macos
     scope: user
     path: "~/.pi/agent/APPEND_SYSTEM.md"
     mode: append
     format: markdown
-    notes: "Global append file on macOS. Used only when --append-system-prompt is unset and no project .pi/APPEND_SYSTEM.md exists."
+    notes: "Global append file. Used when --append-system-prompt is absent and no trusted project .pi/APPEND_SYSTEM.md exists."
   - os: linux
     scope: user
     path: "~/.pi/agent/APPEND_SYSTEM.md"
     mode: append
     format: markdown
-    notes: "Global append file on Linux. Used only when --append-system-prompt is unset and no project .pi/APPEND_SYSTEM.md exists."
+    notes: "Global append file. Used when --append-system-prompt is absent and no trusted project .pi/APPEND_SYSTEM.md exists."
   - os: windows
     scope: user
-    path: "~/.pi/agent/APPEND_SYSTEM.md"
+    path: "%USERPROFILE%\\.pi\\agent\\APPEND_SYSTEM.md"
     mode: append
     format: markdown
-    notes: "Global append file on Windows. Used only when --append-system-prompt is unset and no project .pi/APPEND_SYSTEM.md exists."
+    notes: "Global append file. Used when --append-system-prompt is absent and no trusted project .pi/APPEND_SYSTEM.md exists."
   - os: macos
     scope: repo
-    path: "./.pi/APPEND_SYSTEM.md"
+    path: ".pi/APPEND_SYSTEM.md"
     mode: append
     format: markdown
-    notes: "Project append file (macOS). Trusted projects only. Project path takes precedence over global."
+    notes: "Trusted project append file; takes precedence over the global append file when no append CLI flag is present."
   - os: linux
     scope: repo
-    path: "./.pi/APPEND_SYSTEM.md"
+    path: ".pi/APPEND_SYSTEM.md"
     mode: append
     format: markdown
-    notes: "Project append file (Linux). Trusted projects only. Project path takes precedence over global."
+    notes: "Trusted project append file; takes precedence over the global append file when no append CLI flag is present."
   - os: windows
     scope: repo
-    path: "./.pi/APPEND_SYSTEM.md"
+    path: ".pi\\APPEND_SYSTEM.md"
     mode: append
     format: markdown
-    notes: "Project append file (Windows). Trusted projects only. Project path takes precedence over global."
+    notes: "Trusted project append file; takes precedence over the global append file when no append CLI flag is present."
   - os: macos
     scope: user
-    path: "~/.pi/agent/AGENTS.md"
+    path: "~/.pi/agent/AGENTS.md or ~/.pi/agent/CLAUDE.md"
     mode: append
     format: markdown
-    notes: "First context file loaded on macOS. One file is chosen per directory by case-insensitive filename match against AGENTS.md / AGENTS.MD / CLAUDE.md / CLAUDE.MD."
+    notes: "Global context file. Loaded into the project_context layer unless --no-context-files is set."
   - os: linux
     scope: user
-    path: "~/.pi/agent/AGENTS.md"
+    path: "~/.pi/agent/AGENTS.md or ~/.pi/agent/CLAUDE.md"
     mode: append
     format: markdown
-    notes: "First context file loaded on Linux. One file is chosen per directory by case-insensitive filename match against AGENTS.md / AGENTS.MD / CLAUDE.md / CLAUDE.MD."
+    notes: "Global context file. Loaded into the project_context layer unless --no-context-files is set."
   - os: windows
     scope: user
-    path: "~/.pi/agent/AGENTS.md"
+    path: "%USERPROFILE%\\.pi\\agent\\AGENTS.md or %USERPROFILE%\\.pi\\agent\\CLAUDE.md"
     mode: append
     format: markdown
-    notes: "First context file loaded on Windows. One file is chosen per directory by case-insensitive filename match against AGENTS.md / AGENTS.MD / CLAUDE.md / CLAUDE.MD."
+    notes: "Global context file. Loaded into the project_context layer unless --no-context-files is set."
   - os: macos
     scope: repo
-    path: "./AGENTS.md (cwd and ancestor directories up to filesystem root)"
+    path: "AGENTS.md, AGENTS.MD, CLAUDE.md, or CLAUDE.MD in cwd and ancestors"
     mode: append
     format: markdown
-    notes: "Project context files on macOS. Walked parent-first from cwd to filesystem root, then concatenated into <project_context> with each file as <project_instructions path=\"...\">. Disabled by --no-context-files / -nc."
+    notes: "One matching context file per directory is loaded, parent-first, into XML project_instructions blocks. Context files are not project-trust gated."
   - os: linux
     scope: repo
-    path: "./AGENTS.md (cwd and ancestor directories up to filesystem root)"
+    path: "AGENTS.md, AGENTS.MD, CLAUDE.md, or CLAUDE.MD in cwd and ancestors"
     mode: append
     format: markdown
-    notes: "Project context files on Linux. Walked parent-first from cwd to filesystem root, then concatenated into <project_context> with each file as <project_instructions path=\"...\">. Disabled by --no-context-files / -nc."
+    notes: "One matching context file per directory is loaded, parent-first, into XML project_instructions blocks. Context files are not project-trust gated."
   - os: windows
     scope: repo
-    path: ".\\AGENTS.md (cwd and ancestor directories up to filesystem root)"
+    path: "AGENTS.md, AGENTS.MD, CLAUDE.md, or CLAUDE.MD in cwd and ancestors"
     mode: append
     format: markdown
-    notes: "Project context files on Windows. Walked parent-first from cwd to filesystem root, then concatenated into <project_context> with each file as <project_instructions path=\"...\">. Disabled by --no-context-files / -nc."
+    notes: "One matching context file per directory is loaded, parent-first, into XML project_instructions blocks. Context files are not project-trust gated."
   - os: macos
     scope: user
-    path: "~/.pi/agent/skills/ and ~/.agents/skills/"
-    mode: append
-    format: markdown
-    notes: "Skills on macOS are summarized into <available_skills> XML blocks per the Agent Skills standard; only metadata (name, description, location) is in the prompt unless the model uses /skill:name or reads SKILL.md on demand."
+    path: "~/.pi/agent/settings.json"
+    mode: modify
+    format: json
+    notes: "Global settings can set defaultProjectTrust, extension paths, skill paths, prompts, themes, tool/user behavior, and related defaults. It does not directly contain a system prompt string."
   - os: linux
     scope: user
-    path: "~/.pi/agent/skills/ and ~/.agents/skills/"
-    mode: append
-    format: markdown
-    notes: "Skills on Linux are summarized into <available_skills> XML blocks per the Agent Skills standard; only metadata (name, description, location) is in the prompt unless the model uses /skill:name or reads SKILL.md on demand."
+    path: "~/.pi/agent/settings.json"
+    mode: modify
+    format: json
+    notes: "Global settings can set defaultProjectTrust, extension paths, skill paths, prompts, themes, tool/user behavior, and related defaults. It does not directly contain a system prompt string."
   - os: windows
     scope: user
-    path: "~/.pi/agent/skills/ and ~/.agents/skills/"
-    mode: append
-    format: markdown
-    notes: "Skills on Windows are summarized into <available_skills> XML blocks per the Agent Skills standard; only metadata (name, description, location) is in the prompt unless the model uses /skill:name or reads SKILL.md on demand."
+    path: "%USERPROFILE%\\.pi\\agent\\settings.json"
+    mode: modify
+    format: json
+    notes: "Global settings can set defaultProjectTrust, extension paths, skill paths, prompts, themes, tool/user behavior, and related defaults. It does not directly contain a system prompt string."
   - os: macos
     scope: repo
-    path: "./.pi/skills/ and ./.agents/skills/ (cwd up to git root)"
-    mode: append
-    format: markdown
-    notes: "Project skills on macOS (trusted projects only). .agents/skills/ in ancestor directories also picked up. Same <available_skills> XML emission."
+    path: ".pi/settings.json"
+    mode: modify
+    format: json
+    notes: "Project settings are trust-gated and override/merge with global settings. They can enable project extensions and skills that affect the prompt."
   - os: linux
     scope: repo
-    path: "./.pi/skills/ and ./.agents/skills/ (cwd up to git root)"
-    mode: append
-    format: markdown
-    notes: "Project skills on Linux (trusted projects only). .agents/skills/ in ancestor directories also picked up. Same <available_skills> XML emission."
+    path: ".pi/settings.json"
+    mode: modify
+    format: json
+    notes: "Project settings are trust-gated and override/merge with global settings. They can enable project extensions and skills that affect the prompt."
   - os: windows
     scope: repo
-    path: ".\\.pi\\skills\\ and .\\.agents\\skills\\ (cwd up to git root)"
-    mode: append
-    format: markdown
-    notes: "Project skills on Windows (trusted projects only). .agents/skills/ in ancestor directories also picked up. Same <available_skills> XML emission."
+    path: ".pi\\settings.json"
+    mode: modify
+    format: json
+    notes: "Project settings are trust-gated and override/merge with global settings. They can enable project extensions and skills that affect the prompt."
   - os: macos
     scope: extension
-    path: "~/.pi/agent/extensions/*.ts and ./.pi/extensions/*.ts"
+    path: "~/.pi/agent/extensions/*.ts and ~/.pi/agent/extensions/*/index.ts"
     mode: modify
     format: other
-    notes: "TypeScript extension modules on macOS. Use pi.on('before_agent_start', ...) to rewrite event.systemPrompt or append; later handlers see earlier mutations. Use ctx.getSystemPrompt() / ctx.getSystemPromptOptions() to inspect."
+    notes: "Global TypeScript extensions can return a replacement systemPrompt from before_agent_start or rewrite the serialized provider payload in before_provider_request."
   - os: linux
     scope: extension
-    path: "~/.pi/agent/extensions/*.ts and ./.pi/extensions/*.ts"
+    path: "~/.pi/agent/extensions/*.ts and ~/.pi/agent/extensions/*/index.ts"
     mode: modify
     format: other
-    notes: "TypeScript extension modules on Linux. Use pi.on('before_agent_start', ...) to rewrite event.systemPrompt or append; later handlers see earlier mutations. Use ctx.getSystemPrompt() / ctx.getSystemPromptOptions() to inspect."
+    notes: "Global TypeScript extensions can return a replacement systemPrompt from before_agent_start or rewrite the serialized provider payload in before_provider_request."
   - os: windows
     scope: extension
-    path: "%USERPROFILE%\\.pi\\agent\\extensions\\*.ts and .\\.pi\\extensions\\*.ts"
+    path: "%USERPROFILE%\\.pi\\agent\\extensions\\*.ts and %USERPROFILE%\\.pi\\agent\\extensions\\*\\index.ts"
     mode: modify
     format: other
-    notes: "TypeScript extension modules on Windows. Use pi.on('before_agent_start', ...) to rewrite event.systemPrompt or append; later handlers see earlier mutations. Use ctx.getSystemPrompt() / ctx.getSystemPromptOptions() to inspect."
+    notes: "Global TypeScript extensions can return a replacement systemPrompt from before_agent_start or rewrite the serialized provider payload in before_provider_request."
+  - os: macos
+    scope: extension
+    path: ".pi/extensions/*.ts and .pi/extensions/*/index.ts"
+    mode: modify
+    format: other
+    notes: "Project TypeScript extensions are trust-gated and can mutate or inspect prompts."
+  - os: linux
+    scope: extension
+    path: ".pi/extensions/*.ts and .pi/extensions/*/index.ts"
+    mode: modify
+    format: other
+    notes: "Project TypeScript extensions are trust-gated and can mutate or inspect prompts."
+  - os: windows
+    scope: extension
+    path: ".pi\\extensions\\*.ts and .pi\\extensions\\*\\index.ts"
+    mode: modify
+    format: other
+    notes: "Project TypeScript extensions are trust-gated and can mutate or inspect prompts."
+  - os: macos
+    scope: user
+    path: "~/.pi/agent/skills/, ~/.agents/skills/, and configured skill paths"
+    mode: append
+    format: markdown
+    notes: "Visible skill metadata is rendered into an XML available_skills block when read is active."
+  - os: linux
+    scope: user
+    path: "~/.pi/agent/skills/, ~/.agents/skills/, and configured skill paths"
+    mode: append
+    format: markdown
+    notes: "Visible skill metadata is rendered into an XML available_skills block when read is active."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.pi\\agent\\skills\\, %USERPROFILE%\\.agents\\skills\\, and configured skill paths"
+    mode: append
+    format: markdown
+    notes: "Visible skill metadata is rendered into an XML available_skills block when read is active."
+  - os: macos
+    scope: repo
+    path: ".pi/skills/ and .agents/skills/ in cwd and ancestors"
+    mode: append
+    format: markdown
+    notes: "Project skills are trust-gated and affect the prompt through skill metadata."
+  - os: linux
+    scope: repo
+    path: ".pi/skills/ and .agents/skills/ in cwd and ancestors"
+    mode: append
+    format: markdown
+    notes: "Project skills are trust-gated and affect the prompt through skill metadata."
+  - os: windows
+    scope: repo
+    path: ".pi\\skills\\ and .agents\\skills\\ in cwd and ancestors"
+    mode: append
+    format: markdown
+    notes: "Project skills are trust-gated and affect the prompt through skill metadata."
+  - os: macos
+    scope: agent
+    path: "~/.pi/agent/agents/*.md"
+    mode: append
+    format: markdown
+    notes: "Used by the example subagent extension, not Pi core. Agent file bodies are appended to child Pi processes with --append-system-prompt."
+  - os: linux
+    scope: agent
+    path: "~/.pi/agent/agents/*.md"
+    mode: append
+    format: markdown
+    notes: "Used by the example subagent extension, not Pi core. Agent file bodies are appended to child Pi processes with --append-system-prompt."
+  - os: windows
+    scope: agent
+    path: "%USERPROFILE%\\.pi\\agent\\agents\\*.md"
+    mode: append
+    format: markdown
+    notes: "Used by the example subagent extension, not Pi core. Agent file bodies are appended to child Pi processes with --append-system-prompt."
 env_vars:
   - name: PI_CODING_AGENT_DIR
-    effect: Overrides the config root (default ~/.pi/agent). Changes where global SYSTEM.md, APPEND_SYSTEM.md, AGENTS.md, skills, extensions, and themes are discovered.
+    effect: "Overrides the user agent config directory. This changes where global SYSTEM.md, APPEND_SYSTEM.md, AGENTS.md/CLAUDE.md, settings, extensions, skills, and sessions are discovered."
     mode: other
-  - name: PI_PACKAGE_DIR
-    effect: Overrides the package directory. Useful for Nix/Guix where store paths tokenize poorly.
-    mode: other
-  - name: PI_OFFLINE
-    effect: Disables startup network operations (update check, package update check, install telemetry). Indirectly reduces noise during wrapper runs.
-    mode: disable
-  - name: PI_SKIP_VERSION_CHECK
-    effect: Skips the pi.dev version check at startup. Faster, more deterministic startup for CI / wrappers.
-    mode: disable
-  - name: PI_TELEMETRY
-    effect: Overrides install/update telemetry flag. Accepts 1/0/true/false/yes/no.
+  - name: PI_CODING_AGENT_SESSION_DIR
+    effect: "Overrides session storage and lookup directory. It does not directly change prompt text but can affect resumed sessions."
     mode: other
   - name: PI_CODING_AGENT
-    effect: Set automatically by the CLI ('true') at process start; signals to extensions that pi-coding-agent is the host.
+    effect: "Set to true by Pi at CLI/RPC startup so extensions can detect the host."
+    mode: other
+  - name: PI_PACKAGE_DIR
+    effect: "Overrides the package directory used for resolving Pi docs/examples embedded in the built-in prompt."
+    mode: modify
+  - name: PI_OFFLINE
+    effect: "Disables startup network operations. Useful for deterministic wrapper runs; no direct system-prompt effect."
+    mode: disable
+  - name: PI_SKIP_VERSION_CHECK
+    effect: "Disables startup version checks. No direct system-prompt effect."
+    mode: disable
+  - name: PI_TELEMETRY
+    effect: "Controls install/update telemetry and some attribution behavior. No direct system-prompt effect."
     mode: other
   - name: PI_CACHE_RETENTION
-    effect: When 'long', requests extended prompt-cache windows (Anthropic 1h, OpenAI 24h). Affects provider cache reuse of the system prompt across sessions.
+    effect: "When set to long, requests longer provider prompt-cache retention on supported transports; affects provider caching of the system prompt, not prompt construction."
     mode: other
-  - name: PI_EXPERIMENTAL
-    effect: Enables experimental first-run setup (theme picker, opt-in analytics). Not a prompt-control surface.
-    mode: other
-  - name: VISUAL / EDITOR
-    effect: External editor fallback for Ctrl+G when externalEditor is unset. Does not affect the system prompt.
+  - name: HOME
+    effect: "Used by Node os.homedir() and Pi package-manager helpers; in wrappers, a shadow HOME or PI_CODING_AGENT_DIR can isolate global prompt/config discovery."
     mode: other
 prompt_layers:
-  - source: built-in default system prompt
+  - source: "built-in base system prompt"
     mode: replace
     scope: ["builtin"]
-    order_notes: "Lowest layer; replaced when --system-prompt is set or SYSTEM.md is discovered. Anchors the 'You are an expert coding assistant operating inside pi' identity."
-    notes: "Includes role description, dynamic tool list, dynamic guidelines based on active tools, and Pi documentation references. Tool list is filtered to entries with toolSnippets."
-  - source: --system-prompt <text|file> (CLI override)
+    order_notes: "Lowest base layer when no replacement source is present."
+    notes: "Includes Pi coding-agent identity, active tool snippets, default and tool-specific guidelines, and absolute paths to Pi documentation/examples."
+  - source: "--system-prompt value or file"
     mode: replace
     scope: ["session"]
-    order_notes: "Highest replace-precedence source. Wins over both SYSTEM.md files."
-    notes: "File paths auto-resolved when they exist on disk. Does not disable later layers (project_context, skills, date, cwd)."
-  - source: ./.pi/SYSTEM.md (project)
+    order_notes: "Overrides .pi/SYSTEM.md, ~/.pi/agent/SYSTEM.md, and the built-in base prompt."
+    notes: "Auto-resolves an existing path to file contents; otherwise treats the value as inline text."
+  - source: ".pi/SYSTEM.md"
     mode: replace
     scope: ["repo"]
-    order_notes: "Loaded only when the project is trusted. Wins over the global SYSTEM.md."
-    notes: "Same effect as --system-prompt: replaces the built-in identity paragraph. Context files and skills still appended."
-  - source: ~/.pi/agent/SYSTEM.md (global)
+    order_notes: "Used when the project is trusted and --system-prompt is absent; takes precedence over the global SYSTEM.md."
+    notes: "Trust-gated by project trust, including --approve/--no-approve in non-interactive modes."
+  - source: "~/.pi/agent/SYSTEM.md"
     mode: replace
     scope: ["user"]
-    order_notes: "Used only when --system-prompt is unset and no project SYSTEM.md is discovered."
-    notes: "Replaces the built-in identity paragraph for every session that does not override it."
-  - source: --append-system-prompt (CLI, repeatable)
+    order_notes: "Used when no CLI or trusted project replacement exists."
+    notes: "File content becomes customPrompt, so later layers still apply."
+  - source: "--append-system-prompt values"
     mode: append
     scope: ["session"]
-    order_notes: "Appended in argument order after the default (or after --system-prompt / SYSTEM.md) and before project_context and skills."
-    notes: "Always sits AFTER the 'You are a coding assistant' identity, so identity-level changes are not honored (issue #6127). Use --system-prompt or an extension for persona work."
-  - source: ./.pi/APPEND_SYSTEM.md (project)
+    order_notes: "Added immediately after the selected base prompt and before context files, skills, date, and cwd."
+    notes: "Repeatable; values are resolved as files when paths exist and joined with blank-line separation."
+  - source: ".pi/APPEND_SYSTEM.md"
     mode: append
     scope: ["repo"]
-    order_notes: "Trusted projects only. Wins over the global APPEND_SYSTEM.md."
-    notes: "Identical layering to --append-system-prompt; useful as a checked-in repo-level contract."
-  - source: ~/.pi/agent/APPEND_SYSTEM.md (global)
+    order_notes: "Used only when --append-system-prompt is absent and the project is trusted; takes precedence over global APPEND_SYSTEM.md."
+    notes: "Project append prompt is not combined with the global append file by the built-in loader."
+  - source: "~/.pi/agent/APPEND_SYSTEM.md"
     mode: append
     scope: ["user"]
-    order_notes: "Used only when --append-system-prompt is unset and no project APPEND_SYSTEM.md is discovered."
-    notes: "Machine-wide supplement to the default prompt."
-  - source: "<project_context> (AGENTS.md / CLAUDE.md chain)"
+    order_notes: "Used only when no append CLI flag and no trusted project append file exist."
+    notes: "One global append file is loaded."
+  - source: "AGENTS.md / CLAUDE.md context files"
     mode: append
     scope: ["user", "repo"]
-    order_notes: "Loaded after the prompt body and append sections. Files are emitted as <project_instructions path=\"...\">...</project_instructions> under a single <project_context> wrapper."
-    notes: "Global AGENTS.md first, then ancestor directories up to filesystem root, then cwd last. Disabled by --no-context-files / -nc."
-  - source: "<available_skills> (skill metadata)"
+    order_notes: "Added after append-system-prompt text in a project_context XML block. Global file is first, then ancestor files parent-first down to cwd."
+    notes: "Disabled by --no-context-files. These files are not project-trust gated."
+  - source: "skills"
     mode: append
-    scope: ["user", "repo", "extension"]
-    order_notes: "Appended after <project_context>, before date/cwd. Only emitted when the read tool is active."
-    notes: "Skill bodies are NOT in the prompt; only name, description, and location. The model uses the read tool or /skill:name to load SKILL.md on demand (progressive disclosure)."
-  - source: Current date and working directory footer
+    scope: ["user", "repo"]
+    order_notes: "Added after context files in an available_skills XML block."
+    notes: "Only metadata is included. Hidden skills and all skills when read is unavailable are omitted."
+  - source: "current date and current working directory"
     mode: append
     scope: ["session"]
-    order_notes: "Last block of every prompt."
-    notes: "Two plain lines ('Current date: YYYY-MM-DD' and 'Current working directory: ...'). Injects machine-specific data, so prompt-cache reuse across machines requires care."
-  - source: Extension before_agent_start systemPrompt rewrite
+    order_notes: "Always appended last by buildSystemPrompt."
+    notes: "Date is formatted YYYY-MM-DD and cwd normalizes Windows backslashes to forward slashes."
+  - source: "before_agent_start extension hook"
     mode: modify
-    scope: ["session", "extension"]
-    order_notes: "Runs after the prompt body is assembled, before agent_start. Extensions chain in load order; later handlers see earlier rewrites."
-    notes: "Mutations only affect the current turn's prompt. Also available: pi.sendMessage({ customType, content }) to inject a persistent user-side context message."
+    scope: ["extension"]
+    order_notes: "Runs after the base prompt is built and before the agent loop. Handlers run in extension load order and see prior prompt mutations."
+    notes: "Returning systemPrompt replaces the whole current prompt for that turn."
+  - source: "before_provider_request extension hook"
+    mode: modify
+    scope: ["extension"]
+    order_notes: "Runs after provider payload serialization, just before the request."
+    notes: "Can rewrite or remove provider-level system instructions. ctx.getSystemPrompt does not include these payload-level rewrites."
 agent_prompting:
   supported: true
-  definition_surface: "TypeScript extension modules; can also use Skill (Markdown SKILL.md with frontmatter) registered as /skill:<name>"
-  inheritance: "Extensions do not nest. There is no built-in subagent primitive; Pi explicitly omits sub-agents per its philosophy. Sub-agents can be built as extensions (see examples/extensions/subagent/) or by spawning external pi instances via tmux."
-  isolation: "Extension handlers are session-scoped, not agent-scoped. A before_agent_start rewrite only mutates that turn's prompt. No recursive child agent execution exists in the core."
-  limitations: "No built-in agent spec format; agents are ad-hoc extensions or external pi processes. before_agent_start changes do not persist across compaction unless re-injected. Prompt layering across multiple extensions is order-dependent and not documented as deterministic."
+  definition_surface: "No built-in core subagent API; the official example extension defines Markdown agent files under ~/.pi/agent/agents/*.md and .pi/agents/*.md."
+  inheritance: "The example subagent extension launches separate pi subprocesses and appends each agent file body with --append-system-prompt, so child agents keep Pi's base prompt unless the extension is changed to use --system-prompt."
+  isolation: "Each example subagent invocation is a separate Pi process with isolated context. Final output, usage, and diagnostics are returned through the parent tool result."
+  limitations: "This is extension-provided behavior, not a first-class Pi core agent spec. The sample agent prompt appends to the child base prompt rather than replacing it; project-local agents require explicit agentScope and trust."
 claudine_delivery:
   append_strategy: file_flag
   replace_strategy: file_flag
   temp_file_required: true
-  argv_limit: "Node/Bun argv limits (~1 MB on Linux, 256 KB on Windows by default, larger on macOS) bound inline --append-system-prompt / --system-prompt text. Long prompts should be written to a temp file and passed as the flag value; pi auto-detects file paths and reads them."
-  notes: "Both --system-prompt and --append-system-prompt accept either inline text or an existing file path (resolvePromptInput checks existsSync first). Use a temp file under ~/.claudine/tmp/ (or <repo>/.claudine/tmp/) so user config and global SYSTEM.md / APPEND_SYSTEM.md are never mutated. Set PI_CODING_AGENT_DIR to a shadow config root if you also want to suppress global AGENTS.md / skills / extensions — though that is usually unnecessary since file-flag delivery is already non-mutating. To bypass project trust gating in non-interactive modes, pass --approve or set defaultProjectTrust=always in the user's settings.json. The 'replace' path cannot add Pi's default tool guidance automatically; structure the replacement prompt accordingly (see Format Recommendations)."
+  argv_limit: "Use temporary files for wrapper-generated prompts. Inline text is supported but risks shell/argv length limits and quoting issues."
+  notes: "For append, pass --append-system-prompt <tempfile>. For replace, pass --system-prompt <tempfile>. Add --no-extensions when user/global extension prompt rewrites would violate wrapper isolation. Add --no-context-files only when Claudine explicitly needs to suppress AGENTS.md/CLAUDE.md. Use PI_CODING_AGENT_DIR or a shadow HOME only when isolating global config is required; the CLI flags avoid permanent mutation."
 format_recommendations:
-  append_format: markdown
+  append_format: xml_wrapped_markdown
   replace_format: markdown
-  rationale: "Both SYSTEM.md and APPEND_SYSTEM.md are documented as plain Markdown and Pi's default prompt is Markdown. Skills and context files are wrapped in XML automatically by the framework (<project_context>, <project_instructions>, <available_skills>) per the Agent Skills standard, so wrapping hand-authored Markdown in additional XML tags adds tokens without documented benefit. For replacement, pure Markdown is sufficient unless the wrapper wants to mirror the framework's XML structure for its own rules/context/constraints sections."
+  rationale: "Pi accepts arbitrary text and its user-facing prompt files are Markdown, so replacement should be a complete Markdown system prompt. For append, plain Markdown works, but XML-wrapped Markdown is the safer wrapper format because Pi itself now uses XML boundaries for project context and skills; a Claudine block such as <claudine_append_system_prompt>...</claudine_append_system_prompt> creates an explicit boundary without needing JSON/YAML."
 recent_changes:
   - date: "2026-06-30"
     version: "0.80.3"
-    change: "Fixed extension tool changes to apply before the next provider request in the same agent run without dropping before_agent_start system-prompt overrides (#6162)."
-    impact: "Extensions can mutate the active tool set without losing per-turn before_agent_start system prompt rewrites — important when an extension swaps tools mid-session and still wants a custom prompt."
-  - date: "2026-06-08"
-    version: "0.79.0"
-    change: "Project trust for local inputs. --approve / --no-approve gates project-local SYSTEM.md, APPEND_SYSTEM.md, AGENTS.md, skills, and packages in non-interactive modes."
-    impact: "Wrappers that rely on .pi/SYSTEM.md or project AGENTS.md must either pass --approve, pre-populate ~/.pi/agent/trust.json, or set defaultProjectTrust=always in the user config."
-  - date: "2026-06-04"
-    version: "0.78.1"
-    change: "Added ctx.getSystemPromptOptions() and ctx.mode for extensions; richer system-prompt inspection and mode-aware behaviors."
-    impact: "Extensions can now read the structured system-prompt inputs (customPrompt, selectedTools, promptGuidelines, appendSystemPrompt, contextFiles, skills) instead of just the rendered string, enabling smarter system-prompt surgery."
-  - date: "2026-06-27"
-    version: "0.80.x"
-    change: "Closed issue #6127 confirming --append-system-prompt cannot override the default coding-agent identity; --system-prompt is required for a custom persona."
-    impact: "Documented as a deliberate limitation. Wrappers that need a non-coding persona must use --system-prompt (replacement) plus an extension that re-supplies tool guidance, OR a before_agent_start rewrite."
+    change: "Fixed extension tool changes so they apply before the next provider request without dropping before_agent_start system-prompt overrides."
+    impact: "Prompt-mutating extensions should be more reliable when tools change during a run."
+  - date: "2026-05-22"
+    version: "0.74.0"
+    change: "Added ctx.getSystemPromptOptions() for extension commands to inspect current base prompt inputs."
+    impact: "Extensions can inspect structured prompt inputs outside before_agent_start."
+  - date: "2026-05-13"
+    version: "0.71.0"
+    change: "Changed system prompt and context file boundaries to explicit XML tags instead of Markdown headings."
+    impact: "XML-wrapped appended sections align with Pi's own prompt-boundary style."
+  - date: "2026-04-20"
+    version: "0.68.0"
+    change: "Added systemPromptOptions to before_agent_start extension events."
+    impact: "Extensions can inspect custom prompt, active tools, prompt guidelines, append prompt text, cwd, loaded context files, and loaded skills without re-discovery."
+  - date: "2026-04-14"
+    version: "0.67.2"
+    change: "Added support for multiple --append-system-prompt flags."
+    impact: "Wrappers can pass multiple append files or strings; Pi joins them with blank-line separation."
 quirks:
-  - "resolvePromptInput checks existsSync before treating the value as text. So --append-system-prompt / --system-prompt doubles as either an inline-text flag or a file-flag — no separate --append-system-prompt-file / --system-prompt-file is provided."
-  - "AGENTS.md and CLAUDE.md are equivalent (case-insensitive); the loader picks the first match per directory in the order AGENTS.md / AGENTS.MD / CLAUDE.md / CLAUDE.MD."
-  - "Context file walking goes global -> ancestors (parent-first) -> cwd last, so the most specific instructions appear last and have natural priority by ordering."
-  - "Skills only appear in the system prompt if the `read` tool is active. --no-tools or a --tools allowlist that excludes read will silently drop <available_skills>."
-  - "Skills with disable-model-invocation: true are excluded from the prompt (visible only via /skill:name); they still exist on disk."
-  - "Project-local resources (.pi/SYSTEM.md, .pi/APPEND_SYSTEM.md, .pi/skills, .pi/AGENTS.md, .pi/extensions) require trust. In interactive mode pi prompts; in -p / --mode json / --mode rpc the defaultProjectTrust setting decides unless --approve / --no-approve is passed."
-  - "Hostname / working-directory / current-date are injected last. These break prompt-cache reuse across machines; use PI_CACHE_RETENTION=long only when the same prompt must be reused across sessions."
-  - "Compaction summarization uses its own internal system prompt ('Use neutral AI assistant wording for non-coding agents', per 0.79.0 #5401), separate from the user's prompt — not directly user-overridable without an extension."
-  - "The default system prompt references pi's own documentation paths (README, docs/, examples/) so the model can self-serve pi-internals questions; this content cannot be redacted via --append / --system-prompt without a replacement."
-  - "--append-system-prompt is repeatable; values accumulate in array order. Useful for layering persona + per-task guardrails + audit policy from multiple sources."
-  - "before_agent_start extensions see `event.systemPromptOptions` (structured inputs) and `event.systemPrompt` (the rendered string). Both chain across extensions; later handlers see earlier rewrites."
-  - "before_provider_request is the LAST chance to rewrite the system message that goes to the provider, but its payload-level changes are NOT reflected by ctx.getSystemPrompt() — useful for cache key shaping only."
-  - "No `/inspect-prompt`, no `--show-system-prompt`, no dedicated export for the effective prompt. Inspection is via extensions (ctx.getSystemPrompt / ctx.getSystemPromptOptions) or by intercepting the prompt in a debugger."
-  - "Default thinking level, default model, and default provider are NOT in the system prompt; they are independent settings. Changing them does not require --append-system-prompt."
+  - "The current installed local binary was 0.73.1, while upstream source on 2026-07-03 was 0.80.3. This research uses upstream behavior and observed local config, not the stale binary's behavior."
+  - "Project .pi/SYSTEM.md and .pi/APPEND_SYSTEM.md are ignored in non-interactive mode unless project trust is already saved, defaultProjectTrust is always, or --approve is passed."
+  - "AGENTS.md/CLAUDE.md context files are loaded regardless of project trust; use --no-context-files when wrapper isolation requires suppressing them."
+  - "A replacement prompt is not the final complete provider prompt: Pi still appends append prompts, context files, skills, date, and cwd."
+  - "Append file discovery is exclusive: a project APPEND_SYSTEM.md suppresses the global APPEND_SYSTEM.md, and any --append-system-prompt flag suppresses both discovered append files."
+  - "Extensions can rewrite the prompt after CLI/file delivery. Use --no-extensions for deterministic wrapper tests, or pass an explicit safe extension set with -e."
+  - "before_provider_request can mutate the serialized provider payload in ways ctx.getSystemPrompt() cannot inspect."
+  - "Skills only appear in the prompt as metadata and only when read is active. The model may fail to read the full SKILL.md unless prompted or invoked via /skill:name."
+  - "The official subagent example appends delegated agent prompts instead of replacing the child system prompt, so agent files are layered instructions rather than isolated base identities."
+  - "Local config inspection found no SYSTEM.md, APPEND_SYSTEM.md, AGENTS.md, trust.json, or extensions under the current session HOME (/Users/ken/.claudine/.pi/agent). The user's real /Users/ken/.pi/agent had settings.json with defaultProvider/defaultModel and no prompt files."
 gaps:
-  - "The full default system-prompt text is not published as documentation; only the build code in src/core/system-prompt.ts reveals it. Token count and exact section ordering can drift across releases."
-  - "No CLI flag or command dumps the effective resolved prompt for inspection. Wrappers that need verification must rely on extensions or by reading the session's exported HTML (no first-party `pi --show-system-prompt` exists)."
-  - "The order of multi-extension before_agent_start rewrites is load order, which depends on settings.json `extensions` array and `packages` resolution. Not officially documented as deterministic; package updates could re-order."
-  - "Hostname/cwd injection at the bottom of the prompt is documented but the exact placement of pi documentation references relative to date/cwd may shift across releases; documented behavior covers only the function-level structure."
-  - "No documented official way to inspect AGENTS.md discovery order or to disable individual files (e.g. exclude a parent directory's CLAUDE.md while keeping the cwd one)."
-  - "PI_CODING_AGENT_DIR is environment-only; no CLI equivalent for one-off overrides."
-changes: []
-requires_claudine_update: false
-reason: "Pi's --system-prompt and --append-system-prompt flags already accept inline text or an existing file path, and that file path auto-loads the file's contents. Claudine's existing file-flag delivery maps cleanly to both modes without needing a new wrapper strategy. The existing 'append_system_prompt = file_flag, replace_system_prompt = file_flag' shape in claudine_delivery aligns with Pi's native behavior."
+  - "No dedicated CLI command was found to print or export Pi's final effective provider payload."
+  - "Source inspection proves path-or-inline resolution, but no authenticated provider call was run to observe actual transmitted request payload."
+  - "Windows paths are inferred from Pi's homedir/config-dir implementation and documented path shape; not executed on Windows."
+  - "No current public issue thread was found that changes prompt semantics after upstream commit 23d1462611ab74b4874c35e701a43d7caa5e3de3."
+changes:
+  - "Refreshed Pi system-prompt research against upstream 0.80.3 source and docs on 2026-07-03."
+  - "Added extension hook, subagent example, trust-gating, local config inspection, and wrapper delivery details."
+requires_claudine_update: true
+reason: "Pi has native append and replace CLI flags with file-path support; Claudine can implement wrapper delivery without mutating user config once Pi is added to provider metadata."
 ---
 
 # Pi System Prompt Research
 
 ## Overview
 
-Pi is a minimal, TypeScript-first coding-agent harness from Earendil Inc. ([pi.dev](https://pi.dev/), repo [earendil-works/pi](https://github.com/earendil-works/pi)). Unlike Claude Code or Gemini, Pi ships an aggressively minimal default prompt and treats the system prompt as a programmable surface rather than a sealed artifact — extensions can rewrite it per-turn, and `SYSTEM.md` / `APPEND_SYSTEM.md` files in the global and project config roots provide first-class file-based replacement and append without a custom agent spec.
+Pi provides native per-invocation system-prompt replacement and append surfaces. `--system-prompt` replaces the base prompt, and repeatable `--append-system-prompt` values append to the chosen base prompt. Both flags accept inline text or a path to an existing file.
 
-The package version verified for this research is `0.80.3` (released 2026-06-30). The CLI binary is `pi` (npm: `@earendil-works/pi-coding-agent`); the four execution modes are interactive (TUI), print (`-p`), JSON (`--mode json`), and RPC (`--mode rpc`). The system prompt is constructed in `src/core/system-prompt.ts` (`buildSystemPrompt`) and is layered, in order: an optional replacement string, the default coding-agent paragraph, an optional append string, an XML `<project_context>` block of `AGENTS.md`/`CLAUDE.md` files, an XML `<available_skills>` block, and finally `Current date` / `Current working directory` lines.
+Replacement is not a total final-payload replacement. Pi still layers append text, context files, skills, the current date, and the current working directory after a custom base prompt. Extensions can then mutate the turn prompt through `before_agent_start`, and can even rewrite the final serialized provider payload through `before_provider_request`.
 
-Pi's central distinction for Claudine is that **file-flag delivery is already native**: `--system-prompt` and `--append-system-prompt` both auto-detect when their value points to an existing file and read its contents (see `resolvePromptInput` in `src/core/resource-loader.ts`). Claudine does not need to invent a separate `--*-file` flag.
+The best Claudine delivery path is therefore file-backed flags: write a temporary prompt file and pass `--append-system-prompt <file>` for append or `--system-prompt <file>` for replace. This avoids mutating `~/.pi/agent` or `.pi`, avoids shell quoting problems, and keeps long prompts out of argv as inline strings.
+
+Local inspection on 2026-07-03 found:
+
+| Location | Observation |
+|----------|-------------|
+| Current session `$HOME` | `/Users/ken/.claudine` |
+| Current session Pi config | `/Users/ken/.claudine/.pi/agent` contained only `auth.json` and `sessions`; no prompt files, settings, trust file, skills, or extensions were observed. |
+| User Pi config | `/Users/ken/.pi/agent/settings.json` existed and set `defaultProvider` and `defaultModel`; no `SYSTEM.md`, `APPEND_SYSTEM.md`, `AGENTS.md`, `trust.json`, or extensions were found in the inspected paths. |
+| Installed Pi binary | `pi --version` returned `0.73.1`; upstream source inspected at `23d1462611ab74b4874c35e701a43d7caa5e3de3` reported package version `0.80.3`. |
 
 ## CLI Parameters
 
-The Pi CLI exposes two flags that directly control the system prompt and a handful of related ones that affect adjacent layers.
+| Switch | Mode | Value | Wrapper relevance |
+|--------|------|-------|-------------------|
+| `--system-prompt <text>` | Replace | Inline text or file path | Primary Claudine replace mechanism. |
+| `--append-system-prompt <text>` | Append | Inline text or file path; repeatable | Primary Claudine append mechanism. |
+| `--no-context-files`, `-nc` | Disable | Boolean | Suppresses AGENTS.md/CLAUDE.md context injection, not SYSTEM.md/APPEND_SYSTEM.md. |
+| `--no-skills`, `-ns` | Disable | Boolean | Suppresses automatic skill prompt metadata; explicit `--skill` still loads. |
+| `--skill <path>` | Modify | File or directory path | Adds skill metadata to the system prompt when `read` is active. |
+| `--extension <path>`, `-e <path>` | Modify | TypeScript file or directory | Loads extension hooks that can inspect or mutate prompts. |
+| `--no-extensions`, `-ne` | Disable | Boolean | Prevents discovered extension prompt rewrites; explicit `-e` still loads. |
+| `--approve`, `-a` | Modify | Boolean | Enables trust-gated project prompt files/resources for one run. |
+| `--no-approve`, `-na` | Disable | Boolean | Ignores trust-gated project prompt files/resources for one run. |
+| `--tools`, `--exclude-tools`, `--no-tools`, `--no-builtin-tools` | Modify/disable | Tool name sets | Changes available-tool snippets, tool guidelines, and skill visibility. |
 
-| Flag | Mode | Effect |
-| :--- | :--- | :--- |
-| `--system-prompt <text-or-file>` | Replace | Replaces the default system prompt for the invocation. |
-| `--append-system-prompt <text-or-file>` | Append | Appends to the default system prompt. Repeatable; values accumulate in array order. |
-| `--no-context-files` / `-nc` | Disable | Skips `AGENTS.md` / `CLAUDE.md` discovery and loading. |
-| `--no-skills` / `-ns` | Disable | Skips skill discovery and the `<available_skills>` block. |
-| `--no-extensions` / `-ne` | Disable | Skips extension discovery (explicit `-e` paths still load). |
-| `--approve` / `-a` | Modify | Trusts project-local files for this run; required in `-p`/`json`/`rpc` modes to load `.pi/SYSTEM.md`, `.pi/APPEND_SYSTEM.md`, `.pi/AGENTS.md`, project skills. |
-| `--no-approve` / `-na` | Modify | Ignores project-local files for this run regardless of saved trust. |
-
-Key behaviors to keep in mind:
-
-- Both `--system-prompt` and `--append-system-prompt` accept either an inline string or an existing file path. The resource loader checks `existsSync(value)` first; on hit it reads the file with `readFileSync(value, "utf-8")`, on miss it uses the value as text (and warns if reading fails).
-- Replacement does not disable downstream layers. AGENTS.md/CLAUDE.md context, skills, and the date/cwd footer are still appended after `--system-prompt` (see `buildSystemPrompt`).
-- Appending cannot override the "You are an expert coding assistant" identity line — that sits before any appended text and wins by ordering (issue #6127).
-- The CLI also exposes `--print`/`-p`, `--mode json`, `--mode rpc`, and `--tools`/`--no-tools`. Tool selection changes the system prompt indirectly because the `<available_skills>` block only renders when `read` is active.
+Pi's `resolvePromptInput()` treats a prompt argument as a file only when `existsSync(input)` succeeds; otherwise the raw value is used as prompt text. If reading an existing file fails, Pi logs a warning and falls back to using the argument string as text.
 
 ## Configuration and Discovery
 
-Pi's prompt is shaped by five files and one directory tree, in this lookup order:
+Pi discovers system-prompt and prompt-adjacent resources from user and project scopes:
 
-1. **`--system-prompt`** (CLI value, file or text). If absent, falls through.
-2. **`.pi/SYSTEM.md`** in the project root (trusted projects only).
-3. **`~/.pi/agent/SYSTEM.md`** (global).
-4. **Built-in default prompt** (`buildSystemPrompt` in `src/core/system-prompt.ts`). Anchors the coding-agent identity.
-5. **`--append-system-prompt`** values (CLI, repeatable, file or text).
-6. **`.pi/APPEND_SYSTEM.md`** (project, trusted).
-7. **`~/.pi/agent/APPEND_SYSTEM.md`** (global).
-8. **`<project_context>`** from `AGENTS.md` / `CLAUDE.md` files (case-insensitive match per directory).
-9. **`<available_skills>`** from `~/.pi/agent/skills/`, `~/.agents/skills/`, `.pi/skills/`, `.agents/skills/` (cwd and ancestors).
-10. **Current date** and **current working directory** (always last).
+| Source | Scope | Behavior |
+|--------|-------|----------|
+| `~/.pi/agent/SYSTEM.md` | User | Replaces built-in base prompt when no CLI or trusted project replacement exists. |
+| `.pi/SYSTEM.md` | Project | Replaces built-in base prompt when trusted and no CLI replacement exists. |
+| `~/.pi/agent/APPEND_SYSTEM.md` | User | Appends when no CLI append flag and no trusted project append file exists. |
+| `.pi/APPEND_SYSTEM.md` | Project | Appends when trusted and no CLI append flag exists. |
+| `~/.pi/agent/AGENTS.md` or `CLAUDE.md` | User | Appended in `<project_context>` unless context files are disabled. |
+| `AGENTS.md`, `AGENTS.MD`, `CLAUDE.md`, `CLAUDE.MD` in cwd and ancestors | Repo | Appended in parent-first order in `<project_context>` unless disabled. |
+| `~/.pi/agent/settings.json` | User | Can set `defaultProjectTrust`, extensions, skills, and other prompt-adjacent defaults. |
+| `.pi/settings.json` | Project | Trust-gated project settings; can enable extensions and skills. |
+| `~/.pi/agent/extensions/` and `.pi/extensions/` | Extension | TypeScript hooks can modify prompt text or provider payloads. |
+| `~/.pi/agent/skills/`, `~/.agents/skills/`, `.pi/skills/`, `.agents/skills/` | User/repo | Skill metadata is rendered into the prompt in XML format when active. |
 
-The AGENTS.md walker in `loadProjectContextFiles` reads:
+Project trust matters for `.pi` resources. In non-interactive modes, Pi does not prompt; it uses saved trust, `defaultProjectTrust`, or the explicit `--approve`/`--no-approve` override. Context files are the exception: AGENTS.md and CLAUDE.md load independently of project trust unless disabled.
 
-1. `~/.pi/agent/AGENTS.md` (or `AGENTS.MD`, `CLAUDE.md`, `CLAUDE.MD`) once.
-2. Then walks from `cwd` up to filesystem root, prepending each directory's first-matching file to the list.
-3. The cwd file ends up last in the emitted `<project_context>` block, so the most specific instructions win by ordering.
-
-File-based replacement and append are completely opt-in. With nothing discovered, the built-in default prompt is used unmodified, plus AGENTS.md context and skills.
-
-### Project trust
-
-Project-local resources (anything under `./.pi/`) require trust. Interactive mode prompts via `project_trust`; non-interactive modes consult `defaultProjectTrust` (`"ask"` / `"always"` / `"never"`) in `~/.pi/agent/settings.json`. `--approve` / `-a` is the one-shot override.
-
-### Default prompt structure
-
-The built-in default (from `buildSystemPrompt`) reads roughly:
-
-```
-You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
-
-Available tools:
-- read: <snippet>
-- bash: <snippet>
-- edit: <snippet>
-- write: <snippet>
-
-In addition to the tools above, you may have access to other custom tools depending on the project.
-
-Guidelines:
-- <dynamic guidelines based on active tools>
-- Be concise in your responses
-- Show file paths clearly when working with files
-
-Pi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):
-- Main documentation: <abs path>
-- Additional docs: <abs path>
-- Examples: <abs path>
-...
-```
-
-This is followed by the append section, the `<project_context>` block, the `<available_skills>` block, and the date/cwd footer.
+`PI_CODING_AGENT_DIR` is the most useful environment-level isolation knob. It changes the global agent directory from `~/.pi/agent` to a wrapper-chosen directory, affecting global prompt files, settings, extensions, skills, and sessions.
 
 ## Prompt Layers and Precedence
 
 ```mermaid
-graph TD
-    A[Built-in default prompt] --> B{--system-prompt?}
-    B -- yes --> C[--system-prompt text/file]
-    B -- no --> D{.pi/SYSTEM.md trusted?}
-    D -- yes --> E[.pi/SYSTEM.md]
-    D -- no --> F{~/.pi/agent/SYSTEM.md?}
-    F -- yes --> G[~/.pi/agent/SYSTEM.md]
-    F -- no --> A
-    C --> H[--append-system-prompt repeatable]
-    E --> H
-    G --> H
-    A --> H
-    H --> I{APPEND file?}
-    I -- yes project --> J[.pi/APPEND_SYSTEM.md]
-    I -- yes global --> K[~/.pi/agent/APPEND_SYSTEM.md]
-    J --> L["<project_context>"]
+flowchart TD
+    A["Built-in base prompt"] --> B{"Replacement source?"}
+    B -->|"--system-prompt"| C["CLI custom base"]
+    B -->|".pi/SYSTEM.md trusted"| D["Project custom base"]
+    B -->|"~/.pi/agent/SYSTEM.md"| E["Global custom base"]
+    B -->|"none"| F["Built-in base retained"]
+    C --> G["Append source"]
+    D --> G
+    E --> G
+    F --> G
+    G -->|"--append-system-prompt values"| H["CLI append text"]
+    G -->|".pi/APPEND_SYSTEM.md trusted"| I["Project append text"]
+    G -->|"~/.pi/agent/APPEND_SYSTEM.md"| J["Global append text"]
+    G -->|"none"| K["No append text"]
+    H --> L["AGENTS.md / CLAUDE.md project_context"]
+    I --> L
+    J --> L
     K --> L
-    L --> M["<available_skills> (read tool required)"]
-    M --> N[Current date + cwd footer]
-    N --> O[Extension before_agent_start rewrites]
-    O --> P[Extension before_provider_request payload rewrite]
+    L --> M["available_skills XML block"]
+    M --> N["Current date and cwd"]
+    N --> O["before_agent_start extension chain"]
+    O --> P["before_provider_request payload rewrite"]
 ```
 
-Notes:
+Source-observed order:
 
-- Replacement sources (`--system-prompt`, `SYSTEM.md`) are exclusive: whichever resolves first wins.
-- Append sources are additive: CLI flag array first, then project file, then global file. All three are kept in that order before the `<project_context>` block.
-- `<project_context>` and `<available_skills>` use XML tags. The default prompt body and all hand-authored `SYSTEM.md` / `APPEND_SYSTEM.md` files use plain Markdown.
-- Extension `before_agent_start` runs after the entire prompt is built. Multiple extension handlers chain in load order; later handlers see earlier rewrites of `event.systemPrompt`.
-- Extension `before_provider_request` is the very last chance to mutate what is actually sent over the wire; its changes are not visible to `ctx.getSystemPrompt()`.
+1. Choose the base prompt: CLI `--system-prompt`, trusted project `.pi/SYSTEM.md`, global `~/.pi/agent/SYSTEM.md`, or Pi's built-in prompt.
+2. Add append text immediately after the base prompt: CLI append values, trusted project `APPEND_SYSTEM.md`, global `APPEND_SYSTEM.md`, or nothing.
+3. Add context files inside `<project_context>` and `<project_instructions path="...">` tags.
+4. Add visible skills inside `<available_skills>` if `read` is active.
+5. Add `Current date: YYYY-MM-DD` and `Current working directory: ...`.
+6. Run `before_agent_start` extension handlers in load order; each handler sees the currently chained prompt and may return a full replacement for that turn.
+7. Build the provider request; `before_provider_request` handlers may rewrite the serialized payload.
 
 ## Agents and Subagents
 
-Pi has **no built-in sub-agent primitive** by design — that is one of the project's "what we didn't build" decisions ([pi.dev](https://pi.dev/)). Sub-agents can be built as extensions (see [`examples/extensions/subagent/`](https://github.com/earendil-works/pi/tree/main/packages/coding-agent/examples/extensions/subagent)) or by spawning external pi instances over RPC or tmux.
+Pi's README says Pi ships without built-in subagents and expects extensions to provide workflows such as subagents or plan mode. The official repository includes a subagent example extension that is useful as the current provider-native pattern, but it is not a core CLI subagent feature.
 
-For Claude-Code-style agent specs (a separate system prompt per agent), Pi offers:
+The subagent example:
 
-1. **`SYSTEM.md`** files — the most direct way to give the main thread a different persona.
-2. **`APPEND_SYSTEM.md`** files — for additive customization.
-3. **Skills** — SKILL.md with frontmatter; registered as `/skill:<name>` commands and summarized in the `<available_skills>` block of the prompt. A skill's full body is loaded only when the model uses `/skill:name` or reads the file on demand (progressive disclosure per the [Agent Skills standard](https://agentskills.io)).
-4. **Extensions** — TypeScript modules with a `before_agent_start` handler. Each handler can mutate `event.systemPrompt` and inject persistent `pi.sendMessage({ customType, content })` context messages. Extensions also expose `ctx.getSystemPrompt()` (current rendered string) and `ctx.getSystemPromptOptions()` (structured inputs: `customPrompt`, `selectedTools`, `toolSnippets`, `promptGuidelines`, `appendSystemPrompt`, `cwd`, `contextFiles`, `skills`).
+| Feature | Behavior |
+|---------|----------|
+| Agent definitions | Markdown files with YAML frontmatter and a Markdown body. |
+| User location | `~/.pi/agent/agents/*.md`. |
+| Project location | `.pi/agents/*.md`, enabled only with `agentScope: "project"` or `"both"`. |
+| Prompt delivery | The extension writes the agent body to a temp file and launches child `pi` with `--append-system-prompt <tempfile>`. |
+| Isolation | Each subagent is a separate Pi subprocess with isolated context. |
+| Return path | Final output, usage, and errors return to the parent as a tool result. |
 
-There is no `agent_spec` enum value in the sense of "separate per-agent system prompt text" — extensions *are* the agent customization layer, and they run per-turn rather than per-spawn.
+Because the example uses append, subagent prompt files layer on top of the child Pi base prompt rather than replacing it. A wrapper or extension could use `--system-prompt` instead, but that is not the sample behavior.
 
 ## Format Recommendations
 
-| Goal | Recommended format | Rationale |
-| :--- | :--- | :--- |
-| Append | Pure Markdown | Matches the default prompt style; no documented benefit from XML wrapping. The framework already wraps AGENTS.md in `<project_context>` automatically. |
-| Replace | Pure Markdown | The framework auto-wraps downstream layers (skills, context, date/cwd) in XML; the replacement body itself should be Markdown. If you want to mirror Pi's own `<project_context>` / `<available_skills>` structure inside the replacement, you can, but it adds tokens without documented model-side benefit. |
+Use file-backed Markdown for both append and replace.
 
-For the **append** case, headers and bullet lists integrate cleanly. For the **replace** case, the prompt must self-supply any tool guidance you want the model to follow — Pi's default provides an explicit `Available tools:` section and a `Guidelines:` block; if you replace, replicate that structure or supply it via an extension that re-emits it in `before_agent_start`.
+For replacement, use a complete Markdown prompt. Pi's `SYSTEM.md` convention and `--system-prompt` behavior treat the content as raw prompt text, and the built-in layers will still append context, skills, date, and cwd.
+
+For append, prefer XML-wrapped Markdown for Claudine-authored blocks:
+
+```xml
+<claudine_append_system_prompt>
+
+## Additional Instructions
+
+Markdown instructions go here.
+
+</claudine_append_system_prompt>
+```
+
+Plain Markdown works, but Pi itself changed prompt and context boundaries to XML tags, and skills are emitted as XML. XML wrapping makes Claudine's appended block easy to distinguish from adjacent project context and skill metadata. YAML and JSON add parsing implications that Pi does not document for system prompts.
 
 ## Recent Changes
 
-- **v0.80.3 (2026-06-30)** — Fixed extension tool changes to apply before the next provider request in the same agent run without dropping `before_agent_start` system-prompt overrides ([#6162](https://github.com/earendil-works/pi/issues/6162)). Important for extensions that swap tools mid-session.
-- **v0.79.0 (2026-06-08)** — Added project trust for local inputs ([#5332](https://github.com/earendil-works/pi/pull/5332)). `--approve` / `--no-approve` gate project-local SYSTEM.md, APPEND_SYSTEM.md, AGENTS.md, skills, and packages in non-interactive modes.
-- **v0.78.1 (2026-06-04)** — Added `ctx.getSystemPromptOptions()` and `ctx.mode` for extensions; structured system-prompt inspection ([#5306](https://github.com/earendil-works/pi/pull/5306)). Enables extensions to make informed rewrites instead of regex surgery on the rendered string.
-- **2026-06-27 (issue #6127)** — Closed (Not planned) confirming `--append-system-prompt` cannot override the default coding-agent identity; `--system-prompt` or an extension is required for a custom persona. Useful as documented behavior.
+| Date | Version | Change | Impact |
+|------|---------|--------|--------|
+| 2026-06-30 | 0.80.3 | Fixed extension tool changes so they apply without dropping `before_agent_start` prompt overrides. | More reliable extension prompt mutation. |
+| 2026-05-22 | 0.74.0 | Added `ctx.getSystemPromptOptions()` for extension commands. | Extensions can inspect base prompt inputs outside `before_agent_start`. |
+| 2026-05-13 | 0.71.0 | Switched prompt/context file boundaries to explicit XML tags. | XML-wrapped append blocks align with Pi's prompt style. |
+| 2026-04-20 | 0.68.0 | Added `systemPromptOptions` to `before_agent_start`. | Extensions can inspect structured base prompt inputs. |
+| 2026-04-14 | 0.67.2 | Added multiple `--append-system-prompt` flags. | Claudine can pass more than one append file/string if needed. |
+
+Older but relevant changes include automatic `SYSTEM.md` loading, `APPEND_SYSTEM.md` support, and `--system-prompt` file-path support. These were already present before the current upstream version.
 
 ## Quirks and Workarounds
 
-- `--append-system-prompt` doubles as either an inline-text flag or a file flag because `resolvePromptInput` checks `existsSync` first. No separate `--*-file` flag exists; that is the file-flag delivery mechanism.
-- `--append-system-prompt` is repeatable. Values are concatenated in array order before `<project_context>`.
-- AGENTS.md / CLAUDE.md are equivalent (case-insensitive); the loader picks the first match in `AGENTS.md / AGENTS.MD / CLAUDE.md / CLAUDE.MD` order.
-- Context files are emitted as `<project_instructions path="...">...</project_instructions>` under a single `<project_context>` wrapper, regardless of how many files were loaded. The cwd file is last (most-specific priority by ordering).
-- Skills are wrapped in `<available_skills>` per the Agent Skills standard. Only name, description, and location are in the prompt — bodies are loaded on demand.
-- Skills with `disable-model-invocation: true` are excluded from the prompt entirely (must be invoked via `/skill:name`).
-- `<available_skills>` is omitted entirely if the `read` tool is not active. `--no-tools`, `--tools` allowlists without `read`, or `--no-skills` all drop the block silently.
-- `--system-prompt` does NOT suppress the AGENTS.md context or skills block — those are appended after replacement.
-- The default prompt ends with `Pi documentation: <abs path>` lines and a date/cwd footer. Replacing the prompt does not remove these unless you also suppress them via `--no-context-files` / `--no-skills`.
-- Project-local resources (anything under `.pi/`) require trust; in non-interactive modes the default `defaultProjectTrust: "ask"` means they are silently ignored unless `--approve` is passed.
-- No CLI command or flag dumps or inspects the effective resolved prompt. Inspection requires either an extension (`ctx.getSystemPrompt()` / `ctx.getSystemPromptOptions()`) or a debugger attachment.
-- The default prompt anchors a coding-agent identity that survives any `--append-system-prompt`. For persona swaps, use `--system-prompt` (replacement) or a `before_agent_start` extension rewrite.
-- Extension `before_agent_start` rewrites are scoped to the current turn; they do not persist across compaction unless re-injected via `pi.sendMessage({ customType, content, display: true })`.
-- `before_provider_request` is a lower-level payload rewrite that does not update `ctx.getSystemPrompt()` — useful only for provider cache shaping, not for "make the model think differently".
+- Use `--no-extensions` for deterministic wrapper validation. Otherwise global or project extensions can modify prompts after Claudine's delivery.
+- Use `--no-context-files` only when suppressing AGENTS.md/CLAUDE.md is intentional. It is separate from system-prompt append/replace.
+- Use `--approve` if Claudine intentionally wants project `.pi/SYSTEM.md`, `.pi/APPEND_SYSTEM.md`, `.pi/extensions`, or `.pi/skills` to participate in non-interactive runs.
+- Use `--no-approve` if Claudine wants to ignore project trust-gated prompt files while still allowing global config.
+- Use `PI_CODING_AGENT_DIR` or a shadow HOME if global Pi resources must be isolated. CLI prompt flags alone do not prevent global extensions, global skills, or global context files from loading.
+- `ctx.getSystemPrompt()` is not an export of the final provider payload. It misses later `before_provider_request` rewrites.
+- There is no documented standalone `pi --print-effective-system-prompt` style command. Inspection requires an extension hook or source-level/SDK instrumentation.
 
 ## Claudine Delivery Notes
 
-Claudine should map Pi onto its existing file-flag delivery model:
+Recommended append delivery:
 
-- **Append** — write the resolved prompt to a temp file (e.g. `<repo>/.claudine/tmp/<id>-append.md`) and invoke Pi with `pi --append-system-prompt <tmp>`. The auto-detect in `resolvePromptInput` means no `--*-file` flag is needed.
-- **Replace** — same pattern with `pi --system-prompt <tmp>`. The replacement prompt must self-supply any tool guidance, or pair with a small extension that re-emits Pi's default `Available tools:` section via `before_agent_start`.
-- **Multiple appends** — pass `--append-system-prompt` multiple times if the resolved prompt needs to be split (e.g. persona + per-task guardrail). Each value is independently file-or-text resolved.
-- **Avoid mutating user config** — never write to `~/.pi/agent/SYSTEM.md`, `~/.pi/agent/APPEND_SYSTEM.md`, or project `.pi/SYSTEM.md`. CLI flags and temp files are sufficient. If you also want to suppress global AGENTS.md / skills, set `PI_CODING_AGENT_DIR` to a shadow config root in the wrapper — usually unnecessary, since flag delivery is already non-mutating.
-- **Project trust** — in `-p` / `--mode json` / `--mode rpc` modes, either pass `--approve` to let project `.pi/SYSTEM.md` and `.pi/AGENTS.md` load, or pass `--no-approve` to skip them deterministically. Do not depend on `defaultProjectTrust: "always"` in user settings; that requires mutating user config.
-- **Argv limits** — long prompts should always go through a temp file; Pi's value-as-file auto-detect makes this trivial and avoids Node/Bun argv caps on macOS/Linux/Windows.
-- **Persona customization** — when the wrapper needs a non-coding identity, use `--system-prompt` (replace) plus an extension that re-supplies tool guidance, rather than fighting the built-in identity with `--append-system-prompt`. Documented as deliberate (issue #6127).
+```bash
+PI_OFFLINE=1 PI_SKIP_VERSION_CHECK=1 pi --append-system-prompt /tmp/claudine-pi-append.md -p "..."
+```
+
+Recommended replace delivery:
+
+```bash
+PI_OFFLINE=1 PI_SKIP_VERSION_CHECK=1 pi --system-prompt /tmp/claudine-pi-system.md -p "..."
+```
+
+For strict wrapper isolation:
+
+```bash
+PI_CODING_AGENT_DIR=/tmp/claudine-pi-agent pi --no-extensions --no-context-files --system-prompt /tmp/claudine-pi-system.md -p "..."
+```
+
+Do not permanently write `~/.pi/agent/SYSTEM.md`, `~/.pi/agent/APPEND_SYSTEM.md`, `.pi/SYSTEM.md`, or `.pi/APPEND_SYSTEM.md` for wrapper delivery. File flags are native and avoid config mutation.
+
+## Changelog
+
+- 2026-07-03: Rewrote the Pi system-prompt research against upstream `@earendil-works/pi-coding-agent` 0.80.3 source and docs, adding current CLI semantics, discovery paths, extension hooks, subagent behavior, local config observations, and Claudine delivery guidance.
 
 ## Sources
 
-- [Pi coding-agent README](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md)
-- [Pi CLI argument parser](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/cli/args.ts) — `--system-prompt`, `--append-system-prompt`, `--no-context-files`, `--approve`
-- [Pi main entry](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/main.ts) — wires CLI flags into `resourceLoaderOptions`
-- [Pi system-prompt construction](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/system-prompt.ts) — `buildSystemPrompt` and default prompt text
-- [Pi resource loader](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/resource-loader.ts) — `discoverSystemPromptFile`, `discoverAppendSystemPromptFile`, `loadProjectContextFiles`, `resolvePromptInput`
-- [Pi skills module](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/skills.ts) — `formatSkillsForPrompt` and the Agent Skills XML format
-- [Pi extensions docs](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md) — `before_agent_start`, `before_provider_request`, `ctx.getSystemPrompt`, `ctx.getSystemPromptOptions`
-- [Pi settings docs](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/settings.md) — `defaultProjectTrust`, package/resource settings
-- [Pi skills docs](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/skills.md) — skill locations, Agent Skills standard
-- [Pi prompt-templates docs](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/prompt-templates.md) — `/name` template system
-- [Pi changelog](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/CHANGELOG.md) — recent versions and notable fixes
-- [Pi website](https://pi.dev/) — high-level overview and philosophy
-- [Issue #6127 — `--append-system-prompt` cannot override default identity](https://github.com/earendil-works/pi/issues/6127)
-- [Issue #6162 — Extension tool changes dropped `before_agent_start` system-prompt overrides](https://github.com/earendil-works/pi/issues/6162)
-- [PR #5306 — `ctx.getSystemPromptOptions()` for extensions](https://github.com/earendil-works/pi/pull/5306)
-- [PR #5332 — Project trust for local inputs](https://github.com/earendil-works/pi/pull/5332)
-- [Agent Skills specification](https://agentskills.io/specification)
+- [Pi usage documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/usage.md)
+- [Pi README](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md)
+- [System prompt builder source](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/system-prompt.ts)
+- [Resource loader source](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/resource-loader.ts)
+- [CLI argument parser source](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/cli/args.ts)
+- [Extension documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md)
+- [Skills documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/skills.md)
+- [Security and project trust documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/security.md)
+- [Subagent example documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/extensions/subagent/README.md)
+- [Pi coding-agent changelog](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/CHANGELOG.md)
