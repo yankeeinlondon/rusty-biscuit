@@ -36,10 +36,17 @@ failure:
     message: "💥 the Agent Logging research on **{{state.name}}** failed to complete!"
     warn: "The Agent Logging research on **{{state.name}}** failed to complete! (err: {{err.message}})"
 ---
+# Agent Logging Research on {{state.name}}
 
 ## Skills
 
 Use the 'claudine' skill.
+
+## Scope
+
+This topic covers the **log surfaces**, **record semantics**, and **time semantics** of {{state.name}}: where logs live on disk, how they are organized and archived, what record types they contain, and how their timestamps behave. It feeds Claudine's log ingestion and observability layers. Boundaries against sibling topics: the hooks topic owns lifecycle-event semantics, and the usage topic owns quota inspection — mention those surfaces here only where they explain a log record.
+
+Prior-generation research files in this directory (`roo-code.md`) are validation assets for humans — do not open, paraphrase, or cite them; your research must be independent.
 
 ## Document Structure
 
@@ -53,11 +60,12 @@ Your job is to do detailed research into the **logging** features of the **{{sta
         - SQLite DB
         - etc.
     - Whether or not a SQLite (or other) database is used for storing logs
-    - The major **types** of log messages that this provider distinguishes 
+    - The major **types** of log messages that this provider distinguishes
+    - Any environment variables that relocate the log directories or alter what gets logged (config-dir overrides, verbosity/telemetry toggles, log-level settings)
 
 - `## Logging Schema` Section
     - Try to identify an "official" schema that {{state.name}} has defined for their log output
-        - If found, document it's location and then convert this into a Rust struct/enum
+        - If found, document its location and then convert this into a Rust struct/enum
     - If no "official" schema exists:
         - Document that no official schema exists
         - Look at any popular open sources projects which might have attempted to model a schema for the logs
@@ -84,6 +92,7 @@ Follow these steps exactly:
 
 ::end-block
 - Perform research on topic
+    - **Evidence requirement:** you have read access to `{{state.user_dir}}` on this host. Inspect the *actual* log files/directories there and prefer what you observe over what documentation claims (`confidence: observed` beats `documented`). Real logs regularly contain surfaces, record types, and time formats the documentation omits.
 ::block when="update"
 - Update the document with your research
 - Add an entry to the `## Changelog` section
@@ -114,7 +123,6 @@ Follow these steps exactly:
     - `time_fields` - one record per **timestamp site** across the surfaces (including timestamps embedded in *filenames*). For each: the `site` (JSONPath-ish location or `filename`), the `unit` (`iso8601`/`unix_seconds`/`unix_millis`), the `zone` (`utc`/`local`/`embedded_offset`/`unspecified`), and your `confidence` (`source_code` > `observed` > `documented` > `inferred`)
         - **you must answer unit and zone for every site** — if you cannot establish the zone, record `unspecified` with `confidence: inferred`; never omit the record
     - `record_types` - one record per structured surface: the discriminator field (e.g. `type`) and the **observed** vocabulary of its values
-    - **Evidence requirement:** you have read access to `{{state.user_dir}}` on this host. Inspect the *actual* log files/directories there and prefer what you observe over what documentation claims (`confidence: observed` beats `documented`). Real logs regularly contain surfaces, record types, and time formats the documentation omits.
     - `has_desktop_app` - set as true/false based on whether the given provider not only has a CLI tool but also a desktop based application.
     - `desktop_logs` - as a dictionary:
         - `same_log_format` - set as a boolean value indicating whether the CLI and desktop apps write the same log format/schema or not
