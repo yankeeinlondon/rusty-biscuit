@@ -17,11 +17,11 @@ initialize:
               - skip
 success:
     stack:
-        - when: "frontmatter(file, 'last_updated') != ctx.today"
+        - when: "!file_exists(file) || frontmatter(file, 'last_updated') != ctx.today"
           action:
               - stderr: "The step reported success but <b>{{file}}</b> was not updated — <code>last_updated</code> is not {{ctx.today}}."
               - error: "research file was not updated"
-        - when: "frontmatter(file, 'last_updated') == ctx.today"
+        - when: "file_exists(file) && frontmatter(file, 'last_updated') == ctx.today"
           action:
               - info: "The **Resume** research on **{{state.name}}** completed successfully: {{ link(file) }}"
               - message: "🎉  the **Resume** research on **{{state.name}}** completed successfully"
@@ -29,6 +29,7 @@ failure:
     message: "💥 the Resume research on **{{state.name}}** failed to complete!"
     warn: "The Resume research on **{{state.name}}** failed to complete! (err: {{err.message}})"
 ---
+# Resume Research on {{state.name}}
 
 ## Skills
 
@@ -40,9 +41,15 @@ Research session resume and continuation support for **{{state.desc}}**. This to
 feeds Claudine's lifecycle `resume` control action, recovery behavior, and future
 human-in-the-loop continuation.
 
-Write the result to `{{file}}`. Include `$schema: ./_schema.yaml` in frontmatter so
-the document can be validated, but treat the instructions below as the source of what
-high-quality research must contain.
+**Boundary:** the sibling `non-interactive-sessions` topic owns non-interactive
+invocation and follow-up mechanics — commands, output formats, stream parsing. This
+topic owns session identity, persistence, and re-entry semantics. Record the
+resume-relevant invocations here, but leave stream/format depth to that topic; it
+reciprocally leaves resume semantics to this one.
+
+Prior-generation research files in this directory (`overview.md`, `qwen.md`, `roo.md`)
+are validation assets for humans — do NOT open, paraphrase, or cite them; your research
+must be independent.
 
 ## What Resume Means
 
@@ -76,90 +83,97 @@ The goal is not just "does it have a `resume` command?" The goal is to understan
 state is preserved, how a wrapper can target the right session, whether the behavior is
 safe for automation, and where Claudine must compensate.
 
-## Research Deliverables
+## Document Structure
 
-Write frontmatter that captures these facts directly:
+The research deliverable is a prose document a maintainer can learn the provider's
+resume behavior from; frontmatter is distilled from this body afterward, never invented
+separately. A good body is specific enough that Claudine can build wrapper logic from
+it without guessing: prefer verified commands, concrete file paths, exact field names,
+and explicit limitations over broad statements. Write the body of `{{file}}` using
+these sections:
 
-- `created`, `last_updated`, `agent`, and `model` identify the research run. Preserve
-  `created` on update; set `last_updated` to `{{ctx.today}}`.
-- `docs` is the best official URL for session/resume behavior. If only CLI reference
-  docs exist, use those and explain the gap.
-- `support` classifies the provider's practical resume support:
-  `first_class`, `partial`, `interactive_only`, `non_interactive_only`, `none`, or
-  `unknown`.
-- `continuity_model` states whether resume is transcript replay, server-side session
-  continuation, live-process attach, checkpoint snapshot, mixed, absent, or unknown.
-- `resume_modes` lists each surface where resume can happen: interactive CLI,
-  non-interactive command, headless server, IDE, API, or unknown. Include whether it
-  accepts a follow-up prompt and how the target session is selected.
-- `session_id_capture` records where stable resume handles come from: stdout, stderr,
-  JSON stream, log files, transcript/session files, CLI commands, interactive UI, hooks,
-  or another surface.
-- `resume_invocations` records exact commands, slash commands, API calls, or UI paths.
-  Include examples for continue-latest and explicit-handle resume when both exist.
-- `state_storage` records where resumable state lives on macOS, Linux, Windows, or all
-  OSes. Include path, format, retention, and whether the format is stable enough for
-  Claudine to read directly.
-- `resume_scope` records how session lookup is scoped: current directory, project,
-  repository, worktree, branch, all projects, remote server, or explicit handle only.
-- `branching_checkpointing` records whether the provider can fork, branch, rewind,
-  checkpoint, or duplicate a session without corrupting the original.
-- `restored_state` records what survives resume: transcript, tool results, approvals,
-  model choice, working directory, roots, environment, and permissions.
-- `hitl_resume` records whether an interrupted question, permission prompt, or tool
-  approval can be captured and answered later by Claudine.
-- `interruption_recovery` records what happens after crash, Ctrl+C, process kill,
-  terminal close, network failure, pending tool calls, and pending approvals.
-- `observability` records stream events, hook events, logs, transcript fields, status
-  commands, or APIs that reveal session IDs, lifecycle state, resumability, or failure.
-- `quirks` records provider-specific traps and unsafe assumptions.
-- `gaps` records claims that could not be verified from docs or local inspection.
-- `changes` records update-mode changes only; first-run documents should use `[]`.
-- `requires_claudine_update` is `true` only when the research implies a Claudine code or
-  generated-metadata change. Explain that in `reason`.
-
-Use `support: none` only when the provider clearly cannot continue any prior session.
-Use `unknown` when the docs do not prove the answer.
-
-## Quality Bar
-
-A good answer is specific enough that Claudine can build wrapper logic from it without
-guessing. Prefer verified commands, concrete file paths, exact field names, and explicit
-limitations over broad statements.
-
-Do:
-
-- Distinguish interactive resume from non-interactive resume.
-- Distinguish "continue the latest session" from "resume this exact session."
-- Distinguish session names, IDs, numeric indexes, PR handles, and picker-only selection.
-- Explain whether a new prompt can be supplied at resume time.
-- Explain whether resume keeps writing to the same transcript or creates a new one.
-- Explain whether resumed runs inherit or reset approvals, model choice, tools, roots,
-  sandbox settings, and working directory.
-- Explain whether concurrent resumes of the same session are safe, rejected, or can
-  interleave transcript state.
-- Explain whether branch/fork/checkpoint features preserve the original session.
-- Explain whether direct parsing of session files is supported, discouraged, or unstable.
-- Explain whether session storage and lookup differ across macOS, Linux, and Windows.
-- Cite official documentation first; use local inspection only for facts not documented.
-
-Avoid:
-
-- Saying "supports resume" without saying which mode and selector.
-- Treating a chat-history export as true resume unless the provider can continue from it.
-- Treating memory files or project instructions as resume; those are context sources, not
-  a prior session continuation mechanism.
-- Assuming an interactive picker can be automated.
-- Assuming local transcript replay is equivalent to live server-side continuation.
-- Assuming approval state, current working directory, or model choice survives resume
-  unless verified.
-- Parsing undocumented session files as a stable integration path without calling out the
-  risk.
+- `## Overview` Section
+    - One or two paragraphs: the provider's practical resume support level, the
+      continuity model behind it, and the main risks for a wrapper
+- `## Resume Semantics` Section
+    - What the provider means by a "session": local transcript history, remote server
+      state, a live process, an IDE conversation, or a combination
+    - Which of the What-Resume-Means patterns above apply, and which continuity model
+      backs them — local transcript replay is not equivalent to live server-side
+      continuation, so say which one this is
+    - Guard: a chat-history export is not resume unless the provider can continue
+      from it; memory files and project instructions are context sources, not a prior
+      session continuation mechanism
+- `## Supported Modes` Section
+    - Which resume surfaces exist: CLI flag, subcommand, slash command, TUI picker,
+      IDE command, local server API, SDK
+    - Distinguish interactive from non-interactive resume, and "continue the latest
+      session" from "resume this exact session"; say whether each mode accepts a
+      follow-up prompt
+    - Distinguish session names, IDs, numeric indexes, PR handles, and picker-only
+      selection — and do not assume an interactive picker can be automated
+    - Say whether sessions created in non-interactive mode can themselves be resumed,
+      or only interactive ones
+- `## Session ID Capture` Section
+    - How session IDs, names, transcript paths, or run IDs are emitted: stdout,
+      stderr, JSON streams, hooks, logs, status commands, or local files
+    - How early a handle becomes available and whether it is stable enough for a
+      later resume
+- `## Resume Invocation` Section
+    - Exact commands, slash commands, API calls, or UI paths; include examples for
+      continue-latest and explicit-handle resume when both exist
+    - Whether a new prompt can be supplied at resume time and whether the follow-up
+      answer can be captured as structured output
+- `## Session Lookup Scope` Section
+    - How session lookup is scoped: current directory, project, repository, worktree,
+      branch, all projects, or remote server — and whether storage and lookup differ
+      across macOS, Linux, and Windows
+- `## State Storage` Section
+    - Where resumable state lives on macOS, Linux, and Windows: path, format, and
+      retention
+    - Whether the format is documented and stable, or explicitly internal — if direct
+      parsing is possible but unsupported, call out the risk instead of presenting it
+      as an integration path
+- `## Restored State` Section
+    - What survives resume: conversation transcript, tool results, plan history,
+      approvals, model, permissions, sandbox, cwd, extra roots, attachments, MCP
+      servers, environment variables, and pending tool calls
+    - Do not assume approval state, working directory, or model choice survives
+      unless verified; say what is inherited, reset, or overridable at resume time
+    - Whether resume keeps writing to the same transcript or creates a new one
+- `## Branching and Checkpoints` Section
+    - Whether sessions can be renamed, deleted, exported, listed, searched, shared,
+      branched, forked, rewound, or checkpointed — and whether branch/fork/checkpoint
+      features preserve the original session
+- `## Human-in-the-Loop Resume` Section
+    - Whether a pending user question, approval prompt, or permission request can be
+      captured and answered later; which API/hook/event carries the question and
+      which API/command submits the answer
+- `## Interruption Recovery` Section
+    - What happens after crash, Ctrl+C, terminal close, process kill, provider error,
+      rate-limit pause, context compaction, or network loss — including pending tool
+      calls and pending approvals
+    - Whether concurrent resumes of the same session are safe, rejected, or can
+      interleave transcript state
+- `## Observability` Section
+    - Stream events, hook events, logs, transcript fields, status commands, or APIs
+      that reveal session IDs, lifecycle state, resumability, or failure
+- `## Quirks and Gaps` Section
+    - Provider-specific traps and unsafe assumptions; claims that could not be
+      verified belong here as gaps rather than being silently dropped
+- `## Claudine Integration Notes` Section
+    - What the findings mean for Claudine's lifecycle `resume`, `retry`, `proxy`, and
+      future human-in-the-loop recovery
+- `## Changelog` Section (update runs only)
+    - Summarize what changed since the prior research
+- `## Sources`
+    - add all useful resources you used as Markdown links; cite official
+      documentation first and use local inspection for facts not documented
 
 ## Examples of Useful Variance
 
-These examples show the level of specificity expected. Do not copy them into provider
-files unless verified for that provider.
+These examples show the level of specificity expected in the distilled frontmatter.
+Do not copy them into provider files unless verified for that provider.
 
 ```yaml
 support: first_class
@@ -200,57 +214,87 @@ resume_scope:
   notes: "Default lookup is current project; picker can widen to all projects."
 ```
 
-## Research Questions
+## Task
 
-- What does the provider mean by a "session"? Is it local transcript history, remote
-  server state, a live process, an IDE conversation, or a combination?
-- Which resume surfaces exist: CLI flag, subcommand, slash command, TUI picker, IDE
-  command, local server API, SDK, or undocumented file inspection?
-- Can a caller continue the latest session without knowing a handle?
-- Can a caller target an exact session by ID, name, index, branch, PR, worktree, or path?
-- Can a non-interactive command send a follow-up prompt into a prior session and return
-  structured output?
-- Does resume work for sessions created in non-interactive mode, or only interactive
-  sessions?
-- How are session IDs, names, transcript paths, or run IDs emitted in stdout, stderr,
-  JSON streams, hooks, logs, status commands, or local files?
-- Where is resumable state stored on macOS, Linux, and Windows? Is the format documented
-  and stable, or explicitly internal?
-- How is session lookup scoped by current directory, project, repository, worktree,
-  branch, all projects, or remote server?
-- Can sessions be renamed, deleted, exported, listed, searched, shared, branched, forked,
-  rewound, or checkpointed?
-- What state survives resume: conversation transcript, tool results, plan history,
-  approvals, model, permissions, sandbox, cwd, extra roots, attachments, MCP servers,
-  environment variables, and pending tool calls?
-- Can a pending user question, approval prompt, or permission request be captured and
-  answered later? If so, what API/hook/event carries the question and what API/command
-  submits the answer?
-- What happens after crash, Ctrl+C, terminal close, process kill, provider error,
-  rate-limit pause, context compaction, or network loss?
-- Can the same session be resumed concurrently from multiple terminals or processes? If
-  so, are messages serialized, interleaved, rejected, or forked?
-- Which behavior matters for Claudine's lifecycle `resume`, `retry`, `proxy`, and future
-  human-in-the-loop recovery?
+Follow these steps exactly:
 
-## Body Structure
+::block when="update"
+- Read existing research in `{{file}}`
 
-- `## Overview`
-- `## Resume Semantics`
-- `## Supported Modes`
-- `## Session ID Capture`
-- `## Resume Invocation`
-- `## Session Lookup Scope`
-- `## State Storage`
-- `## Restored State`
-- `## Branching and Checkpoints`
-- `## Human-in-the-Loop Resume`
-- `## Interruption Recovery`
-- `## Observability`
-- `## Quirks and Gaps`
-- `## Claudine Integration Notes`
-- `## Changelog` when `update` is true
-- `## Sources`
+    > **Note:** the speed at which Agentic CLIs change is rapid and therefore you
+    > should assume that the prior research is out of date. You are reading this
+    > primarily to be able to effectively report the changes into the `## Changelog`
+    > section of the document. Critically, you should never substitute information in
+    > the old research for doing your own (up-to-date) research.
 
-Use current official documentation and local inspection where available. Cite sources as
-Markdown links.
+::end-block
+- Perform research on the topic
+
+    > **Evidence requirement:** you have read access to `{{state.user_dir}}` on this
+    > host. Inspect the *actual* session files there — storage paths, file formats,
+    > and what a real transcript contains — and prefer what you observe over what
+    > documentation claims. Negative probes are evidence too — "no session files
+    > exist for non-interactive runs" is a finding. Unanswered is not the same as
+    > omitted: record `unknown` with a note rather than dropping a field.
+
+::block when="update"
+- Update the document with your research
+- Add an entry to the `## Changelog` section
+::end-block
+::block when="!update"
+- Write and save the research to `{{file}}`, following the Document Structure above
+::end-block
+- Set the `$schema` property of `{{file}}` to the string `./_schema.yaml`
+
+    > This is a file reference to this topic's schema sidecar. Read `_schema.yaml`
+    > (it sits next to this sequence file) before filling frontmatter — it is the
+    > authoritative field contract, and `md schema validate` will enforce it against
+    > everything you write.
+
+- Now capture the facts you documented above into the document's frontmatter:
+    ::block when="!update"
+    - `created` - set to "{{ctx.today}}"
+    ::end-block
+    - `last_updated` - set to "{{ctx.today}}"
+    - `agent` - set to "{{env.AGENT}}"
+    - `model` - set to "{{env.MODEL || 'default' }}"
+    - `docs` - the best official URL for session/resume behavior; if only CLI
+      reference docs exist, use those and explain the gap in the body
+    - `support` - the classification from `## Overview`. Use `none` only when the
+      provider clearly cannot continue any prior session; use `unknown` when the docs
+      do not prove the answer
+    - `continuity_model` - from `## Resume Semantics`
+    - `resume_modes` - from `## Supported Modes`
+    - `session_id_capture` - from `## Session ID Capture`
+    - `resume_invocations` - from `## Resume Invocation`
+    - `resume_scope` - from `## Session Lookup Scope`
+    - `state_storage` - from `## State Storage`
+    - `restored_state` - from `## Restored State`
+    - `branching_checkpointing` - from `## Branching and Checkpoints`
+    - `hitl_resume` - from `## Human-in-the-Loop Resume`
+    - `interruption_recovery` - from `## Interruption Recovery`
+    - `observability` - from `## Observability`
+    - `quirks` and `gaps` - from `## Quirks and Gaps`
+    ::block when="update"
+    - `changes` - add a list of string descriptions which summarize the changes discovered since the last research was done
+    ::end-block
+    ::block when="!update"
+    - `changes` - set to `[]`
+    ::end-block
+    - `requires_claudine_update` - set to true/false based on whether you believe there will be required code changes to **Claudine** based on the changes discovered in your research.
+        - If you respond with `true` then you must also set the `reason` frontmatter property to describe why you think that
+
+## Output
+
+::file @prompts/make-it-markdown.md
+
+## Exit Criteria
+
+You are done with this task when the Markdown "{{file}}" has been saved with:
+
+1. all research in the body of the document, following the Document Structure
+2. and all Frontmatter properties have been set
+3. running `md schema validate '{{file}}'` returns `true` (indicating that all Frontmatter was set correctly)
+
+- you do not need to run any tests or lints
+- this task had no code modifications in it
