@@ -20,7 +20,9 @@
 | `usage` | NO | old pattern | **0** | prompt only — full authoring run |
 | `agent-cli` | NO | old pattern | 8 | old-generation docs (`claude-code.md`, `gemini-cli.md`, `roo-code.md`); missing pi/kilo |
 | `non-interactive-sessions` | NO | old (`_details.md`) | 8+2 | old-generation docs (`qwen.md`); missing pi/kilo; 2 non-roster extras (`codex-gotchas.md`, `codex-tools-and-events.md`) |
-| `env-vars` | NO | draft (`_env-vars.md`) | 1 | planned topic, barely started |
+| `system-prompt` | yes | current | 9 legacy | **fleet topic**; legacy docs exist, with two stale resume-prompt misfires to treat as evaluator inputs only |
+| `acp` | yes | current | 6 provider docs + reference docs | **fleet topic**; legacy provider docs and protocol/library docs exist |
+| `env-vars` | — | legacy notes only | 1 | **removed as standalone topic**; domain topics own their own env vars |
 | `hooks` | NO | none | 8 legacy | **fleet topic** (per prior discussion); legacy per-provider docs exist (old-roster names) |
 | `skills` | NO | none | — | **fleet topic**; legacy input: `cross-referencing/` (8 docs) + `skillsets/` (3 docs) |
 | `slash-commands` | NO | none | — | **fleet topic**; legacy input: `cross-referencing/` |
@@ -37,8 +39,8 @@ subagents then cross-check the new doc against the old one — divergences are e
 genuine platform drift (belongs in the new doc) or a regression in the new research
 (fix it). Fresh mode means `changes: []` and no changelog requirement on first runs.
 
-Remaining legacy one-off dirs (`protect`, `rendezvous`, `system-prompt`,
-`agent-designs`, `hook-designs`, `acp`, `separating-phases`) are design research, not
+Remaining legacy one-off dirs (`protect`, `rendezvous`,
+`agent-designs`, `hook-designs`, `separating-phases`) are design research, not
 fleet topics; they stay as-is unless Checkpoint 0 says otherwise.
 
 ## Context the executing agent needs
@@ -99,15 +101,15 @@ Ratified resolutions:
 - **(c) Merged `permissions` home** — lives in `agent-permissions/` (widened schema,
   existing 9 docs run in update mode); assumed default, revisable at the permissions
   Checkpoint 2.x if the schema widening argues otherwise.
-- **(d) Design-research dirs** (`protect`, `rendezvous`, `system-prompt`,
-  `agent-designs`, `hook-designs`, `acp`, `separating-phases`) — left as-is.
+- **(d) Design-research dirs** (`protect`, `rendezvous`, `agent-designs`,
+  `hook-designs`, `separating-phases`) — left as-is.
 - **(e) Skills** — topics with a direct claudine consumer earn one:
   permissions/PolicyEngine, hooks/adapters, skills+slash-commands+subagents/linking,
   mcp/mcp module, streaming/stream, resume/lifecycle resume action.
 
 Ratified ordering (consumer value first; retrofit before greenfield):
 `permissions` (merged) → `hooks` → `agent-cli` → `non-interactive-sessions` →
-`skills` → `slash-commands` → `subagents` → `usage` → `env-vars` → `resume` →
+`skills` → `slash-commands` → `subagents` → `usage` → `system-prompt` → `acp` → `resume` →
 `mcp` → `streaming`.
 
 ## Phase 1 — retrofit trio (repeat per topic: agent-cli, non-interactive-sessions, usage)
@@ -148,7 +150,7 @@ Ratified ordering (consumer value first; retrofit before greenfield):
 ## Phase 2 — merged + fleet-ified + new topics
 
 Repeat per topic: `permissions` (merged), `hooks`, `skills`, `slash-commands`,
-`subagents`, `env-vars`, `resume`, `mcp`, `streaming`.
+`subagents`, `system-prompt`, `acp`, `resume`, `mcp`, `streaming`.
 
 1. **Attribute discovery fan-out.** Inputs differ by topic:
    - `permissions`: the existing `agent-permissions/_schema.yaml` + its 9 docs'
@@ -162,14 +164,21 @@ Repeat per topic: `permissions` (merged), `hooks`, `skills`, `slash-commands`,
      `cross-referencing/` doc (plus `skillsets/` for skills), splitting its combined
      coverage into the three topic-specific attribute sets — these feed the `linking`
      module's portability classification.
-   - `resume` / `mcp` / `env-vars`: one subagent per legacy doc where dirs exist;
+   - `system-prompt`: existing `system-prompt/` docs seed the questions, but
+     evaluator subagents must flag the two stale resume-prompt misfires as legacy
+     defects rather than evidence.
+   - `acp`: existing provider docs seed provider-specific questions; `what-is-acp`,
+     `json-rpc`, `rust-crates`, `typescript-libraries`, and `who-supports-acp` remain
+     protocol/library reference inputs, not per-provider fleet outputs.
+   - `resume` / `mcp`: one subagent per legacy doc where dirs exist;
      web-enabled question-cluster subagents for gaps.
    - `streaming`: greenfield — question-cluster subagents seeded from
      `stream::protocol`'s existing per-provider models.
    Synthesize the attribute inventory + draft `_schema.yaml` in the orchestrator.
 2. **Author the prompt** (`_<topic>.md`) following the reference pattern; state the
    claudine consumer explicitly in the Scope section (PolicyEngine, adapters, linking,
-   mcp module, stream protocol, lifecycle resume capability matrix).
+   SystemPromptSpec, ACP client/adapter integration, mcp module, stream protocol,
+   lifecycle resume capability matrix).
 3. Validate as in Phase 1 step 4.
 4. > **HITL CHECKPOINT 2.x (Ken):** per-topic attribute inventory + schema + prompt
    > approval before the fleet run. For `permissions`, this checkpoint also ratifies
@@ -208,7 +217,7 @@ Repeat per topic: `permissions` (merged), `hooks`, `skills`, `slash-commands`,
 
 Every topic in the ratified roster — the retrofit trio, the merged `permissions`, the
 four resource topics (`hooks`, `skills`, `slash-commands`, `subagents`), and the new
-set (`env-vars`, `resume`, `mcp`, `streaming`) — is schema-enforced (`_schema.yaml` +
+set (`system-prompt`, `acp`, `resume`, `mcp`, `streaming`) — is schema-enforced (`_schema.yaml` +
 `$schema:` references), roster-complete (9 providers, current filenames, old research
 retained as validation baselines), fleet-run with green evaluation verdicts,
 distilled into skills where approved, indexed in the `claudine` skill, and logged in

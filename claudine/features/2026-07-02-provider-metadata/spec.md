@@ -66,8 +66,10 @@ Authoritative detail lives in `docs/topics/provider-metadata.md`. In brief:
 - **Research pipeline**: `claudine sequence <topic>.md` fans out over
   `docs/providers.yaml`, producing one document per provider per topic under
   `docs/research/<topic>/`. Topics today: agent-models, agent-permissions,
-  non-interactive-sessions, usage, agent-logging, agent-cli. Planned: env vars, permissions,
-  resume, MCP (config/security/events), CLI response streaming.
+  non-interactive-sessions, usage, agent-logging, agent-cli. Planned: permissions,
+  system-prompt, ACP, resume, MCP (config/security/events), CLI response streaming.
+  Environment variables are intentionally captured inside the domain topics they
+  affect rather than as a standalone topic.
 - Some research topics carry a `target_schema` (SimpleSchema) so their frontmatter is
   machine-validated (`md schema validate`); others (usage, agent-cli,
   non-interactive-sessions) do not yet.
@@ -248,7 +250,7 @@ Two sources of new fields:
 | `prompt_delivery` (`PromptDeliverySpec`) | wrapper override | highest effort; may stay behavior |
 | `structured_stream_flag` | wrapper `apply_structured_stream` | |
 | `non_interactive_conflicting_flags` | wrapper overrides | |
-| `allowed_env_keys` | wrapper overrides | pairs with the env-vars research topic |
+| `allowed_env_keys` | wrapper overrides | drawn from domain-topic `env_vars` fields; no standalone env-vars topic |
 | `suppress_structured_stderr_on_success` | wrapper override | |
 | `model_required_in_non_tty` | hardcoded OpenCode check in `composition/select.rs` | |
 | `platform_kind` | *(new, 2026-07-02)* | `VendorPlatform` (Claude Code, Codex — predominantly own-vendor models) vs `AgentAggregator` (OpenCode, Pi, Goose — model-agnostic); predicts model-selection UX centrality and API-shim flexibility |
@@ -264,14 +266,23 @@ Two sources of new fields:
 | `non_interactive` | non-interactive-sessions | output formats, schema URL/type, use-case detectability matrix (cap approaching/capped/no-funds/auth/…) |
 | `usage` | usage | usage-data acquisition strategy (api/cli/pty-scrape), dashboard URL |
 | `cli` | agent-cli | version, homepage/repo/docs URLs, full switch inventory (or a pointer to it) |
+| `system_prompt` | system-prompt | append/replace support, prompt delivery strategy, config/memory files, prompt layers, agent/subagent prompt isolation, format recommendations |
+| `acp` | acp | launch mode, protocol version, capabilities, reverse requests, filesystem/terminal delegation, Rust client guidance, compatibility quirks |
 | `local_runners` | *(authored + verified 2026-07-02 — `docs/research/local_runners/`, 5 runner docs + `local-runners` skill; see `spike-local-runners.md`)* | **runner-side focus**: per-OS binaries/installs, OpenAI/Anthropic API surfaces, detection probes (a future `sniff` surface), config, model-id grammar, traps |
 | `hooks` | *(planned — decided 2026-07-02, green-field prompt; see `hl-approach.md` §A)* | per-event payload schemas, `capability: can_block/can_mutate/observe_only`, config file/format/section, mapping onto the Claudine-owned canonical-event enum |
 | `skills` / `slash_commands` / `subagents` | agent-skills / slash-commands / subagents *(planned — decided 2026-07-02, three topics sharing one vocabulary block; see `hl-approach.md` §A)* | config formats, user/repo scopes with per-OS paths, recognized/required metadata keys, invocation grammar (commands) — feeds the `linking` portability classification |
-| `env_vars` | *(planned — refocused 2026-07-02: domain topics own their domain's env vars)* | sanitization allow-lists, precedence chains, general env-recognition behavior |
 | `resume` | *(planned)* | resume flags, session-ID injection pattern |
 | `mcp` | *(planned)* | config location/format, security posture, event visibility |
 | `streaming` | *(planned)* | protocol, event coverage, think-delimiter quirks |
 | `signals` | *(planned — see [Signal Catalog](#signal-catalog--fine-grained-event-semantics))* | detection records: match/extract paths, units, timezones, version vocabularies, evidence fixtures |
+
+Decision, 2026-07-02: there is no standalone `env-vars` research topic for this
+pass. Variables only make sense when tied to a consumer domain: model selection and
+API endpoints live in `model_config`, approval and sandbox variables live in
+`permissions`, MCP variables live in `mcp`, logging variables live in `logging`, and
+general process/CLI variables live in `agent-cli`. Generator work that needs an
+allow-list or sanitization inventory should collect `env_vars` from those domain
+topics and keep the consumer context attached.
 
 ❓ OPEN: how much of B belongs in compiled `ProviderInfo` vs staying research-only (consumed
 by docs/reporting tooling but not compiled)? Proposal: research frontmatter is a superset;

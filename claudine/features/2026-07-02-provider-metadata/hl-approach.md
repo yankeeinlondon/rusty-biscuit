@@ -30,7 +30,7 @@ Immediate: ~~local-runners fleet~~ (done 2026-07-02 — see
 ([model-config-plan.md](model-config-plan.md)). Then sidecars + verification pattern for
 the remaining existing topics (usage, agent-cli, non-interactive-sessions) and the
 planned ones (hooks, agent-skills, slash-commands, subagents, agent-permissions v2,
-resume, MCP, streaming, signals, env-vars — the last refocused; see below). Each new
+system-prompt, ACP, resume, MCP, streaming, signals). Each new
 topic follows the now-standard recipe: schema designed backwards from catalog fields →
 pilot → evaluate → fleet → evaluate again → targeted fixes. The
 `requires_claudine_update` queue is triaged as topics land (Kimi 2.0 protocol fix rides
@@ -62,6 +62,12 @@ from the legacy ones, so stale siblings would otherwise accumulate — observed 
   live in `providers.yaml`, not in any of the three. Feeds the `linking` module's
   portability classification. "Shared scripts folders" from the legacy area rides
   inside `agent-skills` if it earns a record; otherwise dropped.
+- `system-prompt` — append/replace support, provider-native prompt layers,
+  config/memory files, agent/subagent prompt isolation, format recommendations, and
+  the best non-mutating delivery strategy for Claudine's `SystemPromptSpec`.
+- `ACP` — native-vs-adapter launch mode, protocol version/capabilities, reverse
+  request handling, filesystem/terminal delegation, streaming-to-UI patterns, and
+  Rust client integration guidance for Claudine's future ACP client/adapter layer.
 
 **Not a new topic:** the agent-permissions bullet list (OS-specific config paths,
 formal/informal schema classification, defaults-when-unspecified, YOLO defaults, CLI
@@ -70,11 +76,10 @@ switches, env vars) is a **v2 schema for the existing live `agent-permissions` t
 `has_official_schema: enum(formal,informal,none)` (+ `confidence` for observed facts).
 
 **Env-vars ownership rule (decided):** domain topics own their domain's env vars
-(model-config, local-runners, and permissions-v2 already carry `env_vars[]` records);
-the planned standalone `env-vars` topic is **refocused** to what no domain topic owns —
-sanitization allow-lists, precedence chains, and general env-recognition behavior — or
-becomes a generated consolidation view over the domain topics. Never research the same
-env var in two places.
+(model-config, local-runners, and permissions-v2 already carry `env_vars[]` records).
+There is no standalone `env-vars` fleet topic in this pass; sanitization allow-lists
+and allowed-key inventories should be generated consolidation views over the domain
+topics. Never research the same env var in two places.
 
 **Process amendment (from the local-runners cycle):** the recipe is pilot → evaluate →
 fleet → **evaluate again** → targeted fixes. Every fresh generation introduced new
