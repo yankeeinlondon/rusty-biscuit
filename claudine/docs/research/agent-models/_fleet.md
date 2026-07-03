@@ -1,6 +1,13 @@
 ---
 sequence: "@claudine/docs/providers.yaml"
 file: "{{ctx.repo_root}}/claudine/docs/research/agent-models/{{state.file}}"
+# NOTE: `grant:` is not implemented yet — until it is, run this sequence with
+# `--yolo` so the provider can Read files under {{state.user_dir}}; without it
+# OpenCode's external_directory permission is auto-rejected in non-interactive
+# mode and the research agent stops prematurely.
+grant:
+    read:
+        - "{{state.user_dir}}"
 agent: opencode
 model: kimi-for-coding/k2p7
 # the frontmatter contract for target documents lives in the schema sidecar
@@ -29,25 +36,73 @@ failure:
     message: "💥 the Agent Models research on **{{state.name}}** failed to complete!"
     warn: "The Agent Models research on **{{state.name}}** failed to complete! (err: {{err.message}})"
 ---
+# Agent Model Research on {{state.name}}
 
 ## Skills
 
 Use the 'claudine' skill.
 
+## Scope
+
+This topic covers the **out-of-box model surface** of **{{state.desc}}**: which models a
+stock install offers, which mechanisms select a model at launch time and at runtime, the
+precedence between those mechanisms, and whether the catalog can be enumerated
+programmatically. The research feeds Claudine's **model ground-truth mapping** — the
+expected-offering records Claudine uses to know which model IDs a stock {{state.name}}
+install should accept and offer, and to detect drift when the offering changes.
+
+The sibling `model-config` topic owns **user-side extension** of the model set —
+registering bespoke cloud models, local-runner models, and gateway/proxy routing. Do not
+research or document those mechanisms in depth here; name them only where the body asks
+for a classification-level pointer. Reciprocally, `model-config` cedes out-of-box
+enumeration, selection mechanisms, and precedence to this topic.
+
+Sibling provider research files in this directory (e.g. `claude.md`, `codex.md`,
+`gemini.md`, `opencode.md`) are research **outputs**, not sources — do not open,
+paraphrase, or cite another provider's document; your research must be independent.
+
 ## Document Structure
 
-Your job is to do detailed research into the **model** support in the **{{state.desc}}** solution. You are expected to answer the following questions:
-
-- `## Model's Available` Section
-    - what models are available by default when you install **{{state.name}}**?
-    - how can you add in bespoke models (local models or otherwise)?
-
-- `## Model Configuration Details` Section
-
-    - Does **{{state.name}}** provide a formal schema for the configuration of its models? An informal schema?
-    - How is a model selected at launch time and at runtime (CLI flags, ENV variables, config files, interactive slash commands, wire envelope)? What is the precedence between these mechanisms?
-    - Can the CLI enumerate its model catalog programmatically (a `models`/`list` subcommand, an API, a config dump)?
-
+- `## Models Available` Section
+    - Which models does a stock install of {{state.name}} offer? List every entry with
+      its **exact model ID transcribed verbatim from observation** — the precise string
+      the CLI/config accepts. Never normalize, abbreviate, or "clean up" an ID; a
+      ground-truth mapping built from paraphrased IDs is worse than none
+    - Distinguish aliases from the underlying model IDs they resolve to, and say which
+      model is used when the user specifies nothing
+    - Record documented context windows where the provider states them, and note when
+      the default resolution varies by account type or backend
+    - > **Anti-pattern — do not do this:** never report a model absent from the
+      > interactive picker as unavailable without checking the selection mechanisms and
+      > dynamic listing. Pickers are frequently a curated subset; a model can be fully
+      > selectable by exact ID via a CLI flag, env var, or config key while never
+      > appearing in the menu.
+- `## Model Selection` Section
+    - Which mechanisms select a model at launch time and at runtime — CLI flags,
+      environment variables, config-file keys, interactive slash commands,
+      wire-envelope fields? Give the exact flag/variable/key/command name and a
+      concrete example for each mechanism that exists
+    - What is the highest-wins precedence ordering across those mechanisms? State the
+      evidence for the ordering (documented ordering or observed behavior) instead of
+      assuming the conventional `cli > env > config` order holds
+    - How do session-scoped overrides interact with persisted defaults — does an
+      interactive switch persist to config, is a launch flag session-only, what happens
+      on session resume?
+- `## Configuration Schema` Section
+    - Which schema artifacts exist for the model-related configuration surface — a
+      formal machine-readable schema (JSON Schema or similar), an informal documented
+      shape (prose, tables, examples), or neither? Cite the URL of whatever exists
+- `## Dynamic Listing` Section
+    - Which mechanisms enumerate the model catalog programmatically — a
+      `models`/`list` subcommand, an HTTP API, a config dump, a machine-readable cache
+      file? Name the method and show an example invocation with the shape of its output
+    - When no mechanism exists, say exactly what was checked (`--help`, subcommand
+      help, docs) — a negative probe is a finding, not an omission
+- `## Extending the Model Set` Section — pointer only
+    - Name each channel through which users register bespoke/local models, one line
+      per channel with the config file/key involved — classification only. The
+      mechanics (config walkthroughs, gateway setup, local-runner integration) are the
+      `model-config` topic's territory; do not duplicate them here
 - `## Sources`
     - add all useful resources that you used in your research as Markdown links
 
@@ -63,6 +118,15 @@ Follow these steps exactly:
 
 ::end-block
 - Perform research on topic
+    - take your time and make sure to be complete in your research
+    - **Evidence requirement:** you have read access to
+      `{{state.user_dir || 'the provider user config directory'}}` on this host.
+      Inspect the actual config files, caches, and logs there and prefer what you
+      observe over what documentation claims — real installs regularly contain model
+      IDs and selection keys the documentation omits. State when no local config
+      exists to inspect
+    - unanswered ≠ omitted: when a question cannot be settled, record `unknown` with a
+      note rather than silently dropping it
 ::block when="update"
 - Update the document with your research
 - Add an entry to the `## Changelog` section
@@ -77,20 +141,31 @@ Follow these steps exactly:
     > authoritative contract, expressed as a `SimpleSchema`, and `md schema validate`
     > will enforce it against everything you write.
 
-- Now we will capture other key metadata to the research documents Frontmatter:
+- Now capture the facts you documented above into the document's Frontmatter:
     ::block when="!update"
     - `created` - set to "{{ctx.today}}"
     ::end-block
     - `last_updated` - set to "{{ctx.today}}"
     - `agent` - set to "{{env.AGENT}}"
     - `model` - set to "{{env.MODEL || 'default' }}"
-    - `has_official_schema` - set to "formal" if a formal schema exists for **model configuration**, "informal" if only an informal one exists, otherwise "none"
-    - `schema_url` - if a formal or informal schema was discovered then set the URL for the schema's definition (always prefer formal over informal); otherwise do not add this property
-    - `default_models` - one record per model available out of the box. `id` must be the **exact string** the CLI/config accepts; add `alias` when a short form exists, `context_window` when documented, and `is_default: true` on the model used when none is specified
-    - `model_selection` - one record per mechanism for choosing a model (`cli_flag`, `env_var`, `config_file`, `interactive_command`, `wire_envelope`); `site` is the flag/variable/key/command name; give an `example` for each
-    - `precedence` - the highest-wins ordering across the `model_selection` mechanisms (e.g. "cli_flag > env_var > config_file")
-    - `custom_models` - one record per way to register bespoke/local models (`local`, `openai_compatible`, `anthropic_compatible`, `provider_plugin`, `other`); `config_site` names the config file/key involved
-    - `dynamic_listing` - whether the CLI can enumerate its model catalog programmatically; if so name the `method` and give an `example`
+    - `has_official_schema` - from `## Configuration Schema`: "formal" when a
+      machine-readable schema exists, "informal" when only documented prose/examples
+      exist, otherwise "none"
+    - `schema_url` - the URL cited in `## Configuration Schema` (prefer formal over
+      informal); omit when none exists
+    - `default_models` - one record per model documented in `## Models Available`;
+      `id` must be the exact observed string, verbatim — never normalized or
+      abbreviated. Add `alias` when a short form exists, `context_window` when
+      documented, and `is_default: true` on the model used when none is specified
+    - `model_selection` - one record per mechanism documented in `## Model Selection`,
+      with the `site` and `example` shown there
+    - `precedence` - the highest-wins ordering you established in `## Model Selection`
+      (e.g. "cli_flag > env_var > config_file")
+    - `custom_models` - one classification-level record per channel named in
+      `## Extending the Model Set` (`kind`, `config_site`, one-line note); the deep
+      semantics belong to the model-config topic
+    - `dynamic_listing` - the facts from `## Dynamic Listing`: `available`, plus
+      `method` and `example` when a mechanism exists
     ::block when="update"
     - `changes` - add a list of string descriptions which summarize the changes discovered since the last research was done
     ::end-block
