@@ -295,7 +295,7 @@ recent_changes:
 quirks:
   - The Codex CLI has no native ACP mode; every ACP integration requires an adapter bridge.
   - The recommended adapter package moved from `@zed-industries/codex-acp` to `@agentclientprotocol/codex-acp`; old package references may stop getting updates.
-  - `NO_BROWSER=1` removes ChatGPT OAuth from advertised auth methods, which can break flows that expect a browser sign-in.
+  - "`NO_BROWSER=1` removes ChatGPT OAuth from advertised auth methods, which can break flows that expect a browser sign-in."
   - API key auth is only recommended for headless/CI environments; ChatGPT subscription features are unavailable with API keys.
   - Initialization can take longer than 30 seconds; use a 60-second timeout for `initialize`.
   - Relative paths and 0-based indexing are common mistakes; ACP requires absolute paths and 1-based line numbers.
