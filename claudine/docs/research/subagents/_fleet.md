@@ -29,6 +29,7 @@ failure:
     message: "💥 the Subagents research on **{{state.name}}** failed to complete!"
     warn: "The Subagents research on **{{state.name}}** failed to complete! (err: {{err.message}})"
 ---
+# Subagent Research on {{state.name}}
 
 ## Skills
 
@@ -46,6 +47,13 @@ does work inside a session: named subagents, agents, modes, personas, roles, wor
 specialists, tool-scoped agents, extension-provided agents, or documented conventions
 that provide equivalent delegation. Do not count a one-off prompt, an ordinary model
 selection flag, or a built-in mode alone unless users can define their own equivalent.
+Likewise, do not re-document lifecycle-event semantics here — the hooks topic owns
+those; record only *which* events expose agent lifecycle.
+
+Cross-topic ownership: the hooks topic owns event semantics (this topic records only
+which stream/hook events expose agent lifecycle); the plugins topic's
+`packaged_resources` records containment only — agent definitions packaged inside
+plugins still have their semantics documented here.
 
 Write the result to `{{file}}`. Include `$schema: ./_schema.yaml` in frontmatter so the
 document can be validated, but treat the instructions below as the source of what
@@ -218,13 +226,18 @@ observability:
 
 ## Body Structure
 
-- `## Overview`
-- `## Locations`
-- `## Definition Format`
-- `## Runtime Behavior`
-- `## Observability`
-- `## Portability`
-- `## Claudine Linking Notes`
+- `## Overview` — what the provider calls the feature and how complete the support is.
+- `## Locations` — exact template paths per OS and scope, noting which were observed
+  locally versus documented only.
+- `## Definition Format` — file names, metadata keys, body format, and a small real
+  example of a definition.
+- `## Runtime Behavior` — how delegation is triggered, what context and permissions the
+  child inherits, what returns to the parent, and concurrency/nesting limits.
+- `## Observability` — which stream events, hook events, logs, transcripts, or session
+  IDs make agent starts/stops visible to a wrapper.
+- `## Portability` — which definitions link as-is, which need rewriting, and why.
+- `## Claudine Linking Notes` — what the agent linker and lifecycle `proxy`/`resume` can
+  rely on for this provider.
 - `## Changelog` when `update` is true
 - `## Sources`
 
