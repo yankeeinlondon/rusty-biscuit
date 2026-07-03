@@ -29,12 +29,16 @@ failure:
     message: "💥 the Plugins research on **{{state.name}}** failed to complete!"
     warn: "The Plugins research on **{{state.name}}** failed to complete! (err: {{err.message}})"
 ---
+# Plugin Research on {{state.name}}
 
 ## Skills
 
 Use the 'claudine' skill.
 
 ## Context
+
+Prior-generation research in `../cross-referencing/` is a validation asset for humans
+— do not open, paraphrase, or cite it; your research must be independent.
 
 A **plugin** is a packaging unit that bundles multiple extension assets into one installable, shareable unit. Rather than scattering custom instructions, tool configs, and hook scripts across a project, plugins wrap them together so the agent can discover and use them as a coherent capability.
 
@@ -48,22 +52,17 @@ Plugins may include:
 - LSP Server integrations
 - Formatting rules or visual or linguistic themes/styles
 
-How plugins are installed and configured varies by tool. There is no standard the governs this even though some of the assets which are contained by plugins are more standards based (e.g., Agent Skills and MCP, etc.)
+How plugins are installed and configured varies by tool. There is no standard that governs this even though some of the assets which are contained by plugins are more standards based (e.g., Agent Skills and MCP, etc.)
 
-## Task
+This topic owns the plugin **container**: containment, extraction, and the
+install/discovery/trust machinery around it. The semantics of each contained resource
+belong to its sibling topic (skills, slash-commands, subagents, hooks, MCP).
 
-Your primary task is to research how **{{state.name}}** works with "plugins".
-
-- how do you install a plugin?
-- what is the schema of a plugin's manifest/configuration?
-- what are the list of assets which **{{state.name}}** allows to be bundled?
-- are there ways to enable and disable a plugin?
-- how do CLI switches interact with the plugin functionality?
-- are there environment variables which impact how plugins operate?
+Your primary goal is to research how **{{state.name}}** works with "plugins".
 
 ::block when="state.name != 'Claude Code'"
 
-As is common in Agentic CLI platforms today, Claude Code is often seen as the leader and trend setter in this space. You should make clear comparisons between how {{state.name}} differs from Claude Code as this will often serve as a good reference point for readers.
+As is common in Agentic CLI platforms today, Claude Code is often seen as the leader and trend setter in this space. You should make clear comparisons between how {{state.name}} differs from Claude Code as this will often serve as a good reference point for readers. Cite the doc/URL for every comparison claim; do not rely on memory.
 
 ::end-block
 
@@ -142,6 +141,8 @@ frontmatter as follows:
   - `skills`, `scripts`, `slash_commands`, `subagents`, `mcp_servers`, `hooks`,
     `prompts`, `config`, and `assets` are each `full`, `partial`, `none`, or `unknown`.
   - `other` lists additional provider-specific resource types.
+  - this records **containment/extraction only** — the semantics of each contained
+    resource type are owned by its sibling topic.
 - `discovery` - explain mechanism, precedence, namespacing, conflicts, and notes.
   Include whether plugin resources shadow user/repo resources, whether user/repo
   resources shadow plugin resources, and whether plugin resources appear with prefixes.
@@ -252,6 +253,8 @@ portability:
 - Where are plugins installed by OS and scope?
 - What manifest/package format is recognized?
 - How are plugins installed, updated, removed, enabled, disabled, trusted, and versioned?
+- How do CLI switches interact with the plugin functionality?
+- Are there environment variables which impact how plugins operate?
 - How are plugin-provided resources discovered, namespaced, ordered, and deconflicted?
 - How do plugin resources interact with user/repo resources outside the plugin?
 - Can plugins run executable code or scripts? If so, when and with what permissions?
