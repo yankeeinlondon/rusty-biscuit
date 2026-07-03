@@ -1,0 +1,32 @@
+# SimplifiedSchema for the resume research topic.
+#
+# Captures provider session resume support for Claudine lifecycle `resume`,
+# recovery, and possible human-in-the-loop continuation.
+$schema:
+    created: date
+    last_updated: date(required)
+    agent: string(required)
+    model: string(required)
+
+    docs: url
+    support: enum(first_class,partial,interactive_only,non_interactive_only,none,unknown; required)
+
+    # How session ids are emitted or discovered.
+    session_id_capture: "{ surface: enum(stdout,stderr,json_stream,log_file,session_file,cli_command,interactive_ui,hook,unknown,other; required), field: string, format: string, notes: string }[]"
+
+    # CLI or slash-command resume mechanisms.
+    resume_invocations: "{ mode: enum(interactive,non_interactive,both; required), invocation: string(required), accepts_prompt: boolean, notes: string }[]"
+
+    # Local/server persistence of resumable state.
+    state_storage: "{ location: enum(local,server,both,none,unknown; required), os: enum(macos,linux,windows,all), path: string, format: string, retention: string, notes: string }[]"
+
+    # Whether interrupted permission/user questions can be resumed with answers.
+    hitl_resume: "{ supported: boolean(required), question_capture: string, answer_injection: string, limitations: string }"
+
+    # Stream/hook observability relevant to resume.
+    observability: "{ stream_events: string[], hook_events: string[], failure_modes: string[], notes: string }"
+
+    quirks: string[]
+    changes: string[]
+    requires_claudine_update: boolean(required)
+    reason: string
