@@ -36,6 +36,7 @@ failure:
     message: "💥 the Model Config research on **{{state.name}}** failed to complete!"
     warn: "The Model Config research on **{{state.name}}** failed to complete! (err: {{err.message}})"
 ---
+# Model Config Research on {{state.name}}
 
 ## Skills
 
