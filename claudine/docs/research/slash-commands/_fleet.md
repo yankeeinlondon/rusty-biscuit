@@ -29,6 +29,7 @@ failure:
     message: "💥 the Slash Commands research on **{{state.name}}** failed to complete!"
     warn: "The Slash Commands research on **{{state.name}}** failed to complete! (err: {{err.message}})"
 ---
+# Slash Commands Research on {{state.name}}
 
 ## Skills
 
@@ -37,7 +38,9 @@ Use the 'claudine' skill.
 ## Scope
 
 Research user-defined **slash commands and equivalent reusable command resources** for
-**{{state.desc}}**. This topic feeds Claudine's command linking and portability
+**{{state.desc}}**. Prior-generation research in `../cross-referencing/` is a
+validation asset for humans — do not open, paraphrase, or cite it; your research must
+be independent. This topic feeds Claudine's command linking and portability
 classification, so the research must describe both the authoring format and runtime
 invocation behavior.
 
@@ -46,6 +49,10 @@ and invoke in an agent session: slash commands, prompt commands, custom commands
 macros, workflow commands, extension commands, or documented conventions that behave like
 named reusable commands. Do not count built-in commands alone as support unless the
 provider also lets users define their own.
+
+Boundary against the skills topic: this topic owns invocation grammar and command-shaped
+entries — including providers that unify commands into skills, where the command surface
+is still this topic's ground; the skills topic owns packaging, activation, and discovery.
 
 Write the result to `{{file}}`. Include `$schema: ./_schema.yaml` in frontmatter so the
 document can be validated, but treat the instructions below as the source of what
@@ -110,7 +117,13 @@ frontmatter as follows:
   - `required_fields`: metadata keys required by the provider.
   - `optional_fields`: recognized metadata keys.
   - `argument_syntax`: exact placeholder or argument grammar, such as `$ARGUMENTS`,
-    `{{args}}`, positional `$1`, YAML fields, or "none".
+    positional `$1`, a double-braced args placeholder token (literal form shown fenced
+    below), YAML fields, or "none".
+
+    ```text
+    {{args}}
+    ```
+
   - `body_format`: `markdown`, `yaml`, `json`, `toml`, `text`, `other`, or `unknown`.
   - `notes`: include examples, directory-to-namespace mapping, shell behavior, and
     undocumented constraints.
@@ -205,12 +218,16 @@ portability:
 
 ## Body Structure
 
-- `## Overview`
-- `## Locations`
-- `## File Format`
-- `## Invocation Model`
-- `## Portability`
-- `## Claudine Linking Notes`
+- `## Overview` — what the provider calls the feature and how complete the support is.
+- `## Locations` — exact template paths per OS and scope, noting which were observed
+  locally versus documented only.
+- `## File Format` — file names, metadata fields, argument grammar, body format, and a
+  small real example of a command file.
+- `## Invocation Model` — how commands are invoked, namespaced, argument-parsed, and how
+  their content enters the conversation.
+- `## Portability` — which command files link as-is, which need rewriting, and why.
+- `## Claudine Linking Notes` — what the command linker should do and avoid for this
+  provider.
 - `## Changelog` when `update` is true
 - `## Sources`
 
