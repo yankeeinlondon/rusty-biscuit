@@ -238,17 +238,12 @@ git-conflict:
 readme:
     _readme_files claudine
 
-# the directory structure of both CLI and Library
-structure:
+# publish summary research to the claudine skill
+publish-summary-research:
     @echo
-    @echo "{{ BOLD }}{{ GREEN }}Claudine CLI{{ RESET }}"
-    @echo
-    @just _structure cli/src
-    @echo
-    @echo "{{ BOLD }}{{ GREEN }}Claudine Library{{ RESET }}"
-    @echo
-    @just _structure lib/src
-    @echo
+    cp ./docs/research/summary/mcp.md ../.claude/skills/claudine/mcp.md
+    cp ./docs/research/summary/acp.md ../.claude/skills/claudine/acp.md
+    cp ./docs/research/summary/agent-logging.md ../.claude/skills/claudine/agent-logging.md
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 
