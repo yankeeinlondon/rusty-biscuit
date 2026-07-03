@@ -1,276 +1,322 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-04-06
-last_updated: 2026-07-02
+last_updated: 2026-07-03
 agent: codex
 model: default
 docs: https://geminicli.com/docs/cli/headless/
 invocation:
   - command: 'gemini --output-format stream-json -p "prompt"'
     stdin_support: true
-    prompt_arg: "--prompt/-p string; stdin is additional context when piped"
-    notes: "Starts a fresh non-interactive session and emits JSONL events on stdout."
+    prompt_arg: "--prompt/-p supplies prompt text; piped stdin is accepted as additional input/context"
+    notes: "Starts a fresh headless session and emits JSONL events on stdout."
   - command: 'gemini --output-format stream-json "prompt"'
     stdin_support: true
-    prompt_arg: "Variadic positional query; docs prefer -p because positional arguments can default to interactive mode in a TTY"
-    notes: "Can run headlessly when input or output is piped or redirected, but Claudine should prefer -p for deterministic non-interactive launch."
+    prompt_arg: "Variadic positional query; use -p for deterministic wrapper launch"
+    notes: "Documented as a query argument, but Gemini defaults to interactive mode in a TTY, so Claudine should prefer -p."
   - command: 'gemini --resume latest --output-format stream-json -p "prompt"'
     stdin_support: true
-    prompt_arg: "--prompt/-p string; resumes the most recent project session"
-    notes: "Resumes a saved project-scoped session; stream still starts with an init event for the current run."
-  - command: 'gemini --resume <SESSION_ID> --output-format stream-json -p "prompt"'
+    prompt_arg: "--prompt/-p supplies the next user turn"
+    notes: "Resumes the latest saved project session and emits a new stream for the current run."
+  - command: 'gemini --resume <SESSION_ID_OR_INDEX> --output-format stream-json -p "prompt"'
     stdin_support: true
-    prompt_arg: "--prompt/-p string; session ID, session index, or latest can be supplied to --resume"
-    notes: "Resumes a specific saved session and emits the same JSONL stream."
-  - command: 'gemini --experimental-acp'
+    prompt_arg: "--prompt/-p supplies the next user turn"
+    notes: "Resumes a specific saved project session by ID or list index."
+  - command: "gemini --experimental-acp"
     stdin_support: true
-    prompt_arg: "ACP client protocol, not a prompt string"
-    notes: "Starts experimental ACP mode. It is a bidirectional integration surface, not the preferred Claudine wrapper stream."
+    prompt_arg: "ACP protocol messages, not a prompt string"
+    notes: "Starts experimental ACP mode. This is a bidirectional IDE/protocol surface, not the preferred Claudine stream."
 output_formats:
   - name: "text"
     cli_value: "text"
     stream: true
     format: text
-    description: "Human-readable stdout in non-interactive mode; intermediate status and warnings may be human text on stderr."
-    side_effects: "Not parser-safe for lifecycle supervision; use only for humans."
+    description: "Human-readable default output for headless runs."
+    side_effects: "Not parser-safe; stdout can contain prose and stderr can contain warnings/status."
   - name: "json"
     cli_value: "json"
     stream: false
     format: json
-    description: "One final JSON object with optional session_id, response, stats, error, and warnings."
-    side_effects: "No live tool, warning, or assistant-delta visibility until process completion."
+    description: "Single final JSON object with session_id, response, stats, error, and warnings fields."
+    side_effects: "No live tool or assistant-delta visibility until the process exits."
   - name: "stream-json"
     cli_value: "stream-json"
     stream: true
     format: jsonl
-    description: "Newline-delimited JSON events on stdout with type values init, message, tool_use, tool_result, error, and result. Claudine should prefer this mode."
-    side_effects: "Stdout becomes parse-only JSONL; source strips ANSI for programmatic output. Internal usage, session_update, tool_update, elicitation, agent_start, and custom events are intentionally not projected."
+    description: "Newline-delimited JSON events on stdout. This is Claudine's preferred format."
+    side_effects: "Stdout becomes parse-only JSONL; ANSI is stripped for programmatic output; internal usage, session_update, tool_update, elicitation, agent_start, and custom events are not projected."
 schema_sources:
-  - url: "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/output/types.ts"
-    schema_type: typescript
-    formal: false
-    notes: "Best exact source for OutputFormat, JsonOutput, JsonStreamEventType, JsonStreamEvent, StreamStats, and per-event fields."
-  - url: "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/output/stream-json-formatter.ts"
-    schema_type: typescript
-    formal: false
-    notes: "Defines JSONL framing and maps SessionMetrics into the simplified result.stats shape."
-  - url: "https://github.com/google-gemini/gemini-cli/blob/main/packages/cli/src/nonInteractiveCliAgentSession.ts"
-    schema_type: typescript
-    formal: false
-    notes: "Authoritative projection from internal AgentEvent values to stream-json stdout; also shows ignored internal events and fatal-error handling."
   - url: "https://geminicli.com/docs/cli/headless/"
     schema_type: examples
     formal: false
-    notes: "Official headless docs list output modes, stream event names, and exit codes, but do not publish a complete JSON Schema."
+    notes: "Official headless docs list output modes, event names, and exit codes but do not publish a JSON Schema."
+  - url: "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/output/types.ts"
+    schema_type: typescript
+    formal: false
+    notes: "Best exact source for OutputFormat, JsonOutput, JsonStreamEventType, JsonStreamEvent, and StreamStats."
+  - url: "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/output/stream-json-formatter.ts"
+    schema_type: typescript
+    formal: false
+    notes: "Defines JSONL framing and converts SessionMetrics into stream result stats."
+  - url: "https://github.com/google-gemini/gemini-cli/blob/main/packages/cli/src/nonInteractiveCliAgentSession.ts"
+    schema_type: typescript
+    formal: false
+    notes: "Defines how internal AgentEvent values are projected to stdout stream-json events and which internal events are ignored."
   - url: "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/schemas/settings.schema.json"
     schema_type: json_schema
     formal: true
-    notes: "Formal schema for settings.json only; useful for configuration, not for stream-json output."
+    notes: "Formal schema for settings.json, not for the stream-json event protocol."
 cli_params:
   - flag: "-p, --prompt"
     value: "string"
-    description: "Pass prompt text and force non-interactive mode."
-    example: 'gemini --output-format stream-json -p "summarize this repo"'
+    description: "Pass prompt text and invoke headless mode."
+    example: 'gemini -p "summarize this repo"'
   - flag: "--output-format, -o"
     value: "text | json | stream-json"
-    description: "Select non-interactive output format. Claudine should always pass stream-json explicitly."
-    example: 'gemini -o stream-json -p "review"'
+    description: "Select output format. Claudine should pass stream-json explicitly every run."
+    example: "gemini -o stream-json -p prompt"
+  - flag: "--model, -m"
+    value: "alias or concrete model ID"
+    description: "Select requested model; aliases can resolve through Gemini CLI model configuration."
+    example: "gemini -m flash -o stream-json -p prompt"
   - flag: "--resume, -r"
-    value: "latest | index | session UUID"
-    description: "Resume a saved project-scoped session."
-    example: 'gemini --resume latest --output-format stream-json -p "continue"'
+    value: "latest | index | session ID"
+    description: "Resume a previous project-scoped session."
+    example: "gemini --resume latest -o stream-json -p prompt"
   - flag: "--list-sessions"
     value: "boolean"
-    description: "List project sessions and exit; output is human text, not the agent stream."
+    description: "List available sessions for the current project and exit; not the agent event stream."
     example: "gemini --list-sessions"
-  - flag: "--model, -m"
-    value: "model alias or concrete model"
-    description: "Requested model for the session. The stream init.model reports config.getModel(), which may be a configured/resolved name rather than all backend routing details."
-    example: 'gemini --model gemini-2.5-flash --output-format stream-json -p "run"'
   - flag: "--approval-mode"
     value: "default | auto_edit | yolo | plan"
-    description: "Controls tool approval policy. Use yolo only inside an external sandbox; use plan to prevent mutating tools."
-    example: 'gemini --approval-mode=plan --output-format stream-json -p "inspect only"'
+    description: "Controls tool approval behavior. Use plan for read-only automation or yolo only inside an external sandbox."
+    example: "gemini --approval-mode=plan -o stream-json -p prompt"
   - flag: "--yolo, -y"
     value: "boolean"
-    description: "Deprecated alias for automatic tool approval; docs recommend --approval-mode=yolo."
-    example: 'gemini --approval-mode=yolo --output-format stream-json -p "fix tests"'
+    description: "Deprecated auto-approve alias; docs recommend --approval-mode=yolo."
+    example: "gemini --approval-mode=yolo -o stream-json -p prompt"
   - flag: "--sandbox, -s"
     value: "boolean or configured sandbox"
-    description: "Enable sandbox mode for tool execution."
-    example: 'gemini --sandbox --output-format stream-json -p "run tests"'
+    description: "Run in a sandboxed environment; settings and GEMINI_SANDBOX can also configure sandboxing."
+    example: "gemini --sandbox -o stream-json -p prompt"
   - flag: "--skip-trust"
     value: "boolean"
     description: "Trust the current workspace for this session and skip the folder trust check."
-    example: 'gemini --skip-trust --output-format stream-json -p "review"'
+    example: "gemini --skip-trust -o stream-json -p prompt"
   - flag: "--include-directories"
     value: "dir[,dir...]"
-    description: "Add up to five extra workspace directories; may be specified multiple times."
-    example: 'gemini --include-directories ../shared --output-format stream-json -p "inspect"'
+    description: "Add extra workspace directories to the session context."
+    example: "gemini --include-directories ../shared -o stream-json -p prompt"
   - flag: "--allowed-mcp-server-names"
     value: "name[,name...]"
-    description: "Restrict which configured MCP servers are allowed for the session."
-    example: 'gemini --allowed-mcp-server-names github --output-format stream-json -p "use MCP"'
+    description: "Restrict which configured MCP servers are available."
+    example: "gemini --allowed-mcp-server-names github -o stream-json -p prompt"
+  - flag: "--allowed-tools"
+    value: "tool[,tool...]"
+    description: "Deprecated allowlist for tools that may run without confirmation; docs point users to the policy engine instead."
+    example: "gemini --allowed-tools read_file -o stream-json -p prompt"
   - flag: "--extensions, -e"
-    value: "extension names or none"
-    description: "Select extensions; use -e none to disable extensions in controlled automation."
-    example: 'gemini -e none --output-format stream-json -p "run"'
+    value: "extension list"
+    description: "Select extensions; disabling extensions can reduce wrapper drift."
+    example: "gemini -e none -o stream-json -p prompt"
   - flag: "--debug, -d"
     value: "boolean"
-    description: "Enable verbose diagnostic logging; debug details go through stderr/user-feedback paths, not the JSONL schema."
-    example: 'gemini --debug --output-format stream-json -p "run"'
+    description: "Enable debug diagnostics; not part of the JSONL event schema."
+    example: "gemini --debug -o stream-json -p prompt"
   - flag: "--experimental-acp"
     value: "boolean"
-    description: "Start experimental ACP mode instead of the normal CLI run."
+    description: "Starts experimental ACP mode instead of the normal CLI run."
     example: "gemini --experimental-acp"
   - flag: "--prompt-interactive, -i"
     value: "string"
     description: "Starts the interactive UI with an initial prompt; conflicts with Claudine's non-interactive wrapper."
     example: 'gemini -i "explain this code"'
 config_files:
-  - os: linux
-    scope: system
-    path: "/etc/gemini-cli/system-defaults.json"
-    format: json
-    effect: "Lowest-precedence system defaults for settings that can include output.format, model, sandbox, policy, MCP, UI, and telemetry."
-    notes: "Path can be overridden with GEMINI_CLI_SYSTEM_DEFAULTS_PATH."
   - os: macos
     scope: system
     path: "/Library/Application Support/GeminiCli/system-defaults.json"
     format: json
-    effect: "Lowest-precedence system defaults."
-    notes: "Path can be overridden with GEMINI_CLI_SYSTEM_DEFAULTS_PATH."
+    effect: "Lowest-precedence system defaults for model, output, tools, MCP, sandbox, approvals, hooks, telemetry, and other settings."
+    notes: "Override path with GEMINI_CLI_SYSTEM_DEFAULTS_PATH."
+  - os: linux
+    scope: system
+    path: "/etc/gemini-cli/system-defaults.json"
+    format: json
+    effect: "Lowest-precedence system defaults for model, output, tools, MCP, sandbox, approvals, hooks, telemetry, and other settings."
+    notes: "Override path with GEMINI_CLI_SYSTEM_DEFAULTS_PATH."
   - os: windows
     scope: system
     path: "C:\\ProgramData\\gemini-cli\\system-defaults.json"
     format: json
-    effect: "Lowest-precedence system defaults."
-    notes: "Path can be overridden with GEMINI_CLI_SYSTEM_DEFAULTS_PATH."
-  - os: all
+    effect: "Lowest-precedence system defaults for model, output, tools, MCP, sandbox, approvals, hooks, telemetry, and other settings."
+    notes: "Override path with GEMINI_CLI_SYSTEM_DEFAULTS_PATH."
+  - os: macos
     scope: user
-    path: "~/.gemini/settings.json or $GEMINI_CLI_HOME/.gemini/settings.json"
+    path: "~/.gemini/settings.json"
     format: json
-    effect: "User defaults for output.format, model, sandbox, approvals/policy, MCP servers, extensions, context, telemetry, hooks, and UI."
-    notes: "Overrides system defaults. output.format only documents text and json, so stream-json should be supplied as a CLI flag."
-  - os: all
+    effect: "User defaults; can set output.format, model, approval mode, tool policy, MCP servers, hooks, telemetry, sandbox, extensions, and context."
+    notes: "If GEMINI_CLI_HOME is set, the user .gemini directory is rooted there instead."
+  - os: linux
+    scope: user
+    path: "~/.gemini/settings.json"
+    format: json
+    effect: "User defaults; can set output.format, model, approval mode, tool policy, MCP servers, hooks, telemetry, sandbox, extensions, and context."
+    notes: "If GEMINI_CLI_HOME is set, the user .gemini directory is rooted there instead."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.gemini\\settings.json"
+    format: json
+    effect: "User defaults; can set output.format, model, approval mode, tool policy, MCP servers, hooks, telemetry, sandbox, extensions, and context."
+    notes: "If GEMINI_CLI_HOME is set, the user .gemini directory is rooted there instead."
+  - os: macos
     scope: repo
     path: ".gemini/settings.json"
     format: json
-    effect: "Project-local settings, including MCP servers, policies, context file names, sandbox profiles, hooks, and output.format."
-    notes: "Overrides user settings and system defaults. Trust behavior can gate workspace access; use --skip-trust or GEMINI_CLI_TRUST_WORKSPACE=true in CI when appropriate."
+    effect: "Project settings override user settings when the workspace is trusted; can affect tools, MCP, output, model, hooks, sandbox, context, and permissions."
+    notes: "Workspace settings are ignored for untrusted folders. Use --skip-trust or GEMINI_CLI_TRUST_WORKSPACE=true only in controlled automation."
   - os: linux
-    scope: system
-    path: "/etc/gemini-cli/settings.json"
+    scope: repo
+    path: ".gemini/settings.json"
     format: json
-    effect: "Highest-precedence system override settings for all users."
-    notes: "Path can be overridden with GEMINI_CLI_SYSTEM_SETTINGS_PATH."
+    effect: "Project settings override user settings when the workspace is trusted; can affect tools, MCP, output, model, hooks, sandbox, context, and permissions."
+    notes: "Workspace settings are ignored for untrusted folders. Use --skip-trust or GEMINI_CLI_TRUST_WORKSPACE=true only in controlled automation."
+  - os: windows
+    scope: repo
+    path: ".gemini\\settings.json"
+    format: json
+    effect: "Project settings override user settings when the workspace is trusted; can affect tools, MCP, output, model, hooks, sandbox, context, and permissions."
+    notes: "Workspace settings are ignored for untrusted folders. Use --skip-trust or GEMINI_CLI_TRUST_WORKSPACE=true only in controlled automation."
   - os: macos
     scope: system
     path: "/Library/Application Support/GeminiCli/settings.json"
     format: json
-    effect: "Highest-precedence system override settings for all users."
-    notes: "Path can be overridden with GEMINI_CLI_SYSTEM_SETTINGS_PATH."
+    effect: "Highest-precedence file-based system overrides."
+    notes: "Override path with GEMINI_CLI_SYSTEM_SETTINGS_PATH; command-line arguments still win."
+  - os: linux
+    scope: system
+    path: "/etc/gemini-cli/settings.json"
+    format: json
+    effect: "Highest-precedence file-based system overrides."
+    notes: "Override path with GEMINI_CLI_SYSTEM_SETTINGS_PATH; command-line arguments still win."
   - os: windows
     scope: system
     path: "C:\\ProgramData\\gemini-cli\\settings.json"
     format: json
-    effect: "Highest-precedence system override settings for all users."
-    notes: "Path can be overridden with GEMINI_CLI_SYSTEM_SETTINGS_PATH."
-  - os: all
+    effect: "Highest-precedence file-based system overrides."
+    notes: "Override path with GEMINI_CLI_SYSTEM_SETTINGS_PATH; command-line arguments still win."
+  - os: macos
     scope: repo
     path: ".env"
     format: text
-    effect: "Environment source for auth, model, sandbox, telemetry, base URL, and trust behavior."
-    notes: "Loaded from cwd or nearest parent until project root/home; project .env excludes DEBUG/DEBUG_MODE by default, while .gemini/.env files are never excluded."
-  - os: all
-    scope: user
-    path: "~/.gemini/tmp/<project_hash>/chats/"
-    format: other
-    effect: "Project-scoped persisted sessions used by --resume and --list-sessions."
-    notes: "Stores conversation history, tool executions, token usage, and reasoning summaries when available."
+    effect: "Can supply auth, model, trust, sandbox, telemetry, endpoint, and debug variables."
+    notes: "Gemini searches upward from cwd to project root/home and then user home; first .env found is loaded, not merged."
+  - os: linux
+    scope: repo
+    path: ".env"
+    format: text
+    effect: "Can supply auth, model, trust, sandbox, telemetry, endpoint, and debug variables."
+    notes: "Gemini searches upward from cwd to project root/home and then user home; first .env found is loaded, not merged."
+  - os: windows
+    scope: repo
+    path: ".env"
+    format: text
+    effect: "Can supply auth, model, trust, sandbox, telemetry, endpoint, and debug variables."
+    notes: "Gemini searches upward from cwd to project root/home and then user home; first .env found is loaded, not merged."
 env_vars:
   - name: "GEMINI_API_KEY"
-    effect: "Authentication for Gemini API key mode."
-    notes: "One of several supported auth sources; never log value."
+    effect: "Selects Gemini API key authentication for headless use."
+    notes: "Recommended for headless mode when no cached login exists."
   - name: "GOOGLE_API_KEY"
-    effect: "API key for Google Cloud / Vertex AI express use cases."
-    notes: "Auth behavior depends on selected auth mode."
+    effect: "Selects Google Cloud API key authentication for Vertex AI express mode."
+    notes: "Unset GEMINI_API_KEY/GOOGLE_API_KEY when using ADC or service-account Vertex auth."
   - name: "GOOGLE_APPLICATION_CREDENTIALS"
-    effect: "Path to Google Application Credentials JSON for Vertex AI."
-    notes: "Treat path and file as sensitive."
+    effect: "Points Vertex AI to a service account JSON key for non-interactive authentication."
+    notes: "Requires GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION."
   - name: "GOOGLE_CLOUD_PROJECT"
-    effect: "Project ID required for Code Assist or Vertex AI."
-    notes: "Can affect provider quota and billing classification."
+    effect: "Sets Google Cloud project for Code Assist or Vertex AI auth."
+    notes: "Checked before GOOGLE_CLOUD_PROJECT_ID."
+  - name: "GOOGLE_CLOUD_PROJECT_ID"
+    effect: "Fallback Google Cloud project variable."
+    notes: "Used when GOOGLE_CLOUD_PROJECT is absent."
   - name: "GOOGLE_CLOUD_LOCATION"
-    effect: "Vertex AI region for non-express mode."
-    notes: "Required for some Vertex AI modes."
+    effect: "Sets Vertex AI location."
+    notes: "Required for Vertex AI non-express mode."
   - name: "GEMINI_MODEL"
-    effect: "Default model override."
-    notes: "CLI --model takes precedence."
-  - name: "GEMINI_CLI_HOME"
-    effect: "Changes the root for user-level Gemini CLI configuration and storage."
-    notes: "Useful for isolated Claudine runs."
+    effect: "Sets default model and overrides the hardcoded default."
+    notes: "Command-line --model should still be used when Claudine needs deterministic model selection."
   - name: "GEMINI_CLI_TRUST_WORKSPACE"
-    effect: "When true, trusts the current workspace for this session and bypasses folder trust."
-    notes: "Useful for headless CI, but should be paired with external workspace policy."
-  - name: "GEMINI_CLI_TRUSTED_FOLDERS_PATH"
-    effect: "Overrides trustedFolders.json location."
-    notes: "Affects trust gating."
+    effect: "When true, trusts the current workspace for the session and bypasses folder trust."
+    notes: "Useful for CI; unsafe if the workspace is attacker-controlled."
+  - name: "GEMINI_CLI_HOME"
+    effect: "Changes the root directory used for user-level .gemini configuration and storage."
+    notes: "Useful for wrapper-isolated state."
+  - name: "GEMINI_CLI_SYSTEM_DEFAULTS_PATH"
+    effect: "Overrides the system-defaults settings path."
+    notes: "Can alter effective model, output, tools, MCP, sandbox, hooks, and telemetry."
+  - name: "GEMINI_CLI_SYSTEM_SETTINGS_PATH"
+    effect: "Overrides the system settings override path."
+    notes: "System settings have higher file precedence than user and project settings."
   - name: "GEMINI_SANDBOX"
-    effect: "Alternative to sandbox setting; accepts true, false, docker, podman, or a custom command string."
-    notes: "Can change whether mutating tools run in isolation."
-  - name: "GEMINI_SYSTEM_MD"
-    effect: "Replaces the built-in system prompt from a Markdown file."
-    notes: "Changes agent instructions and therefore wrapper-visible behavior."
+    effect: "Configures sandboxing outside settings.json."
+    notes: "Accepts true, false, docker, podman, or a custom command string."
+  - name: "SEATBELT_PROFILE"
+    effect: "Selects macOS sandbox-exec profile."
+    notes: "macOS only; examples include permissive-open, restrictive-open, strict-open, and strict-proxied."
   - name: "GEMINI_TELEMETRY_ENABLED"
-    effect: "Overrides telemetry.enabled."
-    notes: "Telemetry is a secondary surface, not the stream-json contract."
+    effect: "Enables or disables telemetry and overrides telemetry.enabled."
+    notes: "Telemetry is separate from stdout stream-json."
   - name: "GEMINI_TELEMETRY_TRACES_ENABLED"
-    effect: "Overrides telemetry.traces."
-    notes: "Can add detailed tracing outside stdout."
+    effect: "Enables detailed traces and overrides telemetry.traces."
+    notes: "Can include large attributes such as tool outputs and file reads."
   - name: "GEMINI_TELEMETRY_TARGET"
-    effect: "Selects telemetry target such as local or gcp."
-    notes: "Use only as secondary evidence."
+    effect: "Sets telemetry target."
+    notes: "Supported values documented as local and gcp."
   - name: "GEMINI_TELEMETRY_OUTFILE"
-    effect: "Path for local telemetry output."
-    notes: "Potential secondary lifecycle data; not a replacement for stream-json."
-  - name: "GEMINI_CLI_ACTIVITY_LOG_TARGET"
-    effect: "Enables initial activity logging in nonInteractiveCliAgentSession.ts."
-    notes: "Development/devtools surface; not documented as the stable wrapper stream."
+    effect: "Sets local telemetry output file."
+    notes: "Useful as a secondary diagnostic stream, but not equivalent to stream-json."
+  - name: "DEBUG"
+    effect: "Enables verbose debug logging when true or 1."
+    notes: "Excluded from project .env by default."
+  - name: "DEBUG_MODE"
+    effect: "Enables verbose debug logging when true or 1."
+    notes: "Excluded from project .env by default."
+  - name: "NO_COLOR"
+    effect: "Disables color output."
+    notes: "Programmatic stream-json already strips ANSI in projected messages."
 io_contract:
   stdout: structured_only
   stderr: diagnostics_only
   stdin: prompt
   framing: jsonl
-  noise_handling: "With --output-format stream-json, parse stdout as one JSON object per line and treat stderr as diagnostics/user feedback. Do not merge stderr into the event parser."
-  notes: "Programmatic output strips ANSI from assistant text and errors. Stdin is prompt/context, except experimental ACP which is a separate bidirectional protocol."
+  noise_handling: "In stream-json mode parse stdout line by line as JSONL. Treat stderr as diagnostics and fallback error evidence, not as lifecycle events."
+  notes: "stream-json uses process.stdout.write(JSON.stringify(event) + '\\n'). Ctrl+C handling reads stdin only when stdin is a TTY; non-TTY stdin is prompt/input text, not a bidirectional protocol."
 stream_contract:
   discriminator: "type"
-  event_ordering: "init is emitted before user message and agent loop; tool_use precedes its matching tool_result; result is emitted on normal agent_end success. Fatal errors are handled after the catch path and may rely on process exit/stderr rather than a result event."
+  event_ordering: "init is emitted before user message and tool/assistant events; result is terminal on clean completion; fatal errors may exit through stderr/exit code without a result event."
   correlation_fields: ["session_id", "tool_id"]
   terminal_event: "result"
   partial_message_events: true
-  unknown_event_policy: "Skip unknown top-level type values after logging parser telemetry; preserve raw event for fixtures because the TypeScript union is not versioned."
-  notes: "message events use role user or assistant; assistant message chunks use delta: true. Timestamps are ISO-8601 strings from new Date().toISOString()."
+  unknown_event_policy: "Skip unknown event types after logging; do not fail the wrapper solely because a new event appears."
+  notes: "Assistant messages are text deltas with delta=true. Tool results join to tool_use by tool_id. Timestamps are ISO-8601 strings created with new Date().toISOString()."
 session_metadata:
-  session_id: "init.session_id always in stream-json; JsonOutput.session_id optional in final json"
-  cwd: "not emitted in stream-json; available to hooks as cwd"
-  model: "init.model reports config.getModel()"
-  provider: "not emitted; inferred from executable/provider"
-  auth: "not emitted"
-  version: "not emitted; use gemini --version outside the run if needed"
-  mcp_servers: "not emitted; infer from settings/CLI flags or tool_name prefix mcp_<server>_<tool>"
-  permission_mode: "not emitted; infer from invocation/config"
-  notes: "The stream exposes early session_id and model only. Project root, trust, sandbox, auth source, version, roots, and MCP inventory are wrapper-side/config facts unless reflected indirectly in tool names or errors."
+  session_id: "init.session_id; json.session_id for single JSON"
+  cwd: "Not emitted in stream-json; available to hooks as cwd and inferable from wrapper launch context."
+  model: "init.model reports config.getModel(); result.stats.models keys expose models that consumed tokens."
+  provider: "Implicit Gemini CLI; not emitted in stream-json."
+  auth: "Not emitted; infer only from environment/settings or auth failures."
+  version: "Not emitted in stream-json; collect with gemini --version before launch if needed."
+  mcp_servers: "Not emitted in stream-json; configured in settings/mcp and visible indirectly through mcp_* tool names."
+  permission_mode: "Not emitted in stream-json; infer from wrapper flags/settings such as --approval-mode, --yolo, tools.allowed, and policies."
+  notes: "stream-json exposes minimal session metadata early. Hooks receive richer session_id/transcript_path/cwd metadata, but hooks are a separate stdin/stdout contract."
 stream_events:
   - event: "init"
     category: session
     fields: ["type", "timestamp", "session_id", "model"]
-    notes: "First stream-json event; enough for session log correlation and resume hints."
+    notes: "First projected event in stream-json mode."
   - event: "message"
     category: assistant
     fields: ["type", "timestamp", "role", "content", "delta"]
-    notes: "Represents user prompt snapshot and assistant text chunks. Assistant chunks set delta: true."
+    notes: "User prompt is emitted once with role=user; assistant text emits as delta chunks with role=assistant and delta=true."
   - event: "tool_use"
     category: tool_call
     fields: ["type", "timestamp", "tool_name", "tool_id", "parameters"]
@@ -278,502 +324,508 @@ stream_events:
   - event: "tool_result"
     category: tool_result
     fields: ["type", "timestamp", "tool_id", "status", "output", "error.type", "error.message"]
-    notes: "Emitted after tool execution from internal tool_response; joins to tool_use by tool_id."
+    notes: "Emitted after tool execution; output is display text, not necessarily raw stdout/stderr."
   - event: "error"
     category: error
     fields: ["type", "timestamp", "severity", "message"]
-    notes: "Non-fatal warnings and system errors projected from internal non-fatal error events."
+    notes: "Non-fatal warnings and some system errors; RESOURCE_EXHAUSTED maps severity to error."
   - event: "result"
+    category: usage
+    fields: ["type", "timestamp", "status", "error.type", "error.message", "stats.total_tokens", "stats.input_tokens", "stats.output_tokens", "stats.cached", "stats.input", "stats.duration_ms", "stats.tool_calls", "stats.models"]
+    notes: "Terminal success/error event when emitted; clean success includes aggregated and per-model token stats."
+  - event: "initialize"
     category: session
-    fields: ["type", "timestamp", "status", "error.type", "error.message", "stats"]
-    notes: "Final normal stream event. stats includes aggregate and per-model token usage, duration_ms, and tool_calls."
-  - event: "internal initialize"
-    category: other
     fields: []
-    notes: "Internal AgentEvent explicitly ignored by non-interactive stream-json."
-  - event: "internal session_update"
-    category: other
+    notes: "Internal AgentEvent explicitly ignored by stream-json projection."
+  - event: "session_update"
+    category: session
     fields: []
-    notes: "Internal AgentEvent explicitly ignored; stream-json does not expose cwd/project/session updates beyond init."
-  - event: "internal agent_start"
+    notes: "Internal AgentEvent explicitly ignored by stream-json projection."
+  - event: "agent_start"
     category: subagent
     fields: []
-    notes: "Internal AgentEvent explicitly ignored; no parent-visible subagent start event."
-  - event: "internal tool_update"
+    notes: "Internal AgentEvent explicitly ignored by stream-json projection."
+  - event: "tool_update"
     category: tool_call
     fields: []
-    notes: "Internal AgentEvent explicitly ignored; no structured tool progress."
-  - event: "internal elicitation_request"
+    notes: "Internal AgentEvent explicitly ignored by stream-json projection; no live tool progress."
+  - event: "elicitation_request"
     category: permission
     fields: []
-    notes: "Internal AgentEvent explicitly ignored; human-in-loop attempts are not directly projected."
-  - event: "internal elicitation_response"
+    notes: "Internal AgentEvent explicitly ignored by stream-json projection."
+  - event: "elicitation_response"
     category: permission
     fields: []
-    notes: "Internal AgentEvent explicitly ignored."
-  - event: "internal usage"
+    notes: "Internal AgentEvent explicitly ignored by stream-json projection."
+  - event: "usage"
     category: usage
     fields: []
-    notes: "Internal AgentEvent explicitly ignored; only final result.stats exposes usage."
-  - event: "internal custom"
+    notes: "Internal AgentEvent explicitly ignored by stream-json projection; use result.stats for final usage."
+  - event: "custom"
     category: other
     fields: []
-    notes: "Internal AgentEvent explicitly ignored."
+    notes: "Internal AgentEvent explicitly ignored by stream-json projection."
 tools:
-  - name: "read/search/filesystem tools"
-    call_visible: true
-    result_visible: true
-    metadata: ["tool_use.tool_name", "tool_use.tool_id", "tool_use.parameters", "tool_result.status", "tool_result.output", "tool_result.error"]
-    notes: "No dedicated file-read event; file activity appears as generic tool_use/tool_result and may be summarized in display output."
-  - name: "write/edit/delete tools"
-    call_visible: true
-    result_visible: true
-    metadata: ["tool_use.parameters", "tool_result.status", "tool_result.output", "tool_result.error.type"]
-    notes: "No dedicated file_change event. Permission denials are likely tool_result error or error message, not a normalized permission event."
   - name: "run_shell_command"
     call_visible: true
     result_visible: true
-    metadata: ["tool_use.parameters", "tool_result.output", "tool_result.status", "tool_result.error"]
-    notes: "The tool documentation says command, directory, stdout, stderr, exit code, and background PIDs are returned, but stream-json flattens visible result text into output."
-  - name: "web tools"
+    metadata: ["tool_use.tool_name", "tool_use.tool_id", "tool_use.parameters", "tool_result.status", "tool_result.output", "tool_result.error"]
+    notes: "Shell commands require confirmation unless approval/policy allows them. Raw stdout/stderr and exit code are not separately structured in stream-json."
+  - name: "read_file"
     call_visible: true
     result_visible: true
-    metadata: ["tool_name", "tool_id", "parameters", "output", "status"]
-    notes: "Visible only through generic tool events."
-  - name: "MCP tools"
+    metadata: ["tool_use.parameters", "tool_result.output"]
+    notes: "Can read text, images, audio, and PDF according to tools docs; file content may be summarized/truncated in display output."
+  - name: "read_many_files"
     call_visible: true
     result_visible: true
-    metadata: ["tool_name", "tool_id", "parameters", "output", "status"]
-    notes: "MCP tools are discovered from configured servers and named with mcp_<serverAlias>_<tool>; server aliases containing underscores are a documented policy-engine footgun."
+    metadata: ["tool_use.parameters", "tool_result.output"]
+    notes: "Often triggered by @ path syntax; stream does not emit attachment/file-reference events separately."
+  - name: "glob"
+    call_visible: true
+    result_visible: true
+    metadata: ["tool_use.parameters", "tool_result.output"]
+    notes: "Search tool visibility follows generic tool_use/tool_result."
+  - name: "grep_search"
+    call_visible: true
+    result_visible: true
+    metadata: ["tool_use.parameters", "tool_result.output"]
+    notes: "Legacy alias search_file_content may appear depending on tool naming/version."
+  - name: "list_directory"
+    call_visible: true
+    result_visible: true
+    metadata: ["tool_use.parameters", "tool_result.output"]
+    notes: "Directory listing output is not a dedicated event family."
+  - name: "replace"
+    call_visible: true
+    result_visible: true
+    metadata: ["tool_use.parameters", "tool_result.status", "tool_result.output", "tool_result.error"]
+    notes: "Edit tool requires confirmation unless approval/policy allows it; file changes are visible only through tool events."
+  - name: "write_file"
+    call_visible: true
+    result_visible: true
+    metadata: ["tool_use.parameters", "tool_result.status", "tool_result.output", "tool_result.error"]
+    notes: "Write tool requires confirmation unless approval/policy allows it; no dedicated file_change event."
+  - name: "ask_user"
+    call_visible: true
+    result_visible: true
+    metadata: ["tool_use.parameters", "tool_result.status", "tool_result.output", "tool_result.error"]
+    notes: "Interactive clarification tool is automation-sensitive; exact non-TTY answer/failure behavior was not verified."
+  - name: "write_todos"
+    call_visible: true
+    result_visible: true
+    metadata: ["tool_use.parameters", "tool_result.output"]
+    notes: "Todo state does not have dedicated plan/todo stream events."
+  - name: "mcp_*"
+    call_visible: true
+    result_visible: true
+    metadata: ["tool_use.tool_name", "tool_use.parameters", "tool_result.status", "tool_result.error"]
+    notes: "MCP tools are named with mcp_<server>_<tool>; server inventory is not emitted at session start."
   - name: "subagent tools"
     call_visible: true
     result_visible: true
-    metadata: ["tool_name", "tool_id", "parameters", "output", "status"]
-    notes: "Subagents are exposed to the main agent as tools; nested subagent events are not projected separately in stream-json."
+    metadata: ["tool_use.tool_name", "tool_id", "tool_result.output"]
+    notes: "Subagents are exposed as tools, so parent stream shows only the parent tool call/result, not nested subagent lifecycle."
 completion:
   success_event: "result with status=success"
-  failure_event: "result with status=error when emitted; fatal failures may exit non-zero without result"
+  failure_event: "result with status=error when emitted; otherwise process exit plus stderr/error handling"
   exit_code_reliable: true
-  result_fields: ["message.content for assistant deltas", "result.status", "result.error", "JsonOutput.response", "JsonOutput.error", "JsonOutput.warnings"]
+  result_fields: ["result.status", "result.error.type", "result.error.message", "json.response", "json.error"]
   cost_fields: []
-  usage_fields: ["result.stats.total_tokens", "result.stats.input_tokens", "result.stats.output_tokens", "result.stats.cached", "result.stats.input", "result.stats.duration_ms", "result.stats.tool_calls", "result.stats.models.<model>.total_tokens", "result.stats.models.<model>.input_tokens", "result.stats.models.<model>.output_tokens", "result.stats.models.<model>.cached", "result.stats.models.<model>.input"]
-  notes: "Official headless exit codes are 0 success, 1 general/API failure, 42 input error, and 53 turn limit exceeded. Claudine should trust result when present and still classify non-zero exits/stderr when fatal errors prevent a terminal event."
+  usage_fields: ["result.stats.total_tokens", "result.stats.input_tokens", "result.stats.output_tokens", "result.stats.cached", "result.stats.input", "result.stats.duration_ms", "result.stats.tool_calls", "result.stats.models.*"]
+  notes: "Official headless exit codes are 0 success, 1 general/API failure, 42 input error, and 53 turn limit exceeded. Claudine should still prefer a terminal result event when present and use exit/stderr when fatal errors bypass result."
 blocking_behavior:
   permissions: configurable
   questions: unknown
   tool_approvals: configurable
-  notes: "Default security policy can require human confirmation for mutating file and shell tools. Non-interactive behavior for ignored elicitation_request events is not fully documented; use --approval-mode=plan, --approval-mode=yolo in an external sandbox, policy settings, --skip-trust, and/or GEMINI_CLI_TRUST_WORKSPACE=true to avoid mid-run prompts."
+  notes: "Default approval mode prompts for tools; plan is read-only, auto_edit auto-approves edit tools, and yolo auto-approves all actions but can be disabled by security/admin settings. Headless auth must be preconfigured with cached credentials or environment variables. Exact no-TTY behavior for ask_user and MCP OAuth was not verified."
 subagents:
   supported: true
   start_visible: false
   stop_visible: false
   nested_events_visible: false
   prompt_injection_supported: true
-  metadata_fields: ["tool_use.tool_name", "tool_use.tool_id", "tool_use.parameters", "tool_result.output"]
-  notes: "Gemini subagents are exposed as tools and can be forced with @subagent syntax; stream-json shows the parent tool call/result, not nested subagent lifecycle or model/session metadata."
+  metadata_fields: ["tool_use.tool_name", "tool_result.output"]
+  notes: "Subagents operate as tools with separate context loops. Prompt can force a subagent with leading @name syntax, but stream-json ignores internal agent_start and does not expose nested events."
 use_cases:
   - name: "plan_cap_approaching"
     detectable: false
     event_types: []
     fields: []
     hook_parity: "unknown"
-    notes: "No stream-json event exposes remaining plan quota, threshold, or reset time."
+    notes: "No structured near-cap event was found in stream-json."
   - name: "plan_capped"
     detectable: true
     event_types: ["error", "result", "process_exit"]
     fields: ["error.message", "result.error.message", "exit_code"]
     hook_parity: "unknown"
-    notes: "Detect by RESOURCE_EXHAUSTED-derived error severity or fatal provider/API messages; exact cap window/reset fields are not structured."
+    notes: "Quota/resource exhaustion can surface as error severity=error or fatal process failure; reset time/window/upgrade URL are not structured."
   - name: "no_funds"
     detectable: true
     event_types: ["error", "result", "process_exit"]
-    fields: ["error.message", "result.error.message", "stderr"]
+    fields: ["error.message", "result.error.message", "exit_code"]
     hook_parity: "unknown"
-    notes: "Only message classification; no billing balance fields."
+    notes: "Detect from provider error text; no dedicated billing event or cost field."
   - name: "auth"
     detectable: true
     event_types: ["result", "process_exit"]
     fields: ["result.error.type", "result.error.message", "stderr", "exit_code"]
     hook_parity: "unknown"
-    notes: "FatalAuthenticationError is reconstructed in source, but fatal errors may be handled outside stream-json; parse stderr/non-zero exit too."
+    notes: "FatalAuthenticationError exists in source; headless docs require cached auth or env-based auth."
   - name: "permission_read_denied"
     detectable: true
     event_types: ["tool_result", "error"]
-    fields: ["tool_result.tool_id", "tool_result.error.type", "tool_result.error.message", "tool_result.output", "error.message"]
-    hook_parity: "hooks expose BeforeTool/AfterTool inputs separately"
-    notes: "No normalized permission event or path field; infer path from tool parameters joined by tool_id."
+    fields: ["tool_result.tool_id", "tool_result.status", "tool_result.error.type", "tool_result.error.message", "error.message"]
+    hook_parity: "BeforeTool and AfterTool hooks expose tool_name/tool_input/tool_response."
+    notes: "No normalized read-denied code/path field is guaranteed in stream-json; parse tool name and error text."
   - name: "permission_write_denied"
     detectable: true
     event_types: ["tool_result", "error"]
-    fields: ["tool_use.parameters", "tool_result.error.type", "tool_result.error.message", "error.message"]
-    hook_parity: "hooks expose BeforeTool/AfterTool inputs separately"
-    notes: "Distinguish from model/tool failures by tool family and error text/type."
+    fields: ["tool_result.tool_id", "tool_result.status", "tool_result.error.type", "tool_result.error.message", "error.message"]
+    hook_parity: "BeforeTool can deny with decision/reason; exit code 2 blocks tool."
+    notes: "No dedicated write-denied event or file-change event; infer from write/edit tool names and errors."
   - name: "tokens_consumed"
     detectable: true
     event_types: ["result"]
     fields: ["result.stats.total_tokens", "result.stats.input_tokens", "result.stats.output_tokens", "result.stats.cached", "result.stats.input", "result.stats.models"]
-    hook_parity: "session transcript/telemetry may contain richer usage"
-    notes: "Final session aggregate only; no per-step stream usage because internal usage events are ignored."
+    hook_parity: "unknown"
+    notes: "Final session totals in tokens; per-model breakdown is result.stats.models keyed by model name."
   - name: "model_used"
     detectable: true
     event_types: ["init", "result"]
     fields: ["init.model", "result.stats.models"]
     hook_parity: "unknown"
-    notes: "init.model is early; result.stats.models is the per-model token map after completion."
+    notes: "init.model is config.getModel; result.stats.models reveals models with token usage."
   - name: "model_fallback"
     detectable: true
     event_types: ["result"]
-    fields: ["init.model", "result.stats.models"]
+    fields: ["result.stats.models"]
     hook_parity: "unknown"
-    notes: "Inferred only when final stats include model keys different from init.model; no explicit fallback event."
+    notes: "Infer fallback if result.stats.models contains a different model than requested; no explicit fallback event."
   - name: "human_in_loop"
-    detectable: false
-    event_types: []
-    fields: []
-    hook_parity: "hooks can block/allow tools, but stream-json omits elicitation_request/response"
-    notes: "Internal elicitation events are explicitly ignored, so a parser cannot reliably detect a pending prompt from stdout alone."
+    detectable: true
+    event_types: ["tool_use", "error", "process_stall"]
+    fields: ["tool_use.tool_name", "tool_use.parameters", "error.message"]
+    hook_parity: "BeforeTool can observe ask_user or confirmation-sensitive tools."
+    notes: "ask_user tool calls are visible, but internal elicitation_request is ignored; wrappers need an inactivity timeout."
   - name: "session_resumable"
     detectable: true
     event_types: ["init"]
     fields: ["init.session_id"]
     hook_parity: "hooks include session_id and transcript_path"
-    notes: "Session ID appears early. Resume availability also depends on persisted project chat storage."
+    notes: "Use init.session_id with --resume when available; session listing is human text."
   - name: "subagent_prompt_injection"
     detectable: true
     event_types: ["tool_use"]
     fields: ["tool_use.tool_name", "tool_use.parameters"]
     hook_parity: "unknown"
-    notes: "Caller can put non-interactive instructions in the top-level prompt and force subagents with @name syntax, but nested prompts are not separately exposed."
+    notes: "Caller can steer subagent use with @subagent_name prompt syntax; nested prompt contents are only visible if projected as tool parameters."
 headless_constraints:
-  - constraint: "stream-json has no formal JSON Schema or version marker"
-    mitigation: "Generate parser fixtures from provider TypeScript union and tolerate unknown event types."
-    notes: "The settings file has JSON Schema; the output stream does not."
-  - constraint: "output.format setting documents only text and json"
-    mitigation: "Always pass --output-format stream-json on the command line."
-    notes: "Do not rely on persistent config to select stream-json."
-  - constraint: "mutating tools can require confirmation"
-    mitigation: "Use --approval-mode=plan for read-only runs or --approval-mode=yolo only inside external sandboxing; configure policy/trust deterministically."
-    notes: "The stream omits elicitation events, so waiting for approval is hard to classify from stdout alone."
-  - constraint: "fatal errors may not emit a terminal result event"
-    mitigation: "Use result when present; otherwise classify stderr and process exit code."
-    notes: "Source catches fatal errors and delegates to handleError after stream cleanup."
-  - constraint: "file changes are not dedicated stream events"
-    mitigation: "Infer file changes from tool_use parameters and tool_result output, or supplement with filesystem diffing."
-    notes: "No file_change family in the JSONL union."
-  - constraint: "tool progress and internal usage events are dropped"
-    mitigation: "Render tool start on tool_use, completion on tool_result, and final usage on result.stats."
-    notes: "Internal tool_update and usage AgentEvents are explicitly ignored."
+  - constraint: "stream-json is a projection, not the full internal event bus."
+    mitigation: "Parse stream-json for wrapper status and optionally use hooks/telemetry for deeper diagnostics."
+    notes: "Source explicitly ignores usage, session_update, tool_update, elicitation, agent_start, and custom AgentEvents."
+  - constraint: "Fatal errors can bypass a terminal result event."
+    mitigation: "Use exit code and stderr as fallback when stdout ends without result."
+    notes: "The source throws reconstructed fatal errors for fatal internal error events."
+  - constraint: "Default tool approval can require a human."
+    mitigation: "Use --approval-mode=plan for read-only runs, --approval-mode=yolo only in a sandbox, or configure policy/tools.allowed deliberately."
+    notes: "YOLO can be disabled by security/admin settings."
+  - constraint: "Headless auth must be configured before launch."
+    mitigation: "Use GEMINI_API_KEY or Vertex AI environment variables/service account, or ensure cached credentials already exist."
+    notes: "Interactive Google login opens a browser and is not automation-safe."
+  - constraint: "Project settings are gated by folder trust."
+    mitigation: "Use a wrapper-controlled GEMINI_CLI_HOME and --skip-trust/GEMINI_CLI_TRUST_WORKSPACE only for trusted workspaces."
+    notes: "Untrusted project settings are ignored."
+  - constraint: "No dedicated file_change, plan, subagent, or tool progress events in stream-json."
+    mitigation: "Infer from tool_use/tool_result and final stats; do not promise live file-change or nested subagent rendering."
+    notes: "tool_update and agent_start are ignored."
 quirks:
-  - "The stream discriminator is top-level type, but role and status are nested subtypes for message/result/tool_result."
-  - "assistant message chunks are complete JSONL records with content fragments and delta: true, not raw token deltas outside JSON."
-  - "The user prompt is echoed as a message event; wrappers must avoid leaking sensitive prompt text in logs."
-  - "stream-json emits session_id early but omits cwd, root, trust state, auth source, version, sandbox, approval mode, and MCP inventory."
-  - "MCP tool names use mcp_<serverAlias>_<tool>; underscores in server aliases can confuse policy parsing."
-  - "json final output can contain warnings in source even though the headless docs emphasize response/stats/error."
+  - "settings.json documents output.format as text/json, while the CLI flag supports text/json/stream-json. Claudine should pass --output-format stream-json every run."
+  - "stream-json messages are deltas for assistant text; concatenate role=assistant content in order for final answer text."
+  - "Tool_result.output is display text, not a typed command result with separate stdout/stderr/exit_code."
+  - "MCP server aliases with underscores are discouraged because mcp_<server>_<tool> parsing can misidentify the server."
+  - "Hooks are a separate JSON stdin/stdout contract and can expose cwd/transcript_path/tool inputs, but hook events are not emitted as stream-json events."
+  - "The installed local Gemini CLI observed during this research was 0.46.0; official docs advertised latest stable 0.45.0 in the changelog area, so source/docs may drift quickly."
 gaps:
-  - "No official JSON Schema or schema version exists for stream-json."
-  - "Could not verify from docs whether all fatal errors in stream-json mode emit a result status=error before process exit; source suggests some fatal paths rely on handleError."
-  - "Non-TTY behavior for approval/elicitation requests is not fully documented; source shows elicitation events are ignored by stream-json."
-  - "No structured auth source, quota reset time, billing balance, cost, sandbox mode, cwd, root, CLI version, or permission mode fields were found in stream-json."
-  - "No local authenticated run was captured in this refresh, so examples are source-derived rather than live-run fixtures."
+  - "No local authenticated agent run was executed, so real provider auth/quota errors were not captured."
+  - "Exact non-TTY behavior for ask_user, MCP OAuth, and approval prompts was not verified beyond docs/source."
+  - "No formal JSON Schema or protocol version marker was found for stream-json events."
+  - "Whether stderr can contain non-diagnostic structured telemetry in all debug configurations was not exhaustively verified."
+  - "Precise truncation/summarization behavior for each tool_result.output is tool- and setting-dependent."
 claudine_strategy:
-  preferred_invocation: 'gemini --skip-trust --approval-mode=plan --output-format stream-json -p "<prompt>"'
-  required_flags: ["--output-format stream-json", "-p/--prompt", "--skip-trust or GEMINI_CLI_TRUST_WORKSPACE=true when CI workspace trust is expected", "--approval-mode=plan for read-only automation or --approval-mode=yolo only inside an external sandbox"]
-  conflicting_flags: ["--prompt-interactive/-i", "--experimental-acp for the normal wrapper stream", "persistent output.format when stream-json is required", "--yolo outside external sandboxing"]
-  parser_notes: "Parse stdout as JSONL by top-level type. Join tool_use/tool_result by tool_id. Treat result as terminal when present; if absent, classify by exit code and stderr. Accumulate assistant message content where role=assistant and delta=true. Preserve unknown events for drift fixtures."
-  wrapper_notes: "Keep stderr separate as diagnostics. Capture gemini --version separately if version metadata is required. Consider filesystem diffing for file changes and wrapper-side config capture for cwd, roots, sandbox, approval, auth kind, and MCP settings."
+  preferred_invocation: 'gemini --output-format stream-json --prompt "<prompt>"'
+  required_flags: ["--output-format stream-json", "--prompt", "--approval-mode=plan or an explicit sandboxed approval policy"]
+  conflicting_flags: ["--prompt-interactive", "--experimental-acp", "--output-format text", "--output-format json for live parsing"]
+  parser_notes: "Parse stdout as JSONL using top-level type. Join tool_use/tool_result by tool_id. Concatenate assistant message content where role=assistant and delta=true. Treat result as terminal when present; if missing, classify using exit code and stderr. Skip unknown events."
+  wrapper_notes: "Set a controlled cwd and optionally GEMINI_CLI_HOME. Preconfigure auth. Prefer --skip-trust only for trusted workspaces. Use stderr for diagnostics, not primary lifecycle. Collect gemini --version separately because stream-json does not emit it."
 data_format: jsonl
 changes:
-  - "2026-07-02: Rewrote older Gemini research into the current non-interactive-sessions schema; refreshed official docs, TypeScript stream union, config files, and Claudine strategy."
-requires_claudine_update: true
-reason: "The refreshed metadata confirms Gemini should be driven with --output-format stream-json explicitly and parsed as a six-event JSONL union; Claudine provider metadata/parser fixtures should reflect missing terminal events on fatal errors and omitted internal events."
+  - "2026-07-03: Refreshed Gemini CLI non-interactive research against official docs, TypeScript source, settings schema, and local 0.46.0 CLI help/version."
+requires_claudine_update: false
+reason: "No immediate code change is required by the research itself; Claudine should continue preferring stream-json and account for the documented projection gaps."
 ---
 
-# Gemini CLI: Non-Interactive Sessions
+# Gemini CLI Non-Interactive Sessions
 
 ## Summary
 
-Gemini CLI can run non-interactively and can emit structured output. Claudine should prefer `gemini --output-format stream-json -p "<prompt>"` because it is the only documented Gemini CLI mode that streams parseable progress while the run is active. It emits one JSON object per stdout line with a top-level `type` discriminator and event types `init`, `message`, `tool_use`, `tool_result`, `error`, and `result`.
+Gemini CLI can run as a non-interactive agent and can emit structured output. Claudine should prefer `gemini --output-format stream-json --prompt "<prompt>"`, because it emits one JSON object per line on stdout while the run is still active. The stream is suitable for live progress rendering: it includes session initialization, assistant deltas, tool call starts, tool results, warnings/errors, and final usage.
 
-The main parser risk is not framing; the JSONL framing is simple. The risk is projection loss. The non-interactive implementation intentionally drops several internal agent events, including session updates, tool progress, usage increments, elicitation request/response, and subagent start events. Claudine can supervise session start, assistant text, tool start/result, non-fatal warnings, final usage, and final success when a `result` event is emitted, but it must use process exit and stderr as fallback evidence for fatal errors and possible approval/auth failures.
+The main caveat is that `stream-json` is not the full internal event bus. The TypeScript projection in `nonInteractiveCliAgentSession.ts` explicitly ignores internal `usage`, `session_update`, `tool_update`, `elicitation_request`, `elicitation_response`, `agent_start`, and `custom` events. Claudine can reliably supervise the public stream, but it cannot claim live tool progress, nested subagent lifecycle, dedicated file-change events, or per-step usage from this mode alone.
 
 ## Non-Interactive Entry Points
 
-Headless mode is triggered by `-p` / `--prompt` or by non-TTY pipe/redirect conditions. The official automation tutorial recommends `-p` for headless scripts, and the CLI reference notes that positional query arguments can default to interactive mode in a TTY. For Claudine, that makes `-p` the deterministic launch form.
+Gemini's official headless reference says headless mode is triggered when the CLI runs in a non-TTY environment or when a query is supplied with `-p` / `--prompt` ([Headless mode reference](https://geminicli.com/docs/cli/headless/)). The CLI reference also documents a positional `[query..]`, but the CLI defaults to interactive mode in a TTY, so wrappers should use `--prompt` rather than relying on positional detection.
 
 Useful launch forms:
 
-| Command | Prompt input | Session behavior | Claudine use |
-| --- | --- | --- | --- |
-| `gemini --output-format stream-json -p "prompt"` | argv prompt plus optional piped stdin context | fresh session | Preferred |
-| `cat diff.txt \| gemini --output-format stream-json -p "review"` | stdin context plus argv prompt | fresh session | Preferred for piped context |
-| `gemini --resume latest --output-format stream-json -p "continue"` | argv prompt | resumes latest project session | Useful when Claudine intentionally resumes |
-| `gemini --resume <SESSION_ID> --output-format stream-json -p "continue"` | argv prompt | resumes specific project session | Useful when Claudine has `init.session_id` |
-| `gemini --experimental-acp` | protocol messages | long-running integration mode | Not the normal wrapper stream |
+| Purpose | Command shape | Notes |
+| --- | --- | --- |
+| Fresh structured run | `gemini --output-format stream-json -p "prompt"` | Preferred Claudine launch form. |
+| Stdin plus prompt | `cat file | gemini --output-format stream-json -p "summarize"` | Stdin is input/context, not a protocol. |
+| Resume latest | `gemini --resume latest --output-format stream-json -p "continue"` | Resumes a saved project-scoped session. |
+| Resume selected session | `gemini --resume <id-or-index> --output-format stream-json -p "continue"` | Session listing is human-oriented output. |
+| ACP mode | `gemini --experimental-acp` | Experimental bidirectional protocol surface; not the stream Claudine should parse for normal runs. |
 
-The prompt can include file references using Gemini CLI's `@` syntax, and the CLI can include additional workspace directories with `--include-directories`. Model selection is `--model`; trust and permission behavior are influenced by `--skip-trust`, `GEMINI_CLI_TRUST_WORKSPACE`, `--approval-mode`, `--sandbox`, settings files, and policy files.
-
-Subagents are available in non-interactive prompts because Gemini exposes them as tools. A user can force a subagent with leading `@subagent_name` syntax, which instructs the main model to call that subagent tool. The stream still shows the subagent as a normal tool call/result, not as nested subagent lifecycle events.
+Prompts can include `@` file references. The non-interactive source path runs the same at-command processor before sending the query to the agent, so file references can trigger file-reading tools. The `--include-directories` flag adds workspace roots. Model selection is available with `--model`; aliases such as `auto`, `pro`, and `flash` can resolve through model configuration rather than naming the final backend model directly.
 
 ## Output Formats
 
-Gemini CLI exposes three non-interactive output formats through `--output-format`:
+Gemini CLI exposes three headless output modes through `--output-format` / `-o`, documented in the headless reference and CLI cheatsheet ([Headless mode](https://geminicli.com/docs/cli/headless/), [CLI cheatsheet](https://geminicli.com/docs/cli/cli-reference/)).
 
-| Format | CLI value | Shape | Streams | Claudine recommendation |
+| Format | CLI value | Framing | Streams? | Claudine recommendation |
 | --- | --- | --- | --- | --- |
-| Text | `text` | human text | Yes, but not structured | Avoid for wrappers |
-| Final JSON | `json` | single JSON object | No | Useful for simple scripts, not lifecycle supervision |
-| Streaming JSON | `stream-json` | JSONL / NDJSON | Yes | Preferred |
+| Text | `text` | Human text | Yes | Avoid for wrappers; stdout is prose. |
+| Single JSON | `json` | One final JSON object | No | Useful for request/reply scripts, weak for lifecycle supervision. |
+| Streaming JSON | `stream-json` | JSONL / NDJSON-style line events | Yes | Preferred. Parse stdout live. |
 
-The `json` mode returns a final object. The TypeScript `JsonOutput` interface includes optional `session_id`, `response`, `stats`, `error`, and `warnings`. It is good for one-shot scripts that only need final answer text and statistics. It is weak for Claudine because it hides tool calls, warnings, and partial assistant output until the process exits.
+Single JSON includes fields such as `session_id`, `response`, `stats`, `error`, and `warnings` according to the TypeScript `JsonOutput` interface. It is attractive for simple scripts, but Claudine needs live progress and failure classification before process exit. `stream-json` provides that.
 
-The `stream-json` mode emits newline-delimited JSON on stdout. It is the right stream for Claudine because it provides session identity early, assistant output while generation is active, tool call starts before execution, tool results after execution, non-fatal warnings, and final aggregate usage. Stderr remains a diagnostics/user-feedback stream and should not be merged into the JSONL parser.
-
-There is no separate stable hook stream that should replace stdout. Gemini CLI hooks are useful for policy and external side effects; their reference defines hook stdin/stdout JSON contracts, including `session_id`, `transcript_path`, `cwd`, `hook_event_name`, and `timestamp`. Those hook payloads are not the same as the headless stream. Claudine should parse stdout `stream-json` as primary lifecycle data and optionally use hooks/telemetry only as secondary evidence.
-
-One important persistent-config gotcha: the command-line flag accepts `text`, `json`, and `stream-json`, but the documented `output.format` setting currently lists only `text` and `json`. Claudine should pass `--output-format stream-json` every run instead of relying on user or repo settings.
+`stream-json` writes each event with `process.stdout.write(JSON.stringify(event) + "\n")` in `StreamJsonFormatter` ([source](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/output/stream-json-formatter.ts)). In this mode stdout is parse-only JSONL. Stderr remains diagnostic: warnings, debug stacks when enabled, cancellation notices, and fatal error presentation can appear there. Claudine should not merge stderr into the event stream.
 
 ## Schema Sources
 
-The strongest stream schema evidence is provider-authored TypeScript source, not a formal JSON Schema. The relevant files in the official repository are:
+There is no public JSON Schema for the `stream-json` protocol. The strongest schema evidence is the TypeScript union in `packages/core/src/output/types.ts` ([source](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/output/types.ts)). It defines:
 
-| Source | What it defines | Confidence |
-| --- | --- | --- |
-| [`packages/core/src/output/types.ts`](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/output/types.ts) | `OutputFormat`, `JsonOutput`, `JsonStreamEventType`, `JsonStreamEvent`, `StreamStats` | High |
-| [`packages/core/src/output/stream-json-formatter.ts`](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/output/stream-json-formatter.ts) | JSONL framing and stats conversion | High |
-| [`packages/core/src/output/json-formatter.ts`](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/output/json-formatter.ts) | final JSON object formatting | High |
-| [`packages/cli/src/nonInteractiveCliAgentSession.ts`](https://github.com/google-gemini/gemini-cli/blob/main/packages/cli/src/nonInteractiveCliAgentSession.ts) | projection from internal agent events to stdout | High |
-| [Headless mode reference](https://geminicli.com/docs/cli/headless/) | public output mode/event summary and exit codes | Medium |
-| [`schemas/settings.schema.json`](https://raw.githubusercontent.com/google-gemini/gemini-cli/main/schemas/settings.schema.json) | settings schema only | High for config, none for output |
-
-The TypeScript union is strong enough for a Claudine parser because it is the code-level output contract used by the formatter. The residual risk is version drift: there is no explicit stream schema version marker, no published JSON Schema for the JSONL stream, and no documented unknown-event policy.
-
-The stream union currently is:
-
-| `type` | Fields |
+| Event | Important fields |
 | --- | --- |
 | `init` | `timestamp`, `session_id`, `model` |
 | `message` | `timestamp`, `role`, `content`, optional `delta` |
 | `tool_use` | `timestamp`, `tool_name`, `tool_id`, `parameters` |
-| `tool_result` | `timestamp`, `tool_id`, `status`, optional `output`, optional `error.type`, optional `error.message` |
+| `tool_result` | `timestamp`, `tool_id`, `status`, optional `output`, optional `error.type`, `error.message` |
 | `error` | `timestamp`, `severity`, `message` |
 | `result` | `timestamp`, `status`, optional `error`, optional `stats` |
 
-`result.stats` contains `total_tokens`, `input_tokens`, `output_tokens`, `cached`, `input`, `duration_ms`, `tool_calls`, and `models`. Each `models.<model>` entry contains `total_tokens`, `input_tokens`, `output_tokens`, `cached`, and `input`.
+The formatter source defines line framing and the final stats projection. `StreamStats` includes aggregate `total_tokens`, `input_tokens`, `output_tokens`, `cached`, `input`, `duration_ms`, `tool_calls`, and a per-model `models` map.
+
+The settings file has a formal JSON Schema at `schemas/settings.schema.json`, but that schema is for configuration, not events. It is still useful for wrapper configuration drift checks.
 
 ## IO Contract
 
-In `stream-json` mode, stdout is parse-only JSONL. The formatter writes `JSON.stringify(event) + "\n"` directly to stdout. Each line is independently parseable as a complete event.
+With `--output-format stream-json`, stdout is the structured event stream. Each line is independently parseable JSON with a top-level `type`. Assistant text is emitted as `message` events, not as raw prose.
 
-Stderr is diagnostics and user feedback. The non-interactive source writes warning, cancellation, raw-output warning, and debug stack details to stderr. The `ConsolePatcher` also routes console logs into internal events/user feedback. Claudine should keep stderr separate, preserve it for diagnostics, and use it as fallback classification when a fatal error exits without a terminal `result` event.
+Stderr is diagnostics. The non-interactive source wires user feedback to stderr and only writes JSONL through the formatter. Debug mode can add stack traces to stderr. Fatal errors may be reported through the usual error handler after the stream loop exits, so Claudine should retain stderr for failure reports and classify runs that end without a `result`.
 
-Stdin is ordinary prompt/context input, not a bidirectional protocol, for the normal CLI run. Experimental ACP mode is the exception and should be treated as a separate integration surface rather than as `stream-json`.
-
-Programmatic output is sanitized. The non-interactive code strips ANSI from assistant text and error messages for `json` and `stream-json` unless raw-output risk flags are involved for text mode. That reduces parser risk, but Claudine should still treat `message.content` as model-controlled text and avoid feeding it into terminal control paths without escaping.
+Stdin is prompt/context input. It is not bidirectional in normal headless mode. The source installs Ctrl+C keypress handling only when `process.stdin.isTTY`; non-TTY stdin is not used for interactive protocol replies.
 
 ## Stream Contract
 
-The discriminator is top-level `type`. The stream starts with `init`, then echoes the user prompt as a `message` event with `role: "user"`, then streams assistant chunks as `message` events with `role: "assistant"` and `delta: true`. Tool calls use `tool_use`; results use `tool_result`; the join key is `tool_id`.
+The discriminator is `type`. `init` is emitted before the user message and before assistant/tool events. The source then projects internal agent events as follows:
 
-Normal success ends with `result` and `status: "success"`. The source emits that result when the internal agent loop reaches `agent_end` without an abort or configured max-turn fatal condition. For fatal paths, the implementation catches errors and delegates to `handleError` after cleanup; a parser should not assume that every failure includes `result.status: "error"`.
+```mermaid
+flowchart TD
+    A[launch] --> B[init]
+    B --> C[user message]
+    C --> D{agent stream}
+    D --> E[assistant message delta]
+    D --> F[tool_use]
+    F --> G[tool_result]
+    D --> H[error]
+    D --> I[result]
+```
 
-Timestamps are ISO-8601 strings from `new Date().toISOString()`, so they are UTC timestamps with millisecond precision when JavaScript includes it.
+Tool calls correlate by `tool_id`: `tool_use.tool_id` equals `tool_result.tool_id`. Assistant output is a sequence of `message` events where `role` is `assistant` and `delta` is usually `true`; concatenate those chunks in stream order to reconstruct the final text.
 
-Internal events explicitly ignored by the non-interactive projection are:
+Timestamps are ISO-8601 strings generated with `new Date().toISOString()`, so they are UTC instants. There is no schema version marker in the event stream. Unknown event types should be skipped and logged because the format has no formal compatibility contract.
 
-| Internal event | Parser consequence |
-| --- | --- |
-| `initialize` | No richer session-start metadata than `init` |
-| `session_update` | No cwd/project/root updates in the stream |
-| `agent_start` | No subagent start/lifecycle records |
-| `tool_update` | No structured tool progress |
-| `elicitation_request` | No direct human-in-loop prompt event |
-| `elicitation_response` | No direct approval/answer event |
-| `usage` | No incremental token usage |
-| `custom` | No extension/custom event projection |
-
-Unknown top-level event types should be skipped and logged at trace/debug level with raw-event preservation for drift fixtures. Failing closed on unknown events would make Claudine brittle against Gemini CLI releases that add fields or event types.
+The terminal event is `result` when the run ends cleanly. Fatal internal errors can throw out of the projection path and be handled by the process-level error handler, so absence of `result` plus non-zero exit is a meaningful failure state.
 
 ## Session Metadata
 
-`stream-json` exposes only two early session metadata fields: `init.session_id` and `init.model`. `session_id` is emitted before the agentic loop begins, so Claudine can use it for log correlation and possible resume links.
+`init` exposes `session_id` and `model` early. The model is `config.getModel()`, so it may be a configured alias or resolved value depending on Gemini CLI model configuration. Final `result.stats.models` is a better signal for which model IDs actually consumed tokens, especially when model routing/fallback is enabled.
 
-The stream does not emit cwd, project root, git branch, workspace roots, trust status, sandbox status, approval mode, auth kind, CLI version, provider identity, or configured MCP server inventory. Claudine should capture those as wrapper-side facts from invocation, environment, settings inspection, and optional `gemini --version`. MCP tools can be inferred after the fact from `tool_use.tool_name` names beginning with `mcp_`, but that is not equivalent to a complete server inventory.
+The stream does not expose cwd, project root, git branch, provider version, auth kind, approval mode, sandbox mode, roots, or MCP server inventory. Claudine should supply or record these from wrapper context and preflight:
 
-Gemini session history is project-scoped and saved under `~/.gemini/tmp/<project_hash>/chats/` according to the session-management docs. That history includes conversation, tool executions, token usage, and reasoning summaries when available. The stream's `session_id` is useful, but actual resumability also depends on this persisted state.
+| Metadata | Stream availability | Wrapper strategy |
+| --- | --- | --- |
+| Session ID | `init.session_id` | Store for resume/log correlation. |
+| Model | `init.model`; final `stats.models` | Record requested `--model` separately. |
+| Version | Not emitted | Run `gemini --version` outside the stream. |
+| Cwd/project | Not emitted | Use wrapper launch cwd. |
+| Auth kind | Not emitted | Infer from environment/settings and auth errors. |
+| MCP servers | Not emitted | Record settings/Claudine MCP injection; infer MCP calls from `mcp_*` tool names. |
+| Approval/sandbox | Not emitted | Record flags/settings supplied by wrapper. |
+
+Hooks are a separate metadata source. The hooks reference says hook stdin includes `session_id`, `transcript_path`, `cwd`, `hook_event_name`, and `timestamp` ([Hooks reference](https://geminicli.com/docs/hooks/reference/)). That is useful for custom instrumentation, but it is not part of stdout `stream-json`.
 
 ## Event Families
 
-The visible stream families are small but useful:
+The public stream has six event names. It does not have dedicated `file_change`, `plan`, `reasoning`, `subagent_start`, `subagent_stop`, `tool_progress`, or `usage_delta` events.
 
-| Family | Event(s) | What Claudine can render |
+| Family | Event(s) | Notes |
 | --- | --- | --- |
-| Session | `init`, `result` | session ID, model, final status, aggregate usage |
-| Assistant text | `message` | live assistant deltas and prompt echo |
-| Tools | `tool_use`, `tool_result` | tool start, arguments, result/error, correlation by `tool_id` |
-| Errors | `error`, sometimes `result.error` | warnings, resource exhaustion, general runtime errors |
-| Usage | `result.stats` | final aggregate and per-model token counts |
+| Session | `init`, `result` | `result` is terminal when emitted. |
+| Assistant text | `message` | User prompt and assistant deltas share the event name and differ by `role`. |
+| Tool calls | `tool_use` | Input parameters are visible. |
+| Tool results | `tool_result` | Status and display output are visible; raw stdout/stderr/exit code are not separately structured. |
+| Errors/warnings | `error`, `result.error` | Non-fatal errors are streamed; fatal errors may bypass `result`. |
+| Usage | `result.stats` | Final aggregate and per-model token counts only. |
 
-There are no dedicated visible events for plans, file changes, permission decisions, terminal resize/status, subagent lifecycle, or rate-limit reset metadata.
+Source inspection is important here because the projection explicitly ignores internal events that would otherwise be valuable to Claudine: `usage`, `tool_update`, `session_update`, `elicitation_request`, `elicitation_response`, `agent_start`, and `custom`.
 
 ## Tools
 
-Gemini CLI's tools cover execution, filesystem, interaction, task tracking, MCP, memory, planning, system operations, and web. In the headless stream, all visible tool families are normalized into the same two events:
+Gemini CLI's tools reference lists execution, file-system, interaction, task-tracking, MCP, memory, planning, and system tools ([Tools reference](https://geminicli.com/docs/reference/tools/)). In `stream-json`, they all collapse to the same public envelope: `tool_use` before execution and `tool_result` after execution.
 
-1. `tool_use` before execution, with `tool_name`, `tool_id`, and `parameters`.
-2. `tool_result` after execution, with `tool_id`, `status`, `output`, and optional `error`.
+For wrapper purposes:
 
-The tool stream is live enough for Claudine to show "tool started" before completion. It is not rich enough to show structured progress because `tool_update` is ignored. File writes and edits are not separate `file_change` events; Claudine must infer them from tool names/parameters/results or perform its own filesystem diffing.
+| Tool signal | Visible? | Details |
+| --- | --- | --- |
+| Call start | Yes | `tool_use.tool_name`, `tool_id`, `parameters`. |
+| Progress | No | Internal `tool_update` is ignored. |
+| Result | Yes | `tool_result.status`, `output`, optional `error`. |
+| Command stdout/stderr | Partly | Usually folded into display `output`, not separate fields. |
+| Command exit code | Not guaranteed | No dedicated `exit_code` field in stream schema. |
+| File changes | Indirect | Infer from write/edit tool names and parameters/results. |
+| MCP identity | Partly | MCP tools use `mcp_<server>_<tool>` names. |
 
-The shell tool documentation says the tool returns command, directory, stdout, stderr, exit code, and background PIDs. The JSONL projection does not preserve those as separate stable fields; it converts display content to a string `tool_result.output`. A parser should not rely on a structured `exit_code` path in `stream-json` unless future source adds one.
-
-MCP tools are represented like native tools. The configuration docs say MCP-discovered tools are named with an `mcp_` prefix plus the server alias and tool name. The docs warn that underscores in server aliases can confuse policy parsing because the policy engine uses the first underscore after `mcp_`.
+Approval behavior is configurable. The CLI docs list `--approval-mode` values `default`, `auto_edit`, `yolo`, and `plan`, with `--yolo` deprecated in favor of `--approval-mode=yolo` ([CLI cheatsheet](https://geminicli.com/docs/cli/cli-reference/)). Tools such as `run_shell_command`, `replace`, and `write_file` require confirmation unless policy/settings/approval mode allow them. Claudine should use `plan` for read-only automation or use `yolo` only when an external sandbox and policy envelope make that acceptable.
 
 ## Completion and Exit Status
 
-For normal success, trust `result.status == "success"` and then process exit code `0`. The final answer text is the concatenation of assistant `message.content` chunks with `role: "assistant"`; in `json` mode it is `response`.
+A successful stream ends with:
 
-The official headless docs list these exit codes:
+```json
+{"type":"result","timestamp":"...","status":"success","stats":{"total_tokens":0,"input_tokens":0,"output_tokens":0,"cached":0,"input":0,"duration_ms":0,"tool_calls":0,"models":{}}}
+```
 
-| Code | Meaning |
-| --- | --- |
-| `0` | Success |
-| `1` | General error or API failure |
-| `42` | Input error |
-| `53` | Turn limit exceeded |
+The exact values vary, but the field shape comes from the TypeScript `ResultEvent` and `StreamStats` interfaces. The official headless docs list exit code `0` for success, `1` for general/API failure, `42` for input error, and `53` for turn limit exceeded ([Headless mode reference](https://geminicli.com/docs/cli/headless/)).
 
-Because fatal paths are handled outside the normal `result` emission path, Claudine should use a layered completion rule:
+Claudine should prefer the terminal `result` event when it exists. If stdout ends without `result`, fall back to process exit code and stderr. This matters because fatal internal errors are reconstructed and thrown in the non-interactive source path before the normal final result emission.
 
-1. If a `result` event appears, use it as the terminal stream record.
-2. If stdout ends without `result`, classify by process exit code and stderr.
-3. If exit code is non-zero and stderr/auth/error text is available, map known classes such as auth, input, sandbox, config, turn limit, cancellation, and tool execution.
-4. If stdout ends without `result` but exit code is `0`, mark completion ambiguous and keep raw logs for fixture work.
-
-Token usage is final-only. `result.stats` includes aggregate token counts and per-model token maps, but internal incremental `usage` events are ignored. There is no cost field.
+Single JSON mode puts the final assistant answer in `response`. Streaming mode does not provide a separate final text field, so Claudine must concatenate assistant `message.content` deltas in order.
 
 ## Blocking Behavior
 
-Gemini CLI's default security posture can require user confirmation for mutating file tools and shell commands. The tools docs explicitly say users must manually approve mutators, and the CLI exposes `--approval-mode` plus the deprecated `--yolo` shortcut to change approval behavior.
+Headless authentication must be configured before launch. The authentication docs say headless mode uses existing cached credentials if present; otherwise users must configure environment-variable authentication, such as `GEMINI_API_KEY` or Vertex AI variables ([Authentication setup](https://geminicli.com/docs/get-started/authentication/)). Starting an interactive Google sign-in flow is not safe for automation.
 
-For automation, Claudine should choose one of two deterministic postures:
+Tool approval can block automation if left at default. Deterministic choices are:
 
-| Posture | Suggested flags | Use case |
-| --- | --- | --- |
-| Read-only/planning | `--approval-mode=plan --output-format stream-json` | CI analysis, audits, reports |
-| Mutating in external sandbox | `--approval-mode=yolo --sandbox --output-format stream-json` or externally stronger sandbox | autonomous repair jobs |
+| Goal | Flag/config |
+| --- | --- |
+| Read-only inspection | `--approval-mode=plan` |
+| Controlled edit/run in sandbox | `--approval-mode=yolo` plus `--sandbox` or external sandbox |
+| Allow specific tools | Policy/settings such as `tools.allowed` or policy engine configuration |
+| Avoid workspace trust prompt | `--skip-trust` or `GEMINI_CLI_TRUST_WORKSPACE=true` in controlled workspaces |
 
-Workspace trust is a separate blocker. Use `--skip-trust` or `GEMINI_CLI_TRUST_WORKSPACE=true` only when the wrapper has decided the workspace is safe for the run.
-
-The biggest gap is human-in-loop detection. The internal `elicitation_request` and `elicitation_response` events are explicitly ignored by `stream-json`. If a non-interactive run needs approval, the parser may see only silence, stderr diagnostics, a tool error, or a later process failure. Claudine should bound runs with its own silence timeout and classify missing terminal events carefully.
+The exact no-TTY behavior for `ask_user`, MCP OAuth, and every approval prompt was not verified with a live authenticated run. Since `elicitation_request` is ignored by the stream projection, Claudine should run with an inactivity timeout and treat visible `ask_user` tool calls as human-in-loop signals.
 
 ## Subagents
 
-Gemini subagents are supported and documented as specialist agents with their own prompts, tools, and context loops. They are exposed to the main agent as tools. Users can allow automatic delegation or force a subagent by beginning the prompt with `@subagent_name`.
+Gemini CLI supports subagents. The docs describe them as specialists with their own prompt, tools, and independent context loop; they are exposed to the main agent as tools, and a prompt can force one with leading `@subagent_name` syntax ([Subagents](https://geminicli.com/docs/core/subagents/)).
 
-In `stream-json`, subagents are not a distinct event family. The main stream can show the parent `tool_use` for a subagent tool and the final `tool_result`, but not nested subagent start/stop events, nested tool calls, nested model identity, nested session IDs, or nested errors. Claudine can inject non-interactive instructions into the top-level prompt and into forced-subagent prompt text, but cannot verify from the parent stream that a nested subagent avoided interactive behavior except by reading the final subagent result/error.
+For Claudine, the critical stream fact is that subagents are visible only as parent-level tool calls/results. The source ignores `agent_start`, and there are no public `subagent_start`, `subagent_stop`, nested tool, nested model, or nested usage events in `stream-json`. Claudine can show "called subagent tool X" if the tool name reveals it, but cannot render nested subagent progress from stdout alone.
 
 ## Use Case Detection
 
-| Use case | Detectable | Evidence | Notes |
-| --- | --- | --- | --- |
-| `plan_cap_approaching` | No | none | No remaining quota/threshold/reset fields. |
-| `plan_capped` | Partial | `error.message`, `result.error.message`, non-zero exit | `RESOURCE_EXHAUSTED` becomes severity `error`, but reset window is not structured. |
-| `no_funds` | Partial | error/stderr text | No balance or billing fields. |
-| `auth` | Partial | stderr, exit code, possible `result.error` | Source reconstructs `FatalAuthenticationError`; fatal errors may bypass `result`. |
-| `permission_read_denied` | Partial | `tool_use.parameters` + `tool_result.error` | Join by `tool_id`; no normalized path/policy field. |
-| `permission_write_denied` | Partial | `tool_use.parameters` + `tool_result.error` | Distinguish by tool family and error text/type. |
-| `tokens_consumed` | Yes | `result.stats.*` | Final session aggregate and per-model counts only. |
-| `model_used` | Yes | `init.model`, `result.stats.models` | `init.model` is early; `stats.models` is final. |
-| `model_fallback` | Inferred | compare `init.model` to `result.stats.models` keys | No explicit fallback event. |
-| `human_in_loop` | No | none in stdout | Elicitation events are intentionally ignored. |
-| `session_resumable` | Yes | `init.session_id` | Also depends on persisted project chat storage. |
-| `subagent_prompt_injection` | Partial | prompt text and subagent tool call | Parent stream does not show nested prompts. |
+| Use case | Detectable from stream-json? | How |
+| --- | --- | --- |
+| `tokens_consumed` | Yes | Final `result.stats.*` and `result.stats.models.*`. |
+| `model_used` | Yes | `init.model`; final `result.stats.models` for token-consuming models. |
+| `model_fallback` | Inferred | Compare requested model to `result.stats.models` keys. |
+| `session_resumable` | Yes | `init.session_id`. |
+| `auth` | Yes, mostly failure-side | `result.error`, stderr, exit code; no auth kind field. |
+| `plan_capped` / quota exhausted | Partly | `error.severity=error`, `RESOURCE_EXHAUSTED`-derived messages, final failure/exit. Reset windows are not structured. |
+| `no_funds` | Partly | Provider error text; no billing-specific event. |
+| `permission_read_denied` | Partly | Denied read tool `tool_result.error` or streamed `error.message`; no normalized path/policy fields. |
+| `permission_write_denied` | Partly | Denied write/edit tool `tool_result.error`; no dedicated write-denied event. |
+| `human_in_loop` | Partly | `ask_user` tool call or stalled run; internal elicitation events are ignored. |
+| `subagent_prompt_injection` | Yes | Prompt can use `@subagent`; parent stream may show subagent tool call. |
+| `plan_cap_approaching` | No | No near-cap quota event found. |
+
+Hooks can provide stronger permission and tool detail because `BeforeTool` and `AfterTool` receive tool names, inputs, responses, and can deny with structured hook output. But hooks are not a secondary stdout stream; they are separately configured scripts with their own stdin/stdout/stderr contract.
 
 ## Headless Constraints
 
-The main automation constraints are:
+The highest-risk constraints for automation are:
 
-- `stream-json` must be selected on the command line because persistent `output.format` does not document `stream-json`.
-- Fatal errors can end the process without a terminal `result` event.
-- Mutating tools can require approvals unless approval mode and trust are configured.
-- The stream omits elicitation events, so human-in-loop blocking is not directly visible.
-- The stream omits cwd, auth source, CLI version, sandbox, approval mode, and MCP inventory.
-- Tool progress, incremental token usage, and file changes are not first-class stream events.
-- Subagent internals are hidden behind generic parent tool events.
+| Constraint | Impact | Mitigation |
+| --- | --- | --- |
+| Default approvals can prompt | The process may block or fail waiting for a human. | Use `--approval-mode=plan`, explicit policies, or sandboxed `yolo`. |
+| Auth can prompt | Browser login is not automation-safe. | Preconfigure API key or Vertex AI credentials. |
+| Project trust gates settings | Repo `.gemini/settings.json` may be ignored. | Trust only controlled workspaces with `--skip-trust` or env. |
+| Stream omits internal events | No live usage/tool progress/subagent lifecycle. | Parse public stream and optionally add hooks/telemetry. |
+| Fatal errors may skip `result` | Terminal state can be ambiguous if parser waits only for `result`. | Combine terminal event, exit code, and stderr. |
+| No formal stream schema | Parser may drift across releases. | Generate parser from TypeScript union and tolerate unknown events. |
 
 ## Timeline
 
-The current docs indicate:
-
-- Headless mode docs list `json` and `stream-json`, with `stream-json` described as newline-delimited JSON events.
-- The changelog mentions stream JSON output as a release feature for monitoring real-time agent progress.
-- The current TypeScript source includes `warnings` on final `JsonOutput` and per-model token breakdowns under `result.stats.models`.
-- The configuration reference still documents persistent `output.format` values as `text` and `json`, while the CLI flag supports `stream-json`.
+The currently published headless reference lists `stream-json` as an official output mode and was last updated on March 10, 2026. The local CLI observed during this research was `0.46.0`; the public changelog page still referenced a recent stable release separately, so Gemini CLI should be treated as moving quickly. The document was refreshed on July 3, 2026 against official docs, source on `main`, the settings schema, and local CLI help/version output.
 
 ## Quirks and Gaps
 
-The most important quirk is that `stream-json` looks like an event bus but is actually a curated projection. It is useful for Claudine, but it is not enough to reconstruct every internal state transition. In particular, `usage`, `tool_update`, `session_update`, and elicitation events are dropped.
+The most surprising quirk is that persistent `output.format` in settings is documented as only `text` or `json`, while the CLI flag supports `text`, `json`, and `stream-json`. Claudine should not rely on config to select the streaming format; pass `--output-format stream-json` every time.
 
-The second quirk is final failure handling. The public docs say exit codes are meaningful, and source shows fatal errors are reconstructed and handled after cleanup. Claudine should not require a final `result` event to classify failure.
+The stream also does not expose exact cwd, version, auth kind, approval mode, sandbox, or MCP server inventory. Those are wrapper/preflight facts, not stream facts.
 
-Gaps that need fixture evidence:
+Gaps that remain:
 
-- Exact stdout/stderr shape for missing auth, expired auth, and quota exhaustion in `stream-json`.
-- Non-TTY behavior when a mutating tool needs approval and approval mode is default.
-- Whether all configured max-turn exits consistently use exit code `53`.
-- Whether `init.model` is always the requested/configured alias or sometimes a resolved backend name.
-- Whether local telemetry/activity logs expose stable secondary lifecycle records worth parsing.
+- No authenticated live run was executed, so real auth/quota/provider error payloads were not captured.
+- No formal JSON Schema or protocol version marker was found for `stream-json`.
+- Exact non-TTY behavior for `ask_user`, MCP OAuth, and default approval prompts needs fixture evidence.
+- Tool output truncation/summarization is setting- and tool-dependent.
 
 ## Claudine Integration Notes
 
-Recommended default for read-only automation:
+Recommended command:
 
 ```bash
-gemini --skip-trust --approval-mode=plan --output-format stream-json -p "<prompt>"
+gemini --output-format stream-json --prompt "$PROMPT"
 ```
 
-Recommended default for mutating automation only inside a stronger external sandbox:
+For read-only work, add `--approval-mode=plan`. For editing or command execution, use an external sandbox and an explicit approval policy; `--approval-mode=yolo` should not be used as a safety mechanism by itself. Use a wrapper-controlled `GEMINI_CLI_HOME` when Claudine needs isolated config and state.
 
-```bash
-gemini --skip-trust --approval-mode=yolo --sandbox --output-format stream-json -p "<prompt>"
-```
+Parser rules:
 
-Parser notes:
+- Parse stdout as JSONL and require a top-level `type`.
+- Treat stderr as diagnostics and fallback failure evidence.
+- Store `init.session_id` immediately.
+- Concatenate `message` events where `role=assistant`.
+- Join tools by `tool_id`.
+- Treat `result` as terminal when present.
+- If no `result` arrives, classify using exit code and stderr.
+- Skip unknown events and log them for drift analysis.
 
-- Parse stdout line-by-line as JSONL.
-- Use `type` as the discriminator.
-- Treat `init.session_id` as the earliest correlation ID.
-- Accumulate final assistant text from `message` events where `role == "assistant"`.
-- Join `tool_use` and `tool_result` by `tool_id`.
-- Render `tool_use` as live tool start; render `tool_result` as completion.
-- Use `result.stats` for final token usage.
-- Use `result` as terminal when present, but fall back to exit code and stderr when missing.
-- Preserve unknown event records for drift analysis.
+Streams to avoid:
 
-Wrapper notes:
-
-- Keep stderr separate. It is not structured JSONL, but it is important for fatal error classification.
-- Capture wrapper-side metadata that Gemini omits: cwd, roots, trust, sandbox, approval mode, MCP configuration, auth source, and CLI version.
-- Use Claudine timeouts to detect silence/hangs because the stream omits elicitation events.
-- Consider filesystem diffing when file-change reporting matters.
-- Do not use `--prompt-interactive` or positional prompt forms for deterministic wrapper runs.
+- `text` output for automation.
+- `json` output when live progress matters.
+- `--experimental-acp` unless Claudine is intentionally implementing ACP instead of wrapping the CLI stream.
 
 ## Changelog
 
-- 2026-07-02: Rewrote the older Gemini non-interactive note into the current `_schema.yaml` frontmatter shape, refreshed against current official docs and source, and documented the preferred Claudine `stream-json` strategy.
+- 2026-07-03: Refreshed Gemini CLI non-interactive research against official headless docs, CLI/config docs, TypeScript stream source, settings schema, and local Gemini CLI `0.46.0` version/help output.
 
 ## Sources
 
 - [Gemini CLI headless mode reference](https://geminicli.com/docs/cli/headless/)
-- [Gemini CLI automation tutorial](https://geminicli.com/docs/cli/tutorials/automation/)
-- [Gemini CLI command reference](https://geminicli.com/docs/cli/cli-reference/)
+- [Gemini CLI cheatsheet / CLI options](https://geminicli.com/docs/cli/cli-reference/)
 - [Gemini CLI configuration reference](https://geminicli.com/docs/reference/configuration/)
+- [Gemini CLI authentication setup](https://geminicli.com/docs/get-started/authentication/)
 - [Gemini CLI tools reference](https://geminicli.com/docs/reference/tools/)
-- [Gemini CLI hooks reference](https://geminicli.com/docs/hooks/reference/)
-- [Gemini CLI session management](https://geminicli.com/docs/cli/session-management/)
 - [Gemini CLI subagents](https://geminicli.com/docs/core/subagents/)
-- [Gemini CLI quotas and pricing](https://geminicli.com/docs/resources/quota-and-pricing/)
-- [Output TypeScript types](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/output/types.ts)
+- [Gemini CLI hooks reference](https://geminicli.com/docs/hooks/reference/)
+- [Output event TypeScript types](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/output/types.ts)
 - [Stream JSON formatter source](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/output/stream-json-formatter.ts)
-- [JSON formatter source](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/output/json-formatter.ts)
-- [Non-interactive CLI agent session source](https://github.com/google-gemini/gemini-cli/blob/main/packages/cli/src/nonInteractiveCliAgentSession.ts)
+- [Non-interactive session projection source](https://github.com/google-gemini/gemini-cli/blob/main/packages/cli/src/nonInteractiveCliAgentSession.ts)
+- [Gemini CLI settings JSON Schema](https://raw.githubusercontent.com/google-gemini/gemini-cli/main/schemas/settings.schema.json)

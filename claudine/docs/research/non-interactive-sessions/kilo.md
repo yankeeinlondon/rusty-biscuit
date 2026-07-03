@@ -1,117 +1,113 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-02
-last_updated: 2026-07-02
+last_updated: 2026-07-03
 agent: codex
 model: default
 docs: https://kilo.ai/docs/code-with-ai/platforms/cli#autonomous-mode-non-interactive
 invocation:
   - command: "kilo run --auto --format json \"<prompt>\""
     stdin_support: true
-    prompt_arg: "Message words are joined into the prompt; non-TTY stdin is appended to the prompt."
-    notes: "Fresh autonomous session unless --continue or --session is supplied. Preferred subprocess mode for Claudine."
+    prompt_arg: "Prompt words are joined; non-TTY stdin is appended after a newline."
+    notes: "Fresh non-interactive session. Preferred subprocess form for Claudine."
   - command: "kilo run --auto --format json -- \"<prompt beginning with dash>\""
     stdin_support: true
-    prompt_arg: "Words after -- are raw positional prompt atoms; useful for prompts beginning with '-' or shell-like text."
-    notes: "Same session behavior as normal run."
+    prompt_arg: "Prompt words after -- are treated as positional message atoms."
+    notes: "Use when the prompt begins with '-' or contains shell-looking leading options."
   - command: "kilo run --auto --format json --file <path> \"<prompt>\""
     stdin_support: true
-    prompt_arg: "Prompt from argv/stdin plus file attachments represented as file URL parts."
-    notes: "Local files are resolved from --dir/current directory; attach mode resolves against the remote server directory."
+    prompt_arg: "Prompt plus one or more file or directory attachments."
+    notes: "Local paths resolve from --dir/current directory; attach mode resolves against the selected remote/server directory."
   - command: "kilo run --auto --format json --continue \"<prompt>\""
     stdin_support: true
-    prompt_arg: "Same prompt surfaces as normal run."
-    notes: "Continues the last top-level session."
+    prompt_arg: "Same argv/stdin prompt behavior as a fresh run."
+    notes: "Continues the latest top-level session."
   - command: "kilo run --auto --format json --session <session-id> \"<prompt>\""
     stdin_support: true
-    prompt_arg: "Same prompt surfaces as normal run."
+    prompt_arg: "Same argv/stdin prompt behavior as a fresh run."
     notes: "Continues a specific session ID."
   - command: "kilo run --auto --format json --session <session-id> --fork \"<prompt>\""
     stdin_support: true
-    prompt_arg: "Same prompt surfaces as normal run."
-    notes: "Forks an existing local session before continuing."
+    prompt_arg: "Same argv/stdin prompt behavior as a fresh run."
+    notes: "Forks an existing local session, then continues the fork."
   - command: "kilo run --auto --format json --session <cloud-session-id> --cloud-fork \"<prompt>\""
     stdin_support: true
-    prompt_arg: "Same prompt surfaces as normal run."
+    prompt_arg: "Same argv/stdin prompt behavior as a fresh run."
     notes: "Imports a cloud session and continues it locally."
   - command: "kilo serve --port <port>; kilo run --auto --format json --attach http://127.0.0.1:<port> \"<prompt>\""
     stdin_support: true
-    prompt_arg: "Prompt is sent to the long-running server over the SDK HTTP API."
-    notes: "Useful when Claudine wants a reusable server. Basic auth may be required through --username/--password or KILO_SERVER_*."
+    prompt_arg: "Prompt is sent to the long-running server through the SDK HTTP API."
+    notes: "Requires server lifecycle and optional Basic Auth via --username/--password or KILO_SERVER_*."
   - command: "kilo acp --cwd <dir>"
     stdin_support: false
     prompt_arg: "ACP client protocol, not plain prompt stdin."
-    notes: "Starts an Agent Client Protocol server. This is a structured server mode, but it is a different integration surface from kilo run."
+    notes: "Structured server mode for ACP clients; not the one-shot stdout stream Claudine should use first."
 output_formats:
   - name: "formatted run output"
     cli_value: "default"
     stream: true
     format: text
-    description: "Human-oriented formatted output. Final text is printed to stdout when stdout is not a TTY; TTY output includes formatted status and tool summaries."
-    side_effects: "Not safe for parsing: banners, status text, ANSI styling, and logs may appear."
+    description: "Human-oriented formatted output; in non-TTY stdout the final assistant text is printed as text."
+    side_effects: "Not parser-safe: status, warnings, ANSI/UI formatting, share URLs, and tool summaries can appear."
   - name: "raw JSON events"
     cli_value: "--format json"
     stream: true
     format: ndjson
-    description: "One JSON object per stdout line from kilo run. The CLI emits selected event records: tool_use, step_start, step_finish, text, reasoning, and error."
-    side_effects: "Suppresses the human formatter for forwarded records, but global startup/help logs can still be noisy outside normal run execution. No explicit terminal complete event is emitted."
+    description: "One JSON object per stdout line from kilo run. Emitted types are tool_use, step_start, step_finish, text, reasoning, and error."
+    side_effects: "Suppresses the human formatter for forwarded records, but there is no explicit terminal completion event."
   - name: "server SSE"
     cli_value: "kilo serve / SDK event.subscribe"
     stream: true
     format: sse
-    description: "The local Kilo server exposes text/event-stream events. Data payloads are JSON with richer SDK/global event unions."
-    side_effects: "Requires managing a server, optional Basic Auth, directory scoping, and generated SDK/API compatibility. Richer than run JSON but not the simplest subprocess wrapper."
+    description: "The local server exposes text/event-stream frames with event: message and JSON data payloads."
+    side_effects: "Richer than run NDJSON but requires server lifecycle, directory routing, and auth handling."
   - name: "ACP server"
     cli_value: "kilo acp"
     stream: true
     format: other
     description: "Agent Client Protocol server mode."
-    side_effects: "Protocol integration rather than a one-shot stdout stream; stdin/stdout prompt assumptions do not apply."
+    side_effects: "Bidirectional protocol integration; stdin/stdout are not a prompt/result stream."
 schema_sources:
   - url: "https://kilo.ai/docs/code-with-ai/platforms/cli"
     schema_type: examples
     formal: false
-    notes: "Official CLI docs describe autonomous mode, run examples, --format json in the generated command reference, exit codes, config files, and env overrides. They do not define the JSON event schema."
-  - url: "https://github.com/Kilo-Org/kilocode/blob/4c07a1db51d121b60129c3858f035da3f12df39c/packages/opencode/src/cli/cmd/run.ts"
+    notes: "Official docs describe autonomous mode, exit codes, config files, and env overrides; they do not define the JSON event schema."
+  - url: "https://github.com/Kilo-Org/kilocode/blob/419ff008ef180dd7076f679a89442883ba8f8d86/packages/opencode/src/cli/cmd/run.ts"
     schema_type: typescript
     formal: false
-    notes: "Authoritative source for kilo run flags, stdin merging, --format json emission, non-interactive permission replies, network retry behavior, and event names forwarded to stdout."
-  - url: "https://github.com/Kilo-Org/kilocode/blob/4c07a1db51d121b60129c3858f035da3f12df39c/packages/opencode/test/cli/run/run-process.test.ts"
+    notes: "Authoritative source for run flags, stdin merging, JSON emission, permission replies, and forwarded event names."
+  - url: "https://github.com/Kilo-Org/kilocode/blob/419ff008ef180dd7076f679a89442883ba8f8d86/packages/opencode/test/cli/run/run-process.test.ts"
     schema_type: examples
     formal: false
-    notes: "Subprocess tests lock in parseable line-delimited JSON, required type/sessionID fields, and the current mid-stream error exit-code behavior."
-  - url: "https://github.com/Kilo-Org/kilocode/blob/4c07a1db51d121b60129c3858f035da3f12df39c/packages/opencode/src/session/message-v2.ts"
+    notes: "Subprocess tests assert parseable line-delimited JSON with type and sessionID and lock in mid-stream error exit behavior."
+  - url: "https://github.com/Kilo-Org/kilocode/blob/419ff008ef180dd7076f679a89442883ba8f8d86/packages/opencode/src/session/message-v2.ts"
     schema_type: typescript
     formal: false
-    notes: "Effect Schema source for Message, Part, ToolPart, StepFinishPart, tokens, cost, model, provider, cwd/root, and assistant error fields carried inside JSON part payloads."
-  - url: "https://github.com/Kilo-Org/kilocode/blob/4c07a1db51d121b60129c3858f035da3f12df39c/packages/core/src/session-event.ts"
+    notes: "Effect Schema source for part payloads, tool states, step usage/cost, assistant metadata, and error names."
+  - url: "https://github.com/Kilo-Org/kilocode/blob/419ff008ef180dd7076f679a89442883ba8f8d86/packages/core/src/session-event.ts"
     schema_type: typescript
     formal: false
-    notes: "Richer server-side EventV2 union for session.next.* events. Useful if Claudine later integrates through serve/SDK rather than kilo run."
-  - url: "https://github.com/Kilo-Org/kilocode/blob/4c07a1db51d121b60129c3858f035da3f12df39c/packages/sdk/js/src/v2/gen/client/types.gen.ts"
+    notes: "Richer EventV2 union used by the server/SSE and SDK event stream; broader than kilo run NDJSON."
+  - url: "https://github.com/Kilo-Org/kilocode/blob/419ff008ef180dd7076f679a89442883ba8f8d86/packages/opencode/src/server/routes/instance/httpapi/handlers/event.ts"
     schema_type: typescript
     formal: false
-    notes: "Generated TypeScript SDK types for the HTTP/SSE API. Broader than the CLI NDJSON stream."
-  - url: "https://github.com/Kilo-Org/kilocode/blob/4c07a1db51d121b60129c3858f035da3f12df39c/packages/opencode/src/server/routes/instance/httpapi/handlers/event.ts"
-    schema_type: typescript
-    formal: false
-    notes: "Server event endpoint encodes SSE message events with JSON.stringify(data)."
+    notes: "SSE endpoint source; emits event: message frames whose data is JSON.stringify(event)."
 cli_params:
   - flag: "--format"
     value: "default | json"
     description: "Selects formatted text or raw JSON event output for kilo run."
-    example: "kilo run --format json --auto \"fix tests\""
+    example: "kilo run --auto --format json \"fix tests\""
   - flag: "--auto"
     value: ""
-    description: "Autonomous/pipeline mode. Auto-approves permissions for the root session and tracked task child sessions; questions and interactive terminal are denied."
-    example: "kilo run --auto --format json \"task\""
+    description: "Autonomous/pipeline mode. The run loop auto-approves root and tracked task-child permission asks."
+    example: "kilo run --auto --format json \"fix tests\""
   - flag: "--dangerously-skip-permissions"
     value: ""
-    description: "Approves permission requests that are not explicitly denied. More dangerous and less deterministic than explicit permission config plus --auto."
-    example: "kilo run --dangerously-skip-permissions --format json \"task\""
+    description: "Approves permissions that are not explicitly denied. Riskier than --auto with explicit permission config."
+    example: "kilo run --dangerously-skip-permissions --format json \"fix tests\""
   - flag: "--interactive, -i"
     value: ""
-    description: "Starts direct interactive split-footer mode. Conflicts with --format json and requires TTY stdout."
+    description: "Starts direct interactive split-footer mode; conflicts with --format json and requires TTY stdout."
     example: "kilo run --interactive"
   - flag: "--model, -m"
     value: "provider/model"
@@ -131,15 +127,15 @@ cli_params:
     example: "kilo run --agent code --auto --format json \"task\""
   - flag: "--command"
     value: "command"
-    description: "Runs a built-in/slash command with the message as arguments. Some built-ins require --continue or --session."
-    example: "kilo run --command summarize --session ses_x --auto --format json"
+    description: "Runs a built-in or slash command with the message as arguments."
+    example: "kilo run --command review --auto --format json"
   - flag: "--file, -f"
     value: "path"
-    description: "Attaches one or more local files/directories to the prompt."
+    description: "Attaches one or more local files or directories to the prompt."
     example: "kilo run -f README.md --auto --format json \"summarize\""
   - flag: "--continue, -c"
     value: ""
-    description: "Continues the last top-level session."
+    description: "Continues the latest top-level session."
     example: "kilo run --continue --auto --format json \"continue\""
   - flag: "--session, -s"
     value: "session-id"
@@ -153,21 +149,13 @@ cli_params:
     value: ""
     description: "Imports a cloud session before continuing locally; used with --session."
     example: "kilo run --session cloud-id --cloud-fork --auto --format json \"continue\""
-  - flag: "--share"
-    value: ""
-    description: "Shares the session if sharing is enabled."
-    example: "kilo run --share --auto --format json \"task\""
-  - flag: "--title"
-    value: "title"
-    description: "Sets the new session title; empty value derives a title from the prompt."
-    example: "kilo run --title \"CI repair\" --auto --format json \"task\""
   - flag: "--dir"
     value: "path"
     description: "Runs in a local directory, or a remote server directory when --attach is used."
     example: "kilo run --dir packages/app --auto --format json \"task\""
   - flag: "--attach"
     value: "url"
-    description: "Uses an existing Kilo server instead of starting an in-process server."
+    description: "Uses an existing Kilo server instead of an in-process server."
     example: "kilo run --attach http://127.0.0.1:4096 --auto --format json \"task\""
   - flag: "--username, -u"
     value: "name"
@@ -179,708 +167,580 @@ cli_params:
     example: "kilo run --attach http://127.0.0.1:4096 -p \"$KILO_SERVER_PASSWORD\" --auto --format json \"task\""
   - flag: "--print-logs"
     value: ""
-    description: "Prints logs to stderr according to CLI help; parser-relevant because logs can explain startup/auth failures."
+    description: "Global flag that prints logs to stderr; useful for startup/auth diagnosis but not part of the JSON stream."
     example: "kilo --print-logs --log-level INFO run --auto --format json \"task\""
   - flag: "--log-level"
     value: "DEBUG | INFO | WARN | ERROR"
-    description: "Selects log verbosity."
+    description: "Global log verbosity flag."
     example: "kilo --print-logs --log-level DEBUG run --auto --format json \"task\""
   - flag: "--pure"
     value: ""
-    description: "Runs without external plugins. Useful for reproducible automation."
+    description: "Global flag that disables external plugins for a more reproducible run."
     example: "kilo --pure run --auto --format json \"task\""
 config_files:
-  - os: all
-    scope: user
-    path: "~/.config/kilo/kilo.json"
-    format: json
-    effect: "Recommended global Kilo config; can set providers, model defaults, permission rules, MCP servers, plugins, skills, sharing, and server settings."
-    notes: "Source order includes config.json, kilo.json, kilo.jsonc, opencode.json, opencode.jsonc. Later files merge over earlier files."
-  - os: all
+  - os: macos
     scope: user
     path: "~/.config/kilo/kilo.jsonc"
     format: jsonc
-    effect: "Recommended human-editable global config with comments."
-    notes: "Documented as the global config for agents and many customization features."
-  - os: all
-    scope: user
-    path: "~/.config/kilo/config.json"
-    format: json
-    effect: "Supported legacy/compat global config."
-    notes: "Loaded before kilo.json/kilo.jsonc in current source."
-  - os: all
-    scope: user
-    path: "~/.config/kilo/opencode.json | ~/.config/kilo/opencode.jsonc"
-    format: jsonc
-    effect: "Supported compatibility global config, including plugin config."
-    notes: "Loaded after kilo config files; can affect tools, plugins, model/provider behavior, and output-side logs."
-  - os: all
-    scope: repo
-    path: "./kilo.json | ./kilo.jsonc"
-    format: jsonc
-    effect: "Project config. Can override/merge permission, agent, MCP, plugin, skill, and provider settings for the current project."
-    notes: "Project-level configuration takes precedence over global settings unless KILO_DISABLE_PROJECT_CONFIG is set."
-  - os: all
-    scope: repo
-    path: "./.kilo/kilo.json | ./.kilo/kilo.jsonc"
-    format: jsonc
-    effect: "Project config under the recommended .kilo directory."
-    notes: ".kilo directory resources load after root project config in the documented agent precedence."
-  - os: all
-    scope: repo
-    path: "./.kilocode/kilo.json | ./.kilocode/opencode.json"
-    format: jsonc
-    effect: "Legacy project config directories and resources."
-    notes: "Source walks both .kilocode and .kilo; .kilo generally wins when both exist."
-  - os: all
-    scope: user
-    path: "~/.config/kilo/agents/*.md"
-    format: other
-    effect: "Global agent/subagent definitions, including permission and model defaults."
-    notes: "Agent docs say global agent Markdown files merge after global/project config."
-  - os: all
-    scope: repo
-    path: "./.kilo/agents/*.md"
-    format: other
-    effect: "Project agent/subagent definitions and overrides."
-    notes: "Project agent files override same-name global/built-in agent fields by merge."
-  - os: all
-    scope: user
-    path: "~/.config/kilo/tui.json | ~/.config/kilo/tui.jsonc"
-    format: jsonc
-    effect: "TUI and notification configuration."
-    notes: "Mostly irrelevant to --format json, but can affect interactive/attention behavior."
-  - os: all
-    scope: repo
-    path: "./.kilo/tui.json | ./.kilo/tui.jsonc"
-    format: jsonc
-    effect: "Project TUI/notification configuration."
-    notes: "Not a structured stream selector."
-  - os: all
-    scope: user
-    path: "~/.local/state/kilo/model.json"
-    format: json
-    effect: "Stores last selected model per agent."
-    notes: "Docs say this remembered pick can override config-pinned model defaults until reset."
-  - os: macos
-    scope: other
-    path: "~/Library/Application Support/Code/User/globalStorage/kilocode.kilo-code"
-    format: other
-    effect: "VS Code extension storage that can be migrated/read by CLI-related setup."
-    notes: "Source documents this path for Kilo extension global storage."
-  - os: windows
-    scope: other
-    path: "%APPDATA%/Code/User/globalStorage/kilocode.kilo-code"
-    format: other
-    effect: "VS Code extension storage that can be migrated/read by CLI-related setup."
-    notes: "Source documents this path for Kilo extension global storage."
+    effect: "Global model, provider, permission, MCP, plugin, agent, and tool settings."
+    notes: "Loaded after config.json and kilo.json; later project/env/managed scopes can override."
   - os: linux
-    scope: other
-    path: "~/.config/Code/User/globalStorage/kilocode.kilo-code"
-    format: other
-    effect: "VS Code extension storage that can be migrated/read by CLI-related setup."
-    notes: "Source documents this path for Kilo extension global storage."
+    scope: user
+    path: "~/.config/kilo/kilo.jsonc"
+    format: jsonc
+    effect: "Global model, provider, permission, MCP, plugin, agent, and tool settings."
+    notes: "XDG_CONFIG_HOME can move this path; later project/env/managed scopes can override."
+  - os: windows
+    scope: user
+    path: "%LOCALAPPDATA%\\kilo\\kilo.jsonc"
+    format: jsonc
+    effect: "Global model, provider, permission, MCP, plugin, agent, and tool settings."
+    notes: "Kilo uses xdg-basedir; docs warn Windows config dir may vary."
+  - os: macos
+    scope: repo
+    path: "./kilo.jsonc"
+    format: jsonc
+    effect: "Project config; can override global model, provider, permission, MCP, plugin, and agent settings."
+    notes: "Discovered upward from cwd/worktree unless KILO_DISABLE_PROJECT_CONFIG is set."
+  - os: linux
+    scope: repo
+    path: "./kilo.jsonc"
+    format: jsonc
+    effect: "Project config; can override global model, provider, permission, MCP, plugin, and agent settings."
+    notes: "Discovered upward from cwd/worktree unless KILO_DISABLE_PROJECT_CONFIG is set."
+  - os: windows
+    scope: repo
+    path: ".\\kilo.jsonc"
+    format: jsonc
+    effect: "Project config; can override global model, provider, permission, MCP, plugin, and agent settings."
+    notes: "Discovered upward from cwd/worktree unless KILO_DISABLE_PROJECT_CONFIG is set."
+  - os: macos
+    scope: repo
+    path: "./.kilo/kilo.jsonc"
+    format: jsonc
+    effect: "Project config directory; also supports agents, commands, plugins, and skills."
+    notes: "Legacy .kilocode is also read; config directory files are merged after root project files."
+  - os: linux
+    scope: repo
+    path: "./.kilo/kilo.jsonc"
+    format: jsonc
+    effect: "Project config directory; also supports agents, commands, plugins, and skills."
+    notes: "Legacy .kilocode is also read; config directory files are merged after root project files."
+  - os: windows
+    scope: repo
+    path: ".\\.kilo\\kilo.jsonc"
+    format: jsonc
+    effect: "Project config directory; also supports agents, commands, plugins, and skills."
+    notes: "Legacy .kilocode is also read; config directory files are merged after root project files."
+  - os: macos
+    scope: managed
+    path: "/Library/Application Support/kilo/kilo.jsonc"
+    format: jsonc
+    effect: "Enterprise/managed config loaded after user, project, env content, and cloud org config."
+    notes: "macOS MDM preferences under /Library/Managed Preferences can override managed files."
+  - os: linux
+    scope: managed
+    path: "/etc/kilo/kilo.jsonc"
+    format: jsonc
+    effect: "Enterprise/managed config loaded after user, project, env content, and cloud org config."
+    notes: "No managed plist layer on Linux."
+  - os: windows
+    scope: managed
+    path: "%ProgramData%\\kilo\\kilo.jsonc"
+    format: jsonc
+    effect: "Enterprise/managed config loaded after user, project, env content, and cloud org config."
+    notes: "ProgramData defaults to C:\\ProgramData when unset."
 env_vars:
-  - name: "KILO_CONFIG_CONTENT"
-    effect: "Inline JSON/JSONC config override loaded after file config."
-    notes: "Highest documented precedence; useful for deterministic CI wrapper config."
   - name: "KILO_CONFIG"
-    effect: "Loads an explicit config file."
-    notes: "Source loads it in addition to global config, before project directories and KILO_CONFIG_CONTENT."
+    effect: "Loads an explicit config file into the effective config."
+    notes: "Merged after global files and before project files."
   - name: "KILO_CONFIG_DIR"
-    effect: "Adds/preferentially loads a config directory and AGENTS.md/instructions from that profile."
-    notes: "Useful for isolated Claudine provider profiles."
+    effect: "Overrides the global config directory and adds a config directory to the load chain."
+    notes: "Also affects instruction discovery."
+  - name: "KILO_CONFIG_CONTENT"
+    effect: "Injects inline JSON/JSONC config content."
+    notes: "Used by SDK/test harnesses; value is not exposed by config-source reporting."
   - name: "KILO_DISABLE_PROJECT_CONFIG"
-    effect: "Disables project-local config/resource loading."
-    notes: "Reduces repo-driven stream/tool surprises."
+    effect: "Disables project-level config files and directories."
+    notes: "Useful for deterministic CI wrappers."
   - name: "KILO_PERMISSION"
-    effect: "JSON permission override merged into resolved permission config."
-    notes: "Can preconfigure allow/deny policy for non-interactive runs."
-  - name: "KILO_PROVIDER"
-    effect: "Official docs say it overrides active provider ID."
-    notes: "Parser-relevant because it changes model/provider identity."
-  - name: "KILO_<FIELD_NAME>"
-    effect: "Official docs say non-kilocode provider fields can be overridden through env."
-    notes: "Examples include KILO_API_KEY -> apiKey."
-  - name: "KILOCODE_<FIELD_NAME>"
-    effect: "Official docs say kilocode provider fields can be overridden through env."
-    notes: "Example: KILOCODE_MODEL -> kilocodeModel."
-  - name: "KILO_API_KEY"
-    effect: "Kilo gateway/API auth and provider plugin fallback."
-    notes: "Do not log raw value."
-  - name: "KILO_ORG_ID"
-    effect: "Selects organization for non-interactive kilo run; higher priority than persisted /teams selection."
-    notes: "Official docs say there is no --org/--team flag for kilo run."
-  - name: "KILO_AUTH_CONTENT"
-    effect: "Process-local auth JSON override."
-    notes: "Useful for isolated automation; do not log raw value."
-  - name: "KILO_SERVER_PASSWORD"
-    effect: "Basic auth password default for attach/server clients."
-    notes: "Server auth is optional unless this is set."
+    effect: "Runtime JSON overlay for permission rules."
+    notes: "Invalid JSON is skipped with a warning."
   - name: "KILO_SERVER_USERNAME"
-    effect: "Basic auth username default for attach/server clients."
+    effect: "Default Basic Auth username for attach/server flows."
     notes: "Defaults to kilo when unset."
+  - name: "KILO_SERVER_PASSWORD"
+    effect: "Default Basic Auth password for attach/server flows."
+    notes: "Absence makes serve/web warn that the server is unsecured."
+  - name: "KILO_API_KEY"
+    effect: "Kilo Gateway API key/auth source and provider env override."
+    notes: "Used by Kilo Gateway provider and account/session features."
+  - name: "KILO_ORG_ID"
+    effect: "Selects Kilo organization for non-interactive kilo run."
+    notes: "Official docs list it as the highest-priority organization selector for kilo run."
   - name: "KILO_PURE"
-    effect: "Skips external plugins."
-    notes: "Same practical purpose as --pure for reproducible CI."
+    effect: "Disables external plugins."
+    notes: "Equivalent to --pure after top-level parsing."
   - name: "KILO_DISABLE_DEFAULT_PLUGINS"
-    effect: "Disables Kilo default plugins."
-    notes: "Can change providers/auth/tools loaded."
-  - name: "KILO_DIRECT_TRACE"
-    effect: "Enables dev-only direct interactive JSONL trace under ~/.local/share/kilo/log/direct."
-    notes: "Applies to direct interactive mode, not normal kilo run --format json."
-  - name: "KILO_DISABLE_AUTOCOMPACT"
-    effect: "Forces compaction.auto false."
-    notes: "Can affect context behavior and token use."
-  - name: "KILO_DISABLE_PRUNE"
-    effect: "Forces compaction.prune false."
-    notes: "Can affect context behavior and token use."
+    effect: "Disables Kilo default plugin injection."
+    notes: "Can reduce tool/provider surface drift in automation."
+  - name: "KILO_ENABLE_QUESTION_TOOL"
+    effect: "Enables the question tool for additional clients."
+    notes: "Non-interactive run still installs question denial rules."
+  - name: "KILO_EXPERIMENTAL_BACKGROUND_SUBAGENTS"
+    effect: "Enables background subagents."
+    notes: "Subagent tool calls can create child session permission behavior."
   - name: "KILO_EXPERIMENTAL_OUTPUT_TOKEN_MAX"
-    effect: "Overrides default output token ceiling."
-    notes: "Useful for cap/failure analysis."
-  - name: "KILO_DISABLE_MODELS_FETCH"
-    effect: "Disables startup model catalog fetch."
-    notes: "Reduces network activity; may change model availability."
-  - name: "KILO_MODELS_URL"
-    effect: "Overrides model catalog source URL."
-    notes: "Can alter available model metadata."
-  - name: "KILO_MODELS_PATH"
-    effect: "Loads model catalog from disk."
-    notes: "Can alter model/provider availability."
-  - name: "KILO_DB"
-    effect: "Overrides database path; relative paths resolve under data directory; :memory: accepted."
-    notes: "Useful for isolated test/CI runs."
-  - name: "KILO_NO_DAEMON"
-    effect: "Disables automatic daemon attach by clients."
-    notes: "Documented in architecture docs; useful for deterministic subprocess ownership."
-  - name: "KILO_REMOTE"
-    effect: "Enables remote session relay behavior."
-    notes: "Can add network/remote lifecycle behavior."
+    effect: "Sets an experimental output token cap."
+    notes: "Parser can only observe resulting model/session errors, not the configured value."
+  - name: "KILO_DIRECT_TRACE"
+    effect: "Writes direct interactive JSONL traces under the Kilo log directory."
+    notes: "Direct interactive only; not the kilo run NDJSON stream."
+  - name: "OTEL_EXPORTER_OTLP_ENDPOINT"
+    effect: "Enables OpenTelemetry export of traces/logs."
+    notes: "Secondary telemetry stream, not stdout."
 io_contract:
   stdout: structured_only
-  stderr: mixed
+  stderr: diagnostics_only
   stdin: prompt
   framing: ndjson
-  noise_handling: "For kilo run --format json, parse stdout line by line as JSON and treat non-JSON stdout as a wrapper error/noise condition. Keep stderr for diagnostics and startup/auth/log classification."
-  notes: "Normal prompt stdin is one-shot text, not a bidirectional protocol. Help output and some startup logs observed locally can go to stdout, so Claudine should only assume parse-only stdout after launching the exact run command and seeing JSON records."
+  noise_handling: "With --format json, parse stdout as one JSON object per line; keep stderr for diagnostics and startup failures."
+  notes: "Formatted mode is mixed text/UI. The preferred --format json stream has no terminal completion record."
 stream_contract:
   discriminator: "type"
-  event_ordering: "Records are emitted in SDK event order for selected completed parts and errors. There is no session_start or terminal complete record."
-  correlation_fields: ["sessionID", "part.id", "part.sessionID", "part.messageID", "part.callID", "part.tool"]
-  terminal_event: ""
+  event_ordering: "Events are emitted in subscription order for the active session; session.status idle is consumed internally and not emitted."
+  correlation_fields: ["sessionID", "part.id", "part.messageID", "part.callID"]
+  terminal_event: "none"
   partial_message_events: false
-  unknown_event_policy: "Skip unknown type values after logging at trace; preserve raw record for drift analysis."
-  notes: "Every JSON record has type, timestamp as Date.now() Unix milliseconds, and sessionID. text/reasoning/tool/step records carry a nested part object. The stream contains completed text/reasoning parts, completed/error tool parts, step-start/step-finish parts, and session.error records."
+  unknown_event_policy: "Skip unknown top-level types and log at trace; preserve unknown part fields."
+  notes: "Top-level timestamp is Date.now() Unix milliseconds; part time fields are non-negative integer milliseconds from provider/session internals."
 session_metadata:
-  session_id: "Top-level sessionID field on every --format json record; emitted only once the first forwarded event occurs, not as a startup header."
-  cwd: "Nested part.path.cwd/root only appears indirectly in assistant message schemas and server/SSE message.updated events; not emitted as a top-level kilo run JSON header."
-  model: "step_finish.part.model.providerID/modelID when present; assistant message info in server/SSE includes modelID/providerID; requested --model is not echoed in a startup event."
-  provider: "step_finish.part.model.providerID when present; tool/provider metadata can appear in nested tool state metadata."
-  auth: "Not emitted in kilo run JSON. Auth failures surface as error records or stderr/human error text."
-  version: "Not emitted in stream. Use kilo --version separately."
-  mcp_servers: "Not emitted in kilo run JSON. Config/SDK may expose MCP server lists separately."
-  permission_mode: "Inferred from invocation/config: --auto, --dangerously-skip-permissions, session permission rules, or KILO_PERMISSION. Permission requests are not emitted as JSON records."
-  notes: "The preferred stream lacks an init envelope. Claudine must join static invocation/config facts with later part payloads."
+  session_id: "sessionID on every emitted JSON record; available on the first emitted event, not as a separate start event."
+  cwd: "Not emitted by run NDJSON; assistant message/SDK schema has path.cwd/path.root, and server config/path APIs can reveal cwd."
+  model: "step_finish.part.model may contain providerID/modelID; assistant message and EventV2 step.started have richer model refs."
+  provider: "step_finish.part.model.providerID when present; assistant message has providerID."
+  auth: "Not emitted in run NDJSON; auth failures surface as ProviderAuthError or APIError records."
+  version: "Not emitted in stream; use kilo --version out of band."
+  mcp_servers: "Not emitted in run NDJSON; effective config controls MCP."
+  permission_mode: "--auto/--dangerously-skip-permissions are not emitted; infer from invocation."
+  notes: "Run NDJSON is operational but sparse. Server/SSE and exported sessions expose broader state."
 stream_events:
   - event: "tool_use"
     category: tool_result
-    fields: ["type", "timestamp", "sessionID", "part"]
-    notes: "Emitted only for tool parts whose state.status is completed or error. part.callID joins call/result; part.state.input/output/error/metadata/time carry tool details."
+    fields: ["type", "timestamp", "sessionID", "part.type", "part.callID", "part.tool", "part.state.status", "part.state.input", "part.state.output", "part.state.error", "part.state.metadata", "part.state.attachments"]
+    notes: "Only emitted when a tool part reaches completed or error status."
   - event: "step_start"
     category: assistant
-    fields: ["type", "timestamp", "sessionID", "part"]
-    notes: "Emitted for part.type == step-start. Carries part.id/sessionID/messageID and optional snapshot."
+    fields: ["type", "timestamp", "sessionID", "part.id", "part.messageID", "part.snapshot"]
+    notes: "Start of an assistant step; no model field in run part."
   - event: "step_finish"
     category: usage
-    fields: ["type", "timestamp", "sessionID", "part"]
-    notes: "Emitted for part.type == step-finish. Carries reason, optional model.providerID/modelID, cost, and tokens."
+    fields: ["type", "timestamp", "sessionID", "part.reason", "part.model.providerID", "part.model.modelID", "part.cost", "part.tokens.input", "part.tokens.output", "part.tokens.reasoning", "part.tokens.cache.read", "part.tokens.cache.write", "part.tokens.total"]
+    notes: "Best source for model, token, and cost totals in kilo run NDJSON."
   - event: "text"
     category: assistant
-    fields: ["type", "timestamp", "sessionID", "part"]
-    notes: "Emitted only for completed text parts with part.time.end. No partial deltas."
+    fields: ["type", "timestamp", "sessionID", "part.id", "part.messageID", "part.text", "part.time.start", "part.time.end", "part.metadata"]
+    notes: "Only completed text parts are emitted; deltas are not emitted."
   - event: "reasoning"
     category: reasoning
-    fields: ["type", "timestamp", "sessionID", "part"]
-    notes: "Emitted only for completed reasoning parts with --thinking enabled."
+    fields: ["type", "timestamp", "sessionID", "part.id", "part.messageID", "part.text", "part.time.start", "part.time.end", "part.metadata"]
+    notes: "Only emitted when --thinking is enabled and the reasoning part has ended."
   - event: "error"
     category: error
-    fields: ["type", "timestamp", "sessionID", "error"]
-    notes: "Emitted for session.error events or immediate SDK call errors. Mid-stream LLM errors currently can still exit 0."
-  - event: "session.status"
+    fields: ["type", "timestamp", "sessionID", "error.name", "error.data", "error.message"]
+    notes: "Emitted for session.error and immediate SDK/builtin command errors."
+  - event: "session.next.text.delta"
+    category: assistant
+    fields: ["type", "timestamp", "sessionID", "delta"]
+    notes: "Server/SSE EventV2 only; not forwarded by kilo run NDJSON."
+  - event: "session.next.tool.called"
+    category: tool_call
+    fields: ["type", "timestamp", "sessionID", "callID", "tool", "input", "provider.executed", "provider.metadata"]
+    notes: "Server/SSE EventV2 only; richer than run tool_use."
+  - event: "session.next.tool.success"
+    category: tool_result
+    fields: ["type", "timestamp", "sessionID", "callID", "structured", "content", "provider.executed", "provider.metadata"]
+    notes: "Server/SSE EventV2 only."
+  - event: "server.connected"
     category: session
-    fields: ["properties.sessionID", "properties.status.type"]
-    notes: "Internal/SSE event used by run loop to break on idle; not forwarded as --format json."
-  - event: "permission.asked"
-    category: permission
-    fields: ["properties.id", "properties.sessionID", "properties.permission", "properties.patterns", "properties.metadata", "properties.tool"]
-    notes: "Internal/SSE event. In non-interactive run it is auto-replied once under --auto for allowed sessions, auto-rejected without --auto unless --dangerously-skip-permissions is set; not forwarded as JSON."
-  - event: "question.asked"
-    category: permission
-    fields: ["properties.id", "properties.sessionID", "properties.questions"]
-    notes: "Internal/SSE event. Non-interactive sessions create deny rules for question permission; not forwarded as JSON."
-  - event: "session.network.asked"
-    category: error
-    fields: ["properties.id", "properties.sessionID"]
-    notes: "Internal/SSE event. Non-interactive loop retries up to 3 times with exponential delay then rejects; not forwarded as JSON."
+    fields: ["id", "type", "properties"]
+    notes: "SSE-only first event from the server event endpoint."
+  - event: "server.heartbeat"
+    category: session
+    fields: ["id", "type", "properties"]
+    notes: "SSE-only heartbeat every 10 seconds after the initial delay."
 tools:
-  - name: "bash/shell"
+  - name: "shell/bash/process"
     call_visible: false
     result_visible: true
-    metadata: ["part.callID", "part.tool", "part.state.status", "part.state.input", "part.state.output", "part.state.error", "part.state.time", "part.state.metadata"]
-    notes: "CLI JSON emits tool_use only after completed or error tool state. Server/SSE also has session.next.shell.started/ended."
-  - name: "read/glob/grep"
+    metadata: ["part.tool", "part.callID", "part.state.input", "part.state.output", "part.state.error", "part.state.metadata", "part.state.time"]
+    notes: "Run NDJSON emits completed/error tool_use only; server EventV2 exposes called/progress/success/failed."
+  - name: "read/write/edit/apply_patch/glob/grep"
     call_visible: false
     result_visible: true
-    metadata: ["part.callID", "part.tool", "part.state.input", "part.state.output", "part.state.error"]
-    notes: "No separate file-read-denied JSON event; denied/failed access appears as tool error or session error."
-  - name: "edit/write/apply_patch"
+    metadata: ["part.state.input", "part.state.output", "part.state.error", "part.state.attachments"]
+    notes: "File changes are visible through tool payloads or patch/snapshot parts, not a dedicated run-level file_change event."
+  - name: "task/subagent"
     call_visible: false
     result_visible: true
-    metadata: ["part.callID", "part.tool", "part.state.input", "part.state.output", "part.state.metadata", "part.state.attachments"]
-    notes: "No dedicated file_change event in kilo run JSON. Infer changed files from tool name, input, output, metadata, or external filesystem diff."
-  - name: "task"
-    call_visible: true
-    result_visible: true
-    metadata: ["part.callID", "part.tool", "part.state.status", "part.state.metadata.sessionId", "part.state.output"]
-    notes: "Running task tool parts are used internally to track child sessions for --auto, but kilo run JSON only emits completed/error tool_use records. Child session ID can appear in metadata.sessionId."
+    metadata: ["part.tool", "part.state.metadata.sessionId", "part.state.output", "part.state.error"]
+    notes: "Kilo tracks task child session IDs for permission replies; nested child events are not forwarded in the parent run NDJSON."
   - name: "question"
     call_visible: false
-    result_visible: false
-    metadata: ["internal permission/question events only"]
-    notes: "Non-interactive default rules deny question permission; no JSON event is emitted for the attempted human question."
-  - name: "MCP tools"
+    result_visible: true
+    metadata: ["part.state.error", "part.state.output"]
+    notes: "Non-interactive run installs question denial rules; docs describe autonomous responses, but current source also denies question permission."
+  - name: "webfetch/websearch/mcp"
     call_visible: false
     result_visible: true
-    metadata: ["part.tool", "part.callID", "part.state.input", "part.state.output", "part.state.error", "part.state.metadata"]
-    notes: "MCP tools use namespaced permission keys and appear as normal tool parts; MCP server lists are not in the run JSON envelope."
+    metadata: ["part.tool", "part.state.input", "part.state.output", "part.state.error", "part.state.metadata"]
+    notes: "MCP tools use the same tool part envelope in run NDJSON."
 completion:
-  success_event: ""
+  success_event: "none"
   failure_event: "error"
   exit_code_reliable: false
-  result_fields: ["text.part.text", "step_finish.part.reason", "error.error"]
+  result_fields: ["text.part.text", "error.error", "step_finish.part.reason"]
   cost_fields: ["step_finish.part.cost"]
   usage_fields: ["step_finish.part.tokens.input", "step_finish.part.tokens.output", "step_finish.part.tokens.reasoning", "step_finish.part.tokens.cache.read", "step_finish.part.tokens.cache.write", "step_finish.part.tokens.total"]
-  notes: "Official docs list exit 0 success, 124 timeout, 1 initialization/execution failure. Source tests lock in that mid-stream LLM errors emit session.error but currently exit 0, so Claudine must parse error records and not rely only on exit code."
+  notes: "Process exit 0 is reliable for happy-path startup success but mid-stream LLM errors currently emit session.error and still exit 0. Treat error events as failure even if exit code is 0."
 blocking_behavior:
   permissions: configurable
-  questions: auto_deny
+  questions: configurable
   tool_approvals: configurable
-  notes: "Without --auto or --dangerously-skip-permissions, non-interactive permission requests for the root session are rejected. --auto replies once for root and tracked task child sessions. question, interactive_terminal, plan_enter, and plan_exit are denied in non-interactive sessions; network retry prompts are retried up to three times and then rejected."
+  notes: "--auto replies once to permissions for root and tracked task child sessions. Without --auto/--dangerously-skip-permissions, root permissions are auto-rejected and headless child asks fail instead of hanging. Questions are denied by non-interactive permission rules despite public docs describing an autonomous response."
 subagents:
   supported: true
   start_visible: false
   stop_visible: false
   nested_events_visible: false
-  prompt_injection_supported: false
-  metadata_fields: ["tool_use.part.state.metadata.sessionId", "tool_use.part.state.output"]
-  notes: "The task tool can create child sessions and --auto tracks task metadata.sessionId for permission replies. The CLI JSON stream does not forward nested child-session events except what is summarized in the parent task tool result. Server/SSE direct interactive transport has richer subagent state, but not the preferred run JSON stream."
+  prompt_injection_supported: true
+  metadata_fields: ["tool_use.part.state.metadata.sessionId", "tool_use.part.state.input", "tool_use.part.state.output", "tool_use.part.state.error"]
+  notes: "Task/subagent tool results are visible after completion. Parent run NDJSON does not stream child session tool calls."
 use_cases:
-  - name: "plan_cap_approaching"
+  - name: plan_cap_approaching
     detectable: false
     event_types: []
     fields: []
     hook_parity: "unknown"
-    notes: "No plan/quota approaching event was found in kilo run JSON."
-  - name: "plan_capped"
+    notes: "No explicit near-cap event in run NDJSON."
+  - name: plan_capped
     detectable: true
     event_types: ["error", "step_finish"]
-    fields: ["error.error.name", "error.error.data.message", "step_finish.part.reason"]
+    fields: ["error.name", "error.data.message", "error.data.statusCode", "step_finish.part.reason"]
     hook_parity: "unknown"
-    notes: "Only detectable if provider emits an error/final reason. Reset windows or upgrade URLs are not structured in the CLI stream."
-  - name: "no_funds"
+    notes: "Quota/billing failures must be classified from provider error names/messages/status, not a normalized quota event."
+  - name: no_funds
     detectable: true
     event_types: ["error"]
-    fields: ["error.error.name", "error.error.data.message"]
+    fields: ["error.name", "error.data.message", "error.data.statusCode", "error.data.responseBody"]
     hook_parity: "unknown"
-    notes: "Detect by provider/Kilo billing error text or typed error name when present; no dedicated no_funds event."
-  - name: "auth"
+    notes: "Provider error mapping includes insufficient_quota messaging; exact no-funds classification is provider-dependent."
+  - name: auth
     detectable: true
     event_types: ["error"]
-    fields: ["error.error.name", "error.error.data.message"]
+    fields: ["error.name", "error.data.message"]
     hook_parity: "unknown"
-    notes: "Auth source is not emitted. Missing/expired auth must be classified from error payload or stderr."
-  - name: "permission_read_denied"
+    notes: "LoadAPIKeyError and expired auth map to ProviderAuthError."
+  - name: permission_read_denied
     detectable: true
     event_types: ["tool_use", "error"]
-    fields: ["part.tool", "part.state.status", "part.state.error", "part.state.input", "error.error"]
-    hook_parity: "internal permission.asked/replied events exist in SSE but are not forwarded"
-    notes: "No dedicated denial record in CLI JSON; distinguish read denial by tool name and error text."
-  - name: "permission_write_denied"
+    fields: ["part.tool", "part.state.status", "part.state.input", "part.state.error", "error.name", "error.data"]
+    hook_parity: "unknown"
+    notes: "Classify read-shaped tools from tool input/error; no dedicated permission_denied event is forwarded."
+  - name: permission_write_denied
     detectable: true
     event_types: ["tool_use", "error"]
-    fields: ["part.tool", "part.state.status", "part.state.error", "part.state.input", "error.error"]
-    hook_parity: "internal permission.asked/replied events exist in SSE but are not forwarded"
-    notes: "No dedicated denial record in CLI JSON; distinguish edit/write denial by tool name and error text."
-  - name: "tokens_consumed"
+    fields: ["part.tool", "part.state.status", "part.state.input", "part.state.error", "error.name", "error.data"]
+    hook_parity: "unknown"
+    notes: "Classify edit/write/apply_patch/shell failures from tool payloads; no dedicated write-denied event is forwarded."
+  - name: tokens_consumed
     detectable: true
     event_types: ["step_finish"]
-    fields: ["part.tokens.total", "part.tokens.input", "part.tokens.output", "part.tokens.reasoning", "part.tokens.cache.read", "part.tokens.cache.write"]
-    hook_parity: "server/SSE step events expose similar fields"
-    notes: "Units are tokens. Granularity is per step_finish part, not explicitly session-total."
-  - name: "model_used"
+    fields: ["part.tokens.input", "part.tokens.output", "part.tokens.reasoning", "part.tokens.cache.read", "part.tokens.cache.write", "part.tokens.total"]
+    hook_parity: "unknown"
+    notes: "Per-step values; session totals require summing step_finish events."
+  - name: model_used
     detectable: true
-    event_types: ["step_finish", "message.updated"]
-    fields: ["part.model.providerID", "part.model.modelID", "properties.info.providerID", "properties.info.modelID"]
-    hook_parity: "SSE/message.updated has richer metadata"
-    notes: "CLI JSON only exposes model on step_finish when present; no early init model record."
-  - name: "model_fallback"
+    event_types: ["step_finish"]
+    fields: ["part.model.providerID", "part.model.modelID"]
+    hook_parity: "unknown"
+    notes: "Model may be absent on some step_finish records; CLI invocation/config are fallback evidence."
+  - name: model_fallback
     detectable: false
     event_types: []
     fields: []
     hook_parity: "unknown"
-    notes: "No explicit fallback event found in kilo run JSON."
-  - name: "human_in_loop"
-    detectable: false
-    event_types: []
-    fields: []
-    hook_parity: "internal question.asked/permission.asked/interactive_terminal events exist in SSE"
-    notes: "The preferred run JSON does not expose attempted questions or permission prompts. Infer from denial/tool errors unless Claudine uses SSE."
-  - name: "session_resumable"
+    notes: "No explicit fallback event in run NDJSON."
+  - name: human_in_loop
+    detectable: true
+    event_types: ["tool_use", "error"]
+    fields: ["part.tool", "part.state.error", "error.name", "error.data.message"]
+    hook_parity: "unknown"
+    notes: "Questions/permission asks are not forwarded as asks; infer from denied question/permission tool errors."
+  - name: session_resumable
     detectable: true
     event_types: ["tool_use", "step_start", "step_finish", "text", "reasoning", "error"]
     fields: ["sessionID"]
-    hook_parity: "SSE has session IDs in most events"
-    notes: "sessionID appears on every JSON record, but not before first forwarded event."
-  - name: "subagent_prompt_injection"
-    detectable: false
-    event_types: []
-    fields: []
     hook_parity: "unknown"
-    notes: "No general subagent prompt injection surface found. Use configured agent prompts/permissions rather than runtime parent-stream injection."
+    notes: "Every emitted NDJSON line has sessionID, but there is no early session_start record."
+  - name: subagent_prompt_injection
+    detectable: true
+    event_types: ["tool_use"]
+    fields: ["part.tool", "part.state.input", "part.state.metadata.sessionId"]
+    hook_parity: "unknown"
+    notes: "The caller can steer subagents through the root prompt; Kilo exposes selected task input/result after completion."
 headless_constraints:
-  - constraint: "No terminal complete event in --format json."
-    mitigation: "Treat process exit plus absence/presence of error records as completion; retain all final text records."
-    notes: "The run loop breaks on internal session.status idle but does not emit that event."
-  - constraint: "Mid-stream LLM errors currently can exit 0."
-    mitigation: "Classify any error record as run failure or at least ambiguous even when exit code is 0."
-    notes: "Locked in by subprocess test."
-  - constraint: "Permission requests are not visible in CLI JSON."
-    mitigation: "Use --auto with explicit permission config; classify permission failures from tool_use/error payloads."
-    notes: "Use server/SSE if Claudine needs direct permission prompt telemetry."
-  - constraint: "Tool call start/progress is mostly absent in CLI JSON."
-    mitigation: "Render tools when completed/error tool_use arrives; use step_start as coarse progress."
-    notes: "Server/SSE has richer session.next.tool.* events."
-  - constraint: "Startup/help/log output may be human text."
-    mitigation: "Launch only the exact run command for parsing and treat non-JSON stdout as noise/error."
-    notes: "Local help output showed banner and INFO lines on stdout."
-  - constraint: "Project config and plugins can change tools, providers, permissions, and stream-adjacent behavior."
-    mitigation: "Use --pure, KILO_CONFIG_CONTENT, KILO_CONFIG_DIR, and/or KILO_DISABLE_PROJECT_CONFIG for deterministic wrapper profiles."
-    notes: "Project config normally takes precedence over global config."
-  - constraint: "MCP OAuth/auth commands are interactive surfaces."
-    mitigation: "Pre-authenticate MCP servers or disable project MCP for CI; do not run mcp auth inside a non-interactive wrapper."
-    notes: "MCP tools share normal permission system after configured."
+  - constraint: "No terminal complete event in run NDJSON."
+    mitigation: "Treat process exit plus absence/presence of error events as completion; accumulate final text events."
+    notes: "Internal session.status idle breaks the loop but is not emitted."
+  - constraint: "Mid-stream LLM errors currently exit 0."
+    mitigation: "Classify any error event as run failure even when exit code is 0."
+    notes: "Locked by subprocess test on current main."
+  - constraint: "--interactive conflicts with --format json and requires TTY stdout."
+    mitigation: "Never use --interactive for Claudine subprocess automation."
+    notes: "The run handler exits 1 for this combination."
+  - constraint: "Run NDJSON omits tool start/progress and assistant deltas."
+    mitigation: "Use server/SSE only if Claudine needs richer live operational detail and can manage a server."
+    notes: "Subprocess NDJSON is simpler and more stable for first integration."
+  - constraint: "Question behavior differs between docs and current run source."
+    mitigation: "Avoid tasks that require human clarification; include non-interactive instructions in the prompt."
+    notes: "Docs describe autonomous follow-up responses; source installs question denial rules."
 quirks:
-  - "The JSON format is selected with --format json, not --json."
-  - "The JSON stream is sparse: no init, status, permission, question, partial delta, file_change, or complete event."
-  - "Each JSON record includes timestamp from Date.now(), so it is Unix milliseconds in the local process clock."
-  - "text and reasoning are emitted only for completed parts; reasoning additionally requires --thinking."
-  - "tool_use is emitted only after tool completion/error, so live tool start/progress is invisible in the preferred stream."
-  - "--auto does not mean every human interaction is answered; question and interactive_terminal are explicitly denied."
-  - "--dangerously-skip-permissions can make automation proceed, but it is intentionally unsafe and still does not expose approval telemetry."
-  - "The run command may automatically attach to a local daemon unless disabled; use KILO_NO_DAEMON when subprocess ownership matters."
-  - "Kilo inherits substantial OpenCode internals; source paths and some docs/tests still use opencode names."
+  - "Kilo CLI is a Kilo-branded fork of OpenCode; source paths often live under packages/opencode and tests still say opencode."
+  - "The preferred stream is line-delimited JSON but has no schema version marker."
+  - "The top-level run event type names use snake_case, while server EventV2 names are dotted strings such as session.next.tool.success."
+  - "tool_use is a result event, not a call-start event."
+  - "Permissions are operationally handled by the run loop but permission.asked is not emitted to --format json stdout."
+  - "Configured output format is a CLI flag; no evidence that config files persistently select run --format json."
 gaps:
-  - "No official JSON schema or version marker for kilo run --format json was found."
-  - "No captured real authenticated Kilo run was executed; findings rely on official docs, source, package help, and tests."
-  - "Exact stderr/stdout split for all startup/auth failures was not exhaustively observed."
-  - "Whether every provider populates step_finish.part.model consistently is unverified."
-  - "Exact MCP tool payload metadata and OAuth failure payloads in --format json need fixtures."
-  - "ACP protocol details were not researched beyond command availability."
-  - "Server/SDK SSE schema is richer, but equivalence and stability relative to CLI JSON need a separate integration spike."
+  - "No formal JSON Schema/OpenAPI definition was found for kilo run --format json."
+  - "Could not verify a real installed kilo binary run with live credentials in this workspace."
+  - "Exact stdout/stderr behavior for all startup/auth/config failures is source-inferred, not fixture-captured here."
+  - "Exact provider-specific quota/no-funds payloads vary by backend and were not exhaustively captured."
+  - "ACP schema and behavior were not researched deeply because kilo run NDJSON is the recommended first integration surface."
 claudine_strategy:
-  preferred_invocation: "kilo run --auto --format json --dir <cwd> --model <provider/model> \"<prompt>\""
+  preferred_invocation: "kilo run --auto --format json --dir <cwd> \"<prompt>\""
   required_flags: ["run", "--auto", "--format json"]
-  conflicting_flags: ["--interactive", "--replay", "--replay-limit"]
-  parser_notes: "Parse stdout as NDJSON with discriminator type. Accept tool_use, step_start, step_finish, text, reasoning, and error; skip unknown records with trace logging. Treat non-JSON stdout as noise/error. Keep stderr for diagnostics. Use error records as failure evidence even with exit code 0."
-  wrapper_notes: "Prefer explicit --model and isolated config through KILO_CONFIG_CONTENT or KILO_CONFIG_DIR. Use --pure and KILO_DISABLE_PROJECT_CONFIG when repository plugins/config must not affect automation. Add --thinking only if reasoning capture is desired. Do not use --dangerously-skip-permissions unless the caller explicitly accepts the risk."
+  conflicting_flags: ["--interactive", "--replay", "--replay-limit", "--demo"]
+  parser_notes: "Parse stdout as NDJSON with top-level type. Join tool results by part.callID, session records by sessionID, and assistant text by part.messageID/part.id. Treat error events as failure even if exit code is 0. Unknown types should be skipped and logged."
+  wrapper_notes: "Keep stderr for diagnostics. Use --pure and KILO_DISABLE_PROJECT_CONFIG for deterministic runs when desired. Consider server/SSE later for richer progress, but it adds lifecycle/auth complexity."
 data_format: ndjson
-changes: []
+changes:
+  - "2026-07-03: Refreshed Kilo non-interactive research against upstream main 419ff008ef180dd7076f679a89442883ba8f8d86; updated preferred NDJSON strategy, current headless permission behavior, config scopes, and exit-code caveats."
 requires_claudine_update: true
-reason: "Kilo is not currently in Claudine's compiled provider enum, and its preferred stream uses a sparse NDJSON contract with no terminal event; supporting it needs provider metadata, a stream parser, and completion/error classification."
+reason: "Kilo is not yet a compiled Claudine provider; supporting it would require provider metadata and an NDJSON parser for the run stream."
 ---
+
+# Kilo Code Non-Interactive Sessions
 
 ## Summary
 
-Kilo Code can run non-interactively through `kilo run`. For Claudine, the best subprocess format is `kilo run --auto --format json`, which emits line-delimited JSON objects on stdout while the session is active. It is enough to render assistant text, completed tool results, step usage/cost, and session errors without scraping prose.
+Kilo Code can run non-interactively through `kilo run`. For Claudine, the best first integration surface is `kilo run --auto --format json`, which emits newline-delimited JSON records on stdout while the session is active. The stream is operationally useful but intentionally narrow: it includes completed text, optional completed reasoning, step start/finish records, completed or errored tool parts, and errors. It does not emit a session-start event, a terminal success event, tool-call-start records, tool progress, or assistant text deltas.
 
-The main caveat is that Kilo's CLI JSON stream is intentionally sparse. It has no initialization event, no terminal completion event, no permission/question events, no partial assistant deltas, and no tool-start event for most tools. Claudine should parse the NDJSON stream for progress and final text, but it must use process exit plus parsed `error` records for completion classification. Source tests currently lock in that a mid-stream LLM error can emit an error event and still exit `0`, so exit code alone is not reliable.
+The main parser risk is that the stream shape is source-defined, not formally schema-defined. Kilo also has a richer server/SSE event stream, but that requires managing `kilo serve`, server auth, directory routing, and a different SDK-shaped event union. Claudine should start with the subprocess NDJSON stream, keep stderr as diagnostics, and classify any `error` event as a failed run even if the process exits `0`.
 
 ## Non-Interactive Entry Points
 
-The official CLI page documents autonomous mode as the mode for CI and other automation. The command shape is:
+The official CLI docs describe autonomous mode as a CI/CD-oriented mode started with `kilo run --auto "<message>"`. The same docs state that autonomous mode avoids user interaction, handles approvals automatically according to configuration, and exits when the task completes or times out. The command reference lists `kilo run [message..]` and includes `--format`, `--auto`, `--dangerously-skip-permissions`, `--model`, `--agent`, `--file`, `--dir`, `--attach`, `--continue`, `--session`, `--fork`, `--cloud-fork`, and `--thinking`.
 
-```sh
-kilo run --auto "Implement feature X"
-```
+Prompt input can come from argv or non-TTY stdin. In current source, `buildRunMessage(args.message, args["--"])` builds the argv prompt, then `loadInput()` reads `Bun.stdin.text()` when stdin is not a TTY and appends it after a newline. If neither a prompt nor a command is provided, the process exits with an error.
 
-Current package help for `@kilocode/cli` 7.3.54 adds the parser-relevant flag:
+Kilo also exposes server and protocol entry points:
 
-```sh
-kilo run --auto --format json "Implement feature X"
-```
+| Entry point | Shape | Claudine fit |
+| --- | --- | --- |
+| `kilo run --auto --format json "<prompt>"` | One-shot subprocess, NDJSON stdout | Best first integration |
+| `kilo run --attach <url> --auto --format json "<prompt>"` | Subprocess talking to an existing server | Useful when Claudine manages a reusable server |
+| `kilo serve` plus SDK event subscription | Long-running HTTP server with SSE | Richer events, higher lifecycle cost |
+| `kilo acp` | Agent Client Protocol server | Separate protocol integration, not a stdout result stream |
 
-The prompt can come from positional argv, from raw args after `--`, and from non-TTY stdin. Source code joins positional `message` values into a prompt and appends piped stdin. Files can be attached with `--file`; each file becomes a `file://` part with a filename and MIME-like marker.
-
-Session control is scriptable:
-
-| Form | Behavior |
-|---|---|
-| `kilo run --auto --format json "<prompt>"` | Creates a fresh session unless a reusable daemon/session path is involved. |
-| `kilo run --continue --auto --format json "<prompt>"` | Continues the latest top-level session. |
-| `kilo run --session <id> --auto --format json "<prompt>"` | Continues a specific session. |
-| `kilo run --session <id> --fork --auto --format json "<prompt>"` | Forks before continuing. |
-| `kilo run --attach <url> --auto --format json "<prompt>"` | Talks to an existing `kilo serve` HTTP server. |
-
-`kilo serve` is also a headless entry point, but it is a server integration rather than a one-shot subprocess output format. It exposes SDK/SSE surfaces that are richer than `kilo run --format json`, at the cost of lifecycle ownership, server auth, and directory scoping.
-
-Kilo also exposes `kilo acp`, an Agent Client Protocol server. That is a plausible future Claudine integration for protocol-level control, but it is not the same as a plain stdout stream and was not the preferred path for this document.
+Use `--dir` to select a local working directory. Use `--file` for file/directory attachments. Use `--model provider/model`, `--variant`, and `--agent` to steer model/agent selection. If `--agent` names a subagent, the run command warns and falls back to the default primary agent.
 
 ## Output Formats
 
-`kilo run` has two documented formats in current help: `default` and `json`.
+`kilo run` has two direct output formats:
 
-| Format | Selector | Framing | Streams? | Claudine recommendation |
-|---|---|---:|---:|---|
-| Human formatted | default | text | yes | Avoid for wrappers; stdout can contain human text, status, and formatting. |
-| Raw JSON events | `--format json` | NDJSON | yes | Prefer for subprocess wrapping. |
-| Server events | `kilo serve` plus SDK `event.subscribe` | SSE | yes | Consider later when Claudine needs richer permissions/tool progress. |
-| ACP | `kilo acp` | ACP protocol | yes | Separate protocol integration, not a one-shot run stream. |
+| Format | Selector | Streaming | Parser value | Notes |
+| --- | --- | --- | --- | --- |
+| Formatted text | default | Yes | Low | Human/UI output, not safe for machine parsing. |
+| Raw JSON events | `--format json` | Yes | High | One JSON object per stdout line, source-tested as parseable. |
 
-The preferred stream is not a complete low-level event log. In `--format json`, the run loop emits JSON records only for selected events:
+The preferred format is `--format json`. The source `emit()` helper writes:
 
-```ts
-{
-  type,
-  timestamp: Date.now(),
-  sessionID,
-  ...data,
-}
+```json
+{"type":"text","timestamp":1760000000000,"sessionID":"ses_...","part":{}}
 ```
 
-The concrete CLI event names are `tool_use`, `step_start`, `step_finish`, `text`, `reasoning`, and `error`. Each line is independently parseable JSON. `timestamp` is Unix milliseconds from the local process clock.
+The concrete top-level event names forwarded by the run command are `tool_use`, `step_start`, `step_finish`, `text`, `reasoning`, and `error`. `reasoning` is only emitted when `--thinking` is enabled and a reasoning part has ended. `tool_use` is only emitted when a tool part is completed or errored; it is not a call-start event.
 
-The server/SSE stream is richer. The server endpoint returns `text/event-stream`; each SSE `data` value is `JSON.stringify(data)`. It includes internal events such as `session.status`, `permission.asked`, `question.asked`, and the `session.next.*` event family. That richer stream is valuable, but it requires Claudine to manage or attach to a server and use the generated SDK/API contract. For a first Kilo provider, the simpler subprocess NDJSON stream is the right default.
+The server/SSE stream is richer. The server event handler emits `text/event-stream` with `event: message` and `data: JSON.stringify(event)`. It starts with `server.connected`, emits `server.heartbeat`, and forwards broader bus/SDK events. The source EventV2 union includes deltas and tool lifecycle records such as `session.next.text.delta`, `session.next.tool.called`, `session.next.tool.progress`, `session.next.tool.success`, and `session.next.tool.failed`. This is better observability but worse subprocess ergonomics.
 
 ## Schema Sources
 
-Kilo does not publish a formal JSON Schema for `kilo run --format json`. The strongest evidence is source code and tests:
+There is no formal JSON Schema for `kilo run --format json`. The best schema evidence is the current TypeScript source at commit `419ff008ef180dd7076f679a89442883ba8f8d86`:
 
-- `packages/opencode/src/cli/cmd/run.ts` defines the `--format` flag and the exact `emit()` envelope for CLI JSON records.
-- `packages/opencode/test/cli/run/run-process.test.ts` asserts that `--format json` emits parseable line-delimited JSON and that every event has string `type` and `sessionID`.
-- `packages/opencode/src/session/message-v2.ts` defines the nested `part` payload schemas for text, reasoning, tool, step-start, and step-finish parts using Effect Schema.
-- `packages/core/src/session-event.ts` defines the richer `session.next.*` server event union. This is not identical to the CLI stream, but it explains fields that may appear in server/SSE mode or future CLI changes.
-- `packages/sdk/js/src/v2/gen/client/types.gen.ts` contains generated TypeScript client types for the HTTP/SSE API. It is broader than the CLI NDJSON stream.
+| Source | What it proves | Confidence |
+| --- | --- | --- |
+| [`run.ts`](https://github.com/Kilo-Org/kilocode/blob/419ff008ef180dd7076f679a89442883ba8f8d86/packages/opencode/src/cli/cmd/run.ts) | Flags, stdin behavior, JSON emitter, event names, permission replies | High |
+| [`run-process.test.ts`](https://github.com/Kilo-Org/kilocode/blob/419ff008ef180dd7076f679a89442883ba8f8d86/packages/opencode/test/cli/run/run-process.test.ts) | Parseable NDJSON, `type`/`sessionID`, current exit-code behavior | High |
+| [`message-v2.ts`](https://github.com/Kilo-Org/kilocode/blob/419ff008ef180dd7076f679a89442883ba8f8d86/packages/opencode/src/session/message-v2.ts) | `part` payload schemas, tool states, tokens, cost, assistant errors | High |
+| [`session-event.ts`](https://github.com/Kilo-Org/kilocode/blob/419ff008ef180dd7076f679a89442883ba8f8d86/packages/core/src/session-event.ts) | Richer server/EventV2 stream union | Medium for CLI, high for SSE |
+| [`event.ts`](https://github.com/Kilo-Org/kilocode/blob/419ff008ef180dd7076f679a89442883ba8f8d86/packages/opencode/src/cli/cmd/run/event.ts) | SDK sync-event normalization to message events | High |
 
-This means Claudine should treat the CLI stream schema as source-defined and version-sensitive. Unknown event names should be skipped and logged, not fatal, because the format is not formally versioned.
+The official docs are authoritative for supported commands, autonomous mode, config file locations, and documented exit codes, but not for JSON stream fields.
 
 ## IO Contract
 
-For the exact command `kilo run --auto --format json`, stdout is intended to be NDJSON. Claudine should parse stdout line by line and keep the raw line for drift diagnostics. Any non-JSON stdout line during a parsed run should be treated as noise or a wrapper error.
+With `--format json`, stdout should be treated as parse-only NDJSON. Each line is independently parseable JSON. The subprocess test explicitly parses stdout lines and asserts that every event has a string `type` and string `sessionID`.
 
-stderr should not be discarded. Kilo has global `--print-logs` and `--log-level` controls, and startup/auth/provider failures may be clearer in stderr than in the JSON stream. Local package inspection also showed help output with banner and INFO lines on stdout, so the parse-only stdout assumption applies only to the exact run command once JSON records begin.
+Stderr is not part of the structured stream. It can contain logs, warnings, and startup/auth/config diagnostics, especially when `--print-logs` is used. Claudine should retain stderr and show it on startup failure or when the JSON stream ends without enough context.
 
-stdin is one-shot prompt text when it is not a TTY. It is not a bidirectional protocol in `kilo run`. ACP and SDK/server modes are separate protocol surfaces.
+Stdin is prompt text, not a bidirectional protocol. If stdin is not a TTY, Kilo reads all of it and appends it to the argv prompt. The ACP mode is the separate bidirectional/protocol surface.
 
 ## Stream Contract
 
-The top-level discriminator is `type`. The common envelope is:
+The top-level discriminator is `type`. All emitted run records also include `timestamp` and `sessionID`. `timestamp` is produced with `Date.now()`, so it is Unix time in milliseconds. The nested `part` object uses the Effect Schema part union from `message-v2.ts`; nested discriminators are `part.type` and, for tools, `part.state.status`.
 
-```json
-{"type":"text","timestamp":1760000000000,"sessionID":"ses_x","part":{}}
-```
+Run NDJSON emits completed snapshots rather than deltas. The richer server/EventV2 stream has deltas, but the subprocess stream waits for `part.time.end` before emitting `text` or `reasoning`, and waits for `completed` or `error` before emitting `tool_use`.
 
-Important nested discriminators:
-
-| Record | Nested discriminator | Correlation |
-|---|---|---|
-| `tool_use` | `part.type == "tool"` and `part.state.status` | `part.callID`, `part.id`, `part.messageID` |
-| `step_start` | `part.type == "step-start"` | `part.id`, `part.messageID` |
-| `step_finish` | `part.type == "step-finish"` | `part.id`, `part.messageID` |
-| `text` | `part.type == "text"` | `part.id`, `part.messageID` |
-| `reasoning` | `part.type == "reasoning"` | `part.id`, `part.messageID` |
-| `error` | `error.name` or nested provider fields | top-level `sessionID` |
-
-Assistant text and reasoning are complete snapshots, not deltas. `text` is emitted only when a text part has `time.end`; `reasoning` is emitted only when reasoning has ended and `--thinking` is enabled. Tool records are emitted only when the tool part is completed or errored.
-
-There is no terminal event. Internally, the run loop breaks when it sees `session.status` become `idle`, but that record is not forwarded to `--format json`.
+There is no terminal success event. The run loop consumes `session.status` internally and breaks when status becomes `idle`, but it does not forward that event to stdout. Completion is therefore inferred from process exit plus accumulated stream state. Unknown event types should be skipped and logged; the format has no schema version marker.
 
 ## Session Metadata
 
-The stream exposes `sessionID` on every emitted JSON record. It does not emit a startup record, so Claudine does not learn the session ID until the first forwarded event. A run that fails before a forwarded event may have no session ID in stdout.
+Every emitted JSON record contains `sessionID`, so a resumable session ID is available as soon as the first event arrives. There is no separate `session_start` record, and if a run fails before emitting any event, Claudine may not receive a session ID.
 
-Model and provider are best extracted from `step_finish.part.model.providerID` and `step_finish.part.model.modelID` when present. The richer server message schema also carries `providerID`, `modelID`, `agent`, `path.cwd`, `path.root`, `cost`, and token usage on assistant messages. The CLI JSON stream does not emit that as an init envelope.
-
-Auth source, CLI version, MCP server list, permission mode, sandbox mode, and project roots are not emitted in the preferred stream. Claudine should treat those as invocation/config facts or collect them through separate commands/config inspection when needed.
+Model metadata is best read from `step_finish.part.model.providerID` and `step_finish.part.model.modelID` when present. The assistant message schema has `providerID`, `modelID`, `agent`, `path.cwd`, `path.root`, `cost`, `tokens`, and `finish`, but the run stream forwards only selected part records, not the full assistant message. Cwd/root, effective config, MCP servers, auth source, and CLI version are not emitted by run NDJSON. Use `kilo --version`, config inspection, or server/SDK APIs out of band if Claudine needs those fields.
 
 ## Event Families
 
-`tool_use` represents completed or failed tools. The nested `part` carries `tool`, `callID`, and `state`. Completed states include `input`, `output`, `title`, `metadata`, `time.start`, `time.end`, and optional `attachments`. Error states include `input`, `error`, optional `metadata`, and time fields.
+Run NDJSON has these event families:
 
-`step_start` and `step_finish` bracket model steps at a coarse level. `step_finish` is the most important usage event because it carries `reason`, optional `model`, `cost`, and tokens:
+| Event | Category | Live or completed | Key fields |
+| --- | --- | --- | --- |
+| `step_start` | Assistant step | Live start | `part.id`, `part.messageID`, `part.snapshot` |
+| `text` | Assistant output | Completed block | `part.text`, `part.time.start`, `part.time.end` |
+| `reasoning` | Reasoning | Completed block, gated by `--thinking` | `part.text`, `part.time.*` |
+| `tool_use` | Tool result | Completed/error only | `part.callID`, `part.tool`, `part.state.*` |
+| `step_finish` | Usage/completion | Completed step | `part.reason`, `part.model`, `part.cost`, `part.tokens` |
+| `error` | Failure | Immediate when observed | `error.name`, `error.data` |
 
-```json
-{
-  "type": "step_finish",
-  "part": {
-    "type": "step-finish",
-    "reason": "stop",
-    "model": {"providerID": "openai", "modelID": "gpt-5"},
-    "cost": 0.01,
-    "tokens": {
-      "input": 100,
-      "output": 50,
-      "reasoning": 0,
-      "cache": {"read": 0, "write": 0}
-    }
-  }
-}
-```
-
-`text` carries final assistant text part snapshots. Claudine should concatenate final text parts by stream order for a human answer, while preserving part IDs for reports.
-
-`reasoning` carries completed reasoning only when `--thinking` is supplied. It should not be assumed present.
-
-`error` carries session or immediate SDK errors. Source code normalizes some `session.error` payloads to human text for formatted mode, but JSON mode emits the raw `error` object.
+The server/SSE family is broader and includes `session.next.*` events for agent/model switches, prompts, shell start/end, step start/end/failure, text/reasoning deltas, tool input deltas, tool called/progress/success/failed, retries, and compaction.
 
 ## Tools
 
-Kilo's built-in tool registry includes shell/bash, read, glob, grep, edit, write, task, fetch/search, todo, skill, patch, plan, and optional experimental tools. MCP tools are also available when configured and use normal permission keys.
+Built-in tools include shell/process, read, write, edit, apply_patch, glob, grep, diagnostics/LSP, webfetch, websearch, MCP tools, task/subagent, skill, todo, plan enter/exit, question, repository tools, and Kilo-specific tools such as semantic search, background process, notebook, and document extractors.
 
-For Claudine's preferred stream, the important behavior is visibility:
+In `kilo run --format json`, tool calls are visible only after completion or error through `tool_use`. The payload carries the stored tool part:
 
-| Tool signal | `kilo run --format json` |
-|---|---|
-| Call start | Usually absent. |
-| Input | Visible in `tool_use.part.state.input` after completion/error. |
-| Progress | Usually absent. |
-| Result | Visible in `tool_use.part.state.output` for completed tools. |
-| Error | Visible in `tool_use.part.state.error` or top-level `error`. |
-| File changes | No dedicated event; infer from edit/write/patch tool payloads or filesystem diff. |
-| stdout/stderr | Usually embedded as tool output text, not separate streams. |
+| Field | Meaning |
+| --- | --- |
+| `part.callID` | Tool-call correlation ID |
+| `part.tool` | Tool name |
+| `part.state.status` | `completed` or `error` in emitted records |
+| `part.state.input` | Tool input object |
+| `part.state.output` | Completed output string |
+| `part.state.error` | Error string |
+| `part.state.metadata` | Tool-specific metadata |
+| `part.state.attachments` | Optional file attachments |
 
-The `task` tool is special. In `--auto`, Kilo tracks task child sessions through `part.state.metadata.sessionId` so that permissions for child sessions can be auto-replied. The preferred JSON stream still does not forward full nested child-session event streams.
+For command execution, stdout/stderr/exit-code details are tool-specific and appear inside tool output or metadata rather than a normalized command event. File changes are not normalized as `file_change` events in run NDJSON. They can be inferred from edit/write/apply_patch tool payloads, patch parts in the underlying message schema, snapshots, or exported sessions.
 
 ## Completion and Exit Status
 
-Official docs list:
+Official docs list exit codes `0` for success, `124` for timeout, and `1` for initialization or execution failure. Current tests add an important caveat: a mid-stream LLM/provider error emits a `session.error` event but currently exits `0`. The test comments call this a locked-in current behavior and warn that changing it should be deliberate.
 
-| Code | Meaning |
-|---:|---|
-| `0` | Success/task completed |
-| `124` | Timeout |
-| `1` | Initialization or execution failure |
+Claudine should therefore treat process exit code as advisory. A robust classifier should:
 
-Claudine should not rely on this table alone. Kilo's subprocess tests explicitly lock in the current behavior that a mid-stream LLM error emits a `session.error` event but exits `0`. Therefore:
-
-- If the process exits non-zero, classify failure from exit code plus stderr/stdout context.
-- If any `error` JSON record appears, classify the run as failure or ambiguous even if exit code is `0`.
-- If there is no `error` record and exit code is `0`, treat the final answer as the ordered set of `text.part.text` records.
-- Usage and cost are accumulated from `step_finish.part.tokens` and `step_finish.part.cost`.
-
-There is no JSON completion record with final status, final answer, usage total, or cost total.
+1. Parse all stdout NDJSON events.
+2. Mark the run failed if any top-level `error` event appears.
+3. Treat non-zero exit as failed even if no JSON error appears.
+4. Treat exit `0` with no error events as success, using the accumulated `text` events as final answer.
+5. Sum `step_finish.part.tokens.*` and `step_finish.part.cost` for session totals.
 
 ## Blocking Behavior
 
-Autonomous mode is designed to avoid a human TTY mid-run. Official docs say approval requests are handled automatically based on configuration, follow-up questions receive an autonomous-decision instruction, and the CLI exits when the task completes or times out.
+Kilo has three relevant permission modes. With `--auto`, the run loop replies `once` to permission asks for the root session and tracked `task` child sessions. With `--dangerously-skip-permissions`, permission asks that are not explicitly denied are also approved. Without either flag, non-interactive runs auto-reject permission requests, and current source marks plain headless root sessions so subagent permission asks fail instead of waiting forever.
 
-Current source behavior is more specific:
+At session creation, non-interactive runs also install deny rules for `question`, `interactive_terminal`, `plan_enter`, and `plan_exit`. That makes automation safer but creates a documentation tension: the public docs state that autonomous follow-up questions receive an instruction telling the AI to decide autonomously. The current source also denies the `question` permission, so Claudine should not rely on a programmable question-answer path in `kilo run`.
 
-- Non-interactive sessions add deny rules for `question`, `interactive_terminal`, `plan_enter`, and `plan_exit`.
-- Without `--auto`, permission requests for the root session are auto-rejected unless `--dangerously-skip-permissions` is set.
-- With `--auto`, Kilo replies `once` to permissions for the root session and tracked `task` child sessions.
-- `--dangerously-skip-permissions` approves permission requests that are not explicitly denied.
-- `session.network.asked` is retried up to three times with exponential delay and then rejected.
-
-Permission and question attempts are not forwarded in CLI JSON, so Claudine cannot directly render "awaiting permission" from the preferred stream. It should preconfigure permission policy and classify denials from tool/error payloads.
+Network retry prompts are handled internally: `session.network.asked` is retried with exponential delay up to three times, then rejected. These retry prompts are not emitted to `--format json` stdout.
 
 ## Subagents
 
-Kilo supports custom subagents and task child sessions. Project/global agent files can define prompts, models, and permissions. Subagents can run during non-interactive sessions through the task tool.
+Subagents can run through the task tool. Parent run NDJSON exposes the task tool result after completion or error, and Kilo tracks child session IDs from task tool metadata so `--auto` can reply to child-session permission asks. Current source also handles tracked child permission requests in non-auto headless modes so they are rejected rather than hanging.
 
-The preferred CLI JSON stream does not expose subagent start/stop as first-class events. Parent `task` tool results may include child-session metadata and summarized output. Source helper `KiloRunAuto` tracks `task` tool `metadata.sessionId` so that `--auto` can approve permissions for those child sessions, but nested tool calls and child status events are not forwarded to the parent JSON stream.
-
-If Claudine needs rich nested subagent telemetry, it should investigate the server/SSE integration rather than the sparse subprocess stream.
+Nested subagent events are not streamed into the parent NDJSON. There are no parent-stream `subagent_start` or `subagent_stop` records. Claudine can inject non-interactive instructions through the root prompt, but it cannot directly observe child tool calls unless it uses a richer server/session surface or inspects exported session data.
 
 ## Use Case Detection
 
-| Use case | Detectable from `--format json`? | How |
-|---|---:|---|
-| `tokens_consumed` | Yes | Sum `step_finish.part.tokens.*`; units are tokens, per step. |
-| `model_used` | Partially | Use `step_finish.part.model.*` when present; otherwise infer from requested `--model` or server messages. |
-| `session_resumable` | Yes, after first event | Use top-level `sessionID`. |
-| `auth` | Partially | Classify `error.error.name` or `error.error.data.message`; auth source is absent. |
-| `no_funds` | Partially | Classify billing/quota text or typed provider errors in `error`. |
-| `permission_read_denied` | Partially | Tool/error name plus `part.state.error`; no dedicated permission event. |
-| `permission_write_denied` | Partially | Tool/error name plus `part.state.error`; no dedicated permission event. |
-| `human_in_loop` | No | Internal question/permission events are not emitted in CLI JSON. |
-| `model_fallback` | No | No explicit fallback event found. |
-| `plan_cap_approaching` | No | No plan/quota approach event found. |
-| `plan_capped` | Partially | Only if final reason/error text exposes it. |
-| `subagent_prompt_injection` | No | Use configured agent prompts rather than runtime stream injection. |
+| Use case | Detectable from run NDJSON | Evidence |
+| --- | --- | --- |
+| Plan cap approaching | No | No near-cap event found. |
+| Plan capped/quota | Partially | Classify `error.name`, `error.data.message`, status, and provider response text. |
+| No funds | Partially | Provider-specific `APIError`/quota messages; no normalized no-funds event. |
+| Auth failure | Yes | `ProviderAuthError`, `APIError`, or startup stderr/exit. |
+| Permission read/write denied | Partially | Tool error payloads and error records; no forwarded `permission.asked/replied`. |
+| Tokens consumed | Yes | `step_finish.part.tokens.*`, per step. |
+| Cost | Yes | `step_finish.part.cost`, per step. |
+| Model used | Yes | `step_finish.part.model.*` when present. |
+| Model fallback | No | No explicit fallback event found. |
+| Human in loop | Partially | Infer from question/permission tool errors; asks are not directly emitted. |
+| Session resumable | Yes | `sessionID` on every emitted event. |
+| Subagent prompt injection | Yes | Prompt-level only; result visible as task tool payload. |
 
 ## Headless Constraints
 
-The highest-risk automation constraint is the absence of a terminal event. Claudine must treat process exit as the stream terminator and use parsed records for semantic classification.
+The biggest integration constraint is missing terminal state in the preferred stream. Claudine cannot wait for a `session.complete` event because none is emitted. It must combine stream parsing with process lifecycle.
 
-The second major constraint is sparse live visibility. Tool input and result are visible only after completion/error. Permission prompts, questions, and MCP OAuth surfaces are not visible in the preferred stream. This is enough for simple reporting, but not enough for a high-fidelity live operations dashboard.
+The second constraint is event sparsity. `tool_use` is not a start event, `text` is not a delta event, and permission asks are not forwarded. For clean terminal status, Claudine can show step starts, completed tool summaries, completed text blocks, and usage updates, but it cannot render precise live tool progress from the subprocess stream.
 
-Repository and user config can significantly alter behavior. Project configs, `.kilo` resources, plugins, MCP servers, and agent definitions can change available tools, permission behavior, and provider/model selection. For deterministic runs, Claudine should prefer an isolated Kilo profile using `KILO_CONFIG_CONTENT` or `KILO_CONFIG_DIR`, and consider `--pure`, `KILO_DISABLE_PROJECT_CONFIG`, and `KILO_NO_DAEMON` depending on the desired trust boundary.
+The third constraint is configuration drift. Kilo merges global config, explicit config file/content, project config, config directories, cloud organization config, managed files, managed preferences, and runtime env overlays. For deterministic CI, Claudine should consider setting `KILO_DISABLE_PROJECT_CONFIG=1`, using `--pure`, and passing a known `KILO_CONFIG_CONTENT` or `KILO_CONFIG` when appropriate.
 
 ## Timeline
 
-- Kilo CLI 1.0+ docs describe autonomous mode (`kilo run --auto`) for CI/pipeline use.
-- Current npm package inspection on 2026-07-02 found `@kilocode/cli` 7.3.54 and help for `kilo run --format default|json`.
-- Current source at commit `4c07a1db51d121b60129c3858f035da3f12df39c` defines the sparse JSON stream and its non-interactive permission behavior.
+| Date | Finding |
+| --- | --- |
+| 2026-07-03 | Verified upstream main at `419ff008ef180dd7076f679a89442883ba8f8d86`. |
+| 2026-07-03 | Confirmed `kilo run --format json` emits NDJSON with `type`, `timestamp`, `sessionID`, and event-specific payload. |
+| 2026-07-03 | Confirmed current tests lock in mid-stream LLM errors exiting `0`. |
+| 2026-07-03 | Confirmed current headless handling rejects plain non-interactive subagent permission asks instead of hanging. |
 
 ## Quirks and Gaps
 
-Kilo's source still lives largely under `packages/opencode`, and several tests/comments refer to `opencode run`. That is expected for this fork, but future maintainers should cite Kilo-specific wrappers and docs when possible.
+Kilo is Kilo-branded, but many source paths, package names, and tests still use `opencode`. Parser work should not assume package names imply OpenCode behavior, but source citations often live under `packages/opencode`.
 
-The generated SDK and server schemas are richer than the CLI stream. They are useful context, not proof that `kilo run --format json` exposes those fields. A future Claudine server integration should separately test the SSE stream, Basic Auth, session directory selection, and event ordering.
+The JSON stream has no formal schema or version marker. It is source-defined by `run.ts` and the message part Effect schemas. If Claudine implements a parser, it should be tolerant of additional top-level event types and additional nested fields.
 
-Unverified gaps remain around real provider auth failures, MCP OAuth failures, exact provider quota payloads, and model fallback behavior. No authenticated live Kilo task was run for this research.
+The public docs say autonomous follow-up questions receive an autonomous-decision response, while current source denies `question` permission in non-interactive runs. This needs fixture verification against a real model/tool call before Claudine depends on either behavior.
+
+This research did not run a live Kilo session with real credentials, did not capture provider-specific billing/quota examples, and did not deeply research ACP.
 
 ## Claudine Integration Notes
 
-Recommended default:
+Use:
 
-```sh
-kilo run --auto --format json --dir "$PWD" --model "<provider/model>" "<prompt>"
+```bash
+kilo run --auto --format json --dir "$PWD" "<prompt>"
 ```
 
-Use `--thinking` only when Claudine wants completed reasoning blocks. Avoid `--interactive`, `--replay`, and `--replay-limit`; the source rejects those combinations outside interactive mode or with JSON format.
+Parse stdout as NDJSON. Keep stderr for diagnostics only. Use top-level `type` as the discriminator. Join tool data by `part.callID`; join assistant blocks by `part.messageID` and `part.id`; group everything by `sessionID`. Sum `step_finish.part.tokens` and `step_finish.part.cost` for session usage. Treat any `error` event as failure regardless of process exit code.
 
-For deterministic wrapper behavior, launch with an explicit provider profile:
+Avoid `--interactive`, `--replay`, `--replay-limit`, and `--demo` in automation. Add `--thinking` only if Claudine wants completed reasoning blocks and is prepared to store/render them. Add `--pure` and/or `KILO_DISABLE_PROJECT_CONFIG=1` when wrapper reproducibility matters more than repo-local customization.
 
-```sh
-KILO_CONFIG_CONTENT='{"permission":{"*":"allow","question":"deny","interactive_terminal":"deny"}}' \
-KILO_NO_DAEMON=1 \
-kilo --pure run --auto --format json --model "<provider/model>" "<prompt>"
-```
+Do not implement the server/SSE integration first unless Claudine needs live deltas, tool call starts, tool progress, or richer status. SSE is better observability but adds a long-running process, auth, and SDK event-shape complexity.
 
-The parser should:
+## Changelog
 
-- Parse stdout as NDJSON and dispatch by top-level `type`.
-- Preserve unknown records for drift reports.
-- Treat `error` records as semantic failure evidence even if the process exits `0`.
-- Sum usage from `step_finish.part.tokens`.
-- Infer tool/file changes from `tool_use.part`, not from a dedicated file-change event.
-- Use stderr for diagnostics, especially when the JSON stream never starts.
-
-The stream is good enough for a first Claudine provider, but a high-fidelity Kilo integration should eventually investigate `kilo serve` plus SDK/SSE because that surface exposes internal status, permission, question, and `session.next.*` events that the CLI NDJSON stream drops.
+- 2026-07-03: Refreshed against upstream main `419ff008ef180dd7076f679a89442883ba8f8d86`; updated the recommended NDJSON invocation, source-defined schema evidence, headless permission behavior, config/env scopes, and mid-stream error exit-code caveat.
 
 ## Sources
 
 - [Kilo Code CLI docs](https://kilo.ai/docs/code-with-ai/platforms/cli)
-- [CLI Command Reference](https://github.com/Kilo-Org/kilocode/blob/main/packages/kilo-docs/pages/code-with-ai/platforms/cli-reference.md)
-- [Using MCP in the CLI](https://github.com/Kilo-Org/kilocode/blob/main/packages/kilo-docs/pages/automate/mcp/using-in-cli.md)
-- [Custom Modes configuration precedence](https://github.com/Kilo-Org/kilocode/blob/main/packages/kilo-docs/pages/customize/custom-modes.md)
-- [Custom Subagents precedence](https://github.com/Kilo-Org/kilocode/blob/main/packages/kilo-docs/pages/customize/custom-subagents.md)
-- [Plugin load order](https://github.com/Kilo-Org/kilocode/blob/main/packages/kilo-docs/pages/automate/extending/plugins.md)
-- [`packages/opencode/src/cli/cmd/run.ts`](https://github.com/Kilo-Org/kilocode/blob/4c07a1db51d121b60129c3858f035da3f12df39c/packages/opencode/src/cli/cmd/run.ts)
-- [`packages/opencode/test/cli/run/run-process.test.ts`](https://github.com/Kilo-Org/kilocode/blob/4c07a1db51d121b60129c3858f035da3f12df39c/packages/opencode/test/cli/run/run-process.test.ts)
-- [`packages/opencode/src/session/message-v2.ts`](https://github.com/Kilo-Org/kilocode/blob/4c07a1db51d121b60129c3858f035da3f12df39c/packages/opencode/src/session/message-v2.ts)
-- [`packages/core/src/session-event.ts`](https://github.com/Kilo-Org/kilocode/blob/4c07a1db51d121b60129c3858f035da3f12df39c/packages/core/src/session-event.ts)
-- [`packages/opencode/src/server/routes/instance/httpapi/handlers/event.ts`](https://github.com/Kilo-Org/kilocode/blob/4c07a1db51d121b60129c3858f035da3f12df39c/packages/opencode/src/server/routes/instance/httpapi/handlers/event.ts)
-- [`packages/opencode/src/kilocode/cli/run-auto.ts`](https://github.com/Kilo-Org/kilocode/blob/4c07a1db51d121b60129c3858f035da3f12df39c/packages/opencode/src/kilocode/cli/run-auto.ts)
-- Local package inspection: `@kilocode/cli` 7.3.54 and `@kilocode/cli-darwin-arm64` 7.3.54 help output on 2026-07-02.
+- [Kilo CLI command reference](https://kilo.ai/docs/code-with-ai/platforms/cli-reference)
+- [`packages/opencode/src/cli/cmd/run.ts`](https://github.com/Kilo-Org/kilocode/blob/419ff008ef180dd7076f679a89442883ba8f8d86/packages/opencode/src/cli/cmd/run.ts)
+- [`packages/opencode/test/cli/run/run-process.test.ts`](https://github.com/Kilo-Org/kilocode/blob/419ff008ef180dd7076f679a89442883ba8f8d86/packages/opencode/test/cli/run/run-process.test.ts)
+- [`packages/opencode/src/session/message-v2.ts`](https://github.com/Kilo-Org/kilocode/blob/419ff008ef180dd7076f679a89442883ba8f8d86/packages/opencode/src/session/message-v2.ts)
+- [`packages/core/src/session-event.ts`](https://github.com/Kilo-Org/kilocode/blob/419ff008ef180dd7076f679a89442883ba8f8d86/packages/core/src/session-event.ts)
+- [`packages/opencode/src/server/routes/instance/httpapi/handlers/event.ts`](https://github.com/Kilo-Org/kilocode/blob/419ff008ef180dd7076f679a89442883ba8f8d86/packages/opencode/src/server/routes/instance/httpapi/handlers/event.ts)
+- [`packages/opencode/src/kilocode/permission/headless.ts`](https://github.com/Kilo-Org/kilocode/blob/419ff008ef180dd7076f679a89442883ba8f8d86/packages/opencode/src/kilocode/permission/headless.ts)
+- [`packages/opencode/src/kilocode/cli/run-auto.ts`](https://github.com/Kilo-Org/kilocode/blob/419ff008ef180dd7076f679a89442883ba8f8d86/packages/opencode/src/kilocode/cli/run-auto.ts)

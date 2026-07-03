@@ -1,61 +1,61 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-04-06
-last_updated: 2026-07-02
+last_updated: 2026-07-03
 agent: codex
 model: default
 docs: https://moonshotai.github.io/kimi-cli/en/customization/wire-mode.html
 invocation:
-  - command: "kimi --wire"
+  - command: "kimi --wire --work-dir <repo>"
     stdin_support: true
-    prompt_arg: "JSON-RPC `prompt` request on stdin; `--prompt` is ignored in Wire mode"
-    notes: "Starts a Wire JSON-RPC server over stdin/stdout for a fresh or resumed session."
-  - command: "kimi --wire --session <session-id>"
+    prompt_arg: "Send a JSON-RPC `prompt` request on stdin after `initialize`; `--prompt` is not the Wire prompt channel."
+    notes: "Starts a Wire JSON-RPC line-protocol server for a fresh session."
+  - command: "kimi --wire --work-dir <repo> --session <session-id>"
     stdin_support: true
-    prompt_arg: "JSON-RPC `prompt` request on stdin"
-    notes: "Resumes the named session if present; creates a session with that ID if not found."
-  - command: "kimi --wire --continue"
+    prompt_arg: "Send a JSON-RPC `prompt` request on stdin."
+    notes: "Resumes the named session; Kimi docs say an unknown ID creates a new session."
+  - command: "kimi --wire --work-dir <repo> --continue"
     stdin_support: true
-    prompt_arg: "JSON-RPC `prompt` request on stdin"
+    prompt_arg: "Send a JSON-RPC `prompt` request on stdin."
     notes: "Continues the previous session for the selected work directory."
   - command: "kimi --print -p <prompt> --output-format stream-json"
     stdin_support: false
-    prompt_arg: "`--prompt` / `-p` / `--command` / `-c`"
-    notes: "One-shot print mode fallback; exits after the run and auto-enables AFK behavior."
+    prompt_arg: "`--prompt`, `-p`, `--command`, or `-c`."
+    notes: "Simple non-interactive fallback. Print mode exits after the task and implicitly enables AFK behavior."
   - command: "printf '%s\n' '{\"role\":\"user\",\"content\":\"...\"}' | kimi --print --input-format stream-json --output-format stream-json"
     stdin_support: true
-    prompt_arg: "JSONL user messages on stdin"
-    notes: "Print mode reads user-role JSONL messages until stdin closes; this is not Wire."
+    prompt_arg: "User-role JSONL messages on stdin until EOF."
+    notes: "Request/reply print mode, not Wire. Output is JSONL message projection."
 output_formats:
-  - name: "wire"
+  - name: "Wire"
     cli_value: "--wire"
     stream: true
     format: jsonrpc_lines
     description: "Bidirectional JSON-RPC 2.0 over newline-delimited JSON on stdin/stdout."
-    side_effects: "Changes the process into a protocol server; `--prompt`, `--input-format`, and `--output-format` do not apply."
-  - name: "stream-json"
+    side_effects: "Turns the CLI into a protocol peer. `--input-format`, `--output-format`, and final-message-only print options do not select Wire payloads."
+  - name: "print stream-json"
     cli_value: "stream-json"
     stream: true
     format: jsonl
-    description: "Print-mode JSONL made of assistant messages, tool messages, notifications, and plan display records."
-    side_effects: "Whole assistant messages are flushed at step boundaries; many Wire events are intentionally suppressed."
-  - name: "text"
+    description: "Print-mode JSONL made from assistant messages, tool messages, notifications, and plan display records."
+    side_effects: "Lossy projection of Wire. Assistant content and tool-call deltas are buffered into whole messages at step boundaries."
+  - name: "print text"
     cli_value: "text"
     stream: true
     format: text
-    description: "Human-oriented print-mode text."
-    side_effects: "Not suitable as a parser contract; source uses Rich printing for non-final text mode."
-  - name: "final-message-only text"
-    cli_value: "--final-message-only with text, or --quiet"
+    description: "Human-oriented print-mode output."
+    side_effects: "Not a stable parser contract; source uses Rich printing for non-final text output."
+  - name: "quiet/final message only"
+    cli_value: "--quiet or --final-message-only"
     stream: false
     format: text
-    description: "Only the final assistant text."
-    side_effects: "Drops tool calls, progress, notifications, and intermediate state."
+    description: "Only final assistant text."
+    side_effects: "Suppresses intermediate progress, tool calls, tool results, notifications, and most lifecycle evidence."
 schema_sources:
   - url: "https://moonshotai.github.io/kimi-cli/en/customization/wire-mode.html"
     schema_type: other
     formal: true
-    notes: "Official TypeScript-style Wire protocol documentation; current docs state protocol version 1.10."
+    notes: "Official Wire protocol documentation with TypeScript-style request, response, event, request, and display-block definitions; current protocol version is 1.10."
   - url: "https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/wire/types.py"
     schema_type: other
     formal: true
@@ -63,55 +63,51 @@ schema_sources:
   - url: "https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/wire/jsonrpc.py"
     schema_type: other
     formal: true
-    notes: "Provider source Pydantic models for JSON-RPC envelopes and inbound/outbound method sets."
-  - url: "https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/wire/protocol.py"
-    schema_type: other
-    formal: true
-    notes: "Source constant `WIRE_PROTOCOL_VERSION = \"1.10\"`."
+    notes: "Provider source Pydantic models for JSON-RPC envelopes, inbound/outbound method sets, statuses, and error codes."
   - url: "https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/ui/print/visualize.py"
     schema_type: other
     formal: false
-    notes: "Source behavior for print `stream-json`; it is a projection of Wire messages, not the Wire schema."
+    notes: "Source projection for print `stream-json`; useful for knowing what is omitted or buffered."
 cli_params:
   - flag: "--wire"
     value: ""
-    description: "Starts Wire server mode; mutually exclusive with shell, print, and ACP modes."
+    description: "Runs Wire server mode for structured bidirectional integration."
     example: "kimi --wire --work-dir /repo"
   - flag: "--print"
     value: ""
-    description: "Runs non-interactively in print mode and auto-dismisses questions/approvals for that invocation."
-    example: "kimi --print -p \"fix tests\" --output-format stream-json"
+    description: "Runs non-interactively in print mode and implicitly enables AFK."
+    example: "kimi --print -p \"summarize\" --output-format stream-json"
   - flag: "--input-format"
     value: "text | stream-json"
-    description: "Print-only input format; `stream-json` consumes user-role JSONL from stdin."
+    description: "Print-only input format; `stream-json` reads user-role JSONL from stdin until EOF."
     example: "kimi --print --input-format stream-json --output-format stream-json"
   - flag: "--output-format"
     value: "text | stream-json"
-    description: "Print-only output format; use `stream-json` for JSONL fallback output."
-    example: "kimi --print -p \"summarize\" --output-format stream-json"
-  - flag: "--prompt, -p, --command, -c"
-    value: "TEXT"
-    description: "One-shot prompt for shell/print mode; ignored by Wire and ACP server modes."
-    example: "kimi --print -p \"explain this repo\""
-  - flag: "--quiet"
-    value: ""
-    description: "Alias for `--print --output-format text --final-message-only`; parser-hostile."
-    example: "kimi --quiet -p \"commit message\""
+    description: "Print-only output selector."
+    example: "kimi --print -p \"task\" --output-format stream-json"
   - flag: "--final-message-only"
     value: ""
     description: "Print-only lossy final-answer output."
     example: "kimi --print -p \"commit message\" --final-message-only"
+  - flag: "--quiet"
+    value: ""
+    description: "Shortcut for `--print --output-format text --final-message-only`."
+    example: "kimi --quiet -p \"commit message\""
+  - flag: "--prompt, -p, --command, -c"
+    value: "TEXT"
+    description: "One-shot prompt for shell/print mode; Wire clients should send JSON-RPC `prompt` instead."
+    example: "kimi --print -p \"explain this repo\""
   - flag: "--work-dir, -w"
     value: "PATH"
-    description: "Sets the working directory/root for file operations."
+    description: "Sets working directory/root for file operations."
     example: "kimi --wire --work-dir /repo"
   - flag: "--add-dir"
     value: "PATH"
-    description: "Adds extra accessible workspace roots and persists them in session state."
+    description: "Adds accessible workspace roots and persists them in session state."
     example: "kimi --wire --add-dir /shared"
   - flag: "--session, --resume, -S, -r"
     value: "[ID]"
-    description: "Resumes a session by ID; ID-less picker is shell-only and invalid in Wire/print."
+    description: "Resumes a session by ID; ID-less picker is shell-only."
     example: "kimi --wire --session abc123"
   - flag: "--continue, -C"
     value: ""
@@ -119,23 +115,23 @@ cli_params:
     example: "kimi --wire --continue"
   - flag: "--model, -m"
     value: "NAME"
-    description: "Overrides `default_model` from config for this process."
+    description: "Overrides the configured default model for this process."
     example: "kimi --wire --model kimi-for-coding"
   - flag: "--thinking / --no-thinking"
     value: ""
-    description: "Overrides default or previous-session thinking mode when model capabilities allow it."
+    description: "Overrides thinking mode when model capabilities allow it."
     example: "kimi --wire --thinking"
   - flag: "--yolo, --yes, --auto-approve"
     value: ""
-    description: "Auto-approves actions; docs distinguish it from AFK because user questions may still be reachable."
+    description: "Auto-approves tool calls, while user questions may still be reachable."
     example: "kimi --wire --yolo"
   - flag: "--afk"
     value: ""
-    description: "No-user-present mode: auto-approves tools and auto-dismisses AskUserQuestion."
+    description: "Away-from-keyboard mode: auto-approves tools and auto-dismisses AskUserQuestion."
     example: "kimi --wire --afk"
   - flag: "--plan"
     value: ""
-    description: "Starts or resumes in plan mode; Wire clients should also negotiate plan-mode support."
+    description: "Starts or resumes in read-only plan mode."
     example: "kimi --wire --plan"
   - flag: "--max-steps-per-turn"
     value: "N"
@@ -145,6 +141,10 @@ cli_params:
     value: "N"
     description: "Overrides retry count per step."
     example: "kimi --wire --max-retries-per-step 2"
+  - flag: "--max-ralph-iterations"
+    value: "N"
+    description: "Runs Ralph Loop iterations; `0` disables and `-1` is unlimited."
+    example: "kimi --print -p \"iterate\" --max-ralph-iterations 3"
   - flag: "--config"
     value: "TOML_OR_JSON"
     description: "Loads complete config from a string; mutually exclusive with `--config-file`."
@@ -159,73 +159,151 @@ cli_params:
     example: "kimi --wire --mcp-config-file ./mcp.json"
   - flag: "--mcp-config"
     value: "JSON"
-    description: "Inline MCP config JSON; repeatable."
+    description: "Loads inline MCP config JSON; repeatable."
     example: "kimi --wire --mcp-config '{\"mcpServers\":{}}'"
+  - flag: "--agent"
+    value: "NAME"
+    description: "Selects a built-in agent."
+    example: "kimi --wire --agent default"
+  - flag: "--agent-file"
+    value: "PATH"
+    description: "Selects a custom agent file; mutually exclusive with `--agent`."
+    example: "kimi --wire --agent-file ./agent.md"
+  - flag: "--skills-dir"
+    value: "PATH"
+    description: "Adds skills directories; repeatable."
+    example: "kimi --wire --skills-dir ./.kimi/skills"
   - flag: "--verbose"
     value: ""
-    description: "Prints verbose runtime information; not a structured stream selector."
+    description: "Outputs detailed runtime information; not a structured stream selector."
     example: "kimi --verbose --print -p \"task\""
   - flag: "--debug"
     value: ""
-    description: "Enables trace logging to `~/.kimi/logs/kimi.log`."
+    description: "Writes TRACE-level logs to Kimi's log file."
     example: "kimi --debug --wire"
 config_files:
-  - os: all
+  - os: macos
     scope: user
     path: "~/.kimi/config.toml"
     format: toml
     effect: "Default providers, models, loop control, background behavior, hooks, MCP client settings, default YOLO/plan/thinking, theme, telemetry."
-    notes: "Created automatically; `--config-file` can replace it and `--config` can replace file loading for a process."
-  - os: all
+    notes: "Default user config. `--config-file` replaces this file for the process; `--config` bypasses file loading with inline JSON/TOML."
+  - os: linux
+    scope: user
+    path: "~/.kimi/config.toml"
+    format: toml
+    effect: "Default providers, models, loop control, background behavior, hooks, MCP client settings, default YOLO/plan/thinking, theme, telemetry."
+    notes: "Default user config. `--config-file` replaces this file for the process; `--config` bypasses file loading with inline JSON/TOML."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.kimi\\config.toml"
+    format: toml
+    effect: "Default providers, models, loop control, background behavior, hooks, MCP client settings, default YOLO/plan/thinking, theme, telemetry."
+    notes: "Docs express the location as `~/.kimi/config.toml`; on Windows this resolves under the user's home directory."
+  - os: macos
     scope: user
     path: "~/.kimi/config.json"
     format: json
     effect: "Legacy config source."
-    notes: "Migrated to `config.toml` with backup `config.json.bak` when TOML config does not exist."
-  - os: all
+    notes: "Migrated to TOML with backup `config.json.bak` when TOML config does not exist."
+  - os: linux
+    scope: user
+    path: "~/.kimi/config.json"
+    format: json
+    effect: "Legacy config source."
+    notes: "Migrated to TOML with backup `config.json.bak` when TOML config does not exist."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.kimi\\config.json"
+    format: json
+    effect: "Legacy config source."
+    notes: "Migrated to TOML with backup `config.json.bak` when TOML config does not exist."
+  - os: macos
     scope: user
     path: "~/.kimi/mcp.json"
     format: json
     effect: "Default MCP server configuration loaded when no explicit MCP config is supplied."
-    notes: "Additional MCP config files and inline JSON are appended for the invocation."
-  - os: all
+    notes: "Additional MCP config files and inline MCP JSON are appended for the invocation."
+  - os: linux
+    scope: user
+    path: "~/.kimi/mcp.json"
+    format: json
+    effect: "Default MCP server configuration loaded when no explicit MCP config is supplied."
+    notes: "Additional MCP config files and inline MCP JSON are appended for the invocation."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.kimi\\mcp.json"
+    format: json
+    effect: "Default MCP server configuration loaded when no explicit MCP config is supplied."
+    notes: "Additional MCP config files and inline MCP JSON are appended for the invocation."
+  - os: macos
     scope: user
     path: "~/.kimi/sessions/<work-dir-hash>/<session-id>/wire.jsonl"
     format: other
-    effect: "Persistent Wire event/request log used for replay and visualizer/export."
-    notes: "Not startup configuration, but important for resume/replay and parser fixture capture."
-  - os: all
+    effect: "Persistent Wire event/request log used for replay, export, and visualizer workflows."
+    notes: "Not startup configuration, but important for session recovery and fixture capture."
+  - os: linux
+    scope: user
+    path: "~/.kimi/sessions/<work-dir-hash>/<session-id>/wire.jsonl"
+    format: other
+    effect: "Persistent Wire event/request log used for replay, export, and visualizer workflows."
+    notes: "Not startup configuration, but important for session recovery and fixture capture."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.kimi\\sessions\\<work-dir-hash>\\<session-id>\\wire.jsonl"
+    format: other
+    effect: "Persistent Wire event/request log used for replay, export, and visualizer workflows."
+    notes: "Not startup configuration, but important for session recovery and fixture capture."
+  - os: macos
     scope: user
     path: "~/.kimi/sessions/<work-dir-hash>/<session-id>/state.json"
     format: json
     effect: "Session state: approval state, plan mode, extra roots, subagent metadata, and plan identifiers."
     notes: "Resumed sessions restore these values."
-  - os: all
+  - os: linux
+    scope: user
+    path: "~/.kimi/sessions/<work-dir-hash>/<session-id>/state.json"
+    format: json
+    effect: "Session state: approval state, plan mode, extra roots, subagent metadata, and plan identifiers."
+    notes: "Resumed sessions restore these values."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.kimi\\sessions\\<work-dir-hash>\\<session-id>\\state.json"
+    format: json
+    effect: "Session state: approval state, plan mode, extra roots, subagent metadata, and plan identifiers."
+    notes: "Resumed sessions restore these values."
+  - os: macos
     scope: repo
     path: ".kimi/AGENTS.md"
     format: text
-    effect: "Merged into the generated system prompt via `KIMI_AGENTS_MD`."
-    notes: "Affects agent behavior, not stream framing."
+    effect: "Project instruction file that can affect agent behavior."
+    notes: "Affects prompts and behavior, not stream framing."
+  - os: linux
+    scope: repo
+    path: ".kimi/AGENTS.md"
+    format: text
+    effect: "Project instruction file that can affect agent behavior."
+    notes: "Affects prompts and behavior, not stream framing."
+  - os: windows
+    scope: repo
+    path: ".kimi\\AGENTS.md"
+    format: text
+    effect: "Project instruction file that can affect agent behavior."
+    notes: "Affects prompts and behavior, not stream framing."
 env_vars:
   - name: "KIMI_SHARE_DIR"
-    effect: "Moves the Kimi runtime data directory away from `~/.kimi`."
-    notes: "Affects config, sessions, wire logs, credentials, MCP OAuth, and logs."
-  - name: "NO_COLOR"
-    effect: "Standard color suppression for terminal-oriented output."
-    notes: "Not a substitute for structured output; Wire remains JSON-RPC lines."
-  - name: "FORCE_COLOR"
-    effect: "May force color in human output through terminal libraries."
-    notes: "Avoid text mode parsing regardless."
+    effect: "Moves Kimi's runtime data directory away from `~/.kimi`."
+    notes: "Affects config, metadata, credentials, MCP OAuth tokens, sessions, plans, history, and logs."
 io_contract:
   stdout: structured_only
   stderr: diagnostics_only
   stdin: stream_protocol
   framing: jsonrpc_lines
   noise_handling: "For `--wire`, parse stdout as one JSON-RPC message per line and treat stderr/log files as diagnostics. For print `stream-json`, parse stdout as JSONL but expect a lossy projection."
-  notes: "Wire uses stdin for client requests/responses and stdout for server responses/events/requests; print mode uses stdin either as prompt text or user-message JSONL."
+  notes: "Wire uses stdin for client requests/responses and stdout for server responses/events/requests. Print mode uses stdin as prompt text or user-message JSONL."
 stream_contract:
-  discriminator: "JSON-RPC `method`; Wire payload discriminator is `params.type` for `event` and `request` messages"
-  event_ordering: "`TurnBegin` before turn events, `StepBegin` before step events, `TurnEnd` after normal turn events; JSON-RPC `prompt` response is terminal for that turn."
+  discriminator: "JSON-RPC `method`; Wire payload discriminator is `params.type` for `event` and `request` messages; nested subagent payloads use `params.payload.event.type`."
+  event_ordering: "`TurnBegin` starts a turn, `StepBegin` starts each step, `StepRetry` indicates retryable failure, and `TurnEnd` ends a normal turn. `TurnEnd` can be omitted on interruption."
   correlation_fields:
     - "id"
     - "params.payload.id"
@@ -233,41 +311,41 @@ stream_contract:
     - "params.payload.request_id"
     - "params.payload.parent_tool_call_id"
     - "params.payload.message_id"
-  terminal_event: "JSON-RPC response to `prompt` with `result.status`; `TurnEnd` is useful but may be omitted on interruption."
+  terminal_event: "JSON-RPC response to `prompt` with `result.status`; do not rely only on `TurnEnd`."
   partial_message_events: true
-  unknown_event_policy: "Skip unknown `params.type` after preserving raw payload; unknown JSON-RPC methods should be logged and answered with method-not-found only when Claudine is the peer."
-  notes: "Wire content/tool parts may be deltas or complete records; print `stream-json` merges assistant content into whole messages."
+  unknown_event_policy: "Preserve raw payload, classify known fields, and skip unknown `params.type`; answer unknown JSON-RPC requests only when Claudine is the responsible peer."
+  notes: "Wire emits content/tool deltas and complete records. Print `stream-json` merges assistant content into whole messages and drops many control events."
 session_metadata:
-  session_id: "Not emitted as a first-class Wire event; available from selected session directory/state and hook payloads. Claudine should track it from launch/resume and `wire.jsonl` path."
-  cwd: "`--work-dir` controls it; `SessionStart` hook input has cwd, but Wire initialize result does not."
-  model: "Requested via `--model` or config; not reliably emitted in the Wire stream."
-  provider: "Config/model mapping; not reliably emitted in the Wire stream."
-  auth: "OAuth vs API key can be inferred internally by Kimi but is not exposed in Wire initialize result."
-  version: "Initialize result `server.version`; `kimi info --json` also reports `kimi_cli_version` and `wire_protocol_version` on current versions."
-  mcp_servers: "StatusUpdate payload can include `mcp_status.servers[]` with name/status/tools during startup."
-  permission_mode: "Approval behavior is controlled by `--yolo`, `--afk`, print runtime AFK, config `default_yolo`, and session approval state; not emitted as a single mode field."
-  notes: "Wire clients must keep launch-time metadata alongside parsed stream data."
+  session_id: "Not emitted by `initialize`; capture from launch/resume args and the session directory."
+  cwd: "`--work-dir` controls it; Wire does not emit a stable cwd metadata event."
+  model: "Requested via `--model` or config; not reliably emitted in Wire."
+  provider: "Resolved through config/model mapping; not reliably emitted in Wire."
+  auth: "Auth failures have error codes/messages, but auth kind/source is not exposed as stable Wire metadata."
+  version: "`initialize.result.server.version`; `kimi info` is also documented for version/protocol information."
+  mcp_servers: "`StatusUpdate.payload.mcp_status.servers[]` can include name, status, and tools during startup."
+  permission_mode: "Controlled by launch flags, config defaults, and resumed session state; not emitted as a single stable field."
+  notes: "Claudine should record launch metadata beside parsed stream records."
 stream_events:
   - event: "initialize"
     category: session
     fields: ["protocol_version", "server.name", "server.version", "slash_commands", "capabilities", "hooks.supported_events", "external_tools"]
-    notes: "JSON-RPC request/response, not an event notification."
+    notes: "Client request/server response, not an agent event notification."
   - event: "prompt"
     category: session
-    fields: ["result.status", "result.steps", "error.code", "error.message"]
-    notes: "Starts a turn; response completes the turn."
+    fields: ["params.user_input", "result.status", "result.steps", "error.code", "error.message"]
+    notes: "Starts a turn; its JSON-RPC response is the terminal record for that turn."
   - event: "replay"
     category: session
     fields: ["result.status", "result.events", "result.requests"]
-    notes: "Replays saved `wire.jsonl`; clients should not answer replayed requests."
+    notes: "Replays saved Wire logs; clients should not answer replayed requests."
   - event: "steer"
     category: session
     fields: ["params.user_input", "result.status"]
-    notes: "Injects input into an active turn."
+    notes: "Queues input into an active turn."
   - event: "set_plan_mode"
     category: plan
     fields: ["params.enabled", "result.plan_mode", "error.message"]
-    notes: "Requires capability negotiation."
+    notes: "Requires plan-mode capability support."
   - event: "cancel"
     category: session
     fields: ["result.status"]
@@ -275,11 +353,15 @@ stream_events:
   - event: "TurnBegin"
     category: session
     fields: ["user_input"]
-    notes: "First event in a turn."
+    notes: "Beginning of an agent turn."
+  - event: "SteerInput"
+    category: session
+    fields: ["user_input"]
+    notes: "Injected steer message was consumed."
   - event: "TurnEnd"
     category: session
     fields: []
-    notes: "Normal turn end; may be omitted on interruption."
+    notes: "Normal turn end; may be absent on interruption."
   - event: "StepBegin"
     category: session
     fields: ["n"]
@@ -291,47 +373,47 @@ stream_events:
   - event: "StepRetry"
     category: error
     fields: ["n", "next_attempt", "max_attempts", "wait_s", "error_type", "status_code"]
-    notes: "Retryable step failure with wait timing."
+    notes: "Retryable step failure; wait is in seconds."
   - event: "StatusUpdate"
     category: usage
     fields: ["context_usage", "context_tokens", "max_context_tokens", "token_usage", "message_id", "plan_mode", "mcp_status"]
     notes: "Primary live token/context/MCP/status event."
-  - event: "TextPart"
+  - event: "ContentPart/TextPart"
     category: assistant
-    fields: ["type", "text"]
-    notes: "Content-part class from the `kosong` message model."
-  - event: "ThinkPart"
+    fields: ["payload.type", "payload.text"]
+    notes: "Assistant content part; payload subtype distinguishes text/media/reasoning."
+  - event: "ContentPart/ThinkPart"
     category: reasoning
-    fields: ["type", "text"]
-    notes: "Reasoning content when available and not suppressed by model/config."
+    fields: ["payload.type", "payload.think", "payload.encrypted"]
+    notes: "Reasoning content when available and not suppressed."
   - event: "ToolCall"
     category: tool_call
-    fields: ["id", "type", "function.name", "function.arguments"]
+    fields: ["id", "type", "function.name", "function.arguments", "extras"]
     notes: "Native tool call start/input."
   - event: "ToolCallPart"
     category: tool_call
-    fields: ["id", "function.arguments"]
-    notes: "Incremental tool-call delta merged by print JSON printer."
+    fields: ["arguments_part"]
+    notes: "Streaming tool argument fragment."
   - event: "ToolResult"
     category: tool_result
-    fields: ["tool_call_id", "return_value", "display"]
+    fields: ["tool_call_id", "return_value.is_error", "return_value.output", "return_value.message", "return_value.display", "return_value.extras"]
     notes: "Native tool result; join to call by `tool_call_id`."
   - event: "ApprovalRequest"
     category: permission
     fields: ["id", "tool_call_id", "sender", "action", "description", "source_kind", "source_id", "agent_id", "subagent_type", "display"]
-    notes: "JSON-RPC `request`; client must respond with `ApprovalResponse`."
+    notes: "JSON-RPC `request`; client must respond."
   - event: "ApprovalResponse"
     category: permission
     fields: ["request_id", "response", "feedback"]
-    notes: "Response values: `approve`, `approve_for_session`, `reject`."
+    notes: "Response values are `approve`, `approve_for_session`, and `reject`."
   - event: "QuestionRequest"
     category: permission
     fields: ["id", "tool_call_id", "questions[].question", "questions[].options[]", "questions[].multi_select"]
-    notes: "Only sent when client declares `supports_question`; otherwise AskUserQuestion is hidden."
+    notes: "Only sent when client declares question support."
   - event: "ToolCallRequest"
     category: tool_call
     fields: ["id", "name", "arguments"]
-    notes: "External tool call registered during initialize; client must execute and answer."
+    notes: "External tool call registered during `initialize`; client must execute and respond."
   - event: "HookRequest"
     category: permission
     fields: ["id", "subscription_id", "event", "target", "input_data"]
@@ -347,15 +429,15 @@ stream_events:
   - event: "PlanDisplay"
     category: plan
     fields: ["content", "file_path"]
-    notes: "Plan markdown and file path."
+    notes: "Plan markdown and plan file path."
   - event: "SubagentEvent"
     category: subagent
     fields: ["parent_tool_call_id", "agent_id", "subagent_type", "event.type", "event.payload"]
-    notes: "Nested Wire event from a subagent."
+    notes: "Nested Wire event from a subagent; parsers need recursion."
   - event: "Notification"
     category: other
     fields: ["id", "category", "type", "source_kind", "source_id", "title", "body", "severity", "created_at", "payload"]
-    notes: "`created_at` is a float timestamp; timezone/unit is not formally specified in docs."
+    notes: "`created_at` is a float timestamp; unit/timezone are not formally specified in docs."
   - event: "MCPLoadingBegin"
     category: session
     fields: []
@@ -390,55 +472,55 @@ tools:
     call_visible: true
     result_visible: true
     metadata: ["QuestionRequest.id", "QuestionRequest.tool_call_id", "QuestionResponse.answers"]
-    notes: "In Wire it requires capability negotiation; in AFK/print it is auto-dismissed."
+    notes: "In Wire it requires capability negotiation unless AFK suppresses it; in print AFK behavior handles it automatically."
   - name: "SetTodoList"
     call_visible: true
     result_visible: true
-    metadata: ["ToolCall.function.arguments", "ToolResult.display[type=todo]"]
-    notes: "Todo state can also appear in display blocks."
-  - name: "Shell"
+    metadata: ["ToolCall.function.arguments", "ToolResult.return_value.display[type=todo]"]
+    notes: "Todo state can appear in tool display blocks."
+  - name: "Shell/CMD"
     call_visible: true
     result_visible: true
-    metadata: ["ToolCall.function.arguments.command", "ToolResult.return_value", "ToolResult.display[type=shell]", "Notification for background tasks"]
-    notes: "Requires approval unless approval mode auto-approves; background tasks can produce notifications."
+    metadata: ["ToolCall.function.arguments.command", "ToolResult.return_value", "ToolResult.return_value.display[type=shell]", "Notification"]
+    notes: "Requires approval unless approval mode auto-approves. Windows uses a CMD-shaped backend according to changelog notes."
   - name: "ReadFile / ReadMediaFile / Glob / Grep"
     call_visible: true
     result_visible: true
     metadata: ["ToolCall.function.arguments", "ToolResult.return_value"]
-    notes: "Read denials are inferred from tool result/error text, not a dedicated denial event."
-  - name: "WriteFile / StrReplaceFile"
+    notes: "Read denials are inferred from tool errors/results, not a dedicated denial event."
+  - name: "WriteFile / StrReplaceFile / PatchFile"
     call_visible: true
     result_visible: true
-    metadata: ["ApprovalRequest.display[type=diff]", "ToolCall.function.arguments.path", "ToolResult.display"]
+    metadata: ["ApprovalRequest.display[type=diff]", "ToolCall.function.arguments.path", "ToolResult.return_value.display"]
     notes: "Write/edit operations require approval unless auto-approved."
   - name: "SearchWeb / FetchURL"
     call_visible: true
     result_visible: true
     metadata: ["ToolCall.function.arguments", "ToolResult.return_value"]
-    notes: "Search requires configured service; fetch falls back locally when service is absent."
+    notes: "Requires provider/service configuration for search/fetch behavior."
   - name: "EnterPlanMode / ExitPlanMode"
     call_visible: true
     result_visible: true
     metadata: ["set_plan_mode", "StatusUpdate.plan_mode", "PlanDisplay.file_path"]
-    notes: "Wire plan tools are hidden unless client declares `supports_plan_mode`."
+    notes: "Plan tools are controlled by capability negotiation and plan mode."
   - name: "External tools"
     call_visible: true
     result_visible: true
     metadata: ["initialize.external_tools", "ToolCallRequest.id", "ToolCallRequest.name", "ToolCallRequest.arguments"]
     notes: "Wire client registers tools during initialize and must answer tool-call requests."
 completion:
-  success_event: "JSON-RPC success response to `prompt` with `result.status = finished`; process exit 0 for print success."
-  failure_event: "JSON-RPC error response to `prompt`, `result.status = cancelled|max_steps_reached`, `StepInterrupted`, or process exit 1/75 in print mode."
+  success_event: "JSON-RPC success response to `prompt` with `result.status = finished`; print success exits 0."
+  failure_event: "JSON-RPC error response, `result.status = cancelled|max_steps_reached`, `StepInterrupted`, or print exit 1/75."
   exit_code_reliable: true
   result_fields: ["result.status", "result.steps", "error.code", "error.message"]
   cost_fields: []
-  usage_fields: ["StatusUpdate.token_usage", "StatusUpdate.context_tokens", "StatusUpdate.max_context_tokens", "StatusUpdate.context_usage"]
-  notes: "For Wire, the per-request response is more precise than process exit because the server may stay alive after a turn. Print mode documents exit 0/1/75."
+  usage_fields: ["StatusUpdate.token_usage.input_other", "StatusUpdate.token_usage.output", "StatusUpdate.token_usage.input_cache_read", "StatusUpdate.token_usage.input_cache_creation", "StatusUpdate.context_tokens", "StatusUpdate.max_context_tokens", "StatusUpdate.context_usage"]
+  notes: "For Wire, the prompt response is more precise than process exit because the server can remain alive across turns. Print mode documents exit 0/1/75."
 blocking_behavior:
   permissions: configurable
   questions: configurable
   tool_approvals: configurable
-  notes: "Print mode implicitly runs AFK: tool calls are auto-approved and AskUserQuestion/plan switches are handled automatically. Wire can either negotiate questions and approvals or use `--afk`/`--yolo`; on Wire shutdown unresolved foreground approvals are rejected, questions resolve to empty answers, external tools return a ToolError, and hooks allow."
+  notes: "Print mode implicitly runs AFK. Wire clients must either negotiate and answer ApprovalRequest/QuestionRequest/HookRequest/ToolCallRequest or use AFK/YOLO depending on desired policy."
 subagents:
   supported: true
   start_visible: true
@@ -446,7 +528,7 @@ subagents:
   nested_events_visible: true
   prompt_injection_supported: true
   metadata_fields: ["SubagentEvent.parent_tool_call_id", "SubagentEvent.agent_id", "SubagentEvent.subagent_type", "ToolCall.function.arguments.prompt", "ToolCall.function.arguments.model"]
-  notes: "Subagents run through the `Agent` tool and store their own context/wire logs; prompt injection is through the Agent tool prompt or custom agent files, not a separate protocol field."
+  notes: "Subagents run through the `Agent` tool and have their own session subdirectories; prompt steering is through the Agent tool prompt or agent definitions."
 use_cases:
   - name: plan_cap_approaching
     detectable: false
@@ -459,7 +541,7 @@ use_cases:
     event_types: ["prompt error", "print exit 1"]
     fields: ["error.message"]
     hook_parity: "none verified"
-    notes: "Quota exhaustion is documented as print exit 1 but Wire exposes it as provider/config error text, not a dedicated cap schema."
+    notes: "Print docs classify quota exhaustion as non-retryable exit 1, but Wire exposes provider/config failures as generic errors."
   - name: no_funds
     detectable: false
     event_types: ["prompt error", "print exit 1"]
@@ -469,33 +551,33 @@ use_cases:
   - name: auth
     detectable: true
     event_types: ["prompt error", "print exit 1"]
-    fields: ["error.code", "error.message", "initialize.server.version"]
+    fields: ["error.code", "error.message", "initialize.result.server.version"]
     hook_parity: "none verified"
-    notes: "Print docs classify authentication failures as non-retryable exit 1; Wire lacks an auth-kind field."
+    notes: "Source has `AUTH_EXPIRED = -32004`; print docs classify authentication failures as non-retryable exit 1."
   - name: permission_read_denied
     detectable: true
     event_types: ["ToolResult"]
-    fields: ["tool_call_id", "return_value", "ToolCall.function.arguments.path"]
-    hook_parity: "possible through hooks input_data if subscribed"
-    notes: "Infer from read tool result/error; no dedicated denial event."
+    fields: ["tool_call_id", "return_value.is_error", "return_value.message", "ToolCall.function.arguments.path"]
+    hook_parity: "possible through hook input_data if subscribed"
+    notes: "Infer from read tool result/error; no dedicated read-denial event."
   - name: permission_write_denied
     detectable: true
     event_types: ["ApprovalResponse", "HookResolved", "ToolResult"]
     fields: ["response", "feedback", "action", "reason", "display.path", "tool_call_id"]
     hook_parity: "Wire HookRequest/HookResolved can carry hook block details"
-    notes: "Approval rejection is explicit; path may be in display blocks or tool arguments."
+    notes: "Approval rejection and hook block are explicit; path may be in display blocks or tool args."
   - name: tokens_consumed
     detectable: true
     event_types: ["StatusUpdate"]
-    fields: ["token_usage", "context_tokens", "max_context_tokens", "context_usage"]
+    fields: ["token_usage.input_other", "token_usage.output", "token_usage.input_cache_read", "token_usage.input_cache_creation", "context_tokens", "max_context_tokens", "context_usage"]
     hook_parity: "none verified"
-    notes: "TokenUsage shape comes from the `kosong.chat_provider` type; units are tokens."
+    notes: "Units are tokens; context usage is a ratio/percentage-like float per docs/source wording."
   - name: model_used
     detectable: false
     event_types: []
     fields: []
     hook_parity: "none verified"
-    notes: "Requested model is launch/config metadata; resolved provider/model is not reliably emitted in Wire."
+    notes: "Requested model is launch/config metadata; resolved model/provider is not reliably emitted in Wire."
   - name: model_fallback
     detectable: false
     event_types: []
@@ -505,132 +587,128 @@ use_cases:
   - name: human_in_loop
     detectable: true
     event_types: ["ApprovalRequest", "QuestionRequest", "HookRequest"]
-    fields: ["params.type", "params.payload.id", "params.payload.questions", "params.payload.action"]
-    hook_parity: "HookRequest is itself a programmable human/policy callback surface"
-    notes: "If questions are not negotiated, AskUserQuestion is hidden rather than emitted."
+    fields: ["method", "params.type", "params.payload.id", "params.payload.questions", "params.payload.action"]
+    hook_parity: "HookRequest is itself a programmable policy callback surface"
+    notes: "If questions are not negotiated or AFK is active, AskUserQuestion may be suppressed or auto-dismissed."
   - name: session_resumable
     detectable: true
     event_types: ["launch metadata", "wire.jsonl replay"]
     fields: ["session_id from argv/session directory", "replay.result.events", "replay.result.requests"]
-    hook_parity: "SessionStart hook has session_id"
-    notes: "Claudine should capture session ID from launch/resume and filesystem path, not wait for Wire initialize."
+    hook_parity: "SessionStart hook has source context"
+    notes: "Capture session ID from launch/resume and filesystem path, not from `initialize`."
   - name: subagent_prompt_injection
     detectable: true
     event_types: ["ToolCall"]
     fields: ["function.name", "function.arguments.prompt", "function.arguments.subagent_type", "function.arguments.model"]
     hook_parity: "Agent tool hooks can inspect/block"
-    notes: "The caller can steer subagents by changing the Agent tool prompt or custom agent definitions."
+    notes: "Caller can steer subagents by changing the Agent tool prompt or custom agent definitions."
 headless_constraints:
-  - constraint: "Wire is bidirectional; stdout is not just events from the agent."
-    mitigation: "Implement a JSON-RPC peer that sends initialize/prompt and answers request messages."
-    notes: "ApprovalRequest, QuestionRequest, ToolCallRequest, and HookRequest can block the turn until answered."
-  - constraint: "`--prompt` is ignored in Wire mode."
-    mitigation: "Send a JSON-RPC `prompt` request after initialize."
-    notes: "The CLI logs a warning but does not consume the prompt."
+  - constraint: "Wire is bidirectional; stdout is not merely an event feed."
+    mitigation: "Implement a JSON-RPC peer that sends `initialize` and `prompt` and answers requests."
+    notes: "ApprovalRequest, QuestionRequest, ToolCallRequest, and HookRequest can block a turn until answered."
   - constraint: "Print `stream-json` is a lossy projection."
-    mitigation: "Use Wire for lifecycle supervision; use print JSONL only for simple automation."
-    notes: "Print mode suppresses many control/status events and emits whole assistant messages at boundaries."
-  - constraint: "Questions and plan mode require capability negotiation in Wire."
-    mitigation: "Declare `capabilities.supports_question` and `capabilities.supports_plan_mode` when Claudine can service them; otherwise use `--afk`."
-    notes: "Unsupported tools are hidden from the model."
-  - constraint: "Model/provider/auth metadata is not emitted as a stable event."
-    mitigation: "Record launch flags, effective config, and `kimi info --json` output where available."
-    notes: "Do not infer model from assistant text."
+    mitigation: "Use Wire for wrapper-grade supervision; use print JSONL only for simple one-shot automation."
+    notes: "Print JSONL buffers assistant/tool-call deltas and ignores many Wire messages."
+  - constraint: "Wire does not expose complete launch metadata."
+    mitigation: "Record argv, cwd, resolved config snapshot, and session path beside parsed records."
+    notes: "Session ID, cwd, requested model, provider, auth kind, and permission mode are not all emitted in `initialize`."
+  - constraint: "Questions and external tool calls require client capability/response handling."
+    mitigation: "Use `--afk` for deterministic unattended runs or explicitly implement request handlers."
+    notes: "YOLO is weaker than AFK because user questions can still be reachable."
+  - constraint: "Config and resumed session state can silently change permissions, plan mode, roots, and model."
+    mitigation: "Prefer explicit flags and isolated `KIMI_SHARE_DIR` for reproducible wrapper runs."
+    notes: "State is persisted under the share directory."
 quirks:
   - "The best structured mode is a bidirectional JSON-RPC line protocol, not an `--output-format` value."
-  - "Wire payload discriminators are in `params.type` / nested `event.type`, while transport discrimination is JSON-RPC `method`."
-  - "Print `stream-json` says JSONL but emits whole assistant/tool messages plus non-message records like notifications and plans."
-  - "Print mode implicitly uses AFK behavior; this is convenient for CI but can execute edits and shell commands without approval."
-  - "Wire initialize exposes server version and protocol version but not session ID, cwd, model, provider, or auth kind."
-  - "Subagent events can be nested under `SubagentEvent.event`; parsers need recursion."
-  - "Some event payload classes come from dependency packages (`kosong`), so the complete schema spans more than `kimi_cli/wire/types.py`."
+  - "Wire transport discrimination is JSON-RPC `method`; event/request subtype discrimination is `params.type`, with recursive `SubagentEvent.event.type`."
+  - "Print `stream-json` emits OpenAI-like message records plus plan/notification records, not the Wire event union."
+  - "Print mode implicitly uses AFK behavior, which is convenient for CI but can execute edits and shell commands without approval."
+  - "Wire `initialize` exposes server and protocol version but not session ID, cwd, model, provider, auth kind, or a single permission-mode field."
+  - "Some payload classes come from dependency packages (`kosong`), so the complete schema spans more than Kimi's `wire/types.py`."
 gaps:
   - "No official JSON Schema, OpenAPI, AsyncAPI, or versioned schema artifact was found for Wire."
+  - "No captured local fixture was produced because exercising Kimi would require auth and could run tools."
   - "Could not verify a stable field for resolved provider/model or auth kind in the Wire stream."
   - "Could not verify dedicated quota-near-cap, quota-exhausted, no-funds, or model-fallback events."
-  - "Timestamp units/timezone for `Notification.created_at` are not formally documented."
-  - "Local installed `kimi` was version 0.14.0 and did not support `kimi info --json`; local runtime fixtures were not captured from the current CLI."
-  - "Exact `TokenUsage` nested fields come from the external `kosong` package and were not independently schema-dumped."
+  - "Timestamp unit/timezone for `Notification.created_at` is not formally documented."
+  - "Exact handling of unanswered Wire requests in every shutdown/error path should be fixture-tested against an authenticated installation."
 claudine_strategy:
   preferred_invocation: "kimi --wire --work-dir <repo> --afk"
-  required_flags: ["--wire", "--work-dir <repo>", "--afk unless Claudine implements approval/question responses"]
-  conflicting_flags: ["--print", "--quiet", "--final-message-only", "--output-format", "--input-format", "--prompt for Wire"]
-  parser_notes: "Parse stdout as JSON-RPC lines. Drive initialize first, then prompt. Classify by `method`; for `event` and `request`, classify by `params.type`. Recurse into `SubagentEvent.event`. Join tool calls/results by `id` and `tool_call_id`; join approvals/questions/hooks by request `id` and response `request_id`."
-  wrapper_notes: "Keep launch metadata beside stream records because Wire does not emit enough session/model/auth metadata. Parse stderr/logs only for diagnostics. Use print `stream-json` only as a fallback when Claudine wants a one-shot transcript and accepts missing live control events."
+  required_flags: ["--wire", "--work-dir <repo>", "--afk unless Claudine implements approval/question/external-tool/hook request responses"]
+  conflicting_flags: ["--print", "--quiet", "--final-message-only", "--output-format", "--input-format", "--prompt as Wire input"]
+  parser_notes: "Parse stdout as JSON-RPC lines. Drive `initialize` first, then `prompt`. Classify by `method`; for `event` and `request`, classify by `params.type`. Recurse into `SubagentEvent.event`. Join tool calls/results by `id` and `tool_call_id`; join approvals/questions/hooks by request `id` and response `request_id`."
+  wrapper_notes: "Persist launch metadata because Wire does not emit enough session/model/auth context. Treat stderr/log files as diagnostics. Use print `stream-json` only when Claudine accepts missing live control events."
 data_format: jsonrpc_lines
 changes:
-  - "2026-07-02: Reworked Kimi research into schema-backed non-interactive format; updated Wire protocol from 1.8-era notes to 1.10 docs/source; added required body sections and normalized frontmatter."
+  - "2026-07-03: Refreshed against current official docs and source; fixed per-OS config records for schema validation and clarified Wire-vs-print parser strategy."
 requires_claudine_update: true
-reason: "Claudine's Kimi strategy should prefer Wire JSON-RPC lines with a real bidirectional peer; print `stream-json` is insufficient for wrapper-grade supervision."
+reason: "Claudine's Kimi wrapper should prefer Wire JSON-RPC lines with a real bidirectional peer; print `stream-json` is insufficient for live lifecycle supervision."
 ---
+
+# Kimi Code CLI Non-Interactive Sessions
 
 ## Summary
 
-Kimi Code CLI can be run non-interactively with structured output, but the best mode is not a conventional `--output-format` stream. Claudine should prefer `kimi --wire`, which exposes Kimi's bidirectional Wire protocol as JSON-RPC 2.0 messages framed one JSON object per line on stdin/stdout. Wire is the only mode that can show live lifecycle state, request approvals, ask structured questions, report hooks, stream token/context updates, expose MCP startup snapshots, and carry nested subagent events.
+Kimi Code CLI can run non-interactively in two useful ways. `kimi --print` is the simple scripting mode: it accepts a prompt from `-p`/`-c` or stdin, exits automatically, and can emit `--output-format stream-json` JSONL. That mode is useful for one-shot automation, but it is not the best Claudine integration point because it buffers assistant content into whole messages, projects tool results into message records, and drops many lifecycle/control events.
 
-`kimi --print --output-format stream-json` remains useful as a simple automation fallback, but it is a lossy projection of Wire messages. It emits whole assistant/tool-style JSONL messages and selected display objects, not the full event/request protocol. The main parser risk is that Wire requires Claudine to be a peer: it must send JSON-RPC requests and respond to Kimi's `request` messages, not just tail stdout.
+Claudine should prefer `kimi --wire --work-dir <repo> --afk`. Wire mode is a JSON-RPC 2.0 line protocol over stdin/stdout, with official TypeScript-style definitions and matching Pydantic source models. It exposes turn, step, status, tool, approval, hook, plan, notification, MCP, and subagent events while a run is active. The main wrapper risk is that Wire is bidirectional: Claudine must act as a JSON-RPC peer, not just tail stdout. It must send `initialize`/`prompt` and either answer approval, question, external-tool, and hook requests or launch with AFK semantics.
 
 ## Non-Interactive Entry Points
 
-Kimi has two relevant non-interactive entry points. Print mode is command-shaped: pass a prompt with `--prompt`/`-p`, pipe text to stdin, or use JSONL user messages with `--input-format stream-json`. The official print docs define it as non-interactive and suitable for scripting; they also state that print mode implicitly runs in AFK mode, so tool calls are auto-approved and interactive questions/plan switches are handled automatically.
+Kimi's documented non-interactive entry point is print mode. The print-mode page says `--print` is suitable for scripting and automation, can take `-p`/`-c` or stdin, and exits automatically after executing instructions. It also says print mode implicitly enables AFK: tool calls are auto-approved and interactive questions/plan switches are handled automatically.
 
-Wire mode is protocol-shaped:
+Wire mode is lower level. The Wire docs describe it as a structured bidirectional protocol for external programs, custom UIs, embedding, and automated testing. The CLI invocation is `kimi --wire`, but a prompt is not an argv field in this mode; the client sends a JSON-RPC `prompt` request after optionally sending `initialize`. The command reference lists `--print`, `--quiet`, `--acp`, and `--wire` as mutually exclusive UI modes, with shell mode as the default.
 
-```bash
-kimi --wire --work-dir /path/to/repo --afk
-```
+The scriptable forms Claudine should care about are:
 
-After launch, the client sends an optional `initialize` request, then a `prompt` request:
+| Mode | Command shape | Prompt input | Session behavior | Automation fit |
+| --- | --- | --- | --- | --- |
+| Wire fresh | `kimi --wire --work-dir <repo>` | JSON-RPC `prompt` request on stdin | New session | Best for wrappers that need live events |
+| Wire resume | `kimi --wire --work-dir <repo> --session <id>` | JSON-RPC `prompt` request on stdin | Resumes ID, or creates if missing | Best for resumable wrapper sessions |
+| Wire continue | `kimi --wire --work-dir <repo> --continue` | JSON-RPC `prompt` request on stdin | Continues previous session for cwd | Useful when caller controls Kimi state |
+| Print argv | `kimi --print -p "..." --output-format stream-json` | Argv prompt | One-shot session | Simple CI/scripting fallback |
+| Print stdin JSONL | `kimi --print --input-format stream-json --output-format stream-json` | User-role JSONL until EOF | Processes messages until stdin closes | Batch request/reply fallback |
 
-```json
-{"jsonrpc":"2.0","id":"init-1","method":"initialize","params":{"protocol_version":"1.10","client":{"name":"claudine"},"capabilities":{"supports_question":false,"supports_plan_mode":false}}}
-```
-
-```json
-{"jsonrpc":"2.0","id":"turn-1","method":"prompt","params":{"user_input":"Fix the failing tests."}}
-```
-
-`--prompt` is not the prompt channel for Wire. The current CLI source logs that Wire ignores the prompt argument; Claudine must send a JSON-RPC `prompt` request instead. Resume and workspace controls are still normal CLI flags: `--work-dir`, `--add-dir`, `--continue`, and `--session <id>`.
+Kimi also has ACP, web, and visualizer modes, but they are not the preferred non-interactive stream for Claudine's wrapper. ACP is listed as deprecated in favor of `kimi acp`; web and visualizer are server/UI surfaces rather than the direct process stream Claudine needs.
 
 ## Output Formats
 
-Kimi's output modes differ in kind, not only in detail:
+Wire is the richest stream. The official Wire page says each message is a single JSON line conforming to JSON-RPC 2.0 and that the protocol version is `1.10`. It includes ordinary JSON-RPC requests/responses plus server notifications/requests with method names such as `event` and `request`. For Claudine, this means stdout is parseable line-by-line only after Claudine understands that some lines require a response on stdin.
 
-| Mode | Selector | Framing | Streams live? | Claudine preference | Notes |
+Print `stream-json` is easier but weaker. The print-mode docs call it JSONL and show assistant/tool messages emitted sequentially. Source inspection of `src/kimi_cli/ui/print/visualize.py` shows why it is lossy: `JsonPrinter` buffers `ContentPart` and `ToolCall` records, flushes an assistant `Message` at `StepBegin`/`StepInterrupted` boundaries or before a `ToolResult`, emits `ToolResult` as a tool message, emits `PlanDisplay`, buffers notifications until safe boundaries, and ignores other Wire messages. That makes print JSONL usable for transcripts but poor for live lifecycle detection.
+
+| Output | Selector | Framing | Streams while active | What changes | Claudine preference |
 | --- | --- | --- | --- | --- | --- |
-| Wire | `--wire` | JSON-RPC lines | Yes | Prefer | Bidirectional protocol over stdin/stdout. |
-| Print JSONL | `--print --output-format stream-json` | JSONL | Partly | Fallback | Whole assistant/tool messages plus notifications/plans; many Wire events omitted. |
-| Print text | `--print --output-format text` | Text | Partly | Avoid for parsing | Human/Rich output. |
-| Final only | `--quiet` or `--final-message-only` | Text or JSONL final assistant message | No | Avoid for supervision | Drops intermediate state. |
+| Wire | `--wire` | JSON-RPC lines | Yes | Process becomes a bidirectional protocol server | Prefer |
+| Print JSONL | `--print --output-format stream-json` | JSONL | Partly | Emits projected messages, not full Wire events | Fallback |
+| Print text | `--print --output-format text` | Text | Partly | Human-oriented output | Avoid for parsing |
+| Quiet/final-only | `--quiet` or `--final-message-only` | Text | No | Drops intermediate events | Avoid for supervision |
 
-Wire is the best Claudine format because it exposes the interaction surface that matters while a run is active. The response stream contains `event` notifications such as `StatusUpdate`, `StepBegin`, `ToolCall`, `ToolResult`, `PlanDisplay`, `HookTriggered`, and `SubagentEvent`. The same stdout stream can also contain server-to-client `request` messages such as `ApprovalRequest`, `QuestionRequest`, `ToolCallRequest`, and `HookRequest`, which require a JSON-RPC response before the run can continue.
-
-Print `stream-json` is easier to consume but materially weaker. The source JSON printer merges content parts into assistant messages, flushes them at step boundaries, emits tool results as tool messages, and ignores many control events. A parser can see tool calls and tool results, but it loses most session lifecycle, approval, hook, MCP, retry, compaction, and nested subagent structure.
+The tradeoff is straightforward: print JSONL is simpler for request/reply scripts, but Wire is the only documented mode that exposes enough live operational state for Claudine to show progress, classify blocking behavior, correlate tool calls, and drive cancellation or request handling before process exit.
 
 ## Schema Sources
 
-Kimi does not publish a standalone JSON Schema, OpenAPI document, or AsyncAPI document for Wire. The best schema evidence is provider-authored source plus the official Wire page.
+Kimi does not publish a JSON Schema, OpenAPI document, or AsyncAPI document for Wire. The best formal evidence is the official Wire documentation, which provides TypeScript-style interfaces for JSON-RPC envelopes, initialize, prompt, replay, steer, plan mode, request/response errors, events, requests, and display blocks.
 
-The official Wire docs describe JSON-RPC envelopes, protocol version `1.10`, request methods, response shapes, event/request envelopes, display blocks, and capability negotiation. The source is still important because the actual runtime schema is Pydantic:
+The source is also strong evidence. `src/kimi_cli/wire/jsonrpc.py` defines Pydantic models for JSON-RPC message envelopes, inbound methods, outbound methods, statuses, and error codes. It defines inbound methods `initialize`, `prompt`, `steer`, `replay`, `set_plan_mode`, and `cancel`, and outbound methods `event` and `request`. It also defines statuses `finished`, `cancelled`, `max_steps_reached`, and `steered`, plus Kimi-specific error codes such as `LLM_NOT_SET`, `LLM_NOT_SUPPORTED`, `CHAT_PROVIDER_ERROR`, and `AUTH_EXPIRED`.
 
-- [`src/kimi_cli/wire/types.py`](https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/wire/types.py) defines the event/request unions and payload models.
-- [`src/kimi_cli/wire/jsonrpc.py`](https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/wire/jsonrpc.py) defines JSON-RPC inbound/outbound message types and method sets.
-- [`src/kimi_cli/wire/protocol.py`](https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/wire/protocol.py) defines the current protocol constant.
-- [`src/kimi_cli/ui/print/visualize.py`](https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/ui/print/visualize.py) defines the print `stream-json` projection.
+`src/kimi_cli/wire/types.py` defines the Wire event/request union. Important event classes include `TurnBegin`, `SteerInput`, `TurnEnd`, `StepBegin`, `StepInterrupted`, `StepRetry`, `CompactionBegin`, `CompactionEnd`, `HookTriggered`, `HookResolved`, `MCPLoadingBegin`, `MCPLoadingEnd`, `StatusUpdate`, `Notification`, `PlanDisplay`, `BtwBegin`, `BtwEnd`, `SubagentEvent`, `ApprovalResponse`, content parts, tool calls, tool-call parts, and tool results. Request classes include `ApprovalRequest`, `QuestionRequest`, `ToolCallRequest`, and `HookRequest`.
 
-The source types are authoritative enough for Claudine parser work, but not complete in one file. Some payloads come from Kimi's dependencies, especially `kosong.message` and `kosong.tooling`, so parser generation should preserve unknown nested fields.
+Some nested payloads come from Kimi dependencies rather than Kimi's own module, especially `kosong.message`, `kosong.tooling`, and `kosong.chat_provider.TokenUsage`. That is a schema risk: the public docs and Kimi source identify the fields Claudine needs, but a generated parser should keep unknown payload fields and tolerate additive variants.
 
 ## IO Contract
 
-In Wire mode, stdout is parse-only JSON-RPC lines and stdin is also part of the protocol. Claudine must keep stdin open long enough to send `initialize`, `prompt`, possible responses to Kimi requests, `cancel`, and optional `steer` messages. Stderr should be treated as diagnostics; Kimi also writes runtime logs under the Kimi share directory.
+In Wire mode, stdout is the structured transport. Each stdout line is one JSON-RPC message. Stdin is also structured: Claudine must send JSON-RPC requests and responses. Stderr should be treated as diagnostics, not the authoritative event stream. The Kimi data-location docs say runtime logs are stored under `~/.kimi/logs/kimi.log` and `--debug` enables TRACE-level logging there.
 
-In print mode, stdout is either human text or JSONL depending on `--output-format`. Stdin is prompt text for `--input-format text`, or user-message JSONL for `--input-format stream-json`. Print mode can read multiple JSONL user messages until EOF, but this is not the same as Wire because there is no JSON-RPC request/response channel for approvals, hooks, or external tools.
+In print mode, stdout is either text or JSONL depending on `--output-format`. With `--input-format stream-json`, stdin is user-message JSONL, not a bidirectional protocol. Print mode's documented exit codes are useful for CI: `0` for success, `1` for non-retryable failures such as configuration, authentication, quota exhaustion, and other permanent errors, and `75` for retryable failures such as rate limits, 5xx server errors, and timeouts.
+
+Claudine should not mix Wire and print assumptions. `--output-format stream-json` is print-only; it does not make Wire more or less structured.
 
 ## Stream Contract
 
-Wire has two discriminator layers. The transport discriminator is JSON-RPC's `method`: `event`, `request`, or a response with `id` and either `result` or `error`. For `event` and `request`, Kimi's Wire envelope uses `params.type` plus `params.payload`.
+Wire has two discriminator layers. The transport discriminator is JSON-RPC `method`. Server event notifications use `method: "event"` with the Wire subtype in `params.type`; server requests use `method: "request"` with the Wire request subtype in `params.type`. Subagent records are recursive: `SubagentEvent` carries another Wire event under its nested `event` field.
 
-Normal turn flow is:
+The normal turn ordering is:
 
 ```mermaid
 sequenceDiagram
@@ -640,139 +718,153 @@ sequenceDiagram
     K-->>C: initialize result
     C->>K: prompt
     K-->>C: event TurnBegin
-    K-->>C: event StepBegin / content / tool events / StatusUpdate
-    K-->>C: request ApprovalRequest or QuestionRequest
-    C->>K: response ApprovalResponse or QuestionResponse
+    K-->>C: event StepBegin
+    K-->>C: event StatusUpdate
+    K-->>C: event ContentPart / ToolCall / ToolResult
+    K-->>C: request ApprovalRequest / QuestionRequest / HookRequest
+    C->>K: request response
     K-->>C: event TurnEnd
     K-->>C: prompt result {status}
 ```
 
-The prompt response is the terminal record for a turn. `TurnEnd` is useful, but the source model warns it may be omitted if the turn is interrupted. Tool calls and results are joined by tool-call ID. Request/response families use the JSON-RPC `id` plus payload fields such as `request_id` and `tool_call_id`.
+`TurnEnd` is useful but not terminal enough. Source and docs say it may be omitted when a turn is interrupted. Claudine should treat the JSON-RPC response to its `prompt` request as the turn terminal record and use `result.status` or `error` for classification. Tool calls join by `ToolCall.id` and `ToolResult.tool_call_id`. Approval, question, external-tool, and hook requests join by request `id` and response `request_id`.
 
-Unknown `params.type` values should not crash Claudine. The protocol has changed over time and display blocks include an explicit unknown-block fallback. Claudine should preserve raw payloads, classify them as unknown, and continue unless the unknown record is a request that requires a response.
+Unknown event handling should be conservative: preserve raw JSON, classify known envelope fields, skip unknown `params.type`, and continue. The Pydantic source already models additive behavior through optional fields and dependency-owned nested payloads, so a strict closed union would be brittle.
 
 ## Session Metadata
 
-Wire's initialize result gives protocol version, server name/version, slash commands, capabilities, hook info, and external-tool registration results. It does not provide a complete wrapper metadata envelope. Session ID, working directory, selected model, provider, auth source, permission mode, and sandbox/root information must be tracked from launch arguments, config, session files, and Claudine wrapper state.
+Wire exposes some initialization metadata but not everything Claudine wants. The `initialize` response includes `protocol_version`, `server.name`, `server.version`, slash commands, capabilities, hook support, and external-tool registration results. It does not provide a stable session ID, cwd, requested/resolved model, provider, auth kind, permission mode, sandbox mode, or roots.
 
-MCP is more visible. `StatusUpdate` can include `mcp_status` with `loading`, connected/total counts, total tool count, and per-server snapshots with `name`, `status`, and `tools`. This is a useful live signal during startup and tool discovery.
+Those missing fields must come from launch context and Kimi storage. The data-location docs say Kimi stores sessions under `~/.kimi/sessions/<work-dir-hash>/<session-id>/`, with `context.jsonl`, `wire.jsonl`, and `state.json`. `state.json` stores approval state, plan mode, plan identifiers, subagent metadata, and additional directories. `wire.jsonl` stores Wire messages for replay and visualizer/export workflows. `KIMI_SHARE_DIR` can move the whole runtime data directory, so Claudine should not hard-code `~/.kimi` when that variable is set.
+
+MCP metadata can appear in stream status. Source defines `StatusUpdate.mcp_status` with loading state, connected/total/tool counts, and per-server snapshots with `name`, `status`, and `tools`.
 
 ## Event Families
 
-Wire event families that matter for Claudine:
+Kimi's Wire events are broad enough for wrapper supervision:
 
-| Family | Concrete records | Parser value |
+| Family | Events or methods | Wrapper value |
 | --- | --- | --- |
-| Turn/step lifecycle | `TurnBegin`, `TurnEnd`, `StepBegin`, `StepInterrupted`, `StepRetry` | Progress, retry classification, step counters. |
-| Assistant/reasoning | `TextPart`, `ThinkPart`, other content parts | Live transcript and reasoning when available. |
-| Tools | `ToolCall`, `ToolCallPart`, `ToolResult`, `ToolCallRequest` | Tool start/input/result and external tool execution. |
-| Permissions/questions | `ApprovalRequest`, `ApprovalResponse`, `QuestionRequest`, `QuestionResponse` | Human-in-loop detection and deterministic approvals. |
-| Status/usage | `StatusUpdate` | Context usage, token usage, message IDs, plan mode, MCP snapshots. |
-| Plans | `PlanDisplay`, `set_plan_mode`, `StatusUpdate.plan_mode` | Plan content and read-only mode state. |
-| Hooks | `HookRequest`, `HookTriggered`, `HookResolved` | Policy callbacks and hook timing/allow/block outcome. |
-| Subagents | `SubagentEvent`, `Agent` tool calls/results | Nested agent observability. |
-| Background/notifications | `Notification`, `BtwBegin`, `BtwEnd` | Background task and side-question status. |
-| Maintenance | `CompactionBegin`, `CompactionEnd`, `MCPLoadingBegin`, `MCPLoadingEnd` | Context and MCP lifecycle signals. |
+| Session/turn | `initialize`, `prompt`, `replay`, `steer`, `cancel`, `TurnBegin`, `SteerInput`, `TurnEnd` | Lifecycle and cancellation |
+| Step/retry | `StepBegin`, `StepInterrupted`, `StepRetry` | Progress, retry classification, transient errors |
+| Status/usage | `StatusUpdate` | Context ratio, context tokens, token usage, plan mode, MCP status |
+| Assistant/reasoning | `ContentPart` with nested text/think/media types | Live assistant output and reasoning where available |
+| Tools | `ToolCall`, `ToolCallPart`, `ToolResult`, `ToolCallRequest` | Native and external tool execution |
+| Permissions/questions | `ApprovalRequest`, `ApprovalResponse`, `QuestionRequest`, `HookRequest`, `HookResolved` | Human-in-loop and policy decisions |
+| Plan | `set_plan_mode`, `PlanDisplay`, `StatusUpdate.plan_mode` | Plan-mode state and plan artifacts |
+| Subagents | `SubagentEvent` | Nested agent progress and results |
+| MCP | `MCPLoadingBegin`, `MCPLoadingEnd`, `StatusUpdate.mcp_status` | MCP startup and server status |
+| Other | `Notification`, `CompactionBegin`, `CompactionEnd`, `BtwBegin`, `BtwEnd` | UI notifications, compaction, side questions |
 
-Print JSONL collapses this substantially. It primarily emits assistant messages, tool messages, notifications, and plan displays.
+The source token usage fields are `input_other`, `output`, `input_cache_read`, and `input_cache_creation`. `StatusUpdate.context_usage`, `context_tokens`, and `max_context_tokens` describe current context pressure.
 
 ## Tools
 
-The default Kimi agent exposes `Agent`, `AskUserQuestion`, `SetTodoList`, `Shell`, `ReadFile`, `ReadMediaFile`, `Glob`, `Grep`, `WriteFile`, `StrReplaceFile`, `SearchWeb`, `FetchURL`, `EnterPlanMode`, `ExitPlanMode`, `TaskList`, `TaskOutput`, and `TaskStop`. The docs also describe `Think` and the experimental `okabe` agent's `SendDMail`.
+Wire exposes both call and result records for native tools. `ToolCall` includes `id`, `function.name`, and JSON-string `function.arguments`. `ToolCallPart` streams argument fragments. `ToolResult` joins by `tool_call_id` and carries `return_value.is_error`, model-facing output, message, display blocks, and extras.
 
-Wire exposes native tool calls as `ToolCall` and results as `ToolResult`; incremental tool call fragments can arrive as `ToolCallPart`. Built-in writes and shell commands can produce `ApprovalRequest` before execution. Display blocks are important: diffs carry paths and old/new text, shell blocks carry command text, and todo blocks carry item state. Claudine should not rely only on tool result text when a structured display block is present.
+Display blocks matter for file and shell observability. The Wire docs define `DiffDisplayBlock` with `path`, `old_text`, `new_text`, and optional `is_summary`; `ShellDisplayBlock` with `language` and `command`; and todo/brief/unknown blocks. For write tools, an approval request may carry a diff display before execution. For shell tools, command text may appear in tool arguments and shell display blocks. Exact stdout/stderr split for command execution is not documented as separate top-level fields; Claudine should treat shell result output as tool-return content unless fixtures prove a more specific structure.
 
-External tools are a Wire-specific feature. Claudine can declare tools in `initialize.external_tools`; Kimi then sends `ToolCallRequest` messages and waits for Claudine to return a `ToolResult`.
+External tools are different. During `initialize`, Claudine can register `external_tools` with JSON Schema parameters. Kimi can then send `ToolCallRequest` records to the Wire client. Claudine must execute or reject those and send a JSON-RPC response. If Claudine does not implement external tools, it should not register them.
 
 ## Completion and Exit Status
 
-For Wire, completion is per JSON-RPC request. A `prompt` success response contains `result.status`, documented as `finished`, `cancelled`, or `max_steps_reached`; `steps` may be present for max-steps completion. Errors return JSON-RPC error objects. The server process can remain alive after one turn, so process exit is not the right success signal for a single prompt.
+For Wire, the terminal event for a turn is the JSON-RPC response to the `prompt` request. `result.status = "finished"` is normal success. `cancelled` and `max_steps_reached` are terminal non-success statuses. JSON-RPC errors carry `error.code`, `error.message`, and optional `error.data`; source includes standard JSON-RPC codes plus Kimi-specific codes for invalid state, missing/unsupported LLM, chat provider errors, and expired auth.
 
-For print mode, the docs define exit codes: `0` for success, `1` for non-retryable failures such as configuration errors, authentication failures, quota exhaustion, and permanent errors, and `75` for retryable failures such as 429, 5xx, and timeouts. The source classifies provider connection/timeout/empty-response errors and selected HTTP status codes as retryable.
+For print mode, documented process exit codes are meaningful: `0` success, `1` non-retryable failure, and `75` retryable failure. Claudine can trust those in print mode, but in Wire mode process exit is not the per-turn success signal because the server can stay alive across turns. The per-request response is more precise.
+
+Usage is available during the run through `StatusUpdate`, not only at completion. No cost fields were found. Quota and billing failures are not exposed as dedicated typed events; print documentation maps quota exhaustion to exit code `1`, and Wire should be classified from error code/message until a richer event is verified.
 
 ## Blocking Behavior
 
-Print mode is designed not to block on a human. It implicitly enables AFK behavior, auto-approves tool calls, and auto-dismisses `AskUserQuestion`. This is automation-friendly but high-trust: file modifications and shell commands can execute without approval.
+Print mode is the safest noninteractive mode from a blocking perspective because it implicitly enables AFK. The cost is control: it auto-approves tool calls and auto-handles interactive questions and plan switches. That can be acceptable for isolated CI, but it is not a permission-supervision strategy.
 
-Wire can block unless Claudine responds. `ApprovalRequest`, `QuestionRequest`, `ToolCallRequest`, and `HookRequest` are JSON-RPC requests from Kimi to the client. Kimi's shutdown path resolves unresolved foreground approvals as reject, unresolved questions as empty answers, external tool calls as a tool error, and hooks as allow, but Claudine should not depend on shutdown cleanup for normal control flow.
+Wire mode is configurable. `--yolo`, `--yes`, and `--auto-approve` auto-approve tool calls, but the command reference says the user can still be reachable for `AskUserQuestion`. `--afk` is the stronger unattended flag: it auto-approves tool calls and auto-dismisses questions. Without AFK or implemented request handlers, Wire can block on `ApprovalRequest`, `QuestionRequest`, `ToolCallRequest`, or `HookRequest`.
 
-Question and plan tools are capability-gated. If the client does not declare `supports_question`, Kimi hides `AskUserQuestion`; if it does not declare `supports_plan_mode`, plan-mode tools are hidden. Claudine can use this to avoid unsupported human-in-loop behavior.
+For Claudine's first robust integration, `--afk` is the deterministic choice. A richer integration can omit AFK only after it has request handlers and a policy for approval, questions, client tools, and hooks.
 
 ## Subagents
 
-Subagents are supported non-interactively through the `Agent` tool. The docs state that subagents run in isolated contexts, can run in foreground or background, can be resumed, and have per-instance storage under the session directory. Wire wraps nested events in `SubagentEvent` with `parent_tool_call_id`, `agent_id`, and `subagent_type`, and the nested event itself has its own `type` and `payload`.
+Subagents are visible. Source defines `SubagentEvent` with `parent_tool_call_id`, `agent_id`, `subagent_type`, and a nested Wire `event`. The data-location docs say each subagent instance has its own storage directory under the session directory with `context.jsonl`, `wire.jsonl`, `meta.json`, `prompt.txt`, and output.
 
-Claudine can steer subagents by controlling the root prompt, the `Agent` tool prompt when it appears, or custom agent files. There is no separate Wire field named "subagent prompt injection"; it is ordinary agent/tool input plus custom agent configuration.
+The parent stream can therefore show nested subagent events, but parsers must recurse. Prompt injection is not a separate protocol control; it is available through the `Agent` tool prompt/model arguments or custom agent files. If Claudine needs subagents to avoid interactive behavior, it should inject that instruction into the parent prompt and, where possible, into the Agent tool prompt or agent definition.
 
 ## Use Case Detection
 
-| Use case | Detectability | Events and fields | Caveat |
+| Use case | Detectable | Evidence | Notes |
 | --- | --- | --- | --- |
-| `tokens_consumed` | Good | `StatusUpdate.token_usage`, `context_tokens`, `max_context_tokens`, `context_usage` | Nested `TokenUsage` fields come from `kosong`. |
-| `human_in_loop` | Good | `ApprovalRequest`, `QuestionRequest`, `HookRequest` | Questions only appear if negotiated. |
-| `permission_write_denied` | Partial | `ApprovalResponse.response = reject`, `HookResolved.action = block`, tool result errors | Path may be in display blocks or tool args. |
-| `permission_read_denied` | Partial | Read tool `ToolResult` error/result plus prior `ToolCall` args | No dedicated denial event. |
-| `auth` | Partial | JSON-RPC error text or print exit `1` | Auth kind is not emitted. |
-| `plan_capped` / `no_funds` | Weak | Error text or print exit `1` | No dedicated quota/funds schema found. |
-| `model_used` | Weak | Launch/config metadata | Not reliably emitted in stream. |
-| `session_resumable` | Good with wrapper state | `--session`, session directory, `wire.jsonl`, `replay` counts | Not emitted early by initialize. |
-| `subagent_prompt_injection` | Good with tool parsing | `Agent` tool arguments and custom agent files | No special event name. |
+| `plan_cap_approaching` | No | None found | No typed account-plan cap event verified. |
+| `plan_capped` | Weak | print exit `1`, Wire error text | Quota exhaustion is documented only as a non-retryable print failure. |
+| `no_funds` | Weak | Wire/print error text | No dedicated billing/no-funds event verified. |
+| `auth` | Yes | JSON-RPC error, `AUTH_EXPIRED`, print exit `1` | Auth kind/source is not exposed. |
+| `permission_read_denied` | Yes, inferred | `ToolResult.return_value.is_error` and read tool args | No dedicated read-denial event found. |
+| `permission_write_denied` | Yes | `ApprovalResponse`, `HookResolved`, `ToolResult` | Path may be in diff display or tool args. |
+| `tokens_consumed` | Yes | `StatusUpdate.token_usage` | Units are tokens; fields are per status update/current step. |
+| `model_used` | Launch-only | argv/config | Not reliably emitted in Wire. |
+| `model_fallback` | No | None found | No fallback event verified. |
+| `human_in_loop` | Yes | `ApprovalRequest`, `QuestionRequest`, `HookRequest` | AFK may suppress or auto-handle some cases. |
+| `session_resumable` | Yes | argv/session directory/`wire.jsonl` | Do not wait for `initialize` to emit session ID. |
+| `subagent_prompt_injection` | Yes | `ToolCall.function.arguments` for Agent tool | Injection path is prompt/agent configuration, not a protocol field. |
 
 ## Headless Constraints
 
-The biggest constraint is that Wire is a live protocol. A wrapper that only reads stdout can deadlock when Kimi sends a request that expects a response. Claudine either needs to run with `--afk` and with unsupported question/plan capabilities disabled, or it needs to implement the request handlers deliberately.
+The major constraint is bidirectionality. A wrapper that only reads stdout can parse events for a while, but it will eventually fail or block when Kimi sends a request that requires a response. This is a design feature of Wire, not incidental noise.
 
-Print `stream-json` is safer to pipe but weaker for supervision. It is acceptable for a one-shot final transcript or rough tool transcript, but it should not be the primary Claudine integration because it hides or merges too many operational signals.
+The second constraint is metadata. Kimi's stream is good at operational events but weak at launch context. Claudine must preserve its own launch record: cwd, intended worktree, session ID, model flag, config file, `KIMI_SHARE_DIR`, approval mode, and MCP config sources.
 
-The current installed local `kimi` on this host reported `0.14.0` and did not support `kimi info --json`, so this document relies on current official docs and GitHub source rather than local runtime captures.
+The third constraint is persisted state. Resuming a session restores plan mode, approval state, additional directories, and subagent metadata from `state.json`. For reproducible automation, Claudine should prefer explicit flags and an isolated share directory.
 
 ## Timeline
 
-Kimi's structured-output surface has grown from simple print JSONL into a protocol surface:
-
-| Date or version | Change | Wrapper significance |
-| --- | --- | --- |
-| Wire 1.1 | `initialize` added | Clients can negotiate protocol details and external tools. |
-| Wire 1.3 | `replay` added | Saved `wire.jsonl` can be replayed for UI/recovery. |
-| Wire 1.4 | `steer` and structured questions documented | Human-in-loop can become protocol-driven. |
-| Wire 1.6 | Approval response feedback added | Rejections can include model guidance. |
-| Wire 1.8 | Display-block changes such as diff summaries | Display schemas can drift and need tolerant parsing. |
-| Wire 1.10 | Current documented/source protocol version | Claudine should target this version while tolerating older/newer payloads. |
+The changelog records `--print` and `--output-format stream-json` support in the 0.21 release line, and later command docs show `--wire` as an experimental UI mode. Current Wire docs identify protocol version `1.10`. The source files inspected on `main` match the documented split: Wire as JSON-RPC lines and print JSON as a projection over Wire messages.
 
 ## Quirks and Gaps
 
-Kimi has unusually useful Wire visibility, but it is not a complete wrapper metadata feed. Claudine must carry launch/config metadata for model, provider, auth, workdir, roots, and permission mode. The stream has strong tool and lifecycle events, but no dedicated account quota, no-funds, model-fallback, or auth-kind events.
+Kimi's best mode is not named like a conventional output format. `--wire` changes the process contract into JSON-RPC over stdio. Treating it like NDJSON events would miss request/response obligations and cancellation semantics.
 
-The protocol also spans packages. `types.py` is the right starting point, but content parts, token usage, tool calls, tool results, and display blocks also come from imported models. Parser code should preserve unknown fields and not assume the public docs are exhaustive.
+Print `stream-json` can look complete in small examples because it emits assistant and tool messages. Source shows it ignores many Wire messages and buffers deltas, so it is not enough for Claudine's live status, permission, subagent, and lifecycle needs.
+
+Verified gaps remain:
+
+- No official JSON Schema or OpenAPI/AsyncAPI artifact was found.
+- No authenticated local fixture was captured.
+- Resolved provider/model and auth kind were not found as stable Wire fields.
+- Dedicated quota-near-cap, quota-exhausted, no-funds, and model-fallback events were not found.
+- `Notification.created_at` is a float, but its unit/timezone are not formally specified.
 
 ## Claudine Integration Notes
 
 Recommended command:
 
-```bash
-kimi --wire --work-dir "$REPO" --afk
+```sh
+kimi --wire --work-dir <repo> --afk
 ```
 
-Use `--session <id>` or `--continue` only when Claudine intentionally wants resume semantics. Send `initialize` with Claudine client metadata. If Claudine cannot answer human questions, set `supports_question: false`; if it cannot service plan-mode interactions, set `supports_plan_mode: false`. Then send `prompt`.
+Claudine should parse stdout as JSON-RPC lines and treat stderr plus `~/.kimi/logs/kimi.log` as diagnostics. It should send `initialize` with `protocol_version: "1.10"` and client info, then send `prompt`. If Claudine wants to handle human-in-loop events itself, it can declare `supports_question`, hook subscriptions, and external tools during `initialize`; otherwise it should use `--afk` and avoid registering external tools.
 
-Parse stdout as JSON-RPC lines. Classify by JSON-RPC `method`, then by `params.type` for `event` and `request`. Recurse into `SubagentEvent.event`. Join `ToolCall` and `ToolResult` by `id`/`tool_call_id`; join approval, question, and hook requests by JSON-RPC `id` and payload `request_id`. Keep stderr/logs for diagnostics only.
+Parser notes:
 
-Avoid `--quiet`, `--final-message-only`, and text output for Claudine supervision. Use `--print --output-format stream-json` only when implementing a simpler fallback that does not need approvals, questions, hooks, MCP status, retries, or full subagent visibility.
+- Discriminate first by JSON-RPC `method`.
+- For `method: "event"` and `method: "request"`, discriminate by `params.type`.
+- Preserve raw payloads for unknown event/request types.
+- Recurse into `SubagentEvent.event`.
+- Join tool calls/results by `ToolCall.id` and `ToolResult.tool_call_id`.
+- Treat the `prompt` response as terminal for the turn.
+- Keep launch metadata beside the stream because Kimi does not emit enough session/model/auth context.
+
+Use print `stream-json` only when Claudine needs a simple transcript and accepts the loss of live control events. Avoid `--quiet`, `--final-message-only`, and text output for wrapper supervision.
 
 ## Changelog
 
-- 2026-07-02: Reworked Kimi research into the schema-backed non-interactive format, updated Wire to protocol `1.10`, and made Wire JSON-RPC the explicit Claudine preference.
+- 2026-07-03: Refreshed against current Kimi docs and source. Preserved the original creation date, fixed schema-invalid all-OS config records, and clarified that Wire is the preferred bidirectional protocol while print JSONL is only a fallback.
 
 ## Sources
 
-- [Kimi Code CLI Wire mode documentation](https://moonshotai.github.io/kimi-cli/en/customization/wire-mode.html)
-- [Kimi Code CLI Print mode documentation](https://moonshotai.github.io/kimi-cli/en/customization/print-mode.html)
-- [Kimi command reference](https://moonshotai.github.io/kimi-cli/en/reference/kimi-command.html)
-- [Kimi config files documentation](https://moonshotai.github.io/kimi-cli/en/configuration/config-files.html)
-- [Kimi data locations documentation](https://moonshotai.github.io/kimi-cli/en/configuration/data-locations.html)
-- [Kimi agents and subagents documentation](https://moonshotai.github.io/kimi-cli/en/customization/agents.html)
-- [Wire Pydantic types source](https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/wire/types.py)
-- [Wire JSON-RPC source](https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/wire/jsonrpc.py)
-- [Wire protocol version source](https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/wire/protocol.py)
-- [Print JSONL projection source](https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/ui/print/visualize.py)
-- [Print runtime source](https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/ui/print/__init__.py)
+- [Wire mode documentation](https://moonshotai.github.io/kimi-cli/en/customization/wire-mode.html)
+- [Print mode documentation](https://moonshotai.github.io/kimi-cli/en/customization/print-mode.html)
+- [`kimi` command reference](https://moonshotai.github.io/kimi-cli/en/reference/kimi-command.html)
+- [Config files documentation](https://moonshotai.github.io/kimi-cli/en/configuration/config-files.html)
+- [Data locations documentation](https://moonshotai.github.io/kimi-cli/en/configuration/data-locations.html)
+- [Hooks documentation](https://moonshotai.github.io/kimi-cli/en/customization/hooks.html)
+- [`src/kimi_cli/wire/types.py`](https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/wire/types.py)
+- [`src/kimi_cli/wire/jsonrpc.py`](https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/wire/jsonrpc.py)
+- [`src/kimi_cli/ui/print/visualize.py`](https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/ui/print/visualize.py)

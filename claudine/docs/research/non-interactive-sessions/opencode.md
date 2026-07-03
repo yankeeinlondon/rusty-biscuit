@@ -1,7 +1,7 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-02
-last_updated: 2026-07-02
+last_updated: 2026-07-03
 agent: codex
 model: default
 docs: https://opencode.ai/docs/cli/
@@ -186,57 +186,165 @@ cli_params:
     description: "Starts an ACP NDJSON protocol server over stdin/stdout after launching an internal server."
     example: "opencode acp --cwd /repo"
 config_files:
-  - os: all
+  - os: macos
     scope: user
     path: "~/.config/opencode/opencode.json"
     format: json
     effect: "Global model, provider, permission, agent, shell, formatter, LSP, MCP, plugin, instruction, autoupdate, and experimental settings."
     notes: "Loaded after remote config and before `OPENCODE_CONFIG`; merged with later layers."
-  - os: all
+  - os: linux
+    scope: user
+    path: "~/.config/opencode/opencode.json"
+    format: json
+    effect: "Global model, provider, permission, agent, shell, formatter, LSP, MCP, plugin, instruction, autoupdate, and experimental settings."
+    notes: "Loaded after remote config and before `OPENCODE_CONFIG`; merged with later layers."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.config\\opencode\\opencode.json"
+    format: json
+    effect: "Global model, provider, permission, agent, shell, formatter, LSP, MCP, plugin, instruction, autoupdate, and experimental settings."
+    notes: "Source uses XDG config resolution; Windows paths differ from POSIX paths."
+  - os: macos
     scope: user
     path: "~/.config/opencode/opencode.jsonc"
-    format: jsonc
+    format: json
     effect: "Same as the global JSON config, with comments."
-    notes: "Global config layer; docs state plural resource subdirectories under this directory are preferred."
-  - os: all
+    notes: "JSONC file; schema records it as json because the research schema has no jsonc enum."
+  - os: linux
+    scope: user
+    path: "~/.config/opencode/opencode.jsonc"
+    format: json
+    effect: "Same as the global JSON config, with comments."
+    notes: "JSONC file; schema records it as json because the research schema has no jsonc enum."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.config\\opencode\\opencode.jsonc"
+    format: json
+    effect: "Same as the global JSON config, with comments."
+    notes: "JSONC file; Windows path is the XDG-style config path used by OpenCode."
+  - os: macos
     scope: repo
     path: "opencode.json"
     format: json
     effect: "Project-local model, provider, permission, agent, MCP, plugin, command, instruction, and tool settings."
     notes: "OpenCode searches from cwd upward to the nearest Git directory; project config overrides global/custom config on conflicting keys."
-  - os: all
+  - os: linux
+    scope: repo
+    path: "opencode.json"
+    format: json
+    effect: "Project-local model, provider, permission, agent, MCP, plugin, command, instruction, and tool settings."
+    notes: "OpenCode searches from cwd upward to the nearest Git directory; project config overrides global/custom config on conflicting keys."
+  - os: windows
+    scope: repo
+    path: "opencode.json"
+    format: json
+    effect: "Project-local model, provider, permission, agent, MCP, plugin, command, instruction, and tool settings."
+    notes: "Same repo-relative file name; path separators differ when resolved by the host filesystem."
+  - os: macos
     scope: repo
     path: "opencode.jsonc"
-    format: jsonc
+    format: json
     effect: "Project-local JSONC equivalent."
-    notes: "Merged, not replaced; later sources override only conflicting keys."
-  - os: all
+    notes: "JSONC file; merged, not replaced. Later sources override only conflicting keys."
+  - os: linux
+    scope: repo
+    path: "opencode.jsonc"
+    format: json
+    effect: "Project-local JSONC equivalent."
+    notes: "JSONC file; merged, not replaced. Later sources override only conflicting keys."
+  - os: windows
+    scope: repo
+    path: "opencode.jsonc"
+    format: json
+    effect: "Project-local JSONC equivalent."
+    notes: "JSONC file; same repo-relative file name with Windows path resolution."
+  - os: macos
     scope: repo
     path: ".opencode/"
     format: other
     effect: "Project resource directory for agents, commands, plugins, skills, tools, themes, and config-side assets."
     notes: "Loaded after project config; plural subdirectories are preferred, singular names remain supported."
-  - os: all
+  - os: linux
+    scope: repo
+    path: ".opencode/"
+    format: other
+    effect: "Project resource directory for agents, commands, plugins, skills, tools, themes, and config-side assets."
+    notes: "Loaded after project config; plural subdirectories are preferred, singular names remain supported."
+  - os: windows
+    scope: repo
+    path: ".opencode\\"
+    format: other
+    effect: "Project resource directory for agents, commands, plugins, skills, tools, themes, and config-side assets."
+    notes: "Loaded after project config; plural subdirectories are preferred, singular names remain supported."
+  - os: macos
     scope: user
     path: "~/.config/opencode/{agents,commands,plugins,skills,tools,themes}/"
     format: other
     effect: "User resource directories that can add agents/subagents, slash commands, plugins/hooks, skills, tools, and themes."
     notes: "Can affect tool availability, permissions, subagent behavior, and emitted tool names."
-  - os: all
+  - os: linux
+    scope: user
+    path: "~/.config/opencode/{agents,commands,plugins,skills,tools,themes}/"
+    format: other
+    effect: "User resource directories that can add agents/subagents, slash commands, plugins/hooks, skills, tools, and themes."
+    notes: "Can affect tool availability, permissions, subagent behavior, and emitted tool names."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.config\\opencode\\{agents,commands,plugins,skills,tools,themes}\\"
+    format: other
+    effect: "User resource directories that can add agents/subagents, slash commands, plugins/hooks, skills, tools, and themes."
+    notes: "Can affect tool availability, permissions, subagent behavior, and emitted tool names."
+  - os: macos
     scope: other
     path: "$OPENCODE_CONFIG"
     format: json
     effect: "Custom config path."
     notes: "Loaded after global config and before project config."
-  - os: all
+  - os: linux
+    scope: other
+    path: "$OPENCODE_CONFIG"
+    format: json
+    effect: "Custom config path."
+    notes: "Loaded after global config and before project config."
+  - os: windows
+    scope: other
+    path: "%OPENCODE_CONFIG%"
+    format: json
+    effect: "Custom config path."
+    notes: "Loaded after global config and before project config."
+  - os: macos
     scope: other
     path: "$OPENCODE_CONFIG_DIR"
     format: other
     effect: "Custom config directory for user resources."
     notes: "Can redirect resource discovery and plugin loading."
-  - os: all
+  - os: linux
+    scope: other
+    path: "$OPENCODE_CONFIG_DIR"
+    format: other
+    effect: "Custom config directory for user resources."
+    notes: "Can redirect resource discovery and plugin loading."
+  - os: windows
+    scope: other
+    path: "%OPENCODE_CONFIG_DIR%"
+    format: other
+    effect: "Custom config directory for user resources."
+    notes: "Can redirect resource discovery and plugin loading."
+  - os: macos
     scope: other
     path: "$OPENCODE_CONFIG_CONTENT"
+    format: json
+    effect: "Inline runtime config override."
+    notes: "Loaded after `.opencode` directories and before managed settings; useful for wrapper-injected MCP/instructions."
+  - os: linux
+    scope: other
+    path: "$OPENCODE_CONFIG_CONTENT"
+    format: json
+    effect: "Inline runtime config override."
+    notes: "Loaded after `.opencode` directories and before managed settings; useful for wrapper-injected MCP/instructions."
+  - os: windows
+    scope: other
+    path: "%OPENCODE_CONFIG_CONTENT%"
     format: json
     effect: "Inline runtime config override."
     notes: "Loaded after `.opencode` directories and before managed settings; useful for wrapper-injected MCP/instructions."
@@ -635,6 +743,7 @@ claudine_strategy:
   wrapper_notes: "Use argv prompt delivery separated by `--`; retain prompt text yourself because OpenCode does not emit user prompt events. Use `--auto` or explicit permissions only under a caller-approved policy. Keep server/SSE and ACP as future richer adapters, not the current subprocess parser."
 data_format: ndjson
 changes:
+  - "2026-07-03: Reverified official docs and current source, observed local OpenCode 1.17.13 invalid-model failure framing, set `last_updated`, and normalized `config_files` frontmatter to OS-specific records."
   - "2026-07-02: Replaced the older ad hoc research note with schema-backed frontmatter, current OpenCode CLI/source findings, and Claudine's dual stdout/stderr parsing strategy."
 requires_claudine_update: false
 reason: "No immediate code change is required: Claudine's current OpenCode wrapper already uses `--format json --print-logs --log-level INFO` and has an OpenCode stderr bridge. This document refreshes provider metadata and records remaining parser risks."
@@ -836,6 +945,7 @@ The biggest automation hazard is ambiguity at the end of a run. `session.status 
 | 2026-06-08 | Issue `#31435` reported containerized `run --format json` losing `text` and `step_finish` after `step_start`. | Confirms the missing terminal event and idle-race risk are operationally relevant. |
 | 2026-06-09 | Issue `#31482` reported resumed-session JSON mode exiting successfully with empty stdout while DB contained the answer. | Confirms successful exit is not enough to prove the stdout stream was complete. |
 | 2026-07-03 | Official docs observed with `run`, `serve`, `acp`, global `--print-logs`, and current config precedence. | Current research baseline for this document. |
+| 2026-07-03 | Local OpenCode `1.17.13` no-quota probe with an invalid model emitted stdout `error` plus printed stderr lifecycle logs. | Confirms current process/error framing without running a real model prompt. |
 
 ## Quirks and Gaps
 
@@ -844,6 +954,8 @@ The central quirk is that OpenCode's most convenient machine-readable mode is bo
 The second quirk is casing and naming. CLI stdout uses snake_case `type` values such as `step_finish`, while embedded `part.type` values use hyphenated OpenCode names such as `step-finish`. Raw server events use dotted names such as `message.part.updated` and `session.next.text.delta`. A parser must keep these namespaces separate.
 
 The biggest gaps are the absence of a formal CLI line schema, absence of a stdout terminal success event, incomplete stdout metadata for model/cwd/auth/MCP/permissions, and unverified behavior around MCP OAuth or provider OAuth in fully non-interactive runs. Local execution of a real model prompt was not performed for this refresh because it could require credentials and mutate files or consume quota; source, docs, local wrapper code, and public issue evidence were used instead.
+
+A local July 3, 2026 probe with OpenCode `1.17.13` used `OPENCODE_CONFIG_CONTENT` to select an invalid model and ran `opencode run --format json --print-logs --log-level INFO` with both argv and stdin prompt forms. It exited non-zero, printed lifecycle/config/session logs on stderr, and emitted a stdout JSON error with `type: "error"`, epoch-millisecond `timestamp`, `sessionID`, and nested `error.name` / `error.data`. That probe verifies framing and failure behavior only; it does not prove successful-run tool or token payloads.
 
 ## Claudine Integration Notes
 
@@ -865,6 +977,7 @@ Keep server/SSE and ACP separate in the adapter design. They are promising riche
 
 ## Changelog
 
+- 2026-07-03: Reverified official docs and current source, observed local OpenCode `1.17.13` invalid-model failure framing, set `last_updated`, and normalized `config_files` frontmatter to the topic schema's OS-specific records.
 - 2026-07-02: Replaced the older ad hoc research note with schema-backed frontmatter, current OpenCode CLI/source findings, and Claudine's dual stdout/stderr parsing strategy.
 
 ## Sources

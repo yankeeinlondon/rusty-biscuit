@@ -188,7 +188,8 @@ After writing the body, set these frontmatter properties:
 - `config_files`: user, repo, system, or managed config files that can influence
   non-interactive output format, logging, verbosity, color, model, tools, permissions, or
   stream shape. Include OS-specific paths, file format, scope, effect, and merge/override
-  notes.
+  notes. One record per OS — file paths must be recorded separately for macOS, Linux,
+  and Windows (never one record for all OSes; Windows paths always differ).
 - `env_vars`: only variables that change non-interactive behavior, auth source,
   structured output, buffering, color, logging, tool approval, or provider config.
 - `io_contract`: what Claudine can safely assume about stdout, stderr, stdin, and event

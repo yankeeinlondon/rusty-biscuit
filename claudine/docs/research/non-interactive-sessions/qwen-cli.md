@@ -1,1088 +1,812 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-02
-last_updated: 2026-07-02
+last_updated: 2026-07-03
 agent: codex
 model: default
 docs: https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/
 invocation:
   - command: 'qwen -p "prompt" --output-format stream-json --include-partial-messages'
     stdin_support: true
-    prompt_arg: "--prompt/-p string; piped stdin can provide additional prompt/context in text input mode"
-    notes: "Starts a fresh one-shot headless session and emits one JSON object per stdout line."
+    prompt_arg: "--prompt/-p supplies the prompt; piped stdin can add prompt/context in text input mode"
+    notes: "Starts a fresh one-shot headless session and emits JSONL on stdout."
   - command: 'cat input.txt | qwen -p "prompt" --output-format stream-json --include-partial-messages'
     stdin_support: true
     prompt_arg: "--prompt/-p plus text stdin"
-    notes: "Fresh one-shot headless session with prompt text plus piped input."
+    notes: "Fresh one-shot headless session with argv prompt and piped content."
   - command: 'qwen --continue -p "prompt" --output-format stream-json --include-partial-messages'
     stdin_support: true
-    prompt_arg: "--prompt/-p string"
-    notes: "Continues the most recent project-scoped session from saved JSONL history."
+    prompt_arg: "--prompt/-p"
+    notes: "Continues the most recent project-scoped session; history is stored under QWEN_HOME projects state."
   - command: 'qwen --resume <session-id> -p "prompt" --output-format stream-json --include-partial-messages'
     stdin_support: true
-    prompt_arg: "--prompt/-p string; --resume without an ID can open a picker and should be avoided in automation"
-    notes: "Resumes a specific project-scoped saved session."
-  - command: 'qwen --session-id <uuid> -p "prompt" --output-format stream-json --include-partial-messages'
-    stdin_support: true
-    prompt_arg: "--prompt/-p string"
-    notes: "Starts a new session using a caller-supplied UUID; cannot be combined with --continue or --resume."
+    prompt_arg: "--prompt/-p"
+    notes: "Resumes a specific session. Avoid bare --resume in automation because it can choose interactively."
   - command: 'qwen --input-format stream-json --output-format stream-json'
     stdin_support: true
-    prompt_arg: "stdin is a bidirectional JSON-line protocol, not plain prompt text"
-    notes: "SDK/control-plane mode; supports multi-turn input and control requests/responses on the stream."
+    prompt_arg: "stdin is a JSON-line protocol, not plain prompt text"
+    notes: "SDK/control-plane mode. It can emit and consume control_request/control_response records and is still described by upstream docs as under construction."
   - command: 'qwen -p "prompt" --output-format json'
     stdin_support: true
-    prompt_arg: "--prompt/-p string or piped stdin"
-    notes: "One-shot headless session with a final JSON array only after process completion."
+    prompt_arg: "--prompt/-p or piped stdin"
+    notes: "One-shot headless session that buffers a JSON array until completion."
   - command: 'qwen -p "prompt" --output-format text'
     stdin_support: true
-    prompt_arg: "--prompt/-p string or piped stdin"
-    notes: "Human-readable one-shot mode; not suitable for Claudine lifecycle parsing."
+    prompt_arg: "--prompt/-p or piped stdin"
+    notes: "Human-readable headless output; useful for humans, weak for Claudine supervision."
 output_formats:
   - name: "text"
     cli_value: "text"
     stream: true
     format: text
-    description: "Default human-readable response text. With --json-schema, successful text mode stdout becomes the validated JSON payload only."
-    side_effects: "Not parser-safe for general supervision; errors and diagnostics go to stderr."
+    description: "Default human-readable output. With --json-schema, stdout becomes the validated JSON payload line on success."
+    side_effects: "Not parser-safe for lifecycle supervision; diagnostics and warnings are on stderr."
   - name: "json"
     cli_value: "json"
     stream: false
     format: json
-    description: "A single JSON array of message objects emitted after completion. The final result can include stats and structured_result."
-    side_effects: "No live progress; richer stats are present here but not in stream-json."
+    description: "Single JSON array of system, assistant, user/tool-result, and result messages emitted after completion."
+    side_effects: "Good for post-run auditing and stats; no live progress."
   - name: "stream-json"
     cli_value: "stream-json"
     stream: true
     format: jsonl
-    description: "Line-delimited JSON objects on stdout. Without --include-partial-messages it emits completed system/assistant/user/result messages; with the flag it also emits stream_event records."
-    side_effects: "Best Claudine mode. Stdout is parseable JSONL; stderr remains necessary for diagnostics and retry heartbeats."
+    description: "One complete JSON object per stdout line as messages occur. Add --include-partial-messages for stream_event deltas."
+    side_effects: "Best Claudine mode. stdout is parseable JSONL; stderr still carries warnings, debug notices, MCP failures, retry heartbeats, and some failures without result events."
   - name: "stream-json input/control"
     cli_value: "stream-json"
     stream: true
     format: jsonl
-    description: "When selected via --input-format stream-json together with --output-format stream-json, stdin/stdout form a bidirectional JSON-line control protocol."
-    side_effects: "Stdin is no longer prompt text. The host may need to answer control_request messages, including permission requests."
+    description: "Bidirectional JSON-line control protocol when --input-format stream-json is paired with --output-format stream-json."
+    side_effects: "stdin is protocol input; hosts may need to answer control_request records such as can_use_tool."
 schema_sources:
   - url: "https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/nonInteractive/types.ts"
     schema_type: typescript
     formal: false
-    notes: "Closest source-level union for CLIMessage, StreamEvent, ControlMessage, result messages, permission denials, and metadata."
-  - url: "https://github.com/QwenLM/qwen-code/blob/main/packages/sdk-typescript/src/types/protocol.ts"
-    schema_type: typescript
-    formal: false
-    notes: "SDK-facing protocol types; useful for integration shape, but may lag or be narrower than CLI-local types."
+    notes: "Authoritative CLI message, result, stream_event, permission, and control-plane union types; no published JSON Schema."
   - url: "https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/nonInteractive/io/BaseJsonOutputAdapter.ts"
     schema_type: typescript
     formal: false
-    notes: "Authoritative implementation for result construction, permission_denials, tool_result messages, and structured_result."
+    notes: "Builds assistant/user/tool-result/result messages, permission_denials, structured_result, and usage fields."
   - url: "https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/nonInteractive/io/StreamJsonOutputAdapter.ts"
     schema_type: typescript
     formal: false
-    notes: "Authoritative implementation for JSONL framing and optional stream_event emission."
+    notes: "Defines JSONL emission and partial stream_event records for message_start, content_block_delta, tool_progress, active_goal, and related events."
+  - url: "https://github.com/QwenLM/qwen-code/blob/main/packages/sdk-typescript/src/types/protocol.ts"
+    schema_type: typescript
+    formal: false
+    notes: "SDK-facing protocol types mirror much of the CLI shape and are useful for --input-format stream-json, but should be treated as secondary to CLI-local types."
   - url: "https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/"
     schema_type: examples
     formal: false
-    notes: "Official docs for headless entry points and output formats; examples still show session_start while current source emits init."
-  - url: "https://qwenlm.github.io/qwen-code-docs/en/developers/sdk-typescript/"
-    schema_type: examples
-    formal: false
-    notes: "Documents SDK query iteration, session methods, permission handler behavior, and timeout behavior."
+    notes: "Official examples document formats and high-level fields but are not a complete schema."
 cli_params:
-  - flag: "-p, --prompt"
+  - flag: "--prompt, -p"
     value: "string"
-    description: "Pass prompt text and enter non-interactive mode."
-    example: 'qwen -p "review this repo" --output-format stream-json'
+    description: "Runs Qwen Code in non-interactive/headless mode with the supplied prompt."
+    example: 'qwen -p "review this diff"'
   - flag: "--output-format, -o"
     value: "text | json | stream-json"
-    description: "Select output mode. Claudine should pass stream-json explicitly."
-    example: 'qwen -p "run" --output-format stream-json'
+    description: "Selects human text, buffered JSON, or streaming JSONL output for non-interactive mode."
+    example: 'qwen -p "query" --output-format stream-json'
   - flag: "--input-format"
     value: "text | stream-json"
-    description: "Select stdin mode. stream-json requires --output-format stream-json and turns stdin into protocol messages."
+    description: "Selects stdin text input or the bidirectional JSON-line protocol; stream-json input requires stream-json output."
     example: "qwen --input-format stream-json --output-format stream-json"
   - flag: "--include-partial-messages"
     value: "boolean"
-    description: "Emit stream_event records such as message_start, content_block_delta, tool_progress, and active_goal in stream-json mode."
-    example: 'qwen -p "run" --output-format stream-json --include-partial-messages'
+    description: "Adds stream_event records such as message_start and content_block_delta to stream-json output."
+    example: 'qwen -p "query" --output-format stream-json --include-partial-messages'
   - flag: "--system-prompt"
     value: "string"
-    description: "Replace the built-in main-session system prompt for the run."
-    example: 'qwen -p "review" --system-prompt "You are a terse reviewer."'
+    description: "Overrides the main-session system prompt for this run."
+    example: 'qwen -p "query" --system-prompt "You are terse."'
   - flag: "--append-system-prompt"
     value: "string"
-    description: "Append run-specific instructions after the built-in prompt and loaded context."
-    example: 'qwen -p "run" --append-system-prompt "Do not ask the user questions."'
-  - flag: "--approval-mode"
-    value: "plan | default | auto-edit | auto | yolo"
-    description: "Select tool approval behavior. Use yolo only with an external sandbox; use plan/read-only or explicit permissions for safer automation."
-    example: 'qwen -p "inspect" --approval-mode plan --output-format stream-json'
-  - flag: "--yolo, -y"
-    value: "boolean"
-    description: "Legacy/convenience auto-approval for all tool calls. Cannot be combined with --approval-mode."
-    example: 'qwen -p "fix tests" --yolo --sandbox --output-format stream-json'
-  - flag: "--sandbox, -s"
-    value: "boolean"
-    description: "Enable sandbox mode for shell/edit/write execution."
-    example: 'qwen -p "fix" --sandbox --approval-mode yolo --output-format stream-json'
-  - flag: "--safe-mode"
-    value: "boolean"
-    description: "Disable settings-sourced customizations, context files, hooks, extensions, skills, MCP servers, custom subagents, permission rules, memory features, and sandbox settings; CLI yolo/approval-mode still apply."
-    example: 'qwen -p "diagnose" --safe-mode --output-format stream-json'
-  - flag: "--allowed-tools"
-    value: "tool pattern list"
-    description: "Bypass confirmation for matching tools."
-    example: 'qwen -p "inspect" --allowed-tools "Shell(git status)"'
-  - flag: "--core-tools"
-    value: "tool list"
-    description: "Limit built-in/core tool registration; parser-relevant because it changes tools emitted in the init message."
-    example: 'qwen -p "read only" --core-tools read_file,grep_search'
-  - flag: "--exclude-tools"
-    value: "tool list or patterns"
-    description: "Deny tools; useful to disable shell/write/edit/agent in unattended runs."
-    example: 'qwen -p "audit" --exclude-tools shell,write,edit,agent'
-  - flag: "--include-directories"
-    value: "directory list"
-    description: "Add up to five extra workspace directories."
-    example: 'qwen -p "inspect" --include-directories ../shared'
-  - flag: "--all-files, -a"
-    value: "boolean"
-    description: "Recursively include files under the current directory as context."
-    example: 'qwen -p "summarize" --all-files'
+    description: "Appends extra main-session instructions after built-in prompt and memory."
+    example: 'qwen -p "query" --append-system-prompt "Avoid prompts."'
+  - flag: "--json-schema"
+    value: "inline JSON or @path"
+    description: "Constrains the final answer through a synthetic structured_output tool; incompatible with --input-format stream-json, ACP, and prompt-interactive."
+    example: 'qwen -p "audit" --json-schema @./schema.json --output-format stream-json'
   - flag: "--model, -m"
     value: "model id"
-    description: "Requested model for the run; init.model reports config.getModel()."
-    example: 'qwen -p "run" --model qwen3-coder-plus'
-  - flag: "--auth-type"
-    value: "openai | anthropic | qwen-oauth | gemini | vertex-ai"
-    description: "Select auth/provider protocol when configured."
-    example: 'qwen -p "run" --auth-type openai'
+    description: "Selects the model for the session; emitted in system and assistant messages as the model string."
+    example: "qwen -m qwen3-coder-plus -p query"
+  - flag: "--approval-mode"
+    value: "plan | default | auto-edit | auto | yolo"
+    description: "Controls tool approval policy; default cannot prompt in SDK permission control without a host response."
+    example: "qwen -p query --approval-mode yolo"
+  - flag: "--yolo, -y"
+    value: "boolean"
+    description: "Auto-approves all tool calls; does not enable sandboxing."
+    example: "qwen -p query --yolo"
+  - flag: "--sandbox, -s"
+    value: "boolean"
+    description: "Enables sandbox mode for the session."
+    example: "qwen -p query --sandbox"
+  - flag: "--safe-mode"
+    value: "boolean"
+    description: "Disables customizations such as hooks, extensions, skills, MCP servers, custom subagents, permission rules, memory, and settings-sourced sandbox/approval overrides."
+    example: "qwen -p query --safe-mode"
+  - flag: "--all-files, -a"
+    value: "boolean"
+    description: "Adds all files under the current directory as prompt context."
+    example: "qwen -p query --all-files"
+  - flag: "--include-directories"
+    value: "comma-separated paths"
+    description: "Adds extra directories as context roots."
+    example: "qwen -p query --include-directories src,docs"
   - flag: "--continue"
     value: "boolean"
-    description: "Continue the most recent saved session for the project."
-    example: 'qwen --continue -p "continue" --output-format stream-json'
-  - flag: "--resume, -r"
-    value: "session id or title"
-    description: "Resume a saved project session. Avoid bare --resume in automation because it can require interactive selection."
+    description: "Continues the most recent project-scoped saved session."
+    example: 'qwen --continue -p "continue"'
+  - flag: "--resume"
+    value: "optional session id"
+    description: "Resumes a specific session when an ID is supplied; omit the ID only for interactive use."
     example: 'qwen --resume 123e4567-e89b-12d3-a456-426614174000 -p "continue"'
-  - flag: "--session-id"
-    value: "uuid"
-    description: "Start a fresh session with a caller-supplied UUID; mutually exclusive with resume/continue."
-    example: 'qwen --session-id 123e4567-e89b-12d3-a456-426614174000 -p "run"'
   - flag: "--max-session-turns"
-    value: "number"
-    description: "Abort when turn cap is exceeded; documented exit code is 53."
-    example: 'qwen -p "run" --max-session-turns 20'
+    value: "integer"
+    description: "Caps session turns; overrun exits with code 53 and may not emit a result event."
+    example: "qwen -p query --max-session-turns 30"
   - flag: "--max-wall-time"
-    value: "duration"
-    description: "Abort an unattended one-shot or stream-json-input run on wall-clock budget; documented exit code is 55."
-    example: 'qwen -p "run" --max-wall-time 10m'
+    value: "seconds or duration"
+    description: "Caps wall-clock run time; budget aborts use exit code 55."
+    example: "qwen -p query --max-wall-time 10m"
   - flag: "--max-tool-calls"
-    value: "number"
-    description: "Abort after cumulative top-level tool-call budget; subagent inner calls are not counted."
-    example: 'qwen -p "run" --max-tool-calls 50'
-  - flag: "--max-subagent-depth"
-    value: "number"
-    description: "Limit subagent nesting depth."
-    example: 'qwen -p "run" --max-subagent-depth 1'
-  - flag: "--json-schema"
-    value: "JSON literal or @path"
-    description: "Constrain final answer to JSON Schema. In stream-json, final result has structured_result; incompatible with stream-json input and ACP."
-    example: 'qwen -p "extract" --json-schema @schema.json --output-format stream-json'
-  - flag: "--json-file"
-    value: "path"
-    description: "Dual-output JSON file path; can duplicate structured records outside stdout."
-    example: 'qwen -p "run" --json-file out.jsonl'
-  - flag: "--json-fd"
-    value: "fd"
-    description: "Dual-output JSON file descriptor; parser-relevant as a secondary structured stream."
-    example: 'qwen -p "run" --json-fd 3'
-  - flag: "--input-file"
-    value: "path | FIFO | /dev/fd/N"
-    description: "Read prompt/input from a file-like source."
-    example: 'qwen -p "summarize" --input-file prompt.txt'
+    value: "integer"
+    description: "Caps top-level tool dispatches; inner subagent tool calls are out of scope."
+    example: "qwen -p query --max-tool-calls 50"
   - flag: "--debug, -d"
     value: "boolean"
-    description: "Enable verbose diagnostic logging; do not treat stderr as parse-only."
-    example: 'qwen -p "run" --debug --output-format stream-json'
-  - flag: "--openai-logging"
-    value: "boolean"
-    description: "Enable API call logging for debugging; may write logs outside the stdout stream."
-    example: 'qwen -p "run" --openai-logging'
-  - flag: "--openai-logging-dir"
-    value: "path"
-    description: "Directory for OpenAI API logs."
-    example: 'qwen -p "run" --openai-logging --openai-logging-dir ~/qwen-logs'
-  - flag: "--allowed-mcp-server-names"
-    value: "server names"
-    description: "Restrict configured MCP servers made available during the run."
-    example: 'qwen -p "run" --allowed-mcp-server-names github'
-  - flag: "--mcp-config"
-    value: "JSON string or path-like config"
-    description: "Inject MCP server configuration at top precedence."
-    example: 'qwen -p "run" --mcp-config ''{"servers":{}}'''
-  - flag: "--acp"
-    value: "boolean"
-    description: "Starts ACP integration mode, not the preferred Claudine stream-json CLI wrapper."
-    example: "qwen --acp"
-  - flag: "--prompt-interactive, -i"
-    value: "string"
-    description: "Starts the interactive UI; conflicts with headless automation and --json-schema."
-    example: 'qwen -i "interactive prompt"'
+    description: "Enables debug mode and prints debug log location to stderr."
+    example: "qwen -p query --debug"
 config_files:
-  - os: linux
-    scope: system
-    path: "/etc/qwen-code/system-defaults.json"
-    format: json
-    effect: "Lowest-precedence system defaults for settings, including model, output, permissions, MCP, telemetry, sandbox, and tools."
-    notes: "Can be overridden by QWEN_CODE_SYSTEM_DEFAULTS_PATH."
   - os: macos
-    scope: system
-    path: "/Library/Application Support/QwenCode/system-defaults.json"
-    format: json
-    effect: "Lowest-precedence system defaults."
-    notes: "Can be overridden by QWEN_CODE_SYSTEM_DEFAULTS_PATH."
-  - os: windows
-    scope: system
-    path: "C:\\ProgramData\\qwen-code\\system-defaults.json"
-    format: json
-    effect: "Lowest-precedence system defaults."
-    notes: "Can be overridden by QWEN_CODE_SYSTEM_DEFAULTS_PATH."
-  - os: all
     scope: user
-    path: "~/.qwen/settings.json or $QWEN_HOME/settings.json"
-    format: json
-    effect: "User settings for model, output, permissions, auth selection, MCP, tools, telemetry, hooks, extensions, memory, and context."
-    notes: "Overrides system defaults; overridden by trusted project settings, system settings, env vars, and CLI flags."
-  - os: all
+    path: "~/.qwen/settings.json"
+    format: jsonc
+    effect: "User defaults for model, providers, permissions, MCP servers, telemetry, hooks, skills, and other settings."
+    notes: "QWEN_HOME redirects this directory. CLI flags override for the current run where supported."
+  - os: linux
+    scope: user
+    path: "~/.qwen/settings.json"
+    format: jsonc
+    effect: "User defaults for model, providers, permissions, MCP servers, telemetry, hooks, skills, and other settings."
+    notes: "QWEN_HOME redirects this directory. CLI flags override for the current run where supported."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.qwen\\settings.json"
+    format: jsonc
+    effect: "User defaults for model, providers, permissions, MCP servers, telemetry, hooks, skills, and other settings."
+    notes: "QWEN_HOME redirects this directory. CLI flags override for the current run where supported."
+  - os: macos
     scope: repo
     path: ".qwen/settings.json"
-    format: json
-    effect: "Project settings for model, output, permissions, MCP, tools, hooks, context, and other behavior."
-    notes: "Loaded only when workspace settings are active/trusted; overrides user settings and is overridden by system settings, env vars, and CLI flags."
+    format: jsonc
+    effect: "Workspace settings for model/providers, permissions, MCP, hooks, skills, and other repo-local behavior."
+    notes: "Merged only when the workspace is trusted; untrusted workspace settings are ignored."
   - os: linux
-    scope: system
-    path: "/etc/qwen-code/settings.json"
-    format: json
-    effect: "Highest-precedence system settings override."
-    notes: "Can be overridden by QWEN_CODE_SYSTEM_SETTINGS_PATH."
+    scope: repo
+    path: ".qwen/settings.json"
+    format: jsonc
+    effect: "Workspace settings for model/providers, permissions, MCP, hooks, skills, and other repo-local behavior."
+    notes: "Merged only when the workspace is trusted; untrusted workspace settings are ignored."
+  - os: windows
+    scope: repo
+    path: ".qwen\\settings.json"
+    format: jsonc
+    effect: "Workspace settings for model/providers, permissions, MCP, hooks, skills, and other repo-local behavior."
+    notes: "Merged only when the workspace is trusted; untrusted workspace settings are ignored."
   - os: macos
     scope: system
     path: "/Library/Application Support/QwenCode/settings.json"
-    format: json
-    effect: "Highest-precedence system settings override."
-    notes: "Can be overridden by QWEN_CODE_SYSTEM_SETTINGS_PATH."
+    format: jsonc
+    effect: "System override settings. Source merge order makes system settings highest precedence."
+    notes: "Can be redirected by QWEN_CODE_SYSTEM_SETTINGS_PATH."
+  - os: linux
+    scope: system
+    path: "/etc/qwen-code/settings.json"
+    format: jsonc
+    effect: "System override settings. Source merge order makes system settings highest precedence."
+    notes: "Can be redirected by QWEN_CODE_SYSTEM_SETTINGS_PATH."
   - os: windows
     scope: system
     path: "C:\\ProgramData\\qwen-code\\settings.json"
-    format: json
-    effect: "Highest-precedence system settings override."
-    notes: "Can be overridden by QWEN_CODE_SYSTEM_SETTINGS_PATH."
-  - os: all
-    scope: repo
-    path: ".mcp.json"
-    format: json
-    effect: "Project MCP server definitions can affect init.mcp_servers and available tools."
-    notes: "Source comments describe precedence below CLI/session MCP config and system/workspace settings; project/workspace MCP servers may be gated by trust."
-  - os: all
+    format: jsonc
+    effect: "System override settings. Source merge order makes system settings highest precedence."
+    notes: "Can be redirected by QWEN_CODE_SYSTEM_SETTINGS_PATH."
+  - os: macos
+    scope: system
+    path: "/Library/Application Support/QwenCode/system-defaults.json"
+    format: jsonc
+    effect: "System default settings. Lowest precedence loaded settings scope."
+    notes: "Can be redirected by QWEN_CODE_SYSTEM_DEFAULTS_PATH."
+  - os: linux
+    scope: system
+    path: "/etc/qwen-code/system-defaults.json"
+    format: jsonc
+    effect: "System default settings. Lowest precedence loaded settings scope."
+    notes: "Can be redirected by QWEN_CODE_SYSTEM_DEFAULTS_PATH."
+  - os: windows
+    scope: system
+    path: "C:\\ProgramData\\qwen-code\\system-defaults.json"
+    format: jsonc
+    effect: "System default settings. Lowest precedence loaded settings scope."
+    notes: "Can be redirected by QWEN_CODE_SYSTEM_DEFAULTS_PATH."
+  - os: macos
     scope: user
-    path: "<QWEN_HOME>/.env or ~/.qwen/.env"
+    path: "~/.qwen/.env"
     format: text
-    effect: "Qwen-specific environment overrides for auth, logging, sandbox, retry, color, and other behavior."
-    notes: "Loaded before ~/.env and wins over ~/.env when both user-level env files define the same variable; existing process env values are not overwritten."
-  - os: all
+    effect: "User-level environment defaults for auth/provider/config variables."
+    notes: "QWEN-specific user .env wins over ~/.env for duplicate keys; existing process env is not overwritten."
+  - os: linux
     scope: user
-    path: "~/.env"
+    path: "~/.qwen/.env"
     format: text
-    effect: "General user environment variables."
-    notes: "Lower precedence than <QWEN_HOME>/.env for user-level env loading."
-  - os: all
+    effect: "User-level environment defaults for auth/provider/config variables."
+    notes: "QWEN-specific user .env wins over ~/.env for duplicate keys; existing process env is not overwritten."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.qwen\\.env"
+    format: text
+    effect: "User-level environment defaults for auth/provider/config variables."
+    notes: "QWEN_HOME can redirect this home directory."
+  - os: macos
     scope: repo
     path: ".qwen/.env"
     format: text
-    effect: "Project-specific Qwen environment variables."
-    notes: "Project env loading can exclude variables such as DEBUG and DEBUG_MODE unless placed in .qwen/.env."
-  - os: all
-    scope: user
-    path: "~/.qwen/projects/<sanitized-cwd>/chats/*.jsonl"
-    format: json
-    effect: "Project-scoped saved session history for --continue and --resume."
-    notes: "The exact sanitized path is derived from cwd; resumes restore history, tool outputs, and compression checkpoints."
+    effect: "Project environment defaults; can influence auth/provider behavior and wrapper output indirectly."
+    notes: "Project env loading excludes configured variables except that variables from .qwen/.env are never excluded."
+  - os: linux
+    scope: repo
+    path: ".qwen/.env"
+    format: text
+    effect: "Project environment defaults; can influence auth/provider behavior and wrapper output indirectly."
+    notes: "Project env loading excludes configured variables except that variables from .qwen/.env are never excluded."
+  - os: windows
+    scope: repo
+    path: ".qwen\\.env"
+    format: text
+    effect: "Project environment defaults; can influence auth/provider behavior and wrapper output indirectly."
+    notes: "Project env loading excludes configured variables except that variables from .qwen/.env are never excluded."
 env_vars:
   - name: "QWEN_HOME"
-    effect: "Overrides the global configuration directory."
-    notes: "Affects user settings, credentials, memory, skills, and other global state."
+    effect: "Redirects the global configuration directory from ~/.qwen."
+    notes: "Relative paths are resolved from cwd; empty string is unset."
   - name: "QWEN_RUNTIME_DIR"
-    effect: "Overrides runtime output directory for conversations, logs, and todos."
+    effect: "Redirects runtime output such as conversations, logs, and todos."
     notes: "Useful for separating ephemeral runtime data from persistent config."
-  - name: "QWEN_CODE_SYSTEM_DEFAULTS_PATH"
-    effect: "Overrides system defaults settings path."
-    notes: "Can change effective settings for every run."
+  - name: "QWEN_SANDBOX"
+    effect: "Enables sandboxing from the environment."
+    notes: "Use with headless auto-approval to reduce host-risk."
+  - name: "QWEN_SANDBOX_IMAGE"
+    effect: "Selects sandbox image unless overridden by --sandbox-image."
+    notes: "Precedence is --sandbox-image > QWEN_SANDBOX_IMAGE > tools.sandboxImage > built-in default."
+  - name: "QWEN_CODE_SAFE_MODE"
+    effect: "Enables safe mode, disabling settings-derived customizations and tools as documented."
+    notes: "CLI --safe-mode is the explicit per-run equivalent."
+  - name: "QWEN_CODE_SUPPRESS_YOLO_WARNING"
+    effect: "Suppresses the headless YOLO-without-sandbox stderr warning."
+    notes: "Only use after the wrapper deliberately accepts that risk."
+  - name: "QWEN_CODE_UNATTENDED_RETRY"
+    effect: "When true or 1, retries transient 429 and 529 provider errors indefinitely with stderr heartbeats."
+    notes: "Must be paired with a wall-clock budget for deterministic automation."
+  - name: "QWEN_CODE_DEBUG"
+    effect: "Enables additional debug logging paths in some failure reports."
+    notes: "Debug logs are not part of stdout JSONL."
   - name: "QWEN_CODE_SYSTEM_SETTINGS_PATH"
-    effect: "Overrides high-precedence system settings path."
-    notes: "Can force managed settings that users/projects cannot override except by CLI/env where applicable."
+    effect: "Overrides system settings file path."
+    notes: "Useful for managed deployments or tests."
+  - name: "QWEN_CODE_SYSTEM_DEFAULTS_PATH"
+    effect: "Overrides system defaults file path."
+    notes: "Useful for managed deployments or tests."
+  - name: "QWEN_CODE_TRUSTED_FOLDERS_PATH"
+    effect: "Overrides trusted-folder state location."
+    notes: "Workspace settings are ignored unless the workspace is trusted."
   - name: "QWEN_TELEMETRY_ENABLED"
     effect: "Overrides telemetry.enabled."
-    notes: "Parser-adjacent because telemetry/logging may create side-channel records."
-  - name: "QWEN_TELEMETRY_TARGET"
-    effect: "Sets telemetry target label."
-    notes: "Use endpoint/outfile variables for routing."
-  - name: "QWEN_TELEMETRY_OTLP_ENDPOINT"
-    effect: "Configures telemetry OTLP endpoint."
-    notes: "Overrides telemetry settings."
-  - name: "QWEN_TELEMETRY_OTLP_PROTOCOL"
-    effect: "Configures telemetry protocol."
-    notes: "Overrides telemetry settings."
+    notes: "Telemetry/logging is a secondary signal, not the primary stream."
   - name: "QWEN_TELEMETRY_OUTFILE"
-    effect: "Routes telemetry to a file."
-    notes: "Useful secondary evidence stream, but not equivalent to stdout stream-json."
-  - name: "QWEN_CODE_UNATTENDED_RETRY"
-    effect: "When set to true or 1, retries transient HTTP 429/529 errors indefinitely with stderr heartbeats."
-    notes: "CI=true alone does not enable it; combine with --max-wall-time."
-  - name: "QWEN_CODE_SUPPRESS_YOLO_WARNING"
-    effect: "Suppresses the stderr warning for YOLO without sandbox."
-    notes: "Does not make YOLO safe."
-  - name: "QWEN_SANDBOX"
-    effect: "Enables sandbox mode."
-    notes: "Docs recommend this for local/shared unattended yolo runs."
-  - name: "QWEN_SANDBOX_IMAGE"
-    effect: "Selects sandbox image."
-    notes: "Precedence is --sandbox-image, QWEN_SANDBOX_IMAGE, tools.sandboxImage, built-in default."
-  - name: "SEATBELT_PROFILE"
-    effect: "Selects macOS sandbox-exec profile."
-    notes: "macOS-specific; custom profiles live under project .qwen/."
-  - name: "DEBUG"
-    effect: "Enables verbose debug logging when true or 1."
-    notes: "Can add stderr noise; excluded from project env by default unless in .qwen/.env."
-  - name: "DEBUG_MODE"
-    effect: "Enables verbose debug logging when true or 1."
-    notes: "Same parser warning as DEBUG."
-  - name: "NO_COLOR"
-    effect: "Disables colored output."
-    notes: "Structured stdout is already JSON; useful for text/stderr cleanliness."
-  - name: "FORCE_HYPERLINK"
-    effect: "Forces or disables OSC 8 hyperlinks in markdown rendering."
-    notes: "Text-mode/stderr concern."
-  - name: "QWEN_DISABLE_HYPERLINKS"
-    effect: "Disables OSC 8 hyperlinks."
-    notes: "Text-mode/stderr concern."
-  - name: "CLI_TITLE"
-    effect: "Customizes terminal title."
-    notes: "TUI-oriented; not a stream field."
-  - name: "QWEN_CODE_MAX_OUTPUT_TOKENS"
-    effect: "Overrides default maximum output tokens per response."
-    notes: "Can change truncation/escalation behavior and token usage."
-  - name: "QWEN_CODE_LEGACY_MCP_BLOCKING"
-    effect: "Restores synchronous MCP discovery during initialization."
-    notes: "Can delay init/tool availability; modern default discovers progressively."
-  - name: "QWEN_DISABLED_SLASH_COMMANDS"
-    effect: "Adds disabled slash commands."
-    notes: "Unioned with settings and CLI flag."
-  - name: "QWEN_CODE_SAFE_MODE"
-    effect: "Enables safe mode."
-    notes: "Disables many settings-sourced customizations; CLI approval flags still apply."
-  - name: "QWEN_CODE_CLI_PATH"
-    effect: "SDK executable discovery override."
-    notes: "SDK integration only."
-  - name: "OPENAI_API_KEY"
-    effect: "Auth credential for OpenAI-compatible providers."
-    notes: "Do not log value; auth failures surface as errors, not a dedicated auth event."
-  - name: "OPENAI_BASE_URL"
-    effect: "OpenAI-compatible base URL."
-    notes: "Can redirect provider/backend."
-  - name: "OPENAI_MODEL"
-    effect: "Default model for OpenAI-compatible provider."
-    notes: "QWEN_MODEL is an alias according to auth docs."
-  - name: "QWEN_MODEL"
-    effect: "Alias for OpenAI-compatible model selection."
-    notes: "May be superseded by CLI --model."
-  - name: "ANTHROPIC_API_KEY"
-    effect: "Auth credential for Anthropic provider."
-    notes: "Do not log value."
-  - name: "GEMINI_API_KEY"
-    effect: "Auth credential for Gemini provider."
-    notes: "Do not log value."
+    effect: "Can route telemetry to a file via telemetry settings."
+    notes: "Use as secondary diagnostics if enabled; not equivalent to stream-json."
+  - name: "QWEN_CODE_ENABLE_AGENT_TEAM"
+    effect: "Enables experimental agent-team tools."
+    notes: "Can introduce teammate/subagent approval behavior relevant to non-interactive runs."
+  - name: "QWEN_CODE_DISABLE_CRON"
+    effect: "Disables cron/loop tools."
+    notes: "Affects available tools and possible task_notification events."
+  - name: "QWEN_CODE_EMIT_TOOL_USE_SUMMARIES"
+    effect: "Overrides experimental tool-use summary generation."
+    notes: "Docs say SDK/non-interactive emission of the summary message is not yet wired."
 io_contract:
   stdout: structured_only
   stderr: mixed
   stdin: prompt
   framing: jsonl
-  noise_handling: "In stream-json output mode, parse stdout line-by-line as JSON. Keep stderr as diagnostics/lifecycle text for startup warnings, API errors, budget/auth messages, debug logs, and persistent-retry heartbeats."
-  notes: "When --input-format stream-json is also used, stdin becomes a bidirectional protocol instead of prompt text."
+  noise_handling: "In preferred mode, parse stdout line-by-line as JSON and treat stderr as diagnostics/lifecycle adjunct. Always inspect exit code because some failures have no terminal result line."
+  notes: "With --input-format stream-json, stdin changes from prompt text to JSON-line protocol input."
 stream_contract:
-  discriminator: "type; for stream_event use event.type; for control_request use request.subtype; for control_response use response.subtype; content blocks use message.content[].type"
-  event_ordering: "Initial system init message is emitted before run output; assistant/tool messages follow execution order; result is terminal for one-shot runs when emitted, but some process-level failures can exit without a result."
-  correlation_fields: ["session_id", "uuid", "message.id", "parent_tool_use_id", "message.content[].id", "message.content[].tool_use_id", "request_id", "event.tool_use_id"]
+  discriminator: "type"
+  event_ordering: "system init/session_start precedes assistant/user/result messages for normal runs; stream_event records may precede completed assistant messages when partials are enabled; result is terminal when present."
+  correlation_fields: ["session_id", "uuid", "message.id", "content[].id", "content[].tool_use_id", "event.tool_use_id", "parent_tool_use_id", "request_id"]
   terminal_event: "type=result"
   partial_message_events: true
-  unknown_event_policy: "Skip unknown type/event.type values, preserve raw JSON for drift review, and continue parsing known terminal result records."
-  notes: "Partial events require --include-partial-messages. Tool inputs in partial mode arrive as input_json_delta.partial_json, but current source emits the full JSON-stringified input rather than fine-grained deltas."
+  unknown_event_policy: "Skip unknown type or event.type, log at trace, and preserve raw JSON for drift analysis."
+  notes: "Top-level type discriminates message/control families. Nested subtype distinguishes result/system/control payloads; stream_event.event.type distinguishes deltas."
 session_metadata:
-  session_id: "system.session_id and result.session_id; system.uuid equals session id in current source"
-  cwd: "system.cwd"
-  model: "system.model and assistant.message.model"
-  provider: "not emitted directly; infer from auth/config/modelProviders when available"
-  auth: "not emitted directly; selected auth type is config-driven but absent from stream records"
-  version: "system.qwen_code_version"
-  mcp_servers: "system.mcp_servers[].name/status"
-  permission_mode: "system.permission_mode"
-  notes: "Current source emits system.subtype=init with tools, MCP server statuses, slash_commands, qwen_code_version, and agents. Docs examples still show subtype=session_start."
+  session_id: "system.session_id and every message.session_id; emitted early in normal structured runs"
+  cwd: "system.cwd in CLI-local init messages; docs examples omit exact guarantee"
+  model: "system.model and assistant.message.model; requested/resolved distinction is not explicit"
+  provider: "not emitted as a separate provider field; infer Qwen Code from wrapper/invocation"
+  auth: "not emitted in stream-json; startup/auth failures may appear on stderr or as result.error.message"
+  version: "system.qwen_code_version in CLI-local init message"
+  mcp_servers: "system.mcp_servers array with name/status in CLI-local init message"
+  permission_mode: "system.permission_mode in CLI-local init message"
+  notes: "System init shape in source uses subtype init, while public docs examples show subtype session_start; parser should accept both."
 stream_events:
   - event: "system/init"
     category: session
     fields: ["type", "subtype", "uuid", "session_id", "cwd", "tools", "mcp_servers", "model", "permission_mode", "slash_commands", "qwen_code_version", "agents"]
-    notes: "First current-source system record for a run."
-  - event: "system/worktree_started"
-    category: session
-    fields: ["type", "subtype", "uuid", "session_id", "parent_tool_use_id", "data.notice"]
-    notes: "Emitted when startup worktree context is injected."
-  - event: "system/worktree_restored"
-    category: session
-    fields: ["type", "subtype", "uuid", "session_id", "data.notice"]
-    notes: "Emitted when resumed worktree context is restored."
+    notes: "Source-level system initialization message; docs examples call the subtype session_start."
   - event: "assistant"
     category: assistant
-    fields: ["type", "uuid", "session_id", "parent_tool_use_id", "message.id", "message.model", "message.content", "message.stop_reason", "message.usage"]
-    notes: "Completed assistant message. content blocks are one of text, thinking, tool_use, or tool_result-shaped data depending on message category."
+    fields: ["type", "uuid", "session_id", "parent_tool_use_id", "message.id", "message.model", "message.content", "message.usage", "message.stop_reason"]
+    notes: "Completed assistant message. Content blocks include text, thinking, tool_use, and tool_result shapes."
   - event: "user"
     category: tool_result
     fields: ["type", "uuid", "session_id", "parent_tool_use_id", "message.role", "message.content[].tool_use_id", "message.content[].content", "message.content[].is_error"]
-    notes: "Used for tool_result content and subagent prompt/user messages."
-  - event: "stream_event/message_start"
-    category: assistant
-    fields: ["type", "uuid", "session_id", "parent_tool_use_id", "event.type", "event.message.id", "event.message.role", "event.message.model"]
-    notes: "Partial message start; requires --include-partial-messages."
-  - event: "stream_event/content_block_start"
-    category: assistant
-    fields: ["event.index", "event.content_block.type", "event.content_block.id", "event.content_block.name", "event.content_block.input", "parent_tool_use_id"]
-    notes: "Starts text, thinking, or tool_use content block."
-  - event: "stream_event/content_block_delta"
-    category: assistant
-    fields: ["event.index", "event.delta.type", "event.delta.text", "event.delta.thinking", "event.delta.partial_json"]
-    notes: "Partial text/thinking/tool-input updates."
-  - event: "stream_event/content_block_stop"
-    category: assistant
-    fields: ["event.index"]
-    notes: "Closes a partial content block."
-  - event: "stream_event/message_stop"
-    category: assistant
-    fields: ["event.type"]
-    notes: "Closes a partial assistant message."
-  - event: "stream_event/tool_progress"
-    category: tool_call
-    fields: ["event.tool_use_id", "event.content"]
-    notes: "MCP progress only; requires --include-partial-messages and a tool that emits McpToolProgressData."
-  - event: "stream_event/active_goal"
-    category: plan
-    fields: ["event.active_goal"]
-    notes: "Session-level goal state update; current source emits only when partial stream events are enabled."
-  - event: "control_request/can_use_tool"
-    category: permission
-    fields: ["request_id", "request.tool_name", "request.tool_use_id", "request.input", "request.permission_suggestions", "request.blocked_path"]
-    notes: "Only in stream-json input/control mode or SDK-backed permission path."
-  - event: "control_request/initialize"
-    category: session
-    fields: ["request_id", "request.hooks", "request.timeout.canUseTool", "request.sdkMcpServers", "request.mcpServers", "request.agents"]
-    notes: "Control-plane initialization request shape."
-  - event: "control_request/set_permission_mode"
-    category: permission
-    fields: ["request_id", "request.mode"]
-    notes: "Control-plane permission mode change."
-  - event: "control_request/set_model"
-    category: session
-    fields: ["request_id", "request.model"]
-    notes: "Control-plane model change."
-  - event: "control_request/get_context_usage"
-    category: usage
-    fields: ["request_id", "request.show_details"]
-    notes: "Control-plane context usage query."
-  - event: "control_response/success"
-    category: other
-    fields: ["response.request_id", "response.response"]
-    notes: "Acknowledges control requests."
-  - event: "control_response/error"
-    category: error
-    fields: ["response.request_id", "response.error"]
-    notes: "Reports control-plane request errors."
-  - event: "control_cancel_request"
-    category: other
-    fields: ["request_id"]
-    notes: "Control-plane cancellation."
+    notes: "Tool results are emitted as user messages containing tool_result blocks."
   - event: "result/success"
     category: session
-    fields: ["type", "subtype", "uuid", "session_id", "is_error", "duration_ms", "duration_api_ms", "num_turns", "result", "usage", "modelUsage", "permission_denials", "structured_result", "stats"]
-    notes: "Terminal success for one-shot JSON/stream-json runs. stats is only emitted by json output in current source."
+    fields: ["type", "subtype", "uuid", "session_id", "is_error", "duration_ms", "duration_api_ms", "num_turns", "result", "usage", "modelUsage", "permission_denials", "structured_result"]
+    notes: "Terminal success when emitted."
   - event: "result/error_during_execution"
     category: error
     fields: ["type", "subtype", "uuid", "session_id", "is_error", "duration_ms", "duration_api_ms", "num_turns", "usage", "permission_denials", "error.message"]
-    notes: "Terminal structured error when adapter emission succeeds."
+    notes: "Terminal execution error when emitted."
   - event: "result/error_max_turns"
     category: error
     fields: ["type", "subtype", "uuid", "session_id", "is_error", "duration_ms", "duration_api_ms", "num_turns", "usage", "permission_denials", "error.message"]
-    notes: "Typed in source; docs say max-session-turns can also exit 53 without a stdout result in some paths."
+    notes: "Type union defines this subtype, but docs warn max-session-turns can exit with stderr only."
+  - event: "stream_event/message_start"
+    category: assistant
+    fields: ["type", "uuid", "session_id", "parent_tool_use_id", "event.type", "event.message.id", "event.message.role", "event.message.model"]
+    notes: "Only with --include-partial-messages."
+  - event: "stream_event/content_block_start"
+    category: assistant
+    fields: ["type", "uuid", "session_id", "parent_tool_use_id", "event.type", "event.index", "event.content_block"]
+    notes: "Starts text, thinking, or tool_use block."
+  - event: "stream_event/content_block_delta"
+    category: assistant
+    fields: ["type", "uuid", "session_id", "parent_tool_use_id", "event.type", "event.index", "event.delta.type", "event.delta.text", "event.delta.thinking", "event.delta.partial_json"]
+    notes: "Deltas are text_delta, thinking_delta, or input_json_delta. Tool inputs arrive as JSON-string deltas."
+  - event: "stream_event/content_block_stop"
+    category: assistant
+    fields: ["type", "uuid", "session_id", "parent_tool_use_id", "event.type", "event.index"]
+    notes: "Closes a content block."
+  - event: "stream_event/message_stop"
+    category: assistant
+    fields: ["type", "uuid", "session_id", "parent_tool_use_id", "event.type"]
+    notes: "Closes a streamed assistant message."
+  - event: "stream_event/tool_progress"
+    category: tool_call
+    fields: ["type", "uuid", "session_id", "event.type", "event.tool_use_id", "event.content"]
+    notes: "MCP progress data only when partial messages are enabled and the tool emits progress."
+  - event: "stream_event/active_goal"
+    category: plan
+    fields: ["type", "uuid", "session_id", "event.type", "event.active_goal"]
+    notes: "Active goal updates bypass message finalization guard."
+  - event: "system/task_started"
+    category: subagent
+    fields: ["type", "subtype", "uuid", "session_id", "data.task_id", "data.tool_use_id", "data.description", "data.subagent_type"]
+    notes: "Emitted for background agents/monitors."
+  - event: "system/task_notification"
+    category: subagent
+    fields: ["type", "subtype", "uuid", "session_id", "data.task_id", "data.tool_use_id", "data.status", "data.usage.total_tokens", "data.usage.tool_uses", "data.usage.duration_ms"]
+    notes: "Terminal/progress notification for background agents/monitors."
+  - event: "system/worktree_started"
+    category: other
+    fields: ["type", "subtype", "uuid", "session_id", "data"]
+    notes: "Worktree lifecycle record in source."
+  - event: "system/worktree_restored"
+    category: other
+    fields: ["type", "subtype", "uuid", "session_id", "data.slug", "data.path", "data.branch"]
+    notes: "Worktree lifecycle record in source."
+  - event: "system/continue_turn_failed"
+    category: error
+    fields: ["type", "subtype", "uuid", "session_id", "data.error"]
+    notes: "Structured diagnostic in stream-json session continuation when a result was already emitted."
+  - event: "control_request/can_use_tool"
+    category: permission
+    fields: ["type", "request_id", "request.subtype", "request.tool_name", "request.tool_use_id", "request.input", "request.permission_suggestions", "request.blocked_path"]
+    notes: "Only in --input-format stream-json/control mode."
+  - event: "control_response"
+    category: permission
+    fields: ["type", "response.subtype", "response.request_id", "response.response", "response.error"]
+    notes: "Acknowledges control requests or errors in control mode."
+  - event: "control_cancel_request"
+    category: other
+    fields: ["type", "request_id"]
+    notes: "Cancels a pending control request in control mode."
 tools:
-  - name: "read_file"
+  - name: "read/write/edit/shell built-ins"
     call_visible: true
     result_visible: true
     metadata: ["tool_use.id", "tool_use.name", "tool_use.input", "tool_result.tool_use_id", "tool_result.content", "tool_result.is_error"]
-    notes: "Read results are user/tool_result messages. Permission denials also aggregate in final result.permission_denials."
-  - name: "list_directory"
-    call_visible: true
-    result_visible: true
-    metadata: ["input", "content", "is_error"]
-    notes: "Same general tool_use/tool_result shape."
-  - name: "grep_search"
-    call_visible: true
-    result_visible: true
-    metadata: ["input", "content", "is_error"]
-    notes: "Same general tool_use/tool_result shape."
-  - name: "glob"
-    call_visible: true
-    result_visible: true
-    metadata: ["input", "content", "is_error"]
-    notes: "Same general tool_use/tool_result shape."
-  - name: "edit"
-    call_visible: true
-    result_visible: true
-    metadata: ["path in input when present", "tool_result.content", "permission_denials"]
-    notes: "No dedicated file_change event; infer writes from tool name/input/result."
-  - name: "write_file"
-    call_visible: true
-    result_visible: true
-    metadata: ["path in input when present", "tool_result.content", "permission_denials"]
-    notes: "No dedicated file_change event; infer writes from tool name/input/result."
-  - name: "run_shell_command"
-    call_visible: true
-    result_visible: true
-    metadata: ["command input", "tool_result.content", "is_error"]
-    notes: "Exit code/stdout/stderr are not guaranteed as separately typed fields in the CLI stream; they may be embedded in content/resultDisplay."
-  - name: "agent"
-    call_visible: true
-    result_visible: true
-    metadata: ["parent_tool_use_id", "subagent user/assistant/result messages", "task notifications where surfaced"]
-    notes: "Subagent messages are linked to the parent agent tool call by parent_tool_use_id."
-  - name: "skill"
-    call_visible: true
-    result_visible: true
-    metadata: ["tool_use", "tool_result"]
-    notes: "Can affect model override internally; stream should still be parsed as ordinary tool records."
-  - name: "todo_write"
-    call_visible: true
-    result_visible: true
-    metadata: ["tool_use", "tool_result"]
-    notes: "Planning/todo state is not a dedicated normalized plan event except active_goal when emitted."
-  - name: "ask_user_question"
-    call_visible: true
-    result_visible: true
-    metadata: ["tool_use", "tool_result", "permission/control behavior unknown"]
-    notes: "Human answer behavior in plain one-shot headless mode was not fully verified; treat as human-in-loop risk."
-  - name: "exit_plan_mode"
-    call_visible: true
-    result_visible: true
-    metadata: ["tool_use", "tool_result"]
-    notes: "Relevant when plan workflow is active."
-  - name: "web_fetch"
-    call_visible: true
-    result_visible: true
-    metadata: ["tool_use", "tool_result", "permission_denials"]
-    notes: "Network/tool permission policy can deny."
-  - name: "web_search"
-    call_visible: true
-    result_visible: true
-    metadata: ["tool_use", "tool_result", "usage.server_tool_use.web_search_requests"]
-    notes: "Usage may include web_search_requests in ExtendedUsage."
+    notes: "Tool starts appear as assistant tool_use content blocks; results appear as user tool_result blocks. Command stdout/stderr are not normalized as separate fields."
   - name: "MCP tools"
     call_visible: true
     result_visible: true
-    metadata: ["system.mcp_servers", "tool_use.name", "tool_progress", "tool_result"]
-    notes: "tool_progress is visible only as stream_event/tool_progress with --include-partial-messages."
+    metadata: ["system.mcp_servers", "tool_use.name", "tool_progress.content", "tool_result.content"]
+    notes: "MCP server list is in init metadata; progress is visible only with partial messages."
   - name: "structured_output"
     call_visible: true
     result_visible: true
-    metadata: ["result.structured_result", "result.result"]
-    notes: "Synthetic tool for --json-schema. Final result carries structured_result; this tool is exempt from --max-tool-calls but not --max-session-turns."
+    metadata: ["tool_use.name", "tool_use.input", "result.structured_result", "result.result"]
+    notes: "Only exists with --json-schema; final object should be read from result.structured_result."
+  - name: "agent/background task tools"
+    call_visible: true
+    result_visible: true
+    metadata: ["parent_tool_use_id", "system.task_started", "system.task_notification", "data.usage"]
+    notes: "Parent stream sees task lifecycle and parent_tool_use_id. Inner subagent tool-call completeness is not guaranteed as a full nested transcript."
+  - name: "cron/loop/team experimental tools"
+    call_visible: true
+    result_visible: true
+    metadata: ["system.task_started", "system.task_notification", "permission/control events"]
+    notes: "Availability depends on settings/env. Team approvals can auto-cancel outside stream-json control mode unless YOLO is active."
 completion:
-  success_event: "result with subtype=success and is_error=false"
-  failure_event: "result with is_error=true when emitted; otherwise rely on process exit code and stderr"
-  exit_code_reliable: false
-  result_fields: ["result.result", "result.structured_result", "result.error.message", "result.permission_denials", "result.num_turns", "result.duration_ms", "result.duration_api_ms"]
-  cost_fields: ["unknown; stats/modelUsage may help but no stable cost field verified"]
-  usage_fields: ["result.usage.input_tokens", "result.usage.output_tokens", "result.usage.cache_read_input_tokens", "result.usage.cache_creation_input_tokens", "result.usage.total_tokens", "result.usage.server_tool_use.web_search_requests", "result.modelUsage", "result.stats.models"]
-  notes: "Docs state some failures such as max-session-turns exit 53 and signal interrupts exit 130 with stderr only. Budget errors are documented as exit 55 and source tries to emit a terminal result before exiting when possible."
+  success_event: "type=result, subtype=success, is_error=false"
+  failure_event: "type=result with is_error=true when emitted; otherwise classify by non-zero exit code and stderr"
+  exit_code_reliable: true
+  result_fields: ["result", "structured_result", "error.message", "duration_ms", "duration_api_ms", "num_turns", "permission_denials"]
+  cost_fields: []
+  usage_fields: ["usage.input_tokens", "usage.output_tokens", "usage.total_tokens", "usage.cache_creation_input_tokens", "usage.cache_read_input_tokens", "modelUsage.*", "data.usage.total_tokens"]
+  notes: "Exit code remains necessary. Structured-output docs explicitly state max-session-turns exits 53 and signal interrupts exit 130 with stderr only; budget aborts use 55."
 blocking_behavior:
   permissions: configurable
   questions: unknown
   tool_approvals: configurable
-  notes: "Plain one-shot headless mode cannot prompt through a TUI; non-stream-json teammate approvals auto-cancel unless YOLO. SDK docs say default SDK behavior auto-denies write tools unless canUseTool/allowedTools/yolo approves, and canUseTool has a timeout. stream-json input/control mode can emit can_use_tool requests that a host must answer."
+  notes: "Use --approval-mode yolo/auto/auto-edit/plan, --yolo, or stream-json control responses for deterministic runs. Default manual approval cannot be answered by a non-control wrapper."
 subagents:
   supported: true
   start_visible: true
   stop_visible: true
   nested_events_visible: true
   prompt_injection_supported: true
-  metadata_fields: ["parent_tool_use_id", "system.agents", "subagent user messages", "subagent assistant messages", "subagent result errors"]
-  notes: "The agent tool is visible as a normal tool call; child messages and tool calls are linked by parent_tool_use_id. --max-tool-calls counts the top-level agent call but not inner subagent calls; use --exclude-tools agent or --max-subagent-depth for tighter automation bounds."
+  metadata_fields: ["parent_tool_use_id", "system.task_started.data", "system.task_notification.data", "agents", "data.usage"]
+  notes: "Subagent/background-task lifecycle is visible through task_started/task_notification and parent_tool_use_id. Full nested event parity and per-subagent model identity remain partially unverified."
 use_cases:
   - name: "plan_cap_approaching"
     detectable: false
     event_types: []
     fields: []
     hook_parity: "unknown"
-    notes: "No verified near-cap event for plan/quota."
+    notes: "No plan/quota near-cap event verified in stream-json."
   - name: "plan_capped"
     detectable: true
-    event_types: ["result/error_during_execution", "process exit 55", "process exit 53", "stderr"]
-    fields: ["result.error.message", "exit_code"]
+    event_types: ["result", "stderr"]
+    fields: ["error.message", "exit_code"]
     hook_parity: "unknown"
-    notes: "Run budgets produce exit 55; max turns produce exit 53. Provider billing quota exhaustion is not a typed stream event."
+    notes: "Provider quota or max-turn/budget caps can be inferred from result errors or exit codes, but reset windows/upgrades are not normalized."
   - name: "no_funds"
-    detectable: false
-    event_types: ["result/error_during_execution", "stderr"]
-    fields: ["error.message"]
+    detectable: true
+    event_types: ["result", "stderr"]
+    fields: ["error.message", "exit_code"]
     hook_parity: "unknown"
-    notes: "Only generic provider error text was verified."
+    notes: "Detect by provider error text; no dedicated no_funds discriminator verified."
   - name: "auth"
     detectable: true
-    event_types: ["result/error_during_execution", "stderr", "process exit nonzero"]
-    fields: ["result.error.message"]
+    event_types: ["result", "stderr"]
+    fields: ["error.type", "error.message", "exit_code"]
     hook_parity: "unknown"
-    notes: "Auth source/kind is not emitted as metadata; classify from error text and configured auth."
+    notes: "Missing/invalid auth may fail before or during the run; auth kind is not emitted as stable stream metadata."
   - name: "permission_read_denied"
     detectable: true
-    event_types: ["user tool_result", "result"]
-    fields: ["message.content[].is_error", "message.content[].content", "result.permission_denials[].tool_name", "result.permission_denials[].tool_input"]
+    event_types: ["control_request", "control_response", "user/tool_result", "result"]
+    fields: ["request.blocked_path", "request.tool_name", "message.content[].is_error", "permission_denials[].tool_input"]
     hook_parity: "unknown"
-    notes: "Final permission_denials include tool name, tool_use_id, and full input; no dedicated denied-read event verified."
+    notes: "Permission denials are collected in result.permission_denials but do not explicitly classify read vs write."
   - name: "permission_write_denied"
     detectable: true
-    event_types: ["user tool_result", "result"]
-    fields: ["message.content[].is_error", "result.permission_denials[].tool_name", "result.permission_denials[].tool_input"]
+    event_types: ["control_request", "control_response", "user/tool_result", "result"]
+    fields: ["request.blocked_path", "request.tool_name", "message.content[].is_error", "permission_denials[].tool_input"]
     hook_parity: "unknown"
-    notes: "Same as read denial. blocked_path exists in control_request but current source default emits null unless caller supplies it."
+    notes: "Classify by tool name/input path heuristics; no stable write_denied event name verified."
   - name: "tokens_consumed"
     detectable: true
-    event_types: ["assistant", "result"]
-    fields: ["assistant.message.usage", "result.usage", "result.modelUsage", "result.stats.models"]
+    event_types: ["assistant", "result", "system/task_notification"]
+    fields: ["message.usage.input_tokens", "message.usage.output_tokens", "result.usage", "result.modelUsage", "data.usage.total_tokens"]
     hook_parity: "unknown"
-    notes: "Assistant usage is per completed assistant message; result.usage is aggregate. stats only appears in json mode in current source."
+    notes: "Units are tokens. Result usage is session aggregate from metrics; assistant usage is message-level."
   - name: "model_used"
     detectable: true
-    event_types: ["system/init", "assistant", "stream_event/message_start"]
-    fields: ["system.model", "assistant.message.model", "event.message.model"]
+    event_types: ["system/init", "assistant", "result"]
+    fields: ["model", "message.model", "modelUsage"]
     hook_parity: "unknown"
-    notes: "Reports configured model string, not necessarily a fully resolved backend route."
+    notes: "Model string is emitted, but alias vs resolved backend is not explicitly marked."
   - name: "model_fallback"
     detectable: false
     event_types: []
     fields: []
     hook_parity: "unknown"
-    notes: "No dedicated fallback event verified; compare requested --model/env with emitted model as a weak inference only."
+    notes: "No dedicated fallback event verified."
   - name: "human_in_loop"
     detectable: true
-    event_types: ["assistant tool_use", "control_request/can_use_tool", "stderr"]
-    fields: ["message.content[].name", "request.subtype", "request.tool_name"]
+    event_types: ["control_request/can_use_tool", "stderr"]
+    fields: ["request.subtype", "request.tool_name", "request.blocked_path"]
     hook_parity: "unknown"
-    notes: "ask_user_question tool calls and control permission requests indicate human-in-loop risk; plain one-shot answer behavior remains a gap."
+    notes: "In control mode, approval requests are explicit. In one-shot mode, teammate approval can auto-cancel with stderr notice unless YOLO is active."
   - name: "session_resumable"
     detectable: true
-    event_types: ["system/init", "result"]
+    event_types: ["system/init", "assistant", "result"]
     fields: ["session_id"]
-    hook_parity: "none"
-    notes: "Session ID is emitted at run start and can be used with --resume if chat recording remains enabled."
+    hook_parity: "unknown"
+    notes: "Use session_id with --resume when a specific saved session should be resumed."
   - name: "subagent_prompt_injection"
     detectable: true
-    event_types: ["system/init", "assistant tool_use agent", "user subagent prompt"]
-    fields: ["system.agents", "message.content[].name", "parent_tool_use_id", "message.content"]
+    event_types: ["system/init", "system/task_started"]
+    fields: ["agents", "data.subagent_type", "data.description"]
     hook_parity: "unknown"
-    notes: "Top-level --append-system-prompt can instruct subagents indirectly; SDK/control initialize can provide agents. Direct per-subagent injection surface needs more verification."
+    notes: "Main-session system/append prompt can instruct subagents indirectly; SDK initialize can also supply agents."
 headless_constraints:
-  - constraint: "Use --output-format stream-json explicitly; text mode is not parser-safe."
-    mitigation: "Always pass --output-format stream-json --include-partial-messages for Claudine-supervised runs."
-    notes: "json mode is useful only for post-run audit/stats."
-  - constraint: "stream-json input mode is a bidirectional protocol."
-    mitigation: "Do not use --input-format stream-json unless Claudine is prepared to send/answer protocol messages."
-    notes: "The official docs describe it as under construction and intended for SDK integration."
-  - constraint: "Default/ask permissions can require approval that plain headless mode cannot supply."
-    mitigation: "Use plan/read-only constraints, explicit allow/deny rules, SDK canUseTool, or yolo inside an external sandbox."
-    notes: "Do not use --yolo without sandbox for untrusted work."
-  - constraint: "YOLO does not imply sandboxing."
-    mitigation: "Use --sandbox or QWEN_SANDBOX=1 when auto-approving tools."
-    notes: "Qwen prints a startup warning to stderr when yolo has no sandbox."
-  - constraint: "Some failures do not emit a terminal result record."
-    mitigation: "Treat process exit code and stderr as required lifecycle inputs in addition to stdout JSONL."
-    notes: "Structured-output docs call out max-session-turns and signal interrupts."
-  - constraint: "stats are missing from stream-json result in current source."
-    mitigation: "Use result.usage/modelUsage for live runs, or run json mode for post-run stats when live progress is not needed."
-    notes: "Do not require result.stats in Claudine's stream-json parser."
-  - constraint: "Subagent inner tool calls are outside --max-tool-calls."
-    mitigation: "Set --max-subagent-depth 1 or disable agent tool for strict tool-call caps."
-    notes: "Docs explicitly scope tool-call budget to top-level dispatches."
-  - constraint: "--json-schema conflicts with --input-format stream-json and ACP."
-    mitigation: "Use one-shot stream-json/json output for schema-constrained final payloads."
-    notes: "Final result carries structured_result when supported."
-  - constraint: "Docs examples show system.subtype=session_start but current source emits init."
-    mitigation: "Accept both subtypes and prefer source-backed init for current parser fixtures."
-    notes: "Parser should key primarily on type=system and known metadata fields."
+  - constraint: "stream-json input mode is documented as under construction and intended for SDK integration."
+    mitigation: "Prefer one-shot qwen -p with --output-format stream-json for Claudine unless Claudine implements the control protocol."
+    notes: "Control mode requires bidirectional stdin/stdout handling."
+  - constraint: "Some failures do not emit a terminal result line."
+    mitigation: "Always combine stream parsing with process exit-code and stderr classification."
+    notes: "Docs name max-session-turns exit 53 and signal interrupts exit 130 as stderr-only cases."
+  - constraint: "Default approval mode cannot prompt in a plain non-interactive wrapper."
+    mitigation: "Use --approval-mode yolo/auto/auto-edit/plan, restrict tools, or implement --input-format stream-json control responses."
+    notes: "YOLO without sandbox is risky and emits a warning unless suppressed."
+  - constraint: "--json-schema conflicts with --input-format stream-json, ACP, and prompt-interactive."
+    mitigation: "Use --json-schema only with one-shot headless text input/output modes."
+    notes: "Prefer result.structured_result over result.result when using JSON formats."
+  - constraint: "stderr contains meaningful lifecycle diagnostics."
+    mitigation: "Do not discard stderr; capture and classify warnings, auth, MCP failures, retry heartbeats, and budget/interrupt failures."
+    notes: "stdout remains parse-only in stream-json mode."
+  - constraint: "Tool command stdout/stderr are folded into tool_result content."
+    mitigation: "Classify shell outcomes from tool_result content and is_error; do not expect structured per-command stdout/stderr fields."
+    notes: "No dedicated command exit-code field verified in stream-json."
 quirks:
-  - "The best stream schema is TypeScript source, not JSON Schema or OpenAPI."
-  - "Official docs examples still show system.subtype=session_start; current source emits system.subtype=init."
-  - "Current stream-json partial input_json_delta contains JSON.stringify(input), not necessarily tiny incremental chunks."
-  - "result.stats is emitted only for --output-format json in current source; stream-json result has usage and may have modelUsage but not stats."
-  - "Permission denied path detail is best recovered from result.permission_denials[].tool_input; control_request.blocked_path exists but defaults to null in the base emitter."
-  - "stderr is not ignorable: yolo warnings, API errors, persistent retry heartbeats, debug logs, and some no-result failures appear there."
-  - "Qwen OAuth free tier was discontinued on 2026-04-15; unattended runs should use configured Alibaba Cloud/API-key providers."
-  - "The local machine inspected during research had qwen 0.15.6, while the document follows current official docs/source as of 2026-07-02."
+  - "Public docs examples use system subtype session_start, while current CLI source builds subtype init for normal non-interactive system metadata."
+  - "stream-json without --include-partial-messages streams completed messages but not token/content deltas."
+  - "stream_event content_block_delta for tool input uses delta.partial_json as a JSON string, not an object."
+  - "The strongest schema is TypeScript source, not a formal JSON Schema; parser drift should be expected across releases."
+  - "JSON output carries richer stats than stream-json in current source; stream-json is better for live supervision but weaker for post-run auditing."
+  - "YOLO auto-approves host-level shell/write/edit unless sandbox is separately enabled."
 gaps:
-  - "No formal JSON Schema, OpenAPI, AsyncAPI, or versioned schema marker for the CLI stream was found."
-  - "Exact behavior of ask_user_question in plain one-shot non-interactive mode was not verified with a live run."
-  - "Exact auth/rate-limit/no-funds error payload taxonomy is generic and needs captured fixtures."
-  - "Whether all built-in tool outputs preserve command exit code/stdout/stderr as structured fields was not verified; current evidence shows content/resultDisplay projection."
-  - "Exact dual-output --json-file/--json-fd framing and parity with stdout stream-json needs separate fixture capture."
-  - "Timestamp fields were not found in the CLI stream union."
-  - "Cost fields were not verified as stable stream fields."
-  - "Direct per-subagent prompt injection controls outside general prompt/agent config need more verification."
+  - "No formal JSON Schema or protocol version for CLI stream-json was found."
+  - "Exact package version tested at runtime was not captured; findings are from official docs and main-branch source on 2026-07-03."
+  - "Exact auth failure payloads across Qwen OAuth, Coding Plan, OpenAI-compatible providers, and custom modelProviders were not exhaustively sampled."
+  - "No stable dedicated file-change event was verified; file changes must be inferred from tool_use/tool_result content."
+  - "No stable cost field was verified; token usage exists but currency cost does not."
+  - "No dedicated model fallback event was verified."
+  - "Full nested subagent transcript completeness and per-subagent model identity need fixture capture."
 claudine_strategy:
-  preferred_invocation: 'qwen -p "$PROMPT" --output-format stream-json --include-partial-messages --approval-mode plan --max-session-turns <n> --max-wall-time <duration>'
-  required_flags: ["--output-format stream-json", "--include-partial-messages", "--max-session-turns", "--max-wall-time", "one of --approval-mode plan/default/auto-edit/auto/yolo chosen by policy"]
-  conflicting_flags: ["--prompt-interactive", "--input-format stream-json unless Claudine implements the control protocol", "--json-schema together with --input-format stream-json", "--acp for normal CLI stream parsing", "--resume without an explicit session id"]
-  parser_notes: "Parse stdout as JSONL using type as the top-level discriminator. For stream_event records, branch on event.type. Join tool_use to tool_result by content id/tool_use_id and join subagent activity by parent_tool_use_id. Preserve stderr and exit code for lifecycle classification."
-  wrapper_notes: "Prefer plan/read-only for inspection, yolo only under a sandbox. Keep stderr visible in reports. Accept both system subtype init and session_start. Do not assume terminal result on every failure."
+  preferred_invocation: 'qwen -p "$PROMPT" --output-format stream-json --include-partial-messages --approval-mode auto --max-session-turns <N> --max-wall-time <duration>'
+  required_flags: ["--output-format stream-json", "--include-partial-messages", "--prompt/-p or stdin prompt", "--max-session-turns", "--max-wall-time"]
+  conflicting_flags: ["--prompt-interactive", "--input-format stream-json unless implementing control protocol", "--json-schema with --input-format stream-json", "--acp with --json-schema"]
+  parser_notes: "Parse stdout as JSONL using type, subtype, and event.type. Accept both system/init and documented system/session_start. Treat result as terminal only when present; classify missing terminal result with exit code and stderr."
+  wrapper_notes: "Capture stderr, preserve exit code, set deterministic approval/sandbox/budget flags, avoid bare --resume, and keep unknown events for drift analysis."
 data_format: jsonl
 changes: []
 requires_claudine_update: true
-reason: "Qwen's current source-backed stream includes active_goal and control-plane event shapes, uses system subtype init rather than the documented session_start example, and lacks stream-json stats; Claudine parser metadata should reflect those details."
+reason: "Claudine should prefer Qwen stream-json with --include-partial-messages, but parser metadata must account for system/init vs session_start, stream_event deltas, control mode, stderr-only failures, and result-missing exit-code classification."
 ---
+
+# Qwen CLI Non-Interactive Sessions
 
 ## Summary
 
-Qwen Code can run non-interactively and has useful structured output. Claudine should prefer `qwen -p ... --output-format stream-json --include-partial-messages` for ordinary supervised runs because it emits line-delimited JSON on stdout while the process is still active. The stream exposes session initialization, completed assistant messages, tool calls, tool results, optional partial deltas, MCP progress, subagent-linked records, aggregate usage, permission denials, and a terminal `result` record when the run reaches the adapter's normal completion path.
+Qwen Code can run non-interactively with structured output. The best Claudine mode is `qwen -p "..." --output-format stream-json --include-partial-messages`: stdout becomes line-delimited JSON, completed messages are available as they occur, and partial `stream_event` records expose live text, thinking, tool inputs, MCP progress, and active-goal updates. The official headless docs define `text`, `json`, and `stream-json`; they explicitly describe `stream-json` as one complete JSON object per line and name `--include-partial-messages` as the flag that adds `message_start`, `content_block_delta`, and related live events.
 
-The main risks are schema drift and incomplete failure coverage. Qwen does not publish a formal JSON Schema for the CLI stream; the most reliable schema is the TypeScript union and output-adapter implementation in the repository. Some failures can exit with only stderr and an exit code, `result.stats` currently appears in buffered `json` output but not `stream-json`, and the official Headless docs still show `system.subtype: "session_start"` while current source emits `system.subtype: "init"`. Claudine should parse stdout JSONL, preserve stderr as lifecycle evidence, and treat process exit as necessary but not sufficient.
+The main wrapper risk is that `stream-json` is not a complete lifecycle oracle. The structured-output docs say some failures, including max-session-turns and signal interrupts, can exit with stderr only and no final `result` event. Claudine must parse stdout JSONL and capture stderr and exit status. The strongest schema evidence is TypeScript source in Qwen's `packages/cli/src/nonInteractive` tree, not a published JSON Schema, and there is a visible naming drift risk: public examples show `system` subtype `session_start`, while current CLI source builds a normal init message with subtype `init`.
 
 ## Non-Interactive Entry Points
 
-The documented headless entry point is `qwen --prompt/-p`, with prompt text supplied by argv, piped stdin, or both. Headless mode is explicitly described as intended for scripting, automation, CI/CD, and tool-building. It can also resume saved project-scoped sessions using `--continue` or `--resume <session-id>`; the docs say session data is JSONL under `~/.qwen/projects/<sanitized-cwd>/chats`, and that resume restores conversation history, tool outputs, and compression checkpoints.
+The normal one-shot entry point is `qwen --prompt/-p`, or piped stdin. The headless docs say headless mode accepts prompts through command-line arguments or stdin, supports file redirection and piping, and can resume prior project-scoped sessions. The same page documents:
 
-The safe fresh-run command shape for Claudine is:
+| Entry point | Prompt source | Session behavior | Claudine fit |
+| --- | --- | --- | --- |
+| `qwen -p "prompt"` | argv | Fresh one-shot headless session | Preferred |
+| `cat file | qwen -p "prompt"` | argv plus stdin | Fresh one-shot with extra context | Preferred |
+| `qwen --continue -p "prompt"` | argv | Continues most recent project session | Use only when requested |
+| `qwen --resume <session-id> -p "prompt"` | argv | Resumes specific session | Safe if ID supplied |
+| `qwen --input-format stream-json --output-format stream-json` | JSONL stdin | Long-lived SDK/control protocol | Only if Claudine implements bidirectional protocol |
 
-```bash
-qwen -p "$PROMPT" \
-  --output-format stream-json \
-  --include-partial-messages \
-  --max-session-turns 20 \
-  --max-wall-time 10m
-```
-
-For read-only or low-risk inspection, add `--approval-mode plan` or explicit `--exclude-tools shell,write,edit,agent`. For autonomous mutation, use `--approval-mode yolo` or `--yolo` only when Claudine has already provided an external sandbox or Qwen's own `--sandbox`/`QWEN_SANDBOX=1` is enabled. Qwen's docs call out that YOLO auto-approves shell/write/edit but does not enable sandboxing by itself.
-
-Qwen also has a bidirectional non-interactive mode:
-
-```bash
-qwen --input-format stream-json --output-format stream-json
-```
-
-That mode is not just "prompt via JSON." Stdin becomes a JSON-line protocol for SDK/control messages, and stdout can include control requests/responses alongside agent messages. The Headless docs call stream-json input "under construction" and intended for SDK integration, so Claudine should not use it for the basic wrapper until it implements the control protocol.
+Qwen also supports per-run prompt controls: `--system-prompt` replaces the main-session prompt for that run, and `--append-system-prompt` adds instructions after the built-in prompt and loaded memory. For automation, Claudine should set bounded execution controls such as `--max-session-turns` and `--max-wall-time`. The docs distinguish max-session-turns exit code `53`, run-budget exit code `55`, and signal interrupt exit code `130`.
 
 ## Output Formats
 
-| Mode | Selector | Transport | Streams? | Claudine use |
+Qwen's non-interactive output formats are selected with `--output-format`.
+
+| Format | CLI value | Streamed | Shape | Notes |
 | --- | --- | --- | --- | --- |
-| Text | `--output-format text` or default | Plain text | Human output streams as text | Avoid for lifecycle parsing |
-| JSON | `--output-format json` | One JSON array after completion | No | Useful for post-run audit and `stats`, not live supervision |
-| Stream JSON | `--output-format stream-json` | JSONL/NDJSON on stdout | Yes | Preferred for Claudine |
-| Stream JSON control | `--input-format stream-json --output-format stream-json` | Bidirectional JSON-line protocol | Yes | Use only if Claudine hosts the protocol |
+| Text | `text` | Yes, as human output | Plain text | Default. Not safe for live parser supervision. With `--json-schema`, successful stdout is the validated JSON payload line. |
+| Buffered JSON | `json` | No | Single JSON array | Includes message log and final `result`; useful for post-run stats, but no live progress. |
+| Streaming JSON | `stream-json` | Yes | JSONL / NDJSON-like | Best Claudine format. Each stdout line is a complete JSON object. |
+| Stream JSON input/control | `--input-format stream-json --output-format stream-json` | Yes | Bidirectional JSONL | SDK/control protocol, not prompt text. Upstream docs call it under construction. |
 
-`stream-json` is the right default because it gives Claudine progress before process exit. Without `--include-partial-messages`, it still emits completed message envelopes such as `system`, `assistant`, `user`, and `result`. With `--include-partial-messages`, it also emits `stream_event` records such as `message_start`, `content_block_delta`, `tool_progress`, and `active_goal`. This matters for terminal status: Claudine can show that the model is thinking, starting a tool call, receiving tool progress, or producing text instead of waiting for a final JSON array.
+Claudine should prefer `stream-json` plus `--include-partial-messages`. Plain `stream-json` is already structured, but it emits completed message objects; the partial flag adds live `stream_event` records for progress and tool inputs. That matters because Claudine is supervising a running process, not just collecting a final answer.
 
-Buffered `json` is not useless. Current source adds `stats` only when the output format is `json`, and the Headless docs include jq examples against `.stats.models` and `.stats.tools`. The tradeoff is that Claudine sees nothing live. If the wrapper's goal is a report after completion, `json` can be attractive; if the goal is autonomous-process supervision, `stream-json` wins.
-
-`--json-schema` is a separate structured-output feature. In text mode, successful stdout is the validated JSON payload. In `json`, the final array element is a `result` message carrying both `result` as a stringified payload and `structured_result` as the raw object. In `stream-json`, the terminal `result` line carries the same fields. The docs say `--json-schema` is rejected with `--input-format stream-json` and with ACP, so schema-constrained outputs belong to one-shot text/json/stream-json runs, not the long-lived control protocol.
+Buffered `json` remains useful for fixture capture and post-run audits. The current source only attaches the full `stats` object to result messages when the selected output format is `json`; stream-json carries `usage` and optional `modelUsage`, but not the same full stats object. For live wrapping, that tradeoff favors stream-json; for offline usage reports, Claudine may optionally run or replay buffered JSON fixtures.
 
 ## Schema Sources
 
-There is no verified formal JSON Schema, OpenAPI, or AsyncAPI document for Qwen CLI's non-interactive stream. The best schema evidence is provider-authored TypeScript:
+There is no formal JSON Schema for the CLI stream. The authoritative shape is the TypeScript union in [`packages/cli/src/nonInteractive/types.ts`](https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/nonInteractive/types.ts). It defines top-level `CLIMessage` variants (`user`, `assistant`, `system`, `result`, `stream_event`) and `ControlMessage` variants (`control_request`, `control_response`, `control_cancel_request`).
 
-| Source | Role | Confidence |
-| --- | --- | --- |
-| [`packages/cli/src/nonInteractive/types.ts`](https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/nonInteractive/types.ts) | CLI-local unions for `CLIMessage`, `StreamEvent`, `ControlMessage`, results, and permission denials | Highest for the CLI |
-| [`packages/cli/src/nonInteractive/io/BaseJsonOutputAdapter.ts`](https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/nonInteractive/io/BaseJsonOutputAdapter.ts) | Actual construction of assistant/user/result records, permission denials, and structured results | Highest for emitted fields |
-| [`packages/cli/src/nonInteractive/io/StreamJsonOutputAdapter.ts`](https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/nonInteractive/io/StreamJsonOutputAdapter.ts) | JSONL framing and partial stream event emission | Highest for streaming behavior |
-| [`packages/sdk-typescript/src/types/protocol.ts`](https://github.com/QwenLM/qwen-code/blob/main/packages/sdk-typescript/src/types/protocol.ts) | SDK-facing protocol types | Useful but not exact; currently narrower than CLI-local source for some stream events |
-| [Headless Mode docs](https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/) | Public feature and command documentation | Good for user-facing behavior; examples lag source |
-| [TypeScript SDK docs](https://qwenlm.github.io/qwen-code-docs/en/developers/sdk-typescript/) | SDK query and permission behavior | Useful for control-plane behavior |
+The output adapters are also schema evidence. [`BaseJsonOutputAdapter.ts`](https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/nonInteractive/io/BaseJsonOutputAdapter.ts) builds assistant messages, tool-result user messages, result messages, `permission_denials`, and `structured_result`. [`StreamJsonOutputAdapter.ts`](https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/nonInteractive/io/StreamJsonOutputAdapter.ts) writes each message as `JSON.stringify(message) + "\n"` and emits partial events only when `includePartialMessages` is enabled.
 
-The schema source mismatch is important. The SDK protocol file is valuable, but the CLI-local type file currently includes `tool_progress` and `active_goal` stream events that are not present in the SDK type excerpt I inspected. Claudine should generate parser fixtures from CLI-local source and use SDK docs/source for the bidirectional control layer.
+The SDK protocol types in [`packages/sdk-typescript/src/types/protocol.ts`](https://github.com/QwenLM/qwen-code/blob/main/packages/sdk-typescript/src/types/protocol.ts) are useful for control mode, but they are secondary for Claudine's one-shot wrapper because the CLI-local adapters define the actual stdout records. The official docs provide examples and behavior descriptions, but not a complete schema.
 
 ## IO Contract
 
-In `stream-json` output mode, stdout is one JSON object per line. Qwen's `StreamJsonOutputAdapter` writes `JSON.stringify(message) + "\n"` to stdout for each message. Claudine can parse stdout line-by-line and should treat each line as an independent JSON envelope.
+In preferred mode, stdout is parse-only JSONL. Each line is independently parseable JSON. Stderr is not ignorable: startup warnings, debug log paths, MCP server failures, YOLO-without-sandbox warnings, persistent retry heartbeats, auth errors, and some terminal failures can appear there. The headless docs explicitly say persistent retry prints heartbeat messages to stderr and keeps JSON stdout clean.
 
-Stderr is not ignorable. Qwen writes startup warnings, API errors, debug logs, YOLO-without-sandbox warnings, and persistent-retry heartbeat lines to stderr. Persistent retry mode is explicitly documented to print heartbeat messages every 30 seconds while retrying transient HTTP 429/529 errors, and the docs say those messages do not appear on stdout, preserving JSON cleanliness. For failure classification, stderr is a secondary lifecycle stream.
-
-Stdin depends on `--input-format`. In the default `text` mode, stdin can be prompt/context text. With `--input-format stream-json`, stdin is reserved for protocol messages and requires `--output-format stream-json`. Claudine should treat that mode as a bidirectional protocol, not as a prettier prompt channel.
+Stdin is ordinary prompt/context text in default input mode. When `--input-format stream-json` is selected, stdin becomes protocol input. A wrapper that only writes a prompt and closes stdin should not use control mode unless it implements the request/response contract.
 
 ## Stream Contract
 
-The top-level discriminator is `type`. Important top-level values are:
+The top-level discriminator is `type`. Important nested discriminators are:
 
-| Top-level `type` | Meaning |
+| Path | Meaning |
 | --- | --- |
-| `system` | Session/init or runtime system message |
-| `assistant` | Completed assistant message |
-| `user` | User/tool-result message |
-| `stream_event` | Optional partial event, only with `--include-partial-messages` |
-| `result` | Terminal success/error envelope when emitted |
-| `control_request` | Bidirectional protocol request |
-| `control_response` | Bidirectional protocol response |
-| `control_cancel_request` | Bidirectional protocol cancellation |
+| `subtype` | System/result/control subtype, such as `init`, `success`, `error_during_execution`, or control response status. |
+| `event.type` | Partial stream event subtype under top-level `type: "stream_event"`. |
+| `message.content[].type` | Content block subtype: `text`, `thinking`, `tool_use`, `tool_result`. |
+| `event.delta.type` | Delta subtype: `text_delta`, `thinking_delta`, `input_json_delta`. |
 
-Nested discriminators matter. `stream_event` records branch on `event.type`; control requests branch on `request.subtype`; control responses branch on `response.subtype`; assistant content blocks branch on `message.content[].type`.
+Normal completion is a top-level `result` record. Success uses `subtype: "success"` and `is_error: false`; execution failures that reach the adapter use `is_error: true` with `error.message`. Because not all failures emit a result, Claudine should treat `result` as a preferred terminal event, not the only terminal signal.
 
-Tool calls and results are correlated by the assistant `tool_use` block's `id` and the user `tool_result` block's `tool_use_id`. Subagent activity is linked by `parent_tool_use_id`, which points back to the parent agent tool call. Control-plane request/response records use `request_id`.
+Correlation fields are `session_id`, message `uuid`, assistant `message.id`, tool-use `id`, tool-result `tool_use_id`, partial `event.tool_use_id`, `parent_tool_use_id`, and control `request_id`. Tool input deltas are stringified JSON in `event.delta.partial_json`; parsers should decode that string if they need the object.
 
-Partial-message semantics are optional. With `--include-partial-messages`, Qwen emits `message_start`, `content_block_start`, `content_block_delta`, `content_block_stop`, and `message_stop`. For tool inputs, current source emits an `input_json_delta` with `partial_json: JSON.stringify(input)`; parsers should not assume tiny fragments. Completed `assistant` messages still arrive after partials, so Claudine can use partials for live UI and completed messages for stable transcript records.
-
-The terminal record for ordinary one-shot success is `type: "result", subtype: "success", is_error: false`. Structured failures often emit `type: "result", is_error: true`, but not all failures do. The Structured Output docs explicitly say max-session-turns and signal interrupts can exit with stderr output only. Unknown events should be skipped and preserved for drift review, not treated as fatal parser errors.
+Unknown events should be skipped but retained in raw form for drift reports. The source-level schema is not versioned as a JSON protocol, so fail-open parsing with trace logging is safer than rejecting a whole run.
 
 ## Session Metadata
 
-Current source emits a system init record before the run's substantive output. The fields include:
+The source-level init system message includes `session_id`, `cwd`, `tools`, `mcp_servers`, `model`, `permission_mode`, `slash_commands`, `qwen_code_version`, and `agents`. The helper that builds it uses `subtype: "init"`. Public docs examples show a `system` message with `subtype: "session_start"`, `session_id`, and `model`. Claudine should accept both names and map both to session start.
 
-| Field | Meaning | Presence |
-| --- | --- | --- |
-| `session_id` | Stable session identifier for logs/resume | Present in system/result records |
-| `uuid` | For system init, current source sets this to the session ID | Present |
-| `cwd` | Target working directory | Present in init |
-| `tools` | Registered tool names | Present in init |
-| `mcp_servers[].name/status` | Configured MCP servers and current status | Present in init, possibly empty |
-| `model` | Configured active model | Present in init and assistant messages |
-| `permission_mode` | Approval mode | Present in init |
-| `slash_commands` | Available slash command names | Present in init |
-| `qwen_code_version` | CLI version | Present in init, or `unknown` fallback |
-| `agents` | Available subagent names | Present in init, possibly empty |
+Model identity appears as `system.model` and `assistant.message.model`. The docs and source do not prove whether that string is the requested alias or a fully resolved backend model in every provider configuration. Auth source is not emitted as a stable field. Provider identity is implicit from the wrapper invocation.
 
-The official Headless examples still show `subtype: "session_start"`. Current source-backed `buildSystemMessage` emits `subtype: "init"`. Claudine should accept both for compatibility, but parser fixtures should use `init` for current Qwen.
-
-Auth source is not emitted directly. The auth docs explain that `security.auth.selectedType`, model provider config, and provider environment variables choose OpenAI-compatible, Anthropic, Gemini, Vertex AI, Alibaba Cloud Coding Plan, or other providers. To detect auth kind, Claudine must combine configured inputs with generic error text; the stream itself does not provide a safe `auth_type` field.
+Qwen session history is project-scoped. The headless docs state that session data is stored as JSONL under `~/.qwen/projects/<sanitized-cwd>/chats` and that `--continue`/`--resume` restore conversation history, tool outputs, and compression checkpoints.
 
 ## Event Families
 
-The stream is transcript-oriented rather than a fully normalized lifecycle API. The main event families are:
+The core event families visible to Claudine are:
 
-| Family | Records | Notes |
+| Family | Records | Use |
 | --- | --- | --- |
-| Session | `system/init`, `system/worktree_started`, `system/worktree_restored`, `result` | Init arrives early enough to identify session/model/cwd/tools. |
-| Assistant text/reasoning | `assistant`, `stream_event/content_block_delta` | Reasoning appears as `thinking` blocks/deltas when surfaced. |
-| Tools | Assistant `tool_use` blocks, user `tool_result` blocks, `stream_event/tool_progress` | No dedicated file-change event; infer from tool names and inputs. |
-| Permissions | `result.permission_denials`, `control_request/can_use_tool` | Plain stream has aggregate denials; control mode can request host decisions. |
-| Usage | `assistant.message.usage`, `result.usage`, `result.modelUsage`, `result.stats` in JSON mode | Units are tokens; no cost field verified. |
-| Subagents | `agent` tool call plus child messages with `parent_tool_use_id` | Inner tool calls are visible when subagent progress is projected. |
-| Control plane | `control_request`, `control_response`, `control_cancel_request` | Only relevant for stream-json input/SDK-style use. |
+| Session | `system/init` or documented `system/session_start`, `result/*` | Session identity, metadata, final status. |
+| Assistant | `assistant`, `stream_event/message_start`, content block events, `message_stop` | Live and completed model output. |
+| Reasoning | `thinking` content blocks and `thinking_delta` | Reasoning-like content when the provider emits it. |
+| Tool calls | Assistant `tool_use` blocks, partial `input_json_delta`, `tool_progress` | Tool start, input, progress. |
+| Tool results | User `tool_result` blocks | Tool output/error content. |
+| Permission/control | `control_request`, `control_response`, `control_cancel_request` | SDK/control mode approvals and runtime control. |
+| Subagents/tasks | `system/task_started`, `system/task_notification`, `parent_tool_use_id` | Background/subagent lifecycle and usage. |
+| Errors | `result` with `is_error: true`, `system/continue_turn_failed`, stderr, exit code | Terminal and mid-session failure classification. |
 
-`active_goal` deserves special mention because it is parser-significant but easy to miss. It is emitted as `stream_event` with `event.type: "active_goal"` only when partial stream events are enabled. That makes `--include-partial-messages` valuable even when Claudine does not need token-by-token text.
+There is no dedicated file-change event verified in the CLI stream. Claudine should infer file changes from tool names, inputs, and results unless future Qwen releases add explicit events.
 
 ## Tools
 
-Qwen's stream exposes tool calls as assistant content blocks:
+Built-in tool calls are visible before execution as assistant `tool_use` blocks. The block has `id`, `name`, and `input`. The result is emitted as a `user` message containing a `tool_result` block with `tool_use_id`, optional `content`, and optional `is_error`. This gives Claudine enough to join calls to results by tool ID.
 
-```json
-{"type":"assistant","message":{"content":[{"type":"tool_use","id":"...","name":"read_file","input":{"path":"src/lib.rs"}}],"stop_reason":"tool_use"}}
-```
+MCP tools use the same content-block mechanism. The init metadata lists MCP servers with `name` and `status`, and the stream can emit `tool_progress` events with `event.tool_use_id` and structured MCP progress content when partial messages are enabled.
 
-Tool results are user messages with `tool_result` blocks:
+Shell command details are not normalized into separate `stdout`, `stderr`, and `exit_code` fields in the stream shape verified here. The adapter folds tool output into `tool_result.content`, and errors are indicated by `is_error` and error text. Wrappers should not assume per-command exit-code structure unless a specific tool result payload proves it.
 
-```json
-{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"...","content":"...","is_error":false}]}}
-```
-
-The result envelope also aggregates execution-denied tool calls:
-
-```json
-{"type":"result","permission_denials":[{"tool_name":"edit","tool_use_id":"...","tool_input":{"path":"..."}}]}
-```
-
-This is enough for Claudine to detect tool families, inputs, results, and denials. It is not enough to treat file changes as first-class events. Edits and writes must be inferred from `tool_use.name` (`edit`, `write_file`) and their inputs/results. Shell command stdout/stderr/exit status may be present inside `tool_result.content` or the tool's display payload, but I did not verify stable separate `stdout`, `stderr`, and `exit_code` fields in the CLI stream.
-
-MCP progress is a special case. Tools that produce `McpToolProgressData` can emit `stream_event/tool_progress`, but only in stream-json mode with partial messages enabled.
-
-Subagents are represented through the `agent` tool and child messages. The helper code emits the subagent prompt as a `user` message with `parent_tool_use_id` set to the parent agent call. It also emits child tool calls/results through the same adapter APIs, preserving the parent linkage. This is useful for Claudine reports, but budget semantics are a trap: the Headless docs state `--max-tool-calls` counts the top-level `agent` dispatch as one and does not count inner subagent tool calls.
+The `structured_output` tool is special. With `--json-schema`, Qwen registers a synthetic tool whose parameter schema is the caller's JSON Schema. In JSON formats, the final result carries both `result` as a stringified payload and `structured_result` as the raw object. The docs recommend reading `structured_result` for machine use.
 
 ## Completion and Exit Status
 
-For normal success, trust the final `result` record:
+A normal stream-json success ends with:
 
 ```json
-{"type":"result","subtype":"success","is_error":false,"result":"...","usage":{...}}
+{"type":"result","subtype":"success","is_error":false,"result":"...","usage":{}}
 ```
 
-For structured-output success under `--json-schema`, prefer `result.structured_result` over `result.result`; the latter is stringified for consumers expecting a string. For ordinary text answers, `result.result` contains the final assistant text assembled from the last assistant message.
+Execution errors that reach the adapter end with `type: "result"`, `is_error: true`, and `error.message`. In current source, the run attempts to emit this terminal envelope for JSON and stream-json failures before invoking the error handler.
 
-For structured failures, Qwen can emit:
+Exit code still matters. The structured-output docs warn that not all failures emit a result on stdout: max-session-turns exits `53` and signal interrupts exit `130` with stderr only. Headless docs add budget aborts as exit `55`. Claudine should classify completion in this order:
 
-```json
-{"type":"result","subtype":"error_during_execution","is_error":true,"error":{"message":"..."}}
-```
-
-Source types also include `error_max_turns`, and docs distinguish exit codes: budget aborts are exit 55, max-session-turns is exit 53, and SIGINT is 130. The Structured Output docs warn that max-session-turns and signal interrupts can exit with stderr output only. Therefore Claudine should not rely solely on a terminal JSON event or solely on exit code. The robust rule is:
-
-1. If a `result` record is present, use `is_error`, `subtype`, `error.message`, usage, and permission denials.
-2. Always record process exit code.
-3. If the process exits non-zero without a terminal result, classify from exit code and stderr.
-4. If stdout JSONL ends without a `result` and exit code is zero, mark the state ambiguous and preserve raw logs.
+1. If a terminal `result` line exists, use it for final text/error, usage, and permission denials.
+2. Always preserve the process exit code. A non-zero exit after a success result is suspicious and should be reported.
+3. If no terminal result exists, classify from exit code and stderr.
 
 ## Blocking Behavior
 
-Qwen has configurable approval modes: `plan`, `default`, `auto-edit`, `auto`, and `yolo`. The Approval Mode docs say default/ask requires manual approval for edits and shell commands; auto-edit approves edit tools but still prompts for shell; auto uses a classifier; yolo auto-approves everything.
+Qwen has configurable approval modes: `plan`, `default`, `auto-edit`, `auto`, and `yolo`. The headless docs warn that `--yolo` auto-approves shell/write/edit but does not enable sandboxing. It prints a one-line stderr warning when YOLO is used without sandbox unless `QWEN_CODE_SUPPRESS_YOLO_WARNING=1` is set.
 
-In plain one-shot headless mode, there is no TUI available to answer a prompt. Source comments around teammate approvals say that in non-stream-json mode the only safe options are YOLO or cancel; otherwise Qwen auto-cancels teammate tool requests and writes a clear reason to stderr. SDK docs say default SDK behavior auto-denies write tools unless a `canUseTool` callback or allow rule approves them, and that custom permission handling has a timeout.
+In `--input-format stream-json` control mode, permission requests can be represented as `control_request` with `request.subtype: "can_use_tool"`, `tool_name`, `tool_use_id`, `input`, suggestions, and `blocked_path`. A host can respond with `control_response`. In plain one-shot non-stream-json mode there is no interactive prompt channel. Source comments show teammate approval requests auto-proceed in YOLO; otherwise they are auto-cancelled with a stderr notice and a model-visible team notice so the run does not hang for 600 seconds.
 
-For Claudine this means:
-
-| Situation | Expected automation behavior |
-| --- | --- |
-| Read-only/plan mode | Deterministic, but write/shell tools blocked |
-| Default/ask in one-shot headless | Risk of denial/cancellation because no human prompt path exists |
-| SDK/control stream with `can_use_tool` | Host can answer programmatically |
-| YOLO without sandbox | Deterministic but unsafe; Qwen warns on stderr |
-| YOLO with sandbox | Best fit for trusted autonomous mutation |
-
-`ask_user_question` exists as a first-party tool, but I did not verify its exact one-shot headless behavior. Claudine should treat any `ask_user_question` tool call as a human-in-loop risk unless it is hosting the control protocol or has provider-specific evidence that Qwen auto-fails/auto-answers.
+For deterministic Claudine runs, prefer bounded permissions. Use `--approval-mode auto` or a stricter mode with tool allow/deny settings for routine automation; use `--approval-mode yolo` only inside an isolated sandbox/container and with explicit budgets.
 
 ## Subagents
 
-Subagents can run non-interactively. The init message includes an `agents` list, and subagent work is linked to the parent `agent` tool call via `parent_tool_use_id`. The non-interactive helper code projects subagent prompts, child tool calls, child tool results, and subagent error results through the same JSON adapters used for main-agent messages.
+Subagents/background tasks can run in headless mode. Source emits `system/task_started` with `task_id`, optional `tool_use_id`, `description`, and sometimes `subagent_type`. It later emits `system/task_notification` with `task_id`, optional `tool_use_id`, `status`, and optional usage (`total_tokens`, `tool_uses`, `duration_ms`). Assistant and user messages also carry `parent_tool_use_id`, which lets Claudine associate nested work with the parent tool call.
 
-Visibility is good enough for Claudine to build a nested activity report:
-
-```text
-assistant tool_use id=A name=agent
-  user parent_tool_use_id=A content=<subagent prompt>
-  assistant parent_tool_use_id=A tool_use id=B name=read_file
-  user parent_tool_use_id=A tool_result tool_use_id=B
-```
-
-The caveat is control and budgeting. Inner subagent tool calls are visible when projected, but they are not counted by the top-level `--max-tool-calls` budget according to the docs. Use `--max-subagent-depth 1` to prevent nesting and `--exclude-tools agent` when a strict top-level tool budget must also prevent delegated work.
+This is enough for high-level progress and final task status. It does not prove full nested transcript parity for every subagent inner tool call or per-subagent model identity. Claudine should record `task_started`/`task_notification` as subagent lifecycle signals and treat deeper nested events as best-effort.
 
 ## Use Case Detection
 
-| Use case | Detectable? | Best signal | Notes |
-| --- | --- | --- | --- |
-| `plan_cap_approaching` | No | None verified | No near-cap quota/plan event found. |
-| `plan_capped` | Partly | Exit 55, exit 53, `result.error.message`, stderr | Run budgets and turn caps are detectable; provider billing quota is generic. |
-| `no_funds` | Weak | Generic error text | No stable no-funds event verified. |
-| `auth` | Weak | Generic error text plus configured auth | Stream does not emit auth source/kind. |
-| `permission_read_denied` | Yes | `result.permission_denials[]`, tool_result `is_error` | Path/policy usually recovered from tool input/content. |
-| `permission_write_denied` | Yes | Same as read denial | No dedicated write-denied event. |
-| `tokens_consumed` | Yes | `assistant.message.usage`, `result.usage`, `result.modelUsage` | `stats` requires buffered `json` in current source. |
-| `model_used` | Yes | `system.model`, `assistant.message.model` | This is the configured model string. |
-| `model_fallback` | Weak | Compare requested model to emitted model | No explicit fallback event verified. |
-| `human_in_loop` | Yes | `ask_user_question` tool call, `control_request/can_use_tool`, stderr cancellation text | Exact one-shot question behavior remains a gap. |
-| `session_resumable` | Yes | `session_id` in initial system record | Use with `--resume` if chat recording is enabled. |
-| `subagent_prompt_injection` | Partly | `system.agents`, agent tool input, child prompt records | Top-level prompt can instruct subagents indirectly; direct per-subagent injection needs more evidence. |
-
-Token units are tokens. `duration_ms` and `duration_api_ms` are milliseconds. I did not find timestamps in the CLI stream records, so Claudine should timestamp receipt time itself if it needs event timing.
+| Use case | Detectable | Signal |
+| --- | --- | --- |
+| `tokens_consumed` | Yes | `assistant.message.usage`, `result.usage`, optional `result.modelUsage`, task notification `data.usage.total_tokens`. |
+| `model_used` | Yes | `system.model`, `assistant.message.model`, `modelUsage` keys when present. |
+| `session_resumable` | Yes | `session_id` in system/assistant/result messages; use with `--resume <session-id>`. |
+| `human_in_loop` | Yes in control mode | `control_request` with `request.subtype: "can_use_tool"`; in plain mode, stderr/team notice can indicate auto-cancelled approvals. |
+| `permission_read_denied` | Partially | `permission_denials[]`, tool_result `is_error`, control `blocked_path`; classify read/write by tool name and path. |
+| `permission_write_denied` | Partially | Same as read denied; no dedicated write-denied event verified. |
+| `auth` | Partially | stderr or `result.error.message`; no stable auth kind field. |
+| `plan_capped` | Partially | exit code `53` for max turns, `55` for budget, provider error text for quota; no reset-window field. |
+| `plan_cap_approaching` | No | No verified near-cap event. |
+| `no_funds` | Partially | Provider error text only. |
+| `model_fallback` | No | No verified fallback event. |
+| `subagent_prompt_injection` | Partially | Main prompt/system prompt can instruct subagents indirectly; SDK initialize can define agents. |
 
 ## Headless Constraints
 
-The strongest constraints for automation are:
+`--input-format stream-json` is not just another output format. It makes stdin a bidirectional JSON-line protocol, and upstream docs call it under construction and intended for SDK integration. Claudine should avoid it until it can answer `control_request` messages, cancel requests, and handle initialization.
 
-- Always pass an output format. Config can influence output, but Claudine should not rely on persistent output settings because a repo/system/user setting can drift.
-- Do not treat stderr as noise. It carries diagnostics and some lifecycle-only states.
-- Do not use bare `--resume` in automation; it can open a picker. Use `--continue` or an explicit session ID.
-- Do not use `--input-format stream-json` unless Claudine implements the control protocol.
-- Do not combine `--json-schema` with stream-json input or ACP.
-- Use explicit budgets. `--max-wall-time` and `--max-session-turns` are the minimum useful pair for unattended mutation.
-- Treat `--max-tool-calls` as top-level only. Disable `agent` or cap subagent depth when necessary.
-- Use sandboxing if auto-approving tools.
+`--json-schema` is useful for final structured answers, but it has its own terminal contract. It is rejected with prompt-interactive, stream-json input mode, and ACP. In JSON/stream-json output, read the final `structured_result`; in text mode, stdout is the JSON payload line instead of the usual prose.
+
+Unbounded unattended runs are unsafe. Use `--max-session-turns`, `--max-wall-time`, and optionally `--max-tool-calls`. The docs note that `--max-tool-calls` only counts top-level dispatches, not inner subagent tool calls, so excluding or constraining the `agent` tool is necessary for tight caps.
 
 ## Timeline
 
-| Date | Event | Evidence |
-| --- | --- | --- |
-| 2025-10-11 | Community issue requested `json`/`stream-json` output for integration | [Qwen issue #795](https://github.com/QwenLM/qwen-code/issues/795) |
-| 2026-02-09 | Session export to Markdown, JSONL, and HTML announced | [Weekly update](https://qwenlm.github.io/qwen-code-docs/en/blog/weekly-update-2026-02-09/) |
-| 2026-03-13 | Hooks and proactive questions announced | [Weekly update](https://qwenlm.github.io/qwen-code-docs/en/blog/weekly-update-2026-03-13/) |
-| 2026-04-15 | Qwen OAuth free tier discontinued | [Authentication docs](https://qwenlm.github.io/qwen-code-docs/en/users/configuration/auth/) |
-| 2026-05-28 | Runtime budgets `--max-wall-time` and `--max-tool-calls` highlighted | [Weekly update](https://qwenlm.github.io/qwen-code-docs/en/blog/weekly-update-2026-05-28/) |
-| 2026-07-02 | Headless docs list current output formats, budgets, retry behavior, and safety recommendations | [Headless docs](https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/) |
+This research was verified on 2026-07-03 against the Qwen Code official docs last updated on 2026-07-02 and current `main` branch source paths under `packages/cli/src/nonInteractive`. The upstream docs describe `stream-json` input as under construction, and the schema is source-defined rather than formally versioned, so Claudine should schedule drift checks against the TypeScript union and adapters.
 
 ## Quirks and Gaps
 
-The biggest quirk is documentation/source drift. The docs examples show a `system` message with `subtype: "session_start"`, while current source's `buildSystemMessage` uses `subtype: "init"`. Claudine should accept both and avoid making the subtype the only session-start detector.
+The biggest parser footgun is `system` subtype naming. The public docs show `session_start`; current source builds `init`. Both carry session metadata and should normalize to Claudine session start.
 
-The second quirk is that `stream-json` looks complete but omits `stats` in current source. The source computes `stats = outputFormat === OutputFormat.JSON ? uiTelemetryService.getMetrics() : undefined`. For live parsing, use `usage` and `modelUsage`; for detailed post-run stats, run buffered `json`.
+The second footgun is assuming stdout alone proves completion. It does not. Missing terminal `result` plus exit `53`, `55`, or `130` is meaningful and should not be rendered as an ambiguous parser failure.
 
-The third quirk is that the control stream shares the stdout transport. In stream-json input mode, stdout can carry ordinary data messages and control messages. That is a protocol, not a log. A wrapper that reads without answering permission/control requests can deadlock or cause auto-denials.
-
-Verified gaps:
-
-- No formal schema or version marker for stream records.
-- No stable cost field.
-- No timestamps in the stream union.
-- No dedicated file-change event.
-- No fully verified taxonomy for auth, rate-limit, quota, or no-funds failures.
-- No live fixture for `ask_user_question` in plain one-shot headless mode.
-- No verified dual-output framing for `--json-file`/`--json-fd`.
+Important gaps remain: exact auth error envelopes across all auth/provider modes, exact rate-limit/quota/no-funds payloads, full nested subagent event parity, file-change-specific events, command exit-code structure, and whether model identity is always resolved rather than requested.
 
 ## Claudine Integration Notes
 
 Recommended default:
 
-```bash
+```sh
 qwen -p "$PROMPT" \
   --output-format stream-json \
   --include-partial-messages \
-  --approval-mode plan \
-  --max-session-turns 20 \
-  --max-wall-time 10m
+  --approval-mode auto \
+  --max-session-turns "$MAX_TURNS" \
+  --max-wall-time "$MAX_WALL_TIME"
 ```
 
-For trusted mutation inside a sandbox:
+For high-trust disposable CI, `--approval-mode yolo --sandbox` or container isolation may be acceptable. For shared machines, prefer `--sandbox`, explicit allow/deny tool configuration, and avoid YOLO.
 
-```bash
-qwen -p "$PROMPT" \
-  --output-format stream-json \
-  --include-partial-messages \
-  --approval-mode yolo \
-  --sandbox \
-  --max-session-turns 40 \
-  --max-wall-time 20m
-```
+Parser requirements:
 
-Parser rules:
+| Requirement | Handling |
+| --- | --- |
+| Framing | Parse stdout by newline; each line should be a complete JSON object. |
+| Discriminator | Use top-level `type`, then nested `subtype` or `event.type`. |
+| Session start | Normalize both `system/init` and documented `system/session_start`. |
+| Partial messages | Enable and parse `stream_event`; reconstruct deltas by `session_id`, `message.id`, and block `index`. |
+| Tool joins | Join `tool_use.id`, `tool_result.tool_use_id`, and `event.tool_use_id`. |
+| Completion | Prefer terminal `result`, but always inspect exit code and stderr. |
+| Unknown events | Preserve raw JSON and continue. |
 
-- Parse stdout as JSONL.
-- Discriminate first on `type`.
-- For `stream_event`, discriminate on `event.type`.
-- Join tool calls/results by `tool_use.id` and `tool_result.tool_use_id`.
-- Join subagent activity by `parent_tool_use_id`.
-- Treat `result` as terminal only when present.
-- Preserve stderr and exit code as lifecycle evidence.
-- Accept `system.subtype` of both `init` and `session_start`.
-- Do not require `stats` in stream-json.
+Avoid `--input-format stream-json` until Claudine has a bidirectional protocol adapter. Avoid bare `--resume` because it can imply interactive selection. Do not discard stderr.
 
-Wrapper rules:
+## Changelog
 
-- Supply output flags every run; do not trust config defaults.
-- Avoid `--prompt-interactive`, bare `--resume`, and stream-json input unless explicitly implementing those modes.
-- Set budgets for unattended runs.
-- Decide permission mode explicitly from Claudine policy.
-- Keep stderr attached to logs/reports even when stdout parsing succeeds.
-- Mark no-result non-zero exits from codes 53, 55, and 130 using exit code plus stderr.
+Initial Claudine research file for Qwen CLI non-interactive sessions.
 
 ## Sources
 
-- [Qwen Code Headless Mode](https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/)
-- [Qwen Code Configuration Settings](https://qwenlm.github.io/qwen-code-docs/en/users/configuration/settings/)
-- [Qwen Code Structured Output](https://qwenlm.github.io/qwen-code-docs/en/users/features/structured-output/)
-- [Qwen Code Authentication](https://qwenlm.github.io/qwen-code-docs/en/users/configuration/auth/)
-- [Qwen Code Approval Mode](https://qwenlm.github.io/qwen-code-docs/en/users/features/approval-mode/)
-- [Qwen Code TypeScript SDK](https://qwenlm.github.io/qwen-code-docs/en/developers/sdk-typescript/)
-- [QwenLM/qwen-code `packages/cli/src/nonInteractive/types.ts`](https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/nonInteractive/types.ts)
-- [QwenLM/qwen-code `packages/sdk-typescript/src/types/protocol.ts`](https://github.com/QwenLM/qwen-code/blob/main/packages/sdk-typescript/src/types/protocol.ts)
-- [QwenLM/qwen-code `packages/cli/src/nonInteractive/io/BaseJsonOutputAdapter.ts`](https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/nonInteractive/io/BaseJsonOutputAdapter.ts)
-- [QwenLM/qwen-code `packages/cli/src/nonInteractive/io/StreamJsonOutputAdapter.ts`](https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/nonInteractive/io/StreamJsonOutputAdapter.ts)
-- [QwenLM/qwen-code `packages/cli/src/nonInteractiveCli.ts`](https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/nonInteractiveCli.ts)
-- [QwenLM/qwen-code `packages/cli/src/utils/nonInteractiveHelpers.ts`](https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/utils/nonInteractiveHelpers.ts)
-- [Qwen issue #795: output-format json/stream-json request](https://github.com/QwenLM/qwen-code/issues/795)
-- [Qwen Code Weekly: Parallel Agent Panel, Auto-Memory On by Default, Worktree Phase D](https://qwenlm.github.io/qwen-code-docs/en/blog/weekly-update-2026-05-28/)
+- [Qwen Code Headless Mode](https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/) documents `--prompt`, stdin, resume, output formats, `stream-json`, partial messages, budgets, YOLO safety, and persistent retry.
+- [Qwen Code Configuration](https://qwenlm.github.io/qwen-code-docs/en/users/configuration/settings/) documents output/input format flags, approval modes, sandbox, settings, environment variables, telemetry, MCP settings, and config precedence.
+- [Qwen Structured Output](https://qwenlm.github.io/qwen-code-docs/en/users/features/structured-output/) documents `--json-schema`, `structured_result`, restrictions, and failure behavior where some failures emit no stdout result.
+- [Qwen structured-output design](https://qwenlm.github.io/qwen-code-docs/en/design/structured-output/structured-output/) explains the synthetic `structured_output` tool and validation approach.
+- [CLI nonInteractive types](https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/nonInteractive/types.ts) defines the TypeScript unions for CLI messages, stream events, control requests, result messages, usage, and permission denials.
+- [BaseJsonOutputAdapter](https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/nonInteractive/io/BaseJsonOutputAdapter.ts) builds result messages, tool results, permission denials, and structured output fields.
+- [StreamJsonOutputAdapter](https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/nonInteractive/io/StreamJsonOutputAdapter.ts) emits JSONL and partial stream events.
+- [nonInteractive session manager](https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/nonInteractive/session.ts) implements bidirectional stream-json session/control behavior.
+- [runNonInteractive](https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/nonInteractiveCli.ts) implements one-shot headless execution, budgets, task notifications, final result emission, and error handling.
+- [Qwen SDK protocol types](https://github.com/QwenLM/qwen-code/blob/main/packages/sdk-typescript/src/types/protocol.ts) provide secondary TypeScript evidence for SDK/control mode.

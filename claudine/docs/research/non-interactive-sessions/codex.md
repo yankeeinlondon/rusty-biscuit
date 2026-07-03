@@ -1,40 +1,62 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-04-06
-last_updated: 2026-07-02
+last_updated: 2026-07-03
 agent: codex
 model: default
 docs: https://developers.openai.com/codex/noninteractive
 invocation:
   - command: 'codex exec --json "prompt"'
     stdin_support: true
-    prompt_arg: "PROMPT argument, omitted prompt, or '-' for stdin; if stdin is piped and PROMPT is also present, stdin is appended as a context block"
-    notes: "Starts a fresh non-interactive session and emits JSONL events on stdout."
+    prompt_arg: "PROMPT argument, omitted prompt, or '-' for stdin; if stdin is piped and PROMPT is also present, stdin is appended as a <stdin> context block"
+    notes: "Starts a fresh non-interactive local session and emits JSONL events on stdout."
+  - command: 'codex exec --json -'
+    stdin_support: true
+    prompt_arg: "'-' forces stdin to be the prompt"
+    notes: "Starts a fresh non-interactive session with prompt text read from stdin."
   - command: 'codex exec --json resume --last "prompt"'
     stdin_support: true
     prompt_arg: "Optional PROMPT argument or '-' for stdin"
-    notes: "Resumes the newest recorded non-interactive session; requires a persisted session, so do not combine with the original run's --ephemeral."
+    notes: "Resumes the newest recorded session. Do not rely on this after an original --ephemeral run."
   - command: 'codex exec --json resume <SESSION_ID> "prompt"'
     stdin_support: true
     prompt_arg: "Optional PROMPT argument or '-' for stdin"
-    notes: "Resumes a specific session or thread name and emits the same exec JSONL stream."
+    notes: "Resumes a specific thread/session id or name and emits the same exec JSONL stream."
+  - command: 'codex exec review --json'
+    stdin_support: false
+    prompt_arg: "review subcommand arguments"
+    notes: "Runs non-interactive local code review through exec; JSONL stream shape is the same exec event family."
   - command: 'codex app-server --listen stdio://'
     stdin_support: true
     prompt_arg: "JSON-RPC request lines on stdin after initialize/initialized handshake"
-    notes: "Starts a long-running bidirectional JSON-RPC server, not the preferred Claudine exec wrapper surface."
+    notes: "Starts a long-running bidirectional protocol server. It is richer than exec JSONL but is not the recommended Claudine local job wrapper."
+  - command: 'codex app-server --listen ws://127.0.0.1:<PORT>'
+    stdin_support: false
+    prompt_arg: "JSON-RPC messages over WebSocket text frames"
+    notes: "Experimental app-server WebSocket transport. Use only for product integrations that need the full server protocol."
+  - command: 'codex cloud list --json'
+    stdin_support: false
+    prompt_arg: "cloud list filters"
+    notes: "Scriptable cloud task listing, not a local non-interactive agent run."
 output_formats:
   - name: "default text"
     cli_value: "no --json"
     stream: true
     format: text
-    description: "Human progress is streamed to stderr and only the final agent message is printed to stdout."
-    side_effects: "Stdout is not event telemetry; parsing requires prose scraping and loses tool/session structure."
+    description: "Progress is streamed to stderr and only the final agent message is printed to stdout."
+    side_effects: "Stdout is final text, not event telemetry; parser would lose session, tool, file-change, plan, and usage structure."
   - name: "exec JSONL"
     cli_value: "--json"
     stream: true
     format: jsonl
-    description: "One JSON object per stdout line with top-level type values such as thread.started, turn.started, item.started, item.updated, item.completed, turn.completed, turn.failed, and error. Claudine should prefer this mode."
-    side_effects: "Stdout becomes parse-only JSONL; final prose is represented as an agent_message item and can also be copied with -o."
+    description: "One JSON object per stdout line with top-level type values including thread.started, turn.started, item.started, item.updated, item.completed, turn.completed, turn.failed, and error. Claudine should prefer this mode."
+    side_effects: "Stdout becomes parse-only JSONL. Final prose is represented as an agent_message item; -o can additionally copy it to a file."
+  - name: "exec JSONL legacy alias"
+    cli_value: "--experimental-json"
+    stream: true
+    format: jsonl
+    description: "Alias used by the TypeScript SDK for the same exec JSONL mode."
+    side_effects: "Equivalent to --json in the current CLI; prefer the stable --json spelling in wrappers."
   - name: "final-message file"
     cli_value: "-o <FILE> / --output-last-message <FILE>"
     stream: false
@@ -45,693 +67,828 @@ output_formats:
     cli_value: "--output-schema <FILE>"
     stream: false
     format: other
-    description: "Requests that the final assistant response conform to a JSON Schema; can be combined with --json and -o."
-    side_effects: "Constrains the final agent message only; it is not a schema for the JSONL event stream."
+    description: "Requests that the final assistant response conform to a JSON Schema."
+    side_effects: "Constrains only the final agent message. It is not a schema for the JSONL event stream and can be combined with --json."
   - name: "app-server stdio"
     cli_value: "codex app-server --listen stdio://"
     stream: true
     format: jsonrpc_lines
-    description: "Bidirectional JSON-RPC-like line protocol with request id correlation and method notifications."
-    side_effects: "Requires a client that sends initialize/initialized, starts threads/turns, handles approvals and cancellation, and keeps the server lifecycle."
+    description: "Bidirectional JSON-RPC-like line protocol with method names, request ids, responses, and notifications."
+    side_effects: "Requires a client that initializes the server, starts threads/turns, handles server requests, and owns cancellation/lifecycle."
+  - name: "app-server websocket"
+    cli_value: "codex app-server --listen ws://IP:PORT"
+    stream: true
+    format: other
+    description: "Bidirectional JSON-RPC messages framed as WebSocket text frames."
+    side_effects: "Experimental and unsupported; must configure authentication before exposing beyond localhost."
+  - name: "cloud list JSON"
+    cli_value: "codex cloud list --json"
+    stream: false
+    format: json
+    description: "Single JSON object containing a tasks array and optional cursor."
+    side_effects: "Applies only to cloud task listing, not local agent progress."
 schema_sources:
   - url: "https://github.com/openai/codex/blob/main/codex-rs/exec/src/exec_events.rs"
     schema_type: rust
     formal: false
-    notes: "Best exact schema for codex exec --json; Rust Serde enum uses #[serde(tag = \"type\")] and item details use nested item.type."
+    notes: "Best exact schema for codex exec --json; Rust Serde enum uses top-level #[serde(tag = \"type\")] and nested item.type values."
   - url: "https://github.com/openai/codex/blob/main/codex-rs/exec/src/event_processor_with_jsonl_output.rs"
     schema_type: rust
     formal: false
     notes: "Authoritative projection layer from app-server notifications into the flattened exec JSONL stream."
+  - url: "https://github.com/openai/codex/blob/main/sdk/typescript/src/events.ts"
+    schema_type: typescript
+    formal: false
+    notes: "Typed SDK union for exec stream events, generated or maintained from the Rust exec event types."
+  - url: "https://github.com/openai/codex/blob/main/sdk/typescript/src/items.ts"
+    schema_type: typescript
+    formal: false
+    notes: "Typed SDK union for nested exec item payloads."
   - url: "https://developers.openai.com/codex/noninteractive"
     schema_type: examples
     formal: false
-    notes: "Official docs describe JSON Lines mode and list event and item families, but do not publish a complete exec JSON Schema."
+    notes: "Official docs describe JSON Lines mode and list event/item families, but do not publish a complete exec JSON Schema."
   - url: "https://developers.openai.com/codex/app-server"
     schema_type: json_schema
     formal: true
     notes: "App-server can generate JSON Schema and TypeScript bindings for its broader JSON-RPC protocol; useful context but not the exec JSONL schema."
-  - url: "https://raw.githubusercontent.com/openai/codex/main/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json"
-    schema_type: json_schema
-    formal: true
-    notes: "Provider-authored JSON Schema Draft 7 bundle for app-server v2."
 cli_params:
   - flag: "--json"
     value: "boolean"
-    description: "Emit exec JSONL events to stdout."
+    description: "Emit exec events to stdout as JSONL."
     example: 'codex exec --json "summarize this repo"'
-  - flag: "-o, --output-last-message"
-    value: "FILE"
-    description: "Write the final assistant message to a file in addition to the selected stdout mode."
-    example: 'codex exec --json -o result.md "write summary"'
+  - flag: "--experimental-json"
+    value: "boolean"
+    description: "Legacy alias for --json used by the TypeScript SDK."
+    example: 'codex exec --experimental-json "summarize this repo"'
   - flag: "--output-schema"
     value: "FILE"
-    description: "Path to a JSON Schema for the final response, not the event stream."
-    example: 'codex exec --json --output-schema schema.json -o result.json "extract metadata"'
-  - flag: "-m, --model"
+    description: "Request a final assistant response matching the supplied JSON Schema."
+    example: "codex exec --json --output-schema ./schema.json 'extract metadata'"
+  - flag: "--output-last-message / -o"
+    value: "FILE"
+    description: "Write the final assistant message to a file in addition to normal stdout behavior."
+    example: "codex exec --json -o ./final.md 'write release notes'"
+  - flag: "--model / -m"
     value: "MODEL"
-    description: "Requested model for the run; exec JSONL does not currently echo it as stable metadata."
-    example: 'codex exec --json -m gpt-5.5 "review"'
-  - flag: "-C, --cd"
+    description: "Override the configured model."
+    example: 'codex exec --json -m gpt-5.5 "review this change"'
+  - flag: "--sandbox / -s"
+    value: "read-only | workspace-write | danger-full-access"
+    description: "Set sandbox policy for model-generated shell commands."
+    example: 'codex exec --json --sandbox workspace-write "fix the test"'
+  - flag: "--ask-for-approval / -a"
+    value: "untrusted | on-request | never"
+    description: "Global approval policy flag; exec defaults to never asking unless configuration and auto-review rebuild alter the effective policy."
+    example: 'codex exec --json -a never "run checks"'
+  - flag: "--dangerously-bypass-approvals-and-sandbox / --yolo"
+    value: "boolean"
+    description: "Disable approvals and sandboxing for externally isolated automation."
+    example: 'codex exec --json --yolo "apply the patch"'
+  - flag: "--cd / -C"
     value: "DIR"
-    description: "Set the agent working root."
-    example: 'codex exec --json -C /repo "inspect"'
+    description: "Set the working directory before the run."
+    example: 'codex exec --json -C /repo "summarize"'
   - flag: "--add-dir"
     value: "DIR"
-    description: "Add an extra writable directory alongside the primary workspace."
-    example: 'codex exec --json --add-dir ../shared "update files"'
-  - flag: "-s, --sandbox"
-    value: "read-only | workspace-write | danger-full-access"
-    description: "Select sandbox policy for model-generated shell commands."
-    example: 'codex exec --json --sandbox workspace-write "fix tests"'
-  - flag: "--dangerously-bypass-approvals-and-sandbox"
-    value: "boolean"
-    description: "Disable approval prompts and sandboxing; intended only for externally sandboxed automation."
-    example: 'codex exec --json --dangerously-bypass-approvals-and-sandbox "run migration"'
-  - flag: "--ask-for-approval"
-    value: "never | untrusted | on-request | granular"
-    description: "Global/root option inherited by exec; controls approval behavior. Use never for deterministic read-only CI or bypass flag only in isolated runners."
-    example: 'codex --ask-for-approval never exec --json "audit"'
-  - flag: "--ephemeral"
-    value: "boolean"
-    description: "Run without persisted session files; disables later resume for that run."
-    example: 'codex exec --json --ephemeral "one-shot analysis"'
+    description: "Grant additional writable roots alongside the primary workspace."
+    example: "codex exec --json --add-dir ../shared 'update both crates'"
+  - flag: "--image / -i"
+    value: "FILE[,FILE...]"
+    description: "Attach images to the initial prompt."
+    example: "codex exec --json -i screenshot.png 'prototype this UI'"
+  - flag: "--profile / -p"
+    value: "NAME"
+    description: "Layer CODEX_HOME/<name>.config.toml on top of base user config."
+    example: 'codex exec --json --profile ci "review"'
+  - flag: "--config / -c"
+    value: "key=value"
+    description: "One-off TOML config override; CLI overrides have highest precedence."
+    example: "codex exec --json -c 'web_search=\"disabled\"' 'answer from repo only'"
   - flag: "--ignore-user-config"
     value: "boolean"
-    description: "Skip $CODEX_HOME/config.toml while still using CODEX_HOME for auth/state."
-    example: 'codex exec --json --ignore-user-config "controlled run"'
+    description: "Do not load CODEX_HOME/config.toml; auth still uses CODEX_HOME."
+    example: 'codex exec --json --ignore-user-config "inspect"'
   - flag: "--ignore-rules"
     value: "boolean"
     description: "Skip user and project execpolicy .rules files."
-    example: 'codex exec --json --ignore-rules "controlled run"'
-  - flag: "-c, --config"
-    value: "key=value"
-    description: "Override TOML config values for this invocation."
-    example: 'codex exec --json -c model="gpt-5.5" "review"'
-  - flag: "-p, --profile"
-    value: "CONFIG_PROFILE"
-    description: "Load $CODEX_HOME/<name>.config.toml as a profile layer."
-    example: 'codex exec --json --profile ci "review"'
-  - flag: "-i, --image"
-    value: "FILE..."
-    description: "Attach image files to the initial prompt or resumed prompt."
-    example: 'codex exec --json -i screenshot.png "analyze UI"'
+    example: 'codex exec --json --ignore-rules "run scripted task"'
+  - flag: "--skip-git-repo-check"
+    value: "boolean"
+    description: "Allow running outside a Git repository."
+    example: 'codex exec --json --skip-git-repo-check "summarize this folder"'
+  - flag: "--ephemeral"
+    value: "boolean"
+    description: "Do not persist session files; makes later resume unavailable."
+    example: 'codex exec --json --ephemeral "one-shot triage"'
   - flag: "--strict-config"
     value: "boolean"
-    description: "Fail on unknown config fields for this Codex version."
-    example: 'codex exec --json --strict-config "run"'
+    description: "Fail when config.toml contains fields this Codex version does not recognize."
+    example: 'codex exec --json --strict-config "check"'
   - flag: "--color"
     value: "always | never | auto"
-    description: "Color setting for human output; JSONL stdout remains JSON."
-    example: 'codex exec --json --color never "run"'
+    description: "Controls human color output; JSONL stdout remains JSON."
+    example: 'codex exec --json --color never "inspect"'
+  - flag: "--oss"
+    value: "boolean"
+    description: "Use local open-source provider defaults."
+    example: 'codex exec --json --oss "summarize"'
 config_files:
-  - os: all
+  - os: macos
     scope: user
-    path: "~/.codex/config.toml or $CODEX_HOME/config.toml"
+    path: "~/.codex/config.toml"
     format: toml
-    effect: "Durable defaults for model, provider, sandbox, approvals, MCP, hooks, tools, logging, reasoning visibility, shell environment, and history."
-    notes: "Loaded below CLI flags, project config, and selected profile; can be skipped for exec with --ignore-user-config."
-  - os: all
+    effect: "Sets default model, provider, approval policy, sandbox, MCP servers, web search, hooks, permissions, logging, OTel, and features."
+    notes: "Can be moved with CODEX_HOME. CLI flags and -c overrides win. --ignore-user-config skips this file but not auth state."
+  - os: linux
+    scope: user
+    path: "~/.codex/config.toml"
+    format: toml
+    effect: "Same user config effects as macOS."
+    notes: "Can be moved with CODEX_HOME. CLI flags and -c overrides win. --ignore-user-config skips this file but not auth state."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.codex\\config.toml"
+    format: toml
+    effect: "Same user config effects as macOS/Linux."
+    notes: "Default CODEX_HOME is the user home .codex directory; Windows system config uses ProgramData separately."
+  - os: macos
+    scope: user
+    path: "~/.codex/<profile>.config.toml"
+    format: toml
+    effect: "Profile layer selected by --profile; commonly changes model, reasoning, provider, approval, sandbox, and model catalog."
+    notes: "Loaded above user config and below trusted project config and CLI overrides."
+  - os: linux
+    scope: user
+    path: "~/.codex/<profile>.config.toml"
+    format: toml
+    effect: "Same profile behavior as macOS."
+    notes: "Loaded above user config and below trusted project config and CLI overrides."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.codex\\<profile>.config.toml"
+    format: toml
+    effect: "Same profile behavior as macOS/Linux."
+    notes: "Loaded above user config and below trusted project config and CLI overrides."
+  - os: macos
     scope: repo
     path: ".codex/config.toml"
     format: toml
-    effect: "Trusted project-scoped overrides for many runtime settings."
-    notes: "Loaded only for trusted projects; nearest project/subdirectory layer wins. Project config cannot override machine-local provider/auth/telemetry/profile/notify keys."
-  - os: all
-    scope: user
-    path: "~/.codex/<profile>.config.toml or $CODEX_HOME/<profile>.config.toml"
+    effect: "Trusted project overrides for model, sandbox, MCP, hooks, permissions, instructions, and feature-relevant settings."
+    notes: "Codex walks from project root toward cwd; closest trusted project config wins for duplicate keys. Provider/auth redirection keys are ignored in project config."
+  - os: linux
+    scope: repo
+    path: ".codex/config.toml"
     format: toml
-    effect: "Named profile layer selected with --profile."
-    notes: "Precedence is below trusted project config and above base user config."
+    effect: "Same trusted project override behavior as macOS."
+    notes: "Ignored when the project is untrusted."
+  - os: windows
+    scope: repo
+    path: ".codex\\config.toml"
+    format: toml
+    effect: "Same trusted project override behavior as macOS/Linux."
+    notes: "Ignored when the project is untrusted."
+  - os: macos
+    scope: system
+    path: "/etc/codex/config.toml"
+    format: toml
+    effect: "System default config layer below user config."
+    notes: "Lowest explicit config layer before built-in defaults."
   - os: linux
     scope: system
     path: "/etc/codex/config.toml"
     format: toml
-    effect: "System default layer."
-    notes: "Lower precedence than user config and higher than built-in defaults; official docs name Unix path."
-  - os: all
-    scope: managed
-    path: "requirements.toml"
+    effect: "System default config layer below user config."
+    notes: "Lowest explicit config layer before built-in defaults."
+  - os: windows
+    scope: system
+    path: "%ProgramData%\\OpenAI\\Codex\\config.toml"
     format: toml
-    effect: "Managed constraints for approval policies, sandbox modes, permission profiles, hooks, apps, web search, and related enterprise controls."
-    notes: "Can restrict user/project choices; managed requirements take precedence for the constrained behavior."
-  - os: all
+    effect: "System default config layer below user config."
+    notes: "Source code falls back to C:\\ProgramData if the ProgramData known folder cannot be resolved."
+  - os: macos
+    scope: managed
+    path: "com.openai.codex:config_toml_base64"
+    format: toml
+    effect: "MDM managed default config encoded as base64 TOML."
+    notes: "Managed defaults apply before ordinary user changes; admin requirements can still constrain effective values."
+  - os: linux
+    scope: managed
+    path: "cloud-managed config bundle"
+    format: toml
+    effect: "ChatGPT Business/Enterprise managed defaults when available for signed-in users."
+    notes: "Best-effort remote managed layer; exact local cache path not verified."
+  - os: windows
+    scope: managed
+    path: "cloud-managed config bundle"
+    format: toml
+    effect: "ChatGPT Business/Enterprise managed defaults when available for signed-in users."
+    notes: "Best-effort remote managed layer; exact local cache path not verified."
+  - os: macos
+    scope: managed
+    path: "com.openai.codex:requirements_toml_base64"
+    format: toml
+    effect: "MDM admin-enforced requirements for allowed approval policies, sandbox modes, permission profiles, MCP, hooks, web search, and features."
+    notes: "Requirements have precedence over user attempts to broaden restricted settings."
+  - os: linux
+    scope: managed
+    path: "/etc/codex/requirements.toml"
+    format: toml
+    effect: "System admin-enforced requirements."
+    notes: "Cloud-managed requirements outrank system requirements when present."
+  - os: macos
+    scope: managed
+    path: "/etc/codex/requirements.toml"
+    format: toml
+    effect: "System admin-enforced requirements."
+    notes: "Cloud-managed and MDM requirements outrank this file when present."
+  - os: windows
+    scope: managed
+    path: "%ProgramData%\\OpenAI\\Codex\\requirements.toml"
+    format: toml
+    effect: "System admin-enforced requirements."
+    notes: "Cloud-managed requirements outrank this file when present."
+  - os: macos
     scope: user
-    path: "$CODEX_HOME/auth.json or OS credential store"
+    path: "~/.codex/hooks.json"
     format: json
-    effect: "Cached ChatGPT or API-key authentication."
-    notes: "Sensitive secret material; codex exec can also use CODEX_API_KEY for a single invocation."
-  - os: all
+    effect: "User lifecycle hooks can affect tool approval, logging, and run behavior."
+    notes: "Hooks can also be inline in config.toml. Project hooks require trust."
+  - os: linux
     scope: user
-    path: "$CODEX_HOME/history.jsonl"
-    format: other
-    effect: "Persisted session transcript/history when history persistence is enabled."
-    notes: "Not written for --ephemeral runs."
+    path: "~/.codex/hooks.json"
+    format: json
+    effect: "Same hook behavior as macOS."
+    notes: "Hooks can also be inline in config.toml."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.codex\\hooks.json"
+    format: json
+    effect: "Same hook behavior as macOS/Linux."
+    notes: "Hooks can also be inline in config.toml."
 env_vars:
-  - name: "CODEX_API_KEY"
-    effect: "Provides an API key for one codex exec run."
-    notes: "Officially supported only by codex exec; set inline for the single invocation rather than job-wide when repository-controlled code runs."
-  - name: "CODEX_ACCESS_TOKEN"
-    effect: "Provides a ChatGPT/Codex access token for trusted automation or login seeding."
-    notes: "Can be piped to codex login --with-access-token for persisted auth; treat as secret."
   - name: "CODEX_HOME"
-    effect: "Changes the root for config, auth, logs, sessions, skills, and state."
-    notes: "Defaults to ~/.codex; directory must exist when set."
+    effect: "Sets Codex state root including config, auth, logs, sessions, skills, and package metadata."
+    notes: "Default is ~/.codex; directory must already exist when set."
   - name: "CODEX_SQLITE_HOME"
-    effect: "Changes SQLite-backed state location."
-    notes: "sqlite_home config option takes precedence."
+    effect: "Sets SQLite-backed state location unless sqlite_home config takes precedence."
+    notes: "Relative paths resolve from current working directory."
+  - name: "CODEX_API_KEY"
+    effect: "Supplies an API key for a single codex exec run."
+    notes: "Only supported by codex exec; set inline rather than job-wide around untrusted repository code."
+  - name: "CODEX_ACCESS_TOKEN"
+    effect: "Supplies a ChatGPT/Codex access token for trusted automation or login --with-access-token."
+    notes: "Useful when automation needs ChatGPT-managed access."
   - name: "CODEX_CA_CERTIFICATE"
-    effect: "Sets PEM CA bundle for HTTPS/login/WebSocket clients."
+    effect: "PEM CA bundle for HTTPS, login, and WebSocket clients."
     notes: "Takes precedence over SSL_CERT_FILE."
   - name: "SSL_CERT_FILE"
-    effect: "Fallback PEM CA bundle for HTTPS/login/WebSocket clients."
-    notes: "Used when CODEX_CA_CERTIFICATE is unset."
+    effect: "Fallback PEM CA bundle when CODEX_CA_CERTIFICATE is unset."
+    notes: "Affects network/auth behavior, not stream shape."
   - name: "RUST_LOG"
-    effect: "Controls Codex Rust log verbosity; codex exec defaults to error-level output unless overridden."
-    notes: "More verbose values can add diagnostics to stderr and should not be mixed into stdout parsing."
+    effect: "Controls Rust log verbosity; codex exec defaults to error output unless overridden."
+    notes: "More verbose values can add stderr diagnostics; stdout JSONL remains parse-only in --json mode."
+  - name: "CODEX_NON_INTERACTIVE"
+    effect: "Makes standalone installer scripts skip installer prompts."
+    notes: "Installer-only; not a runtime exec-mode flag."
+  - name: "CODEX_INSTALL_DIR"
+    effect: "Changes standalone installer destination."
+    notes: "Installer-only."
+  - name: "provider env_key variables"
+    effect: "Custom provider API keys are read from whatever env var is named by model_providers.<id>.env_key."
+    notes: "Variable names are user-defined; record effective provider config rather than assuming OPENAI_API_KEY."
 io_contract:
   stdout: structured_only
   stderr: diagnostics_only
   stdin: prompt
   framing: jsonl
-  noise_handling: "When --json is set, parse stdout line-by-line as JSONL and treat stderr as diagnostics/lifecycle hints only. In text mode, stdout is final prose and stderr carries progress."
-  notes: "app-server is a different stdin/stdout contract: bidirectional JSON-RPC-like request/response/notification lines."
+  noise_handling: "With --json, parse stdout line-by-line as JSON and keep stderr as diagnostics for startup/config/auth failures and non-zero exits. Without --json, stdout is final text and stderr is human progress."
+  notes: "The exec crate denies accidental stdout writes: default mode reserves stdout for final message, JSON mode reserves stdout for valid JSONL, and all other output goes to stderr."
 stream_contract:
-  discriminator: "type; nested item.type for item.started, item.updated, and item.completed"
-  event_ordering: "thread.started is first; turn.started begins the turn; item lifecycle events follow; turn.completed or turn.failed is terminal for the exec run when emitted. A top-level error can appear before shutdown."
+  discriminator: "type"
+  event_ordering: "thread.started is first for a new thread; turn.started follows turn submission; item events stream during the turn; turn.completed or turn.failed is terminal for normal/failing turns. Interrupted turns may initiate shutdown without an exec JSON terminal event."
   correlation_fields: ["thread_id", "item.id", "item.sender_thread_id", "item.receiver_thread_ids"]
   terminal_event: "turn.completed or turn.failed"
   partial_message_events: false
-  unknown_event_policy: "Skip unknown top-level or item types after logging parser telemetry; do not fail the wrapper unless completion cannot be classified."
-  notes: "Events are complete item snapshots, not deltas. item.updated currently matters most for todo_list updates. No schema-version marker is present."
+  unknown_event_policy: "Skip unknown top-level or item types, preserve raw JSON for logs, and continue parsing by discriminator."
+  notes: "item.started and item.completed for the same raw app-server item are mapped to the same flattened item.id while in progress. Assistant messages and reasoning are emitted as completed items, not token deltas."
 session_metadata:
-  session_id: "thread.started.thread_id; always present as first JSONL event in normal exec runs and usable for resume unless the run is --ephemeral"
-  cwd: "not emitted in exec JSONL; infer from wrapper invocation, -C/--cd, and process cwd"
-  model: "not emitted in exec JSONL; infer requested model from CLI/config, or use hook/app-server surfaces for stronger evidence"
-  provider: "not emitted in exec JSONL; infer from config model_provider/--oss/--local-provider"
-  auth: "not emitted in exec JSONL; infer out-of-band from CODEX_API_KEY, auth status, or app-server account APIs"
-  version: "not emitted in exec JSONL; wrapper must run codex --version out-of-band"
-  mcp_servers: "not enumerated in exec JSONL; mcp_tool_call items reveal server names only when tools are called"
-  permission_mode: "not emitted in exec JSONL; infer from flags/config/managed requirements"
-  notes: "exec JSONL intentionally exposes only a compact thread/turn/item projection."
+  session_id: "thread.started.thread_id, first event for new exec threads and usable with codex exec resume <SESSION_ID>"
+  cwd: "Not emitted in exec JSONL; effective cwd comes from wrapper invocation (--cd), config, or app-server/OTel surfaces."
+  model: "Not emitted in exec JSONL; requested model is known from --model/config. Model reroute appears only as item.completed item.type=error text."
+  provider: "Not emitted in exec JSONL; infer from config/model_provider or --oss."
+  auth: "Not emitted in exec JSONL; auth failures appear as stderr/startup errors or error/turn.failed messages."
+  version: "Not emitted in exec JSONL; wrapper must capture `codex --version` separately if needed."
+  mcp_servers: "Not enumerated in exec JSONL; individual MCP calls expose item.server and item.tool."
+  permission_mode: "Not emitted in exec JSONL; wrapper must record supplied --sandbox, --ask-for-approval, --yolo, and effective config if it needs this."
+  notes: "The app-server protocol and OTel logs expose richer metadata, but the flattened exec JSONL stream is intentionally smaller."
 stream_events:
   - event: "thread.started"
     category: session
     fields: ["type", "thread_id"]
-    notes: "First event; thread_id can be used for resume when persistence is enabled."
+    notes: "First event for a new thread; thread_id is the resume handle."
   - event: "turn.started"
     category: session
     fields: ["type"]
-    notes: "Marks the start of model work."
+    notes: "No turn id in exec JSONL."
   - event: "turn.completed"
     category: usage
     fields: ["type", "usage.input_tokens", "usage.cached_input_tokens", "usage.output_tokens", "usage.reasoning_output_tokens"]
-    notes: "Terminal success for the turn; usage is total tokens from the latest app-server token usage snapshot."
+    notes: "Terminal success event for completed turns; usage is total token usage from the last token usage notification."
   - event: "turn.failed"
     category: error
     fields: ["type", "error.message"]
-    notes: "Terminal failure for the turn; structured CodexErrorInfo is not forwarded in the exec projection."
+    notes: "Terminal failure event when app-server marks the turn failed."
   - event: "error"
     category: error
     fields: ["type", "message"]
-    notes: "Unrecoverable stream-level error; process may continue until turn.failed or shutdown."
-  - event: "item.started:item.type=command_execution"
-    category: tool_call
-    fields: ["item.id", "item.command", "item.status"]
-    notes: "Command start; status is usually in_progress."
-  - event: "item.completed:item.type=command_execution"
-    category: tool_result
-    fields: ["item.id", "item.command", "item.aggregated_output", "item.exit_code", "item.status"]
-    notes: "Command completion; status can be completed, failed, or declined."
-  - event: "item.completed:item.type=file_change"
-    category: file_change
-    fields: ["item.id", "item.changes[].path", "item.changes[].kind", "item.status"]
-    notes: "Patch/file change summary; declined file changes are collapsed to failed in the exec projection."
-  - event: "item.started:item.type=mcp_tool_call"
-    category: tool_call
-    fields: ["item.id", "item.server", "item.tool", "item.arguments", "item.status"]
-    notes: "MCP tool dispatch."
-  - event: "item.completed:item.type=mcp_tool_call"
-    category: tool_result
-    fields: ["item.id", "item.server", "item.tool", "item.arguments", "item.result.content", "item.result._meta", "item.result.structured_content", "item.error.message", "item.status"]
-    notes: "MCP tool success or failure."
-  - event: "item.started:item.type=collab_tool_call"
-    category: subagent
-    fields: ["item.id", "item.tool", "item.sender_thread_id", "item.receiver_thread_ids", "item.prompt", "item.agents_states", "item.status"]
-    notes: "Subagent/collaboration tool start."
-  - event: "item.completed:item.type=collab_tool_call"
-    category: subagent
-    fields: ["item.id", "item.tool", "item.sender_thread_id", "item.receiver_thread_ids", "item.prompt", "item.agents_states", "item.status"]
-    notes: "Subagent/collaboration tool terminal snapshot."
-  - event: "item.completed:item.type=agent_message"
+    notes: "Unrecoverable stream error notification; process can continue until turn completion/failure."
+  - event: "item.started"
+    category: other
+    fields: ["type", "item.id", "item.type"]
+    notes: "Starts in-progress command_execution, mcp_tool_call, collab_tool_call, web_search, and todo_list items."
+  - event: "item.updated"
+    category: plan
+    fields: ["type", "item.id", "item.type", "item.items"]
+    notes: "Currently important for todo_list plan updates."
+  - event: "item.completed"
+    category: other
+    fields: ["type", "item.id", "item.type"]
+    notes: "Terminal item event for messages, reasoning, tools, file changes, errors, and final todo list."
+  - event: "item.type=agent_message"
     category: assistant
     fields: ["item.id", "item.text"]
-    notes: "Assistant message text; final answer is the last agent_message from the turn."
-  - event: "item.completed:item.type=reasoning"
+    notes: "Completed assistant message. The final answer is the last completed agent_message."
+  - event: "item.type=reasoning"
     category: reasoning
     fields: ["item.id", "item.text"]
-    notes: "Reasoning summary text when available and not hidden; empty summaries are suppressed."
-  - event: "item.started:item.type=web_search"
+    notes: "Reasoning summary text, not raw hidden reasoning."
+  - event: "item.type=command_execution"
+    category: tool_call
+    fields: ["item.id", "item.command", "item.aggregated_output", "item.exit_code", "item.status"]
+    notes: "Represents shell/command execution. Output is aggregated, not stdout/stderr-separated."
+  - event: "item.type=file_change"
+    category: file_change
+    fields: ["item.id", "item.changes[].path", "item.changes[].kind", "item.status"]
+    notes: "Emitted after patch success/failure; no per-hunk content."
+  - event: "item.type=mcp_tool_call"
+    category: tool_call
+    fields: ["item.id", "item.server", "item.tool", "item.arguments", "item.result.content", "item.result.structured_content", "item.result._meta", "item.error.message", "item.status"]
+    notes: "MCP call start and completion are visible, including arguments and result/error payload."
+  - event: "item.type=collab_tool_call"
+    category: subagent
+    fields: ["item.id", "item.tool", "item.sender_thread_id", "item.receiver_thread_ids", "item.prompt", "item.agents_states", "item.status"]
+    notes: "Subagent orchestration tool. Nested child tool calls are not flattened into the parent stream unless surfaced as collab state/messages."
+  - event: "item.type=web_search"
     category: tool_call
     fields: ["item.id", "item.query", "item.action"]
-    notes: "Web search request."
-  - event: "item.completed:item.type=web_search"
-    category: tool_result
-    fields: ["item.id", "item.query", "item.action"]
-    notes: "Search item completion does not include raw search results in the exec item."
-  - event: "item.started:item.type=todo_list"
+    notes: "Search action is preserved from WebSearchAction when available."
+  - event: "item.type=todo_list"
     category: plan
     fields: ["item.id", "item.items[].text", "item.items[].completed"]
-    notes: "Plan/todo list first snapshot."
-  - event: "item.updated:item.type=todo_list"
-    category: plan
-    fields: ["item.id", "item.items[].text", "item.items[].completed"]
-    notes: "Plan/todo status update."
-  - event: "item.completed:item.type=todo_list"
-    category: plan
-    fields: ["item.id", "item.items[].text", "item.items[].completed"]
-    notes: "Plan/todo final snapshot at turn end."
-  - event: "item.completed:item.type=error"
+    notes: "Plan/todo state starts, updates, then completes at turn end."
+  - event: "item.type=error"
     category: error
     fields: ["item.id", "item.message"]
-    notes: "Non-fatal warning/config/deprecation/error item."
+    notes: "Non-fatal warnings, config warnings, deprecation notices, and model reroute messages are flattened as error items."
 tools:
-  - name: "shell / command execution"
+  - name: "shell command / command_execution"
     call_visible: true
     result_visible: true
     metadata: ["command", "aggregated_output", "exit_code", "status"]
-    notes: "Visible as command_execution items; stdout/stderr are aggregated into aggregated_output rather than split streams."
-  - name: "apply_patch / file changes"
+    notes: "Start is visible before execution completes. stdout/stderr are combined into aggregated_output."
+  - name: "apply_patch / file_change"
     call_visible: false
     result_visible: true
     metadata: ["changes[].path", "changes[].kind", "status"]
-    notes: "Visible as file_change completion snapshots only; no dedicated diff payload or approval reason in exec JSONL."
+    notes: "File changes are dedicated completed items after patch success/failure; no patch body or hunk details."
   - name: "MCP tools"
     call_visible: true
     result_visible: true
-    metadata: ["server", "tool", "arguments", "result.content", "result._meta", "result.structured_content", "error.message", "status"]
-    notes: "MCP startup state is not currently enumerated in exec JSONL; required server init failure exits with an error."
-  - name: "web search"
+    metadata: ["server", "tool", "arguments", "result.content", "result.structured_content", "result._meta", "error.message", "status"]
+    notes: "MCP OAuth/login setup is outside the exec stream; configured required MCP startup failure exits with an error."
+  - name: "web_search"
     call_visible: true
     result_visible: true
     metadata: ["query", "action"]
-    notes: "Search request/action visible; raw result set is not a structured exec field."
-  - name: "plan / todo list"
+    notes: "Docs say web_search items appear in transcripts or codex exec --json output."
+  - name: "todo_list / plan"
     call_visible: true
     result_visible: true
     metadata: ["items[].text", "items[].completed"]
-    notes: "Plan changes stream as todo_list started/updated/completed snapshots."
-  - name: "collab / subagent tools"
+    notes: "Plan updates are item.updated events, then completed at turn end."
+  - name: "collab_tool_call / subagents"
     call_visible: true
     result_visible: true
     metadata: ["tool", "sender_thread_id", "receiver_thread_ids", "prompt", "agents_states", "status"]
-    notes: "Parent stream sees collaboration tool snapshots, not every nested subagent event as separate parent events."
-  - name: "image attachment / view_image"
-    call_visible: false
-    result_visible: false
-    metadata: ["unknown"]
-    notes: "Images can be attached with -i/--image; exact exec JSONL item visibility for image processing was not verified."
+    notes: "Covers spawn_agent, send_input, wait, and close_agent orchestration."
 completion:
   success_event: "turn.completed"
-  failure_event: "turn.failed or top-level error without a later turn.completed"
-  exit_code_reliable: false
-  result_fields: ["item.completed where item.type=agent_message -> item.text", "output-last-message file when -o is supplied"]
+  failure_event: "turn.failed or top-level error followed by non-zero process exit"
+  exit_code_reliable: true
+  result_fields: ["item.type=agent_message item.text", "turn.completed.usage"]
   cost_fields: []
   usage_fields: ["turn.completed.usage.input_tokens", "turn.completed.usage.cached_input_tokens", "turn.completed.usage.output_tokens", "turn.completed.usage.reasoning_output_tokens"]
-  notes: "Outer process exit is useful for launch/auth/crash failures, but Claudine should classify agent/tool success from terminal events and item statuses. Cost and rate-limit fields are absent from exec JSONL."
+  notes: "Source tracks fatal server errors and failed/interrupted turns for non-zero process status. The TypeScript SDK also treats non-zero exit or signal as failure and includes stderr in the thrown error."
 blocking_behavior:
-  permissions: configurable
+  permissions: fail
   questions: fail
-  tool_approvals: configurable
-  notes: "Use --ask-for-approval never with read-only CI, --sandbox workspace-write for edit automation, or the bypass flag only inside external isolation. App-server has structured approval/user-input flows; exec mostly collapses unsupported elicitation paths into failures or declined/failed tool items."
+  tool_approvals: fail
+  notes: "exec defaults to approval_policy=never. MCP elicitation is auto-canceled. Command, file-change, apply_patch, exec-command, permission, request_user_input, dynamic-tool, auth-refresh, attestation, and current-time server requests are rejected as unsupported in exec mode."
 subagents:
   supported: true
   start_visible: true
   stop_visible: true
   nested_events_visible: false
   prompt_injection_supported: true
-  metadata_fields: ["collab_tool_call.tool", "sender_thread_id", "receiver_thread_ids", "prompt", "agents_states.<thread_id>.status", "agents_states.<thread_id>.message"]
-  notes: "Subagents run through collaboration tools. The parent exec JSONL stream exposes collab tool snapshots and agent states; it does not flatten all nested subagent tool calls into parent stream events. Non-interactive instructions can be supplied through the root prompt, AGENTS.md, and custom agent config."
+  metadata_fields: ["item.type=collab_tool_call", "item.tool", "item.sender_thread_id", "item.receiver_thread_ids", "item.prompt", "item.agents_states.<thread_id>.status", "item.agents_states.<thread_id>.message", "item.status"]
+  notes: "Subagents are enabled by default and only spawn when explicitly requested. Non-interactive approvals that cannot surface fail and report back to the parent workflow. Parent prompts can include non-interactive instructions for spawned agents."
 use_cases:
   - name: plan_cap_approaching
     detectable: false
     event_types: []
     fields: []
-    hook_parity: "No hook parity found for exec JSONL."
-    notes: "exec JSONL has no stable remaining-plan/quota percentage, reset time, or cap window."
+    hook_parity: "unknown"
+    notes: "No plan/quota approaching-cap event found in exec JSONL."
   - name: plan_capped
     detectable: false
-    event_types: ["turn.failed", "error"]
-    fields: ["error.message", "message"]
-    hook_parity: "No direct hook parity."
-    notes: "Only text matching is available in exec JSONL; app-server has richer CodexErrorInfo but exec does not forward it."
+    event_types: ["error", "turn.failed"]
+    fields: ["message", "error.message"]
+    hook_parity: "unknown"
+    notes: "Quota/rate/billing errors may appear as generic messages, but no structured cap/reset fields are exposed."
   - name: no_funds
     detectable: false
-    event_types: ["turn.failed", "error"]
-    fields: ["error.message", "message"]
-    hook_parity: "No direct hook parity."
-    notes: "Billing/credit failure is not a distinct exec event."
+    event_types: ["error", "turn.failed"]
+    fields: ["message", "error.message"]
+    hook_parity: "unknown"
+    notes: "Insufficient credits can only be classified from provider error text unless a future event adds structured billing fields."
   - name: auth
-    detectable: false
-    event_types: ["turn.failed", "error"]
-    fields: ["error.message", "message"]
-    hook_parity: "Out-of-band auth status and app-server account APIs are stronger."
-    notes: "Auth kind is not emitted in exec JSONL; classify failures by launch stderr/exit and error message."
+    detectable: true
+    event_types: ["error", "turn.failed", "process_exit"]
+    fields: ["message", "error.message", "stderr"]
+    hook_parity: "no"
+    notes: "Missing/invalid auth may fail before thread.started and appear on stderr with non-zero exit; exec JSONL does not expose auth kind."
   - name: permission_read_denied
     detectable: true
-    event_types: ["item.completed:item.type=command_execution"]
-    fields: ["item.command", "item.aggregated_output", "item.exit_code", "item.status"]
-    hook_parity: "PreToolUse/PermissionRequest hooks can be more precise when configured."
-    notes: "Detect best-effort from declined/failed command_execution and OS error text; path extraction is not structured."
+    event_types: ["item.completed", "turn.failed"]
+    fields: ["item.type=command_execution item.status", "item.aggregated_output", "item.exit_code", "error.message"]
+    hook_parity: "partial: permission hooks/app-server expose richer fields than exec JSONL"
+    notes: "Filesystem deny details are generally command output or error text, not a dedicated read-denied event."
   - name: permission_write_denied
     detectable: true
-    event_types: ["item.completed:item.type=file_change", "item.completed:item.type=command_execution"]
-    fields: ["item.changes[].path", "item.status", "item.command", "item.aggregated_output"]
-    hook_parity: "PreToolUse/PermissionRequest hooks can be more precise when configured."
-    notes: "file_change failed can mean policy decline or patch failure; exec collapses declined to failed."
+    event_types: ["item.completed", "turn.failed"]
+    fields: ["item.type=file_change item.status", "item.changes[].path", "item.type=command_execution item.aggregated_output", "error.message"]
+    hook_parity: "partial: permission hooks/app-server expose richer fields than exec JSONL"
+    notes: "File-change failure gives paths and failed status; shell write denials appear in command output."
   - name: tokens_consumed
     detectable: true
     event_types: ["turn.completed"]
     fields: ["usage.input_tokens", "usage.cached_input_tokens", "usage.output_tokens", "usage.reasoning_output_tokens"]
-    hook_parity: "No direct hook parity."
-    notes: "Turn-total token counts; no cost units or per-tool token usage."
+    hook_parity: "OTel sse_event can include token counts on response.completed"
+    notes: "Units are tokens. The exec event reports total usage for the completed turn."
   - name: model_used
     detectable: false
     event_types: []
     fields: []
-    hook_parity: "Hooks include model in their payloads; exec JSONL does not."
-    notes: "Use wrapper-known requested model/config as a fallback; do not call it resolved backend model."
+    hook_parity: "OTel conversation_starts includes model"
+    notes: "Exec JSONL does not emit model; wrapper must record --model/effective config or use OTel/app-server metadata."
   - name: model_fallback
     detectable: true
-    event_types: ["item.completed:item.type=error"]
-    fields: ["item.message"]
+    event_types: ["item.completed"]
+    fields: ["item.type=error", "item.message"]
     hook_parity: "unknown"
-    notes: "The JSONL projection maps ModelRerouted to an error item message like 'model rerouted: from -> to (reason)', not a structured model_fallback event."
+    notes: "Model reroute is flattened to an error item message like 'model rerouted: from -> to (reason)'; parse as best-effort text, not a typed field."
   - name: human_in_loop
     detectable: true
-    event_types: ["item.completed:item.type=mcp_tool_call", "item.completed:item.type=command_execution", "turn.failed", "error"]
-    fields: ["item.error.message", "item.status", "error.message", "message"]
-    hook_parity: "App-server approval/user-input methods are richer; hooks are partial."
-    notes: "Detect by declined statuses and messages such as unsupported request_user_input/user cancelled; exact question/options are not exposed in exec JSONL."
+    event_types: ["error", "turn.failed", "process_exit"]
+    fields: ["message", "error.message", "stderr"]
+    hook_parity: "app-server server requests and hooks are richer"
+    notes: "exec rejects or cancels human-input surfaces; classify messages containing unsupported approval/request_user_input/elicitation text."
   - name: session_resumable
     detectable: true
     event_types: ["thread.started"]
     fields: ["thread_id"]
     hook_parity: "unknown"
-    notes: "thread_id is emitted early; resume requires non-ephemeral persistence."
+    notes: "thread_id arrives first and can be used with codex exec resume <SESSION_ID> unless the run used --ephemeral."
   - name: subagent_prompt_injection
     detectable: true
-    event_types: ["item.started:item.type=collab_tool_call", "item.completed:item.type=collab_tool_call"]
-    fields: ["item.prompt", "item.receiver_thread_ids", "item.agents_states"]
-    hook_parity: "SubagentStart/SubagentStop hooks exist in config, but parent exec JSONL is the parser surface."
-    notes: "Root prompts, AGENTS.md, and agent config can steer subagents; no dedicated CLI flag appends text to every subagent prompt."
+    event_types: ["item.started", "item.completed"]
+    fields: ["item.type=collab_tool_call", "item.prompt"]
+    hook_parity: "subagentStart/subagentStop hooks exist outside exec JSONL"
+    notes: "Parent prompt can explicitly instruct subagents; collab tool call exposes prompt when present."
 headless_constraints:
-  - constraint: "exec JSONL has no formal standalone JSON Schema or schema-version marker."
-    mitigation: "Generate parser types from codex-rs/exec/src/exec_events.rs or maintain fixtures per Codex version."
-    notes: "Do not validate exec JSONL against the app-server schema bundle."
-  - constraint: "Model, provider, auth kind, cwd, permission mode, MCP server inventory, cost, and rate-limit caps are not emitted as stable exec JSONL metadata."
-    mitigation: "Capture wrapper-side invocation/config and optionally run out-of-band status/version/config probes."
-    notes: "The app-server protocol exposes some richer account/thread fields, but that is a different integration mode."
-  - constraint: "Human approval and elicitation paths are not first-class exec events."
-    mitigation: "Use deterministic approval/sandbox flags and classify declined/failed tool items plus error messages."
-    notes: "MCP elicitation may fail instead of yielding a programmable prompt in exec mode."
-  - constraint: "Process exit code alone is not enough to classify command/tool failure."
-    mitigation: "Parse item statuses and terminal turn events; treat nonzero process exit as launch/crash/auth failure."
-    notes: "A successful agent turn can contain failed commands."
-  - constraint: "Reasoning visibility is configurable and may be absent."
-    mitigation: "Do not use reasoning items as required heartbeats."
-    notes: "hide_agent_reasoning suppresses reasoning in TUI and codex exec output."
+  - constraint: "No formal JSON Schema for exec JSONL."
+    mitigation: "Generate parser types from codex-rs/exec/src/exec_events.rs or SDK TypeScript unions and preserve unknown events."
+    notes: "App-server schema is formal but broader and not identical to exec JSONL."
+  - constraint: "Exec JSONL does not emit model, provider, auth kind, cwd, sandbox, approval policy, version, or MCP server inventory."
+    mitigation: "Wrapper should record invocation flags, selected config/profile, cwd, environment, and `codex --version` beside the stream."
+    notes: "OTel/app-server can expose richer metadata but is a separate integration."
+  - constraint: "Interrupted turns may not produce turn.failed."
+    mitigation: "Treat process signal/non-zero exit and missing terminal event as cancellation/ambiguous failure."
+    notes: "Source marks interrupted turns as error_seen for exit status but the JSONL projector initiates shutdown without emitting turn.failed."
+  - constraint: "Approval and user-input requests cannot be answered in exec mode."
+    mitigation: "Use approval_policy=never, preconfigure permissions, avoid prompt_tool-style workflows, and parse rejection messages as human-in-loop attempts."
+    notes: "MCP elicitation is auto-canceled; approval requests fail closed."
+  - constraint: "Command output is aggregated."
+    mitigation: "Do not promise stdout/stderr separation for shell tools from exec JSONL."
+    notes: "Use app-server command execution deltas if separate streams are required."
+  - constraint: "Project config and hooks load only when project is trusted."
+    mitigation: "For deterministic automation, use --ignore-user-config/--ignore-rules or explicit -c overrides, and record trust assumptions."
+    notes: "Project-local provider/auth redirection keys are ignored even when trusted."
 quirks:
-  - "The exact exec stream schema is the Rust Serde surface, not the app-server JSON Schema."
-  - "item.type is a nested discriminator only inside item.* events; top-level type remains item.started/item.updated/item.completed."
-  - "file_change declined is mapped to failed by the exec projection, losing the reason distinction."
-  - "Model reroute is projected as an error item message rather than structured model fields."
-  - "agent_message has text only; current public issue reports that phase/commentary vs final-answer distinction is dropped."
-  - "No timestamps are present in the exec JSONL events."
-  - "RUST_LOG can increase stderr diagnostics; stdout remains the only parse stream in --json mode."
+  - "The stable user-facing flag is --json, but the TypeScript SDK still invokes --experimental-json as an alias."
+  - "thread.started.thread_id is the only session id in exec JSONL; there is no separate turn id."
+  - "Model reroute is not a typed model_fallback event; it is flattened into an item.type=error message."
+  - "File changes are summarized by path and add/delete/update kind only; no patch text is included."
+  - "MCP tool result uses structured_content in exec JSONL, while MCP protocol names the field structuredContent in some broader schemas."
+  - "Reasoning items contain summaries/text, not hidden reasoning."
+  - "JSONL item ids are synthesized by the exec projector and are not necessarily raw app-server item ids."
+  - "Without --json, stdout is intentionally only the final assistant message, which is good for pipes but poor for lifecycle supervision."
 gaps:
-  - "No current local authenticated codex exec fixture was captured in this update; event details are from official docs, local help, and upstream source."
-  - "Exact exit-code behavior for every launch/auth/rate-limit/cancellation path was not exhaustively re-tested on 0.142.5."
-  - "Image attachment event visibility in exec JSONL was not verified."
-  - "Whether app-server should become a future Claudine high-control mode remains a product decision; this document recommends exec JSONL for the current wrapper."
+  - "No official, versioned JSON Schema for codex exec --json was found."
+  - "Exact stderr text and exit codes for every auth, quota, rate-limit, and billing failure were not exhaustively fixture-tested."
+  - "Cost fields are not exposed in exec JSONL."
+  - "The exact local cache path for cloud-managed config/requirements was not verified."
+  - "Nested subagent child tool events were not verified as visible in the parent exec JSONL stream; source exposes collab state in parent events."
+  - "No timestamp fields were found in exec JSONL events."
 claudine_strategy:
-  preferred_invocation: 'codex exec --json --sandbox workspace-write --ask-for-approval never "..."'
-  required_flags: ["exec", "--json", "--sandbox <mode>", "--ask-for-approval never for deterministic CI or explicit bypass only in external isolation"]
-  conflicting_flags: ["--ephemeral when Claudine needs resume", "text mode/no --json for lifecycle parsing", "app-server when using the simple exec parser"]
-  parser_notes: "Parse stdout as JSONL with top-level type and nested item.type. Treat turn.completed/turn.failed as terminal, item.id as lifecycle correlation, thread.started.thread_id as resume identity, and unknown events as forward-compatible telemetry."
-  wrapper_notes: "Capture codex --version, cwd, argv, config overrides, selected profile, env auth source, and process exit separately because exec JSONL omits them. Keep stderr for diagnostics but do not mix it into the JSON parser."
+  preferred_invocation: 'codex exec --json --sandbox workspace-write --skip-git-repo-check "PROMPT"'
+  required_flags: ["exec", "--json", "--sandbox <mode chosen by Claudine>", "--color never when wrapping human stderr"]
+  conflicting_flags: ["no --json for live parsing", "--ephemeral when Claudine needs resume", "--yolo unless the outer runner is isolated", "codex app-server for simple one-shot jobs"]
+  parser_notes: "Parse stdout as JSONL with top-level type discriminator and nested item.type. Use thread.started.thread_id for resume, last item.completed agent_message for final text, turn.completed usage for tokens, and turn.failed/error/non-zero exit for failure. Preserve unknown events."
+  wrapper_notes: "Capture stderr, process exit status, signal, `codex --version`, cwd, selected config/profile, sandbox/approval flags, and environment auth source separately because exec JSONL omits much of that metadata."
 data_format: jsonl
 changes:
-  - "2026-07-02: Rewrote Codex non-interactive research against official docs, local codex-cli 0.142.5 help, and upstream Rust exec JSONL source; added schema-backed frontmatter."
-requires_claudine_update: false
-reason: "Research refresh only; no mandatory Claudine code change was proven beyond keeping provider metadata aligned with this document."
+  - "2026-07-03: Refreshed Codex CLI non-interactive research from current OpenAI Codex manual, local codex-cli 0.142.5 help, and openai/codex source event types."
+requires_claudine_update: true
+reason: "Claudine should prefer codex exec --json and parse the current ThreadEvent/item.type JSONL contract; wrappers also need side-channel capture for metadata omitted from exec JSONL."
 ---
+
+# Codex CLI Non-Interactive Sessions
 
 ## Summary
 
-Claudine can run Codex CLI non-interactively with structured live output by using `codex exec --json`. The official non-interactive documentation describes `codex exec` as the script/CI entry point and says that `--json` turns stdout into a JSON Lines stream where each line is a JSON object. The stream is useful while the run is still active: it exposes a thread id, turn boundaries, command/tool lifecycle, file-change summaries, plan updates, subagent collaboration tool snapshots, final assistant messages, and token usage on successful completion.
+Codex CLI can run non-interactively with `codex exec`. For Claudine, the preferred local wrapper mode is `codex exec --json`, because it turns stdout into a live JSON Lines stream with session, turn, item, tool, file-change, plan, error, and usage events. Plain `codex exec` is useful for shell pipelines because stdout contains only the final assistant message, but that mode hides the operational state Claudine needs while a run is active.
 
-Claudine should prefer `codex exec --json` over text mode and over the app-server protocol for the current wrapper. Text mode loses most operational structure. App-server is richer and formally schema-generatable, but it is a bidirectional JSON-RPC-like protocol that requires Claudine to act as a full client, handle initialization, start threads and turns, answer approvals/user-input requests, and own server lifecycle. The main parser risks for `exec --json` are that the exact schema is defined by Rust Serde types rather than a published standalone JSON Schema, the stream omits important metadata such as model/auth/cost/rate limits, and some app-server concepts are flattened or lost in the exec projection.
+The main parser risk is that the `exec --json` stream is not published as a formal JSON Schema. Its best schema source is the Rust Serde union in `codex-rs/exec/src/exec_events.rs`, plus the JSONL projection code in `event_processor_with_jsonl_output.rs` and the TypeScript SDK event/item unions. The stream is intentionally smaller than the broader app-server protocol: it does not emit model, provider, auth kind, cwd, sandbox, approval policy, version, full MCP inventory, timestamps, or cost. Claudine should parse stdout JSONL and separately capture invocation/config metadata, stderr, process exit status, and `codex --version`.
 
 ## Non-Interactive Entry Points
 
-The primary non-interactive entry point is `codex exec`. Official docs position it for scripts, CI, pipelines, and explicit sandbox/approval settings. A prompt can be passed as a positional argument, omitted and read from stdin, or represented by `-` to force stdin. Local `codex-cli 0.142.5` help confirms that if stdin is piped and a prompt argument is also provided, Codex treats the argument as the instruction and appends stdin as a `<stdin>` block.
+The official non-interactive entry point is `codex exec`. It starts the agent without opening the TUI, accepts a prompt as an argv argument, reads stdin when no prompt is supplied or when the prompt is `-`, and treats piped stdin plus a prompt argument as additional context. The local CLI observed on this host was `codex-cli 0.142.5`, and `codex exec --help` confirmed the documented flags: `--json`, `--output-schema`, `--output-last-message`, `--sandbox`, `--cd`, `--add-dir`, `--image`, `--profile`, `--config`, `--ignore-user-config`, `--ignore-rules`, `--skip-git-repo-check`, `--ephemeral`, and `resume`.
 
-Recommended fresh-session shape:
+Typical invocations:
 
-```bash
-codex exec --json --sandbox workspace-write --ask-for-approval never "fix the failing tests"
-```
+| Purpose | Command shape | Notes |
+| --- | --- | --- |
+| Fresh local run | `codex exec --json "prompt"` | Best Claudine default for live parsing. |
+| Prompt from stdin | `codex exec --json -` | stdin is the prompt. |
+| Prompt plus context | `producer | codex exec --json "instruction"` | piped content is appended as context. |
+| Resume latest | `codex exec --json resume --last "prompt"` | Requires persisted session state. |
+| Resume by id | `codex exec --json resume <SESSION_ID> "prompt"` | `SESSION_ID` is `thread.started.thread_id`. |
+| Review | `codex exec review --json` | Uses the exec stream for a code review workflow. |
 
-Use `--sandbox read-only --ask-for-approval never` for read-only CI and `--sandbox workspace-write` when edits are required. `--dangerously-bypass-approvals-and-sandbox` is available, but it should only be used when Claudine or the caller has already put the process inside a separate isolation boundary. The deprecated `codex exec --full-auto` compatibility path should not be used for new wrapper work.
+Codex also has programmatic surfaces that are adjacent but not the right default for a one-shot Claudine local run. `codex app-server` exposes a bidirectional JSON-RPC-like protocol over stdio, WebSocket, or Unix socket. It is richer, can generate schemas, and is appropriate for a product integration that wants to manage threads, turns, approvals, and cancellation directly. For a wrapper around an autonomous process, `exec --json` is simpler and already handles a complete run lifecycle. `codex cloud list --json` is scriptable JSON, but it lists cloud tasks rather than running a local agent session.
 
-Resume is also scriptable:
-
-```bash
-codex exec --json resume --last "continue"
-codex exec --json resume <SESSION_ID> "continue"
-```
-
-`thread.started.thread_id` is the identity Claudine can record for resume. That does not help if the original run used `--ephemeral`, because that disables persisted session files.
-
-Codex also ships `codex app-server`, which can run over stdio, WebSocket, or Unix socket. App-server is not an output format for `exec`; it is a separate long-running protocol. It is attractive for a future deep integration because it exposes approvals, account APIs, richer thread items, cancellation, steering, and generated schemas. It is also more work and changes Claudine from a process wrapper into a protocol client.
+Attachments and configuration are available in `exec`: `--image` attaches images; `--cd` changes the working directory; `--add-dir` adds writable roots; `--model`, `--profile`, and `-c key=value` influence model/provider/reasoning/tools; MCP servers are configured through `config.toml`; and `--sandbox`/approval settings control tool permissions.
 
 ## Output Formats
 
-Codex has one best live structured format for non-interactive CLI wrapping: `codex exec --json`.
+Codex has several output modes with different wrapper value:
 
-| Mode | Selector | Shape | Streams? | Claudine recommendation |
+| Format | Selector | Framing | Streams? | Claudine preference |
 | --- | --- | --- | --- | --- |
-| Default text | no `--json` | final prose on stdout, progress on stderr | yes, but human-oriented | Avoid for lifecycle parsing |
-| Exec JSONL | `--json` | one JSON object per stdout line | yes | Prefer |
-| Final-message file | `-o FILE` / `--output-last-message FILE` | final assistant text file | no live stream | Use as an optional artifact sink |
-| Schema-constrained final output | `--output-schema FILE` | final response requested to match JSON Schema | no live stream | Optional final artifact constraint, not telemetry |
-| App-server | `codex app-server --listen stdio://` | JSON-RPC-like request/response/notification lines | yes and bidirectional | Future high-control integration, not the exec parser |
+| Default text | no `--json` | text | stderr progress, stdout final text | Avoid for supervision; useful only for final-message pipes. |
+| Exec JSONL | `--json` | JSONL on stdout | yes | Prefer. |
+| Exec JSONL alias | `--experimental-json` | JSONL on stdout | yes | Same behavior today; use `--json` in new wrappers. |
+| Final-message file | `-o FILE` / `--output-last-message FILE` | text file | no | Optional side sink. |
+| Schema-constrained final answer | `--output-schema FILE` | final answer is model-produced JSON text | no | Useful for final artifact shape, not stream telemetry. |
+| App-server stdio | `codex app-server --listen stdio://` | JSON-RPC lines | yes, bidirectional | Use only for deep integrations. |
+| App-server WebSocket | `codex app-server --listen ws://...` | WebSocket text frames | yes, bidirectional | Experimental; not default. |
+| Cloud list JSON | `codex cloud list --json` | single JSON | no | Separate cloud task listing use case. |
 
-In default text mode, Codex streams progress to stderr and prints only the final agent message to stdout. That makes shell pipelines pleasant for humans, but it is weak input for Claudine because tool calls, file changes, plans, usage, and failure shape are not structured on stdout.
+The official docs state that default `codex exec` streams progress to stderr and prints only the final agent message to stdout. That is good Unix behavior, but weak wrapper telemetry. With `--json`, stdout becomes JSON Lines and captures every event the exec projector emits while the run is active. That lets Claudine render tool progress, detect file changes, classify turn failure, collect token usage, and obtain the resume id before process exit.
 
-With `--json`, official docs say stdout becomes JSON Lines and list event families including `thread.started`, `turn.started`, `turn.completed`, `turn.failed`, `item.*`, and `error`. Local `codex exec --help` for `codex-cli 0.142.5` says the same in shorter form: `--json` prints events to stdout as JSONL. This is the stream Claudine should parse.
+`--output-schema` is easy to misread. It asks the model to make the final assistant response conform to a caller-supplied JSON Schema. It does not define or validate the event stream. In `--json` mode, the final structured answer appears as text inside an `item.completed` event whose nested item is `type: "agent_message"`.
 
-`--output-schema` should be understood narrowly. It asks the model to make the final assistant response conform to a JSON Schema, and it can be paired with `-o` for a final JSON artifact. It does not validate the event stream and does not replace the JSONL parser.
+The app-server stream is a different API style. It is a request/reply plus notification protocol with `method`, `params`, and `id`, and the client must answer some server requests. Its richer protocol is useful context, but Claudine should not use it for ordinary one-shot runs unless it wants to become a full Codex client.
 
 ## Schema Sources
 
-The exact `codex exec --json` stream does not currently have a provider-published standalone JSON Schema. The best exact schema is the upstream Rust source:
+No formal JSON Schema for `codex exec --json` was found. The authoritative stream shape is the Rust source:
 
-- [`codex-rs/exec/src/exec_events.rs`](https://github.com/openai/codex/blob/main/codex-rs/exec/src/exec_events.rs)
-- [`codex-rs/exec/src/event_processor_with_jsonl_output.rs`](https://github.com/openai/codex/blob/main/codex-rs/exec/src/event_processor_with_jsonl_output.rs)
+| Source | Evidence type | Usefulness |
+| --- | --- | --- |
+| [`codex-rs/exec/src/exec_events.rs`](https://github.com/openai/codex/blob/main/codex-rs/exec/src/exec_events.rs) | Rust Serde types | Best schema for top-level `ThreadEvent` and nested `ThreadItemDetails`. |
+| [`codex-rs/exec/src/event_processor_with_jsonl_output.rs`](https://github.com/openai/codex/blob/main/codex-rs/exec/src/event_processor_with_jsonl_output.rs) | Rust projection logic | Explains which app-server notifications become exec JSONL events and which are dropped. |
+| [`sdk/typescript/src/events.ts`](https://github.com/openai/codex/blob/main/sdk/typescript/src/events.ts) and [`items.ts`](https://github.com/openai/codex/blob/main/sdk/typescript/src/items.ts) | TypeScript unions | Good consumer-facing typed examples for SDK parsers. |
+| [Non-interactive mode](https://developers.openai.com/codex/noninteractive) | Official examples | Documents `--json`, event families, and sample JSONL. |
+| [Codex App Server](https://developers.openai.com/codex/app-server) | Formal app-server schema generation | Useful for broader protocol context, not equivalent to exec JSONL. |
 
-`exec_events.rs` defines `ThreadEvent` as a Serde tagged enum with top-level `type`. It also defines `ThreadItemDetails` as a nested Serde tagged enum with `item.type` values such as `agent_message`, `reasoning`, `command_execution`, `file_change`, `mcp_tool_call`, `collab_tool_call`, `web_search`, `todo_list`, and `error`.
+The Rust event enum uses `#[serde(tag = "type")]`, so the top-level discriminator is `type`. Nested items also use `type`, with snake_case item variants such as `agent_message`, `command_execution`, `file_change`, `mcp_tool_call`, `collab_tool_call`, `web_search`, `todo_list`, and `error`.
 
-`event_processor_with_jsonl_output.rs` is equally important because it shows what the app-server notification stream loses or rewrites when projected into exec JSONL. Examples: agent messages and reasoning are not emitted as started items; file-change `declined` is mapped to `failed`; model reroute becomes an `error` item message; token usage is stored from token-usage notifications and emitted on `turn.completed`.
-
-The app-server schema is formal but broader. Official app-server docs say clients can generate both TypeScript bindings and a JSON Schema bundle with `codex app-server generate-ts --out ./schemas` and `codex app-server generate-json-schema --out ./schemas`. The published schema bundle is useful context for richer concepts like account/rate-limit APIs, approvals, user-input requests, and thread notifications, but Claudine must not validate `exec --json` as if it were raw app-server JSON-RPC.
+The app-server protocol can generate TypeScript and JSON Schema for its own methods and notifications. That schema is formal and version-specific, but it is not the flattened `exec --json` schema. Claudine should treat it as a secondary reference when deciding whether a missing field might exist in a richer integration.
 
 ## IO Contract
 
-For `codex exec --json`, stdout is parse-only JSONL. Each line is one complete JSON object. Claudine should parse stdout incrementally and should not expect banners, Markdown, or progress bars there.
+`codex exec` has a clean stdio contract. Source comments in the exec crate say default mode reserves stdout for the final message, JSON mode reserves stdout for valid JSONL, and all other output belongs on stderr. That is exactly what a wrapper needs: with `--json`, stdout can be parsed line-by-line, and stderr can be captured as diagnostics.
 
-Stderr is diagnostics and human progress/error output. Official docs say text mode uses stderr for progress and stdout for final content. Environment-variable docs also note that `codex exec` defaults Rust logging to `error` unless `RUST_LOG` is set, and that non-interactive mode prints messages inline instead of using a separate TUI log file. Claudine should preserve stderr for operator diagnostics and launch-failure classification, but not feed it into the JSONL parser.
+stdin is prompt input, not a bidirectional protocol. If a prompt argument is absent or `-`, Codex reads stdin as the prompt. If stdin is piped while a prompt argument is present, the prompt remains the instruction and stdin becomes additional context. In contrast, `app-server` uses stdin as a bidirectional JSON-RPC line transport and requires an initialize handshake.
 
-Stdin is prompt/context input for `exec`. It is not a bidirectional protocol. App-server is the opposite: stdin/stdout are protocol lines, and the client must send requests such as `initialize`, `thread/start`, and `turn/start` while reading responses and notifications.
+stderr is not structured, but it is operationally important. Startup/config/auth failures can happen before `thread.started`, and the TypeScript SDK includes stderr text when the child exits non-zero. Claudine should keep stderr attached to the run record and use it for failure classification when the JSONL stream has no terminal event.
 
 ## Stream Contract
 
-The exec JSONL top-level discriminator is `type`. For item events, there is a second discriminator at `item.type`.
+The top-level `type` values are:
 
-The stable top-level union from current Rust source is:
+| Event | Meaning |
+| --- | --- |
+| `thread.started` | New thread/session started; contains `thread_id`. |
+| `turn.started` | A prompt was submitted and a turn began. |
+| `item.started` | An in-progress item became visible. |
+| `item.updated` | An item changed, especially `todo_list`. |
+| `item.completed` | An item reached a terminal state. |
+| `turn.completed` | The turn completed successfully; includes token usage. |
+| `turn.failed` | The turn failed; includes `error.message`. |
+| `error` | Unrecoverable stream/server error message. |
 
-- `thread.started`
-- `turn.started`
-- `turn.completed`
-- `turn.failed`
-- `item.started`
-- `item.updated`
-- `item.completed`
-- `error`
+For a new thread, `thread.started` is documented in source as the first event, and the TypeScript SDK updates `thread.id` immediately when it sees that event. `turn.completed` and `turn.failed` are the normal terminal stream events. One caveat from source: an interrupted turn initiates shutdown and contributes to non-zero exit handling, but the JSONL projector does not emit `turn.failed` for `TurnStatus::Interrupted`. Claudine should treat process signal, non-zero exit, or EOF without terminal event as cancellation or ambiguous failure.
 
-Normal ordering starts with `thread.started`, then `turn.started`, then zero or more item events, and finally `turn.completed` or `turn.failed`. A top-level `error` can appear as an unrecoverable stream-level error. Claudine should treat `turn.completed` and `turn.failed` as terminal when they appear, while still using process exit to catch launch crashes, auth setup failures, and abnormal termination before a terminal event.
+Tool and item correlation is by `item.id` in the flattened stream. The projector maps raw app-server item ids to synthetic `item_N` ids, keeps the same id across started/completed while an item is in progress, then removes the mapping. There is no top-level turn id in exec JSONL.
 
-Events are snapshots, not partial deltas. `item.updated` carries a full current snapshot for the item; today the important case is `todo_list`. Assistant text is not streamed as token deltas in exec JSONL. The useful assistant field is `item.completed` with `item.type = "agent_message"` and `item.text`.
-
-Correlation is mostly by `item.id`. Subagent/collaboration items additionally expose `sender_thread_id`, `receiver_thread_ids`, and an `agents_states` map. `thread.started.thread_id` is the session identity. There are no timestamps, no schema version marker, and no event sequence number, so Claudine should process events in arrival order and tolerate unknown future events by logging and skipping them.
+Assistant messages are not token deltas. The final answer is the last completed `agent_message` item. Reasoning appears only as summary text in completed `reasoning` items. Command output is aggregated into one `aggregated_output` field rather than split into stdout/stderr channels.
 
 ## Session Metadata
 
-`thread.started.thread_id` is emitted first and is the strongest session identity in exec JSONL. It is suitable for logs and resume recovery as long as the session is persisted.
+The only reliable session metadata in exec JSONL is:
 
-Most other metadata Claudine wants is absent from the stream:
-
-| Metadata | Exec JSONL support | Practical source |
+| Metadata | Field | Notes |
 | --- | --- | --- |
-| cwd/project root | not emitted | wrapper cwd, `-C/--cd`, config |
-| CLI version | not emitted | `codex --version` before launch |
-| requested model | not emitted | argv/config/profile captured by wrapper |
-| resolved model/provider | not emitted | out-of-band config/app-server/hook evidence |
-| auth kind/source | not emitted | env/auth status/app-server account APIs |
-| sandbox/approval mode | not emitted | argv/config/managed requirements |
-| MCP server inventory | not emitted | config; `mcp_tool_call.server` only when called |
-| tools enabled | partially visible | item types that actually occur |
+| Resume/session id | `thread.started.thread_id` | Arrives first; usable with `codex exec resume <SESSION_ID>`. |
+| Token usage | `turn.completed.usage.*` | Input, cached input, output, and reasoning output tokens. |
+| MCP server/tool for a call | `item.server`, `item.tool` on `mcp_tool_call` | Per-call only, not inventory. |
+| Subagent ids/state | `collab_tool_call.receiver_thread_ids`, `agents_states` | Parent orchestration state, not full child transcript. |
 
-The absence of model identity is a known integration gap. The stream can reveal model reroute only indirectly because the projection maps `ModelRerouted` into an `item.completed` error message such as `model rerouted: from -> to (reason)`.
+Important metadata is absent from exec JSONL: cwd, project root, git branch, model, provider, auth source, CLI version, sandbox mode, approval policy, full MCP server list, roots, terminal size, timestamps, and cost. Some of this is available elsewhere: OTel `conversation_starts` includes model and sandbox/approval settings, app-server exposes richer config and thread structures, and the wrapper already knows invocation flags. For Claudine, the pragmatic strategy is to record wrapper-side metadata beside the JSONL stream.
 
 ## Event Families
 
-The event families Claudine can parse are:
+`item.completed` is a broad event; the nested `item.type` is the real operational category:
 
-| Family | Events | Notes |
+| `item.type` | Start/update/completion behavior | Key fields |
 | --- | --- | --- |
-| Session/turn | `thread.started`, `turn.started`, `turn.completed`, `turn.failed` | Boundaries and final usage |
-| Assistant | `item.completed` / `agent_message` | Final answer is the last agent message |
-| Reasoning | `item.completed` / `reasoning` | Summary text only; can be hidden or absent |
-| Command tools | `item.started`, `item.completed` / `command_execution` | Command, aggregate output, exit code, status |
-| File changes | `item.completed` / `file_change` | Paths, add/delete/update, status |
-| MCP tools | `item.started`, `item.completed` / `mcp_tool_call` | Server/tool/args/result/error/status |
-| Web search | `item.started`, `item.completed` / `web_search` | Query and action, not raw result set |
-| Plan/todo | `item.started`, `item.updated`, `item.completed` / `todo_list` | Step text plus completed booleans |
-| Subagents | `item.started`, `item.completed` / `collab_tool_call` | Collaboration tool snapshots and agent states |
-| Errors/warnings | top-level `error`, `turn.failed`, `item.completed` / `error` | Mixed severity; only message is stable |
+| `agent_message` | completed only | `text` |
+| `reasoning` | completed only | `text` |
+| `command_execution` | started and completed | `command`, `aggregated_output`, `exit_code`, `status` |
+| `file_change` | completed after patch succeeds/fails | `changes[].path`, `changes[].kind`, `status` |
+| `mcp_tool_call` | started and completed | `server`, `tool`, `arguments`, `result`, `error`, `status` |
+| `collab_tool_call` | started and completed | `tool`, `sender_thread_id`, `receiver_thread_ids`, `prompt`, `agents_states`, `status` |
+| `web_search` | started and completed | `query`, `action` |
+| `todo_list` | started, updated, completed | `items[].text`, `items[].completed` |
+| `error` | completed | `message` |
 
-The app-server protocol has many more event and item types. Claudine should not assume they appear in exec JSONL unless `event_processor_with_jsonl_output.rs` maps them.
+Warnings, config warnings, deprecation notices, and model reroutes are flattened into `item.type=error`. A model reroute message currently looks like prose containing the source model, destination model, and reason; it is not a typed `model_fallback` event.
 
 ## Tools
 
-Command execution is the strongest tool surface in exec JSONL. The start event exposes `item.command` and `status: "in_progress"`. The completion event adds `aggregated_output`, `exit_code`, and final `status`. The output is aggregated; stdout and stderr are not separately typed.
+Shell command execution is visible before and after completion. Claudine can show `item.started` with `command_execution.status=in_progress`, then update final status from `item.completed`. The command result includes an exit code when available and combined output in `aggregated_output`.
 
-File edits are visible as `file_change` completed items with `changes[].path`, `changes[].kind`, and `status`. There is no dedicated start event in the exec projection. A declined file change from the richer protocol is collapsed to `failed`, so Claudine cannot reliably distinguish policy denial from patch failure using only `file_change.status`.
+File edits are visible as `file_change` items after the patch succeeds or fails. The stream includes path and add/delete/update kind, but not hunk text. If Claudine needs an exact diff, it must run `git diff` or inspect files separately.
 
-MCP tool calls expose start and completion, including `server`, `tool`, `arguments`, optional `result.content`, optional `result._meta`, optional `result.structured_content`, optional `error.message`, and `status`. MCP server initialization state is not currently a first-class exec event, but the official non-interactive docs say a required MCP server that fails to initialize makes `codex exec` exit with an error.
+MCP tool calls include server name, tool name, arguments, and either result content/structured content/meta or an error message. Required MCP server startup failures are documented to make `codex exec` exit with an error instead of silently continuing without the server. MCP OAuth setup is not solved mid-run by exec JSONL; configure MCP authentication before automation.
 
-Subagents are represented through `collab_tool_call` items. Supported collab tool enum values in the exec Rust type are `spawn_agent`, `send_input`, `wait`, and `close_agent`. The payload includes sender/receiver thread ids, optional prompt, agent state map, and status. This is enough for Claudine to show that subagent machinery was invoked, but not enough to reconstruct every nested subagent command/tool event as if it were part of the parent stream.
-
-Web search and plan updates are visible enough for progress UI. Web search exposes the query/action. The plan stream uses `todo_list` snapshots and updates.
+Web search appears as `web_search` items when used. Plan state appears as `todo_list`, not as a separate top-level plan event. Subagents are represented as `collab_tool_call` items with tool names such as spawn/send/wait/close and maps of child agent states.
 
 ## Completion and Exit Status
 
-For agent success, trust `turn.completed`. It includes token usage:
+For normal success, trust `turn.completed` and collect the last `agent_message` as final text. Token usage is on `turn.completed.usage`:
 
 ```json
 {"type":"turn.completed","usage":{"input_tokens":24763,"cached_input_tokens":24448,"output_tokens":122,"reasoning_output_tokens":0}}
 ```
 
-For agent failure, trust `turn.failed` when present:
+For failure, trust `turn.failed` when present, and also watch top-level `error` events. Source code tracks fatal server errors and failed/interrupted turns so that automation gets a non-zero process status. The TypeScript SDK also treats non-zero exit or signal as failure and includes captured stderr in the thrown error. That makes exit code reliable as process-level failure signaling, but not sufficient as the only classifier: stderr and stream events carry the human-readable reason.
 
-```json
-{"type":"turn.failed","error":{"message":"turn failed"}}
-```
-
-The final answer is the last `item.completed` where `item.type` is `agent_message`. If `-o/--output-last-message` is supplied, Codex also writes that final message to a file. Claudine should still parse the stream because the file is not live telemetry.
-
-The process exit code should be treated as necessary but not sufficient. A nonzero exit before any terminal event is meaningful for launch/auth/crash failures. A zero exit does not prove every tool succeeded, because a completed agent turn can contain failed or declined command/file/MCP items. Claudine should classify tool failures from item statuses and classify run failure from `turn.failed`, missing terminal event plus abnormal exit, or timeout/cancellation.
-
-Token units are tokens. They are turn-total values as exposed by `turn.completed.usage`. There is no cost field, no currency, no per-tool token count, and no reset window. There are also no timestamps.
+Cancellation/interruption is the important caveat. Source sets error state for interrupted turns, but the JSONL projection does not emit a `turn.failed` event for `TurnStatus::Interrupted`; it just initiates shutdown. Claudine should classify EOF without `turn.completed`/`turn.failed`, a signal, or non-zero exit as canceled or ambiguous depending on the process status.
 
 ## Blocking Behavior
 
-Non-interactive runs should be launched with explicit sandbox and approval settings. Official docs say `codex exec` defaults to a read-only sandbox and recommend least-privilege sandbox choices for automation. The approvals/security docs list read-only CI as `--sandbox read-only --ask-for-approval never`, automatic edit mode as `--sandbox workspace-write`, and dangerous full access as `--dangerously-bypass-approvals-and-sandbox` / `--yolo`.
+`codex exec` is designed not to wait for a human TTY. The exec config path defaults approval policy to `never` for headless mode. Source-level request handling then rejects approval and user-input requests that would otherwise need a human:
 
-When a human decision would be needed, exec JSONL does not expose a rich programmable question/answer event. Depending on the surface, Claudine may see a declined command, a failed file change, a failed MCP tool with an error message, `turn.failed`, a top-level `error`, or process failure. App-server is the surface with structured approval requests and user-input methods; `exec` is the safer current choice only when Claudine preconfigures permissions so the run is deterministic.
+| Request | Exec behavior |
+| --- | --- |
+| MCP elicitation | Resolves with cancel. |
+| Command execution approval | Rejects as unsupported in exec mode. |
+| File-change approval | Rejects as unsupported in exec mode. |
+| `request_user_input` | Rejects as unsupported in exec mode. |
+| Dynamic tool call request | Rejects as unsupported in exec mode. |
+| ChatGPT auth token refresh request | Rejects as unsupported in exec mode. |
+| Apply patch / exec command approval | Rejects as unsupported in exec mode. |
+| Permissions request approval | Rejects as unsupported in exec mode. |
 
-Authentication is another automation boundary. Official docs recommend API-key auth for programmatic CLI workflows and document `CODEX_API_KEY` for a single `codex exec` invocation. Browser login is interactive; ChatGPT-managed auth on CI requires seeding persisted auth carefully and is only appropriate for trusted runners.
+This is favorable for automation: the run should fail closed rather than hang for a prompt. It also means Claudine must preconfigure sandbox and permissions. If a workflow requires human approval, use an interactive Codex surface or the app-server protocol with a client that can answer server requests.
+
+Authentication is separate. If no usable login or API key exists, `exec` can fail before a thread starts. For CI, official docs recommend setting `CODEX_API_KEY` only for the single `codex exec` invocation, or using trusted ChatGPT-managed auth/access-token workflows when API-key billing is not the desired source.
 
 ## Subagents
 
-Codex supports subagent/collaboration tools non-interactively, and exec JSONL exposes them as `collab_tool_call` items. The payload identifies the collab tool, sender thread id, receiver thread ids, optional prompt, agent states, and final status. This is enough for high-level Claudine lifecycle reporting: a subagent was spawned, waited on, or closed; which child thread ids were involved; and what the last known child states were.
+Codex subagents are supported in current CLI releases and are enabled by default. They do not spawn automatically; the user must explicitly ask for subagents or parallel agent work. In non-interactive flows, an action that needs a fresh approval fails and is surfaced back to the parent workflow.
 
-The parent stream does not flatten all nested subagent events into separate parent events. Claudine should not expect a child command execution to appear as a normal parent `command_execution` item unless the parent itself ran it. For prompt injection, there is no dedicated `--subagent-system-prompt` flag in `codex exec`; the practical controls are the root prompt, AGENTS.md/project instructions, skills, and custom agent config.
+In the exec JSONL stream, parent-visible subagent activity appears through `collab_tool_call` items. These include the collaboration tool, sender thread id, receiver thread ids, optional prompt, per-agent state map, and status. This is enough to know that a subagent was spawned, waited on, or closed, and to see high-level child state. It is not proof that every nested child tool call is replayed into the parent stream. Claudine should treat nested child tool visibility as a gap unless fixture evidence proves otherwise.
+
+The caller can steer subagents by prompt: because Codex only starts subagents when explicitly requested, Claudine can include non-interactive constraints in the parent prompt, such as requiring child agents to avoid prompts and return concise summaries. Custom agents can also be configured under `~/.codex/agents/` or trusted project `.codex/agents/`.
 
 ## Use Case Detection
 
-`tokens_consumed` is strongly detectable from `turn.completed.usage`. The fields are `input_tokens`, `cached_input_tokens`, `output_tokens`, and `reasoning_output_tokens`.
+| Use case | Detectable from exec JSONL? | Detection |
+| --- | --- | --- |
+| `session_resumable` | Yes | `thread.started.thread_id`, unless `--ephemeral` prevents persisted resume. |
+| `tokens_consumed` | Yes | `turn.completed.usage.*`, units are tokens for the completed turn. |
+| `model_used` | No | Capture `--model`, config/profile, or OTel/app-server metadata outside exec JSONL. |
+| `model_fallback` | Partial | Parse `item.type=error` message beginning with model reroute text; no typed fields. |
+| `auth` | Partial | Startup stderr, top-level `error`, `turn.failed.error.message`, non-zero exit. |
+| `plan_cap_approaching` | No | No structured plan/quota cap event found. |
+| `plan_capped` | Partial | Generic provider error text only; no reset/window fields. |
+| `no_funds` | Partial | Generic billing/quota error text only. |
+| `permission_read_denied` | Partial | Command failure/output or `turn.failed`; no dedicated read-denied event. |
+| `permission_write_denied` | Partial | Failed `file_change`, command output, or `turn.failed`. |
+| `human_in_loop` | Yes | Unsupported approval/input/elicitation messages, failed request handling, or non-zero exit. |
+| `subagent_prompt_injection` | Yes | `collab_tool_call.prompt` and parent prompt content. |
 
-`session_resumable` is strongly detectable from `thread.started.thread_id`, with the caveat that `--ephemeral` prevents persistence.
-
-`permission_read_denied` and `permission_write_denied` are only partially detectable. Read denial usually appears as a `command_execution` item with `status: "declined"` or `status: "failed"` plus OS/policy text in `aggregated_output`. Write denial through patching appears as a `file_change` with `status: "failed"` and affected paths. That does not cleanly distinguish policy denial from patch failure because exec collapses declined file changes to failed.
-
-`human_in_loop` is detectable only as a near miss: declined statuses, failed MCP tool calls, or messages that mention unsupported user input or cancellation. The actual question/options are not emitted in exec JSONL.
-
-`model_used` is not detectable from exec JSONL. Claudine can record the requested model from argv/config, but that is not a resolved backend model. `model_fallback` is weakly detectable because reroute is projected as a text error item rather than structured fields.
-
-Plan-cap, quota, billing/no-funds, and auth-kind detection are weak in exec JSONL. They may surface as `turn.failed` or `error` message text, but there is no stable enum, remaining quantity, reset time, or billing discriminator. App-server account/rate-limit APIs are richer, but they are outside the exec stream.
+No timestamps are present in exec JSONL, so timezone/window fields for quotas or reset times cannot be extracted unless an error message includes them as prose.
 
 ## Headless Constraints
 
-The biggest constraint is schema stability. `exec --json` is documented, but the exact event contract is a Rust Serde type and projection layer. Claudine should maintain fixtures and tolerate unknown events.
+The most important constraint is metadata absence. `exec --json` is good for live progress, but it is not a complete run manifest. Claudine should wrap it with its own manifest: executable path/version, cwd, prompt source, config/profile, model override, sandbox/approval flags, environment auth source, start/end timestamps, process id, exit code, signal, and stderr.
 
-The second constraint is metadata absence. Claudine must capture wrapper-side context: `codex --version`, process cwd, argv, selected profile, config overrides, sandbox and approval flags, intended model, and auth source. None of that is reliably present in JSONL.
+The second constraint is permission determinism. Exec will not ask a human. That is good, but a misconfigured task can fail instead of pausing. Use explicit `--sandbox`, approval policy, MCP tool approval modes, and project trust assumptions. Avoid `--yolo` unless the outer runner is isolated.
 
-The third constraint is approval and elicitation behavior. To avoid automation hangs or ambiguous failures, Claudine should launch with deterministic settings. Use `--ask-for-approval never` for read-only CI. Use `workspace-write` only when writes are intended. Use bypass only when the outer environment is disposable and sandboxed.
-
-Finally, do not use app-server accidentally as if it were an output format. App-server is a bidirectional protocol. If Claudine adopts it later, the parser must become a client that sends requests, handles ids, answers or rejects approvals, and issues cancellation/interrupt methods.
+The third constraint is schema drift. Since there is no formal exec JSON Schema, the parser should be tolerant: unknown top-level `type` or nested `item.type` should be logged and preserved, not fatal. Required behavior should be based on the documented/core events: `thread.started`, item events, `turn.completed`, `turn.failed`, and process status.
 
 ## Timeline
 
-| Date | Event | Why it matters |
-| --- | --- | --- |
-| 2025-07-24 | GitHub issue requesting JSON Schema for `--json` output was opened | Confirms the lack of a standalone exec schema was already an integration concern |
-| 2026-03-10 | Codex CLI 0.113.0 changelog period wired exec closer to app-server internals | Explains why exec JSONL mirrors a subset of app-server concepts |
-| 2026-03-11 | Codex CLI 0.114.0 changelog period added hooks/schema groundwork | Relevant to lifecycle and generated protocol types |
-| 2026-04-06 | Earlier Claudine Codex research captured the exec Rust event union | Baseline for this refresh |
-| 2026-07-02 | This document was refreshed against current official docs, local `codex-cli 0.142.5` help, and upstream Rust source | Current recommendation remains `codex exec --json` |
+| Date | Evidence |
+| --- | --- |
+| 2026-07-03 | Fetched current Codex manual through the OpenAI docs skill helper; non-interactive docs describe `codex exec`, `--json`, JSONL events, stdin behavior, permissions, auth, and resume. |
+| 2026-07-03 | Locally observed `codex-cli 0.142.5`; `codex exec --help` confirmed current CLI flags and prompt/stdin behavior. |
+| 2026-07-03 | Cloned `openai/codex` and inspected `codex-rs/exec` plus TypeScript SDK event parsing for source-level schema and blocking behavior. |
 
 ## Quirks and Gaps
 
-`exec --json` and app-server are related but not interchangeable. The app-server schema has richer account, rate-limit, approval, hook, and thread concepts. The exec projection intentionally flattens the stream and drops many of those fields.
+`--json` and `--experimental-json` currently select the same stream, but new wrappers should use the stable documented spelling. The SDK still uses the alias internally, so parsers may see examples using either.
 
-Some fields are lossy. File-change decline becomes failure. Model reroute becomes a text error item. Agent message items expose text but not a stable phase that distinguishes mid-turn commentary from final answer. Reasoning can be hidden with `hide_agent_reasoning` and should not be used as a heartbeat.
+The stream is flattened from app-server notifications. Some broader app-server events are intentionally ignored by the JSONL projector, including hook started/completed and several metadata-rich notifications. That keeps `exec` simple, but it means Claudine should not assume absence from JSONL means absence from Codex internally.
 
-No authenticated local run fixture was captured during this update. The event taxonomy comes from official docs and source, and local execution evidence is limited to `codex-cli 0.142.5` help/version output. Image attachment event shape remains unverified.
+Known gaps remain: no formal exec JSON Schema, no cost fields, no timestamps, no structured quota reset fields, no exhaustive fixture matrix for auth/rate-limit/billing stderr, and no proof that nested subagent child tool calls are visible in the parent exec stream.
 
 ## Claudine Integration Notes
 
-Use this as the default wrapper shape:
+Recommended default:
 
 ```bash
-codex exec --json --sandbox workspace-write --ask-for-approval never "..."
+codex exec --json --sandbox workspace-write "PROMPT"
 ```
 
-Adjust sandbox downward to `read-only` for audit-only tasks. Add `-o <path>` only when Claudine needs a final artifact file. Add `--output-schema <schema.json>` only for final response shape; keep parsing JSONL for lifecycle.
+Add `--skip-git-repo-check` only when Claudine intentionally runs outside a Git repository. Add `--output-schema` only when the final answer needs a schema; it does not replace event parsing. Avoid `--ephemeral` when resume/recovery matters. Avoid `--yolo` unless Claudine runs Codex inside a separately hardened container, VM, or throwaway workspace.
 
-Parse stdout only. The parser should use `type` as the top-level discriminator and `item.type` for `item.*`. Join item start/update/completion by `item.id`. Treat `thread.started.thread_id` as session identity. Treat `turn.completed` and `turn.failed` as terminal stream events. Keep stderr for diagnostics and pre-terminal failures, especially auth/config/MCP startup errors.
+Parser rules:
 
-Before launch, capture out-of-band metadata that the stream lacks: `codex --version`, cwd, requested model, profile/config overrides, sandbox mode, approval mode, auth source/env choice, and whether `--ephemeral` was used. After launch, classify success from the terminal event and item statuses rather than process exit alone.
+- Parse stdout as JSONL and treat each line as one event.
+- Use top-level `type` as the discriminator and nested `item.type` for item families.
+- Capture `thread.started.thread_id` immediately for resume/recovery.
+- Show live tool progress from `item.started`, `item.updated`, and `item.completed`.
+- Use the last completed `agent_message` as final text.
+- Use `turn.completed.usage` for token usage.
+- Treat `turn.failed`, top-level `error`, non-zero exit, signal, or EOF without a terminal event as failure/cancellation evidence.
+- Preserve unknown events for drift analysis.
 
-Avoid app-server for the current simple wrapper. It is the right future surface if Claudine needs structured approvals, mid-turn steering, account/rate-limit APIs, or cancellation as protocol methods, but it requires a separate client implementation.
+Wrapper rules:
+
+- Capture stderr, even in JSON mode.
+- Capture process exit code and signal.
+- Capture `codex --version` separately.
+- Record cwd, prompt source, selected model/config/profile, sandbox/approval flags, MCP config assumptions, and auth source separately.
+- Keep app-server integration separate from the one-shot `exec --json` adapter. App-server is powerful, but it changes Claudine from a process wrapper into a protocol client.
 
 ## Changelog
 
-- 2026-07-02: Rewrote the document into the requested non-interactive research shape, added `$schema: ./_schema.yaml`, refreshed commands and config behavior, and reconciled the event contract against current upstream Rust source.
+- 2026-07-03: Refreshed the document from the current OpenAI Codex manual, local `codex-cli 0.142.5` help output, and current `openai/codex` source. Preserved the original `created` date and updated the recommended Claudine strategy to `codex exec --json`.
 
 ## Sources
 
-- [OpenAI Codex non-interactive mode](https://developers.openai.com/codex/noninteractive)
-- [OpenAI Codex CLI reference](https://developers.openai.com/codex/cli/reference)
-- [OpenAI Codex app-server docs](https://developers.openai.com/codex/app-server)
-- [OpenAI Codex config basics](https://developers.openai.com/codex/config-basic)
-- [OpenAI Codex configuration reference](https://developers.openai.com/codex/config-reference)
-- [OpenAI Codex environment variables](https://developers.openai.com/codex/environment-variables)
-- [OpenAI Codex authentication](https://developers.openai.com/codex/auth)
-- [OpenAI Codex approvals and security](https://developers.openai.com/codex/agent-approvals-security)
+- [Codex non-interactive mode](https://developers.openai.com/codex/noninteractive)
+- [Codex CLI command reference](https://developers.openai.com/codex/cli/reference)
+- [Codex config basics](https://developers.openai.com/codex/config-basic)
+- [Codex advanced config](https://developers.openai.com/codex/config-advanced)
+- [Codex environment variables](https://developers.openai.com/codex/environment-variables)
+- [Codex managed configuration](https://developers.openai.com/codex/enterprise/managed-configuration)
+- [Codex permissions](https://developers.openai.com/codex/permissions)
+- [Codex MCP](https://developers.openai.com/codex/mcp)
+- [Codex app-server](https://developers.openai.com/codex/app-server)
+- [Codex subagents](https://developers.openai.com/codex/subagents)
 - [openai/codex `exec_events.rs`](https://github.com/openai/codex/blob/main/codex-rs/exec/src/exec_events.rs)
 - [openai/codex `event_processor_with_jsonl_output.rs`](https://github.com/openai/codex/blob/main/codex-rs/exec/src/event_processor_with_jsonl_output.rs)
-- [openai/codex app-server JSON Schema bundle](https://raw.githubusercontent.com/openai/codex/main/codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json)
-- Local inspection: `codex-cli 0.142.5`, `codex exec --help`, and `codex exec resume --help` on 2026-07-02.
+- [openai/codex `exec` CLI flags](https://github.com/openai/codex/blob/main/codex-rs/exec/src/cli.rs)
+- [openai/codex `exec` runtime and request handling](https://github.com/openai/codex/blob/main/codex-rs/exec/src/lib.rs)
+- [OpenAI Codex TypeScript SDK events](https://github.com/openai/codex/blob/main/sdk/typescript/src/events.ts)
+- [OpenAI Codex TypeScript SDK items](https://github.com/openai/codex/blob/main/sdk/typescript/src/items.ts)
+- [OpenAI Codex TypeScript SDK exec wrapper](https://github.com/openai/codex/blob/main/sdk/typescript/src/exec.ts)
