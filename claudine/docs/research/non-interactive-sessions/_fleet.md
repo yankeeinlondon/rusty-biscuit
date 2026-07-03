@@ -2,6 +2,8 @@
 sequence: "@claudine/docs/providers.yaml"
 operation: "research"
 file: "{{ctx.repo_root}}/claudine/docs/research/non-interactive-sessions/{{state.file}}"
+agent: opencode
+model: kimi-for-coding/k2p7
 update: "{{file_exists(file) && !markdown_body_empty(file)}}"
 initialize:
     stack:
@@ -11,7 +13,7 @@ initialize:
               - skip
 success:
     stack:
-        - when: "frontmatter(file, 'last_updated') != ctx.today"
+        - when: "!file_exists(file) || frontmatter(file, 'last_updated') != ctx.today"
           action:
               - stderr: "The step reported success but <b>{{file}}</b> was not updated — <code>last_updated</code> is not {{ctx.today}}."
               - error: "research file was not updated"
@@ -23,13 +25,16 @@ failure:
     message: "💥 the Non-Interactive Sessions research on **{{state.name}}** failed to complete!"
     warn: "The Non-Interactive Sessions research on **{{state.name}}** failed to complete! (err: {{err.message}})"
 ---
-
-# Non-Interactive Sessions with Agents in Claudine
+# Non-Interactive Session Research on {{state.name}}
 
 ## Scope
 
 Research how **{{state.desc}}** behaves when it runs as a **non-interactive agent
 session**.
+
+Prior-generation research files in this directory (`qwen.md`, `roo-code.md`,
+`codex-gotchas.md`, `codex-tools-and-events.md`) are validation assets for humans — do
+not open, paraphrase, or cite them; your research must be independent.
 
 When an agent runs non-interactively, Claudine is not just trying to get the final answer
 as text. Claudine is acting as a wrapper around an autonomous process. It needs to see
@@ -162,8 +167,8 @@ After writing the body, set these frontmatter properties:
 - `created` set to "{{ctx.today}}" when the file does not define this property; otherwise
   leave unchanged
 - `last_updated` set to "{{ctx.today}}"
-- `agent` set to "{{ctx.agent}}"
-- `model` set to "{{ctx.model}}"
+- `agent` set to "{{env.AGENT}}"
+- `model` set to "{{env.MODEL || 'default'}}"
 - `docs`: primary official documentation for the exact mode Claudine would use. Prefer a
   headless/print/exec/run/SDK/wire-mode page over generic CLI docs.
 - `invocation`: every scriptable launch form. Include the full command shape, whether the
@@ -512,3 +517,18 @@ paths, API keys, private repository names, or user prompt content.
 
 The final Markdown must be idiomatic CommonMark + GFM. Use Markdown tables for structured
 comparisons and Mermaid diagrams only when they clarify event flow.
+
+## Output
+
+::file @prompts/make-it-markdown.md
+
+## Exit Criteria
+
+You are done with this task when the Markdown "{{file}}" has been saved with:
+
+1. all research in the body of the document
+2. and all Frontmatter properties have been set
+3. running `md schema validate '{{file}}'` returns `true` (indicating that all Frontmatter was set correctly)
+
+- you do not need to run any tests or lints
+- this task had no code modifications in it
