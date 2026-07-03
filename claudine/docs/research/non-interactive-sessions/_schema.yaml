@@ -29,7 +29,7 @@ $schema:
     cli_params: "{ flag: string(required), value: string, description: string(required), example: string }[]"
 
     # Configuration files that influence non-interactive output behavior.
-    config_files: "{ os: enum(macos,linux,windows,all; required), scope: enum(user,repo,system,managed,other; required), path: string(required), format: enum(json,jsonc,yaml,toml,ini,text,other), effect: string, notes: string }[]"
+    config_files: "{ os: enum(macos,linux,windows; required), scope: enum(user,repo,system,managed,other; required), path: string(required), format: enum(json,jsonc,yaml,toml,ini,text,other), effect: string, notes: string }[]"
 
     # Environment variables that specifically affect non-interactive execution,
     # structured output, auth source, buffering, color, logging, or tool approvals.

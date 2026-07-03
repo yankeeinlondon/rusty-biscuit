@@ -17,11 +17,11 @@ success:
               - error: "research file was not updated"
         - when: "frontmatter(file, 'last_updated') == ctx.today"
           action:
-              - info: "The non-interactive sessions research on **{{state.name}}** completed successfully: {{ link(file) }}"
-              - message: "🎉  the non-interactive sessions research on **{{state.name}}** completed successfully"
+              - info: "The **Non-Interactive Sessions** research on **{{state.name}}** completed successfully: {{ link(file) }}"
+              - message: "🎉  the **Non-Interactive Sessions** research on **{{state.name}}** completed successfully"
 failure:
-    message: "💥 the non-interactive sessions research on **{{state.name}}** failed to complete!"
-    warn: "The non-interactive sessions research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    message: "💥 the Non-Interactive Sessions research on **{{state.name}}** failed to complete!"
+    warn: "The Non-Interactive Sessions research on **{{state.name}}** failed to complete! (err: {{err.message}})"
 ---
 
 # Non-Interactive Sessions with Agents in Claudine
@@ -461,18 +461,30 @@ output_formats:
     description: "One JSON event per line on stdout."
     side_effects: "Disables ANSI styling and moves logs to stderr."
 config_files:
-  - os: all
+  - os: macos
     scope: user
     path: "~/.provider/config.toml"
     format: toml
     effect: "Can set default output format and logging verbosity."
-    notes: "CLI flags override this file for a single run."
-  - os: all
+    notes: "CLI flags override this file for a single run; add Linux and Windows records with their platform-specific paths."
+  - os: linux
+    scope: user
+    path: "~/.config/provider/config.toml"
+    format: toml
+    effect: "Can set default output format and logging verbosity."
+    notes: "Example XDG location; verify against provider docs."
+  - os: windows
+    scope: user
+    path: "%APPDATA%\\Provider\\config.toml"
+    format: toml
+    effect: "Can set default output format and logging verbosity."
+    notes: "Example Windows location; verify against provider docs."
+  - os: macos
     scope: repo
     path: ".provider/config.toml"
     format: toml
     effect: "Can override project-local output and tool settings."
-    notes: "Loaded only after the project is trusted; repo values override user values."
+    notes: "Repo-relative paths still need separate OS records; add Linux and Windows records explicitly."
 io_contract:
   stdout: structured_only
   stderr: diagnostics_only

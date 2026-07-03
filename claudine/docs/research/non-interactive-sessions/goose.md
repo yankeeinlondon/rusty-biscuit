@@ -1,833 +1,861 @@
 ---
-schema: https://raw.githubusercontent.com/aaif-goose/goose/main/ui/desktop/openapi.json
-schema_type: open-api
-data_format: json / ndjson
-docs: https://goose-docs.ai/docs/guides/running-tasks/
+$schema: ./_schema.yaml
 created: 2026-04-10
-last_updated: 2026-04-10
+last_updated: 2026-07-02
+agent: codex
+model: default
+docs: https://goose-docs.ai/docs/guides/running-tasks/
+invocation:
+  - command: "goose run --output-format stream-json -t \"<prompt>\""
+    stdin_support: false
+    prompt_arg: "--text/-t"
+    notes: "Starts a fresh headless run unless --resume and an identifier are supplied."
+  - command: "goose run --output-format stream-json -i -"
+    stdin_support: true
+    prompt_arg: "--instructions/-i -"
+    notes: "Reads the complete prompt from stdin, then executes one non-interactive run."
+  - command: "goose run --output-format stream-json -i <file>"
+    stdin_support: false
+    prompt_arg: "--instructions/-i <file>"
+    notes: "Reads instructions from a file; useful for generated prompt files."
+  - command: "goose run --output-format stream-json --recipe <recipe.yaml> --params key=value"
+    stdin_support: false
+    prompt_arg: "--recipe plus optional --params and --sub-recipe"
+    notes: "Runs a recipe headlessly; the recipe must provide a prompt."
+  - command: "goose run --output-format stream-json --resume --name <name> -t \"<prompt>\""
+    stdin_support: false
+    prompt_arg: "--text/-t"
+    notes: "Resumes an existing stored session by name, session id, or legacy path."
+  - command: "goose run --output-format stream-json --no-session -t \"<prompt>\""
+    stdin_support: false
+    prompt_arg: "--text/-t"
+    notes: "Uses a null session path and discards the transcript after completion."
+output_formats:
+  - name: text
+    cli_value: text
+    stream: true
+    format: text
+    description: "Human terminal rendering with markdown, progress, and optional stats."
+    side_effects: "Not parse-safe; stdout can contain prose, progress, ANSI styling, and tool display."
+  - name: json
+    cli_value: json
+    stream: false
+    format: json
+    description: "One pretty-printed final JSON object with messages and metadata after the run finishes."
+    side_effects: "Useful for batch logs, but Claudine cannot observe live progress before process exit."
+  - name: stream-json
+    cli_value: stream-json
+    stream: true
+    format: ndjson
+    description: "One compact JSON event per stdout line as events occur; this is the format Claudine should prefer."
+    side_effects: "Suppresses normal terminal rendering and emits message, notification, error, and complete events."
+schema_sources:
+  - url: https://github.com/aaif-goose/goose/blob/main/crates/goose-cli/src/session/mod.rs
+    schema_type: rust
+    formal: false
+    notes: "Authoritative source for JsonOutput, JsonMetadata, StreamEvent, and NotificationData; not a published schema artifact."
+  - url: https://github.com/aaif-goose/goose/blob/main/crates/goose-provider-types/src/conversation/message.rs
+    schema_type: rust
+    formal: false
+    notes: "Authoritative Rust serde model for nested Message, MessageContent, tool, actionRequired, thinking, and metadata objects."
+  - url: https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-server/ui/desktop/openapi.json
+    schema_type: openapi
+    formal: true
+    notes: "Formal server/Desktop API schema for nested message content and related objects; broader than the exact CLI stream envelope."
+  - url: https://github.com/aaif-goose/goose/blob/main/ui/sdk/src/generated/types.gen.ts
+    schema_type: typescript
+    formal: true
+    notes: "Generated SDK types from OpenAPI; useful corroboration for nested server types, not the CLI stdout envelope."
+  - url: https://goose-docs.ai/docs/guides/running-tasks/
+    schema_type: examples
+    formal: false
+    notes: "Official prose examples document the flags and high-level JSON/stream-json behavior."
+cli_params:
+  - flag: "--output-format"
+    value: "text|json|stream-json"
+    description: "Selects human text, final JSON, or streaming JSON events."
+    example: "goose run --output-format stream-json -t \"summarize changes\""
+  - flag: "-t, --text"
+    value: "TEXT"
+    description: "Prompt text passed on argv."
+    example: "goose run -t \"fix the failing test\""
+  - flag: "-i, --instructions"
+    value: "FILE|-"
+    description: "Instruction file path, or '-' to read stdin."
+    example: "cat prompt.md | goose run --output-format stream-json -i -"
+  - flag: "--recipe"
+    value: "RECIPE_NAME or PATH"
+    description: "Runs a recipe; conflicts with --text and --instructions."
+    example: "goose run --output-format stream-json --recipe audit.yaml"
+  - flag: "--params"
+    value: "KEY=VALUE"
+    description: "Supplies recipe parameters; can be repeated."
+    example: "goose run --recipe deploy.yaml --params env=staging"
+  - flag: "--sub-recipe"
+    value: "RECIPE"
+    description: "Includes additional sub-recipes for recipe execution."
+    example: "goose run --recipe main.yaml --sub-recipe security.yaml"
+  - flag: "--system"
+    value: "TEXT"
+    description: "Adds system instructions for non-recipe runs."
+    example: "goose run --system \"Be concise\" -t \"review this repo\""
+  - flag: "--provider"
+    value: "PROVIDER"
+    description: "Overrides the configured provider for this run."
+    example: "goose run --provider anthropic --model claude-sonnet-4-5-20250929 -t \"...\""
+  - flag: "--model"
+    value: "MODEL"
+    description: "Overrides the configured model for this run."
+    example: "goose run --provider openai --model gpt-4.1 -t \"...\""
+  - flag: "--with-builtin"
+    value: "NAME[,NAME]"
+    description: "Adds builtin extensions such as developer or computercontroller."
+    example: "goose run --with-builtin developer -t \"edit files\""
+  - flag: "--with-extension"
+    value: "COMMAND"
+    description: "Adds stdio extensions; can include leading ENV=value pairs."
+    example: "goose run --with-extension \"API_KEY=... tool-server\" -t \"...\""
+  - flag: "--with-streamable-http-extension"
+    value: "URL [timeout=SECONDS]"
+    description: "Adds a streamable HTTP extension for the run."
+    example: "goose run --with-streamable-http-extension \"https://example/mcp timeout=100\" -t \"...\""
+  - flag: "--no-profile"
+    value: ""
+    description: "Does not load default configured extensions; only CLI-specified extensions are used."
+    example: "goose run --no-profile --with-builtin developer -t \"...\""
+  - flag: "--no-session"
+    value: ""
+    description: "Runs without storing a session file; conflicts with --resume, --name, and --path."
+    example: "goose run --no-session --output-format stream-json -t \"...\""
+  - flag: "--resume, -r"
+    value: ""
+    description: "Resumes a stored session; can be combined with --name, --session-id, or legacy --path."
+    example: "goose run --resume --name project-x -t \"continue\""
+  - flag: "--name, -n"
+    value: "NAME"
+    description: "Names a new session or selects a session when used with --resume."
+    example: "goose run -n project-x -t \"initial prompt\""
+  - flag: "--session-id, --id"
+    value: "SESSION_ID"
+    description: "Resumes a specific session id; requires --resume."
+    example: "goose run --resume --session-id 20260702_120000 -t \"continue\""
+  - flag: "--max-turns"
+    value: "NUMBER"
+    description: "Limits turns without user input; also configurable as GOOSE_MAX_TURNS."
+    example: "goose run --max-turns 20 -t \"...\""
+  - flag: "--debug"
+    value: ""
+    description: "Shows complete tool responses, detailed parameters, and full paths in human rendering; structured message payloads still come from the same message model."
+    example: "goose run --debug --output-format stream-json -t \"...\""
+  - flag: "--quiet, -q"
+    value: ""
+    description: "Suppresses non-response output for text mode; do not rely on it as the structured-output selector."
+    example: "goose run --quiet -t \"...\""
+  - flag: "--stats"
+    value: ""
+    description: "Prints generation stats after text-mode completion; not needed with stream-json completion token fields."
+    example: "goose run --stats -t \"...\""
+  - flag: "--interactive, -s"
+    value: ""
+    description: "Continues in an interactive session after the initial input; avoid for Claudine headless execution."
+    example: "goose run -i prompt.md --interactive"
+config_files:
+  - os: macos
+    scope: user
+    path: "~/.config/goose/config.yaml"
+    format: yaml
+    effect: "Persistent provider, model, mode, extensions, tool output, telemetry, and related settings."
+    notes: "Environment variables override config file values; no documented persistent setting for run --output-format."
+  - os: linux
+    scope: user
+    path: "~/.config/goose/config.yaml"
+    format: yaml
+    effect: "Persistent provider, model, mode, extensions, tool output, telemetry, and related settings."
+    notes: "Environment variables override config file values; no documented persistent setting for run --output-format."
+  - os: windows
+    scope: user
+    path: "%APPDATA%\\Block\\goose\\config\\config.yaml"
+    format: yaml
+    effect: "Persistent provider, model, mode, extensions, tool output, telemetry, and related settings."
+    notes: "Environment variables override config file values; no documented persistent setting for run --output-format."
+  - os: all
+    scope: user
+    path: "permission.yaml"
+    format: yaml
+    effect: "Tool permission levels managed by goose configure."
+    notes: "Lives under the Goose config directory; influences whether tools require confirmation."
+  - os: all
+    scope: user
+    path: "permissions/tool_permissions.json"
+    format: json
+    effect: "Runtime permission decisions managed by Goose."
+    notes: "Auto-managed; exact path is under the Goose config directory."
+  - os: all
+    scope: user
+    path: "secrets.yaml"
+    format: yaml
+    effect: "File-based API key and secret storage when keyring is disabled or unavailable."
+    notes: "Goose prefers the system keyring; file fallback is relevant in CI and containers."
+  - os: all
+    scope: user
+    path: "prompts/"
+    format: text
+    effect: "Custom prompt templates can affect agent and subagent behavior."
+    notes: "Located under the Goose config directory."
+  - os: all
+    scope: repo
+    path: ".goosehints"
+    format: text
+    effect: "Project context file loaded from cwd-derived context file names."
+    notes: "Default context filename is .goosehints; CONTEXT_FILE_NAMES can add alternatives."
+env_vars:
+  - name: GOOSE_PROVIDER
+    effect: "Selects the default provider when --provider is not supplied."
+    notes: "Overrides config file setting."
+  - name: GOOSE_MODEL
+    effect: "Selects the default model when --model is not supplied."
+    notes: "Overrides config file setting."
+  - name: GOOSE_PROVIDER__TYPE
+    effect: "Selects provider implementation/type for advanced provider configuration."
+    notes: "Used with custom endpoints or enterprise deployments."
+  - name: GOOSE_PROVIDER__HOST
+    effect: "Overrides provider API endpoint."
+    notes: "Can route a provider to custom or proxy endpoints."
+  - name: GOOSE_PROVIDER__API_KEY
+    effect: "Provides API-key auth for providers."
+    notes: "Avoid logging; alternate auth can come from keyring or secrets file."
+  - name: GOOSE_MODE
+    effect: "Controls tool execution behavior: auto, approve, chat, or smart_approve."
+    notes: "For headless automation, official docs recommend auto."
+  - name: GOOSE_CONTEXT_STRATEGY
+    effect: "Controls context limit behavior; headless default is summarize."
+    notes: "Values include summarize, truncate, clear, and prompt."
+  - name: GOOSE_MAX_TURNS
+    effect: "Maximum turns allowed without user input."
+    notes: "Equivalent operational concern to --max-turns; default documented as 1000."
+  - name: GOOSE_SUBAGENT_MAX_TURNS
+    effect: "Maximum turns a subagent can take before timeout."
+    notes: "Can be overridden by recipe settings or subagent calls."
+  - name: GOOSE_MAX_BACKGROUND_TASKS
+    effect: "Limits concurrent background subagent tasks."
+    notes: "Default documented as 5."
+  - name: GOOSE_DISABLE_SESSION_NAMING
+    effect: "Disables the extra background model call used to name sessions."
+    notes: "Useful for CI/headless runs to reduce noise/cost."
+  - name: GOOSE_DISABLE_TOOL_CALL_SUMMARY
+    effect: "Disables the per-tool-call AI-generated summary title."
+    notes: "Saves one provider call per tool invocation."
+  - name: GOOSE_CLI_SHOW_THINKING
+    effect: "Shows reasoning/thinking output in CLI responses where providers expose it."
+    notes: "Structured streams may include nested thinking content when such messages are produced."
+  - name: GOOSE_CLI_SHOW_COST
+    effect: "Toggles cost estimates in CLI output."
+    notes: "Human output setting; cost is not exposed as a stable stream-json field."
+  - name: GOOSE_CLI_MIN_PRIORITY
+    effect: "Controls tool output verbosity for CLI rendering."
+    notes: "Can affect human-visible notification/log rendering; do not treat as a schema control."
+  - name: GOOSE_DISABLE_KEYRING
+    effect: "Can force file-based secret storage instead of OS keyring."
+    notes: "Relevant for headless servers, CI, and containers."
+  - name: GOOSE_ALLOWLIST
+    effect: "URL for allowed extensions."
+    notes: "Can constrain extension availability in automated runs."
+  - name: CONTEXT_FILE_NAMES
+    effect: "JSON array of project context filenames Goose loads."
+    notes: "Default is [\".goosehints\"]."
+io_contract:
+  stdout: structured_only
+  stderr: diagnostics_only
+  stdin: prompt
+  framing: ndjson
+  noise_handling: "When --output-format stream-json is supplied, parse stdout line-by-line as JSON and treat stderr as diagnostics/fallback error context."
+  notes: "The CLI prints stream events with serde_json::to_string and println; stdin is only prompt text via -i -, not a bidirectional protocol."
+stream_contract:
+  discriminator: "type"
+  event_ordering: "Message and notification events are emitted as the agent stream yields them; error cancels processing; complete is emitted after the loop reaches finalization."
+  correlation_fields:
+    - "message.content[].id"
+    - "message.content[].toolCall.name"
+    - "extension_id"
+  terminal_event: "complete"
+  partial_message_events: false
+  unknown_event_policy: "Skip unknown top-level events with a warning; preserve unknown nested message content for drift analysis."
+  notes: "Outer event names are snake_case; nested message content uses camelCase type names and fields."
+session_metadata:
+  session_id: "Not emitted in the stream-json envelope; available only from invocation choice, stored session files, logs, or wrapper-side session selection."
+  cwd: "Not emitted in stream-json; stored when the session is created but not present on stdout."
+  model: "Nested message.metadata.inference.requestedModel/resolvedModel may appear on model-originated messages; no guaranteed init event."
+  provider: "Nested message.metadata.inference.provider may appear; no guaranteed top-level provider field."
+  auth: "Not emitted except through provider error text or configuration."
+  version: "Not emitted; use goose --version out of band."
+  mcp_servers: "Not listed at session start; extension notifications include extension_id when they occur."
+  permission_mode: "Not emitted; effective GOOSE_MODE comes from env/config and must be captured by the wrapper."
+  notes: "Goose run has no session_start/init record in stream-json, so Claudine must supplement launch metadata itself."
+stream_events:
+  - event: message
+    category: assistant
+    fields:
+      - "message.role"
+      - "message.created"
+      - "message.content[]"
+      - "message.metadata"
+    notes: "Carries completed Message objects, including text, toolRequest, toolResponse, actionRequired, thinking, redactedThinking, systemNotification, and model inference metadata where present."
+  - event: notification
+    category: other
+    fields:
+      - "extension_id"
+      - "message"
+      - "progress"
+      - "total"
+    notes: "Flattened notification payload from MCP/server notifications; log notifications have message, progress notifications have progress/total/message."
+  - event: error
+    category: error
+    fields:
+      - "error"
+    notes: "Stringified agent error emitted before cancellation and error return."
+  - event: complete
+    category: session
+    fields:
+      - "total_tokens"
+      - "input_tokens"
+      - "output_tokens"
+    notes: "Terminal success event emitted after the stream loop; token fields are optional i32 values."
+  - event: "message.content[].type=text"
+    category: assistant
+    fields:
+      - "text"
+    notes: "Assistant/user text content inside a message event."
+  - event: "message.content[].type=toolRequest"
+    category: tool_call
+    fields:
+      - "id"
+      - "toolCall.name"
+      - "toolCall.arguments"
+      - "metadata"
+      - "_meta"
+    notes: "Tool call request; id is the primary join key when present."
+  - event: "message.content[].type=toolResponse"
+    category: tool_result
+    fields:
+      - "id"
+      - "toolResult"
+      - "metadata"
+    notes: "Tool result or tool error; join to toolRequest by id."
+  - event: "message.content[].type=toolConfirmationRequest"
+    category: permission
+    fields:
+      - "id"
+      - "toolName"
+      - "arguments"
+      - "prompt"
+    notes: "Nested permission request shape; in current headless processing Goose handles confirmations before normal message emission."
+  - event: "message.content[].type=actionRequired"
+    category: permission
+    fields:
+      - "data.actionType"
+      - "data.id"
+      - "data.toolName"
+      - "data.arguments"
+      - "data.message"
+      - "data.requestedSchema"
+    notes: "Nested user-input or tool-confirmation action model; actionType values include toolConfirmation, elicitation, and elicitationResponse."
+  - event: "message.content[].type=thinking"
+    category: reasoning
+    fields:
+      - "thinking"
+      - "signature"
+    notes: "Reasoning content when provider and configuration expose it."
+  - event: "message.content[].type=redactedThinking"
+    category: reasoning
+    fields:
+      - "data"
+    notes: "Redacted reasoning placeholder."
+  - event: "message.content[].type=systemNotification"
+    category: other
+    fields:
+      - "notificationType"
+      - "msg"
+      - "data"
+    notes: "Nested system notification; notificationType includes thinkingMessage, inlineMessage, and creditsExhausted."
+tools:
+  - name: builtin developer extension
+    call_visible: true
+    result_visible: true
+    metadata:
+      - "toolRequest.id"
+      - "toolRequest.toolCall.name"
+      - "toolRequest.toolCall.arguments"
+      - "toolResponse.id"
+      - "toolResponse.toolResult"
+    notes: "File reads, edits, shell commands, and command output are visible only as generic tool request/response payloads; no dedicated file_change event."
+  - name: builtin computercontroller extension
+    call_visible: true
+    result_visible: true
+    metadata:
+      - "toolRequest.id"
+      - "toolResponse.id"
+      - "toolResponse.toolResult"
+    notes: "Visible through the same nested tool content model."
+  - name: stdio MCP extensions
+    call_visible: true
+    result_visible: true
+    metadata:
+      - "extension_id"
+      - "notification.message"
+      - "notification.progress"
+      - "toolRequest.id"
+      - "toolResponse.id"
+    notes: "Tool calls/results are nested messages; MCP logging/progress notifications are flattened top-level notification events."
+  - name: streamable HTTP extensions
+    call_visible: true
+    result_visible: true
+    metadata:
+      - "extension_id"
+      - "notification.progress"
+      - "notification.total"
+      - "notification.message"
+    notes: "Configured by --with-streamable-http-extension; no separate server-event stream is exposed by goose run."
+  - name: subagent tasks
+    call_visible: true
+    result_visible: true
+    metadata:
+      - "notification.extension_id"
+      - "notification.message"
+      - "toolRequest.toolCall.name"
+      - "toolResponse.toolResult"
+    notes: "Subagent activity can appear as formatted notification strings and tool payloads, not as a dedicated structured subagent start/stop event family."
+completion:
+  success_event: complete
+  failure_event: error
+  exit_code_reliable: true
+  result_fields:
+    - "message.content[].text"
+    - "json.messages"
+    - "json.metadata.status"
+  cost_fields: []
+  usage_fields:
+    - "complete.total_tokens"
+    - "complete.input_tokens"
+    - "complete.output_tokens"
+    - "json.metadata.total_tokens"
+    - "json.metadata.input_tokens"
+    - "json.metadata.output_tokens"
+  notes: "Use complete plus process exit 0 for success. Error events are string payloads and are followed by a non-zero command result in the current source path."
+blocking_behavior:
+  permissions: configurable
+  questions: fail
+  tool_approvals: configurable
+  notes: "Headless Goose cannot collect elicitation input and cancels the run. In Approve/SmartApprove modes, a tool confirmation is an invalid non-interactive configuration and fails; in Auto mode current source auto-allows tool confirmations with a warning."
+subagents:
+  supported: true
+  start_visible: false
+  stop_visible: false
+  nested_events_visible: true
+  prompt_injection_supported: true
+  metadata_fields:
+    - "notification.message"
+    - "toolRequest.toolCall.name"
+    - "toolResponse.toolResult"
+    - "GOOSE_SUBAGENT_MAX_TURNS"
+  notes: "Goose supports subagents and sub-recipes, but the run stream does not expose normalized parent/child lifecycle records. Behavior can be steered through recipe/subagent prompts and prompt templates."
+use_cases:
+  - name: plan_cap_approaching
+    detectable: false
+    event_types: []
+    fields: []
+    hook_parity: "unknown"
+    notes: "No structured plan/quota approaching event was verified in stream-json."
+  - name: plan_capped
+    detectable: true
+    event_types:
+      - "message.content[].type=systemNotification"
+    fields:
+      - "notificationType=creditsExhausted"
+      - "msg"
+      - "data"
+    hook_parity: "unknown"
+    notes: "Credits exhaustion is detectable as a nested system notification when emitted; quota reset/window fields are not guaranteed."
+  - name: no_funds
+    detectable: true
+    event_types:
+      - "message.content[].type=systemNotification"
+      - error
+    fields:
+      - "notificationType=creditsExhausted"
+      - "msg"
+      - "error"
+    hook_parity: "unknown"
+    notes: "Detect creditsExhausted separately from generic provider error text."
+  - name: auth
+    detectable: true
+    event_types:
+      - error
+    fields:
+      - "error"
+    hook_parity: "unknown"
+    notes: "Auth failures are not typed in the CLI envelope; classify from provider error strings."
+  - name: permission_read_denied
+    detectable: false
+    event_types:
+      - "message.content[].type=toolResponse"
+      - error
+    fields:
+      - "toolResult"
+      - "error"
+    hook_parity: "unknown"
+    notes: "Read-denial semantics are tool/provider specific and not normalized."
+  - name: permission_write_denied
+    detectable: true
+    event_types:
+      - error
+      - "message.content[].type=toolResponse"
+    fields:
+      - "error"
+      - "toolResult"
+    hook_parity: "unknown"
+    notes: "Approve/SmartApprove headless confirmation failures are detectable from error text; tool-level denials require heuristics."
+  - name: tokens_consumed
+    detectable: true
+    event_types:
+      - complete
+    fields:
+      - "total_tokens"
+      - "input_tokens"
+      - "output_tokens"
+    hook_parity: "unknown"
+    notes: "Token fields are session totals from accumulated usage when available; fields are optional i32 values."
+  - name: model_used
+    detectable: true
+    event_types:
+      - "message"
+    fields:
+      - "message.metadata.inference.provider"
+      - "message.metadata.inference.requestedModel"
+      - "message.metadata.inference.resolvedModel"
+    hook_parity: "unknown"
+    notes: "Not guaranteed early; wrapper should also record --provider/--model and env/config values."
+  - name: model_fallback
+    detectable: true
+    event_types:
+      - "message"
+    fields:
+      - "message.metadata.inference.requestedModel"
+      - "message.metadata.inference.resolvedModel"
+    hook_parity: "unknown"
+    notes: "Only detectable when inference metadata is present and requested/resolved values differ."
+  - name: human_in_loop
+    detectable: true
+    event_types:
+      - error
+      - "message.content[].type=actionRequired"
+      - "message.content[].type=toolConfirmationRequest"
+    fields:
+      - "error"
+      - "data.actionType"
+      - "prompt"
+      - "requestedSchema"
+    hook_parity: "unknown"
+    notes: "Elicitation cancels in headless mode; tool confirmations fail in approval modes and auto-allow in Auto mode."
+  - name: session_resumable
+    detectable: false
+    event_types: []
+    fields: []
+    hook_parity: "unknown"
+    notes: "The stream lacks a session id; Claudine must know the chosen --name/--session-id or inspect Goose session storage out of band."
+  - name: subagent_prompt_injection
+    detectable: true
+    event_types: []
+    fields:
+      - "--recipe"
+      - "--sub-recipe"
+      - "prompts/"
+      - "GOOSE_SUBAGENT_MAX_TURNS"
+    hook_parity: "unknown"
+    notes: "Supported through authored recipe/subagent/prompt-template instructions, not a stream event."
+headless_constraints:
+  - constraint: "stream-json has no init/session_start event."
+    mitigation: "Claudine should synthesize launch metadata from cwd, args, env, and goose --version."
+    notes: "Do not wait for a session id on stdout."
+  - constraint: "Approve and SmartApprove modes require interactive approval in headless runs."
+    mitigation: "Set GOOSE_MODE=auto or preconfigure deterministic permissions before launch."
+    notes: "Current source returns an error if a tool confirmation is needed in these modes."
+  - constraint: "Auto mode auto-allows tool confirmations in headless mode."
+    mitigation: "Use Claudine policy/protect controls before launch if stronger non-interactive safety is required."
+    notes: "This is automation-friendly but should not be confused with sandboxing."
+  - constraint: "Elicitation/user questions cannot be answered in headless mode."
+    mitigation: "Provide detailed prompts and avoid MCP tools/recipes that require elicitation."
+    notes: "Current source cancels when elicitation is requested in non-interactive mode."
+  - constraint: "No dedicated file_change events."
+    mitigation: "Infer file changes from developer tool calls/results or filesystem diffing around the process."
+    notes: "Tool payloads are generic MCP call results."
+  - constraint: "Cost is not in stream-json completion."
+    mitigation: "Use tokens from complete and compute cost externally from model catalog where possible."
+    notes: "GOOSE_CLI_SHOW_COST is a human rendering setting."
+  - constraint: "Output format is not documented as persistently configurable."
+    mitigation: "Always pass --output-format stream-json explicitly."
+    notes: "Config/env can affect model, tools, mode, and verbosity."
+quirks:
+  - "The flag is named stream-json, but the wire format is NDJSON: one JSON object per line."
+  - "Outer stream event names and notification payload keys are snake_case; nested message content type names and fields are camelCase."
+  - "Top-level notification events flatten either log or progress data rather than nesting it under data."
+  - "The broader OpenAPI/server schema is formal but is not the exact goose run stdout schema."
+  - "The stream lacks a session id, cwd, provider version, permission mode, and tool inventory init event."
+  - "Subagent notifications may be formatted strings rather than structured subagent lifecycle events."
+  - "Tool confirmations in headless Auto mode are auto-allowed, while approval modes fail; this is easy to misclassify as simple auto-deny."
+gaps:
+  - "No provider-published JSON Schema or OpenAPI component for the exact goose run --output-format stream-json envelope."
+  - "No verified stable schema-version marker for stream-json."
+  - "No local captured run fixture was produced in this update because provider credentials and model behavior are environment-dependent."
+  - "Exact exit code taxonomy for auth, rate limit, context overflow, max-turn, and cancellation is not documented separately from generic command failure."
+  - "No structured cost field was verified in stream-json."
+  - "No dedicated structured file-change, sandbox, roots, or permission-denial event was verified."
+  - "No exact merge semantics for repo-scoped context files beyond documented config precedence and CONTEXT_FILE_NAMES were verified."
+claudine_strategy:
+  preferred_invocation: "goose run --output-format stream-json --no-session -i -"
+  required_flags:
+    - "--output-format stream-json"
+    - "-i -"
+    - "--no-session"
+  conflicting_flags:
+    - "--interactive"
+    - "--output-format text"
+    - "--output-format json"
+  parser_notes: "Parse stdout as NDJSON by top-level type; parse nested message.content[].type separately; join toolRequest/toolResponse by content id; treat complete as terminal success only if process exit is zero."
+  wrapper_notes: "Set or record GOOSE_MODE explicitly, prefer auto for deterministic headless runs, capture cwd/provider/model/env/config out of band, and use stderr only for diagnostics or fallback classification."
+data_format: ndjson
+changes:
+  - "2026-07-02: Rewrote Goose non-interactive research against current aaif-goose docs and source; normalized frontmatter to the topic schema and added headless permission, token, and parser caveats."
+requires_claudine_update: true
+reason: "Goose metadata/parser generation should prefer stream-json NDJSON, recognize complete.input_tokens/output_tokens, synthesize missing init metadata, and handle current headless permission behavior."
 ---
 
-# Goose CLI Structured Output in Non-Interactive Sessions
+# Goose CLI Non-Interactive Sessions
 
 ## Summary
 
-Goose currently exposes two machine-readable output modes for `goose run`: batch `json` and streaming `stream-json`. The batch mode emits one JSON document after the run completes. The streaming mode emits one JSON object per line as the run progresses, so it is functionally NDJSON even though the CLI flag is named `stream-json`.
+Claudine can run Goose non-interactively through `goose run`. Goose documents three output formats for that command: human `text`, final `json`, and streaming `stream-json`. Claudine should prefer `goose run --output-format stream-json`, ideally with `-i -` for prompt stdin and `--no-session` for disposable automation runs. Despite the flag name, the stream is newline-delimited JSON: every stdout line is a complete JSON object.
 
-For Claudine, the important distinction is that Goose documents the modes, but does not publish a dedicated formal schema for the full `goose run` wire format. The best provider-owned formal schema I found is Goose's OpenAPI document for the desktop/server API plus its generated TypeScript types. Those formalize the nested `Message`, `MessageContent`, `ActionRequiredData`, and `SystemNotificationContent` objects that also appear inside CLI output, but they do not define the outer `stream-json` event envelope. The outer envelope is currently defined only in source by Rust `serde` types such as `StreamEvent`, `JsonOutput`, and `JsonMetadata`.
+The main parser risk is that Goose does not publish a formal schema for the exact CLI stream envelope. The outer events are defined in Rust source as `message`, `notification`, `error`, and `complete`; nested message payloads are better specified by Goose's Rust message types and the server OpenAPI/SDK types. Claudine must also supplement missing launch metadata itself because the stream has no `session_start` event, no session id, no cwd, no permission mode, and no tool inventory snapshot.
 
-The current source-backed stream contract is narrower than some older notes and examples imply:
+## Non-Interactive Entry Points
 
-- Current top-level stream events are `message`, `notification`, `error`, and `complete`.
-- I did not find a current top-level `model_change` event in Goose mainline.
-- `stream-json` uses `snake_case` at the outer envelope, while nested `message.content[]` items use `camelCase`.
-- `notification` payloads are flattened into the top level of the event object.
-- Several high-value conditions Claudine may care about, especially auth failures, permissions failures, and some subagent activity, are still exposed only as nested message content or plain-text log/error strings rather than dedicated event types.
+`goose run` is the automation entry point. The official Running Tasks guide says it starts a new session, executes the supplied arguments, and exits automatically when the task is complete. The prompt can come from `--text/-t`, an instruction file through `--instructions/-i`, stdin through `-i -`, or a recipe through `--recipe`.
 
-The practical integration guidance is:
+The most wrapper-friendly command shape is:
 
-- Prefer `goose run --output-format stream-json` for live orchestration.
-- Parse the outer event envelope first, then parse nested Goose `Message` objects exactly.
-- Treat `complete.total_tokens` as the only stable built-in session token total in the stream.
-- Expect some cases to require heuristics over `toolResponse.toolResult.error`, `systemNotification.msg`, or `error.error`.
-- Treat human-in-the-loop prompts in headless mode as a current sharp edge, not a cleanly modeled workflow.
-
-## Schema
-
-### What Goose publishes today
-
-Goose does not currently publish a standalone schema artifact for the complete CLI wire format of:
-
-- `goose run --output-format json`
-- `goose run --output-format stream-json`
-
-I did not find:
-
-- A dedicated JSON Schema for the CLI output
-- An AsyncAPI document for the streaming event feed
-- An OpenAPI path or component that models the outer `stream-json` envelope
-- A provider-published TypeScript definition specifically for the CLI stream events
-
-### Best formal definitions I found
-
-The best provider-owned formal definitions are split across three layers:
-
-| Surface | Source | Schema language | Scope | Notes |
-| --- | --- | --- | --- | --- |
-| Nested message types | [OpenAPI document](https://raw.githubusercontent.com/aaif-goose/goose/main/ui/desktop/openapi.json) | OpenAPI 3 | `Message`, `MessageContent`, `ActionRequiredData`, `SystemNotificationContent`, `SystemNotificationType`, and related types | This is the best formal schema Goose publishes, but it does not define the outer CLI `stream-json` event envelope. |
-| Generated consumer types | [Generated TypeScript types](https://raw.githubusercontent.com/aaif-goose/goose/main/ui/desktop/src/api/types.gen.ts) | TypeScript types generated from OpenAPI | Same nested message and action-required shapes | Useful as a formalized consumer view of the provider schema. |
-| Outer CLI event envelope | [`crates/goose-cli/src/session/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs) | Rust `serde` enums/structs | `StreamEvent`, `NotificationData`, `JsonOutput`, `JsonMetadata` | This is source-backed and authoritative, but not published as a schema artifact. |
-
-### Closest thing to a full current schema
-
-Current `stream-json` top-level events are defined in source as:
-
-```json
-{"type":"message","message":{...}}
-{"type":"notification","extension_id":"developer","message":"..."}
-{"type":"notification","extension_id":"developer","progress":0.5,"total":1.0,"message":"..."}
-{"type":"error","error":"..."}
-{"type":"complete","total_tokens":1234}
+```bash
+goose run --output-format stream-json --no-session -i -
 ```
 
-Important current details:
+That lets Claudine feed the prompt over stdin and parse stdout as a live event stream. `--no-session` avoids creating a stored session and, per the docs, routes session output to the platform null path (`/dev/null` on Unix and `NUL` on Windows). If resume/recovery matters more than a disposable run, Claudine can omit `--no-session` and select a stored session with `--name`, `--session-id`, and `--resume`.
 
-- Outer `type` values are `snake_case`.
-- `notification` uses `#[serde(flatten)]`, so the log/progress payload is not nested.
-- `complete.total_tokens` is optional.
-- There is no current source-backed `model_change` variant in `StreamEvent`.
+Recipes are valid in headless mode, but the headless tutorial states that a recipe must include a `prompt` field. `--params` and `--sub-recipe` can parameterize a recipe run. `--system` adds system instructions for non-recipe runs. Tool surfaces are selected with config plus `--with-builtin`, `--with-extension`, `--with-streamable-http-extension`, and `--no-profile`.
 
-Current batch `json` mode emits one final JSON object:
+Avoid `--interactive` for Claudine-managed non-interactive execution. It intentionally continues into an interactive session after the initial input and changes the blocking model.
+
+## Output Formats
+
+Goose exposes three `goose run --output-format` values:
+
+| CLI value | Format | Streams | Claudine use |
+| --- | --- | --- | --- |
+| `text` | Human terminal output | Yes, but not structured | Avoid for parsing. It can contain prose, markdown rendering, progress display, ANSI styling, and optional stats. |
+| `json` | One final JSON object | No | Useful for batch logs after completion, but weak for live orchestration. |
+| `stream-json` | NDJSON | Yes | Preferred. It emits JSON records while the run is active. |
+
+`json` mode emits a final object like:
 
 ```json
 {
-  "messages": [
-    {
-      "id": null,
-      "role": "assistant",
-      "created": 1743999999,
-      "content": [],
-      "metadata": {
-        "userVisible": true,
-        "agentVisible": true
-      }
-    }
-  ],
+  "messages": [],
   "metadata": {
-    "total_tokens": 1234,
+    "total_tokens": 123,
+    "input_tokens": 45,
+    "output_tokens": 78,
     "status": "completed"
   }
 }
 ```
 
-### Nested message schema details that matter
-
-The nested Goose message schema is formalized much better than the outer CLI envelope.
-
-Examples from the current provider-owned OpenAPI and TypeScript types:
-
-- `MessageContent.type` values include `text`, `image`, `toolRequest`, `toolResponse`, `toolConfirmationRequest`, `actionRequired`, `frontendToolRequest`, `thinking`, `redactedThinking`, and `systemNotification`
-- `ActionRequiredData.actionType` values include `toolConfirmation`, `elicitation`, and `elicitationResponse`
-- `SystemNotificationType` currently enumerates `thinkingMessage`, `inlineMessage`, and `creditsExhausted`
-
-That means Goose does have a formal provider schema for the nested message payloads Claudine will likely parse, but not for the complete top-level streaming wire format.
-
-### What I checked
-
-I looked in all of the following places before concluding that Goose does not publish a full CLI stream schema:
-
-- Official docs:
-  - [CLI Commands](https://goose-docs.ai/docs/guides/goose-cli-commands/)
-  - [Running Tasks](https://goose-docs.ai/docs/guides/running-tasks/)
-  - [Using goose in Headless Mode for Automation](https://goose-docs.ai/docs/tutorials/headless-goose/)
-  - [MCP Elicitation](https://goose-docs.ai/docs/guides/mcp-elicitation/)
-  - [goose Permission Modes](https://goose-docs.ai/docs/guides/goose-permissions/)
-  - [Customizing Prompt Templates](https://goose-docs.ai/docs/guides/prompt-templates/)
-- Current Goose source:
-  - [`crates/goose-cli/src/session/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
-  - [`crates/goose/src/conversation/message.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/conversation/message.rs)
-  - [`ui/desktop/openapi.json`](https://raw.githubusercontent.com/aaif-goose/goose/main/ui/desktop/openapi.json)
-  - [`ui/desktop/src/api/types.gen.ts`](https://raw.githubusercontent.com/aaif-goose/goose/main/ui/desktop/src/api/types.gen.ts)
-- Release history:
-  - [v1.25.0](https://github.com/aaif-goose/goose/releases/tag/v1.25.0)
-  - [v1.26.0](https://github.com/aaif-goose/goose/releases/tag/v1.26.0)
-  - [v1.27.0](https://github.com/aaif-goose/goose/releases/tag/v1.27.0)
-  - [v1.29.0](https://github.com/aaif-goose/goose/releases/tag/v1.29.0)
-  - [v1.17.0](https://github.com/aaif-goose/goose/releases/tag/v1.17.0)
-  - [v1.0.30](https://github.com/aaif-goose/goose/releases/tag/v1.0.30)
-- Broader ecosystem searches targeted at Vercel AI SDK, LangChain, and Goose-related GitHub discussions
-
-I did not find a respected third-party project that formalizes Goose's CLI stream schema either.
-
-## Documentation
-
-### Official documentation
-
-The most useful official documentation for structured non-interactive output is:
-
-- [Running Tasks](https://goose-docs.ai/docs/guides/running-tasks/)
-  - Best direct explanation of `goose run`
-  - Explicitly documents `--output-format json` and `--output-format stream-json`
-- [CLI Commands](https://goose-docs.ai/docs/guides/goose-cli-commands/)
-  - Enumerates the `run` flags
-  - Confirms the available output formats are `text`, `json`, and `stream-json`
-- [Using goose in Headless Mode for Automation](https://goose-docs.ai/docs/tutorials/headless-goose/)
-  - Best explanation of headless behavior and non-interactive limitations
-- [MCP Elicitation](https://goose-docs.ai/docs/guides/mcp-elicitation/)
-  - Explains the structured user-input request model Goose uses
-- [goose Permission Modes](https://goose-docs.ai/docs/guides/goose-permissions/)
-  - Important context for tool approval requests
-- [Customizing Prompt Templates](https://goose-docs.ai/docs/guides/prompt-templates/)
-  - Important for subagent prompt injection via `subagent_system.md`
-- [Smart Context Management](https://goose-docs.ai/docs/guides/sessions/smart-context-management/)
-  - Important for token-limit behavior and credit-balance messaging
-
-### Official code and schema references
-
-When the prose docs are vague, the current authoritative references are:
-
-- [`StreamEvent`, `NotificationData`, `JsonOutput`, and `JsonMetadata`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
-- [`Message`, `MessageContent`, `ActionRequiredData`, and `SystemNotificationContent`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/conversation/message.rs)
-- [OpenAPI document](https://raw.githubusercontent.com/aaif-goose/goose/main/ui/desktop/openapi.json)
-- [Generated TypeScript consumer types](https://raw.githubusercontent.com/aaif-goose/goose/main/ui/desktop/src/api/types.gen.ts)
-
-### Article-style documentation and release writeups
-
-The highest-signal article-style resources I found are mostly Goose's own blog/tutorial material:
-
-- [Previewing Goose v1.0 Beta](https://goose-docs.ai/blog/2024/12/06/previewing-goose-v10-beta)
-  - Earliest clear public article-style mention I found for headless mode
-- [Using goose in Headless Mode for Automation](https://goose-docs.ai/docs/tutorials/headless-goose/)
-  - Tutorial, but it reads like a practical operational article
-- [goose v1.25.0 is here](https://github.com/aaif-goose/goose/releases/tag/v1.25.0)
-  - Explicitly calls out `stream-json` usage in Goose's provider integrations
-- [I had Goose Build its Own Secure Recipe Scanner](https://goose-docs.ai/blog/2025/08/25/goose-became-its-own-watchdog)
-  - A real-world headless automation case study
-
-### Broader ecosystem coverage
-
-I did not find a strong set of independent third-party articles focused specifically on Goose's structured output schema. Coverage is much stronger for:
-
-- Headless automation as a workflow
-- Goose recipes and GitHub Actions
-- Provider integration behavior
-
-For the schema itself, the official docs and current source are much more useful than community writeups.
-
-## CLI
-
-### Available output formats
-
-Goose currently accepts these output formats for `goose run`:
-
-| CLI value | Returns | Best use |
-| --- | --- | --- |
-| `text` | Human-readable terminal output | Manual runs |
-| `json` | One final JSON object after the run completes | Batch automation, CI, logs |
-| `stream-json` | One JSON object per line during execution | Live orchestration, progress monitoring, wrappers like Claudine |
-
-### Syntax
-
-The current CLI syntax is:
-
-```bash
-goose run --output-format <text|json|stream-json> ...
-```
-
-Examples:
-
-```bash
-goose run --output-format json -t "summarize this repo"
-```
-
-```bash
-goose run --output-format stream-json -t "summarize this repo"
-```
-
-Structured output can be combined with the usual non-interactive inputs:
-
-- `-t, --text`
-- `-i, --instructions <FILE>`
-- `-i -` for stdin
-- `--recipe ...`
-
-### Behavioral differences and side effects
-
-`text`
-
-- Not a stable machine contract
-- Best for humans
-
-`json`
-
-- Emits a single final JSON object
-- Includes the full saved conversation messages plus `metadata.total_tokens`
-- Good for batch post-processing
-
-`stream-json`
-
-- Emits line-delimited JSON, not one single JSON document
-- Is the only built-in format suitable for real-time wrappers
-- Emits `error` as JSON rather than plain stderr
-- Ends with a `complete` event
-
-Important current side effects:
-
-- `stream-json` is NDJSON in practice, even though the CLI flag is not named `ndjson`
-- `json` gives you the final conversation state, not an event log
-- `notification` payloads are flattened
-- Rich MCP or subagent notification payloads are sometimes reduced to formatted strings
-- Current Goose output does not include a stable structured model/provider event
-- Human-in-the-loop requests are not cleanly represented in headless mode today
-
-## Gotchas
-
-### No published full CLI schema
-
-Goose documents the formats but does not publish a complete machine-readable schema for the outer CLI wire format. The best formal schema is partial and covers the nested message objects, not the full stream envelope.
-
-Sources:
-
-- [Running Tasks](https://goose-docs.ai/docs/guides/running-tasks/)
-- [OpenAPI document](https://raw.githubusercontent.com/aaif-goose/goose/main/ui/desktop/openapi.json)
-- [`StreamEvent` source](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
-
-### Outer events are `snake_case`; nested message content is `camelCase`
-
-This is a real parser footgun:
-
-- Outer event: `{"type":"complete"}`
-- Nested message content: `{"type":"toolRequest"}`
-- Nested action discriminator: `actionType`
-- Nested notification discriminator: `notificationType`
-
-Sources:
-
-- [`StreamEvent` source](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
-- [`MessageContent` source](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/conversation/message.rs)
-
-### `notification` events flatten their payload
-
-Current source emits:
+`stream-json` mode emits compact stdout lines shaped by the Rust `StreamEvent` enum:
 
 ```json
+{"type":"message","message":{"role":"assistant","created":1760000000,"content":[]}}
 {"type":"notification","extension_id":"developer","message":"..."}
-```
-
-and:
-
-```json
 {"type":"notification","extension_id":"developer","progress":0.5,"total":1.0,"message":"..."}
+{"type":"error","error":"..."}
+{"type":"complete","total_tokens":123,"input_tokens":45,"output_tokens":78}
 ```
 
-not:
+The streaming format is better than final JSON because Claudine can render live assistant output, observe tool requests/results as nested message content, classify errors before process exit, and detect the terminal `complete` event. There is no separate CLI log stream that Claudine must parse for normal operation. Stderr is still useful as diagnostics, especially if the process exits before a terminal stream event.
 
-```json
-{"type":"notification","log":{"message":"..."}}
-```
+## Schema Sources
 
-Source:
+Goose's exact CLI stream schema is source-backed rather than formally published. The strongest source for the outer envelope is `crates/goose-cli/src/session/mod.rs`, where `StreamEvent` is a Rust `serde` enum tagged by top-level `type` and `NotificationData` is flattened into the notification event.
 
-- [`NotificationData` and `#[serde(flatten)]`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
+Nested `message` payloads are stronger. `crates/goose-provider-types/src/conversation/message.rs` defines `Message`, `MessageMetadata`, `InferenceMetadata`, `MessageContent`, `ToolRequest`, `ToolResponse`, `ActionRequiredData`, `SystemNotificationContent`, and related types. Those nested types use camelCase `serde` names. Goose also publishes an OpenAPI document for the server/Desktop API and generated TypeScript SDK types. Those are formal, but they are broader than `goose run` stdout and should not be treated as a formal schema for the outer CLI stream.
 
-### Stream consumers lose some MCP and subagent structure
+The practical confidence model is:
 
-Current Goose CLI turns several richer MCP notifications into formatted strings before printing them to `stream-json`. This affects subagent tool-call visibility and task-execution updates.
-
-Sources:
-
-- [`handle_mcp_notification`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
-- [Issue: stream subagent output to CLI terminal](https://github.com/aaif-goose/goose/issues/6178)
-- [PR: restore subagent tool call notifications after summon refactor](https://github.com/aaif-goose/goose/pull/7243)
-
-### Headless human-in-the-loop behavior is still sharp-edged
-
-Current `process_agent_response` logic still routes tool confirmations and elicitation requests through interactive handlers before normal stream emission. There is an open PR specifically to stop headless sessions from hanging when approvals are required.
-
-Sources:
-
-- [`process_agent_response` logic in `session/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
-- [Open PR: prevent session hang when tool approval required in headless mode](https://github.com/aaif-goose/goose/pull/7915)
-
-### Developer extension docs lag the current code
-
-The official Developer MCP page still documents an older surface (`text_editor`, `analyze`, `screen_capture`, `image_processor`) while current source and recent Goose research show the developer built-in has shifted toward a different tool surface. For Claudine, source should win when the docs and code disagree.
-
-Sources:
-
-- [Developer Extension docs](https://goose-docs.ai/docs/mcp/developer-mcp/)
-- [`bundled-extensions.json`](https://raw.githubusercontent.com/aaif-goose/goose/main/ui/desktop/src/components/settings/extensions/bundled-extensions.json)
-- Current Goose source
-
-### Streaming tool payloads still have active bug reports
-
-The stream layer continues to see parser-edge bugs for large or fragmented tool-call payloads.
-
-Source:
-
-- [Issue: Tool call JSON parse failures with large payloads and streaming fragments](https://github.com/aaif-goose/goose/issues/8272)
-
-## Timeline
-
-This timeline focuses on structured-output-adjacent milestones that matter for non-interactive automation.
-
-| Date | Version | Event | Why it matters |
+| Layer | Best source | Confidence | Caveat |
 | --- | --- | --- | --- |
-| 2025-06-27 | [v1.0.30](https://github.com/aaif-goose/goose/releases/tag/v1.0.30) | Subagents shipped | Subagent observability later becomes a key stream consumer requirement. |
-| 2025-12-18 | [v1.17.0](https://github.com/aaif-goose/goose/releases/tag/v1.17.0) | MCP elicitation support shipped | Introduces structured user-input requests modeled as `actionRequired` content. |
-| 2026-02-18 | [v1.25.0](https://github.com/aaif-goose/goose/releases/tag/v1.25.0) | Release notes explicitly mention `stream-json` in provider integration work | Confirms `stream-json` is a first-class integration surface, not just a side feature. |
-| 2026-02-26 | [v1.26.0](https://github.com/aaif-goose/goose/releases/tag/v1.26.0) | Release notes mention low-balance detection and subagent tool-call stream work | Important for Claudine's monitoring story around funds and subagents. |
-| 2026-03-05 | [v1.27.0](https://github.com/aaif-goose/goose/releases/tag/v1.27.0) | Developer `shell` tool gains structured `{stdout, stderr}` output schema | A meaningful improvement in machine-readability of tool results. |
+| CLI outer stream | Rust `StreamEvent` source | High for current versions | Not a published compatibility contract. |
+| Final JSON output | Rust `JsonOutput`/`JsonMetadata` source | High for current versions | No dedicated public JSON Schema. |
+| Nested messages | Rust message types plus OpenAPI | High | Server OpenAPI may include message variants broader than current CLI emission. |
+| Docs examples | Running Tasks and CLI Commands docs | Medium | Good for flags and intent, not complete field-level schema. |
 
-Context note:
+## IO Contract
 
-- On 2026-04-07, Goose announced its move to the Agentic AI Foundation. Older references to `block.github.io/goose` and `github.com/block/goose` now redirect to `goose-docs.ai` and `github.com/aaif-goose/goose`.
+With `--output-format stream-json`, stdout is the machine channel. Each line is independently parseable JSON. Goose emits the line with `serde_json::to_string` and `println!`, so Claudine can use a normal line-oriented NDJSON parser.
+
+Stdin is only prompt input when using `-i -`; it is not a JSON-RPC or bidirectional protocol. Goose headless mode does not ask Claudine to answer protocol requests over stdin.
+
+Stderr should be treated as diagnostics and fallback lifecycle evidence. It may contain command failures, warnings, tracing/logging output, or human-oriented errors if a failure happens outside the stream path. In normal stream-json operation, the structured lifecycle source is stdout.
+
+## Stream Contract
+
+The top-level discriminator is `type`. Current top-level events are:
+
+| Event | Payload | Meaning |
+| --- | --- | --- |
+| `message` | `message` | A completed Goose `Message` object from the agent stream. |
+| `notification` | `extension_id` plus flattened `message` or `progress` fields | MCP/server log or progress notification. |
+| `error` | `error` string | Agent error. |
+| `complete` | optional `total_tokens`, `input_tokens`, `output_tokens` | Terminal success event emitted during finalization. |
+
+Nested message content uses a second discriminator at `message.content[].type`. Important values include `text`, `image`, `toolRequest`, `toolResponse`, `toolConfirmationRequest`, `actionRequired`, `frontendToolRequest`, `thinking`, `redactedThinking`, and `systemNotification`. This casing split is a parser requirement: top-level events use snake_case, while nested content names and fields are camelCase.
+
+Tool calls and results should be correlated by `message.content[].id` on `toolRequest` and `toolResponse`. If a tool integration omits or mutates ids, the parser can fall back to ordered heuristics, but that should be logged as degraded correlation. Top-level `notification` events are correlated to an extension by `extension_id`, not by a tool call id.
+
+Assistant messages are emitted as completed message objects, not token deltas. There is no verified partial-message event flag equivalent. Unknown top-level events should be skipped and logged at trace or warning level; unknown nested content should be preserved in captured raw JSON when possible because the formal OpenAPI/server model can move ahead of the CLI adapter.
+
+## Session Metadata
+
+`stream-json` does not include an init event. It does not reliably expose session id, cwd, project root, Goose version, permission mode, sandbox mode, root list, or configured extension inventory at startup. Claudine should synthesize that launch record itself from the wrapper context: cwd, argv, selected prompt mode, environment overrides, and an out-of-band `goose --version` probe when needed.
+
+Model/provider identity is only partially visible in the stream. The nested `MessageMetadata` type can carry `metadata.inference.provider`, `metadata.inference.requestedModel`, and `metadata.inference.resolvedModel`, but there is no guarantee this appears before the first meaningful output or on every message. Claudine should record requested `--provider`/`--model` and relevant `GOOSE_PROVIDER`/`GOOSE_MODEL` values before launch, then treat nested inference metadata as runtime confirmation.
+
+Token usage is better. Current source emits optional `total_tokens`, `input_tokens`, and `output_tokens` in the final JSON metadata and the stream `complete` event. These come from accumulated session usage when available, falling back to current usage.
+
+## Event Families
+
+The stream has a small top-level event family and a richer nested message family:
+
+| Family | Where | Notes |
+| --- | --- | --- |
+| Assistant/user text | `message.content[].type=text` | Final text blocks, not token deltas. |
+| Tool call | `message.content[].type=toolRequest` | Includes `id`, `toolCall.name`, `toolCall.arguments`, optional provider metadata, and optional `_meta`. |
+| Tool result | `message.content[].type=toolResponse` | Includes `id`, `toolResult`, and optional metadata. Errors live inside `toolResult` or provider-specific structures. |
+| Permission/user action | `toolConfirmationRequest` and `actionRequired` | Nested model for tool confirmations and MCP elicitation, but headless code often handles these before normal rendering. |
+| Reasoning | `thinking` and `redactedThinking` | Depends on provider support and configuration such as `GOOSE_CLI_SHOW_THINKING`. |
+| System notification | `systemNotification` | Includes `notificationType`, `msg`, and optional `data`; `creditsExhausted` is the strongest quota/no-funds signal. |
+| MCP notifications | top-level `notification` | Flattened log/progress from extensions, keyed by `extension_id`. |
+| Error | top-level `error` | Stringified agent error. |
+| Completion | top-level `complete` | Terminal success event with optional token totals. |
 
 ## Tools
 
-### Built-in extensions available out of the box
+Goose tools are exposed through the same nested message model regardless of whether they come from builtin extensions or configured MCP extensions. For Claudine, this means there is no separate `file_change`, `command_started`, or `command_finished` top-level event. A shell command, file edit, read, or extension operation must be inferred from the `toolRequest.toolCall.name`, `toolRequest.toolCall.arguments`, and `toolResponse.toolResult` payload.
 
-The current bundled built-ins are declared in Goose's bundled extension manifest:
+MCP/server logging and progress notifications can appear as top-level `notification` events. These are useful for status rendering, but they are not a complete lifecycle stream for all tools. A progress notification has `progress`, optional `total`, and optional `message`. A log notification has `message`.
 
-| Extension | Bundled | Enabled by default | Primary role |
-| --- | --- | ---: | --- |
-| `developer` | yes | yes | Development and file/system work |
-| `computercontroller` | yes | no | Browser and desktop automation |
-| `autovisualiser` | yes | no | Charts and diagrams |
-| `memory` | yes | no | Persistent preference/memory storage |
-| `tutorial` | yes | no | Guided tutorials |
+`--debug` is documented as showing complete tool responses, detailed parameters, and full paths in CLI output. In structured mode the stream still serializes the same message objects; Claudine should not rely on `--debug` as a schema-expansion switch unless a fixture proves additional structured fields for the specific Goose version.
 
-Sources:
+## Completion and Exit Status
 
-- [`bundled-extensions.json`](https://raw.githubusercontent.com/aaif-goose/goose/main/ui/desktop/src/components/settings/extensions/bundled-extensions.json)
-- [Developer MCP docs](https://goose-docs.ai/docs/mcp/developer-mcp/)
-- [Computer Controller MCP docs](https://goose-docs.ai/docs/mcp/computer-controller-mcp/)
-- [Auto Visualiser MCP docs](https://goose-docs.ai/docs/mcp/autovisualiser-mcp/)
-- [Memory MCP docs](https://goose-docs.ai/docs/mcp/memory-mcp/)
-- [Tutorial MCP docs](https://goose-docs.ai/docs/mcp/tutorial-mcp/)
+For success, Claudine should require both a `complete` event and process exit success. `complete` carries optional `total_tokens`, `input_tokens`, and `output_tokens`; it does not carry final answer text. Final answer text must be assembled from `message.content[].type=text` events.
 
-### Built-in tool inventory
+For failure, Goose emits top-level `error` with an error string in the stream-json path, cancels processing, performs interruption cleanup, and returns an error. The process exit code should be treated as reliable for command success/failure, but not rich enough for classification. Claudine should classify failure kind from the `error.error` string, nested `toolResponse.toolResult` errors, and stderr fallback text.
 
-This is the current out-of-the-box built-in tool inventory I could verify:
+Cancellation and user interruption do not have a dedicated structured terminal event in the verified stream contract. If the process exits without `complete`, Claudine should mark the run ambiguous or failed depending on exit status and stderr.
 
-| Extension | Tool names | Verification basis |
-| --- | --- | --- |
-| `developer` | `write`, `edit`, `shell`, `tree` | Current source in `platform_extensions/developer/mod.rs` |
-| `computercontroller` | `web_scrape`, `automation_script`, `computer_control`, `xlsx_tool`, `docx_tool`, `pdf_tool`, `cache` | Current source in `goose-mcp/src/computercontroller/mod.rs` |
-| `autovisualiser` | `render_sankey`, `render_radar`, `render_donut`, `render_treemap`, `render_chord`, `render_map`, `render_mermaid`, `show_chart` | Current source in `goose-mcp/src/autovisualiser/mod.rs` |
-| `memory` | `remember_memory`, `retrieve_memories`, `remove_memory_category`, `remove_specific_memory` | Official docs plus current repo references |
-| `tutorial` | `load_tutorial` | Current source in `goose-mcp/src/tutorial/mod.rs` |
+## Blocking Behavior
 
-Notes:
+Goose's headless tutorial states that headless mode has no user interaction capability and uses default or configured behavior for decisions. Current source makes the important cases concrete:
 
-- The Developer MCP docs still describe an older surface, so I treated current source as authoritative there.
-- The built-in inventory above is about bundled extensions and their tools, not third-party MCP servers the user may add later.
+| Situation | Headless behavior |
+| --- | --- |
+| Tool confirmation in `GOOSE_MODE=approve` or `smart_approve` | Goose cancels and returns an error saying approval modes require an interactive terminal and to use Auto for headless sessions. |
+| Tool confirmation in `GOOSE_MODE=auto` | Goose logs a warning and returns `AllowOnce`. |
+| MCP elicitation/user input request | Goose cancels because it cannot collect user input non-interactively. |
+| Context limit decision | Docs say headless defaults to summarization, configurable with `GOOSE_CONTEXT_STRATEGY`. |
 
-### What the stream exposes around tool calls
+That behavior is automation-friendly but not a sandbox. If Claudine needs deterministic safety, it should enforce its own policy before launch, set `GOOSE_MODE` deliberately, and avoid MCP tools that can require elicitation or OAuth/user input mid-run.
 
-For normal tool usage, Goose surfaces tool activity inside `message` events:
+## Subagents
 
-1. A `message` event contains one or more `toolRequest` content items
-2. A later `message` event contains the matching `toolResponse` content items
-3. The `id` ties the request and response together
+Goose supports subagents, background tasks, and sub-recipes, and environment variables such as `GOOSE_SUBAGENT_MAX_TURNS` and `GOOSE_MAX_BACKGROUND_TASKS` affect their behavior. However, `goose run --output-format stream-json` does not expose a normalized subagent lifecycle family with child session ids, start/stop events, child model, or nested tool stream boundaries.
 
-This means the stream usually exposes:
+Subagent activity may be visible as generic tool requests/results or as formatted top-level notification messages. Claudine can show these as progress, but should not claim complete parent/child observability. Prompt injection for non-interactive behavior is possible through recipes, sub-recipes, and custom prompt templates under the Goose config `prompts/` directory.
 
-- Tool name
-- Tool arguments
-- Success vs error
-- Tool output
-- Some provider metadata
+## Use Case Detection
 
-What it does not guarantee:
+| Use case | Detection | Fields | Caveat |
+| --- | --- | --- | --- |
+| `tokens_consumed` | Yes | `complete.total_tokens`, `complete.input_tokens`, `complete.output_tokens` | Optional session totals; units are tokens. |
+| `model_used` | Partial | `message.metadata.inference.provider`, `requestedModel`, `resolvedModel` | Not guaranteed early; supplement with argv/env/config. |
+| `model_fallback` | Partial | Compare `requestedModel` and `resolvedModel` | Only when inference metadata is present. |
+| `auth` | Heuristic | `error.error`, stderr | No typed auth error envelope. |
+| `no_funds` / `plan_capped` | Partial | `systemNotification.notificationType=creditsExhausted`, `msg`, `data` | Reset windows and upgrade URLs are not guaranteed. |
+| `permission_write_denied` | Partial | `error.error`, `toolResponse.toolResult` | Approval-mode failures are clear strings; tool denials are provider/tool specific. |
+| `permission_read_denied` | Weak | `toolResponse.toolResult`, `error.error` | No normalized read-denied type. |
+| `human_in_loop` | Yes for attempted interaction | `actionRequired.data.actionType`, `toolConfirmationRequest.prompt`, `error.error` | Headless may cancel before normal message emission. |
+| `session_resumable` | Not from stream | wrapper-selected `--name`/`--session-id` | No stream session id. |
+| `subagent_prompt_injection` | Config/prompt feature | recipes, sub-recipes, prompt templates | Not a stream event. |
 
-- A dedicated before/after top-level tool event type
-- Stable cost metadata
-- Full-fidelity forwarding of every MCP notification related to the tool
+No structured `plan_cap_approaching` event was verified in the CLI stream. Claudine should not infer quota windows from generic text unless it clearly labels the result heuristic.
 
-### What the stream exposes around notifications
+## Headless Constraints
 
-In addition to `toolRequest` and `toolResponse`, Goose emits top-level `notification` events for MCP logging/progress.
+The most important headless constraint is that structured output does not equal complete operational observability. Goose's `stream-json` gives live messages, notifications, errors, and terminal token usage, but it omits launch metadata, normalized permission denials, file changes, sandbox/root information, and a stable schema version.
 
-These usually expose:
+The second constraint is permission mode. Official docs recommend `GOOSE_MODE=auto` for headless success. Current source confirms why: approval modes cannot ask a human in non-interactive mode and fail when confirmation is needed, while Auto mode auto-allows confirmations. Claudine should make that choice explicit instead of inheriting a surprising user config.
 
-- `extension_id`
-- `message` for log-style notifications
-- `progress`
-- `total`
-- optional `message` for progress notifications
+The third constraint is auth and keyring behavior. Goose prefers OS keyrings but can fall back to `secrets.yaml` when keyring access is unavailable or disabled. CI and containers should set provider auth through environment variables or deterministic file-based config and should not run interactive `goose configure`.
 
-What it may lose:
+## Timeline
 
-- Original structured notification objects for subagent and task-execution events
+- 2025-08-29: A public feature request asked for structured `goose run --output-format json` output because plain text was hard to parse programmatically.
+- 2025-11: Goose added JSON output support for `goose run` in the public issue/PR stream.
+- 2026-04-07: Goose announced the repository move from `block/goose` to `aaif-goose/goose`.
+- 2026-07-02: Current docs and source verify `text`, `json`, and `stream-json`; `complete` now includes optional total, input, and output token fields.
 
-### Example: Developer `shell`
+## Quirks and Gaps
 
-Possible request:
+The strongest quirk is the mixed casing. A parser must handle top-level snake_case events and nested camelCase content in the same stdout line. `notification` is also flattened, so there is no stable nested `data` object at the top level.
 
-```json
-{
-  "type": "message",
-  "message": {
-    "role": "assistant",
-    "content": [
-      {
-        "type": "toolRequest",
-        "id": "call_1",
-        "toolCall": {
-          "status": "success",
-          "value": {
-            "name": "shell",
-            "arguments": {
-              "command": "cargo test -p claudine"
-            }
-          }
-        }
-      }
-    ]
-  }
-}
+The largest gap is the absence of a formal CLI stream schema. The OpenAPI schema is useful for nested server/Desktop objects, but the exact `goose run` stdout contract is currently the Rust source. There is also no verified stream schema version, no local fixture captured with real credentials in this update, no structured cost field, and no exact documented exit-code taxonomy for auth, rate limit, context overflow, max-turn, or cancellation cases.
+
+## Claudine Integration Notes
+
+Use:
+
+```bash
+goose run --output-format stream-json --no-session -i -
 ```
 
-Possible response:
+Parse stdout only as NDJSON. Treat stderr as diagnostics, not the primary lifecycle stream. The top-level parser should dispatch on `type`; the nested parser should dispatch on `message.content[].type`. Join tool requests and responses by `id`, and treat `complete` as the stream terminal event. If the process exits without `complete`, classify from exit status, stderr, and any prior `error` event.
 
-```json
-{
-  "type": "message",
-  "message": {
-    "role": "user",
-    "content": [
-      {
-        "type": "toolResponse",
-        "id": "call_1",
-        "toolResult": {
-          "status": "success",
-          "value": {
-            "content": [
-              {
-                "type": "text",
-                "text": "..."
-              }
-            ]
-          }
-        }
-      }
-    ]
-  }
-}
-```
+Before launch, Claudine should capture the cwd, argv, selected provider/model, relevant Goose env vars, and Goose version because the stream does not emit them. It should pass `--output-format stream-json` every time because no persistent output-format config was verified. It should avoid `--interactive`, avoid inheriting approval modes accidentally, and either set `GOOSE_MODE=auto` for automation or enforce a stricter Claudine policy layer before Goose starts.
 
-Since v1.27.0, Goose also documents a structured `{stdout, stderr}` shell return path in the Developer tooling story, which is relevant if Claudine wants better shell-output extraction.
+For reporting, use `complete.total_tokens`, `complete.input_tokens`, and `complete.output_tokens` as session token totals when present. Cost must be computed externally. File changes should be detected through tool payload interpretation or by filesystem diffing around the process.
 
-### Example: Credits exhausted
+## Changelog
 
-Possible structured signal:
-
-```json
-{
-  "type": "message",
-  "message": {
-    "role": "assistant",
-    "content": [
-      {
-        "type": "systemNotification",
-        "notificationType": "creditsExhausted",
-        "msg": "Please add credits to your account, then resend your message to continue.",
-        "data": {
-          "top_up_url": "https://..."
-        }
-      }
-    ]
-  }
-}
-```
-
-The top-up URL is extractable when the provider supplies it.
-
-### Example: Subagent tool notification
-
-Possible surfaced stream event:
-
-```json
-{
-  "type": "notification",
-  "extension_id": "developer",
-  "message": "[subagent:3] shell | developer"
-}
-```
-
-The CLI currently exposes a formatted log string, not the original rich notification payload, for this case.
-
-## Use Cases
-
-Before drilling into the cases: Goose has exactly one true hook today, `GOOSE_STATUS_HOOK`, and it only receives a single positional status argument such as `thinking` or `waiting`. None of the cases below have hook parity with the structured stream. Unless otherwise noted, the answer to "is this also exposed as a hook?" is "no".
-
-### Plan Cap Approaching
-
-I did not find a stable, source-backed structured event for "plan cap approaching" or "usage cap approaching".
-
-What I found instead:
-
-- Goose docs say it can warn when credits are running low or exhausted
-- The current formal `SystemNotificationType` enum only contains `thinkingMessage`, `inlineMessage`, and `creditsExhausted`
-- The only explicit credit-related structured notification I found in current source is `creditsExhausted`
-
-Practical conclusion:
-
-- There is no current source-backed event type dedicated to "approaching cap"
-- If Goose does surface a low-balance warning before exhaustion, it is not presently formalized as its own stable structured enum
-- The best fallback is heuristic text matching over a `systemNotification.msg` or `error.error`, but that is inference, not a schema guarantee
-- I found no way to extract remaining percentage, token count, or reset-window time from the current stream
-
-Hook parity:
-
-- No. `GOOSE_STATUS_HOOK` does not expose balance or cap information.
-
-### Plan Capped
-
-The best current structured signal is:
-
-- top-level event type: `message`
-- nested content type: `systemNotification`
-- nested `notificationType`: `creditsExhausted`
-
-Current source path:
-
-- `ProviderError::CreditsExhausted` is turned into an assistant `systemNotification`
-- `notification.data.top_up_url` may be present
-
-What can be extracted:
-
-- A stable classification: `creditsExhausted`
-- A human-readable message in `msg`
-- An optional `top_up_url`
-
-What cannot be extracted from the current stream:
-
-- Remaining balance
-- Remaining tokens
-- Reset-window time
-- A reliable distinction between "subscription cap hit" and "credit wallet empty"
-
-Hook parity:
-
-- No. The stream includes the useful data; the hook does not.
-
-### No Funds
-
-For Goose, "no funds" and "plan capped" currently collapse into the same structured concept when the provider reports HTTP 402 or equivalent: `creditsExhausted`.
-
-Relevant current mapping:
-
-- `402 Payment Required` maps to `ProviderError::CreditsExhausted`
-- That becomes a `systemNotification` with `notificationType: "creditsExhausted"`
-
-Practical conclusion:
-
-- The stable structured signal is the same one used for plan exhaustion: `creditsExhausted`
-- Goose does not currently expose a separate structured variant for "no funds" versus "plan quota exhausted"
-- If you need to distinguish them, you would be forced into provider-specific heuristics over the message text or out-of-band billing metadata
-
-Hook parity:
-
-- No.
-
-### Auth
-
-The stable signal I found for authentication failures is:
-
-- top-level event type: `error`
-- payload field: `error`
-
-Current provider behavior:
-
-- `401` and `403` map to `ProviderError::Authentication`
-- `handle_agent_error` emits the provider error as a plain string in the `error` event for `stream-json`
-
-Practical conclusion:
-
-- You can often detect auth failures by matching `error.error` text such as `Authentication failed`
-- I did not find a stable structured field that tells you the auth kind used by the user, such as API key vs subscription vs device flow vs OAuth
-- Auth kind is effectively out-of-band configuration state, not part of the stream contract
-
-Hook parity:
-
-- No.
-
-### Permissions: Can't Read File
-
-I did not find a dedicated "file read permission denied" event type.
-
-Current best detection path:
-
-- top-level event type: `message`
-- nested content type: `toolResponse`
-- nested `toolResult.status == "error"`
-- error text containing clues such as `Permission denied`, `os error 13`, `Access is denied`, or provider-specific equivalents
-
-How to identify the path:
-
-- Prefer the preceding `toolRequest` arguments when available
-- Fall back to path extraction from `toolResult.error` or from structured shell output if the tool is `shell`
-
-How to distinguish from similar cases:
-
-- Look at the tool name and arguments in the immediately preceding `toolRequest`
-- Read-like cases typically come from tree/list/read/view commands, or from shell commands that attempted to read
-- Goose does not emit a dedicated reason code beyond the error string
-
-Hook parity:
-
-- No.
-
-### Permissions: Can't Write File
-
-I also did not find a dedicated "file write permission denied" event type.
-
-Current best detection path:
-
-- top-level event type: `message`
-- nested content type: `toolResponse`
-- nested `toolResult.status == "error"`
-- error text describing the denial
-
-How to identify the path:
-
-- Prefer the preceding `toolRequest` arguments for `write`, `edit`, or shell-based file modifications
-- Fall back to parsing the error text
-
-How to distinguish from similar cases:
-
-- Write-like tools and shell commands are the main discriminator
-- In interactive approval modes, a request may first appear as `actionRequired` with `actionType: "toolConfirmation"`, but that is a request for permission, not evidence that the underlying filesystem blocked the write
-- In headless runs, this area is currently especially sharp-edged because approval handling is not cleanly modeled
-
-Hook parity:
-
-- No.
-
-### Tokens Consumed
-
-Current stable overall token totals:
-
-- `stream-json`: `complete.total_tokens`
-- `json`: `metadata.total_tokens`
-
-What I did not find as a stable built-in contract:
-
-- Per-turn token usage in the CLI stream
-- A machine-readable cost basis in `json` or `stream-json`
-- Structured dollar-cost reporting in the non-interactive output formats
-
-Practical conclusion:
-
-- Goose exposes a useful session-level token total
-- Claudine should not expect reliable per-turn usage or cost data from the CLI structured output today
-
-Hook parity:
-
-- No.
-
-### Model Used
-
-I did not find a stable current stream event that announces the active model/provider.
-
-Important current source finding:
-
-- The current `StreamEvent` enum does not include `model_change`
-
-Practical conclusion:
-
-- There is no current source-backed structured model-selection event in `stream-json`
-- The reliable way to know the model is out-of-band:
-  - the caller's own `--provider` / `--model` arguments
-  - environment variables
-  - recipe metadata
-  - the session/config state you launched Goose with
-- Older notes that mention `model_change` should be treated as stale unless you pin to an older Goose build that still emitted it
-
-Hook parity:
-
-- No.
-
-### Human in the Loop
-
-Goose does have structured message types for human-in-the-loop requests:
-
-- `message.content[].type == "actionRequired"`
-- `actionType == "toolConfirmation"`
-- `actionType == "elicitation"`
-- `actionType == "elicitationResponse"`
-
-Those shapes are formalized in the provider-owned OpenAPI and TypeScript types.
-
-However, there is a major practical caveat for non-interactive sessions:
-
-- Current CLI session processing intercepts tool confirmations and elicitation requests before the normal stream-emission path
-- There is an open PR specifically to stop headless sessions from hanging when approval is required
-
-Practical conclusion:
-
-- Goose conceptually models these requests as structured data
-- But in current headless CLI behavior, you should not assume you will receive them cleanly as `stream-json` events
-- For subagents, I found no dedicated structured subagent-specific human-input event in the stream; subagent activity is mostly surfaced as notifications or nested messages, and some of that gets flattened to log strings
-
-If you do receive the raw message before interception, you can extract:
-
-- For tool approval:
-  - `data.actionType == "toolConfirmation"`
-  - `id`
-  - `toolName`
-  - `arguments`
-  - optional `prompt`
-- For elicitation:
-  - `data.actionType == "elicitation"`
-  - `id`
-  - `message`
-  - `requested_schema`
-
-Hook parity:
-
-- No. `GOOSE_STATUS_HOOK` does not expose these requests or their payloads.
-
-### Injecting into Subagent Prompt
-
-Yes, but not through the structured stream itself.
-
-What Goose supports today:
-
-- A customizable prompt template named [`subagent_system.md`](https://github.com/aaif-goose/goose/blob/main/crates/goose/src/prompts/subagent_system.md)
-- A prompt-template override mechanism under `~/.config/goose/prompts/`
-- Runtime rendering of subagent prompt context in `build_subagent_prompt`
-
-Practical conclusion:
-
-- If you control Goose's config, you can inject persistent instructions into all subagents by overriding `subagent_system.md`
-- That is the cleanest current way to warn subagents that they are in non-interactive mode and should not ask for input
-- I did not find a dedicated per-run CLI flag that injects extra context only into spawned subagents
-- This is configuration-time prompt customization, not an event-stream feature
-
-Hook parity:
-
-- No. This is a prompt-template/configuration surface, not a hook.
+- 2026-07-02: Rewrote the Goose non-interactive research file against current `aaif-goose/goose` docs and source, normalized the frontmatter, and added parser-specific notes for `stream-json`, token fields, missing init metadata, and headless permission behavior.
 
 ## Sources
 
-- Goose docs:
-  - https://goose-docs.ai/docs/guides/goose-cli-commands/
-  - https://goose-docs.ai/docs/guides/running-tasks/
-  - https://goose-docs.ai/docs/tutorials/headless-goose/
-  - https://goose-docs.ai/docs/guides/mcp-elicitation/
-  - https://goose-docs.ai/docs/guides/goose-permissions/
-  - https://goose-docs.ai/docs/guides/prompt-templates/
-  - https://goose-docs.ai/docs/guides/sessions/smart-context-management/
-  - https://goose-docs.ai/docs/guides/handling-llm-rate-limits-with-goose/
-- Goose schema/source:
-  - https://raw.githubusercontent.com/aaif-goose/goose/main/ui/desktop/openapi.json
-  - https://raw.githubusercontent.com/aaif-goose/goose/main/ui/desktop/src/api/types.gen.ts
-  - https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs
-  - https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/cli.rs
-  - https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/output.rs
-  - https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/conversation/message.rs
-- https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/agents/agent.rs
-- https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/agents/subagent_handler.rs
-- https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/agents/subagent_execution_tool/notification_events.rs
-- https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/agents/platform_extensions/developer/mod.rs
-- https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-mcp/src/computercontroller/mod.rs
-- https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-mcp/src/autovisualiser/mod.rs
-- https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-mcp/src/tutorial/mod.rs
-- https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/providers/openai_compatible.rs
-- https://raw.githubusercontent.com/aaif-goose/goose/main/ui/desktop/src/components/settings/extensions/bundled-extensions.json
-- Goose releases and article-style resources:
-  - https://github.com/aaif-goose/goose/releases/tag/v1.29.0
-  - https://github.com/aaif-goose/goose/releases/tag/v1.27.0
-  - https://github.com/aaif-goose/goose/releases/tag/v1.26.0
-  - https://github.com/aaif-goose/goose/releases/tag/v1.25.0
-  - https://github.com/aaif-goose/goose/releases/tag/v1.17.0
-  - https://github.com/aaif-goose/goose/releases/tag/v1.0.30
-  - https://goose-docs.ai/blog/2024/12/06/previewing-goose-v10-beta
-  - https://goose-docs.ai/blog/2025/08/25/goose-became-its-own-watchdog
-- Relevant issues and PRs:
-  - https://github.com/aaif-goose/goose/issues/6178
-  - https://github.com/aaif-goose/goose/pull/7243
-  - https://github.com/aaif-goose/goose/pull/7915
-  - https://github.com/aaif-goose/goose/issues/8272
+- [Running Tasks](https://goose-docs.ai/docs/guides/running-tasks/)
+- [CLI Commands](https://goose-docs.ai/docs/guides/goose-cli-commands/)
+- [Using goose in Headless Mode for Automation](https://goose-docs.ai/docs/tutorials/headless-goose/)
+- [Environment Variables](https://goose-docs.ai/docs/guides/environment-variables/)
+- [Configuration Files](https://goose-docs.ai/docs/guides/config-files/)
+- [goose Permission Modes](https://goose-docs.ai/docs/guides/managing-tools/goose-permissions/)
+- [`crates/goose-cli/src/cli.rs`](https://github.com/aaif-goose/goose/blob/main/crates/goose-cli/src/cli.rs)
+- [`crates/goose-cli/src/session/mod.rs`](https://github.com/aaif-goose/goose/blob/main/crates/goose-cli/src/session/mod.rs)
+- [`crates/goose-provider-types/src/conversation/message.rs`](https://github.com/aaif-goose/goose/blob/main/crates/goose-provider-types/src/conversation/message.rs)
+- [Goose server OpenAPI document](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-server/ui/desktop/openapi.json)
+- [Generated TypeScript SDK types](https://github.com/aaif-goose/goose/blob/main/ui/sdk/src/generated/types.gen.ts)
+- [Goose moved to AAIF](https://goose-docs.ai/blog/2026/04/07/goose-moves-to-aaif/)
+- [Structured output feature request](https://github.com/block/goose/issues/4419)
