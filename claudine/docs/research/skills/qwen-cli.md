@@ -1,9 +1,9 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-02
-last_updated: 2026-07-02
-agent: codex
-model: default
+last_updated: 2026-07-03
+agent: open_code
+model: minimax/MiniMax-M3
 
 homepage: https://qwenlm.github.io/qwen-code-docs/en/users/overview/
 docs: https://qwenlm.github.io/qwen-code-docs/en/users/configuration/settings/
@@ -186,7 +186,15 @@ env_vars:
   - name: NPM_TOKEN
     effect: "Used by npm extension installation. It can affect access to private extension packages that contribute skills."
 
-changes: []
+changes:
+  - "Refreshed 2026-07-03: re-verified against Qwen Code 0.15.6 bundled skills shipped under /opt/homebrew/Cellar/qwen-code/0.15.6/libexec/lib/node_modules/@qwen-code/qwen-code/bundled/, the qc-helper/docs/features/skills.md shipped with that package, and the current SkillManager source on QwenLM/qwen-code main (1215 lines)."
+  - "Confirmed SKILL_PROVIDER_CONFIG_DIRS = ['.qwen', '.agents'] continues to scan both user/project roots; .qwen uses Storage.getGlobalQwenDir() (so QWEN_HOME redirects it), while .agents stays anchored to the OS home directory."
+  - "Confirmed cross-level precedence (project > user > extension > bundled) and the alphabetical model-facing sort; priority only re-orders the /skills display layer."
+  - "Confirmed safe mode limits levels to ['bundled'] and bare mode skips every level (startWatching still refreshes the cache, but listSkillsAtLevel returns [])."
+  - "Confirmed path-activation (paths: frontmatter) gates a skill from model listing until a tool invocation touches a picomatch-matching project-root-relative file; disable-model-invocation skills are excluded from the activation registry to avoid misleading reminders."
+  - "Confirmed allowedTools uses camelCase in Qwen (other providers use allowed-tools kebab-case); current bundled review and qc-helper skills both follow this convention."
+  - "Confirmed watcher depth is intentionally shallow (WATCHER_MAX_DEPTH = 2) so node_modules-style subtrees do not exhaust file descriptors."
+  - "Confirmed bundled skill directory is resolved at runtime via resolveBundleDir(import.meta.url) + 'bundled', so the absolute path varies by install method (npm, pnpm, Homebrew, manual)."
 
 requires_claudine_update: true
 reason: "Claudine's linker should add Qwen Code first-class skill locations for ~/.qwen/skills, .qwen/skills, the source-confirmed ~/.agents/skills and .agents/skills aliases, extension skills, and bundled package skills. Portability rules should mark Qwen-specific allowedTools, hooks, model, paths, priority, settings skills.disabled, and qwen-extension.json packaging as rewrite-needed or provider-managed."
@@ -203,7 +211,9 @@ Qwen Code has first-class Agent Skills. A skill is a durable directory containin
 
 The implementation is file-system based and source-confirmed in `SkillManager`, `SkillTool`, and `SkillCommandLoader`. Qwen discovers four tiers: project, user, extension, and bundled. Project and user tiers scan both Qwen-specific directories and the interoperable `.agents/skills` alias. Extension skills are parsed from enabled extensions. Bundled skills are shipped inside the installed `qwen-code` package and behave as the lowest-precedence built-in tier.
 
-Local inspection on this macOS host found `/opt/homebrew/bin/qwen` installed as Homebrew `qwen-code` 0.15.6, with bundled skills under `/opt/homebrew/Cellar/qwen-code/0.15.6/libexec/lib/node_modules/@qwen-code/qwen-code/bundled/`. No `~/.qwen` directory exists on this host, so there were no local user skills or settings to inspect.
+Local inspection on this macOS host (refreshed 2026-07-03) found `/opt/homebrew/bin/qwen` installed as Homebrew `qwen-code` 0.15.6, with bundled skills under `/opt/homebrew/Cellar/qwen-code/0.15.6/libexec/lib/node_modules/@qwen-code/qwen-code/bundled/`. The shipped bundles are `batch/`, `loop/`, `qc-helper/`, and `review/`; `qc-helper` carries a complete `docs/` mirror of the user documentation, including `docs/features/skills.md` which restates `~/.qwen/skills/`, `.qwen/skills/`, and the extension `skills` field as the public surface.
+
+A `~/.qwen` directory does exist on this host, populated with `skills/`, `commands/`, `debug/`, `output-language.md`, `projects/`, `settings.json`, and `oauth_creds.json` — but every entry under `~/.qwen/skills/` (174 directories) is a symlink into `~/.claude/skills/`, so the user skills tree is effectively empty of original Qwen-authored content here. The `~/.agents` directory contains a single `find-skills` skill plus a `.skill-lock.json` from the Vercel Labs skills installer. These observations confirm the source-confirmed `.qwen` and `.agents` aliases are active but also show real-world users commonly populate them by symlinking rather than by copy.
 
 ## Locations
 
@@ -340,6 +350,11 @@ The linker should prefer linking normal user/project skills, not bundled skills.
 The linker should avoid treating `QWEN.md`, ordinary commands, memories, chat history, settings files, and docs pages as Agent Skills. Settings matter only insofar as `skills.disabled`, safe mode, folder trust, `QWEN_HOME`, and extension enablement affect loading. If Claudine models provider state, it should add Qwen fields for `.agents` aliases, `skills.disabled`, safe/bare mode behavior, and extension skill participation.
 
 `requires_claudine_update` is `true` because current linking metadata should include Qwen's first-class skill locations, the `.agents/skills` aliases, Qwen-specific frontmatter keys, and the provider-managed bundled tier.
+
+## Changelog
+
+- **2026-07-03** — Refresh against Qwen Code 0.15.6. Verified the bundled-skill layout (`batch`, `loop`, `qc-helper`, `review`) and the shipped `qc-helper/docs/features/skills.md` mirror of the public skills documentation. Confirmed the current `SkillManager` source (QwenLM/qwen-code `main`, 1215 lines) still exposes `SKILL_PROVIDER_CONFIG_DIRS = ['.qwen', '.agents']`, project > user > extension > bundled precedence, safe/bare-mode behavior, the `paths:` activation registry that excludes `disable-model-invocation` skills, and the camelCase `allowedTools` convention. Updated frontmatter `last_updated`, `agent`, and `model`. No new storage locations, file format fields, or CLI/env knobs surfaced since the 2026-07-02 first run.
+- **2026-07-02** — Initial research. Established first-class support, four-tier discovery (project, user, extension, bundled), the `.agents/skills` aliases as Qwen-shipped-but-undocumented, source-confirmed `SKILL_PROVIDER_CONFIG_DIRS`, the camelCase `allowedTools` frontmatter, the path-activation registry, safe/bare-mode filtering, Trusted Folders gating, and the cross-extension packaging conversions from Claude/Gemini manifests.
 
 ## Sources
 
