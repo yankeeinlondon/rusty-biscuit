@@ -166,11 +166,15 @@ Follow these steps exactly:
     - `latest_version` - the version you verified in `## Overview`, or `unknown`. Do
       not use the old `latest-version` key; the schema property is `latest_version`
     - `homepage`, `repo`, `docs`, `cli_docs` - the URLs cited in `## Overview`
-    - `binaries` and `install_methods` - distilled from `## Installation and Binaries`
+    - `binaries` and `install_methods` - distilled from `## Installation and Binaries`;
+      one record per OS for every os-bearing record in this document — never `os: all`
+      (Windows binaries and install commands always differ)
     - `subcommands` - from `## Subcommands`, with `non_interactive` reflecting your
       TTY analysis
     - `cli_switches` - the inventory from `## CLI Switch Inventory`
-    - `config_files` - from `## Configuration Discovery`
+    - `config_files` - from `## Configuration Discovery`; one record per OS — file
+      paths must be recorded separately for macOS, Linux, and Windows (never one
+      record for all OSes; Windows paths always differ)
     - `env_vars` - from `## Environment Variables`
     - `machine_introspection` - from `## Machine Introspection`
     - `wrapper_notes` - from `## Wrapper Notes`

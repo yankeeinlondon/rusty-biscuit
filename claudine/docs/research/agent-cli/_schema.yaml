@@ -25,8 +25,8 @@ $schema:
 
     # Binary names by OS. Use `os: all` only when the executable name is the same
     # everywhere; otherwise record per-OS binaries and aliases/shims.
-    binaries: "{ os: enum(macos,linux,windows,all; required), binary: string(required), alt_binaries: string[], notes: string }[]"
-    install_methods: "{ os: enum(macos,linux,windows,all; required), method: enum(package_manager,standalone_binary,npm,pip,cargo,brew,winget,chocolatey,scoop,app_bundle,source,other; required), command: string, notes: string }[]"
+    binaries: "{ os: enum(macos,linux,windows; required), binary: string(required), alt_binaries: string[], notes: string }[]"
+    install_methods: "{ os: enum(macos,linux,windows; required), method: enum(package_manager,standalone_binary,npm,pip,cargo,brew,winget,chocolatey,scoop,app_bundle,source,other; required), command: string, notes: string }[]"
 
     # One record per top-level subcommand or mode.
     subcommands: "{ name: string(required), description: string(required), non_interactive: boolean, notes: string }[]"
