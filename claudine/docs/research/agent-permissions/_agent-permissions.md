@@ -181,6 +181,13 @@ Follow these steps exactly:
         - `description` - a prose description of what this CLI parameter does
         - `example` - an example of using this parameter
         - `example_description` - describe the example you've provided
+        - Include adjacent security-control switches here too: tool include/exclude
+          flags, extension/profile selectors, sandbox/container flags, approval-mode
+          flags, no-tools/read-only flags, MCP/trust switches, and non-interactive
+          permission-prompt switches. Do not return `[]` merely because the provider
+          lacks a direct `--mode`/`--yolo` flag; return `[]` only after checking
+          `--help`, subcommand help, and docs for these adjacent surfaces, and explain
+          that absence in the body.
     - `env_vars` - one record per environment variable that influences permissions: `name` and its `effect`
     - `config_files` - an array of dictionaries describing where permission
       configuration can live. Use one `os: all` record only when the paths are the
