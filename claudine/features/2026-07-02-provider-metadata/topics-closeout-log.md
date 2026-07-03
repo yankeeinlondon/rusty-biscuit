@@ -74,5 +74,11 @@
   with the full target research filepath, uses `file_exists(file)` rather than
   `state.file` path checks, and emits positive lifecycle progress on successful
   same-day updates in addition to stale-success failure checks.
+- Removed `streaming` as a standalone provider-research topic. The standalone prompt
+  duplicated `non-interactive-sessions` and was too generic to produce useful parser
+  facts. Structured stream selection, framing, event families, correlation metadata,
+  terminal events, and parser caveats now belong to `non-interactive-sessions`; any
+  future stream-specific topic should be fixture/test-case oriented rather than another
+  general provider fleet.
 - Stopped before the checkpoint-gated pilot/fleet run. Next step is Ken review of the
   widened schema and prompt.

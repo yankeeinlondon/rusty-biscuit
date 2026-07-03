@@ -63,11 +63,11 @@ Authoritative detail lives in `docs/topics/provider-metadata.md`. In brief:
   provider-specific dispatch (topic doc, "Decentralized Provider Info").
 - **`WrapperProfile`** (CLI crate): defaults derive from the catalog, but ~14 methods are
   still overridden per provider with knowledge that is conceptually static data.
-- **Research pipeline**: `claudine sequence <topic>.md` fans out over
+- **Research pipeline**: `claudine sequence <topic>/_fleet.md` fans out over
   `docs/providers.yaml`, producing one document per provider per topic under
   `docs/research/<topic>/`. Topics today: agent-models, agent-permissions,
   non-interactive-sessions, usage, agent-logging, agent-cli. Planned: permissions,
-  system-prompt, ACP, resume, MCP (config/security/events), CLI response streaming.
+  system-prompt, ACP, resume, MCP (config/security/events).
   Environment variables are intentionally captured inside the domain topics they
   affect rather than as a standalone topic.
 - Some research topics carry a `target_schema` (SimpleSchema) so their frontmatter is
@@ -263,7 +263,7 @@ Two sources of new fields:
 | `models` | agent-models | **out-of-box focus**: default offerings (exact accepted strings + `catalog_id` mapping), selection mechanisms, precedence, dynamic listing |
 | `model_config` | *(authored 2026-07-02 — `docs/research/model-config/`, sidecar validated, dry-run clean ×9; fleet run pending)* | **user-extension focus**: config file/schema for adding models, API-standard (`openai_compatible`/`anthropic_compatible`/`bespoke`), adapter mechanism (e.g. OpenCode's `npm` key), base-URL delivery, metadata-override shape (cost/limit/modalities), merge-vs-shadow semantics against the built-in catalog, per-runner local-model support (ollama, oMLX, LM Studio, llama.cpp, vLLM) |
 | `permissions` | agent-permissions | permission CLI params, config file paths (user/repo), agent-scoped permissions, policy-engine fit; **v2 schema planned** (2026-07-02): per-OS config paths, official-schema classification, defaults-when-unspecified, YOLO defaults, permission CLI switches + env vars |
-| `non_interactive` | non-interactive-sessions | output formats, schema URL/type, use-case detectability matrix (cap approaching/capped/no-funds/auth/…) |
+| `non_interactive` | non-interactive-sessions | headless invocation, output formats, structured stream/event contract, schema URL/type, use-case detectability matrix (cap approaching/capped/no-funds/auth/…) |
 | `usage` | usage | usage-data acquisition strategy (api/cli/pty-scrape), dashboard URL |
 | `cli` | agent-cli | version, homepage/repo/docs URLs, full switch inventory (or a pointer to it) |
 | `system_prompt` | system-prompt | append/replace support, prompt delivery strategy, config/memory files, prompt layers, agent/subagent prompt isolation, format recommendations |
@@ -273,8 +273,15 @@ Two sources of new fields:
 | `skills` / `slash_commands` / `subagents` | agent-skills / slash-commands / subagents *(planned — decided 2026-07-02, three topics sharing one vocabulary block; see `hl-approach.md` §A)* | config formats, user/repo scopes with per-OS paths, recognized/required metadata keys, invocation grammar (commands) — feeds the `linking` portability classification |
 | `resume` | *(planned)* | resume flags, session-ID injection pattern |
 | `mcp` | *(planned)* | config location/format, security posture, event visibility |
-| `streaming` | *(planned)* | protocol, event coverage, think-delimiter quirks |
 | `signals` | *(planned — see [Signal Catalog](#signal-catalog--fine-grained-event-semantics))* | detection records: match/extract paths, units, timezones, version vocabularies, evidence fixtures |
+
+Decision, 2026-07-02: there is no standalone `streaming` research topic for this
+pass. Structured response streaming is part of `non-interactive-sessions`: Claudine
+must first know how to invoke a provider headlessly and select the best machine-readable
+output before it can reason about framing, event families, correlation IDs, metadata,
+terminal events, and parser caveats. A future parser-fixture topic may be useful, but
+that should collect concrete stream samples and parser test cases rather than repeat
+general provider research.
 
 Decision, 2026-07-02: there is no standalone `env-vars` research topic for this
 pass. Variables only make sense when tied to a consumer domain: model selection and

@@ -30,11 +30,11 @@ Immediate: ~~local-runners fleet~~ (done 2026-07-02 — see
 ([model-config-plan.md](model-config-plan.md)). Then sidecars + verification pattern for
 the remaining existing topics (usage, agent-cli, non-interactive-sessions) and the
 planned ones (hooks, agent-skills, slash-commands, subagents, agent-permissions v2,
-system-prompt, ACP, resume, MCP, streaming, signals). Each new
+system-prompt, ACP, resume, MCP, signals). Each new
 topic follows the now-standard recipe: schema designed backwards from catalog fields →
 pilot → evaluate → fleet → evaluate again → targeted fixes. The
 `requires_claudine_update` queue is triaged as topics land (Kimi 2.0 protocol fix rides
-the streaming/signals topics).
+the non-interactive-sessions/signals topics).
 
 **New topics (decided 2026-07-02).** Four additions, all green-field prompt authoring —
 the legacy `docs/research/hooks/` and `docs/research/cross-referencing/` areas have

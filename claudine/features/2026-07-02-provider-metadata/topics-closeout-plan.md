@@ -29,7 +29,7 @@
 | `subagents` | NO | none | — | **fleet topic**; legacy input: `cross-referencing/` |
 | *(new)* `resume` | — | — | legacy dir (9 docs, no prompt) | planned per spec |
 | *(new)* `mcp` | — | — | legacy dir (6 docs, no prompt) | planned per spec ("config/security/events") |
-| *(new)* `streaming` | — | — | — | planned per spec ("CLI response streaming") |
+| `streaming` | — | — | — | **removed as standalone topic**; structured stream contracts belong to `non-interactive-sessions` |
 
 **Old research is a validation asset, not a migration burden.** Old-generation files
 (`claude-code.md`, `gemini-cli.md`, `qwen.md`, the legacy `hooks/`, `cross-referencing/`,
@@ -105,12 +105,13 @@ Ratified resolutions:
   `hook-designs`, `separating-phases`) — left as-is.
 - **(e) Skills** — topics with a direct claudine consumer earn one:
   permissions/PolicyEngine, hooks/adapters, skills+slash-commands+subagents/linking,
-  mcp/mcp module, streaming/stream, resume/lifecycle resume action.
+  mcp/mcp module, non-interactive-sessions/stream parser contract,
+  resume/lifecycle resume action.
 
 Ratified ordering (consumer value first; retrofit before greenfield):
 `permissions` (merged) → `hooks` → `agent-cli` → `non-interactive-sessions` →
 `skills` → `slash-commands` → `subagents` → `usage` → `system-prompt` → `acp` → `resume` →
-`mcp` → `streaming`.
+`mcp`.
 
 ## Phase 1 — retrofit trio (repeat per topic: agent-cli, non-interactive-sessions, usage)
 
@@ -123,8 +124,8 @@ Ratified ordering (consumer value first; retrofit before greenfield):
    via a schema-design subagent.
 2. **Modernize the prompt** to the current pattern (sequence frontmatter stacks,
    `$schema` instruction, per-field capture instructions mirroring the schema, evidence
-   requirement, Sources section). Rename `_fleet.md`-style prompts to
-   `_<topic>.md`. Fold lessons from the model-config defect: ask capability questions
+   requirement, Sources section). Keep the sequence driver named `_fleet.md`.
+   Fold lessons from the model-config defect: ask capability questions
    ("which standards / mechanisms exist"), never presence questions ("does X support
    Y"), and add topic-specific anti-pattern lines where the old docs show a failure
    class (an inspection subagent per topic reports candidate failure classes from the
@@ -150,7 +151,7 @@ Ratified ordering (consumer value first; retrofit before greenfield):
 ## Phase 2 — merged + fleet-ified + new topics
 
 Repeat per topic: `permissions` (merged), `hooks`, `skills`, `slash-commands`,
-`subagents`, `system-prompt`, `acp`, `resume`, `mcp`, `streaming`.
+`subagents`, `system-prompt`, `acp`, `resume`, `mcp`.
 
 1. **Attribute discovery fan-out.** Inputs differ by topic:
    - `permissions`: the existing `agent-permissions/_schema.yaml` + its 9 docs'
@@ -172,13 +173,12 @@ Repeat per topic: `permissions` (merged), `hooks`, `skills`, `slash-commands`,
      protocol/library reference inputs, not per-provider fleet outputs.
    - `resume` / `mcp`: one subagent per legacy doc where dirs exist;
      web-enabled question-cluster subagents for gaps.
-   - `streaming`: greenfield — question-cluster subagents seeded from
-     `stream::protocol`'s existing per-provider models.
    Synthesize the attribute inventory + draft `_schema.yaml` in the orchestrator.
 2. **Author the prompt** (`_<topic>.md`) following the reference pattern; state the
    claudine consumer explicitly in the Scope section (PolicyEngine, adapters, linking,
-   SystemPromptSpec, ACP client/adapter integration, mcp module, stream protocol,
-   lifecycle resume capability matrix).
+   SystemPromptSpec, ACP client/adapter integration, mcp module, lifecycle resume
+   capability matrix). Do not recreate a standalone streaming topic; structured
+   stream protocol details are part of `non-interactive-sessions`.
 3. Validate as in Phase 1 step 4.
 4. > **HITL CHECKPOINT 2.x (Ken):** per-topic attribute inventory + schema + prompt
    > approval before the fleet run. For `permissions`, this checkpoint also ratifies
@@ -217,7 +217,7 @@ Repeat per topic: `permissions` (merged), `hooks`, `skills`, `slash-commands`,
 
 Every topic in the ratified roster — the retrofit trio, the merged `permissions`, the
 four resource topics (`hooks`, `skills`, `slash-commands`, `subagents`), and the new
-set (`system-prompt`, `acp`, `resume`, `mcp`, `streaming`) — is schema-enforced (`_schema.yaml` +
+set (`system-prompt`, `acp`, `resume`, `mcp`) — is schema-enforced (`_schema.yaml` +
 `$schema:` references), roster-complete (9 providers, current filenames, old research
 retained as validation baselines), fleet-run with green evaluation verdicts,
 distilled into skills where approved, indexed in the `claudine` skill, and logged in
