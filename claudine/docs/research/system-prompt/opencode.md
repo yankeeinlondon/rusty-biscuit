@@ -72,10 +72,10 @@ config_sources:
     notes: 'Linux path equivalent (XDG config home).'
   - os: windows
     scope: user
-    path: '~/.config/opencode/AGENTS.md'
+    path: '%USERPROFILE%\.config\opencode\AGENTS.md'
     mode: append
     format: markdown
-    notes: 'Windows path equivalent (Postmodern %APPDATA% semantics — the literal `.config/opencode` directory is what OpenCode reads on Windows).'
+    notes: 'OpenCode resolves its config dir home-relative on every OS — on Windows the literal `.config\opencode` directory under the user profile, not %APPDATA%.'
   - os: macos
     scope: user
     path: '~/.claude/CLAUDE.md'
@@ -90,7 +90,7 @@ config_sources:
     notes: 'Linux equivalent of the Claude-compat global-rules fallback.'
   - os: windows
     scope: user
-    path: '~/.claude/CLAUDE.md'
+    path: '%USERPROFILE%\.claude\CLAUDE.md'
     mode: append
     format: markdown
     notes: 'Windows equivalent. OPENCODE_DISABLE_CLAUDE_CODE=1 disables every Claude-compat file.'
@@ -144,7 +144,7 @@ config_sources:
     notes: 'Linux equivalent.'
   - os: windows
     scope: user
-    path: '~/.config/opencode/opencode.json'
+    path: '%USERPROFILE%\.config\opencode\opencode.json'
     mode: append
     format: jsonc
     notes: 'Windows equivalent.'
@@ -180,7 +180,7 @@ config_sources:
     notes: 'Linux equivalent.'
   - os: windows
     scope: agent
-    path: '~/.config/opencode/agents/*.md'
+    path: '%USERPROFILE%\.config\opencode\agents\*.md'
     mode: replace
     format: markdown
     notes: 'Windows equivalent.'
@@ -672,6 +672,7 @@ The temporary file lives only for the duration of the spawned process; no `~/.co
 
 ## Changelog
 
+- **2026-07-03 curation edit** — Rewrote the four `os: windows` `config_sources` paths in Windows form (`%USERPROFILE%\.config\opencode\…`, `%USERPROFILE%\.claude\CLAUDE.md`): OpenCode resolves these dirs home-relative on every OS, so the locations were correct but unix-styled; also removed a stray `%APPDATA%` reference in the notes. Cross-validated against the agent-cli topic's host-evidence records.
 - **2026-07-03 refresh** — Switched `created` / `agent` / `model` frontmatter per the prompt contract. Expanded `cli_params` to every documented `opencode run` flag with verified 1.17.13 `--help` output. Expanded `config_sources` to per-OS records (macos/linux/windows) for `AGENTS.md`, `CLAUDE.md`, `opencode.json`, `agents/*.md`, and `<name>/prompt.txt`; added managed-config paths for all three OSes plus the macOS MDM `ai.opencode.managed` plist domain. Expanded `env_vars` to cover every `OPENCODE_*` env var that touches prompt discovery, agent config, MCP, model fetches, or the system layer (per the CLI docs Environment variables section). Rebuilt `prompt_layers` to mirror the v2 source-of-truth assembly in `packages/opencode/src/session/llm/request.ts:prepare()` and the three `system.ts` services (`environment`, `skills`, `mcp`). Updated `agent_prompting` so the slot-0 replacement semantics per issue #34721 are explicit (the agent's `prompt` does not replace the entire effective system prompt, only slot 0). Updated `recent_changes` with v1.17.13, issue #34721, v1.17.10 (MCP server instructions to session context), v1.16.2 (system context updates persist), v1.16.0 (skill discovery and file-based agent loading), and issue #20695 (memory megathread). Added quirks for the v2 substitution engine, the OpenAI-OAuth `options.instructions` promotion, and the substring-match model-routing in `system.ts`. Switched `claudine_delivery.append_strategy` from `unsupported` to `env_var_file` (still `agent_spec` for replace), and added concrete `OPENCODE_CONFIG_CONTENT` invocations showing the wrapper temp-file path. Updated `format_recommendations` to recommend plain Markdown for both append and replace, because the provider prompt files (`prompt/*.txt`) are themselves Markdown-flavored XML and the model handles inline Markdown cleanly.
 
 ## Sources
