@@ -1,104 +1,194 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-01
-last_updated: 2026-07-02
-agent: open_code
-model: kimi-for-coding/k2p7
+last_updated: 2026-07-03
+agent: codex
+model: default
 
 cli_params:
   - param: approval-mode
     style: switch
-    description: "Set the session approval mode. CLI values are plan (read-only analysis), default (ask before edits/shell), auto-edit (auto-approve file edits), and yolo (auto-approve all tool calls). The auto mode can be configured via settings.json or /approval-mode."
-    example: "qwen -p \"refactor auth\" --approval-mode auto-edit"
-    example_description: "Starts a headless session that auto-approves file edits but still prompts for shell commands."
+    description: "Set the session approval mode. Current values are plan, default, auto-edit, auto, and yolo."
+    example: "qwen -p \"review this repository\" --approval-mode plan"
+    example_description: "Starts a headless read-only planning run."
   - param: yolo
     style: switch
-    description: "Enable YOLO mode for the session, auto-approving all tool calls. Equivalent to --approval-mode yolo."
-    example: "qwen -p \"run tests and commit\" --yolo"
-    example_description: "Runs a headless prompt with every tool call approved automatically."
+    description: "Shortcut for YOLO approval mode. It auto-approves tool calls but does not enable a sandbox."
+    example: "qwen -p \"run tests and fix failures\" --yolo"
+    example_description: "Starts a headless run with all tool calls auto-approved unless other hard blocks apply."
   - param: allowed-tools
     style: switch
-    description: "Comma-separated or repeated list of tool rules that bypass the confirmation dialog for this session. Accepts tool names and Tool(specifier) patterns."
-    example: "qwen -p \"...\" --allowed-tools \"Shell(npm test),Read\""
-    example_description: "Auto-approves npm test shell commands and all read operations for this session."
+    description: "Comma-separated or repeated list of permission rules to auto-approve for this session; accepts the same Tool or Tool(specifier) grammar as permissions.allow."
+    example: "qwen -p \"run the unit tests\" --allowed-tools \"Bash(npm test),Read\""
+    example_description: "Auto-approves npm test and read-family tools for this run."
   - param: exclude-tools
     style: switch
-    description: "Comma-separated or repeated list of tool names to remove from the session's available tool surface."
-    example: "qwen -p \"...\" --exclude-tools \"Shell,Write,Edit\""
-    example_description: "Prevents the model from using shell, write, and edit tools in this session."
+    description: "Comma-separated or repeated list of permission rules to deny for this session; accepts tool aliases, command patterns, path rules, and MCP tool names."
+    example: "qwen -p \"inspect only\" --exclude-tools \"Bash,Edit,Write,NotebookEdit,WebFetch,Agent,Skill,mcp__*\""
+    example_description: "Blocks common mutation, network, subagent, skill, and MCP tool surfaces for one run."
   - param: core-tools
     style: switch
-    description: "Comma-separated or repeated list of core tool names/paths to include in the session."
-    example: "qwen -p \"...\" --core-tools Read,Edit"
-    example_description: "Restricts the session to the listed core tools."
-  - param: disabled-slash-commands
+    description: "Comma-separated or repeated legacy core-tool allowlist. Only listed core tools are registered, but this is deprecated in favor of permissions.allow/deny and is ignored in safe mode."
+    example: "qwen -p \"summarize the repo\" --core-tools read_file,grep_search,glob,list_directory"
+    example_description: "Limits registered core tools to read/search tools for the session."
+  - param: safe-mode
     style: switch
-    description: "Comma-separated or repeated list of slash command names to disable for the session. Unioned with slashCommands.disabled and QWEN_DISABLED_SLASH_COMMANDS."
-    example: "qwen --disabled-slash-commands \"auth,mcp,extensions\""
-    example_description: "Disables the /auth, /mcp, and /extensions slash commands for this session."
-  - param: sandbox
-    style: switch
-    description: "Enable sandbox mode for the session, running shell and file-modifying tools inside a sandbox (sandbox-exec on macOS or Docker/Podman)."
-    example: "qwen -s -p \"analyze the code\""
-    example_description: "Runs the session with filesystem/process isolation enabled."
-  - param: sandbox-image
-    style: switch
-    description: "Set the Docker/Podman image used when sandboxing."
-    example: "qwen -s --sandbox-image ghcr.io/qwenlm/qwen-code:0.19.4 -p \"...\""
-    example_description: "Uses a specific sandbox image for the session."
-  - param: include-directories
-    style: switch
-    description: "Add additional directories to the workspace scope for the session."
-    example: "qwen -p \"...\" --include-directories ../shared,../docs"
-    example_description: "Expands the working directory set for this session."
-  - param: allowed-mcp-server-names
-    style: switch
-    description: "Comma-separated or repeated list of MCP server names that are allowed to load for the session."
-    example: "qwen --allowed-mcp-server-names \"puppeteer,github\" -p \"...\""
-    example_description: "Only loads the named MCP servers."
-  - param: mcp-config
-    style: switch
-    description: "Load MCP servers from a JSON file or inline JSON string for the session."
-    example: "qwen --mcp-config ./mcp.json -p \"...\""
-    example_description: "Loads MCP servers defined in a project-local configuration file."
+    description: "Disable customizations such as context files, hooks, extensions, skills, MCP servers, custom subagents, permission rules from settings, memory features, and sandbox settings. Explicit --approval-mode, --yolo, --allowed-tools, and --exclude-tools still apply."
+    example: "qwen -p \"diagnose startup\" --safe-mode --approval-mode plan"
+    example_description: "Starts a troubleshooting run with project/user customizations disabled and plan approval mode forced by CLI."
   - param: bare
     style: switch
-    description: "Minimal mode that skips implicit startup auto-discovery and only honors explicitly provided CLI inputs."
-    example: "qwen --bare -p \"Summarize this file\" --allowed-tools Read"
-    example_description: "Runs a headless summary task with no project configuration loaded."
+    description: "Minimal mode that skips implicit startup auto-discovery and honors only explicit CLI inputs. It also disables settings-sourced permission rules, MCP servers, extensions, skills, memory, hooks, and sandbox settings."
+    example: "qwen --bare -p \"summarize the prompt input\" --approval-mode plan"
+    example_description: "Runs with minimal startup behavior and read-only plan mode."
+  - param: sandbox
+    style: switch
+    description: "Enable sandboxing for the session. The flag is boolean in current CLI help; docs also describe --sandbox=<provider>, while QWEN_SANDBOX can force docker, podman, or sandbox-exec."
+    example: "qwen -s -p \"run the test suite\""
+    example_description: "Runs the headless prompt with sandboxing enabled."
+  - param: sandbox-image
+    style: switch
+    description: "Set the Docker/Podman sandbox image for this session. The flag is deprecated in favor of tools.sandboxImage but currently has highest sandbox-image precedence."
+    example: "qwen -s --sandbox-image ghcr.io/qwenlm/qwen-code:0.19.6 -p \"build\""
+    example_description: "Uses a specific container image for the sandboxed run."
+  - param: include-directories
+    style: switch
+    description: "Add extra directories to the workspace context. Can be repeated or comma-separated; docs state a maximum of five directories."
+    example: "qwen -p \"inspect shared code\" --include-directories ../shared,../docs"
+    example_description: "Includes adjacent directories in the workspace scope for this session."
+  - param: allowed-mcp-server-names
+    style: switch
+    description: "Comma-separated or repeated list of MCP server names to allow for this session. When set, settings-level mcp.allowed and mcp.excluded are ignored."
+    example: "qwen --allowed-mcp-server-names github,filesystem -p \"triage issue\""
+    example_description: "Loads only the named MCP servers from the effective MCP configuration."
+  - param: mcp-config
+    style: switch
+    description: "Load session-injected MCP servers from an inline JSON string or JSON file path with an mcpServers object. CLI/session-injected servers sit above settings and .mcp.json and are not gated by project MCP approval."
+    example: "qwen --mcp-config ./mcp.json -p \"query the test database\""
+    example_description: "Adds MCP servers for this run without editing settings.json."
+  - param: extensions
+    style: switch
+    description: "Comma-separated or repeated extension names to use for this session. If omitted, all available extensions are used; docs describe `qwen -e none` to disable all extensions."
+    example: "qwen -e none -p \"review without extension tools\""
+    example_description: "Disables extension-provided tools, commands, and subagents for the run."
+  - param: disabled-slash-commands
+    style: switch
+    description: "Comma-separated or repeated slash command names to hide and refuse. Unioned with slashCommands.disabled and QWEN_DISABLED_SLASH_COMMANDS."
+    example: "qwen --disabled-slash-commands auth,mcp,extensions"
+    example_description: "Removes high-risk slash commands from the interactive command surface."
+  - param: max-tool-calls
+    style: switch
+    description: "Headless/unattended run budget for cumulative top-level tool calls. `0` means no tool calls are allowed; the first attempted tool call aborts with budget exit code 55."
+    example: "qwen -p \"answer without tools\" --max-tool-calls 0"
+    example_description: "Provides a hard session-scoped no-tool-execution budget, but it cannot selectively add tools back in the same run."
+  - param: max-wall-time
+    style: switch
+    description: "Headless/unattended wall-clock budget. Accepts seconds or duration strings such as 30s, 5m, or 1h."
+    example: "qwen -p \"try a bounded fix\" --max-wall-time 10m"
+    example_description: "Prevents an unattended run from exceeding a wall-clock limit."
+  - param: max-session-turns
+    style: switch
+    description: "Maximum number of session turns before exiting; useful as an unattended-run guardrail."
+    example: "qwen -p \"attempt one fix\" --max-session-turns 8"
+    example_description: "Caps the session turn count for a headless task."
+  - param: max-subagent-depth
+    style: switch
+    description: "Maximum subagent nesting depth, one-based. `1` keeps subagents available but prevents nested subagents; capped at 100."
+    example: "qwen -p \"investigate\" --max-subagent-depth 1"
+    example_description: "Allows first-level delegation but blocks recursive subagent nesting."
+  - param: output-format
+    style: switch
+    description: "Set headless output format to text, json, or stream-json. Stream-json can carry permission events through SDK/daemon integrations."
+    example: "qwen -p \"fix lint\" --output-format stream-json"
+    example_description: "Streams machine-readable events during a headless run."
 
 env_vars:
-  - name: QWEN_SANDBOX
-    effect: "Enable or configure sandbox mode (true/false/docker/podman/sandbox-exec). Takes precedence over the --sandbox flag and tools.sandbox setting."
-  - name: QWEN_SANDBOX_IMAGE
-    effect: "Override the sandbox Docker/Podman image. Takes precedence over --sandbox-image and tools.sandboxImage."
-  - name: SEATBELT_PROFILE
-    effect: "macOS-only. Select the sandbox-exec profile (permissive-open, permissive-closed, restrictive-open, etc.)."
-  - name: QWEN_CODE_SAFE_MODE
-    effect: "Equivalent to safe mode. Disables customizations including context files, hooks, extensions, skills, MCP servers, custom subagents, permission rules, settings-sourced approval mode overrides, memory, and sandbox settings; explicit --yolo/--approval-mode still apply."
-  - name: QWEN_DISABLED_SLASH_COMMANDS
-    effect: "Comma-separated list of slash commands to disable. Unioned with slashCommands.disabled and --disabled-slash-commands."
   - name: QWEN_HOME
-    effect: "Changes the global configuration directory (default ~/.qwen), affecting where user-scoped settings, skills, agents, and memory are loaded."
+    effect: "Changes the global Qwen directory, including user settings, memory, skills, credentials, trusted folders, and runtime state when QWEN_RUNTIME_DIR is unset."
+  - name: QWEN_RUNTIME_DIR
+    effect: "Separates runtime output such as conversations, logs, and todos from persistent global config."
+  - name: QWEN_CODE_SAFE_MODE
+    effect: "Truthy values enable safe mode, disabling settings-sourced permission rules, MCP servers, extensions, skills, hooks, memory features, custom subagents, and sandbox settings while still honoring explicit CLI approval flags."
+  - name: QWEN_SANDBOX
+    effect: "Enables or disables sandboxing and can force docker, podman, or sandbox-exec. For sandbox enablement, docs state this overrides the CLI flag and settings."
+  - name: QWEN_SANDBOX_IMAGE
+    effect: "Sets the sandbox image unless --sandbox-image is supplied; overrides tools.sandboxImage."
+  - name: SEATBELT_PROFILE
+    effect: "macOS-only Seatbelt profile selector, including permissive-open, permissive-closed, permissive-proxied, restrictive-open, restrictive-closed, restrictive-proxied, and project custom profiles."
+  - name: SANDBOX_FLAGS
+    effect: "Additional Docker/Podman flags for container sandboxing."
+  - name: QWEN_SANDBOX_PROXY_COMMAND
+    effect: "Starts a local proxy for proxied sandbox profiles; used for network allowlist-style control."
+  - name: SANDBOX_SET_UID_GID
+    effect: "Linux container sandbox UID/GID mapping control."
+  - name: QWEN_DISABLED_SLASH_COMMANDS
+    effect: "Comma-separated slash-command denylist unioned with slashCommands.disabled and --disabled-slash-commands."
+  - name: QWEN_CODE_SYSTEM_SETTINGS_PATH
+    effect: "Overrides the system settings file path, which is the highest settings-file layer."
+  - name: QWEN_CODE_SYSTEM_DEFAULTS_PATH
+    effect: "Overrides the system defaults file path, which is the lowest settings-file layer above hardcoded defaults."
+  - name: QWEN_CODE_TRUSTED_FOLDERS_PATH
+    effect: "Overrides the trustedFolders.json path used when folder trust is enabled."
+  - name: QWEN_CODE_SUPPRESS_YOLO_WARNING
+    effect: "Suppresses the warning printed for headless YOLO runs without sandboxing; it does not change permissions."
+  - name: QWEN_CODE_LEGACY_MCP_BLOCKING
+    effect: "Restores older blocking MCP discovery behavior; this affects when tools become available, not approval decisions."
+  - name: QWEN_CODE_FORCE_ENCRYPTED_FILE_STORAGE
+    effect: "Forces encrypted/keychain-backed storage for MCP OAuth tokens where available instead of plaintext token files."
+  - name: QWEN_TLS_INSECURE
+    effect: "Disables TLS verification for API connections when truthy; this is a security-control escape hatch, not a tool permission."
 
 config_files:
-  - os: all
-    user: ~/.qwen/settings.json
-    repo: .qwen/settings.json
+  - os: macos
+    user: ".qwen/settings.json"
+    repo: ".qwen/settings.json"
+    notes: "User path is relative to the effective home or QWEN_HOME. System defaults: /Library/Application Support/QwenCode/system-defaults.json; system override: /Library/Application Support/QwenCode/settings.json. This machine has /Users/ken/.qwen/settings.json with auth/model/provider settings and no permissions block; the session HOME /Users/ken/.claudine has no .qwen/settings.json."
+  - os: linux
+    user: ".qwen/settings.json"
+    repo: ".qwen/settings.json"
+    notes: "User path is relative to the effective home or QWEN_HOME. System defaults: /etc/qwen-code/system-defaults.json; system override: /etc/qwen-code/settings.json."
+  - os: windows
+    user: ".qwen/settings.json"
+    repo: ".qwen/settings.json"
+    notes: "User path is relative to the Windows user home or QWEN_HOME. System defaults: C:\\ProgramData\\qwen-code\\system-defaults.json; system override: C:\\ProgramData\\qwen-code\\settings.json."
 
 precedence:
-  - source: "CLI flags > environment variables > system settings file > project settings > user settings > system defaults file > hardcoded defaults"
-    scope: [permissions]
-    merge_strategy: none
-    notes: "CLI flags are temporary session overrides and win over environment variables and config files. Environment variables override all settings-file layers except CLI flags. System override settings (/etc/qwen-code/settings.json) win over project and user settings. Project settings override user settings. For permission rules specifically, deny > ask > allow, and a deny rule from any scope overrides allow rules from any scope."
+  - source: "cli"
+    scope: ["approval_mode", "allowed_tools", "exclude_tools", "mcp", "slash_command_visibility", "extensions", "budgets", "tool_visibility"]
+    merge_strategy: "none"
+    notes: "CLI flags are session-scoped and generally override settings. --yolo and --approval-mode are mutually exclusive; use --approval-mode=yolo when the explicit mode flag is needed."
+  - source: "env"
+    scope: ["sandbox", "slash_command_visibility", "safe_mode", "system_settings_paths", "trusted_folder_path", "mcp_discovery", "token_storage"]
+    merge_strategy: "none"
+    notes: "Environment variables override settings for their specific surfaces. QWEN_SANDBOX overrides both --sandbox and tools.sandbox, while sandbox image precedence is --sandbox-image, then QWEN_SANDBOX_IMAGE, then tools.sandboxImage."
+  - source: "system_settings"
+    scope: ["approval_mode", "rules", "mcp", "tool_visibility", "trust", "sandbox", "slash_command_visibility"]
+    merge_strategy: "deep"
+    notes: "System settings override user and project settings. Admins can redirect the path with QWEN_CODE_SYSTEM_SETTINGS_PATH."
+  - source: "project_config"
+    scope: ["approval_mode", "rules", "mcp", "sandbox", "extensions", "hooks", "skills", "subagents", "slash_command_visibility"]
+    merge_strategy: "deep"
+    notes: "Project .qwen/settings.json overrides user settings when loaded. If folder trust is enabled and the folder is untrusted, project-local surfaces are ignored and privileged approval modes are forced down to default."
+  - source: "user_config"
+    scope: ["approval_mode", "rules", "mcp", "sandbox", "extensions", "hooks", "skills", "subagents", "slash_command_visibility"]
+    merge_strategy: "deep"
+    notes: "User settings apply globally and are overridden by project and system settings. Permission arrays merge by decision type rather than replacing wholesale."
+  - source: "system_defaults"
+    scope: ["approval_mode", "rules", "mcp", "sandbox", "tool_visibility"]
+    merge_strategy: "deep"
+    notes: "System defaults provide a base layer above hardcoded defaults and below user/project/system settings."
+  - source: "rule_engine"
+    scope: ["rules"]
+    merge_strategy: "none"
+    notes: "After sources are merged, runtime rule conflict priority is deny, then ask, then allow, then mode/default behavior."
 
-default_posture: "With no configuration, Qwen Code starts in default approval mode (Ask Permissions): read-only built-in tools run without confirmation, while file edits, shell commands, web fetches, MCP tool calls, and other state-changing actions prompt for approval."
+default_posture: "With no relevant CLI flags, environment variables, settings files, or trust changes, Qwen Code starts in Ask Permissions mode (`tools.approvalMode: \"default\"`). Read-only and metadata tools run without confirmation, read-only shell commands are auto-allowed by shell analysis, and mutating shell/edit/network/MCP/subagent actions ask or follow their tool defaults."
 
 cli_zero_permissions:
   supported: false
-  invocation: ""
-  mechanism: "Qwen Code has no single CLI flag that denies all tool calls. The closest approximation is to combine --approval-mode plan with --exclude-tools for the tools to remove, or to use broad deny rules in settings.json."
-  limitations: "There is no universal deny-all or empty-tool-list flag. --exclude-tools removes named tools but does not block remaining tools from prompting or being approved; --approval-mode plan stops edits/shell but still allows read-only tools."
+  invocation: "qwen --safe-mode --approval-mode plan --exclude-tools \"Bash,Shell,Edit,Write,NotebookEdit,WebFetch,Agent,Skill,Monitor,SaveMemory,ReadMcpResource,mcp__*\" --max-tool-calls 0 -p \"...\""
+  mechanism: "Approximation only: safe mode disables config-sourced customizations, plan mode blocks non-info tools, exclude-tools denies named surfaces, and max-tool-calls 0 aborts on any tool call."
+  limitations: "There is no CLI deny-all wildcard or empty tool allowlist that both starts from no permissions/no tools and then selectively adds tools back in the same run. --max-tool-calls 0 is a hard execution budget, not a mutable permission baseline; --core-tools cannot express an empty allowlist and is ignored in safe mode; --approval-mode plan still allows read/info tools."
 
 agent_permissions:
   allowed: true
@@ -106,366 +196,344 @@ agent_permissions:
     - approvalMode
     - tools
     - disallowedTools
-    - permissionMode
 
 yolo:
   has_interactive_yolo: true
   has_non_interactive_yolo: true
-  mechanism: "--yolo or --approval-mode yolo CLI flags; /approval-mode yolo in an interactive session; or tools.approvalMode: yolo in settings.json"
+  mechanism: "--yolo, --approval-mode yolo, /approval-mode yolo, Shift+Tab/Tab mode cycling, or tools.approvalMode: \"yolo\" in settings.json. Headless YOLO without sandbox prints a warning unless QWEN_CODE_SUPPRESS_YOLO_WARNING is set."
 
 policy_engine:
   ergonomic: false
   provides_coverage: true
   gaps:
-    - "Auto mode relies on an LLM classifier with natural-language hints; the classifier decision is not a deterministic static rule."
-    - "Meta-category rules such as Read cover read_file, grep_search, glob, and list_directory, requiring backend-specific expansion."
-    - "Path-pattern prefixes (//, ~/, /, ./) and shell-command word-boundary matching differ from generic glob semantics."
-    - "Protected self-modification and persistence paths are hard-coded exceptions in auto mode and cannot be expressed as static rules."
-    - "Subagent permission inheritance and parent-mode override (e.g., a yolo parent forces yolo on subagents) are runtime behaviors outside static policy."
-    - "MCP server-level allow/deny (mcp.allowed/mcp.excluded), per-server includeTools/excludeTools, and the trust flag are additional policy surfaces."
-    - "Folder trust and safe mode are trust/scope gates rather than permission rules."
+    - "Auto mode is classifier-driven and can fail closed or fall back to manual approval after consecutive blocks/unavailable results; this is not a deterministic static rule."
+    - "Over-broad allow rules are temporarily stripped only while in Auto mode, without mutating settings.json."
+    - "The rule grammar has Qwen-specific aliases, meta-categories, command splitting, command word-boundary semantics, path-prefix semantics, and shell virtual operations that require provider-specific matching."
+    - "Tool visibility is separate from approval: coreTools registry filtering, whole-tool deny hiding, MCP include/exclude filters, extensions, and slash-command denylist."
+    - "Folder trust and safe mode are source-loading gates, not simple rules."
+    - "MCP policy includes server filters, per-server trust, resources, prompts as slash commands, OAuth token storage, and discovery timing."
+    - "Sandbox mode has OS/container backends, network profiles, and image/proxy settings outside static permission rules."
+    - "Subagent permission inheritance and parent-mode dominance, including yolo/auto-edit/plan override behavior, are runtime semantics."
 
 permission_entities:
   - entity: tool
-    native_names: ["permissions.allow", "permissions.ask", "permissions.deny", "--allowed-tools", "--exclude-tools"]
-    notes: "Built-in tools such as Bash/Shell, Read, Edit, Write, WebFetch, Agent, Skill, etc. Bare tool names match all uses; specifiers narrow matching. --exclude-tools hides tools from the model context."
+    native_names: ["permissions.allow", "permissions.ask", "permissions.deny", "--allowed-tools", "--exclude-tools", "tools.core", "tools.allowed", "tools.exclude"]
+    notes: "Rules target built-in tool names, aliases, MCP tool names, and Tool(specifier) patterns. Legacy tools.allowed/exclude/core are deprecated and migrated or preserved for compatibility."
   - entity: tool_group
-    native_names: ["Read, Grep, Glob, ListFiles", "Edit, Write, NotebookEdit"]
-    notes: "Read rules apply to read_file, grep_search, glob, and list_directory. Edit rules apply to edit, write_file, and notebook_edit."
+    native_names: ["Read", "Edit", "Bash"]
+    notes: "Read covers read_file, grep_search, glob, and list_directory. Edit covers edit, write_file, and notebook_edit. Bash covers run_shell_command and monitor."
   - entity: command
-    native_names: ["Bash", "Shell"]
-    notes: "Shell/Bash rules match command strings with glob semantics and word-boundary matching."
+    native_names: ["Bash(pattern)", "Shell(pattern)", "Monitor(pattern)"]
+    notes: "Shell command patterns support * globs, word-boundary behavior when a space precedes *, prefix matching without *, compound command splitting, and virtual file/network operation extraction."
   - entity: path
-    native_names: ["Read(...)", "Edit(...)", "Write(...)"]
-    notes: "Path rules follow gitignore-style patterns with //, ~/, /, and relative anchors."
+    native_names: ["Read(path)", "ReadFile(path)", "Edit(path)", "Write(path)", "NotebookEdit(path)"]
+    notes: "Path rules use // absolute, ~/ home-relative, / project-root-relative, ./ cwd-relative, and no-prefix cwd-relative patterns with picomatch/gitignore-style matching."
   - entity: workspace
-    native_names: ["includeDirectories", "--include-directories", "--add-dir"]
-    notes: "Additional directories extend where Qwen can read and edit, but do not load most .qwen configuration."
+    native_names: ["context.includeDirectories", "--include-directories", "--add-dir", "security.folderTrust.enabled"]
+    notes: "Workspace and included directories affect read/write scope and context; folder trust can gate project-local settings and force approval mode down."
   - entity: mcp_server
-    native_names: ["mcpServers", "--mcp-config", "--allowed-mcp-server-names", "mcp.allowed", "mcp.excluded"]
-    notes: "MCP servers can be scoped user/project and filtered by name or trust."
+    native_names: ["mcpServers", "mcp.allowed", "mcp.excluded", "--allowed-mcp-server-names", "--mcp-config"]
+    notes: "Server names can be filtered by config or CLI. Project/workspace MCP servers can be gated; CLI/session-injected servers are top-tier and not gated."
   - entity: mcp_tool
     native_names: ["mcp__<server>", "mcp__<server>__<tool>", "includeTools", "excludeTools"]
-    notes: "MCP tools are governed by the same permission rule syntax as built-in tools; per-server include/exclude lists further narrow the surface."
+    notes: "MCP tools use normal permission rules plus per-server include/exclude tool filters; excludeTools wins over includeTools."
+  - entity: mcp_resource
+    native_names: ["read_mcp_resource", "ReadMcpResource", "@server:uri"]
+    notes: "MCP resources can be browsed and inserted into prompts; resource reads are disabled in untrusted folders."
   - entity: agent
-    native_names: ["Agent", "Agent(<name>)"]
-    notes: "The Agent tool spawns subagents; rules can allow/deny specific agent types or the tool itself."
+    native_names: ["Agent", "agent", "Task"]
+    notes: "The Agent tool spawns named subagents and fork subagents. Rules can target the tool or Agent(subagent_type)."
   - entity: subagent
-    native_names: ["tools", "disallowedTools", "permissionMode"]
-    notes: "Subagent frontmatter can restrict tools and set a permission mode."
+    native_names: ["approvalMode", "tools", "disallowedTools", "--max-subagent-depth"]
+    notes: "Subagent Markdown frontmatter controls model, approval mode, and tool allow/deny lists. Parent yolo/auto-edit/plan modes dominate narrower subagent settings."
   - entity: mode
-    native_names: ["tools.approvalMode", "--approval-mode", "permissionMode"]
-    notes: "Approval modes set the session baseline for approvals: plan, default, auto-edit, auto, yolo."
+    native_names: ["tools.approvalMode", "--approval-mode", "--yolo", "/approval-mode", "/plan"]
+    notes: "Approval mode sets the baseline: plan, default, auto-edit, auto, or yolo."
   - entity: approval_category
-    native_names: ["permissions.allow", "permissions.ask", "permissions.deny"]
-    notes: "Fine-grained rule decisions. Deny > ask > allow; deny from any scope beats allow from any scope."
+    native_names: ["allow", "ask", "deny", "default"]
+    notes: "Permission decisions are evaluated deny > ask > allow > default."
   - entity: sandbox
-    native_names: ["tools.sandbox", "tools.sandboxImage", "--sandbox", "--sandbox-image", "QWEN_SANDBOX"]
-    notes: "OS-level isolation for shell/file-modifying tools; separate from the permission rule engine."
+    native_names: ["tools.sandbox", "tools.sandboxImage", "--sandbox", "--sandbox-image", "QWEN_SANDBOX", "SEATBELT_PROFILE"]
+    notes: "Sandboxing is a separate OS/container isolation layer from approval mode."
   - entity: hook
-    native_names: ["hooks"]
-    notes: "Hooks can extend or mediate behavior; safe mode disables them."
+    native_names: ["hooks", ".qwen/hooks"]
+    notes: "Hooks are disabled by safe mode and untrusted workspaces."
   - entity: extension
-    native_names: ["extensions", "--extensions"]
-    notes: "Extensions can add tools and commands; safe mode disables custom extensions."
+    native_names: ["extensions", "--extensions", "-e none"]
+    notes: "Extensions can add tools, commands, skills, and subagents; safe mode disables them and CLI can select or disable them for a session."
   - entity: slash_command
     native_names: ["slashCommands.disabled", "--disabled-slash-commands", "QWEN_DISABLED_SLASH_COMMANDS"]
-    notes: "Slash commands can be disabled globally or per session."
+    notes: "Slash-command visibility is independent of tool permissions and is a union denylist across sources."
 
 approval_modes:
   - name: plan
-    effect: "Read-only exploration only; file edits and shell commands are not executed. Presents a plan for approval before exiting."
+    effect: "Read-only planning/exploration. Blocks non-info tools except plan entry/exit and user-question tools."
     interactive: true
     non_interactive: true
-    aliases: ["plan", "Plan mode"]
+    aliases: ["plan", "--approval-mode plan", "/approval-mode plan", "/plan"]
   - name: default
-    effect: "Read-only tools run without approval; state-changing tools prompt for approval."
+    effect: "Ask Permissions mode. Read-only operations and read-only shell commands can run; risky operations ask."
     interactive: true
     non_interactive: true
-    aliases: ["default", "Ask Permissions"]
+    aliases: ["default", "Ask Permissions", "--approval-mode default", "/approval-mode default"]
   - name: auto-edit
-    effect: "Auto-approves file edits; shell commands and other state-changing actions still prompt."
+    effect: "Auto-approves edit/info confirmation types while shell commands and other risky tools still ask."
     interactive: true
     non_interactive: true
-    aliases: ["auto-edit", "Edit automatically"]
+    aliases: ["auto-edit", "auto_edit", "autoedit", "--approval-mode auto-edit", "/approval-mode auto-edit"]
   - name: auto
-    effect: "Routes tool calls through an LLM classifier that auto-approves routine actions and blocks risky ones. Explicit ask rules still prompt; deny rules still block."
+    effect: "Classifier-driven approval. In-workspace edits and safe/read-only tools use fast paths; shell, network, out-of-workspace edits, MCP, and agent calls route through an LLM classifier unless hard rules decide first."
     interactive: true
     non_interactive: true
-    aliases: ["auto", "Auto mode"]
+    aliases: ["auto", "--approval-mode auto", "/approval-mode auto", "tools.approvalMode: auto"]
   - name: yolo
-    effect: "Skips permission prompts and safety checks so tool calls execute immediately. Explicit ask rules and deny rules still apply."
+    effect: "Auto-approves all tool calls except ask_user_question and hard denials/other guards. Does not automatically sandbox."
     interactive: true
     non_interactive: true
-    aliases: ["yolo", "--yolo", "YOLO mode"]
+    aliases: ["yolo", "--yolo", "-y", "--approval-mode yolo", "/approval-mode yolo"]
 
 rule_model:
-  decisions: ["allow", "ask", "deny"]
-  syntax: "Tool or Tool(specifier). Specifiers include Bash(pattern), Shell(pattern), Read/Edit/Write(path-pattern), WebFetch(domain:host), Agent(name), Skill(name), mcp__server__tool. Natural-language hints also drive the auto-mode classifier."
-  precedence: "Deny rules are evaluated first, then ask rules, then allow rules. A matching deny rule always wins over a matching ask or allow rule, even if the allow rule is more specific. Deny rules from any settings scope override allow rules from any scope. The active permission mode applies after rules."
-  merge_semantics: "Permission allow/ask/deny arrays merge across user, project, and system settings scopes. Other settings generally replace by precedence."
-  matcher_semantics: "Bash/Shell rules use glob patterns with *; a space before * enforces a word boundary. Read/Edit/Write rules follow gitignore patterns with // (absolute), ~/ (home), / (project root), and relative anchors. WebFetch uses domain: prefixes with * wildcards. MCP rules use mcp__server__tool naming."
-  default_decision: "In default mode, read-only tools are allowed and everything else asks. In plan mode, edits/shell are blocked. In yolo mode, the default is allow (subject to deny/ask rules)."
+  decisions: ["deny", "ask", "allow", "default"]
+  syntax: "Rules are strings: ToolName or ToolName(specifier). Built-in aliases include Bash/Shell, Read/ReadFile, Edit/EditFile, Write/WriteFile, NotebookEdit, Grep, Glob, ListFiles, WebFetch, Agent/Task, Skill, ReadMcpResource, Lsp, Monitor, and MCP names like mcp__server__tool."
+  precedence: "PermissionManager checks session deny, persistent deny, session ask, persistent ask, session allow, persistent allow, then default. For combined shell virtual operations, the most restrictive decision wins."
+  merge_semantics: "Settings files are deep-merged by schema strategy. permissions.allow/ask/deny arrays merge across settings scopes; CLI allowed-tools appends session allow rules and exclude-tools appends session deny rules. Legacy tools.allowed/exclude are read for compatibility; tools.core is separate registry allowlist state."
+  matcher_semantics: "Shell patterns use * globs with word-boundary behavior for patterns like `git *`, prefix matching when no * is present, and compound-command splitting. Path patterns use // absolute, ~/ home, / project-root, ./ cwd, and cwd-relative default semantics. WebFetch matches domains. Literal specifiers match agent, skill, and resource/server names. MCP tools are matched by their mcp__server__tool names."
+  default_decision: "In default mode, each tool's default permission applies: safe/read-only tools are allowed, read-only shell commands are allowed by AST analysis, and risky shell/edit/network/MCP/agent operations ask. Plan blocks non-info tools; auto-edit auto-approves edit/info confirmations; auto uses classifier fast paths and fail-closed logic; yolo auto-approves unless a hard denial applies."
 
 tool_visibility:
   supported: true
   mechanisms:
-    - "--exclude-tools removes named tools from the session surface."
-    - "--core-tools restricts the session to the listed core tools."
-    - "Subagent frontmatter tools/disallowedTools restricts subagent tool surface."
-    - "permissions.deny with a bare tool name removes that tool from the model's context."
-    - "--allowed-mcp-server-names limits which configured MCP servers load."
-  notes: "--exclude-tools and --core-tools affect the available tool surface; a denied tool is hidden from the model entirely, while an allowed tool may still prompt depending on the mode and rules."
+    - "--core-tools and legacy tools.core restrict registered core tools."
+    - "A whole-tool deny rule without a specifier prevents a tool from being registered or visible."
+    - "--exclude-tools blocks matching tools/rules for the session."
+    - "mcp.allowed, mcp.excluded, --allowed-mcp-server-names, and per-server includeTools/excludeTools restrict MCP server/tool visibility."
+    - "--extensions and `qwen -e none` control extension-provided surfaces."
+    - "slashCommands.disabled, --disabled-slash-commands, and QWEN_DISABLED_SLASH_COMMANDS hide/refuse slash commands."
+    - "Subagent tools/disallowedTools restrict a subagent's tool pool."
+  notes: "Tool visibility and approval are distinct. An allow rule auto-approves matching calls; a registry allowlist or server/tool filter can prevent the model from seeing a tool at all."
 
 sandbox:
   supported: true
-  modes: ["regular-permissions"]
-  backends: ["macOS Seatbelt (sandbox-exec)", "Linux/WSL Docker/Podman", "Windows Docker/Podman"]
-  filesystem_control: "Sandboxed tools run with restricted filesystem access. The working directory and included directories are available; additional paths are denied unless the sandbox image/profile permits them."
-  network_control: "Network access depends on the sandbox backend and image configuration. No domains are pre-allowed by default when using container sandboxing."
-  notes: "Sandboxing applies to shell and file-modifying tools. Built-in read tools, MCP tools, and subagent tool calls run outside this boundary unless the provider also isolates them. If sandbox dependencies are missing, Qwen Code warns and may fall back to unsandboxed execution."
+  modes: ["permissive-open", "permissive-closed", "permissive-proxied", "restrictive-open", "restrictive-closed", "restrictive-proxied", "docker", "podman", "sandbox-exec"]
+  backends: ["macOS Seatbelt sandbox-exec", "Docker container", "Podman container"]
+  filesystem_control: "macOS default permissive-open restricts writes outside the project directory while allowing most other operations. Container sandboxing mounts the workspace and ~/.qwen so auth/settings persist. Include directories and custom sandbox profiles/images can widen access."
+  network_control: "Seatbelt profiles distinguish open, closed, and proxied network behavior. Container network behavior depends on Docker/Podman flags and image setup. QWEN_SANDBOX_PROXY_COMMAND plus proxied profiles can implement allowlist-style egress."
+  notes: "Sandboxing is opt-in and separate from approval mode. Docs state Qwen Code runs in a sandbox to reduce risk when tools execute shell commands or modify files, and that MCP servers/tools must be available inside the sandbox environment. If dependencies are missing, sandbox startup can fail with FatalSandboxError rather than silently becoming a permission rule."
 
 trust_and_admin:
-  folder_trust: "First-time launches in a project directory prompt a workspace trust dialog. Untrusted folders ignore project .qwen settings, context files, hooks, extensions, skills, MCP servers, and custom subagents. Trust is saved per directory. Trust verification is skipped in non-interactive -p mode."
-  managed_policy: "System-level settings files (/etc/qwen-code/settings.json and system-defaults.json) provide the managed/admin layer. They occupy a higher precedence tier than user/project config and cannot be overridden by lower scopes. Specific managed-only keys may lock approval modes or sandbox policy."
-  safe_mode: "QWEN_CODE_SAFE_MODE=1 (or safe mode) disables context files, hooks, extensions, skills, MCP servers, custom subagents, permission rules, settings-sourced approval mode overrides, memory, and sandbox settings. Built-in tools and explicit CLI permission flags continue to work."
-  notes: "Folder trust and safe mode are trust/scope gates rather than permission rules. --bare skips implicit startup auto-discovery and honors only explicit CLI inputs."
+  folder_trust: "Folder trust is disabled by default and enabled with security.folderTrust.enabled. When enabled, trust choices are stored in trustedFolders.json; IDE trust signal has priority over the local trust file. Untrusted workspaces ignore project settings, project .env files, extension management, auto-acceptance, and automatic memory loading; current source also forces auto-edit/auto/yolo approval modes down to default while allowing default and plan."
+  managed_policy: "System defaults and system settings files provide the admin-managed settings layers. System settings override user/project settings; admins can redirect these paths with QWEN_CODE_SYSTEM_DEFAULTS_PATH and QWEN_CODE_SYSTEM_SETTINGS_PATH."
+  safe_mode: "--safe-mode or QWEN_CODE_SAFE_MODE=true disables customizations including context files, hooks, extensions, skills, MCP servers, custom subagents, settings-sourced permission rules and approval mode, memory features, and sandbox settings. Explicit CLI approval mode, yolo, allowed-tools, and exclude-tools continue to apply."
+  notes: "The observed current user config at /Users/ken/.qwen/settings.json contains auth/model/provider settings only, not permissions. No trustedFolders.json exists in either /Users/ken/.qwen or the session's /Users/ken/.claudine/.qwen. The repository has .qwen/agents, commands, and skills but no repo .qwen/settings.json."
 
 mcp_permissions:
   supported: true
   server_filters:
-    - "--allowed-mcp-server-names restricts which configured servers load for the session."
-    - "mcp.allowed / mcp.excluded in settings.json filter servers by name."
-    - "Per-server trust: true bypasses confirmation prompts for that server's tools."
-    - "--mcp-config loads a session-specific MCP server set."
-    - "Safe mode disables custom MCP servers."
+    - "mcp.allowed allowlists server names; glob * and ? are supported."
+    - "mcp.excluded denies server names; excluded wins when a server is both allowed and excluded."
+    - "--allowed-mcp-server-names is a session upper bound and causes mcp.allowed/excluded to be ignored."
+    - "--mcp-config injects top-tier session MCP servers without mutating settings."
+    - "Project/workspace MCP servers can be gated until approved; YOLO skips pending gating."
+    - "Safe mode and bare mode disable settings-sourced MCP servers."
   tool_filters:
-    - "Permission rules mcp__<server> and mcp__<server>__<tool> allow/ask/deny specific tools."
-    - "Per-server includeTools/excludeTools restrict the tool surface."
-    - "--allowed-tools accepts the same MCP patterns."
-  trust_model: "MCP servers can be configured at user or project scope. A trusted server bypasses confirmation prompts for its tools. Untrusted project-scoped servers require user approval via a trust dialog; untrusted repos ignore project MCP approvals. In non-interactive mode, project MCP servers load only if already approved or allowed by user/managed settings."
-  notes: "MCP tools run outside the Qwen sandbox. stdio servers are local subprocesses and can access the user's environment unless constrained by safe mode or environment scrubbing."
+    - "mcpServers.<name>.includeTools allowlists tools from one server."
+    - "mcpServers.<name>.excludeTools denies tools from one server and wins over includeTools."
+    - "permissions.allow/ask/deny can target mcp__server and mcp__server__tool names."
+    - "Auto mode usually blocks MCP tools unless explicitly allowed or the tool implements safe classifier projection."
+  trust_model: "Per-server trust: true bypasses all tool-call confirmations for that server. Folder trust gates project-local MCP resource reads and project/workspace MCP configuration when enabled. MCP OAuth tokens default to ~/.qwen/mcp-oauth-tokens.json mode 0600 unless encrypted storage is forced."
+  notes: "MCP exposes tools, prompts as slash commands, and resources. Resources are inserted with @server:uri and are disabled in untrusted folders. Current docs say sandboxed sessions require MCP server commands to be available inside the sandbox environment."
 
-headless_behavior: "In non-interactive -p mode, interactive permission prompts cannot be shown. Use --allowed-tools, --approval-mode plan, or --approval-mode yolo to avoid hangs. Auto mode's classifier blocks risky actions; repeated blocks may abort the session. MCP servers requiring user approval are unavailable unless already trusted or allowed. Workspace trust dialogs are skipped in -p mode, so project MCP servers and project settings load only when already approved or allowed by user/managed settings."
+headless_behavior: "Headless mode uses -p/--prompt or piped stdin. Interactive permission prompts cannot be shown in ordinary text/json headless output; use --approval-mode plan/yolo/auto, --allowed-tools, --exclude-tools, stream-json/SDK permission channels, or run budgets. Source shows teammate approval that needs a prompt fails in non-stream-json modes and instructs callers to use --yolo or stream-json."
 
-approval_persistence: "Session-level approvals granted via --allowed-tools or YOLO mode do not persist beyond the session. Settings.json rules persist until the file is changed. 'Yes, don't ask again' style approvals, if offered, are typically scoped to the project directory and command pattern; specifics are provider-version dependent."
+approval_persistence: "CLI flags and session rules do not persist. Interactive confirmation outcomes can persist allow rules to project or user settings via ProceedAlwaysProject/ProceedAlwaysUser, and the in-memory PermissionManager is updated immediately. Persisted rules use permissions.allow entries scoped to the generated rule pattern."
 
 protected_paths:
-  - ".qwen"
-  - ".qwen/settings.json"
-  - ".git"
-  - ".gitconfig, .gitmodules"
-  - ".bashrc, .bash_profile, .bash_login, .bash_aliases, .bash_logout, .zshrc, .zprofile, .zshenv, .zlogin, .zlogout, .profile, .envrc"
-  - "shell and SSH configuration files"
-  - "Qwen Code internal state directories"
+  - ".qwen/settings*.json"
+  - ".qwen/rules/"
+  - ".qwen/commands/"
+  - ".qwen/agents/"
+  - ".qwen/skills/"
+  - ".qwen/hooks/"
+  - ".mcp.json"
+  - "QWEN.md"
+  - "AGENTS.md"
+  - "QWEN.local.md"
+  - "configured context filenames"
+  - ".git/"
+  - ".husky/"
+  - "package.json"
+  - ".npmrc"
+  - "Makefile"
+  - ".github/workflows/"
+  - "symlinks targeting protected paths"
 
-security_posture: "Qwen Code's default security is a client-side static policy engine with advisory prompts, not an OS-enforced sandbox. An optional OS-enforced sandbox (Seatbelt on macOS, Docker/Podman containers on Linux/Windows) can restrict shell and file-modifying tool filesystem and network access. Auto mode adds a model-based classifier. System settings provide administrative policy but are still client-side controls. Defense-in-depth requires combining permission rules, sandboxing, and managed policy."
+security_posture: "Qwen Code combines client-side static permission rules, advisory/interactive approval UX, classifier-based Auto mode, optional OS/container sandboxing, and managed settings/trust gates. Only the sandbox layer is an OS/container enforcement boundary; permission rules, tool visibility, safe mode, and managed settings are client-side controls."
 
 changes:
-  - "Refreshed research against Qwen Code 0.15.6 and current documentation (2026-07-02)."
-  - "Corrected CLI flags: removed --include-tools and --safe-mode; added --core-tools, --allowed-mcp-server-names, and --bare."
-  - "Limited --approval-mode CLI choices to plan/default/auto-edit/yolo and noted auto mode is available via settings.json and /approval-mode."
-  - "Added all schema-required frontmatter fields: cli_zero_permissions, permission_entities, approval_modes, rule_model, tool_visibility, sandbox, trust_and_admin, mcp_permissions, headless_behavior, approval_persistence, protected_paths, security_posture."
-  - "Updated policy_engine assessment to ergonomic: false because of Qwen-specific meta-categories, classifier-based auto mode, and additional trust/MCP/sandbox surfaces."
+  - "Refreshed against upstream Qwen Code 0.19.6 docs/source and compared with the locally installed 0.15.6 CLI."
+  - "Updated --approval-mode to include current CLI value auto; prior research said auto was not a CLI value."
+  - "Restored --safe-mode as a current documented and implemented CLI flag, and described its interaction with explicit CLI permission flags."
+  - "Captured that folder trust is disabled by default and, when enabled, untrusted workspaces force privileged modes down to default."
+  - "Updated legacy tools.core/tools.allowed/tools.exclude status: they are deprecated/migrated compatibility surfaces, while permissions.allow/ask/deny are the preferred grammar."
+  - "Added max-tool-calls as the only CLI-only hard no-tool-execution budget, while keeping cli_zero_permissions unsupported because it cannot selectively add permissions back."
+  - "Updated MCP coverage for resources, prompts-as-slash-commands, per-server include/exclude, OAuth token storage, progressive discovery, and sandbox availability requirements."
+  - "Updated sandbox details for QWEN_SANDBOX precedence, sandbox image precedence, Seatbelt profiles, proxying, and the fact that YOLO does not imply sandboxing."
+  - "Recorded local config inspection: /Users/ken/.qwen/settings.json exists with no permissions block; no settings.json exists in the session QWEN home and no repo .qwen/settings.json exists."
 
 requires_claudine_update: true
-reason: "Qwen Code's permission model combines approval modes, allow/ask/deny rules with meta-categories and path-pattern prefixes, subagent-scoped overrides, MCP include/exclude/trust, sandbox gates, folder trust, safe mode, and an LLM-based auto-mode classifier. Fully representing these in Claudine's PolicyEngine will require backend updates to the Qwen backend and mutation planning for settings.json permission objects."
+reason: "Current Qwen Code permission metadata differs from the prior catalog in ways Claudine should model: --approval-mode auto is a CLI value, --safe-mode is a live security-control switch, folder trust is opt-in but constrains privileged modes when enabled, legacy tool keys are deprecated/migrated, max-tool-calls can act as a hard no-tool-execution budget, and MCP resources/prompts/trust/OAuth storage plus sandbox precedence need provider metadata coverage."
 ---
 
-# Qwen CLI Permissions
+# Qwen CLI Permissions and Security Controls
 
 ## Introduction to Qwen CLI Permissions
 
-Qwen CLI controls tool access through a combination of **approval modes**, **permission rules**, **sandboxing**, and **tool allowlists/blocklists**. The goal is to let the agent act autonomously when the risk is acceptable while keeping destructive or sensitive operations under user control.
+Qwen Code permissions are defined by five cooperating layers:
 
-Permissions can be defined in three ways:
+- **Approval mode**: `plan`, `default`, `auto-edit`, `auto`, or `yolo`.
+- **Permission rules**: `permissions.allow`, `permissions.ask`, and `permissions.deny`.
+- **Tool visibility controls**: core-tool allowlists, deny rules without specifiers, MCP server/tool filters, extension selection, and disabled slash commands.
+- **Trust and safe-mode gates**: folder trust and safe mode decide whether project/user customizations are loaded.
+- **Sandboxing**: optional OS/container isolation separate from approval decisions.
 
-1. **Configuration files** — `settings.json` at user, project, system-defaults, and system-override scopes.
-2. **CLI flags** — `--approval-mode`, `--yolo`, `--allowed-tools`, `--exclude-tools`, `--sandbox`, etc.
-3. **In-session controls** — `/approval-mode`, `/permissions`, `/plan`, and the mode switcher.
+The main configuration file grammar is JSON in `settings.json`. User-scope settings live at `~/.qwen/settings.json` or under `QWEN_HOME`; project settings live at `.qwen/settings.json`; system defaults and system settings provide admin layers. Current Qwen Code also supports `.mcp.json` and session-injected MCP config, but permission rules themselves are in `settings.json`.
 
-### Approval modes
+Current preferred permission rules are:
 
-Qwen Code supports five approval modes. The mode acts as the baseline; `permissions.allow`, `permissions.ask`, and `permissions.deny` rules refine it.
+```json
+{
+  "tools": {
+    "approvalMode": "default"
+  },
+  "permissions": {
+    "allow": ["Read", "Bash(npm test)", "WebFetch(docs.rs)"],
+    "ask": ["Bash(git push *)", "Edit"],
+    "deny": ["Bash(rm -rf *)", "Read(.env)", "mcp__untrusted"]
+  }
+}
+```
 
-| Mode | File edits | Shell commands | Best for |
-| :----- | :----- | :----- | :----- |
-| `plan` | Not executed | Not executed | Safe exploration and planning |
-| `default` | Ask | Ask | Daily interactive work |
-| `auto-edit` | Auto-approve | Ask | Refactoring and code changes |
-| `auto` | Classifier-evaluated | Classifier-evaluated | Long autonomous sessions with a safety net |
-| `yolo` | Auto-approve | Auto-approve | Trusted automation and CI/CD |
+Legacy `tools.allowed`, `tools.exclude`, and `tools.core` still exist for compatibility, but the docs mark them deprecated. `tools.allowed` maps to `permissions.allow`, `tools.exclude` maps to `permissions.deny`, and `tools.core` retains registry allowlist semantics for core tools.
 
-The `--approval-mode` CLI flag accepts `plan`, `default`, `auto-edit`, and `yolo`. The `auto` mode is available via `settings.json` (`tools.approvalMode: auto`) and the `/approval-mode auto` slash command.
+Environment variables influence adjacent security controls: `QWEN_SANDBOX`, `QWEN_SANDBOX_IMAGE`, `SEATBELT_PROFILE`, `QWEN_CODE_SAFE_MODE`, `QWEN_DISABLED_SLASH_COMMANDS`, `QWEN_HOME`, and system settings path overrides are the important ones. `QWEN_CODE_SUPPRESS_YOLO_WARNING` only suppresses a warning; it does not grant or remove permissions.
 
-### Permission rule syntax
+The important CLI switches are in the frontmatter. Precedence is mostly CLI above environment above settings, but sandboxing has documented exceptions: `QWEN_SANDBOX` overrides `--sandbox` and `tools.sandbox`, while sandbox image selection is `--sandbox-image` over `QWEN_SANDBOX_IMAGE` over `tools.sandboxImage`.
 
-Permission rules live under the `permissions` object in `settings.json` as `allow`, `ask`, and `deny` arrays. Rules use the form `ToolName` or `ToolName(specifier)`. Decision priority is `deny > ask > allow > default`.
-
-| Rule | Effect |
-| :----- | :----- |
-| `"Bash"` | Matches all shell commands |
-| `"Bash(npm run *)"` | Matches commands starting with `npm run ` |
-| `"Read(./secrets/**)"` | Matches reads under `./secrets/` (covers read_file, grep, glob, list) |
-| `"ReadFile(./.env)"` | Matches only `read_file` of `./.env` |
-| `"Edit(/src/**/*.ts)"` | Matches edits under project-root `/src/` (covers edit, write_file, notebook_edit) |
-| `"WebFetch(api.example.com)"` | Matches fetches from `api.example.com` and subdomains |
-| `"mcp__puppeteer"` | Matches every tool from the `puppeteer` MCP server |
-| `"Agent"` | Matches subagent spawns |
-
-Path-pattern prefixes:
-
-| Prefix | Meaning | Example |
-| :----- | :----- | :----- |
-| `//` | Absolute from filesystem root | `//etc/passwd` |
-| `~/` | Relative to home directory | `~/Documents/*.pdf` |
-| `/` | Relative to project root | `/src/**/*.ts` |
-| `./` | Relative to current working directory | `./secrets/**` |
-| (none) | Same as `./` | `secrets/**` |
-
-### CLI parameters and precedence
-
-The permission-related CLI parameters are listed in the frontmatter. In summary:
-
-- `--approval-mode <mode>` sets the session approval mode.
-- `--yolo` is a shortcut for `--approval-mode yolo`.
-- `--allowed-tools <rules>` adds temporary allow rules.
-- `--exclude-tools <tools>` removes tools from the session surface.
-- `--core-tools <tools>` restricts the session to the listed core tools.
-- `--disabled-slash-commands <commands>` disables slash commands.
-- `--sandbox` / `--sandbox-image` enable filesystem/process isolation.
-- `--include-directories` expands the workspace scope.
-- `--allowed-mcp-server-names` limits which MCP servers load.
-- `--mcp-config` loads MCP servers from a file or JSON string.
-- `--bare` skips implicit startup auto-discovery and honors only explicit CLI inputs.
-
-Precedence is documented in the frontmatter. The key points are:
-
-- CLI flags are temporary session overrides and win over environment variables and config files.
-- Environment variables override all settings-file layers except CLI flags.
-- System override settings (`/etc/qwen-code/settings.json`) win over project and user settings.
-- Project settings override user settings.
-- For permission rules specifically, `deny` rules from any scope override `allow` and `ask` rules.
+Approval policy is not the same as tool visibility. `permissions.allow` pre-approves a visible tool call. A bare `permissions.deny` rule, `--core-tools`, `mcp.allowed`, `mcp.excluded`, per-server `includeTools`/`excludeTools`, extension selection, and slash-command disabling can remove or hide capabilities before the model can use them.
 
 ## Permissions Use Cases
 
 ### Default
 
-If no environment variable, config file, or CLI switch configures permissions, Qwen Code starts in `default` mode (Ask Permissions): read-only tools such as `read_file`, `grep_search`, `glob`, and `list_directory` run without approval, while file edits, shell commands, web fetches, MCP tool calls, and other state-changing tools prompt for approval.
+With no permission-relevant CLI flags, environment variables, config files, or trust state, Qwen Code uses `tools.approvalMode: "default"`, now presented as **Ask Permissions** mode. Read-only built-ins and read-only shell commands run without confirmation. Mutating edits, non-read-only shell commands, web fetches, MCP calls, subagent spawns, skills, memory writes, and similar actions ask according to their tool defaults.
 
-A PolicyEngine description of the default posture would be:
+PolicyEngine can describe the coarse default as allow read/info, ask write/execute/network/MCP/agent, and deny nothing. That is usable but not ergonomic for exact Qwen behavior because Qwen's shell read-only AST check, command splitting, virtual file/network operations, and tool aliases need a provider-specific matcher.
 
-- `can_read(path)` → Allow for workspace paths and additional included directories.
-- `can_write(path)` → Ask for paths in the workspace; Deny for paths outside it until approved.
-- `can_execute(command)` → Ask for shell commands.
-- `can_access_domain(domain)` → Ask for web fetches.
-- `can_use_mcp_server(server)` / `can_use_mcp_tool(server, tool)` → Ask until approved or denied.
-- `can_spawn_subagent(agent)` → Allow to spawn, but the subagent's own tool calls are checked independently.
-
-This use case is ergonomic in PolicyEngine because the engine already models read, write, execute, network, MCP, and agent axes. The main limitation is that the interactive approval prompt itself is a runtime UI concern, not a static policy fact.
+If no PolicyEngine changes were made, Claudine could define this use case at a conservative level. It would lose precision around read-only shell commands, meta-categories, and Qwen's generated "always allow" rule scopes.
 
 ### Whitelisting
 
-Qwen Code does not provide a single "deny everything" wildcard. To start with minimal permissions and require every needed action to be asked for or explicitly declared, set broad `deny` rules for the categories you want blocked, leave needed categories unset (so `default` mode asks), and add explicit `allow` rules for automation.
+Qwen Code has no single CLI or config wildcard that means "deny every possible tool, then add back a few." The practical approaches are:
 
-In `settings.json`:
+- **Interactive whitelist style**: run in `default` mode, deny high-risk categories, and add `allow` rules only for known-safe operations.
+- **Read-only planning**: run with `--approval-mode plan`, knowing read/info tools still work.
+- **Hard no-tool execution**: run with `--max-tool-calls 0`, knowing the first tool call aborts and no permissions can be added back in that run.
+- **Visibility reduction**: use `--safe-mode`, `--extensions none`, `--allowed-mcp-server-names`, `--exclude-tools`, and optionally `--core-tools` outside safe mode.
 
-```json
-{
-  "tools": {
-    "approvalMode": "default"
-  },
-  "permissions": {
-    "deny": ["Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "Agent", "Skill"],
-    "ask": ["Edit", "Bash"],
-    "allow": ["Read", "Grep", "Glob"]
-  }
-}
-```
-
-With this configuration, read-only tools are allowed, edits and shell commands ask for approval, and the explicitly denied categories cannot be used even if the model requests them.
-
-CLI examples:
+Best CLI-only, session-scoped locked-down invocation for a future Claudine wrapper is an approximation, not a true add-back baseline:
 
 ```bash
-# Headless run that can only read and search
-qwen -p "explain the auth module" --exclude-tools "Shell,Write,Edit" --allowed-tools "Read,Grep,Glob"
-
-# Allow only npm test and reads for a CI step
-qwen -p "run the test suite" --allowed-tools "Shell(npm test),Read"
-
-# Block risky tools for an exploration session
-qwen -p "..." --exclude-tools "Shell,Write,Edit"
+qwen --safe-mode \
+  --approval-mode plan \
+  --exclude-tools "Bash,Shell,Edit,Write,NotebookEdit,WebFetch,Agent,Skill,Monitor,SaveMemory,ReadMcpResource,mcp__*" \
+  --max-tool-calls 0 \
+  -p "..."
 ```
 
-PolicyEngine can describe this use case by setting broad `Deny` rules on command, write, network, MCP, and agent axes, then adding explicit `GrantRead`, `AllowCommand`, and `Ask` rules. It is mostly ergonomic, but the lack of a universal deny-all wildcard means the engine must enumerate Qwen's meta-categories rather than using a single rule.
+This is useful for "answer without tools" enforcement, but it is not a good foundation for "start with no tools and add exactly these tools back" because `--max-tool-calls 0` aborts all tools and `--core-tools` is ignored in safe mode.
+
+Examples for adding limited permissions:
+
+```bash
+qwen -p "summarize the repo" \
+  --approval-mode plan \
+  --allowed-tools "Read,Grep,Glob,ListFiles"
+```
+
+```bash
+qwen -p "run tests only" \
+  --approval-mode default \
+  --allowed-tools "Bash(npm test),Read" \
+  --exclude-tools "Edit,Write,NotebookEdit,WebFetch,Agent,Skill,mcp__*"
+```
+
+```bash
+qwen -p "use only the github MCP server" \
+  --allowed-mcp-server-names github \
+  --allowed-tools "mcp__github__get_issue,Read" \
+  --exclude-tools "Bash,Edit,Write"
+```
+
+PolicyEngine can express the intended whitelist with explicit allow/ask/deny rules, but it cannot produce a native Qwen "deny everything then add back" CLI invocation because Qwen does not expose that primitive. A provider backend would need to enumerate Qwen categories, understand MCP wildcards, and warn that full zero-permissions is unsupported except by the blunt tool-call budget.
 
 ### YOLO
 
-YOLO mode in Qwen Code is called `yolo` and is the `tools.approvalMode` value `yolo`. A session can be put into YOLO mode by:
+YOLO can be enabled with `--yolo`, `-y`, `--approval-mode yolo`, `/approval-mode yolo`, keyboard mode cycling, or `tools.approvalMode: "yolo"` in settings. It is available in interactive and non-interactive runs.
 
-- Starting with `--yolo`.
-- Starting with `--approval-mode yolo`.
-- Using `/approval-mode yolo` inside an interactive session.
-- Setting `tools.approvalMode` to `yolo` in a settings file.
+In YOLO mode, tool calls are auto-approved, including file edits, shell commands, web fetches, MCP tools, skills, and subagents. It does not enable sandboxing. Headless YOLO without sandbox prints a warning unless `QWEN_CODE_SUPPRESS_YOLO_WARNING` is set.
 
-Availability:
-
-- **Interactive sessions**: yes, via `/approval-mode yolo` or the mode switcher.
-- **Non-interactive sessions**: yes, `qwen -p "..." --yolo` works.
-- **Root/sudo**: the public documentation does not describe any root-specific restriction, so YOLO remains available to root sessions unless blocked by managed configuration.
-
-When in YOLO mode:
-
-- **Allowed**: almost all tool calls execute without prompting, including file edits, shell commands, web fetches, MCP tool calls, and subagent spawns.
-- **Still enforced**: explicit `permissions.deny` rules still block actions; explicit `permissions.ask` rules still force a prompt; managed settings that disable YOLO still prevent it.
-- **Not allowed**: it cannot bypass folder-trust safe mode or managed system settings.
+YOLO does not bypass all controls. Explicit deny rules, tool visibility filters, safe mode source gates, untrusted-folder mode downgrades, run budgets, and OS/container sandbox restrictions can still matter. Source also keeps `ask_user_question` outside the blanket YOLO auto-approve path.
 
 ### Root User
 
-The Qwen Code documentation does not describe any special permission behavior when the CLI is started as root or under `sudo`. Unlike Claude Code, there is no documented restriction that disables YOLO/bypass mode for root sessions. Therefore, all approval modes, including YOLO, remain available to root sessions unless an administrator blocks them through system-level configuration.
+I found no current Qwen documentation or obvious source check that treats root/sudo sessions specially for approval mode. That means there is no documented root-specific YOLO prohibition comparable to some other providers. The safe statement for Claudine metadata is: Qwen Code has no documented root permission mode change; root sessions run with the process privileges they were launched with, so YOLO as root is especially dangerous unless sandboxed or blocked by admin policy.
 
 ### Configuring the Default
 
-Default permissions are configured through `settings.json` files at multiple scopes:
+Default permissions are configured in:
 
-- **User scope**: `~/.qwen/settings.json` applies across all projects.
-- **Repo/project scope**: `.qwen/settings.json` applies to everyone working in the repository.
-- **System defaults**: `/etc/qwen-code/system-defaults.json` (Linux), `C:\ProgramData\qwen-code\system-defaults.json` (Windows), `/Library/Application Support/QwenCode/system-defaults.json` (macOS).
+- **User scope**: `~/.qwen/settings.json` or `$QWEN_HOME/settings.json`.
+- **Repo/project scope**: `.qwen/settings.json`.
+- **System defaults**: `/etc/qwen-code/system-defaults.json`, `C:\ProgramData\qwen-code\system-defaults.json`, or `/Library/Application Support/QwenCode/system-defaults.json`.
 - **System override**: `/etc/qwen-code/settings.json`, `C:\ProgramData\qwen-code\settings.json`, or `/Library/Application Support/QwenCode/settings.json`.
 
-For the schema's `config_files` field, user scope is `~/.qwen/settings.json` and repo scope is `.qwen/settings.json`.
-
-Examples that illustrate the grammar:
+Example user default:
 
 ```json
-// ~/.qwen/settings.json — user-wide defaults
 {
   "tools": {
     "approvalMode": "auto-edit"
   },
   "permissions": {
-    "allow": ["Bash(npm run *)", "Bash(git status *)", "WebFetch(domain:docs.rs)"],
-    "deny": ["Bash(curl *)", "Bash(wget *)", "Read(~/\.ssh/**)"]
+    "allow": ["Read", "Bash(git status)", "Bash(npm test)"],
+    "ask": ["Bash(git push *)"],
+    "deny": ["Read(./.env)", "Read(~/\\.ssh/**)", "WebFetch(malicious.com)"]
   }
 }
 ```
 
+Example project default:
+
 ```json
-// .qwen/settings.json — repo-shared defaults
 {
   "tools": {
-    "approvalMode": "default"
+    "approvalMode": "default",
+    "sandbox": true
   },
   "permissions": {
-    "allow": ["Bash(npm run lint)", "Bash(npm run test *)"],
-    "deny": ["Read(./.env)", "Read(./secrets/**)"]
+    "allow": ["Bash(npm run lint)", "Bash(npm test)"],
+    "deny": ["Bash(curl * | sh)", "Edit(.github/workflows/**)"]
+  },
+  "mcp": {
+    "allowed": ["github", "docs-*"],
+    "excluded": ["experimental-*"]
   }
 }
 ```
 
+Example Auto mode hints:
+
 ```json
-// .qwen/settings.json — auto mode with classifier hints
 {
   "tools": {
     "approvalMode": "auto"
@@ -473,11 +541,12 @@ Examples that illustrate the grammar:
   "permissions": {
     "autoMode": {
       "hints": {
-        "allow": ["Running pytest, mypy, and ruff on this Python repo"],
+        "allow": ["Running pytest and ruff in this Python project"],
         "softDeny": ["Editing Qwen Code settings unless explicitly requested"],
         "hardDeny": ["Sending secrets or .env contents to any network endpoint"]
       },
-      "environment": ["Open-source monorepo; commits are signed"]
+      "environment": ["Private monorepo; production credentials are not in files"],
+      "classifyAllShell": true
     }
   }
 }
@@ -485,11 +554,7 @@ Examples that illustrate the grammar:
 
 ### Extending the Base
 
-Default permissions can be set at user scope and then narrowed or extended by narrower scopes or CLI flags.
-
-**Example 1: user allows, repo denies.**
-
-User `~/.qwen/settings.json`:
+User settings can define a broad base and project settings can narrow it:
 
 ```json
 {
@@ -499,8 +564,6 @@ User `~/.qwen/settings.json`:
 }
 ```
 
-Repo `.qwen/settings.json`:
-
 ```json
 {
   "permissions": {
@@ -509,162 +572,131 @@ Repo `.qwen/settings.json`:
 }
 ```
 
-Result: `curl` is blocked in the repository because deny rules from any scope override allow rules.
+The repo deny wins because deny is evaluated before allow after merge.
 
-**Example 2: user default mode, CLI override.**
-
-User `~/.qwen/settings.json`:
-
-```json
-{
-  "tools": {
-    "approvalMode": "auto-edit"
-  }
-}
-```
-
-CLI:
+A CLI mode can override config for one run:
 
 ```bash
-qwen -p "..." --approval-mode plan
+qwen -p "plan a migration" --approval-mode plan
 ```
 
-Result: the session starts in `plan` mode; CLI flags override settings.
+This starts in plan mode even if user settings default to `auto-edit` or `auto`.
 
-**Example 3: project whitelist, local addition.**
+Sandbox has a special precedence caveat:
 
-Repo `.qwen/settings.json`:
-
-```json
-{
-  "tools": {
-    "approvalMode": "default"
-  },
-  "permissions": {
-    "allow": ["Read", "Grep", "Bash(npm test)"]
-  }
-}
+```bash
+QWEN_SANDBOX=false qwen -s -p "run tests"
 ```
 
-If a user also has `~/.qwen/settings.json`:
-
-```json
-{
-  "permissions": {
-    "allow": ["Bash(npm run build)"]
-  }
-}
-```
-
-Result: in this repository, `npm test`, `npm run build`, Read, and Grep are all allowed because `allow` rules merge across scopes.
+Docs state `QWEN_SANDBOX` overrides the CLI sandbox flag and settings, so Claudine should not assume `-s` always wins when the environment is set.
 
 ## Tools and Permissions
 
-Qwen Code provides the following built-in tools and tool groups. The "Permission required" column indicates the effective behavior in `default` mode when no explicit rules match.
+Current Qwen Code built-in tools include:
 
-| Tool / group | Permission required | Notes |
-| :----- | :----- | :----- |
-| `read_file` (Read/ReadFile) | No | Reads file contents. The `Read` meta-category also covers grep, glob, and list. |
-| `grep_search` (Grep) | No | Content search. |
-| `glob` (Glob/FindFiles) | No | File pattern matching. |
-| `list_directory` (ListFiles) | No | Directory listing. |
-| `edit` (Edit/EditFile) | Yes | Targeted file edits. Covered by the `Edit` meta-category. |
-| `write_file` (Write/WriteFile) | Yes | Creates or overwrites files. Covered by the `Edit` meta-category. |
-| `notebook_edit` (NotebookEdit) | Yes | Jupyter notebook edits. Covered by the `Edit` meta-category. |
-| `run_shell_command` (Bash/Shell) | Yes | Shell command execution. Read-only commands such as `ls`, `cat`, and `git status` are auto-approved. |
-| `monitor` | Yes | Long-lived shell command background tasks. |
-| `web_fetch` (WebFetch) | Yes | Fetches content from URLs. |
-| `agent` / `task` (Agent) | Yes (spawn) | Spawns subagents; the subagent's own tool calls are checked independently. |
-| `skill` (Skill) | Yes | Executes a skill. |
-| `todo_write` | No | Session checklist management. |
-| `exit_plan_mode` | Yes | Exits plan mode and presents a plan for approval. |
-| `save_memory` | Yes | Persists durable memory. |
-| `computer_use_*` | Yes | Native desktop automation tools. |
-| MCP tools (`mcp__<server>__<tool>`) | Yes | External tools exposed through configured MCP servers. |
+| Tool or family | Default posture | Notes |
+| --- | --- | --- |
+| `read_file` / `ReadFile` | Allow | Read rules can cover this directly or through `Read`. |
+| `grep_search` / `Grep` | Allow | Covered by `Read`. |
+| `glob` / `Glob` | Allow | Covered by `Read`. |
+| `list_directory` / `ListFiles` | Allow | Covered by `Read`. |
+| `edit` / `Edit` | Ask or mode-dependent | Covered by `Edit`. |
+| `write_file` / `WriteFile` | Ask or mode-dependent | Covered by `Edit` or `Write`. |
+| `notebook_edit` / `NotebookEdit` | Ask or mode-dependent | Covered by `Edit`. |
+| `run_shell_command` / `Bash` / `Shell` | Read-only allow, otherwise ask | Command AST and permission rules decide. |
+| `monitor` | Read-only/command-dependent | Long-lived shell commands; `Bash` rules also cover monitor. |
+| `web_fetch` / `WebFetch` | Ask or classifier-dependent | Domain rules can allow/ask/deny. |
+| `agent` / `Agent` | Ask or mode-dependent | Spawns subagents; can target `Agent(type)`. |
+| `skill` / `Skill` | Ask or mode-dependent | Skills can be disabled by safe mode/trust/visibility. |
+| `todo_write` / `TodoList` | Usually allow | Metadata/session checklist. |
+| `save_memory` / `SaveMemory` | Ask or setting-dependent | Persists memory. |
+| `exit_plan_mode` / `enter_plan_mode` | Mode control | Plan-mode workflow tools. |
+| `ask_user_question` | Special | Not blanket-auto-approved by YOLO code path. |
+| `lsp` / `Lsp` | Trust-dependent | LSP servers are trust-gated by default. |
+| `cron_*`, `loop_wakeup`, `workflow`, `artifact`, `computer_use__*` | Feature/mode-dependent | Scheduled, workflow, artifact, and desktop automation surfaces. |
+| `read_mcp_resource` / `ReadMcpResource` | Trust/resource-dependent | Reads MCP resources; disabled in untrusted folders. |
+| `mcp__<server>__<tool>` | Ask unless allowed/trusted/mode-dependent | External tools from MCP servers. |
+| `tool_search` | Visibility/search tool | Can defer/hide tool discovery and is denied for some model heuristics. |
 
-Permissions map to tool calls through the rule syntax described above. An `Edit(...)` allow rule also grants read access to the same path. Bash permission rules support glob patterns and recognize common read-only commands. MCP tools use the `mcp__<server>` or `mcp__<server>__<tool>` naming convention.
+Permissions map to tool calls through `PermissionManager`. Each tool produces a default decision, then rules refine it. The rule engine checks deny, ask, allow, then falls back to mode/tool default. Shell commands receive extra analysis: Qwen splits compound commands, detects read-only shell commands, and extracts virtual read/write/network operations so path and WebFetch rules cannot be bypassed with simple shell equivalents such as `cat .env` or `curl`.
 
-## MCP and Permissions
+Rule grammar:
 
-MCP servers extend Qwen Code with external tools. Once connected, their tools appear as `mcp__<server>__<tool>` and are governed by the same permission system as built-in tools.
+- Decision values: `allow`, `ask`, `deny`, plus internal/default fallback.
+- Rule forms: `ToolName` or `ToolName(specifier)`.
+- Command examples: `Bash(git *)`, `Bash(npm test)`, `Monitor(pnpm dev)`.
+- Path examples: `Read(./secrets/**)`, `ReadFile(./.env)`, `Edit(/src/**/*.ts)`, `Read(//etc/passwd)`.
+- Domain examples: `WebFetch(api.example.com)`.
+- Literal examples: `Agent(cautious-reviewer)`, `Skill(pdf)`, `ReadMcpResource(server)`.
+- MCP examples: `mcp__github`, `mcp__github__get_issue`, `mcp__*`.
 
-Permission rules for MCP:
+Conflict precedence is deny before ask before allow. The first matching rule in the current decision class wins, with session rules checked before persistent rules inside each class.
 
-- `mcp__<server>` matches any tool from that server.
-- `mcp__<server>__*` matches every tool from that server.
-- `mcp__<server>__<tool>` matches a specific tool.
-- `mcp__*` as a deny rule removes every MCP tool from the model's context.
-
-MCP servers can be configured at user scope (`~/.qwen/settings.json`), project scope (`.qwen/settings.json`), or via `qwen mcp add`. Each server entry supports:
-
-- `includeTools` / `excludeTools` — per-server tool allowlist/blocklist.
-- `trust: true` — bypasses confirmation prompts for that server's tools.
-- `mcp.allowed` / `mcp.excluded` — global server allowlist/denylist in `settings.json`.
-
-Administrators can make MCP safer through several mechanisms:
-
-- **Global allow/deny lists**: use `mcp.allowed` and `mcp.excluded` to control which servers load.
-- **Per-server tool filtering**: use `includeTools`/`excludeTools` to expose only safe operations.
-- **Trust control**: avoid setting `trust: true` unless the server is fully trusted.
-- **Permission rules**: add `deny` rules such as `mcp__filesystem__write_file` or `mcp__github__create_issue` to block specific high-risk operations while keeping the server connected.
-- **Safe mode**: `QWEN_CODE_SAFE_MODE=1` disables custom MCP servers and only loads built-in subagents.
-- **Session server filtering**: use `--allowed-mcp-server-names` to load only named servers for one run.
-
-When an MCP server is blocked by policy, it is not available to the model. In `default` mode, MCP tool calls prompt for approval unless covered by an allow rule or the server is trusted.
+Approvals can persist when a user selects project/user "always allow" outcomes. Qwen writes generated `permissions.allow` rules to project or user `settings.json` and updates the active PermissionManager immediately. Session CLI flags do not persist.
 
 ## Sandboxing, Trust, and Administrative Controls
 
-### Sandboxing
+Sandboxing is separate from approval mode. `--yolo` does not imply `--sandbox`.
 
-Qwen Code's sandbox is a separate layer from permission modes and rules. It provides OS-level filesystem and network isolation for shell and file-modifying tools.
+Backends:
 
-- **Backends**: macOS uses Seatbelt (`sandbox-exec`); Linux/Windows use Docker/Podman containers.
-- **Filesystem**: sandboxed tools can access the working directory and any `--include-directories`; other paths are denied unless the sandbox image/profile permits them.
-- **Network**: container sandboxing has no pre-allowed domains; network access is controlled by the sandbox image configuration.
-- **Scope**: sandboxing applies to shell and file-modifying tools. Built-in read tools, MCP tools, and subagent tool calls run outside this boundary.
-- **Fallback**: if sandbox dependencies are missing, Qwen Code warns and may fall back to unsandboxed execution.
+- **macOS**: Seatbelt via `sandbox-exec`; default profile is `permissive-open`.
+- **Linux/Windows**: Docker or Podman containers.
+- **Container image**: built-in package image unless `--sandbox-image`, `QWEN_SANDBOX_IMAGE`, or `tools.sandboxImage` selects another.
 
-Permissions and sandboxing are complementary:
+Filesystem and network controls depend on backend/profile. Seatbelt profiles distinguish write restrictions and network-open/closed/proxied behavior. Container sandboxing mounts the workspace and `~/.qwen`; custom Dockerfiles, `.qwen/sandbox.bashrc`, `SANDBOX_FLAGS`, and proxy commands can alter behavior.
 
-- Permission rules block Qwen from attempting restricted actions.
-- Sandbox restrictions prevent shell commands from reaching resources outside defined boundaries, even if a prompt injection bypasses Qwen's decision-making.
+Folder trust is disabled by default. When enabled, trust decisions are stored in `trustedFolders.json`; an IDE trust signal takes priority if present. Untrusted workspaces ignore project settings and `.env` files, disable extension management, disable auto-acceptance, and disable automatic memory loading. Current source also forces non-default/non-plan approval modes down to `default` when the folder is not trusted.
 
-### Trust and administrative controls
+Managed/admin policy uses system defaults and system settings. System settings are the strongest settings-file layer. They merge/override through the settings loader but remain client-side controls; they are not an OS sandbox.
 
-**Folder/project trust**: first-time launches in a project directory prompt a workspace trust dialog. Untrusted folders ignore project `.qwen/settings.json`, context files, hooks, extensions, skills, MCP servers, and custom subagents. Trust is saved per directory. Trust verification is skipped in non-interactive `-p` mode.
+Protected paths are especially important in Auto mode. Qwen routes writes to Qwen self-modification surfaces and persistence surfaces through the classifier even when they are inside the workspace, and symlinks targeting protected paths are rejected. The frontmatter `protected_paths` list captures the documented examples.
 
-**Managed/admin policy**: system-level settings files (`/etc/qwen-code/settings.json` and system-defaults paths) provide the managed layer. They occupy a higher precedence tier than user/project config and cannot be overridden by lower scopes. Specific managed-only keys may lock approval modes or sandbox policy.
+Security posture: default Qwen permissions are advisory/client-side policy plus interactive approval. Auto mode adds an LLM classifier. System settings and safe mode constrain client behavior. The sandbox is the OS/container enforcement boundary.
 
-**Safe mode**: `QWEN_CODE_SAFE_MODE=1` disables context files, hooks, extensions, skills, MCP servers, custom subagents, permission rules, settings-sourced approval mode overrides, memory, and sandbox settings. Built-in tools and explicit CLI permission flags continue to work.
+## MCP and Permissions
 
-**Bare mode**: `--bare` skips implicit startup auto-discovery and honors only explicit CLI inputs. It is useful for reproducible CI runs.
+Qwen MCP support covers tools, prompts, and resources. Tools appear as `mcp__<server>__<tool>` and participate in permission rules. Prompts become slash commands labeled by server. Resources can be browsed and referenced in prompts with `@server:uri`; resource reads are disabled in untrusted folders.
 
-### Protected paths
+Safer MCP configuration layers:
 
-Auto mode and other approval logic protect a set of self-modification and persistence paths. Writes to these paths are never auto-approved except in YOLO mode, and may still prompt in other modes:
+- Use `mcp.allowed` and `mcp.excluded` to restrict server names.
+- Use `--allowed-mcp-server-names` for a session-scoped upper bound.
+- Use per-server `includeTools` and `excludeTools`; exclude wins over include.
+- Avoid `trust: true` unless the server is fully trusted because it bypasses all tool confirmations for that server.
+- Use `permissions.deny` for high-risk MCP tool names such as `mcp__filesystem__write_file`.
+- Use `--mcp-config` to inject session-only servers without mutating user/project config.
+- Use safe mode or bare mode to disable settings-sourced MCP servers.
 
-- Qwen Code internal state: `.qwen/`, `.qwen/settings.json`.
-- Version control: `.git/`, `.gitconfig`, `.gitmodules`.
-- Shell configuration: `.bashrc`, `.bash_profile`, `.bash_login`, `.bash_aliases`, `.bash_logout`, `.zshrc`, `.zprofile`, `.zshenv`, `.zlogin`, `.zlogout`, `.profile`, `.envrc`.
-- SSH and other sensitive configuration files.
+MCP OAuth tokens are stored in `~/.qwen/mcp-oauth-tokens.json` by default with mode 0600. `QWEN_CODE_FORCE_ENCRYPTED_FILE_STORAGE=true` asks Qwen to use keychain-backed or AES-GCM encrypted storage where available.
+
+Current docs state that in sandbox mode, tools including MCP servers must be available inside the sandbox environment. That is a change from the older assumption that MCP tools always run outside the sandbox. Claudine should model this as provider-version-sensitive: Qwen's sandbox wraps the execution environment, but remote MCP services and OAuth/token behavior still need separate trust modeling.
 
 ## Non-Interactive Behavior
 
-In non-interactive `-p` mode, Qwen Code cannot show interactive permission prompts. Use one of these strategies:
+Headless mode is entered with `--prompt`/`-p`, positional prompt in non-TTY, or piped stdin. Plain headless output cannot show ordinary interactive prompts. Safe choices are `--approval-mode plan`, explicit `--allowed-tools`, `--approval-mode auto`, or `--approval-mode yolo` with sandboxing and run budgets.
 
-- Pass `--allowed-tools` with the rules you want auto-approved.
-- Start in `--approval-mode plan` for read-only exploration.
-- Start in `--approval-mode yolo` for fully auto-approved runs.
-- Use `--bare` to skip auto-discovery of project/user customizations and make runs reproducible.
-
-Auto mode in `-p` works, but if the classifier blocks an action repeatedly the session may abort because there is no user to prompt. MCP servers requiring user approval are unavailable in `-p` unless already trusted or allowed by user/managed settings. Workspace trust dialogs are skipped in `-p` mode, so project-local MCP servers and project settings load only when already approved or allowed.
+Stream-json and SDK/daemon paths expose programmatic permission channels. Developer docs describe permission request/resolution events and a `canUseTool` callback with timeout/auto-deny behavior for SDKs. Source comments show non-stream-json teammate approvals cannot prompt and fail with guidance to use `--yolo` or stream-json.
 
 ## Sources
 
-- Qwen Code CLI help (`qwen --help --all`), version 0.15.6.
-- Local installation at `/opt/homebrew/bin/qwen`.
-- Qwen Code documentation: approval modes, permissions, sandboxing, settings, headless usage, sub-agents, MCP, trusted folders, hooks, and permission mediation.
+- [Qwen Code user overview](https://qwenlm.github.io/qwen-code-docs/en/users/overview)
+- [Qwen Code settings docs](https://qwenlm.github.io/qwen-code-docs/en/users/configuration/settings)
+- [Qwen Code approval mode docs](https://qwenlm.github.io/qwen-code-docs/en/users/features/approval-mode)
+- [Qwen Code auto mode docs](https://qwenlm.github.io/qwen-code-docs/en/users/features/auto-mode)
+- [Qwen Code sandbox docs](https://qwenlm.github.io/qwen-code-docs/en/users/features/sandbox)
+- [Qwen Code MCP docs](https://qwenlm.github.io/qwen-code-docs/en/users/features/mcp)
+- [Qwen Code headless docs](https://qwenlm.github.io/qwen-code-docs/en/users/features/headless)
+- [Qwen Code trusted folders docs](https://qwenlm.github.io/qwen-code-docs/en/users/configuration/trusted-folders)
+- [Qwen Code subagents docs](https://qwenlm.github.io/qwen-code-docs/en/users/features/sub-agents)
+- [QwenLM/qwen-code GitHub repository](https://github.com/QwenLM/qwen-code)
+- [Qwen Code SDK TypeScript docs](https://github.com/QwenLM/qwen-code/blob/main/docs/developers/sdk-typescript.md)
+- [Qwen Code serve protocol docs](https://github.com/QwenLM/qwen-code/blob/main/docs/developers/qwen-serve-protocol.md)
+- Local clone of `QwenLM/qwen-code` at commit fetched 2026-07-03, package version 0.19.6.
+- Local installed Qwen CLI at `/opt/homebrew/bin/qwen`, version 0.15.6, used for comparison.
+- Local observed config: `/Users/ken/.qwen/settings.json`, `/Users/ken/.claudine/.qwen`, and repository `.qwen/`.
 
 ## Changelog
 
+- 2026-07-03: Refreshed against upstream Qwen Code 0.19.6 docs/source and local 0.15.6 install. Updated `--approval-mode` to include `auto`, restored `--safe-mode`, documented opt-in folder trust, updated legacy permission key status, added `max-tool-calls` no-tool budget caveat, expanded MCP resources/prompts/OAuth/sandbox coverage, and recorded local config inspection.
 - 2026-07-02: Refreshed research against Qwen Code 0.15.6 and current documentation. Corrected CLI flags (removed `--include-tools` and `--safe-mode`; added `--core-tools`, `--allowed-mcp-server-names`, and `--bare`). Limited `--approval-mode` CLI choices to `plan`/`default`/`auto-edit`/`yolo` and noted `auto` is available via settings.json and `/approval-mode`. Added schema-required frontmatter fields and updated the PolicyEngine assessment. Flagged Claudine backend/mutation updates as required.

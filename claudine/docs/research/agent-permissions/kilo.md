@@ -1,125 +1,160 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-01
-last_updated: 2026-07-02
-agent: open_code
-model: kimi-for-coding/k2p7
+last_updated: 2026-07-03
+agent: codex
+model: default
 
 cli_params:
   - param: auto
     style: switch
-    description: Start a non-interactive `kilo run` session in auto-approve mode. Permission requests for the main session and tracked Task child sessions are approved automatically unless explicitly denied.
-    example: kilo run --auto "refactor the auth module"
-    example_description: Runs a headless task where all non-denied permission requests are approved, including permissions requested by spawned subagent tasks.
+    description: "For `kilo run`; auto-replies `once` to permission prompts for the root session and tracked Task child sessions when the request is not already denied by policy."
+    example: 'kilo run --auto "run tests and fix failures"'
+    example_description: "Runs a non-interactive session that approves ordinary permission prompts for the main run and its tracked subagents."
   - param: dangerously-skip-permissions
     style: switch
-    description: Start a non-interactive `kilo run` session that auto-approves any permission request that is not explicitly denied. Unlike --auto, this flag does not track or auto-approve Task child-session permissions.
-    example: kilo run --dangerously-skip-permissions "deploy to staging"
-    example_description: Runs a headless deployment prompt with all non-denied permission requests approved for the main session only.
+    description: "For `kilo run`; auto-replies `once` to permission prompts that are not explicitly denied. In current source it also replies to tracked Task child-session prompts."
+    example: 'kilo run --dangerously-skip-permissions "update dependencies"'
+    example_description: "Runs a headless session with prompts auto-approved instead of rejected."
   - param: agent
     style: switch
-    description: Select the active agent for the session. Each agent can define its own permission profile, so this flag determines which permission set is evaluated for tool calls.
-    example: kilo --agent plan
-    example_description: Starts an interactive session with the plan agent, which defaults write and bash permissions to ask.
+    description: "Selects the primary agent for the session. Agents have their own `permission` rules, so this changes the effective policy."
+    example: 'kilo --agent plan'
+    example_description: "Starts the TUI with the built-in plan agent, which denies normal edit operations."
+  - param: pure
+    style: switch
+    description: "Runs without external plugins. This reduces plugin-provided hooks and custom tools but does not disable built-in tools or MCP configured in ordinary config."
+    example: 'kilo --pure'
+    example_description: "Starts an interactive session without loading external plugins."
+  - param: interactive
+    style: switch
+    description: "For `kilo run`; enables direct interactive split-footer mode. Interactive sessions can display permission prompts instead of auto-rejecting them."
+    example: 'kilo run --interactive "inspect this repo"'
+    example_description: "Runs through the interactive prompt UI so permission requests can be answered by a user."
+  - param: format
+    style: switch
+    description: "For `kilo run`; accepts `default` or `json`. It changes output shape only; permission prompts in non-interactive mode are still handled by run-loop auto-approve or auto-reject logic."
+    example: 'kilo run --format json "summarize changes"'
+    example_description: "Streams raw JSON events while keeping the same permission behavior as non-interactive run mode."
+  - param: dir
+    style: switch
+    description: "For `kilo run`; selects the working directory, which changes the worktree-relative paths used by file permissions and the sandbox writable project root."
+    example: 'kilo run --dir ./packages/api "fix lint"'
+    example_description: "Runs in a narrower directory context."
   - param: permissions
     style: switch
-    description: For `kilo agent create` only. Comma-separated list of permissions to allow when scaffolding a new agent. Any permission not listed is denied in the generated agent.
-    example: kilo agent create --permissions read,grep --mode subagent
-    example_description: Creates a new read-only subagent that is allowed only read and grep.
+    description: "For `kilo agent create`; comma-separated permission names to allow in the generated agent. Unlisted known permissions are written as deny rules. Alias: `--tools`."
+    example: 'kilo agent create --path .kilo --description "read-only reviewer" --mode subagent --permissions read,grep,glob'
+    example_description: "Creates a generated subagent that denies all standard permissions except read, grep, and glob."
+  - param: tools
+    style: switch
+    description: "Alias for `kilo agent create --permissions`; accepts the same comma-separated permission allowlist."
+    example: 'kilo agent create --path .kilo --description "docs editor" --mode primary --tools read,edit'
+    example_description: "Creates an agent with only read and edit enabled among the standard agent-create permissions."
 
 env_vars:
   - name: KILO_PERMISSION
-    effect: Provides an inline JSON permissions configuration that is merged into the effective config for the session, overriding config-file permissions.
+    effect: "Runtime JSON overlay merged into the effective `permission` object near the end of config loading."
   - name: KILO_CONFIG_CONTENT
-    effect: Provides inline JSON config content that can include a permission object and overrides most config file values.
+    effect: "Inline JSON/JSONC config content; can include permissions, agents, MCP, plugins, and sandbox settings."
   - name: KILO_CONFIG
-    effect: Points to a custom config file path; that file may define permissions and is loaded between global and project config.
+    effect: "Path to an extra config file loaded after global config and before project/config-directory sources."
+  - name: KILO_CONFIG_DIR
+    effect: "Adds or replaces an extra config directory in the load chain; it may contain `kilo.jsonc`, agents, commands, plugins, and tools."
   - name: KILO_DISABLE_PROJECT_CONFIG
-    effect: When set, skips loading project-level config files (kilo.json, opencode.json, .kilo/, .kilocode/, .opencode/), so only global, env, and CLI sources shape permissions.
-  - name: KILO_SANDBOX
-    effect: Controls sandbox behavior for Bash subprocesses. Values include `allow` (network allowed), `deny` (network denied), and `proxy` (experimental; not fully supported as of current source).
-  - name: KILO_SANDBOX_ALLOWED_HOSTS
-    effect: When set, restricts sandboxed network access to the listed hosts. Support status is experimental as of current source.
+    effect: "Disables project root config files and project `.kilo`/`.kilocode` config directories for this process."
+  - name: KILO_DISABLE_DEFAULT_PLUGINS
+    effect: "Disables Kilo default plugins, reducing plugin-provided behavior."
+  - name: KILO_PURE
+    effect: "Environment equivalent used by runtime flag handling for pure mode, disabling external plugins."
+  - name: KILO_ENABLE_QUESTION_TOOL
+    effect: "Enables the question tool for clients that would not normally expose it."
+  - name: KILO_EXPERIMENTAL_LSP_TOOL
+    effect: "Enables the LSP tool, adding another permission-targetable tool."
+  - name: KILO_EXPERIMENTAL_SCOUT
+    effect: "Enables scout/repository tools such as repo clone and repo overview in current source."
+  - name: KILO_BWRAP_PATH
+    effect: "Overrides the Linux bubblewrap executable used by the sandbox backend."
 
 config_files:
   - os: macos
-    user: ~/Library/Application Support/kilo/kilo.jsonc
-    repo: kilo.json
-    notes: "User-scope config on macOS. JSONC is supported. Legacy paths opencode.json/opencode.jsonc and ~/.opencode/ are also read for backward compatibility."
+    user: ".config/kilo/kilo.jsonc; .kilo/kilo.jsonc; .kilocode/kilo.jsonc"
+    repo: "kilo.jsonc; kilo.json; .kilo/kilo.jsonc; .kilo/kilo.json; .kilocode/kilo.jsonc; .kilocode/kilo.json"
+    notes: "Current CLI uses xdg-basedir with app name `kilo`, so on this host the global config root is `~/.config/kilo`, not `~/Library/Application Support/kilo`. The CLI also reads home `.kilo` and `.kilocode` config directories."
   - os: linux
-    user: ~/.config/kilo/kilo.jsonc
-    repo: kilo.json
-    notes: "User-scope config on Linux. JSONC is supported. Legacy paths opencode.json/opencode.jsonc and ~/.opencode/ are also read for backward compatibility."
+    user: ".config/kilo/kilo.jsonc; .kilo/kilo.jsonc; .kilocode/kilo.jsonc"
+    repo: "kilo.jsonc; kilo.json; .kilo/kilo.jsonc; .kilo/kilo.json; .kilocode/kilo.jsonc; .kilocode/kilo.json"
+    notes: "XDG config roots can move when `XDG_CONFIG_HOME` is set. Legacy OpenCode names `opencode.jsonc` and `opencode.json` are also loaded."
   - os: windows
-    user: "%APPDATA%\\kilo\\kilo.jsonc"
-    repo: kilo.json
-    notes: "User-scope config on Windows. JSONC is supported. Legacy paths opencode.json/opencode.jsonc and ~/.opencode/ are also read for backward compatibility."
+    user: "AppData\\Roaming\\kilo\\kilo.jsonc; .kilo\\kilo.jsonc; .kilocode\\kilo.jsonc"
+    repo: "kilo.jsonc; kilo.json; .kilo\\kilo.jsonc; .kilo\\kilo.json; .kilocode\\kilo.jsonc; .kilocode\\kilo.json"
+    notes: "Uses the xdg-basedir Windows config root plus home `.kilo` and `.kilocode`; matching is case-insensitive on Windows."
   - os: macos
-    user: /Library/Application Support/kilo/kilo.jsonc
+    user: "/Library/Application Support/kilo/kilo.jsonc; /Library/Managed Preferences/<user>/ai.opencode.managed.plist"
     repo: ""
-    notes: "File-based managed config. Requires admin/root access to write."
+    notes: "Managed config files and macOS MDM preferences are read after normal config and override it."
   - os: linux
-    user: /etc/kilo/kilo.jsonc
+    user: "/etc/kilo/kilo.jsonc"
     repo: ""
-    notes: "File-based managed config. Requires admin/root access to write."
+    notes: "Managed config files are read after normal config and override it."
   - os: windows
     user: "%ProgramData%\\kilo\\kilo.jsonc"
     repo: ""
-    notes: "File-based managed config. Requires admin access to write."
+    notes: "Managed config files are read after normal config and override it."
 
 precedence:
   - source: cli
-    scope: [approval_mode]
+    scope: [approval_mode, agent_selection, tool_visibility]
     merge_strategy: none
-    notes: "CLI flags such as --auto and --dangerously-skip-permissions are temporary session overrides."
-  - source: env
-    scope: [permissions, config_content, config_path, sandbox]
+    notes: "`kilo run --auto`, `--dangerously-skip-permissions`, and `--agent` are session controls; `--pure` affects plugin loading."
+  - source: runtime_api
+    scope: [approval_mode, rules]
     merge_strategy: none
-    notes: "KILO_PERMISSION, KILO_CONFIG_CONTENT, KILO_CONFIG, and KILO_SANDBOX apply for the session. They override file-based config except where managed settings take precedence."
+    notes: "The local permission API can enable allow-everything globally or for one session and can persist selected always-rules."
   - source: managed_preferences
-    scope: [all_config]
-    merge_strategy: none
-    notes: "On macOS, .mobileconfig deployed via MDM under the managed domain is the highest-priority config source and cannot be overridden by users."
-  - source: managed_config_files
-    scope: [all_config]
-    merge_strategy: none
-    notes: "kilo.jsonc under /Library/Application Support/kilo/, /etc/kilo/, or %ProgramData%\\kilo\\ overrides all lower config sources."
-  - source: organization_config
-    scope: [permissions, providers, rules]
-    merge_strategy: none
-    notes: "Active organization config from Kilo Gateway occupies the highest precedence tier for enterprise-managed rules and cannot be overridden by user or project config."
-  - source: inline_config
-    scope: [config]
+    scope: [config, rules, mcp, sandbox, tool_visibility]
     merge_strategy: deep
-    notes: "KILO_CONFIG_CONTENT is loaded after .kilo/.kilocode directories and before managed config files."
-  - source: project_config
-    scope: [config]
+    notes: "macOS managed preferences are loaded last and act as admin-controlled overrides."
+  - source: managed_config
+    scope: [config, rules, mcp, sandbox, tool_visibility]
     merge_strategy: deep
-    notes: "kilo.jsonc in the project root. Project configs override global and remote defaults; later conflicting keys win."
-  - source: dot_kilo_directories
-    scope: [agents, commands, plugins, modes, tools, skills, themes, permissions]
+    notes: "System config under `/Library/Application Support/kilo`, `/etc/kilo`, or `%ProgramData%\\kilo` is loaded after ordinary user/project config."
+  - source: cloud_org_config
+    scope: [config, providers, rules, mcp, tool_visibility]
     merge_strategy: deep
-    notes: ".kilo and .kilocode directories (legacy .opencode) are loaded after project config. Agent-specific permission objects override global permission objects."
+    notes: "Active Kilo Cloud organization config is loaded after env content and before managed local config."
+  - source: env
+    scope: [rules, config_content, config_path, project_config_loading, plugin_loading]
+    merge_strategy: deep
+    notes: "`KILO_PERMISSION` is applied near the end as a permission overlay; `KILO_CONFIG_CONTENT` and `KILO_CONFIG` participate in the ordinary deep-merge chain."
+  - source: config_directories
+    scope: [agents, commands, plugins, tools, rules, mcp]
+    merge_strategy: deep
+    notes: "Config directories load from global, primary-worktree fallback, project `.kilocode`/`.kilo`, home `.kilocode`/`.kilo`, and `KILO_CONFIG_DIR`; later merges override or append depending on field."
+  - source: repo_config
+    scope: [config, rules, agents, mcp, sandbox]
+    merge_strategy: deep
+    notes: "Project `kilo.jsonc`/`kilo.json` and legacy `opencode` files load after `KILO_CONFIG` and before config directories unless project config is disabled."
   - source: custom_config_path
-    scope: [config]
+    scope: [config, rules, agents, mcp]
     merge_strategy: deep
-    notes: "KILO_CONFIG file is loaded between global and project config."
-  - source: global_user_config
-    scope: [config]
+    notes: "`KILO_CONFIG` loads after global config and before project config."
+  - source: user_config
+    scope: [config, rules, agents, mcp]
     merge_strategy: deep
-    notes: "~/.config/kilo/kilo.jsonc (or XDG/macOS/Windows equivalents) overrides remote organizational defaults."
+    notes: "Global files load in order: `config.json`, `kilo.json`, `kilo.jsonc`, `opencode.json`, `opencode.jsonc`."
   - source: remote_well_known_config
-    scope: [config]
+    scope: [config, rules, providers]
     merge_strategy: deep
-    notes: ".well-known/opencode endpoint provides organizational defaults and is loaded first."
+    notes: "Remote `.well-known/opencode` config is loaded before local global config."
 
-default_posture: "With no configuration, Kilo Code uses permissive defaults: most built-in tools are allowed automatically, while doom_loop and external_directory ask for approval. The read tool is allowed by default, but .env files are denied."
+default_posture: "Kilo's raw permission evaluator defaults unmatched checks to `ask`, but the built-in default primary agent supplies a permissive ruleset: most tools are allowed, `.env` and `.env.*` reads ask, `.env.example` is allowed, `external_directory` asks, and `doom_loop` asks. Several auxiliary tools such as question, plan transitions, repo_clone, and repo_overview are denied unless enabled by an agent or experimental flag."
 
 cli_zero_permissions:
   supported: false
-  invocation: 'KILO_PERMISSION=''{"*":"deny"}'' kilo run "..."'
-  mechanism: "Kilo has no dedicated CLI flag for a no-permissions baseline. The closest session-scoped option is the KILO_PERMISSION environment variable, which sets a deny-all rule."
-  limitations: "There is no native --permission or --no-tools runtime flag. --agent can select a locked-down agent, but the agent must already be configured. Additional permissions must be added via KILO_PERMISSION or pre-configured agents."
+  invocation: 'KILO_PERMISSION=''{"*":"deny"}'' KILO_DISABLE_PROJECT_CONFIG=1 kilo run "..."'
+  mechanism: "Kilo has no CLI-only no-tools or deny-all switch. The closest session-scoped wrapper posture uses environment overlays to deny all permissions and disable project config."
+  limitations: "This is not CLI-only, and additional permissions cannot be added back with Kilo CLI flags in the same invocation. Claudine would need to set `KILO_PERMISSION`/`KILO_CONFIG_CONTENT` or launch a preconfigured locked-down agent."
 
 agent_permissions:
   allowed: true
@@ -130,250 +165,254 @@ agent_permissions:
 yolo:
   has_interactive_yolo: true
   has_non_interactive_yolo: true
-  mechanism: "--auto or --dangerously-skip-permissions on `kilo run`; interactive TUI sessions can also toggle auto-approve permissions from the command palette."
+  mechanism: "Interactive TUI/VS Code can toggle runtime allow-everything through the permission API; non-interactive `kilo run` exposes `--auto` and `--dangerously-skip-permissions`; config can set `permission: {\"*\":\"allow\"}`."
 
 policy_engine:
   ergonomic: false
   provides_coverage: false
   gaps:
-    - "Kilo Code permissions are tool-centric (read, edit, bash, webfetch, skill, question, doom_loop, external_directory, etc.) and support wildcard/last-match-wins patterns, while PolicyEngine's canonical model is organized around filesystem, command, network, MCP, agent, and runtime axes."
-    - "The default permissive posture (most tools allow by default) is the inverse of PolicyEngine's typical ask/deny defaults, requiring explicit modeling."
-    - "external_directory is a path-scoped permission key rather than a true tool, and PolicyEngine would need to represent it as a workspace/external path rule with matching semantics."
-    - "doom_loop is a runtime recovery guard, not a standard tool or resource permission."
-    - "Agent-specific permissions and task subagent permissions are supported by Kilo but require PolicyEngine to scope rules by agent name."
-    - "MCP tools are addressed by server-prefixed wildcard names (e.g., mymcp_*); PolicyEngine's MCP axis may not support arbitrary tool-name wildcard rules."
-    - "Kilo-specific permission keys (agent_manager, notebook_read, notebook_edit, notebook_execute, repo_clone, repo_overview) extend the OpenCode grammar and have no direct PolicyEngine mapping."
-    - "Kilo adds an OS-enforced sandbox (Seatbelt on macOS, bubblewrap on Linux) for Bash subprocesses with filesystem and network controls; PolicyEngine does not currently model sandbox boundaries."
+    - "Kilo's native rule entity is an ordered `(permission, pattern, action)` ruleset with last-match-wins wildcard semantics; PolicyEngine does not yet model provider-specific ordered wildcard rules directly."
+    - "Tool visibility and approval are coupled: deny-all for a tool can remove it from the model tool surface."
+    - "Kilo's built-in agents inject permissive defaults even though raw unmatched rules ask."
+    - "Sensitive `.env` read hardening cannot be overridden by broad allow or allow-everything rules."
+    - "Protected config paths force ask and disable always approvals."
+    - "Session-scoped and persisted always approvals are provider runtime state, not just static config."
+    - "Kilo sandbox state has per-session, per-directory, and config-default layers that PolicyEngine does not model."
+    - "MCP and custom plugin tools are permissioned by generated tool names rather than stable provider-neutral entities."
 
 permission_entities:
   - entity: tool
-    native_names: [permission, tools]
-    notes: "Built-in tools such as bash, read, edit, glob, grep, list, lsp, skill, todowrite, webfetch, websearch, question, repo_clone, repo_overview, agent_manager, and notebook_read/notebook_edit/notebook_execute are gated by permission keys."
+    native_names: [bash, read, edit, write, apply_patch, glob, grep, list, task, todowrite, todoread, webfetch, websearch, lsp, skill, question, suggest, agent_manager, interactive_terminal, repo_clone, repo_overview, notebook_read, notebook_edit, notebook_execute]
+    notes: "Built-in and Kilo-specific tools are evaluated through permission names; write and apply_patch are grouped under `edit`."
   - entity: tool_group
-    native_names: [edit]
-    notes: "The edit permission covers edit, write, and apply_patch as a group."
+    native_names: [edit, tools]
+    notes: "`edit` covers edit/write/apply_patch; legacy `tools` booleans are converted to permission allow/deny rules."
   - entity: command
     native_names: [bash]
-    notes: "bash permission rules match parsed command strings with glob semantics."
+    notes: "Bash rules match parsed command strings; multi-command shell inputs may generate multiple checks."
   - entity: path
-    native_names: [read, edit, glob, grep, list, external_directory]
-    notes: "read, edit, glob, grep, list, and external_directory rules can match file paths, glob patterns, or external directory prefixes."
+    native_names: [read, edit, glob, grep, list, external_directory, .kilocodeignore]
+    notes: "File permissions match worktree-relative paths; external directory checks use absolute paths; `.kilocodeignore` is migrated into deny rules."
   - entity: workspace
-    native_names: [external_directory]
-    notes: "external_directory gates access to paths outside the project working directory."
+    native_names: [external_directory, dir, worktree]
+    notes: "Access outside the worktree asks by default; `--dir` changes the runtime directory and sandbox project root."
   - entity: mcp_server
-    native_names: [mcp]
-    notes: "MCP servers are configured under the mcp object and can be enabled or disabled."
+    native_names: [mcp, enabled]
+    notes: "MCP servers can be disabled with `enabled: false`; local and remote server configs have different runtime boundaries."
   - entity: mcp_tool
-    native_names: ["<server>_*", "<server>_<tool>"]
-    notes: "MCP tools are registered with the server name as a prefix and can be targeted by permission wildcards."
+    native_names: ["{server}_{tool}", "{server}_*"]
+    notes: "MCP tools are exposed with sanitized server-prefixed names and use the ordinary permission ruleset."
+  - entity: mcp_resource
+    native_names: ["{server}:{resource}"]
+    notes: "MCP resources are listed/read through the MCP service; no separate documented permission key was found."
   - entity: agent
-    native_names: [agent, default_agent]
-    notes: "Agents can define their own permission objects that override global permissions."
+    native_names: [agent, mode, default_agent]
+    notes: "Agents carry `permission` rules and may be selected by `--agent` or configured as built-ins/custom agents."
   - entity: subagent
-    native_names: [task]
-    notes: "The task permission controls which subagents can be spawned."
+    native_names: [task, subagent_type]
+    notes: "`permission.task` controls which subagents can be launched; Kilo also hard-denies nested task/question/interactive_terminal in child sessions."
   - entity: mode
-    native_names: ["--auto", "--dangerously-skip-permissions", auto-approve]
-    notes: "--auto and --dangerously-skip-permissions change the session baseline so non-denied requests are approved automatically."
+    native_names: [build, plan, general, explore, scout, code, ask, orchestrator]
+    notes: "Built-in agent modes supply different permission defaults; plan denies normal edits."
   - entity: approval_category
-    native_names: [allow, ask, deny]
-    notes: "The three decision values for permission rules."
+    native_names: [allow, ask, deny, once, always, reject]
+    notes: "Static rules use allow/ask/deny; prompts can be answered once, always, or reject."
   - entity: sandbox
-    native_names: [sandbox]
-    notes: "Kilo supports an OS-enforced sandbox for Bash subprocesses with filesystem and network controls, separate from the permission rule engine."
+    native_names: [experimental.sandbox, experimental.sandbox_restrict_network, kilocode.sandbox, /sandbox]
+    notes: "Sandboxing is separate from approval policy and can be toggled per session."
   - entity: hook
-    native_names: []
-    notes: "Kilo supports custom tools and plugins but does not have a documented PreToolUse hook for permission decisions."
+    native_names: [plugin, "tool.execute.before", "tool.execute.after", "permission.ask"]
+    notes: "Plugins can add hooks and tools; no PreToolUse policy hook equivalent was found for replacing permission evaluation."
   - entity: extension
-    native_names: [plugin]
-    notes: "Plugins can add tools and hooks; external plugins can be disabled by not loading them."
+    native_names: [plugin, pure]
+    notes: "External plugins can add tools and hooks; `--pure` suppresses external plugins."
   - entity: slash_command
-    native_names: []
-    notes: "Slash commands such as /init and /undo are not separately permission-gated."
+    native_names: [/sandbox, /init, /profile, command]
+    notes: "Slash commands can trigger provider behavior; `/sandbox` toggles the sandbox, while custom workflows live under config directories."
 
 approval_modes:
   - name: default
-    effect: "Most built-in tools are allowed automatically; doom_loop and external_directory ask for approval."
+    effect: "Built-in agent rules allow most tools while prompting for external-directory access, `.env` reads, and doom-loop continuation."
     interactive: true
     non_interactive: true
-    aliases: [default]
-  - name: auto-approve
-    effect: "Non-denied permission requests are approved automatically. Explicit deny rules are still enforced."
+    aliases: [build, code, default]
+  - name: ask-by-default
+    effect: "The raw permission evaluator returns ask when no rule matches; this appears when an agent lacks Kilo's built-in permissive fallback."
     interactive: true
     non_interactive: true
-    aliases: ["--auto", auto, "Enable auto-approve permissions"]
+    aliases: [unmatched-rule-default]
+  - name: auto
+    effect: "Non-interactive run auto-approves permission prompts for the root and tracked Task child sessions unless denied by policy."
+    interactive: false
+    non_interactive: true
+    aliases: ["--auto"]
   - name: dangerously-skip-permissions
-    effect: "Non-denied permission requests are approved automatically for the main session only; Task child-session permissions are not tracked or auto-approved."
+    effect: "Non-interactive run auto-approves permission prompts that are not explicitly denied."
     interactive: false
     non_interactive: true
     aliases: ["--dangerously-skip-permissions"]
-  - name: plan-agent
-    effect: "The built-in plan agent sets edit and bash to ask by default, preventing file modifications."
+  - name: allow-everything
+    effect: "Runtime API or config adds `{permission:'*', pattern:'*', action:'allow'}`; explicit denies and hard protections still apply."
     interactive: true
-    non_interactive: false
-    aliases: [plan, "--agent plan"]
+    non_interactive: true
+    aliases: ["permission.allow_everything", "permission: {\"*\":\"allow\"}", "shield toggle"]
+  - name: plan
+    effect: "Built-in primary agent that denies ordinary edit permission while allowing plan-specific transitions and plan-file writes."
+    interactive: true
+    non_interactive: true
+    aliases: ["--agent plan", plan]
 
 rule_model:
   decisions: [allow, ask, deny]
-  syntax: "permission_key -> action string, or permission_key -> {pattern: action}. Custom/MCP tools can be targeted by wildcard keys."
-  precedence: "Rules are evaluated in order across merged rulesets; the last matching rule wins. Deny rules do not have special precedence over allow rules except by order."
-  merge_semantics: "Config files merge with later sources overriding earlier sources for conflicting keys. Permission rulesets are concatenated in precedence order, so later sources' rules can override earlier sources. Agent-specific permission objects override global permission objects for that agent."
-  matcher_semantics: "* matches zero or more characters; ? matches exactly one character; all other characters match literally. ~ and $HOME at the start of a pattern expand to the user's home directory."
-  default_decision: "Most permissions default to allow. doom_loop and external_directory default to ask. read is allow but .env files are denied."
+  syntax: "Config accepts `permission: \"allow\"|\"ask\"|\"deny\"|null` as shorthand for `*`, or `permission: { key: { pattern: action } }`; agent Markdown uses the same shape in YAML frontmatter. Runtime rules normalize to ordered `{permission, pattern, action}` records."
+  precedence: "Within the effective ruleset, the last matching rule wins. Kilo's resolver adds hard behavior: base deny wins over saved/session approvals, saved deny can still deny, base ask is not bypassed unless a saved allow is at least as broad, `.env` broad allows are hardened to ask, and protected config edits force ask."
+  merge_semantics: "Config sources deep-merge. Permission objects preserve author key order during parsing; legacy `tools` booleans are converted into permission allow/deny and merged under `permission`. Agent and session rules are merged by concatenating ordered rulesets."
+  matcher_semantics: "`*` becomes `.*`, `?` becomes `.`, regex metacharacters are escaped, backslashes normalize to `/`, Unix matching is case-sensitive, Windows matching is case-insensitive, and a trailing ` *` also matches the bare command. `~` and `$HOME` prefixes are expanded at config load."
+  default_decision: "Raw unmatched permission checks ask. The default built-in agent supplies explicit allow/ask/deny rules that make most common tools allow by default."
 
 tool_visibility:
   supported: true
   mechanisms:
-    - "The legacy tools object can disable individual tools or MCP server tool patterns by setting them to false."
-    - "A permission deny rule with pattern * for a tool removes it from the model's context entirely."
-    - "Agent-specific permission objects can restrict the tool surface for that agent."
-  notes: "Tool visibility and approval policy are both expressed through the same permission object. A denied tool is hidden from the model."
+    - "Tools whose permission is denied by a broad `*` pattern are omitted from the model tool list."
+    - "The legacy `tools` config object maps booleans to permission allow/deny."
+    - "`--pure`, `KILO_DISABLE_DEFAULT_PLUGINS`, and plugin config affect custom tool availability."
+    - "Experimental flags/config can expose extra tools such as LSP and scout/repository tools."
+  notes: "Kilo does not expose a clean CLI `--tools` allowlist for runtime sessions; visibility and approval share the permission ruleset."
 
 sandbox:
   supported: true
-  modes: [auto-allow, regular-permissions]
-  backends: ["macOS Seatbelt", "Linux/WSL2 bubblewrap"]
-  filesystem_control: "Default write scope is the working directory plus a session temp directory. allowWrite, denyWrite, denyRead, and allowRead arrays configure boundaries."
-  network_control: "Network modes include allow, deny, and proxy. allowedHosts can restrict outbound hosts. Proxy and allowedHosts support is experimental as of current source."
-  notes: "Sandboxing applies only to Bash subprocesses. Native Windows is not supported (use WSL2). The sandbox is separate from the static permission engine; a tool may be permitted while the sandbox blocks its filesystem/network access."
+  modes: [disabled, enabled-network-deny, enabled-network-allow]
+  backends: ["macOS sandbox-exec/Seatbelt", "Linux bubblewrap/bwrap", "Windows unsupported"]
+  filesystem_control: "When enabled, shell commands and file-write tools are confined to the project/worktree plus Kilo data/cache/config/state/tmp/bin/log/repos. `.git`, sandbox policy store, and sandbox preference store are denied for writes. File reads are not confined."
+  network_control: "When `experimental.sandbox_restrict_network` is true, outbound network is denied for model-originated shell commands, first-party HTTP tools, custom tools, and remote MCP delegated authority. Provider/model traffic, local MCP servers, and plugin hooks are not covered."
+  notes: "Sandbox is off by default and experimental. Per-session toggles and per-directory preferences seed future sessions. If the backend is unavailable, confinement stays off or the support reason is reported."
 
 trust_and_admin:
-  folder_trust: "Kilo Code does not document a folder/project trust gate that disables project config, memory, or extensions."
-  managed_policy: "Managed settings can be delivered via file-based kilo.jsonc in system directories (/Library/Application Support/kilo/, /etc/kilo/, or %ProgramData%\\kilo\\), via macOS MDM .mobileconfig under the managed domain, or through Kilo Gateway organization config. These occupy the highest precedence tier and cannot be overridden by user, project, or local config, nor by most environment variables or CLI flags."
-  safe_mode: "Kilo does not have a dedicated safe-mode flag. Plugins can be avoided by not loading them, but built-in tools and permissions remain active."
-  notes: "Enterprise deployments can use central config and SSO integration to restrict providers and configuration."
+  folder_trust: "No separate folder-trust prompt was found. Project config and project `.kilo`/`.kilocode` directories load by default unless `KILO_DISABLE_PROJECT_CONFIG` is set."
+  managed_policy: "Managed local config files and macOS MDM preferences are loaded after user, project, env-content, and cloud organization config. Active Kilo Cloud organization config is also a managed layer before local managed files."
+  safe_mode: "There is no dedicated safe-mode flag. `--pure`, `KILO_PURE`, `KILO_DISABLE_PROJECT_CONFIG`, and strict deny rules are the practical safe-start controls."
+  notes: "Protected config paths are permission-gated even in broad allow modes; this is a client-side guard, not a project-trust framework."
 
 mcp_permissions:
   supported: true
   server_filters:
-    - "MCP servers can be enabled or disabled with enabled: true/false."
-    - "The tools object (deprecated) can disable an entire MCP server or pattern."
-    - "Permission rules can target MCP tools by server-prefixed wildcard names."
+    - "`mcp.<name>.enabled: false` disables a server."
+    - "`--pure` can suppress plugin-provided MCP-adjacent behavior but not ordinary configured MCP."
   tool_filters:
-    - "Permission rules such as mymcp_*: deny or mymcp_write_file: ask apply to MCP tools."
-    - "Agent-specific permission objects can further restrict MCP tools for that agent."
-  trust_model: "OAuth tokens for remote MCP servers are stored per user. Project-scoped MCP servers load if already configured; no interactive trust dialog is documented."
-  notes: "MCP tools run outside any Kilo sandbox. stdio MCP servers are local subprocesses; remote MCP servers make network requests from outside Kilo's process."
+    - "Each MCP tool gets a sanitized permission key such as `github_create_pull_request`."
+    - "Rules can use wildcard groups such as `github_*`."
+    - "Subagents inherit parent denials for MCP-prefixed tool names."
+  trust_model: "No folder trust gate was found for MCP config. Remote MCP OAuth stores per-user auth; remote MCP tools are marked as delegated network authority for sandbox network checks."
+  notes: "Local MCP servers and plugin hooks are outside the sandbox network restriction; remote MCP calls are checked by Kilo's in-process network assertion when sandbox network restriction is active. MCP response sanitization beyond normal truncation/attachment conversion was not found."
 
-headless_behavior: "In non-interactive `kilo run` mode, interactive permission prompts cannot be shown. Any tool call that would ask for approval is effectively blocked unless --auto or --dangerously-skip-permissions is used, or the permission is pre-approved. Use KILO_PERMISSION or an allow-all/deny-all config to avoid hangs."
+headless_behavior: "Plain non-interactive `kilo run` cannot prompt a human; permission prompts for the root session are auto-rejected unless `--auto` or `--dangerously-skip-permissions` is set. Headless child-session asks are denied instead of hanging, and tracked Task prompts are auto-approved in `--auto`."
 
-approval_persistence: "Approvals granted with 'always' persist only for the rest of the current Kilo session. They are not saved across sessions or projects."
+approval_persistence: "Interactive `always` approvals and selected allow/deny always-rules can be persisted into global config through the permission API. Config-file edit requests disable always approval and are downgraded to once."
 
 protected_paths:
   - "*.env"
   - "*.env.*"
+  - ".env"
+  - ".env.*"
+  - "kilo.json"
+  - "kilo.jsonc"
+  - "opencode.json"
+  - "opencode.jsonc"
+  - "AGENTS.md"
+  - "AGENT.md"
+  - ".kilo/**"
+  - ".kilocode/**"
+  - ".git/**"
+  - "kilo-sandbox-policy/**"
+  - "kilo-sandbox-preference/**"
 
-security_posture: "Kilo Code's permission system is a client-side static policy engine with advisory prompts, layered with an optional OS-enforced sandbox (Seatbelt on macOS, bubblewrap on Linux/WSL2) for Bash subprocesses. Managed settings provide administrative policy, but they are still enforced by the client. Effective security requires combining strict permission rules, sandbox boundaries, and managed policy where available."
+security_posture: "Kilo combines a client-side static permission engine, advisory/runtime approval prompts, persisted config rules, managed config layers, and an optional OS-enforced sandbox for writes and selected network surfaces. The sandbox is not a complete OS isolation boundary because reads, provider traffic, local MCP servers, and plugin hooks can remain outside it."
 
 changes:
-  - "Refreshed config paths against current source: Kilo uses XDG-basedir with app name 'kilo', so user config lives at ~/Library/Application Support/kilo/kilo.jsonc on macOS, ~/.config/kilo/kilo.jsonc on Linux, and %APPDATA%\\kilo\\kilo.jsonc on Windows."
-  - "Documented Kilo-specific permission keys: agent_manager, repo_clone, repo_overview, notebook_read, notebook_edit, notebook_execute, plus list and skill."
-  - "Updated precedence to include managed config files, macOS MDM preferences, and Kilo Gateway organization config."
-  - "Added sandbox coverage: Seatbelt on macOS, bubblewrap on Linux/WSL2, filesystem/network controls, auto-allow vs regular-permissions modes, and experimental proxy/allowedHosts status."
-  - "Documented --dangerously-skip-permissions as a separate non-interactive YOLO mode that does not auto-approve Task child sessions."
-  - "Expanded frontmatter to the full schema contract including permission_entities, approval_modes, rule_model, tool_visibility, sandbox, trust_and_admin, mcp_permissions, headless_behavior, approval_persistence, protected_paths, and security_posture."
-  - "Corrected rule precedence: last matching rule wins across merged rulesets, not deny-wins."
-  - "Recorded that Kilo has no documented root/sudo restriction on YOLO mode."
+  - "Changed frontmatter agent/model to `codex`/`default` and refreshed `last_updated` to 2026-07-03."
+  - "Corrected global config paths: current CLI uses xdg-basedir `~/.config/kilo` on this macOS host; the inspected local config only contained `$schema` and no permission rules."
+  - "Corrected raw default decision to `ask` while documenting that built-in default agents add permissive allow rules."
+  - "Corrected `.env` handling from deny to ask for broad read approvals; `.env.example` is explicitly allowed."
+  - "Added protected config-file behavior: edits to Kilo config paths and AGENTS files force approval and disable always grants."
+  - "Updated non-interactive behavior: plain `kilo run` auto-rejects root asks, denies headless child asks, and `--auto` tracks Task child sessions."
+  - "Updated approval persistence: always approvals can write global config, but protected config edits are once-only."
+  - "Updated sandbox details against current source and docs: sandbox is off by default, experimental, unavailable on Windows, and covers writes plus selected network surfaces rather than file reads."
+  - "Expanded MCP coverage to include server `enabled`, sanitized server-prefixed tool names, remote MCP network checks, and local MCP sandbox bypass."
+  - "Recorded that no true CLI-only zero-permissions/no-tools baseline exists."
 
 requires_claudine_update: true
-reason: "Kilo Code's permission grammar is inherited from OpenCode (tool-centric wildcard patterns, last-rule-wins evaluation, external_directory, doom_loop, agent/task permissions, permissive defaults, and Kilo-specific keys) and does not map cleanly to PolicyEngine's canonical axes. In addition, Kilo's OS-enforced sandbox for Bash subprocesses and its experimental network controls are not modeled by PolicyEngine. Supporting Kilo permissions accurately will require backend work in the PolicyEngine OpenCode/Kilo backend and mutation planning for kilo.jsonc permission objects."
+reason: "Kilo is not yet a compiled Claudine provider, and accurate PolicyEngine support needs Kilo/OpenCode-style ordered wildcard rules, agent-scoped permissions, runtime/persisted approvals, protected config-path semantics, tool visibility coupling, and sandbox metadata that the current provider-neutral model cannot fully express."
 ---
 
-# Kilo Code Permissions
+# Kilo Code Permissions and Security Controls
 
 ## Introduction to Kilo Code Permissions
 
-Kilo Code controls tool access with a single `permission` configuration object. Each permission key maps to one or more tools and resolves to one of three actions:
+Kilo Code uses an ordered permission ruleset. Native runtime rules have three fields: `permission`, `pattern`, and `action`. The action is one of `allow`, `ask`, or `deny`. User config can write the same idea compactly as either a scalar action or a pattern map:
 
-- `"allow"` — run without approval
-- `"ask"` — prompt the user for approval
-- `"deny"` — block the action
+```yaml
+permission:
+  read: allow
+  edit:
+    "*": deny
+    "*.md": allow
+  bash:
+    "*": ask
+    "git status *": allow
+```
 
-Kilo CLI is a fork of [OpenCode](https://opencode.ai), and the permission system is largely the same. Permissions can be configured through JSON/JSONC config files, inline environment variables, Markdown agent frontmatter, and a small set of CLI flags. Unlike some other agents, Kilo defaults to a permissive posture: most tools are allowed unless a rule says otherwise.
+The public docs describe the same model: rules decide whether a tool call runs, prompts, or is blocked, and later matching rules win. Current source confirms the matcher is not a general regex exposed to users; Kilo escapes regex metacharacters, treats `*` and `?` as wildcards, normalizes backslashes to `/`, and is case-insensitive on Windows.
 
-Kilo adds one significant layer that OpenCode does not provide: an OS-enforced sandbox for Bash subprocesses using Seatbelt on macOS and bubblewrap on Linux/WSL2. The sandbox is separate from the permission rule engine and can block filesystem or network access even when a tool call has been approved.
+Configuration can define permissions in several places:
 
-### Configuration files
+- Global config files in the xdg-basedir config root for app `kilo`, usually `~/.config/kilo/kilo.jsonc` on this host.
+- Project root `kilo.jsonc` / `kilo.json`.
+- Config directories such as `.kilo/`, `.kilocode/`, `~/.kilo/`, and `~/.kilocode/`.
+- Agent Markdown frontmatter under `permission`.
+- Runtime overlays from `KILO_PERMISSION` or `KILO_CONFIG_CONTENT`.
+- Managed config files and macOS MDM preferences.
 
-The `permission` key lives in `kilo.json` or `kilo.jsonc` (legacy `opencode.json` / `opencode.jsonc` and `.opencode/` directories are still read). It can be a single action string that applies to all tools, or an object that maps tool names to action strings or granular pattern objects. See [Configuring the Default](#configuring-the-default) for file locations and examples.
+The local inspection found `/Users/ken/.claudine/.config/kilo/kilo.jsonc` with only:
 
-### Environment variables
+```json
+{
+  "$schema": "https://app.kilo.ai/config.json"
+}
+```
 
-The main environment variables that influence permissions and sandbox behavior are:
+No local permission rules were present to inspect. The installed `kilo` and `kilocode` commands both reported version `7.3.45`.
 
-| Variable | Effect |
-| :----- | :----- |
-| `KILO_PERMISSION` | Inline JSON permissions config merged into the effective config. |
-| `KILO_CONFIG_CONTENT` | Inline JSON config content; can include a full `permission` object. |
-| `KILO_CONFIG` | Path to a custom config file that may contain a `permission` object. |
-| `KILO_DISABLE_PROJECT_CONFIG` | Skip loading project-level config files, so only global/env/CLI sources apply. |
-| `KILO_SANDBOX` | Control sandbox network mode: `allow`, `deny`, or `proxy` (experimental). |
-| `KILO_SANDBOX_ALLOWED_HOSTS` | Restrict sandboxed network access to listed hosts (experimental). |
+Environment variables that matter most are `KILO_PERMISSION`, `KILO_CONFIG_CONTENT`, `KILO_CONFIG`, `KILO_CONFIG_DIR`, `KILO_DISABLE_PROJECT_CONFIG`, `KILO_PURE`, and plugin/tool experimental flags. `KILO_PERMISSION` is the important one for a wrapper: it is JSON merged into the effective `permission` object near the end of config loading.
 
-### CLI parameters
+CLI permission controls are limited. `kilo run --auto` and `kilo run --dangerously-skip-permissions` are non-interactive auto-approval modes. `--agent` selects an agent and therefore its permission profile. `--pure` reduces external plugin/tool/hook surface. `kilo agent create --permissions` or `--tools` writes a new agent with denied permissions for unselected standard keys; it does not alter a live session.
 
-Only a few CLI switches directly affect permissions:
-
-| Flag | What it does |
-| :----- | :----- |
-| `--auto` | On `kilo run`, enable auto-approve mode for the main session and tracked Task child sessions. |
-| `--dangerously-skip-permissions` | On `kilo run`, auto-approve non-denied permission requests for the main session only. |
-| `--agent <name>` | Use the named agent, whose `permission` profile (if any) is applied. |
-| `--permissions <list>` | Only for `kilo agent create`. Lists permissions to allow in the generated agent. |
-
-### Precedence
-
-Effective permissions are built from multiple layers. Highest-wins ordering is:
-
-1. CLI flags such as `--auto` and `--dangerously-skip-permissions`
-2. `KILO_PERMISSION`
-3. macOS managed preferences / MDM
-4. Managed config files in system directories
-5. Active organization config from Kilo Gateway
-6. `KILO_CONFIG_CONTENT`
-7. Project `kilo.json` / `kilo.jsonc` and `.kilo/` / `.kilocode/` config directories (legacy `.opencode/` also read)
-8. Custom config path from `KILO_CONFIG`
-9. Global user config (`~/.config/kilo/kilo.jsonc` or OS equivalent)
-10. Remote `.well-known/opencode` organizational defaults
-
-Within any config object, rules are evaluated in order and the **last matching rule wins**.
-
-### Permission policy vs tool visibility
-
-Kilo does not have a separate visibility layer independent of approval policy. Both concerns are expressed through the same `permission` object (and the deprecated `tools` object):
-
-- A tool with `"deny"` and pattern `"*"` is removed from the model's context entirely.
-- A tool with `"allow"` is visible and runs without prompting.
-- A tool with `"ask"` is visible but prompts before each call.
+There is no independent runtime `--tools` allowlist. Tool visibility and approval are coupled through permissions: if the effective ruleset broadly denies a tool, Kilo can omit it from the model's tool surface. The legacy `tools` config object is converted into permission allow/deny rules.
 
 ## Permissions Use Cases
 
 ### Default
 
-If no environment variable, config file, or CLI switch configures permissions, Kilo Code starts from permissive defaults:
+Two defaults must be distinguished:
 
-- Most tools are `"allow"`.
-- `doom_loop` and `external_directory` are `"ask"`.
-- `read` is `"allow"`, but `.env` files are denied by default.
-- Several auxiliary tools default to `"deny"` unless enabled: `suggest`, `question` (interactive), `interactive_terminal`, `plan_enter`, `plan_exit`, `repo_clone`, `repo_overview`.
+- The raw evaluator defaults unmatched permission checks to `ask`.
+- Kilo's built-in default primary agent adds an explicit permissive ruleset, so most common tools are allowed out of the box.
 
-A PolicyEngine description of the default posture would be:
+The built-in default posture allows most tools, asks for `external_directory`, asks for `doom_loop`, and hardens broad `.env` read approvals back to `ask`. `.env.example` is allowed. Some auxiliary tools are denied by default unless an agent or flag enables them, including question, plan transitions, repo clone, and repo overview.
 
-- `can_read(path)` → Allow for workspace paths; Deny for `.env` files.
-- `can_write(path)` → Allow for workspace paths.
-- `can_execute(command)` → Allow for bash commands (subject to sandbox constraints).
-- `can_access_domain(domain)` → Allow for webfetch/websearch.
-- `can_use_mcp_server(server)` / `can_use_mcp_tool(server, tool)` → Allow.
-- `can_spawn_subagent(agent)` → Allow.
-- `can_loop_recovery()` → Ask (doom_loop).
-- `can_access_external_directory(path)` → Ask.
+A PolicyEngine representation would need rules like:
 
-This use case is not ergonomic in PolicyEngine without adjustments. PolicyEngine's canonical axes (filesystem, command, network, MCP, agent, runtime) do not line up one-to-one with Kilo's tool keys, and the permissive default is the opposite of PolicyEngine's usual ask/deny baseline. No changes are required to describe the broad idea, but full coverage of the default posture would need new mappings for `doom_loop`, `external_directory`, and the `.env` deny rule.
+- Read workspace paths: allow, except `.env` / `.env.*`: ask.
+- Write workspace paths: allow, except provider config paths: ask and once-only.
+- Execute bash: allow, with sandbox metadata if sandbox is enabled.
+- External directory: ask.
+- Doom-loop continuation: ask.
+- Subagent task: allow only if the chosen agent policy allows the subagent pattern.
+
+PolicyEngine can describe the broad intent, but it is not ergonomic or complete. The missing pieces are ordered last-match-wins wildcard rules, Kilo's built-in agent default layer, hard `.env` read behavior, config-path protection, session/global always approvals, and sandbox state.
 
 ### Whitelisting
 
-To start with no permissions and require every needed permission to be asked for or explicitly declared, set a global deny rule and then add specific allow or ask rules.
+Kilo supports whitelisting through config or env, not through a dedicated CLI flag:
 
 ```json
 {
@@ -393,108 +432,94 @@ To start with no permissions and require every needed permission to be asked for
 }
 ```
 
-In an interactive session, `ask` causes Kilo to prompt. In a non-interactive `kilo run`, `ask` is effectively deny because there is no user to approve, so you should pre-declare `allow` rules for any tool the headless session needs.
+In interactive sessions, `ask` produces a prompt. In plain non-interactive `kilo run`, root-session prompts are auto-rejected unless `--auto` or `--dangerously-skip-permissions` is set; child-session prompts are denied instead of hanging.
 
-Because Kilo does not have a dedicated `--permission` runtime flag, you usually whitelist through config or environment:
+The best locked-down wrapper invocation is not CLI-only:
 
 ```bash
-# Headless run with a locked-down allowlist via env
-KILO_PERMISSION='{"*":"deny","read":"allow","grep":"allow","bash":{"git status *":"allow"}}' \
-  kilo run "summarize the auth module"
-
-# Use the built-in plan agent to default bash/edit to ask
-kilo --agent plan
-
-# Create and use a read-only subagent
-kilo agent create --permissions read,grep --mode subagent --description "read-only explorer"
-kilo --agent read-only-explorer
+KILO_DISABLE_PROJECT_CONFIG=1 \
+KILO_PERMISSION='{"*":"deny","read":"allow","grep":"allow","glob":"allow"}' \
+  kilo run "summarize the repository"
 ```
 
-PolicyEngine can express this use case as `SetApprovalMode` to a deny-by-default posture plus explicit `GrantRead`, `AllowCommand`, and similar rules. It is not fully ergonomic because Kilo's tool-key wildcard patterns and last-match-wins ordering do not map directly to PolicyEngine's rule model. Without changes, PolicyEngine could describe the intent but not the exact pattern-matching behavior or agent-scoped deny defaults.
+Concrete examples:
+
+```bash
+# Deny all, then allow read-only search.
+KILO_PERMISSION='{"*":"deny","read":"allow","grep":"allow","glob":"allow"}' \
+  kilo run "find auth entry points"
+
+# Deny all, ask for bash, allow two safe git command patterns.
+KILO_PERMISSION='{"*":"deny","bash":{"*":"ask","git status *":"allow","git diff *":"allow"}}' \
+  kilo run --interactive "inspect git state"
+
+# Select a preconfigured locked-down agent.
+kilo run --agent plan "make a plan without editing files"
+```
+
+For Claudine, `KILO_PERMISSION` plus `KILO_DISABLE_PROJECT_CONFIG=1` is the practical session-scoped posture. It is not pure CLI, and adding permissions back in the same run must be done by building the JSON overlay before launch. PolicyEngine needs a Kilo backend that emits provider-native ordered rules.
 
 ### YOLO
 
-Kilo Code's YOLO mode is called **auto-approve**. A session can be put into this mode by:
+Kilo's YOLO modes are:
 
-- Starting `kilo run` with `--auto`, for example `kilo run --auto "..."`.
-- Starting `kilo run` with `--dangerously-skip-permissions`.
-- Setting `permission: "allow"` or `permission: { "*": "allow" }` in config.
-- Using an agent whose permissions are all `allow`.
-- Toggling **Enable auto-approve permissions** from the interactive TUI command palette (inherited from OpenCode).
+- `kilo run --auto`
+- `kilo run --dangerously-skip-permissions`
+- Runtime allow-everything through the TUI/VS Code permission API
+- Static config such as `permission: {"*": "allow"}`
+- An agent whose rules allow everything
 
-Availability:
+YOLO is available in interactive sessions through the runtime toggle and config. It is available in non-interactive sessions through `--auto` and `--dangerously-skip-permissions`.
 
-- **Interactive sessions**: yes, via the TUI command palette auto-approve toggle or by using an agent configured with all-allow permissions.
-- **Non-interactive sessions**: yes, via `kilo run --auto` or `kilo run --dangerously-skip-permissions`.
-
-When in auto-approve mode:
-
-- **Allowed**: any tool call that is not explicitly denied is approved automatically, including bash, edit/write, webfetch, websearch, MCP tools, and subagent spawns.
-- **Still enforced**: explicit `"deny"` rules in config are still enforced; if a tool is denied it will not run.
-- **Not allowed**: auto-approve cannot override managed/MDM config that denies an action.
-
-`--auto` and `--dangerously-skip-permissions` differ in one important way: `--auto` tracks and auto-approves permissions requested by spawned Task child sessions, while `--dangerously-skip-permissions` only auto-approves the main session.
+YOLO does not bypass everything. Explicit deny rules still deny. Broad allow does not bypass sensitive `.env` read hardening. Provider config-file edits still force ask and disable always approval. Managed config loaded after normal config can constrain the result. The sandbox can still deny writes or selected network operations when enabled.
 
 ### Root User
 
-The public Kilo Code documentation does not describe any special permission behavior when the CLI is started as root or under `sudo`. The source code does not contain a root/sudo gate for auto-approve mode. Unlike Claude Code, there is no documented restriction that disables YOLO mode for root sessions. Therefore, YOLO mode remains available to root sessions unless an administrator blocks it through managed config.
+No root/sudo-specific permission gate was found in docs or source. Kilo does not appear to disable `--auto`, `--dangerously-skip-permissions`, or allow-everything for root sessions. Running as root therefore increases the blast radius of allowed shell/file operations unless policy and sandboxing are configured carefully.
 
 ### Configuring the Default
 
-Default permissions are configured through JSON/JSONC config files at two main scopes:
+User-scope defaults usually live in:
 
-- **User scope**: OS-specific XDG path (`~/Library/Application Support/kilo/kilo.jsonc` on macOS, `~/.config/kilo/kilo.jsonc` on Linux, `%APPDATA%\kilo\kilo.jsonc` on Windows). Legacy `opencode.json` / `opencode.jsonc` are also read. Applies across all projects.
-- **Repo scope**: `kilo.json` or `kilo.jsonc` in the project root, or inside `.kilo/` / `.kilocode/` (legacy `.opencode/` is also read). Applies to everyone working in the repository and can be checked into version control.
+- macOS on this host: `~/.config/kilo/kilo.jsonc`
+- Linux: `~/.config/kilo/kilo.jsonc`
+- Windows: `%APPDATA%\kilo\kilo.jsonc`
 
-Agent-specific defaults can also be defined in Markdown files under `~/.config/kilo/agents/` or `.kilo/agents/`.
+Kilo also reads home `.kilo` / `.kilocode` config directories and legacy `opencode` file names. Repo-scope defaults can live in `kilo.jsonc`, `kilo.json`, `.kilo/kilo.jsonc`, or `.kilocode/kilo.jsonc`.
 
-Examples that illustrate the grammar:
+Examples:
 
 ```json
-// ~/Library/Application Support/kilo/kilo.jsonc — user-wide defaults (macOS)
 {
   "$schema": "https://app.kilo.ai/config.json",
   "permission": {
     "*": "ask",
+    "read": "allow",
+    "grep": "allow",
+    "glob": "allow",
     "bash": {
       "*": "ask",
-      "git *": "allow",
-      "npm *": "allow"
-    },
-    "read": "allow"
-  }
-}
-```
-
-```json
-// kilo.json — repo-shared defaults
-{
-  "$schema": "https://app.kilo.ai/config.json",
-  "permission": {
-    "edit": "ask",
-    "bash": {
-      "*": "ask",
-      "npm test": "allow"
-    },
-    "external_directory": {
-      "~/shared/**": "allow"
+      "git status *": "allow",
+      "git diff *": "allow"
     }
   }
 }
 ```
 
 ```json
-// Agent config in kilo.json
 {
   "$schema": "https://app.kilo.ai/config.json",
   "agent": {
-    "review": {
-      "mode": "subagent",
-      "description": "Read-only code reviewer",
+    "docs-writer": {
+      "description": "Writes documentation only",
+      "mode": "primary",
       "permission": {
-        "edit": "deny",
-        "write": "deny",
-        "bash": "deny"
+        "*": "deny",
+        "read": "allow",
+        "edit": {
+          "*": "deny",
+          "*.md": "allow"
+        }
       }
     }
   }
@@ -502,303 +527,156 @@ Examples that illustrate the grammar:
 ```
 
 ```markdown
-<!-- ~/.config/kilo/agents/review.md -->
 ---
-description: Code review without edits
+description: Read-only security audit
 mode: subagent
 permission:
-  edit: deny
-  bash: ask
-  webfetch: deny
+  "*": deny
+  read: allow
+  grep: allow
+  glob: allow
+  bash:
+    "*": deny
+    "git log *": allow
 ---
-Only analyze code and suggest changes.
+
+Review code and report findings without editing files.
 ```
 
 ### Extending the Base
 
-Default permissions can be set at user scope and then narrowed or extended by narrower scopes or CLI flags.
-
-**Example 1: user allows, repo denies.**
-
-User `~/.config/kilo/kilo.jsonc`:
+A user can set broad personal defaults and let a repo narrow them:
 
 ```json
 {
   "permission": {
-    "bash": {
-      "rm *": "allow"
-    }
-  }
-}
-```
-
-Repo `kilo.json`:
-
-```json
-{
-  "permission": {
-    "bash": {
-      "rm *": "deny"
-    }
-  }
-}
-```
-
-Result: `rm` is blocked in the repository because the later project config overrides the earlier global config.
-
-**Example 2: repo default ask, CLI auto-approve override.**
-
-Repo `kilo.json`:
-
-```json
-{
-  "permission": {
-    "edit": "ask",
+    "*": "allow",
     "bash": "ask"
   }
 }
 ```
 
-CLI:
-
-```bash
-kilo run --auto "apply the suggested refactor"
-```
-
-Result: the non-interactive run auto-approves non-denied edit and bash requests for this session.
-
-**Example 3: global whitelist plus project additions.**
-
-Global config:
-
 ```json
 {
   "permission": {
-    "*": "deny",
-    "read": "allow",
-    "grep": "allow"
-  }
-}
-```
-
-Repo `kilo.json`:
-
-```json
-{
-  "permission": {
+    "edit": {
+      "*": "deny",
+      "docs/**": "allow"
+    },
     "bash": {
-      "npm test": "allow"
+      "*": "deny",
+      "npm test *": "allow"
     }
   }
 }
 ```
 
-Result: in this repo, read, grep, and `npm test` are allowed; everything else is denied.
+CLI and env can narrow further for one wrapper run:
+
+```bash
+KILO_DISABLE_PROJECT_CONFIG=1 KILO_PERMISSION='{"*":"deny","read":"allow"}' \
+  kilo run "read package metadata only"
+```
+
+Managed config and macOS managed preferences load late and should be treated as administrative overrides.
 
 ## Tools and Permissions
 
-Kilo Code provides the following built-in tools. Each tool is gated by a permission key. Some keys cover multiple tools.
+Kilo's built-in/default tool surface includes:
 
-| Tool | Permission key | Permission required by default |
-| :----- | :----- | :----- |
-| `bash` | `bash` | Allow |
-| `edit` | `edit` | Allow |
-| `write` | `edit` (covers all file modifications) | Allow |
-| `apply_patch` | `edit` (covers all file modifications) | Allow |
-| `read` | `read` | Allow, except `.env` files are denied |
-| `grep` | `grep` | Allow |
-| `glob` | `glob` | Allow |
-| `list` | `list` | Allow |
-| `lsp` | `lsp` | Allow (requires experimental flag) |
-| `skill` | `skill` | Allow |
-| `todowrite` / `todoread` | `todowrite` | Allow |
-| `webfetch` | `webfetch` | Allow |
-| `websearch` | `websearch` | Allow |
-| `question` | `question` | Allow |
-| `task` (subagent spawn) | `task` | Allow |
-| `repo_clone` | `repo_clone` | Deny |
-| `repo_overview` | `repo_overview` | Deny |
-| `agent_manager` | `agent_manager` | Deny |
-| `notebook_read` | `notebook_read` | Allow |
-| `notebook_edit` | `notebook_edit` | Allow |
-| `notebook_execute` | `notebook_execute` | Allow |
+- Shell/command: `bash`
+- File/read/search: `read`, `glob`, `grep`, `list`
+- File/write: `edit`, `write`, `apply_patch`
+- Planning/todos: `todowrite`, plan enter/exit tools
+- Delegation: `task`
+- Web: `webfetch`, `websearch`
+- Skills and context: `skill`, LSP when enabled
+- Kilo-specific tools: `question`, `suggest`, `agent_manager`, `interactive_terminal`, `repo_clone`, `repo_overview`, notebook tools, semantic/code search when enabled
+- MCP tools: sanitized names such as `{server}_{tool}`
+- Custom plugin tools: exported from configured plugin/tool files
 
-Additional tools such as `suggest`, `interactive_terminal`, `plan_enter`, and `plan_exit` are gated and default to `deny` because they are interactive or UI-oriented.
+Permission checks map tool calls to permission names. `write` and `apply_patch` use `edit`. `task` checks the requested subagent name. MCP checks use the generated tool key. Bash checks parse shell commands and may also trigger `external_directory` if a command touches paths outside the worktree.
 
-Permission rules match the tool input. For example, `bash` rules match parsed command strings, `read`/`edit` rules match file paths, `glob` rules match glob patterns, `grep` rules match regex patterns, and `webfetch` rules match URLs. Wildcards follow simple glob semantics: `*` matches zero or more characters, `?` matches exactly one character, and all other characters match literally. `~` and `$HOME` at the start of a pattern expand to the user's home directory.
+Rule decisions are `allow`, `ask`, and `deny`; prompt replies are `once`, `always`, and `reject`. Static rule conflicts are last-match-wins, but runtime saved approvals cannot override base denials, and broad saved allows cannot bypass base asks unless the saved pattern is at least as broad.
 
-Rules are evaluated in order across merged rulesets and the **last matching rule wins**, so a common pattern is to place `"*": "ask"` first and more specific allow/deny rules after it.
-
-### Native permission entities
-
-Kilo's permission system is tool-centric. The native entities it can target are:
-
-- **Tools** — each built-in tool has a permission key.
-- **Tool groups** — `edit` covers `edit`, `write`, and `apply_patch`.
-- **Commands** — `bash` permission rules match parsed command strings.
-- **Paths** — `read`, `edit`, `glob`, `grep`, `list`, and `external_directory` match file paths or patterns.
-- **Workspace/external directories** — `external_directory` gates paths outside the working directory.
-- **MCP servers** — enabled/disabled via the `mcp` config object.
-- **MCP tools** — targeted by server-prefixed wildcard names such as `mymcp_*` or `mymcp_search`.
-- **Agents/subagents** — agents define their own `permission` object; `task` controls subagent spawning.
-- **Mode** — `--auto` and `--dangerously-skip-permissions` toggle auto-approve for the session.
-- **Approval category** — `allow`, `ask`, `deny`.
-- **Sandbox** — separate filesystem/network isolation for Bash subprocesses.
-- **Extensions/plugins** — plugin-provided tools can be avoided by not loading the plugin.
-
-### Rule grammar
-
-Permission rules follow this grammar:
-
-```json
-{
-  "permission": {
-    "<tool-key>": "<action>",
-    "<tool-key>": {
-      "<pattern>": "<action>",
-      "<pattern>": "<action>"
-    }
-  }
-}
-```
-
-- `<action>` is one of `allow`, `ask`, `deny`.
-- `<tool-key>` can be any built-in key, custom tool name, or MCP tool wildcard.
-- `<pattern>` uses `*` (zero or more), `?` (one), and literal matching. `~` and `$HOME` expand to the home directory.
-
-Conflict resolution is last-match-wins across the merged ruleset. A broad deny rule placed after a narrow allow rule will win, and vice versa. There is no special deny-beats-allow semantics.
-
-### Approval modes
-
-Kilo does not use named coarse permission modes like Claude Code. Instead it has:
-
-- **Default** — permissive defaults as described above.
-- **Auto-approve** (`--auto`) — non-denied requests are approved automatically, including Task child sessions.
-- **Dangerously-skip-permissions** (`--dangerously-skip-permissions`) — non-denied requests are approved automatically for the main session only.
-- **Plan agent** (`--agent plan`) — a built-in primary agent that defaults `edit` and `bash` to `ask`.
-
-There is no `dontAsk`, `bypassPermissions`, or classifier-based `auto` mode.
-
-### Persistence
-
-When Kilo prompts for approval, the UI offers three outcomes:
-
-- `once` — approve just this request.
-- `always` — approve future requests matching the suggested patterns for the rest of the current Kilo session.
-- `reject` — deny the request.
-
-`always` approvals are session-only and are lost when Kilo exits.
+Approvals can persist. Source shows `always` and explicit always-rule saves update global config, while the UI text says the approval lasts until Kilo is restarted. The implementation is more durable than that text for ordinary rules. Protected config-path requests are the exception: they force `ask`, hide/disable always, and downgrade always replies to once.
 
 ## Sandboxing, Trust, and Administrative Controls
 
-### Sandboxing
+Kilo's sandbox is separate from approval mode. It is configured with:
 
-Kilo Code provides an OS-enforced sandbox for Bash subprocesses that is separate from the permission rule engine.
+```json
+{
+  "experimental": {
+    "sandbox": true,
+    "sandbox_restrict_network": true
+  }
+}
+```
 
-- **Backends**: macOS uses Seatbelt; Linux and WSL2 use bubblewrap.
-- **Modes**:
-  - **Auto-allow**: sandboxed Bash commands run without prompting; the sandbox boundary substitutes for the bare `bash` ask rule.
-  - **Regular permissions**: sandboxed commands still go through the regular permission flow.
-- **Filesystem**: by default, sandboxed commands can write only to the working directory and a session temp directory. Use `sandbox.filesystem.allowWrite`, `denyWrite`, `denyRead`, and `allowRead` to customize paths.
-- **Network**: modes include `allow`, `deny`, and `proxy`. Use `allowedHosts` to restrict outbound hosts. As of current source, `proxy` and `allowedHosts` support is experimental.
-- **Scope**: sandboxing applies only to Bash subprocesses. Built-in file tools, MCP tools, and other operations run outside this boundary.
-- **Platform differences**: Native Windows is not supported; use WSL2. If sandbox dependencies are missing, Kilo warns and may fall back to unsandboxed execution depending on configuration.
+It is off by default. When enabled, it uses macOS `sandbox-exec`/Seatbelt or Linux bubblewrap. Windows has no backend. The sandbox restricts shell commands and file-write tools to the project/worktree plus Kilo state roots. It denies writes to `.git`, the sandbox policy store, and sandbox preference store. It does not confine file reads.
 
-Permissions and sandboxing are complementary:
+Network restriction is on by default when sandboxing is enabled. It blocks model-originated shell network, first-party HTTP tools, custom tools, and remote MCP delegated authority. It does not block provider/model traffic, local MCP servers, or plugin hooks. `allowedHosts` and proxy modes exist in the lower-level profile type but current source fails closed for non-empty `allowedHosts` and proxy.
 
-- Permission rules block Kilo from attempting restricted actions.
-- Sandbox restrictions prevent Bash commands from reaching resources outside defined boundaries, even if a prompt injection bypasses Kilo's decision-making.
+No folder-trust prompt was found. Project config loads by default unless `KILO_DISABLE_PROJECT_CONFIG=1` is set. Managed config files and macOS MDM preferences load late and override lower layers. Kilo also has Kilo Cloud organization config for managed org settings.
 
-### Trust and administrative controls
+Protected paths and files include sensitive `.env` reads, provider config files, AGENTS files, `.kilo` / `.kilocode` config paths, `.git` writes under sandbox, and sandbox policy/preference stores.
 
-**Folder/project trust**: Kilo Code does not document a folder trust gate that disables project config, memory, extensions, or MCP servers.
-
-**Managed/admin policy**: managed settings can be delivered in several ways:
-
-- **File-based**: drop a `kilo.jsonc` in `/Library/Application Support/kilo/` on macOS, `/etc/kilo/` on Linux, or `%ProgramData%\kilo\` on Windows. These directories require admin access to write.
-- **macOS MDM**: deploy a `.mobileconfig` with the managed domain.
-- **Kilo Gateway**: active organization config from Kilo Gateway can enforce permissions, allowed providers, and other rules.
-
-Managed settings occupy the highest precedence tier and cannot be overridden by user, project, or local config, nor by most environment variables or CLI flags. The `permission` object in a managed config is enforced like any other managed key.
-
-**Safe/minimal mode**: Kilo does not have a dedicated safe-mode flag. Plugins can be avoided by not loading them, but built-in tools and permissions remain active.
-
-### Protected paths
-
-The only provider-reserved path protection documented is the default `.env` deny rule:
-
-- `*.env` — denied
-- `*.env.*` — denied
-- `*.env.example` — explicitly allowed
-
-There is no extensive list of protected dotfiles or provider config paths like Claude Code maintains.
-
-### Security posture
-
-Kilo Code's permission system is a **client-side static policy engine with advisory prompts**, layered with an **optional OS-enforced sandbox** for Bash subprocesses. Managed settings provide administrative policy, but they are still enforced by the client. Effective security requires combining strict permission rules, sandbox boundaries, and managed policy where available.
+The honest security posture is mixed: static client-side policy plus UX prompts, with optional OS-enforced sandboxing for writes and selected network operations. It is not a full containment sandbox.
 
 ## MCP and Permissions
 
-MCP servers add external tools that appear alongside built-in tools. Once a server is configured under the `mcp` object, its tools are registered with the server name as a prefix (for example, a server named `mymcp` exposes tools like `mymcp_search`).
-
-Permissions interact with MCP tools in three ways:
-
-1. **Server enablement**: A server can be enabled or disabled with `enabled: true`/`false`. A disabled server is not available.
-2. **Tool-level rules**: The global `permission` object can target MCP tools by name or wildcard:
+MCP tools use the same permission system as built-in tools. Each tool is named with a sanitized server prefix, for example `github_create_pull_request`, so rules can target a single tool or a group:
 
 ```json
 {
-  "$schema": "https://app.kilo.ai/config.json",
+  "mcp": {
+    "github": {
+      "type": "remote",
+      "url": "https://example.com/mcp",
+      "enabled": true
+    }
+  },
   "permission": {
-    "mymcp_*": "ask",
-    "mymcp_write_file": "deny",
-    "mymcp_read_file": "allow"
+    "github_*": "ask",
+    "github_create_pull_request": "deny"
   }
 }
 ```
 
-3. **Legacy `tools` object**: The deprecated `tools` object can also disable an entire MCP server or pattern:
+MCP can be made safer by disabling unused servers, denying broad server patterns by default, and allowing only selected tools. Subagents inherit parent denials for MCP-prefixed tool names, so Plan Mode and locked-down orchestrators can constrain child sessions.
 
-```json
-{
-  "tools": {
-    "mymcp_*": false
-  }
-}
-```
-
-To make MCP safer:
-
-- Deny all MCP tools by default and allow only specific servers or operations.
-- Disable high-risk servers globally and enable them only for specific agents.
-- Use `ask` for write/delete operations while keeping read operations allowed.
-- Keep the MCP server list short to reduce context size and attack surface.
-- Use the experimental `policies` feature to deny untrusted LLM providers, since MCP servers may forward requests through configured providers.
-
-MCP tools run **outside** the Kilo sandbox. Remote MCP servers make network requests from outside the Kilo process, and stdio MCP servers run as local subprocesses with the user's environment.
+Server-level filtering is `enabled: false`. Tool-level filtering is ordinary permission rules. Remote MCP OAuth is stored per user. MCP resources are exposed through the MCP service, but no separate resource-level permission key was found. Local MCP servers and plugin hooks are outside sandbox network restriction; remote MCP tools are marked as delegated authority and are checked by Kilo's sandbox network assertion when restriction is active.
 
 ## Non-Interactive Behavior
 
-In non-interactive `kilo run` mode, interactive permission prompts cannot be shown. Any tool call that would `ask` for approval is effectively blocked because there is no user to approve it. To avoid hangs:
+Plain `kilo run` subscribes to permission events and auto-rejects root-session prompts. Child-session asks from a headless root are denied to avoid hanging. `--auto` auto-approves the root and tracked Task child sessions. `--dangerously-skip-permissions` auto-approves non-denied prompts. `--format json` changes event output but not this permission behavior.
 
-- Pass `--auto` to approve non-denied requests automatically (main session and tracked Task child sessions).
-- Pass `--dangerously-skip-permissions` to approve non-denied requests automatically for the main session only.
-- Set `KILO_PERMISSION` with explicit `allow` rules for every tool the headless session needs.
-- Pre-configure a locked-down agent and select it with `--agent`.
-
-`ask` rules do not automatically become `allow` in headless mode; they block the call.
-
-## Sources
-
-- [Kilo Code docs - Permissions](https://docs.kilo.ai/permissions)
-- [Kilo Code docs - Config](https://docs.kilo.ai/config)
-- [Kilo Code docs - Tools](https://docs.kilo.ai/tools)
-- [Kilo Code docs - Agents](https://docs.kilo.ai/agents)
-- [Kilo Code docs - MCP servers](https://docs.kilo.ai/mcp-servers)
-- [Kilo Code docs - CLI](https://docs.kilo.ai/cli)
-- [Kilo Code config schema](https://app.kilo.ai/config.json)
-- [Kilo Code GitHub repository](https://github.com/Kilo-Org/kilocode)
+Kilo has a programmatic approval API: list pending permissions, reply once/always/reject, save always allow/deny rules, and enable allow-everything. That makes it possible for wrappers to supervise prompts when attached to a server, but the CLI has no native no-tools/no-permissions flag.
 
 ## Changelog
 
-- 2026-07-02: Refreshed research against Kilo Code v7.3.45, current documentation, and source on GitHub. Updated config paths to XDG-basedir equivalents for macOS/Linux/Windows. Documented Kilo-specific permission keys (agent_manager, repo_clone, repo_overview, notebook_*) and the additional list/skill keys. Added coverage of the OS-enforced sandbox (Seatbelt/bubblewrap), network modes, and experimental proxy/allowedHosts status. Distinguished `--auto` from `--dangerously-skip-permissions` (Task child-session tracking). Expanded frontmatter to the full schema contract and flagged Claudine updates as required.
+- **2026-07-03** — Refreshed against current upstream `main` commit `419ff008ef180dd7076f679a89442883ba8f8d86`, installed CLI `7.3.45`, current Kilo docs, and local config inspection. Corrected defaults, `.env` behavior, global config path, non-interactive behavior, approval persistence, config-path protection, sandbox scope, MCP handling, and frontmatter metadata.
+- **2026-07-02** — Legacy research recorded an OpenCode-like permissions model, Kilo-specific permission keys, sandbox support, managed config layers, and CLI auto-approval flags. This update verifies and revises those claims instead of treating them as current truth.
+
+## Sources
+
+- [Kilo Code Agent Permissions](https://kilo.ai/docs/customize/agent-permissions)
+- [Kilo Code Auto-Approving Actions](https://kilo.ai/docs/getting-started/settings/auto-approving-actions)
+- [Kilo Code Sandboxing](https://kilo.ai/docs/getting-started/settings/sandboxing)
+- [Kilo Code CLI Command Reference](https://kilo.ai/docs/code-with-ai/platforms/cli-reference)
+- [Kilo Code Custom Subagents](https://kilo.ai/docs/customize/custom-subagents)
+- [Kilo Code .kilocodeignore](https://kilo.ai/docs/customize/context/kilocodeignore)
+- [Kilo Code repository](https://github.com/Kilo-Org/kilocode)
+- [Source: `packages/core/src/permission.ts`](https://github.com/Kilo-Org/kilocode/blob/main/packages/core/src/permission.ts)
+- [Source: `packages/core/src/plugin/agent.ts`](https://github.com/Kilo-Org/kilocode/blob/main/packages/core/src/plugin/agent.ts)
+- [Source: `packages/opencode/src/permission/index.ts`](https://github.com/Kilo-Org/kilocode/blob/main/packages/opencode/src/permission/index.ts)
+- [Source: `packages/opencode/src/config/config.ts`](https://github.com/Kilo-Org/kilocode/blob/main/packages/opencode/src/config/config.ts)
+- [Source: `packages/opencode/src/config/permission.ts`](https://github.com/Kilo-Org/kilocode/blob/main/packages/opencode/src/config/permission.ts)
+- [Source: `packages/opencode/src/config/paths.ts`](https://github.com/Kilo-Org/kilocode/blob/main/packages/opencode/src/config/paths.ts)
+- [Source: `packages/opencode/src/config/managed.ts`](https://github.com/Kilo-Org/kilocode/blob/main/packages/opencode/src/config/managed.ts)
+- [Source: `packages/opencode/src/cli/cmd/run.ts`](https://github.com/Kilo-Org/kilocode/blob/main/packages/opencode/src/cli/cmd/run.ts)
+- [Source: `packages/opencode/src/kilocode/permission/config-paths.ts`](https://github.com/Kilo-Org/kilocode/blob/main/packages/opencode/src/kilocode/permission/config-paths.ts)
+- [Source: `packages/opencode/src/kilocode/sandbox/policy.ts`](https://github.com/Kilo-Org/kilocode/blob/main/packages/opencode/src/kilocode/sandbox/policy.ts)
+- [Source: `packages/kilo-sandbox/src/backend.ts`](https://github.com/Kilo-Org/kilocode/blob/main/packages/kilo-sandbox/src/backend.ts)
+- [Source: `packages/opencode/src/mcp/index.ts`](https://github.com/Kilo-Org/kilocode/blob/main/packages/opencode/src/mcp/index.ts)

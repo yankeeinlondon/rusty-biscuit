@@ -1,790 +1,641 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-01
-last_updated: 2026-07-02
-agent: open_code
-model: kimi-for-coding/k2p7
+last_updated: 2026-07-03
+agent: codex
+model: default
 
 cli_params:
-  - param: auto
+  - param: "--auto"
     style: switch
-    description: "Start the session in auto-approve mode. Any permission request that is not explicitly denied is approved automatically instead of prompting."
-    example: "opencode run --auto \"refactor the auth module\""
-    example_description: "Runs a headless prompt where all non-denied permission requests are approved without interactive approval."
-  - param: agent
+    description: "Run with auto-approval for permission requests that would otherwise prompt; explicit deny rules are still enforced."
+    example: "opencode run --auto \"Refactor this module\""
+    example_description: "Runs a headless prompt and replies once to each non-denied permission request."
+  - param: "--dangerously-skip-permissions"
     style: switch
-    description: "Select the active agent for the session. Each agent can define its own permission profile, so this flag determines which permission set is evaluated for tool calls."
-    example: "opencode --agent plan"
-    example_description: "Starts an interactive session with the plan agent, which defaults bash and edit to ask."
-  - param: permissions
+    description: "Hidden alias for the same auto-approval path as --auto; accepted by opencode run and treated as dangerous YOLO behavior."
+    example: "opencode run --dangerously-skip-permissions \"Apply the requested changes\""
+    example_description: "Auto-approves promptable permissions for one run without changing config."
+  - param: "--yolo"
     style: switch
-    description: "For opencode agent create only. Comma-separated list of permissions to allow when scaffolding a new agent. Anything omitted is denied in the generated agent. Aliased as --tools."
-    example: "opencode agent create --permissions read,grep --mode subagent"
-    example_description: "Creates a new read-only subagent that is allowed only read and grep."
-  - param: pure
+    description: "Hidden compatibility alias for auto-approval in opencode run."
+    example: "opencode run --yolo \"Update dependencies\""
+    example_description: "Uses the same auto-approval mechanism as --auto."
+  - param: "--agent"
     style: switch
-    description: "Run without external plugins. This removes plugin-provided tools, hooks, and customizations from the session, reducing the accessible tool surface."
-    example: "opencode --pure"
-    example_description: "Starts a session with only built-in tools and configuration, ignoring external plugins."
+    description: "Select the active agent; agent permission rules are merged after global rules and can narrow or widen the effective policy."
+    example: "opencode run --agent plan \"Review the design\""
+    example_description: "Runs with the plan agent, whose built-in rules deny broad edit access."
+  - param: "--dir"
+    style: switch
+    description: "Set the directory for the run. This determines the project/worktree boundary used by external_directory checks for local runs."
+    example: "opencode run --dir packages/api \"Inspect this package\""
+    example_description: "Runs from packages/api, affecting relative paths and external-directory evaluation."
+  - param: "--attach"
+    style: switch
+    description: "Attach opencode run to a running OpenCode server. Permission prompts and saved approvals are handled by that server/session."
+    example: "opencode run --attach http://127.0.0.1:4096 --password \"$OPENCODE_SERVER_PASSWORD\" \"Continue\""
+    example_description: "Uses an existing server and supplies Basic Auth credentials."
+  - param: "--password"
+    style: switch
+    description: "Basic Auth password for --attach; defaults to OPENCODE_SERVER_PASSWORD."
+    example: "opencode run --attach http://127.0.0.1:4096 --password secret \"Summarize\""
+    example_description: "Authenticates to a password-protected OpenCode server."
+  - param: "--username"
+    style: switch
+    description: "Basic Auth username for --attach; defaults to OPENCODE_SERVER_USERNAME or opencode."
+    example: "opencode run --attach http://127.0.0.1:4096 --username opencode --password secret \"Summarize\""
+    example_description: "Overrides the Basic Auth username for an attached server."
+  - param: "--pure"
+    style: switch
+    description: "Global flag that sets OPENCODE_PURE=1 and runs without external plugins, reducing plugin-provided tools and hooks."
+    example: "opencode --pure run \"Inspect this repo\""
+    example_description: "Starts a run with external plugins disabled for the process."
+  - param: "agent create --permissions"
+    style: switch
+    description: "For opencode agent create only. Takes a comma-separated list of permission keys to allow in the generated agent; omitted permissions are denied. Alias: --tools."
+    example: "opencode agent create --path .opencode --description \"Read-only reviewer\" --mode subagent --permissions read,grep,glob"
+    example_description: "Creates a subagent whose frontmatter denies every listed agent-create permission not named in the allow list."
+  - param: "agent create --tools"
+    style: switch
+    description: "Alias for agent create --permissions."
+    example: "opencode agent create --description \"No shell reviewer\" --mode subagent --tools read,grep,glob"
+    example_description: "Uses the legacy tools alias to generate an agent with selected permissions."
+  - param: "serve --hostname"
+    style: switch
+    description: "Bind address for the headless API server; affects exposure of the programmatic permission API."
+    example: "OPENCODE_SERVER_PASSWORD=secret opencode serve --hostname 127.0.0.1"
+    example_description: "Starts a local-only server with Basic Auth enabled."
+  - param: "serve --port"
+    style: switch
+    description: "Port for the headless API server; affects where programmatic permission replies can be sent."
+    example: "OPENCODE_SERVER_PASSWORD=secret opencode serve --port 4096"
+    example_description: "Starts the API server on a predictable port."
 
 env_vars:
   - name: OPENCODE_PERMISSION
-    effect: "Provides an inline JSON permissions configuration that is merged into the effective config for the session."
+    effect: "Inline JSON object merged into the effective legacy permission config after all file, directory, inline, and managed config sources; useful for session-scoped policy overlays."
   - name: OPENCODE_CONFIG_CONTENT
-    effect: "Provides inline JSON config content that can include a permission object and overrides most config file values."
+    effect: "Inline JSON/JSONC config loaded near the end of config precedence; can define permission, agent, mcp, plugin, and other security-control settings for one process."
   - name: OPENCODE_CONFIG
-    effect: "Points to a custom config file path; that file may define permissions and is loaded between global and project config."
+    effect: "Path to a custom config file loaded after global config and before project config."
   - name: OPENCODE_CONFIG_DIR
-    effect: "Points to a custom config directory that is searched for agents, commands, modes, and plugins like the standard .opencode directory."
+    effect: "Custom config directory used like the standard config directory for opencode.json/opencode.jsonc, agents, commands, plugins, and related resources."
+  - name: OPENCODE_PURE
+    effect: "Truthy value disables external plugins; the CLI --pure flag sets this for the process."
+  - name: OPENCODE_DISABLE_PROJECT_CONFIG
+    effect: "Truthy value disables project config discovery, including project opencode.json/opencode.jsonc and project .opencode directories."
   - name: OPENCODE_ENABLE_EXA
-    effect: "Enables the websearch tool when set to any truthy value."
-  - name: OPENCODE_EXPERIMENTAL_LSP_TOOL
-    effect: "Enables the experimental lsp tool when set to true."
-  - name: OPENCODE_DISABLE_DEFAULT_PLUGINS
-    effect: "Disables default plugins, reducing the tool surface available to the session."
-  - name: OPENCODE_DISABLE_CLAUDE_CODE
-    effect: "Disables reading from .claude directories, including prompts and skills."
-  - name: OPENCODE_DISABLE_CLAUDE_CODE_PROMPT
-    effect: "Disables reading ~/.claude/CLAUDE.md."
-  - name: OPENCODE_DISABLE_CLAUDE_CODE_SKILLS
-    effect: "Disables loading .claude/skills."
+    effect: "Truthily enables the websearch tool in current public docs when not using the OpenCode provider."
+  - name: OPENCODE_WEBSEARCH_PROVIDER
+    effect: "Selects the websearch backend in current source, which affects whether the websearch tool can execute."
+  - name: EXA_API_KEY
+    effect: "Credential used by the Exa websearch backend; presence affects websearch availability."
+  - name: PARALLEL_API_KEY
+    effect: "Credential used by the Parallel websearch backend; presence affects websearch availability."
+  - name: OPENCODE_SERVER_PASSWORD
+    effect: "Enables HTTP Basic Auth for opencode serve/web and is also the default password used by opencode run --attach."
+  - name: OPENCODE_SERVER_USERNAME
+    effect: "Overrides the Basic Auth username for opencode serve/web and --attach; defaults to opencode."
 
 config_files:
-  - os: all
-    user: ~/.config/opencode/opencode.json
-    repo: opencode.json
-    notes: "Both JSON and JSONC are supported. TUI-specific settings live in tui.json alongside the config file."
   - os: macos
-    user: /Library/Application Support/opencode/opencode.json
-    repo: ""
-    notes: "File-based managed config. Requires admin/root access to write."
+    user: ".config/opencode/opencode.json or .config/opencode/opencode.jsonc"
+    repo: "opencode.json or opencode.jsonc; .opencode/opencode.json or .opencode/opencode.jsonc; .opencode/agents/*.md"
+    notes: "OpenCode uses XDG config paths on macOS by default. Managed config can also live in /Library/Application Support/opencode/opencode.json or opencode.jsonc and macOS MDM managed preferences under ai.opencode.managed."
   - os: linux
-    user: /etc/opencode/opencode.json
-    repo: ""
-    notes: "File-based managed config. Requires admin/root access to write."
+    user: ".config/opencode/opencode.json or .config/opencode/opencode.jsonc"
+    repo: "opencode.json or opencode.jsonc; .opencode/opencode.json or .opencode/opencode.jsonc; .opencode/agents/*.md"
+    notes: "OpenCode uses XDG config paths. Managed config can also live in /etc/opencode/opencode.json or opencode.jsonc."
   - os: windows
-    user: "%ProgramData%\\opencode\\opencode.json"
-    repo: ""
-    notes: "File-based managed config. Requires admin access to write."
+    user: ".config\\opencode\\opencode.json or .config\\opencode\\opencode.jsonc"
+    repo: "opencode.json or opencode.jsonc; .opencode\\opencode.json or .opencode\\opencode.jsonc; .opencode\\agents\\*.md"
+    notes: "The source uses xdg-basedir for user config and %ProgramData%\\opencode for managed config. Windows shell/path behavior can affect external_directory matching."
 
 precedence:
   - source: cli
-    scope: [approval_mode]
+    scope: [approval_mode, agent_selection, server_auth, plugin_loading, workspace]
     merge_strategy: none
-    notes: "CLI flags such as --auto are temporary session overrides."
-  - source: env
-    scope: [permissions, config_content, config_path, config_dir]
-    merge_strategy: none
-    notes: "OPENCODE_PERMISSION, OPENCODE_CONFIG_CONTENT, OPENCODE_CONFIG, and OPENCODE_CONFIG_DIR apply for the session. They override file-based config except where managed settings take precedence."
-  - source: managed_preferences
+    notes: "--auto/--yolo/--dangerously-skip-permissions are session flags. --pure sets OPENCODE_PURE. --agent selects the agent whose permissions are evaluated."
+  - source: env_OPENCODE_PERMISSION
+    scope: [rules]
+    merge_strategy: deep
+    notes: "Merged into result.permission after managed config and before legacy tools migration; later rule order can override earlier rules."
+  - source: managed_preferences_macos
     scope: [all_config]
-    merge_strategy: none
-    notes: "On macOS, .mobileconfig deployed via MDM under ai.opencode.managed is the highest-priority config source and cannot be overridden by users."
+    merge_strategy: deep
+    notes: "macOS MDM managed preferences under ai.opencode.managed override file, directory, inline, remote, and account config before OPENCODE_PERMISSION is applied."
   - source: managed_config_files
     scope: [all_config]
-    merge_strategy: none
-    notes: "opencode.json under /Library/Application Support/opencode/, /etc/opencode/, or %ProgramData%\\opencode\\ overrides all lower config sources."
-  - source: inline_config
-    scope: [config]
     merge_strategy: deep
-    notes: "OPENCODE_CONFIG_CONTENT is loaded after .opencode directories and before managed config files."
-  - source: project_config
-    scope: [config]
+    notes: "System managed opencode.json/opencode.jsonc is loaded from /Library/Application Support/opencode, /etc/opencode, or %ProgramData%\\opencode."
+  - source: console_account_config
+    scope: [all_config, provider_policy]
     merge_strategy: deep
-    notes: "opencode.json in the project root. Project configs override global and remote defaults; later conflicting keys win."
-  - source: custom_config_path
-    scope: [config]
+    notes: "Active OpenCode Console organization config is loaded late and can manage providers."
+  - source: env_OPENCODE_CONFIG_CONTENT
+    scope: [all_config, rules, agents, mcp, plugins]
     merge_strategy: deep
-    notes: "OPENCODE_CONFIG file is loaded between global and project config."
-  - source: dot_opencode_directories
-    scope: [agents, commands, plugins, modes, tools, skills, themes, permissions]
+    notes: "Inline config is local-scoped and loaded after file and directory config."
+  - source: config_directories
+    scope: [rules, agents, commands, plugins, mcp]
     merge_strategy: deep
-    notes: ".opencode directories are loaded after project config. Agent-specific permission objects override global permission objects."
-  - source: global_user_config
-    scope: [config]
+    notes: "Global, discovered .opencode directories, and OPENCODE_CONFIG_DIR are loaded with nearer project directories applied later."
+  - source: repo_config
+    scope: [all_config, rules, agents, mcp, plugins]
+    merge_strategy: nearest
+    notes: "Project opencode.json/opencode.jsonc files are discovered upward from the run directory to the worktree and can be disabled with OPENCODE_DISABLE_PROJECT_CONFIG."
+  - source: env_OPENCODE_CONFIG
+    scope: [all_config]
     merge_strategy: deep
-    notes: "~/.config/opencode/opencode.json overrides remote organizational defaults."
+    notes: "Custom config file is loaded after global config and before project config."
+  - source: user_config
+    scope: [all_config]
+    merge_strategy: deep
+    notes: "User config includes config.json, opencode.json, and opencode.jsonc in the OpenCode config directory."
   - source: remote_well_known_config
-    scope: [config]
+    scope: [all_config]
     merge_strategy: deep
-    notes: ".well-known/opencode endpoint provides organizational defaults and is loaded first."
+    notes: "Remote .well-known/opencode organizational config loads before user config."
 
-default_posture: "With no configuration, OpenCode uses permissive defaults: most built-in tools are allowed automatically, while doom_loop and external_directory ask for approval. The read tool is allowed by default, but .env files are denied."
+default_posture: "The default build agent is permissive: most actions allow, external_directory and doom_loop ask, and question/plan control permissions are adjusted for the active agent. Current source asks before reading .env and .env.* files by default while allowing .env.example; older docs and prior research that said deny are no longer current."
 
 cli_zero_permissions:
-  supported: false
-  invocation: "OPENCODE_PERMISSION='{\"*\":\"deny\"}' opencode run \"...\""
-  mechanism: "OpenCode has no dedicated CLI flag for a no-permissions baseline. The closest session-scoped option is the OPENCODE_PERMISSION environment variable, which sets a deny-all rule."
-  limitations: "There is no native --permission or --no-tools runtime flag. --pure removes external plugins but leaves built-in tools. --agent can select a locked-down agent, but the agent must already be configured. Additional permissions must be added via OPENCODE_PERMISSION or pre-configured agents."
+  supported: true
+  invocation: "OPENCODE_PERMISSION='{\"*\":\"deny\"}' opencode --pure run \"...\""
+  mechanism: "Session-scoped deny-all rule injected through OPENCODE_PERMISSION, optionally combined with --pure to remove external plugin tools."
+  limitations: "There is no first-class --no-tools or --permission flag for run. Additional permissions cannot be added back with CLI flags in the same command except by encoding the entire rule overlay in OPENCODE_PERMISSION or OPENCODE_CONFIG_CONTENT. Built-in non-tool behavior, startup config loading, and server behavior still exist."
 
 agent_permissions:
   allowed: true
   fm_properties:
     - permission
+    - permissions
+    - agent.<name>.permission
+    - agents.<name>.permissions
     - tools
 
 yolo:
   has_interactive_yolo: true
   has_non_interactive_yolo: true
-  mechanism: "--auto flag (or setting permission to allow/all in config). In the TUI, auto-approve permissions can also be toggled from the command palette."
+  mechanism: "--auto is documented for interactive and run modes; opencode run also accepts hidden --yolo and --dangerously-skip-permissions aliases. Non-interactive run auto-replies once to promptable permissions; explicit deny still blocks."
 
 policy_engine:
   ergonomic: false
   provides_coverage: false
   gaps:
-    - "OpenCode permissions are tool-centric (read, edit, bash, webfetch, skill, question, doom_loop, etc.) and support wildcard/last-match-wins patterns, while PolicyEngine's canonical model is organized around filesystem, command, network, MCP, agent, and runtime axes."
-    - "The default permissive posture (most tools allow by default) is the inverse of PolicyEngine's typical ask/deny defaults, requiring explicit modeling."
-    - "external_directory is a path-scoped permission key rather than a true tool, and PolicyEngine would need to represent it as a workspace/external path rule with matching semantics."
-    - "doom_loop is a runtime recovery guard, not a standard tool or resource permission."
-    - "Agent-specific permissions and task subagent permissions are supported by OpenCode but require PolicyEngine to scope rules by agent name."
-    - "MCP tools are addressed by server-prefixed wildcard names (e.g., mymcp_*); PolicyEngine's MCP axis may not support arbitrary tool-name wildcard rules."
-    - "OpenCode has no OS-enforced sandbox to model; its security boundary is the static policy engine."
-    - "There is no CLI flag for a zero-permission baseline, so PolicyEngine mutations would need to emit env var or config-file changes."
+    - "Claudine's current OpenCode backend must understand current source behavior: --auto, hidden YOLO aliases, OPENCODE_PERMISSION, OPENCODE_CONFIG_CONTENT, JSONC config files, managed config, .opencode directories, and saved always approvals."
+    - "OpenCode permissions are flat ordered action/resource/effect rules internally but public docs still expose legacy permission object grammar; PolicyEngine needs exact migration/order semantics."
+    - "Tool visibility is derived from whole-tool deny rules, not a separate allowlist; ask rules keep tools visible."
+    - "MCP tools use server-prefixed tool names, while MCP resource tools use read permission with mcp:server:resource patterns."
+    - "The default .env posture changed from deny to ask in current source, requiring provider metadata and tests to avoid stale assumptions."
+    - "No OS sandbox exists, so PolicyEngine can model approvals but cannot honestly represent isolation."
+    - "Agent/subagent permission inheritance includes parent session deny and external_directory rules plus subagent defaults; this is more nuanced than a simple per-agent override."
 
 permission_entities:
   - entity: tool
-    native_names: [permission, tools]
-    notes: "Built-in tools such as bash, read, edit, glob, grep, list, lsp, skill, todowrite, webfetch, websearch, and question are gated by permission keys."
+    native_names: [bash, edit, write, apply_patch, read, grep, glob, list, lsp, skill, todowrite, webfetch, websearch, question]
+    notes: "Tools are gated by permission action names. write and apply_patch map to edit; MCP resource list/read tools map to read."
   - entity: tool_group
-    native_names: [edit]
-    notes: "The edit permission covers edit, write, and apply_patch as a group."
+    native_names: [edit, read]
+    notes: "edit covers edit/write/apply_patch. read covers ordinary reads and MCP resource list/read helper tools for visibility decisions."
   - entity: command
     native_names: [bash]
-    notes: "bash permission rules match parsed command strings with glob semantics."
+    notes: "Shell permission resources are parsed command strings; patterns are wildcard matched."
   - entity: path
-    native_names: [read, edit, glob, grep, list, external_directory]
-    notes: "read, edit, glob, grep, list, and external_directory rules can match file paths, glob patterns, regexes, or external directory prefixes."
+    native_names: [read, edit, glob, grep, external_directory]
+    notes: "Path and pattern resources are wildcard matched. Leading ~ and $HOME expand in legacy permission config."
   - entity: workspace
-    native_names: [external_directory]
-    notes: "external_directory gates access to paths outside the project working directory."
+    native_names: [external_directory, references]
+    notes: "external_directory asks when a tool touches paths outside the project working directory; configured references are automatically allowed through this boundary."
   - entity: mcp_server
-    native_names: [mcp]
-    notes: "MCP servers are configured under the mcp object and can be enabled or disabled."
+    native_names: [mcp, mcp.servers, enabled, disabled]
+    notes: "Legacy docs/config use enabled false; current v2 schema uses disabled true. Server config determines whether MCP tools/resources exist."
   - entity: mcp_tool
-    native_names: ["<server>_*", "<server>_<tool>"]
-    notes: "MCP tools are registered with the server name as a prefix and can be targeted by permission wildcards."
+    native_names: ["<server>_<tool>", "mcp_*"]
+    notes: "MCP tools are registered under server-prefixed names and are permissioned by those names."
+  - entity: mcp_resource
+    native_names: [list_mcp_resources, list_mcp_resource_templates, read_mcp_resource, "mcp:<server>:<uri>"]
+    notes: "MCP resource helpers ask for read permission with mcp:server:* or mcp:server:uri resource patterns."
   - entity: agent
-    native_names: [agent, default_agent]
-    notes: "Agents can define their own permission objects that override global permissions."
+    native_names: [agent, agents, default_agent, "--agent"]
+    notes: "Agents can define permission rules and are selectable at runtime."
   - entity: subagent
-    native_names: [task]
-    notes: "The task permission controls which subagents can be spawned."
+    native_names: [task, general, explore]
+    notes: "The task permission gates subagent launch by subagent type. Subagent sessions derive additional rules from parent denies and external_directory rules."
   - entity: mode
-    native_names: ["--auto", auto-approve]
-    notes: "--auto changes the session baseline so non-denied requests are approved automatically."
+    native_names: [build, plan, "--auto", "--dangerously-skip-permissions", "--yolo"]
+    notes: "Build and plan are built-in primary agents with different permissions. Auto/YOLO flags change approval response behavior."
   - entity: approval_category
-    native_names: [allow, ask, deny]
-    notes: "The three decision values for permission rules."
+    native_names: [allow, ask, deny, once, always, reject]
+    notes: "allow/ask/deny are rule effects; once/always/reject are runtime replies to an ask."
   - entity: hook
-    native_names: []
-    notes: "OpenCode supports custom tools and plugins but does not have a documented PreToolUse hook for permission decisions."
+    native_names: [permission.ask, tool.execute.before, tool.execute.after, shell.env]
+    notes: "Plugins can observe permission asks and wrap tool execution; hooks are not an OS security boundary."
   - entity: extension
-    native_names: [plugin, --pure]
-    notes: "Plugins can add tools and hooks; --pure disables external plugins for the session."
+    native_names: [plugin, plugins, "--pure", OPENCODE_PURE]
+    notes: "Plugins can add tools and hooks. --pure/OPENCODE_PURE removes external plugins for the process."
   - entity: slash_command
+    native_names: [command, commands, ".opencode/commands"]
+    notes: "Custom slash commands can execute shell interpolation during prompt construction and are loaded from user/project config surfaces."
+  - entity: sandbox
     native_names: []
-    notes: "Slash commands such as /init and /undo are not separately permission-gated."
+    notes: "OpenCode explicitly does not provide an OS sandbox."
 
 approval_modes:
   - name: default
-    effect: "Most built-in tools are allowed automatically; doom_loop and external_directory ask for approval."
+    effect: "Use configured allow/ask/deny rules. For the default build agent, most tools allow, external_directory and doom_loop ask, and .env reads ask."
     interactive: true
     non_interactive: true
-    aliases: [default]
-  - name: auto-approve
-    effect: "Non-denied permission requests are approved automatically. Explicit deny rules are still enforced."
+    aliases: [build, default]
+  - name: auto
+    effect: "Automatically replies once to permission requests that reach ask; explicit deny remains denied."
     interactive: true
     non_interactive: true
-    aliases: ["--auto", auto, "Enable auto-approve permissions"]
-  - name: plan-agent
-    effect: "The built-in plan agent sets edit and bash to ask by default, preventing file modifications."
+    aliases: ["--auto", "--dangerously-skip-permissions", "--yolo"]
+  - name: plan
+    effect: "Built-in primary agent that denies broad edit access while allowing plan-file writes and plan exit."
     interactive: true
-    non_interactive: false
+    non_interactive: true
     aliases: [plan, "--agent plan"]
 
 rule_model:
   decisions: [allow, ask, deny]
-  syntax: "permission_key -> action string, or permission_key -> {pattern: action}. Custom/MCP tools can be targeted by wildcard keys."
-  precedence: "Rules are evaluated in order across merged rulesets; the last matching rule wins. Deny rules do not have special precedence over allow rules except by order."
-  merge_semantics: "Config files merge with later sources overriding earlier sources for conflicting keys. Permission rulesets are concatenated in precedence order, so later sources' rules can override earlier sources. Agent-specific permission objects override global permission objects for that agent."
-  matcher_semantics: "* matches zero or more characters; ? matches exactly one character; all other characters match literally. ~ and $HOME at the start of a pattern expand to the user's home directory."
-  default_decision: "Most permissions default to allow. doom_loop and external_directory default to ask. read is allow but .env files are denied."
+  syntax: "Public legacy grammar: permission: { action: \"allow|ask|deny\" } or permission: { action: { resource_pattern: \"allow|ask|deny\" } }. Current internal grammar: ordered rules { action, resource, effect }. A top-level wildcard action \"*\" can provide a fallback or override depending on order."
+  precedence: "Last matching rule wins among flattened rules. There is no hard deny-wins rule at pure evaluation time, but the v2 runtime checks configured denies before applying saved always approvals."
+  merge_semantics: "Config sources deep-merge; legacy permission objects are converted to ordered rules preserving top-level key order and nested pattern order. Rule sets are concatenated, so later rules can override earlier ones."
+  matcher_semantics: "Wildcard matching supports * and ? style matching through OpenCode's Wildcard matcher. Leading ~/ and $HOME in legacy permission pattern keys expand to the user's home directory; tildes in the middle of a path do not expand."
+  default_decision: "Pure evaluation returns ask if no rule matches, but built-in agents seed defaults first. The build agent seeds * allow, doom_loop ask, external_directory ask with allowlisted internal/reference paths, question allow, plan_enter allow, plan_exit deny, and read rules that ask for .env and .env.*."
 
 tool_visibility:
   supported: true
   mechanisms:
-    - "The legacy tools object can disable individual tools or MCP server tool patterns by setting them to false."
-    - "A permission deny rule with pattern * for a tool removes it from the model's context."
-    - "--pure disables external plugins, removing plugin-provided tools."
-    - "Agent-specific permission objects can restrict the tool surface for that agent."
-  notes: "Tool visibility and approval policy are both expressed through the same permission object. A denied tool is hidden from the model."
+    - "Whole-tool deny rules with pattern/resource * hide tools from the model."
+    - "The legacy tools object is migrated to permission deny/allow rules and remains supported."
+    - "--pure / OPENCODE_PURE removes external plugin-provided tools and hooks."
+    - "Agent permissions can hide task subagents, skills, and tools for a selected agent."
+  notes: "Visibility is not the same as approval: ask keeps the tool visible and prompts at runtime, while deny with a full wildcard can remove the tool from the tool registry or skill list."
 
 sandbox:
   supported: false
   modes: []
   backends: []
-  filesystem_control: ""
-  network_control: ""
-  notes: "OpenCode does not provide an OS-enforced sandbox. Bash commands run in the user's shell environment with the user's privileges."
+  filesystem_control: "No OS-enforced filesystem sandbox. Permissions check tool calls in-process; bash runs with the user's host privileges."
+  network_control: "No OS-enforced network sandbox. Network tools, remote MCP servers, and shell commands can use the host network if allowed or not otherwise blocked."
+  notes: "OpenCode's SECURITY.md tells users to use Docker or a VM for true isolation."
 
 trust_and_admin:
-  folder_trust: "OpenCode does not document a folder/project trust gate that disables project config, memory, or extensions."
-  managed_policy: "Managed settings can be delivered via file-based opencode.json in system directories (/Library/Application Support/opencode/, /etc/opencode/, or %ProgramData%\\opencode\\) or via macOS MDM .mobileconfig under the ai.opencode.managed domain. These occupy the highest precedence tier and cannot be overridden by user or project configuration."
-  safe_mode: "OpenCode does not have a dedicated safe-mode flag. --pure disables external plugins but keeps built-in tools and permissions."
-  notes: "Enterprise deployments can use central config and SSO integration to restrict providers and configuration."
+  folder_trust: "No folder trust prompt was found. Project config and .opencode directories are loaded by default; OPENCODE_DISABLE_PROJECT_CONFIG can disable project config discovery for a process."
+  managed_policy: "Managed config files and macOS MDM preferences are supported and loaded at high precedence. Active Console organization config can also manage provider config."
+  safe_mode: "There is no dedicated safe mode. --pure/OPENCODE_PURE disables external plugins but does not disable built-in tools or project config."
+  notes: "Custom commands, agents, plugins, and MCP config are loaded from user and project config surfaces unless project config is disabled or plugins are suppressed."
 
 mcp_permissions:
   supported: true
   server_filters:
-    - "MCP servers can be enabled or disabled with enabled: true/false."
-    - "The tools object (deprecated) can disable an entire MCP server or pattern."
-    - "Permission rules can target MCP tools by server-prefixed wildcard names."
+    - "Configure only approved MCP servers under mcp/mcp.servers."
+    - "Disable a server with enabled: false in legacy config or disabled: true in current schema."
+    - "Use --pure to remove plugin-added MCP/tool surfaces, but configured MCP servers are still config-controlled."
   tool_filters:
-    - "Permission rules such as mymcp_*: deny or mymcp_write_file: ask apply to MCP tools."
-    - "Agent-specific permission objects can further restrict MCP tools for that agent."
-  trust_model: "OAuth tokens for remote MCP servers are stored per user in ~/.local/share/opencode/mcp-auth.json. Project-scoped MCP servers load if already configured; no interactive trust dialog is documented."
-  notes: "MCP tools run outside any OS sandbox. stdio MCP servers are local subprocesses; remote MCP servers make network requests from outside OpenCode's process."
+    - "Set permission entries such as myserver_*: ask or myserver_write_file: deny for MCP tools."
+    - "Set read rules for mcp:server:* and mcp:server:uri patterns to control MCP resources."
+    - "Agent permission overrides can narrow MCP tool/resource access per agent."
+  trust_model: "MCP servers are trusted configured tools. Local servers are subprocesses; remote servers make network calls. OAuth-capable remote servers store tokens per user, and MCP behavior is outside OpenCode's security boundary."
+  notes: "MCP tools and resources do not run inside an OpenCode OS sandbox. Resource output is formatted/truncated, unsupported or oversized binary resources are omitted, and plugin tool hooks can observe executions."
 
-headless_behavior: "In non-interactive opencode run mode, interactive permission prompts cannot be shown. Any tool call that would ask for approval is effectively blocked unless --auto is used or the permission is pre-approved. Use OPENCODE_PERMISSION or an allow-all/deny-all config to avoid hangs."
+headless_behavior: "In opencode run, permission requests are not presented interactively. Without --auto/--yolo/--dangerously-skip-permissions, run prints a permission requested message, auto-rejects the request, and continues; with auto mode it replies once. The server API exposes programmatic permission list/reply endpoints for clients that attach to or drive a running server."
 
-approval_persistence: "Approvals granted with always persist only for the rest of the current OpenCode session. They are not saved across sessions or projects."
+approval_persistence: "Legacy interactive allow always persists only in the current process/session's approved list. Current v2 PermissionSaved stores always approvals in the database by projectID as allow rules, so wrappers must distinguish session-only legacy behavior from project-scoped saved approvals in the v2 server path."
 
 protected_paths:
   - "*.env"
   - "*.env.*"
+  - ".env.example"
+  - "~/.config/opencode/opencode.json"
+  - "~/.config/opencode/opencode.jsonc"
+  - ".opencode/opencode.json"
+  - ".opencode/opencode.jsonc"
+  - ".opencode/agents/*.md"
+  - ".opencode/plugins/*"
 
-security_posture: "OpenCode's permission system is a client-side static policy engine with advisory prompts, not an OS-enforced sandbox. Rules are evaluated by the OpenCode process; a bypass in the client or a model-level jailbreak could circumvent them. There is no separate sandbox layer for Bash subprocesses."
+security_posture: "OpenCode permissions are an in-process static policy plus advisory/user-approval workflow, with plugin hooks and managed config layers. They are not an OS-enforced sandbox; root or ordinary user processes run with the privileges of the invoking user."
 
 changes:
-  - "Updated config precedence to match current docs: managed config files and macOS MDM preferences are the highest tier; OPENCODE_CONFIG_CONTENT sits between .opencode directories and managed config."
-  - "Documented the deprecated status of the tools object and its merge into permission."
-  - "Added list as a granular permission key in addition to read, edit, glob, grep, bash, task, external_directory, lsp, and skill."
-  - "Clarified that OpenCode has no OS-enforced sandbox; security posture is static policy plus advisory prompts."
-  - "Corrected rule precedence: last matching rule wins across merged rulesets, not deny-wins."
-  - "Documented subagent permission derivation: parent session deny and external_directory rules are inherited, plus default denials for task and todowrite unless the subagent permits them."
-  - "Updated YOLO/auto-approve coverage: only --auto and config allow values; no root/sudo restrictions documented."
-  - "Added --pure as a session-scoped way to reduce tool surface by disabling external plugins."
-  - "Recorded that OpenCode has no native CLI flag for a zero-permission baseline; OPENCODE_PERMISSION env var is the session-scoped alternative."
-  - "Expanded MCP permission coverage with server enablement, tool-level wildcard rules, and OAuth credential storage."
+  - "Updated metadata to agent=codex/model=default and last_updated=2026-07-03."
+  - "Replaced stale os: all config metadata with separate macOS, Linux, and Windows records."
+  - "Verified installed OpenCode 1.17.13 and current source/docs instead of relying on prior research."
+  - "Documented current --auto support plus hidden --yolo and --dangerously-skip-permissions aliases for opencode run."
+  - "Changed default .env posture from deny to ask based on current source defaults."
+  - "Added current config precedence details, including OPENCODE_CONFIG_CONTENT, OPENCODE_PERMISSION, OPENCODE_DISABLE_PROJECT_CONFIG, managed config files, macOS MDM preferences, and Console account config."
+  - "Documented current internal permission rules as flat ordered action/resource/effect rules while keeping the public legacy permission grammar examples."
+  - "Added session-scoped CLI zero-permission posture using OPENCODE_PERMISSION deny-all plus --pure."
+  - "Added MCP resource permission behavior using read permission patterns such as mcp:server:* and mcp:server:uri."
+  - "Added approval persistence distinction between legacy session always approvals and v2 project-scoped saved approvals."
+  - "Added explicit security posture from OpenCode SECURITY.md: no OS sandbox."
 
 requires_claudine_update: true
-reason: "OpenCode's tool-based permission grammar (wildcard patterns, last-rule-wins evaluation, external_directory, doom_loop, agent/task permissions, permissive defaults, and lack of OS sandbox) does not map cleanly to PolicyEngine's canonical axes. Supporting OpenCode permissions accurately in Claudine will require backend work in the PolicyEngine OpenCode backend and mutation planning for opencode.json permission objects."
+reason: "Claudine's OpenCode PolicyEngine/provider metadata should be updated for current OpenCode behavior: --auto aliases, JSONC/user/repo/.opencode config discovery, OPENCODE_CONFIG_CONTENT and OPENCODE_PERMISSION, managed config layers, v2 saved approvals, MCP resource rules, --pure, and the current default .env ask posture."
 ---
 
-# OpenCode CLI Permissions
+# OpenCode CLI Permissions and Security Controls
 
 ## Introduction to OpenCode CLI Permissions
 
-OpenCode controls tool access with a single `permission` configuration object. Each permission key maps to one or more tools and resolves to one of three actions:
+OpenCode controls tool execution with permission rules. The public docs present the legacy user-facing config key as `permission`, while current source migrates that object into an ordered internal ruleset shaped like `{ action, resource, effect }`. The three native effects are `allow`, `ask`, and `deny`.
 
-- `"allow"` — run without approval
-- `"ask"` — prompt the user for approval
-- `"deny"` — block the action
-
-Permissions can be configured through JSON config files, inline environment variables, Markdown agent frontmatter, and a small set of CLI flags. Unlike some other agents, OpenCode defaults to a permissive posture: most tools are allowed unless a rule says otherwise.
-
-### Configuration files
-
-The `permission` key lives in `opencode.json` (or `opencode.jsonc`). It can be a single action string that applies to all tools, or an object that maps tool names to action strings or granular pattern objects. See [Configuring the Default](#configuring-the-default) for file locations and examples.
-
-### Environment variables
-
-The main environment variables that influence permissions are:
-
-| Variable | Effect |
-| :----- | :----- |
-| `OPENCODE_PERMISSION` | Inline JSON permissions config merged into the effective config. |
-| `OPENCODE_CONFIG_CONTENT` | Inline JSON config content; can include a full `permission` object. |
-| `OPENCODE_CONFIG` | Path to a custom config file that may contain a `permission` object. |
-| `OPENCODE_CONFIG_DIR` | Path to a custom config directory searched for agents, commands, modes, and plugins. |
-| `OPENCODE_ENABLE_EXA` | Enables the `websearch` tool when set to a truthy value. |
-| `OPENCODE_EXPERIMENTAL_LSP_TOOL` | Enables the experimental `lsp` tool. |
-| `OPENCODE_DISABLE_DEFAULT_PLUGINS` | Disables default plugins, reducing the tool surface. |
-| `OPENCODE_DISABLE_CLAUDE_CODE` | Disables reading `.claude` directories. |
-| `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT` | Disables reading `~/.claude/CLAUDE.md`. |
-| `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` | Disables loading `.claude/skills`. |
-
-### CLI parameters
-
-Only a few CLI switches directly affect permissions or the tool surface:
-
-| Flag | What it does |
-| :----- | :----- |
-| `--auto` | Enable auto-approve mode for the session. Non-denied requests are approved automatically. |
-| `--agent <name>` | Use the named agent, whose `permission` profile (if any) is applied. |
-| `--permissions <list>` | Only for `opencode agent create`. Lists permissions to allow in the generated agent. Aliased as `--tools`. |
-| `--pure` | Run without external plugins, removing plugin-provided tools and hooks. |
-
-### Precedence
-
-Effective permissions are built from multiple layers. Config files merge together, with later sources overriding earlier sources for conflicting keys. Within that merged config, permission rules are evaluated in order and the **last matching rule wins**.
-
-Config-source ordering (later wins):
-
-1. Remote config from `.well-known/opencode`
-2. Global user config `~/.config/opencode/opencode.json`
-3. Custom config path from `OPENCODE_CONFIG`
-4. Project `opencode.json`
-5. `.opencode` directories (agents, commands, plugins, modes, tools, skills, themes)
-6. Inline config from `OPENCODE_CONFIG_CONTENT`
-7. Managed config files in system directories
-8. macOS managed preferences via MDM `.mobileconfig`
-
-Session-scoped overrides sit above the config stack:
-
-- Environment variables such as `OPENCODE_PERMISSION` and `OPENCODE_CONFIG_CONTENT` apply for the session.
-- CLI flags such as `--auto` apply for the session.
-- Managed settings (file-based and MDM) occupy the highest precedence tier and cannot be overridden by users.
-
-Within any config file, an agent-specific `permission` object overrides the global `permission` object for that agent.
-
-### Permission policy vs tool visibility
-
-OpenCode does not have a separate visibility layer independent of approval policy. Both concerns are expressed through the same `permission` object (and the deprecated `tools` object):
-
-- A tool with `"deny"` and pattern `"*"` is removed from the model's context entirely.
-- A tool with `"allow"` is visible and runs without prompting.
-- A tool with `"ask"` is visible but prompts before each call.
-- `--pure` removes plugin-provided tools without changing permission rules.
-
-## Permissions Use Cases
-
-### Default
-
-If no environment variable, config file, or CLI switch configures permissions, OpenCode starts from permissive defaults:
-
-- Most tools are `"allow"`.
-- `doom_loop` and `external_directory` are `"ask"`.
-- `read` is `"allow"`, but `.env` files are denied by default:
+The public config grammar is still the safest grammar for Claudine to emit for users:
 
 ```json
-{
-  "permission": {
-    "read": {
-      "*": "allow",
-      "*.env": "deny",
-      "*.env.*": "deny",
-      "*.env.example": "allow"
-    }
-  }
-}
-```
-
-A PolicyEngine description of the default posture would be:
-
-- `can_read(path)` → Allow for workspace paths; Deny for `.env` files.
-- `can_write(path)` → Allow for workspace paths.
-- `can_execute(command)` → Allow for bash commands.
-- `can_access_domain(domain)` → Allow for webfetch/websearch.
-- `can_use_mcp_server(server)` / `can_use_mcp_tool(server, tool)` → Allow.
-- `can_spawn_subagent(agent)` → Allow.
-- `can_loop_recovery()` → Ask (doom_loop).
-- `can_access_external_directory(path)` → Ask.
-
-This use case is not ergonomic in PolicyEngine without adjustments. PolicyEngine's canonical axes (filesystem, command, network, MCP, agent, runtime) do not line up one-to-one with OpenCode's tool keys, and the permissive default is the opposite of PolicyEngine's usual ask/deny baseline. No changes are required to describe the broad idea, but full coverage of the default posture would need new mappings for `doom_loop`, `external_directory`, and the `.env` deny rule.
-
-### Whitelisting
-
-To start with no permissions and require every needed permission to be asked for or explicitly declared, set a global deny rule and then add specific allow or ask rules.
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "permission": {
-    "*": "deny",
-    "read": "allow",
-    "grep": "allow",
-    "glob": "allow",
-    "bash": {
-      "*": "ask",
-      "git status *": "allow",
-      "git log *": "allow"
-    },
-    "edit": "ask"
-  }
-}
-```
-
-In an interactive session, `ask` causes OpenCode to prompt. In a non-interactive run, `ask` is effectively deny because there is no user to approve, so you should pre-declare `allow` rules for any tool the headless session needs.
-
-Because OpenCode does not have a dedicated runtime `--permission` flag, you usually whitelist through config or environment:
-
-```bash
-# Headless run with a locked-down allowlist via env
-OPENCODE_PERMISSION='{"*":"deny","read":"allow","grep":"allow","bash":{"git status *":"allow"}}' \
-  opencode run "summarize the auth module"
-
-# Use the built-in plan agent to default bash/edit to ask
-opencode --agent plan
-
-# Create and use a read-only subagent
-opencode agent create --permissions read,grep --mode subagent --description "read-only explorer"
-opencode --agent read-only-explorer
-```
-
-PolicyEngine can express this use case as `SetApprovalMode` to a deny-by-default posture plus explicit `GrantRead`, `AllowCommand`, and similar rules. It is not fully ergonomic because OpenCode's tool-key wildcard patterns and last-match-wins ordering do not map directly to PolicyEngine's rule model. Without changes, PolicyEngine could describe the intent but not the exact pattern-matching behavior or agent-scoped deny defaults.
-
-### YOLO
-
-OpenCode's YOLO mode is called **auto-approve**. A session can be put into this mode by:
-
-- Starting with `--auto`, for example `opencode --auto` or `opencode run --auto "..."`.
-- Setting `permission: "allow"` or `permission: { "*": "allow" }` in config.
-- Using an agent whose permissions are all `allow`.
-- Toggling **Enable auto-approve permissions** from the TUI command palette.
-
-Availability:
-
-- **Interactive sessions**: yes, via `--auto` or the TUI toggle.
-- **Non-interactive sessions**: yes, via `opencode run --auto`.
-
-When in auto-approve mode:
-
-- **Allowed**: any tool call that is not explicitly denied is approved automatically, including bash, edit/write, webfetch, websearch, MCP tools, and subagent spawns.
-- **Still enforced**: explicit `"deny"` rules in config are still enforced; if a tool is denied it will not run.
-- **Not allowed**: auto-approve cannot override managed/MDM config that denies an action.
-
-### Root User
-
-The public OpenCode documentation does not describe any special permission behavior when the CLI is started as root or under `sudo`. Unlike Claude Code, there is no documented restriction that disables auto-approve/YOLO mode for root sessions. Therefore, YOLO mode remains available to root sessions unless an administrator blocks it through managed config.
-
-### Configuring the Default
-
-Default permissions are configured through JSON config files at two main scopes:
-
-- **User scope**: `~/.config/opencode/opencode.json` (also supported as `.jsonc`). Applies across all projects.
-- **Repo scope**: `opencode.json` in the project root. Applies to everyone working in the repository and can be checked into version control.
-
-Agent-specific defaults can also be defined in Markdown files under `~/.config/opencode/agents/` or `.opencode/agents/`.
-
-Examples that illustrate the grammar:
-
-```json
-// ~/.config/opencode/opencode.json — user-wide defaults
 {
   "$schema": "https://opencode.ai/config.json",
   "permission": {
     "*": "ask",
     "bash": {
       "*": "ask",
-      "git *": "allow",
-      "npm *": "allow"
+      "git status*": "allow",
+      "git push*": "deny"
     },
-    "read": "allow"
-  }
-}
-```
-
-```json
-// opencode.json — repo-shared defaults
-{
-  "$schema": "https://opencode.ai/config.json",
-  "permission": {
-    "edit": "ask",
-    "bash": {
-      "*": "ask",
-      "npm test": "allow"
-    },
+    "edit": "deny",
     "external_directory": {
-      "~/shared/**": "allow"
+      "$HOME/projects/shared/*": "allow",
+      "*": "ask"
     }
   }
 }
 ```
 
-```json
-// Agent config in opencode.json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "agent": {
-    "review": {
-      "mode": "subagent",
-      "description": "Read-only code reviewer",
-      "permission": {
-        "edit": "deny",
-        "write": "deny",
-        "bash": "deny"
-      }
-    }
-  }
-}
+Configuration can live in user config, repo config, `.opencode` directories, inline environment config, custom config paths, managed config, and agent Markdown frontmatter. OpenCode supports JSON and JSONC, and current source also seeds a user `opencode.json` with a schema pointer if no routed config is present.
+
+Permission and tool visibility are related but distinct. `ask` leaves a tool visible to the model and prompts at runtime. A full wildcard `deny` for a tool can hide that tool from the model. The legacy `tools` boolean object is deprecated but still supported; it is migrated into permission allow/deny rules.
+
+Important environment variables:
+
+- `OPENCODE_PERMISSION` overlays a JSON permission object for the process.
+- `OPENCODE_CONFIG_CONTENT` provides inline config content for the process.
+- `OPENCODE_CONFIG` points at a custom config file.
+- `OPENCODE_CONFIG_DIR` points at a custom config directory.
+- `OPENCODE_PURE` disables external plugins; `--pure` sets it.
+- `OPENCODE_DISABLE_PROJECT_CONFIG` disables project config discovery.
+
+Relevant CLI switches:
+
+- `--auto` auto-approves permission prompts that are not explicitly denied.
+- Hidden `--dangerously-skip-permissions` and `--yolo` are accepted by `opencode run` and map to the same auto path.
+- `--agent` selects the agent whose rules are evaluated.
+- `--dir` changes the run directory and therefore the workspace boundary used by external-directory checks.
+- `--pure` disables external plugins.
+- `opencode agent create --permissions` or `--tools` generates an agent file where unlisted permissions are denied.
+
+CLI/runtime switches have session/process scope and do not mutate config. `OPENCODE_PERMISSION` is applied after file and managed config, making it the best current wrapper mechanism for one-shot policy overlays.
+
+## Permissions Use Cases
+
+### Default
+
+With no user, repo, env, or CLI policy override, OpenCode starts with the built-in `build` agent. Current source seeds:
+
+- `*`: `allow`
+- `doom_loop`: `ask`
+- `external_directory`: `ask`, with internal temporary/skill/reference paths allowlisted
+- `read`: `allow`, but `.env` and `.env.*` are `ask`, and `.env.example` is `allow`
+- `question`: `allow` for the build agent
+- `plan_enter`: `allow` and `plan_exit`: `deny` for the build agent
+
+The current PolicyEngine can approximate filesystem, command, and subagent permissions, but it is not ergonomic for OpenCode because OpenCode's model is ordered tool/action/resource rules with tool visibility side effects. Claudine also needs updates for the current `.env` default, JSONC paths, env overlays, managed config, saved approvals, and MCP resource rules.
+
+### Whitelisting
+
+OpenCode does not expose a dedicated `--no-tools` or `--permissions` runtime flag for `opencode run`. The best CLI-only, session-scoped locked-down launch is:
+
+```sh
+OPENCODE_PERMISSION='{"*":"deny"}' opencode --pure run "..."
 ```
+
+This starts from a deny-all permission overlay and disables external plugins. To add back permissions in the same run, encode the complete rule set in `OPENCODE_PERMISSION`:
+
+```sh
+OPENCODE_PERMISSION='{"*":"deny","read":"allow","grep":"allow","glob":"allow"}' opencode --pure run "Audit the repo"
+```
+
+```sh
+OPENCODE_PERMISSION='{"*":"deny","read":"allow","bash":{"*":"ask","git status*":"allow"},"edit":"deny"}' opencode --pure run "Inspect status"
+```
+
+```sh
+OPENCODE_PERMISSION='{"*":"deny","mymcp_*":"ask","read":{"mcp:docs:*":"ask"}}' opencode --pure run "Use docs only if needed"
+```
+
+PolicyEngine can describe this if it can emit an OpenCode env overlay rather than only persistent config edits. Current Claudine support is incomplete because the OpenCode backend does not fully model `OPENCODE_PERMISSION`, `--auto`, JSONC, managed config, and MCP resources.
+
+### YOLO
+
+YOLO-style operation is available as documented `--auto` and as hidden `opencode run` aliases `--dangerously-skip-permissions` and `--yolo`. In non-interactive `opencode run`, these flags automatically reply `once` to permission prompts. Explicit `deny` rules still block the action.
+
+Interactive availability is documented for `opencode --auto`. The source inspected here specifically shows the hidden aliases on `opencode run`; the docs do not advertise the hidden aliases.
+
+YOLO does not create a sandbox exception because there is no sandbox. It only changes `ask` to auto-approved; `deny` still wins.
+
+### Root User
+
+I found no OpenCode behavior that changes permission policy when run as root or administrator. Since OpenCode does not sandbox the agent, root execution is more dangerous: allowed shell/file operations run with root privileges. YOLO/auto mode is still a CLI/session behavior and is not documented or implemented as disabled for root.
+
+### Configuring the Default
+
+User-scope config:
+
+- macOS/Linux: `~/.config/opencode/opencode.json` or `~/.config/opencode/opencode.jsonc`
+- Windows: xdg-basedir-backed `.config\opencode\opencode.json` or `.config\opencode\opencode.jsonc` under the user's home-like config location in current source
+
+Repo-scope config:
+
+- `opencode.json` or `opencode.jsonc`
+- `.opencode/opencode.json` or `.opencode/opencode.jsonc`
+- `.opencode/agents/*.md`
+- `.opencode/commands/*.md`
+- `.opencode/plugins/*`
+
+Agent Markdown frontmatter example:
 
 ```markdown
-<!-- ~/.config/opencode/agents/review.md -->
 ---
-description: Code review without edits
+description: Read-only reviewer
 mode: subagent
 permission:
-  edit: deny
-  bash: ask
-  webfetch: deny
+  "*": deny
+  read: allow
+  grep: allow
+  glob: allow
 ---
-Only analyze code and suggest changes.
+
+Review code without modifying files.
 ```
 
 ### Extending the Base
 
-Default permissions can be set at user scope and then narrowed or extended by narrower scopes or CLI flags.
-
-**Example 1: user allows, repo denies.**
-
-User `~/.config/opencode/opencode.json`:
+User config can set a broad baseline:
 
 ```json
 {
   "permission": {
-    "bash": {
-      "rm *": "allow"
-    }
-  }
-}
-```
-
-Repo `opencode.json`:
-
-```json
-{
-  "permission": {
-    "bash": {
-      "rm *": "deny"
-    }
-  }
-}
-```
-
-Result: `rm` is blocked in the repository because the later project config overrides the earlier global config.
-
-**Example 2: repo default ask, CLI auto-approve override.**
-
-Repo `opencode.json`:
-
-```json
-{
-  "permission": {
-    "edit": "ask",
-    "bash": "ask"
-  }
-}
-```
-
-CLI:
-
-```bash
-opencode run --auto "apply the suggested refactor"
-```
-
-Result: the non-interactive run auto-approves non-denied edit and bash requests for this session.
-
-**Example 3: global whitelist plus project additions.**
-
-Global config:
-
-```json
-{
-  "permission": {
-    "*": "deny",
+    "*": "ask",
     "read": "allow",
-    "grep": "allow"
+    "edit": "deny"
   }
 }
 ```
 
-Repo `opencode.json`:
+A repo can then allow a narrow write path by placing a later rule in project config:
 
 ```json
 {
   "permission": {
-    "bash": {
-      "npm test": "allow"
+    "edit": {
+      "*": "deny",
+      "docs/generated/*": "allow"
     }
   }
 }
 ```
 
-Result: in this repo, read, grep, and `npm test` are allowed; everything else is denied.
+A wrapper can override both for one process:
+
+```sh
+OPENCODE_PERMISSION='{"edit":"deny","bash":{"*":"ask","just test*":"allow"}}' opencode run "Run focused checks"
+```
+
+Because last matching rule wins after merge/flattening, order matters. A later wildcard can override an earlier specific rule.
 
 ## Tools and Permissions
 
-OpenCode provides the following built-in tools. Each tool is gated by a permission key. Some keys cover multiple tools.
+OpenCode's default built-in tool surface includes:
 
-| Tool | Permission key | Permission required by default |
-| :----- | :----- | :----- |
-| `bash` | `bash` | Allow |
-| `edit` | `edit` | Allow |
-| `write` | `edit` (covers all file modifications) | Allow |
-| `apply_patch` | `edit` (covers all file modifications) | Allow |
-| `read` | `read` | Allow, except `.env` files are denied |
-| `grep` | `grep` | Allow |
-| `glob` | `glob` | Allow |
-| `list` | `list` | Allow |
-| `lsp` | `lsp` | Allow (requires experimental flag) |
-| `skill` | `skill` | Allow |
-| `todowrite` / `todoread` | `todowrite` | Allow |
-| `webfetch` | `webfetch` | Allow |
-| `websearch` | `websearch` | Allow (requires OpenCode provider or `OPENCODE_ENABLE_EXA`) |
-| `question` | `question` | Allow |
-| `task` (subagent spawn) | `task` | Allow |
+- `bash`
+- `edit`
+- `write`
+- `read`
+- `grep`
+- `glob`
+- `lsp`
+- `apply_patch`
+- `skill`
+- `todowrite`
+- `webfetch`
+- `websearch`
+- `question`
+- `task` for subagents
+- plan-control tools in current source when plan mode is enabled
+- MCP tools and MCP resource helper tools when MCP servers expose them
 
-Permission rules match the tool input. For example, `bash` rules match parsed command strings, `read`/`edit` rules match file paths, `glob` rules match glob patterns, `grep` rules match regex patterns, and `webfetch` rules match URLs. Wildcards follow simple glob semantics: `*` matches zero or more characters, `?` matches exactly one character, and all other characters match literally. `~` and `$HOME` at the start of a pattern expand to the user's home directory.
+Permission mapping:
 
-Rules are evaluated in order across merged rulesets and the **last matching rule wins**, so a common pattern is to place `"*": "ask"` first and more specific allow/deny rules after it.
+| Tool or feature | Permission action |
+| --- | --- |
+| `bash` / shell | `bash` |
+| `edit`, `write`, `apply_patch` | `edit` |
+| `read` | `read` |
+| `grep` | `grep` |
+| `glob` | `glob` |
+| `lsp` | `lsp` |
+| `skill` | `skill` |
+| `todowrite` | `todowrite` |
+| `webfetch` | `webfetch` |
+| `websearch` | `websearch` |
+| `question` | `question` |
+| subagent launch | `task` |
+| outside workspace | `external_directory` |
+| repeated identical tool call | `doom_loop` |
+| MCP tool | generated name such as `server_tool` |
+| MCP resources | `read` with `mcp:server:*` or `mcp:server:uri` resource |
 
-### Native permission entities
+Native permission entities are tool/action, resource pattern, command string, filesystem path, workspace boundary, MCP server/tool/resource, agent/subagent, plugin hook, slash command, and approval reply. There is no separate OS sandbox entity.
 
-OpenCode's permission system is tool-centric. The native entities it can target are:
-
-- **Tools** — each built-in tool has a permission key.
-- **Tool groups** — `edit` covers `edit`, `write`, and `apply_patch`.
-- **Commands** — `bash` permission rules match parsed command strings.
-- **Paths** — `read`, `edit`, `glob`, `grep`, `list`, and `external_directory` match file paths or patterns.
-- **Workspace/external directories** — `external_directory` gates paths outside the working directory.
-- **MCP servers** — enabled/disabled via the `mcp` config object.
-- **MCP tools** — targeted by server-prefixed wildcard names such as `mymcp_*` or `mymcp_search`.
-- **Agents/subagents** — agents define their own `permission` object; `task` controls subagent spawning.
-- **Mode** — `--auto` toggles auto-approve for the session.
-- **Approval category** — `allow`, `ask`, `deny`.
-- **Extensions/plugins** — `--pure` removes plugin-provided tools for the session.
-
-### Rule grammar
-
-Permission rules follow this grammar:
-
-```json
-{
-  "permission": {
-    "<tool-key>": "<action>",
-    "<tool-key>": {
-      "<pattern>": "<action>",
-      "<pattern>": "<action>"
-    }
-  }
-}
-```
-
-- `<action>` is one of `allow`, `ask`, `deny`.
-- `<tool-key>` can be any built-in key, custom tool name, or MCP tool wildcard.
-- `<pattern>` uses `*` (zero or more), `?` (one), and literal matching. `~` and `$HOME` expand to the home directory.
-
-Conflict resolution is last-match-wins across the merged ruleset. A broad deny rule placed after a narrow allow rule will win, and vice versa. There is no special deny-beats-allow semantics.
-
-### Approval modes
-
-OpenCode does not use named coarse permission modes like Claude Code. Instead it has:
-
-- **Default** — permissive defaults as described above.
-- **Auto-approve** (`--auto`) — non-denied requests are approved automatically.
-- **Plan agent** (`--agent plan`) — a built-in primary agent that defaults `edit` and `bash` to `ask`.
-
-There is no `dontAsk`, `bypassPermissions`, or classifier-based `auto` mode.
-
-### Persistence
-
-When OpenCode prompts for approval, the UI offers three outcomes:
-
-- `once` — approve just this request.
-- `always` — approve future requests matching the suggested patterns for the rest of the current OpenCode session.
-- `reject` — deny the request.
-
-`always` approvals are session-only and are lost when OpenCode exits.
+Rule decisions are `allow`, `ask`, and `deny`. Runtime prompt replies are `once`, `always`, and `reject`. `always` can add remembered allow rules; see persistence notes.
 
 ## Sandboxing, Trust, and Administrative Controls
 
-### Sandboxing
+OpenCode's own security policy says it does not sandbox the agent. Permissions are a UX feature and not security isolation. Shell commands run in the user's environment. File operations run with the user's filesystem privileges. Network-capable tools and MCP servers use the host network.
 
-OpenCode does **not** provide an OS-enforced sandbox. Bash commands run in the user's shell environment with the user's privileges. There is no Seatbelt, bubblewrap, seccomp, or similar isolation layer documented or implemented.
+There is no documented folder trust prompt. Project config loads by default, including project `.opencode` directories. Use `OPENCODE_DISABLE_PROJECT_CONFIG=1` to disable project config discovery for a process.
 
-Because there is no sandbox, the permission system is the primary security control. A model-level bypass or prompt injection that convinces OpenCode to call a permitted tool will execute with the user's privileges.
+Administrative controls:
 
-### Trust and administrative controls
+- macOS/Linux/Windows managed config files in system directories.
+- macOS MDM managed preferences under `ai.opencode.managed`.
+- OpenCode Console account/org config for managed providers.
+- Experimental provider policies under `experimental.policies`, currently for `provider.use`.
 
-**Folder/project trust**: OpenCode does not document a folder trust gate that disables project config, memory, extensions, or MCP servers.
+Protected or guarded paths are mostly modeled as permission defaults, not immutable provider-reserved paths. Current source asks for `.env` and `.env.*` reads by default and allows `.env.example`.
 
-**Managed/admin policy**: managed settings can be delivered in two ways:
-
-- **File-based**: drop an `opencode.json` or `opencode.jsonc` in `/Library/Application Support/opencode/` on macOS, `/etc/opencode/` on Linux, or `%ProgramData%\opencode\` on Windows. These directories require admin access to write.
-- **macOS MDM**: deploy a `.mobileconfig` with PayloadType `ai.opencode.managed`. OpenCode reads `/Library/Managed Preferences/<user>/ai.opencode.managed.plist` and `/Library/Managed Preferences/ai.opencode.managed.plist`.
-
-Managed settings occupy the highest precedence tier and cannot be overridden by user, project, or local config, nor by most environment variables or CLI flags. The `permission` object in a managed config is enforced like any other managed key.
-
-**Safe/minimal mode**: OpenCode does not have a dedicated safe-mode flag. `--pure` disables external plugins for the session but keeps built-in tools and permissions.
-
-### Protected paths
-
-The only provider-reserved path protection documented is the default `.env` deny rule:
-
-- `*.env` — denied
-- `*.env.*` — denied
-- `*.env.example` — explicitly allowed
-
-There is no extensive list of protected dotfiles or provider config paths like some other agents maintain.
-
-### Security posture
-
-OpenCode's permission system is a **client-side static policy engine with advisory prompts**. It is not an OS-enforced sandbox. Managed settings provide administrative policy, but they are still enforced by the client. Effective security requires combining strict permission rules, careful agent configuration, and managed policy where available.
+Security posture: advisory/static policy plus prompts and managed config. Use a container or VM for real isolation.
 
 ## MCP and Permissions
 
-MCP servers add external tools that appear alongside built-in tools. Once a server is configured under the `mcp` object, its tools are registered with the server name as a prefix (for example, a server named `mymcp` exposes tools like `mymcp_search`).
+MCP servers are configured under `mcp` in config. Legacy config uses per-server `enabled`; current v2 schema uses `disabled`. Remote MCP can use OAuth or headers. Local MCP servers run as local subprocesses.
 
-Permissions interact with MCP tools in three ways:
-
-1. **Server enablement**: A server can be enabled or disabled with `enabled: true`/`false`. A disabled server is not available.
-2. **Tool-level rules**: The global `permission` object can target MCP tools by name or wildcard:
+MCP tool permissions use the generated tool name. For example:
 
 ```json
 {
-  "$schema": "https://opencode.ai/config.json",
   "permission": {
-    "mymcp_*": "ask",
-    "mymcp_write_file": "deny",
-    "mymcp_read_file": "allow"
+    "github_*": "ask",
+    "github_delete_issue": "deny"
   }
 }
 ```
 
-3. **Legacy `tools` object**: The deprecated `tools` object can also disable an entire MCP server or pattern:
+MCP resources are different. If an MCP server exposes resources, OpenCode adds resource helper tools. These ask for `read` with resource patterns:
 
 ```json
 {
-  "tools": {
-    "mymcp_*": false
+  "permission": {
+    "read": {
+      "mcp:docs:*": "ask",
+      "mcp:prod-secrets:*": "deny"
+    }
   }
 }
 ```
 
 To make MCP safer:
 
-- Deny all MCP tools by default and allow only specific servers or operations.
-- Disable high-risk servers globally and enable them only for specific agents.
-- Use `ask` for write/delete operations while keeping read operations allowed.
-- Keep the MCP server list short to reduce context size and attack surface.
-- Use the experimental `policies` feature to deny untrusted LLM providers, since MCP servers may forward requests through configured providers.
+- Disable unneeded servers in config.
+- Use `--pure` to suppress plugin-added tool surfaces.
+- Put MCP tools behind `ask` by server wildcard.
+- Deny known destructive MCP tools explicitly.
+- Gate MCP resources with `read` rules.
+- Use agent-specific permissions for subagents that should not see MCP tools.
 
-MCP tools run **outside** any OpenCode sandbox. Remote MCP servers make network requests from outside the OpenCode process, and stdio MCP servers run as local subprocesses with the user's environment.
+MCP tools and servers are not sandboxed by OpenCode. Local MCP servers can run subprocess logic, and remote MCP servers are outside OpenCode's trust boundary.
 
 ## Non-Interactive Behavior
 
-In non-interactive `opencode run` mode, interactive permission prompts cannot be shown. Any tool call that would `ask` for approval is effectively blocked because there is no user to approve it. To avoid hangs:
+`opencode run` cannot show an interactive prompt. When a permission request is emitted and auto mode is not enabled, it prints a warning, replies `reject`, and continues. With `--auto`, `--yolo`, or `--dangerously-skip-permissions`, it replies `once`.
 
-- Pass `--auto` to approve non-denied requests automatically.
-- Set `OPENCODE_PERMISSION` with explicit `allow` rules for every tool the headless session needs.
-- Pre-configure a locked-down agent and select it with `--agent`.
-
-`ask` rules do not automatically become `allow` in headless mode; they block the call.
-
-## Sources
-
-- [OpenCode docs - Permissions](https://opencode.ai/docs/permissions)
-- [OpenCode docs - Config](https://opencode.ai/docs/config)
-- [OpenCode docs - Tools](https://opencode.ai/docs/tools)
-- [OpenCode docs - Agents](https://opencode.ai/docs/agents)
-- [OpenCode docs - MCP servers](https://opencode.ai/docs/mcp-servers)
-- [OpenCode docs - Policies](https://opencode.ai/docs/policies)
-- [OpenCode docs - CLI](https://opencode.ai/docs/cli)
-- [OpenCode config schema](https://opencode.ai/config.json)
-- [OpenCode GitHub repository](https://github.com/anomalyco/opencode)
+The server API exposes pending permission listing and permission reply endpoints, so a client can programmatically approve or reject requests when driving a running server. That is different from plain one-shot `opencode run`, which auto-rejects unless auto mode is active.
 
 ## Changelog
 
-- 2026-07-02: Refreshed research against current OpenCode documentation (v1.17.13) and config schema. Updated precedence to include managed config files and macOS MDM preferences. Documented the deprecated `tools` object, `list` permission key, subagent permission derivation, MCP server/tool controls, and the lack of OS-enforced sandbox. Expanded frontmatter to the full schema contract and flagged Claudine updates as required.
+- 2026-07-03: Refreshed against OpenCode docs, installed CLI 1.17.13, current source, and observed local config. Added current config precedence, CLI/env metadata, no-sandbox posture, MCP resource rules, and v2 approval persistence notes. Marked Claudine update required.
+- 2026-07-02: Prior research documented the merged legacy `tools`/`permission` model and managed config at a high level.
+
+## Sources
+
+- [OpenCode Permissions](https://opencode.ai/docs/permissions/)
+- [OpenCode Config](https://opencode.ai/docs/config/)
+- [OpenCode CLI](https://opencode.ai/docs/cli/)
+- [OpenCode Tools](https://opencode.ai/docs/tools/)
+- [OpenCode Agents](https://opencode.ai/docs/agents/)
+- [OpenCode Agent Skills](https://opencode.ai/docs/skills/)
+- [OpenCode MCP servers](https://opencode.ai/docs/mcp-servers/)
+- [OpenCode Policies](https://opencode.ai/docs/policies/)
+- [OpenCode References](https://opencode.ai/docs/references/)
+- [OpenCode Plugins](https://opencode.ai/docs/plugins/)
+- [OpenCode SECURITY.md](https://github.com/anomalyco/opencode/blob/dev/SECURITY.md)
+- [OpenCode source: permission/index.ts](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/permission/index.ts)
+- [OpenCode source: core permission.ts](https://github.com/anomalyco/opencode/blob/dev/packages/core/src/permission.ts)
+- [OpenCode source: config/config.ts](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/config/config.ts)
+- [OpenCode source: config/managed.ts](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/config/managed.ts)
+- [OpenCode source: cli/cmd/run.ts](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/cli/cmd/run.ts)
+- [OpenCode source: agent/agent.ts](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/agent/agent.ts)
+- [OpenCode source: session/tools.ts](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/session/tools.ts)
+- [Local observed config: /Users/ken/.claudine/.config/opencode/opencode.jsonc](/Users/ken/.claudine/.config/opencode/opencode.jsonc)

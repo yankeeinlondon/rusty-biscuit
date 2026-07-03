@@ -1,397 +1,603 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-01
-last_updated: 2026-07-02
-agent: open_code
-model: kimi-for-coding/k2p7
+last_updated: 2026-07-03
+agent: codex
+model: default
 
 cli_params:
   - param: tools
     style: switch
-    description: Allowlist specific built-in, extension, and custom tools for the session. The model can only use the named tools.
-    example: pi --tools read,grep,find,ls -p "Review the code"
-    example_description: Limits the session to read-only built-in tools.
+    description: "Comma-separated allowlist of tool names. Only listed built-in, extension, and SDK/custom tools are exposed for the session."
+    example: 'pi --tools read,grep,find,ls -p "Review the code"'
+    example_description: "Starts a non-interactive read/search-only run by exposing only read, grep, find, and ls."
   - param: exclude-tools
     style: switch
-    description: Disable specific tool names across built-in, extension, and custom tools.
-    example: pi --exclude-tools bash -p "Answer without running commands"
-    example_description: Removes the bash tool from the session tool set.
-  - param: no-builtin-tools
-    style: switch
-    description: Disable the built-in tools by default while keeping extension and custom tools enabled.
-    example: pi --no-builtin-tools -e ./my-tools.ts
-    example_description: Starts Pi with only extension-provided tools.
+    description: "Comma-separated denylist of tool names. The listed built-in, extension, and SDK/custom tools are removed from the active set after any allowlist is applied."
+    example: 'pi --exclude-tools bash -p "Answer without running commands"'
+    example_description: "Keeps default tools except the shell tool."
   - param: no-tools
     style: switch
-    description: Disable all tools by default.
-    example: pi --no-tools -p "Answer from context only"
-    example_description: Runs a text-only session with no tool calling.
+    description: "Disables all tools by default by mapping the session to an empty tool allowlist."
+    example: 'pi --no-tools -p "Answer from the prompt only"'
+    example_description: "Runs a tool-free session."
+  - param: no-builtin-tools
+    style: switch
+    description: "Disables the default built-in tools while leaving extension and custom tools available unless separately filtered."
+    example: "pi --no-builtin-tools -e ./my-tools.ts"
+    example_description: "Starts without Pi's built-in read, bash, edit, and write tools, using tools supplied by an explicit extension."
+  - param: extension
+    style: switch
+    description: "Loads an extension file or directory; can be repeated. Extensions can register tools, commands, flags, hooks, providers, and policy-like gates."
+    example: "pi --extension ./permission-gate.ts"
+    example_description: "Loads an explicit extension for this run."
   - param: no-extensions
     style: switch
-    description: Disable auto-discovered extensions. Explicit --extension paths still load.
-    example: pi --no-extensions -e ./permission-gate.ts
-    example_description: Starts Pi without auto-discovered extensions, loading only the explicit permission gate.
+    description: "Disables extension auto-discovery. Explicit --extension/-e paths still load."
+    example: 'pi --no-extensions -p "Use only built-in behavior"'
+    example_description: "Prevents user and project extension discovery for the session."
+  - param: skill
+    style: switch
+    description: "Loads a skill file or directory; can be repeated. Skills are prompt resources, not execution permissions, but they can influence tool use."
+    example: 'pi --skill ./SKILL.md -p "Use this procedure"'
+    example_description: "Adds one explicit skill resource."
   - param: no-skills
     style: switch
-    description: Disable skill discovery and loading.
-    example: pi --no-skills -p "Answer without skills"
-    example_description: Runs without loading any skills.
+    description: "Disables skill discovery and loading."
+    example: 'pi --no-skills -p "Answer without skill instructions"'
+    example_description: "Runs without user or project skills."
+  - param: prompt-template
+    style: switch
+    description: "Loads a prompt template file or directory; can be repeated. Prompt templates can add slash-command-like workflows."
+    example: 'pi --prompt-template ./prompts'
+    example_description: "Adds explicit prompt templates."
   - param: no-prompt-templates
     style: switch
-    description: Disable prompt template discovery and loading.
-    example: pi --no-prompt-templates -p "Answer without templates"
-    example_description: Runs without loading any prompt templates.
+    description: "Disables prompt-template discovery and loading."
+    example: 'pi --no-prompt-templates -p "Answer without templates"'
+    example_description: "Runs without discovered prompt templates."
+  - param: theme
+    style: switch
+    description: "Loads a theme file or directory; can be repeated. This is UI-adjacent and not an execution permission."
+    example: "pi --theme ./theme.json"
+    example_description: "Loads an explicit theme."
   - param: no-themes
     style: switch
-    description: Disable theme discovery and loading.
-    example: pi --no-themes
-    example_description: Runs with the default theme only.
+    description: "Disables theme discovery and loading."
+    example: "pi --no-themes"
+    example_description: "Runs with built-in/default theme behavior."
   - param: no-context-files
     style: switch
-    description: Disable AGENTS.md and CLAUDE.md context file discovery and loading.
-    example: pi --no-context-files -p "Answer generically"
-    example_description: Ignores project instruction files for the session.
+    description: "Disables AGENTS.md and CLAUDE.md context-file discovery."
+    example: 'pi --no-context-files -p "Ignore repository instructions"'
+    example_description: "Prevents project and global context files from influencing the run."
   - param: approve
     style: switch
-    description: Trust project-local files, settings, extensions, and packages for this run.
-    example: pi -a -p "Run CI task"
-    example_description: Auto-approves project trust for a non-interactive run.
+    description: "Trusts project-local Pi settings, resources, packages, and extensions for this run."
+    example: 'pi --approve -p "Run the project task"'
+    example_description: "Session-scoped project trust approval."
   - param: no-approve
     style: switch
-    description: Ignore project-local files, settings, extensions, and packages for this run.
-    example: pi -na -p "Answer generically"
-    example_description: Declines project trust for the session.
+    description: "Declines project-local Pi settings, resources, packages, and extensions for this run."
+    example: 'pi --no-approve -p "Summarize from prompt context only"'
+    example_description: "Session-scoped project trust denial."
+  - param: offline
+    style: switch
+    description: "Disables startup network operations such as update checks, package update checks, and install/update telemetry."
+    example: 'pi --offline -p "Work without startup network checks"'
+    example_description: "Prevents Pi-managed startup network calls for one run."
+  - param: mode
+    style: switch
+    description: "Selects output mode: text, json, or rpc. This affects whether extension UI/approval prompts can be shown programmatically."
+    example: 'pi --mode json "Inspect this"'
+    example_description: "Runs in JSON event-stream mode."
+  - param: print
+    style: switch
+    description: "Runs a non-interactive prompt and exits. Extension UI helpers are unavailable in print mode."
+    example: 'pi --print "List files"'
+    example_description: "Headless single-prompt execution."
+  - param: no-session
+    style: switch
+    description: "Uses an in-memory session and avoids saving transcript state."
+    example: 'pi --no-session -p "One-shot private prompt"'
+    example_description: "Avoids persisting the session JSONL."
+  - param: session-dir
+    style: switch
+    description: "Overrides the directory used for session storage and lookup; takes precedence over PI_CODING_AGENT_SESSION_DIR and settings.json sessionDir."
+    example: 'pi --session-dir /tmp/pi-sessions -p "Use temporary session storage"'
+    example_description: "Moves session persistence to a temporary directory for this run."
 
 env_vars:
   - name: PI_CODING_AGENT_DIR
-    effect: Overrides the configuration directory (default ~/.pi/agent). Changing this affects where settings.json, trust.json, extensions, skills, and sessions are loaded from.
+    effect: "Overrides the Pi agent configuration directory, which changes where settings.json, trust.json, models.json, auth.json, extensions, skills, prompts, themes, and sessions are read from."
   - name: PI_CODING_AGENT_SESSION_DIR
-    effect: Overrides the session storage directory. Has lower precedence than --session-dir.
-  - name: PI_OFFLINE
-    effect: Disables startup network operations (update checks, package update checks, install telemetry). Security-adjacent because it prevents external network calls during startup.
-  - name: PI_TELEMETRY
-    effect: Overrides install/update telemetry and provider attribution headers. Does not grant or deny tool permissions.
+    effect: "Overrides session storage unless --session-dir is provided."
   - name: PI_PACKAGE_DIR
-    effect: Overrides the package installation directory. Affects where installed Pi packages (which may contain extensions) are loaded from.
+    effect: "Overrides the package asset directory; this affects built-in assets and package/resource lookup, including extension package contents."
+  - name: PI_OFFLINE
+    effect: "Disables startup network operations when set to 1/true/yes, including update checks, package update checks, and install/update telemetry."
+  - name: PI_SKIP_VERSION_CHECK
+    effect: "Skips the startup latest-version request to pi.dev without disabling other network operations."
+  - name: PI_TELEMETRY
+    effect: "Overrides install/update telemetry and provider attribution headers when set to 1/true/yes or 0/false/no. It does not grant or deny tool permissions."
 
 config_files:
-  - os: all
-    user: ~/.pi/agent/settings.json
-    repo: .pi/settings.json
-    notes: Global settings are overridden by project settings. Nested objects merge; scalars replace. There is no permissions key in either file.
+  - os: macos
+    user: ".pi/agent/settings.json"
+    repo: ".pi/settings.json"
+    notes: "Relative to the user's home directory and repo root. Project settings load only after project trust is granted. Observed local /Users/ken/.pi/agent/settings.json contains model defaults only; no permission settings were present."
+  - os: linux
+    user: ".pi/agent/settings.json"
+    repo: ".pi/settings.json"
+    notes: "Same home-relative and repo-relative paths as macOS. Project settings load only after project trust is granted."
+  - os: windows
+    user: ".pi/agent/settings.json"
+    repo: ".pi/settings.json"
+    notes: "Same home-relative and repo-relative paths using the Windows home directory. Project settings load only after project trust is granted."
+  - os: macos
+    user: ".pi/agent/trust.json"
+    repo: "none"
+    notes: "Stores persisted project trust decisions by canonical directory. No local trust.json was present in /Users/ken/.pi/agent during this run."
+  - os: linux
+    user: ".pi/agent/trust.json"
+    repo: "none"
+    notes: "Stores persisted project trust decisions by canonical directory."
+  - os: windows
+    user: ".pi/agent/trust.json"
+    repo: "none"
+    notes: "Stores persisted project trust decisions by canonical directory."
 
 precedence:
   - source: cli
-    scope: [tools, extensions, skills, prompts, themes, context_files, project_trust]
+    scope: [tool_visibility, project_trust, resource_loading, startup_network, session_storage, output_mode]
     merge_strategy: none
-    notes: CLI flags are temporary session overrides. --tools/--exclude-tools/--no-tools adjust the active tool set; --approve/--no-approve override project trust for one run.
-  - source: environment variables
-    scope: [config_paths, startup_network]
+    notes: "CLI flags are session-scoped. --tools creates an allowlist, --exclude-tools removes names, --no-tools creates an empty allowlist, --approve/--no-approve override project trust for the run, and --offline overrides startup network behavior."
+  - source: extension_hooks
+    scope: [tool_calls, user_bash, provider_payload, project_trust, tool_visibility, slash_command]
+    merge_strategy: shallow
+    notes: "Loaded extensions run in load order. tool_call handlers can mutate input; the first { block: true } result blocks the call. Extension code is trusted code running with the Pi process permissions."
+  - source: env
+    scope: [config_paths, session_storage, package_assets, startup_network, telemetry]
     merge_strategy: none
-    notes: PI_CODING_AGENT_DIR and PI_CODING_AGENT_SESSION_DIR override settings-derived paths. PI_OFFLINE disables startup network operations.
-  - source: project settings
-    scope: [settings]
+    notes: "Environment variables mostly move config/storage locations or disable startup network/telemetry surfaces. They do not define allow/ask/deny policy."
+  - source: repo_config
+    scope: [settings, packages, extensions, skills, prompts, themes, system_prompt]
     merge_strategy: shallow
-    notes: .pi/settings.json overrides global settings. Nested objects merge; scalars replace.
-  - source: user settings
-    scope: [settings]
+    notes: "Project .pi/settings.json overlays global settings after project trust. Nested setting objects are merged at the top nested-object level; arrays and scalars replace. Project settings do not contain a native permissions key."
+  - source: trust_store
+    scope: [project_trust]
+    merge_strategy: nearest
+    notes: "Saved trust decisions in trust.json apply by closest current or parent directory before defaultProjectTrust."
+  - source: user_config
+    scope: [settings, packages, extensions, skills, prompts, themes, system_prompt]
     merge_strategy: shallow
-    notes: ~/.pi/agent/settings.json provides baseline values when no project override exists.
+    notes: "User/global settings provide the baseline. defaultProjectTrust is documented as a global-only setting."
 
-default_posture: "When nothing is configured, Pi runs with full access to the launching user's filesystem, shell, network, and credentials. All built-in tools are enabled and no interactive permission prompts or denials are issued."
+default_posture: "Pi starts with read, bash, edit, and write built-in tools enabled, no native approval prompts, and the filesystem/process/network permissions of the launching OS user. grep, find, and ls are built-in read-only tools but are normally enabled only when explicitly selected or activated by an extension."
 
 cli_zero_permissions:
   supported: true
-  invocation: "pi --no-tools"
-  mechanism: "The --no-tools flag disables all built-in and extension tools for the session, leaving the model with no callable tools."
-  limitations: "Extensions loaded via --extension can still register custom tools. To fully lock down tool calling, combine --no-tools with --no-extensions and load only explicitly vetted extensions. Filesystem, network, and process access are still bounded only by the OS user permissions."
+  invocation: "pi --no-tools --no-extensions --no-skills --no-prompt-templates --no-context-files --no-themes --no-approve --offline --no-session"
+  mechanism: "Empty tool allowlist plus disabled resource discovery, declined project trust, disabled startup network operations, and in-memory session state."
+  limitations: "This removes model-callable tools and most local resource influence for one run, but it is not an OS sandbox. Pi can still call the selected model provider, built-in startup/runtime code runs as the OS user, explicitly supplied extensions would execute if added, and there is no CLI mechanism to add permissions back later except by choosing a different allowlist at launch."
 
 agent_permissions:
   allowed: false
+  fm_properties: []
 
 yolo:
   has_interactive_yolo: false
   has_non_interactive_yolo: false
-  mechanism: "none"
+  mechanism: "No explicit YOLO flag, mode, env var, or config key. Pi's default is already permissive, but it is not exposed as a named YOLO mode."
 
 policy_engine:
   ergonomic: false
   provides_coverage: false
   gaps:
-    - "Pi has no native permission model, so there is nothing for PolicyEngine to map to its allow/ask/deny axes."
-    - "Pi is not one of PolicyEngine's supported backends, so queries would return Unknown."
-    - "Tool gating is done through CLI allowlists and extension code, not through static permission rules."
-    - "Project trust gates resource loading but does not restrict tool execution."
-    - "Extension-based permission gates are arbitrary TypeScript code and are not discoverable as static policy rules."
+    - "PolicyEngine has no Pi backend today."
+    - "Pi core has no native static allow/ask/deny rule grammar for tool calls, paths, commands, network, or MCP."
+    - "Pi's strongest native control is tool visibility, not approval policy."
+    - "Project trust gates project-local resource loading but does not constrain trusted tools after startup."
+    - "Extension-based permission gates are arbitrary TypeScript code and may be dynamic, stateful, or undiscoverable from static config."
+    - "Optional packages such as pi-permission-system define their own non-core policy grammar that would need separate provider-extension modeling."
 
 permission_entities:
   - entity: tool
-    native_names: ["--tools", "--exclude-tools", "--no-builtin-tools", "--no-tools"]
-    notes: "Tool visibility is controlled through CLI flags that include or exclude tool names from the active set. There are no per-tool allow/ask/deny rules."
-  - entity: extension
-    native_names: ["--extension", "--no-extensions", "settings.json extensions/packages"]
-    notes: "Extensions can register tools and subscribe to tool_call events to block or allow individual calls. Extensions run with full system permissions."
+    native_names: ["read", "bash", "edit", "write", "grep", "find", "ls", "--tools", "--exclude-tools", "--no-tools", "--no-builtin-tools", "pi.getActiveTools", "pi.setActiveTools", "pi.registerTool"]
+    notes: "Tool visibility is native. Per-call allow/deny is implemented only through extension tool_call handlers."
+  - entity: command
+    native_names: ["bash", "user_bash", "! command", "!! command"]
+    notes: "The model can invoke the bash tool when active. Interactive user shell shortcuts can be intercepted by extensions through user_bash."
+  - entity: path
+    native_names: ["tool input path fields", "extension tool_call input", "protected-paths example"]
+    notes: "Pi core has no path rule grammar. Extensions can inspect path-bearing tool inputs and block or mutate them."
   - entity: workspace
-    native_names: ["project trust", "--approve", "--no-approve", "defaultProjectTrust"]
-    notes: "Project trust gates whether .pi/settings.json, project extensions, and project packages load. It does not restrict what trusted tools can do."
+    native_names: ["project trust", "defaultProjectTrust", "trust.json", "--approve", "--no-approve", "/trust"]
+    notes: "Trust gates project-local settings/resources/packages/extensions, not runtime filesystem access."
+  - entity: extension
+    native_names: ["extensions", "packages", "--extension", "--no-extensions", "pi.registerFlag", "pi.on"]
+    notes: "Extensions are trusted code with full process permissions. They can add tools, commands, hooks, flags, providers, and policy-like behavior."
+  - entity: slash_command
+    native_names: ["pi.registerCommand", "prompt templates", "skill commands", "/trust", "/settings", "/reload"]
+    notes: "Slash commands can be built-in, extension-provided, prompt-template-provided, or skill-derived. They are not permission rules but can mutate session behavior."
+  - entity: hook
+    native_names: ["project_trust", "before_provider_request", "after_provider_response", "tool_call", "tool_result", "user_bash", "input", "context", "before_agent_start"]
+    notes: "Hooks are extension APIs. tool_call can block; tool_result and provider/context hooks can rewrite data."
+  - entity: mcp_server
+    native_names: []
+    notes: "Pi core does not include built-in MCP support. MCP may be implemented by extensions or packages."
+  - entity: mcp_tool
+    native_names: []
+    notes: "No native MCP tool filtering exists in Pi core."
+  - entity: agent
+    native_names: ["subagent example extension", "agentScope", "tools frontmatter"]
+    notes: "Subagents are not a native Pi core feature. The example subagent extension supports user/project agent files with tools/model frontmatter."
+  - entity: mode
+    native_names: ["--mode text", "--mode json", "--mode rpc", "--print"]
+    notes: "Mode affects UI availability and output protocol, not native approval policy."
   - entity: sandbox
-    native_names: ["containerization", "Gondolin", "Docker", "OpenShell"]
-    notes: "Pi has no built-in sandbox; isolation is achieved by running Pi or its tool execution in external containers or micro-VMs."
+    native_names: ["Gondolin extension", "Docker", "OpenShell", "sandbox example extension"]
+    notes: "Sandboxing is external or extension-provided, not built into Pi core."
 
 approval_modes: []
 
 rule_model:
-  decisions: []
-  syntax: "none"
-  precedence: "none"
-  merge_semantics: "none"
-  matcher_semantics: "none"
-  default_decision: "allow"
+  decisions: ["allow by omission", "block via extension { block: true, reason?: string }"]
+  syntax: "Pi core has no static rule file or allow/ask/deny grammar. Extension TypeScript can inspect and mutate tool_call input and return { block: true, reason?: string }; project_trust extensions return { trusted: \"yes\" | \"no\" | \"undecided\", remember?: boolean }."
+  precedence: "For tool_call handlers, extensions run in load order and the first blocking result stops the tool. If no handler blocks, the call proceeds. CLI tool visibility removes unavailable tools before the model can call them."
+  merge_semantics: "No native rule merge. Settings merge globally then project after trust; extension behavior composes procedurally in load order."
+  matcher_semantics: "No native matcher semantics. Matching is arbitrary extension code; examples use regular expressions for bash commands and substring checks for paths."
+  default_decision: "allow for any visible tool call"
 
 tool_visibility:
   supported: true
   mechanisms:
-    - "--tools <list> allowlists specific tool names across built-in, extension, and custom tools."
-    - "--exclude-tools <list> denies specific tool names across built-in, extension, and custom tools."
-    - "--no-builtin-tools disables built-in tools while keeping extension/custom tools."
-    - "--no-tools disables all tools by default."
-    - "Extensions can register or unregister tools at runtime via pi.registerTool() and pi.setActiveTools()."
-  notes: "Tool visibility controls which tools appear in the model's context. It is independent of any approval flow; Pi has no built-in approval prompts."
+    - "--tools <comma-list> allowlists active tool names."
+    - "--exclude-tools <comma-list> removes active tool names."
+    - "--no-tools starts with an empty active-tool allowlist."
+    - "--no-builtin-tools disables the default built-in tool set while preserving extension/custom tools."
+    - "Extensions can call pi.registerTool(), pi.getActiveTools(), and pi.setActiveTools()."
+  notes: "Tool visibility is separate from approval policy. Pi can hide tools from the model, but visible tools are not natively pre-approved versus approval-required; they simply execute unless an extension blocks them."
 
 sandbox:
   supported: false
   modes: []
   backends: []
-  filesystem_control: "none"
-  network_control: "none"
-  notes: "Pi has no native OS-enforced sandbox. The documentation describes three containerization patterns: Gondolin (micro-VM tool routing), plain Docker (whole process isolation), and OpenShell (policy-controlled sandbox). These are external to Pi and must be configured by the user."
+  filesystem_control: "none in Pi core"
+  network_control: "none in Pi core; --offline only disables Pi-managed startup network operations, not model/provider calls or tool network access"
+  notes: "Pi documents external containment patterns: whole-process Docker, whole-process OpenShell, host Pi with Gondolin micro-VM routing for built-in tools and ! commands, and an example sandbox extension for bash."
 
 trust_and_admin:
-  folder_trust: "On interactive startup, Pi asks before trusting a project folder that contains project-local settings, resources, or .agents/skills. Trusting allows .pi/settings.json, .pi resources, and project extensions to load. Decisions are saved in ~/.pi/agent/trust.json. Non-interactive modes use defaultProjectTrust (ask/always/never) unless --approve or --no-approve is passed."
-  managed_policy: "none"
-  safe_mode: "none"
-  notes: "There is no managed/admin policy layer. Project trust only gates resource loading, not tool capabilities."
+  folder_trust: "Project trust gates loading of .pi/settings.json, .pi resources, project packages, project extensions, project system prompt files, and project .agents/skills. Trust can be saved through /trust in trust.json; --approve and --no-approve override for one run."
+  managed_policy: "No native managed/admin policy layer was found."
+  safe_mode: "No native safe mode was found. A locked-down run must be assembled from CLI flags such as --no-tools, --no-extensions, --no-context-files, --no-approve, --offline, and --no-session."
+  notes: "AGENTS.md and CLAUDE.md context files load regardless of project trust unless --no-context-files is used. Project trust is an input-loading guard, not a sandbox."
 
 mcp_permissions:
   supported: false
   server_filters: []
   tool_filters: []
-  trust_model: "none"
-  notes: "Pi does not include built-in MCP support. MCP can be added only through a custom extension, at which point its security depends entirely on the extension and the host/container in which Pi runs."
+  trust_model: "No native MCP trust model in Pi core."
+  notes: "Pi documentation states it intentionally does not include built-in MCP. MCP can be added by extensions/packages; the Pi package catalog lists pi-permission-system as an extension with MCP-related gates, but that is optional third-party extension behavior, not a Pi core permission surface."
 
-headless_behavior: "In non-interactive -p mode and JSON/RPC modes, Pi does not show interactive permission prompts. Project trust dialogs are skipped; defaultProjectTrust or --approve/--no-approve controls whether project resources load. Without an extension that implements confirmation, all available tools execute with the OS user's permissions."
+headless_behavior: "In print mode and JSON mode, extension UI helpers cannot prompt; a permission-gate extension must block, allow, or use non-UI logic. RPC mode exposes extension dialogs through the JSON protocol, but native project-trust prompts are not shown in non-interactive modes and fall back to saved trust/defaultProjectTrust/--approve/--no-approve."
 
-approval_persistence: "Pi has no built-in approval persistence for individual tool calls. Project trust decisions persist in ~/.pi/agent/trust.json until the user changes them."
+approval_persistence: "Pi core has no per-tool approval persistence. Project trust decisions persist in .pi/agent/trust.json by canonical directory; extension-provided gates may persist their own decisions if they implement that behavior."
 
 protected_paths: []
 
-security_posture: "Pi's default security posture is all-permissive: it runs with the launching user's OS permissions and provides no built-in permission prompts, sandbox, or static policy engine. Restrictions must be imposed externally via OS permissions, containers, or user-provided extensions that subscribe to tool_call events."
+security_posture: "Pi core is a permissive local agent harness with tool visibility filters and a project-resource trust gate. It is not an OS-enforced sandbox or native static policy engine; stronger guarantees require external containment or trusted extension/package code."
 
 changes:
-  - "Verified current Pi behavior against v0.73.1 local install and pi.dev / GitHub documentation as of 2026-07-02."
-  - "Added missing CLI flags observed in --help: --no-extensions/-ne, --no-skills/-ns, --no-prompt-templates/-np, --no-themes, --no-context-files/-nc."
-  - "Expanded environment variables list with PI_CODING_AGENT_DIR, PI_CODING_AGENT_SESSION_DIR, PI_OFFLINE, PI_TELEMETRY, and PI_PACKAGE_DIR."
-  - "Added detailed sandboxing/containerization coverage (Gondolin, Docker, OpenShell) from current containerization.md."
-  - "Documented project trust behavior, trust.json, defaultProjectTrust, and --approve/--no-approve precedence."
-  - "Filled all schema-required frontmatter fields introduced by the merged permissions topic."
-  - "Confirmed Pi still has no built-in MCP support, no approval modes, no YOLO mode, and no static permission rule grammar."
+  - "Refreshed against earendil-works/pi main at commit 23d1462611ab74b4874c35e701a43d7caa5e3de3 and package version 0.80.3 on 2026-07-03."
+  - "Corrected config_files to use separate macOS, Linux, and Windows records instead of the legacy unsupported os: all value."
+  - "Verified that current Pi core still has no native permission prompts, no explicit YOLO flag, no managed/admin policy, no built-in MCP, and no native sandbox."
+  - "Updated the default posture to distinguish the default active tools read/bash/edit/write from additional built-in read-only tools grep/find/ls that are normally activated explicitly."
+  - "Documented current CLI-only locked-down launch using --no-tools plus resource/trust/session/startup-network suppression flags."
+  - "Added extension hook behavior as the lower-level policy mechanism: tool_call can mutate input or block; tool_result and provider hooks can rewrite data; extension errors in tool_call fail closed by blocking execution."
+  - "Added the newly observed optional pi-permission-system package as non-core context without treating its grammar as Pi native policy."
+  - "Recorded local config inspection: /Users/ken/.pi/agent/settings.json existed with model defaults only, no trust.json existed, and no repo .pi/settings.json existed in this workspace."
 
 requires_claudine_update: true
-reason: "Claudine's PolicyEngine does not include a Pi backend. Modeling Pi's all-permissive default, CLI tool allowlists/denylists, project-trust behavior, and extension-based permission gates requires a new backend and canonical rule mapping."
+reason: "Claudine's PolicyEngine still lacks a Pi backend and cannot currently model Pi's core distinction between tool visibility, project trust, and arbitrary extension-mediated blocking."
 ---
 
-# Pi Permissions
+# Pi Permissions and Security Controls
 
 ## Introduction to Pi Permissions
 
-Pi is a minimal, extensible coding agent harness. It deliberately does not ship with a built-in permission system for filesystem, process, network, or credential access. By default, Pi runs with the full permissions of the operating-system user and process that launched it. Any restriction must be imposed by the operating system, a container or sandbox, or by a user-provided extension.
+Pi core does not define a native permission policy for filesystem, process, network, credential, or MCP access. Its own security documentation describes Pi as a local coding agent that runs with the permissions of the user account that starts it, and the repository README states that Pi does not include a built-in permission system for restricting filesystem, process, network, or credential access.
 
-Configuration files do not define execution permissions. `settings.json` controls general agent behavior, resource discovery, and project trust, but it has no `permissions` object and no allow/ask/deny rule grammar. The only native policy-like mechanisms are:
+The controls Pi does provide are narrower:
 
-- **Project trust** — decides whether project-local `.pi` resources load.
-- **Tool visibility** — the `--tools`, `--exclude-tools`, `--no-builtin-tools`, and `--no-tools` CLI flags restrict which tools are exposed to the model.
-- **Extension gates** — TypeScript modules can subscribe to `tool_call` events and block individual calls.
+- Tool visibility controls which tools are exposed to the model.
+- Project trust controls whether project-local Pi resources are loaded.
+- Extensions can implement custom gates by intercepting events such as `tool_call`, `user_bash`, `project_trust`, and provider payload hooks.
+- External isolation can be supplied by Docker, OpenShell, Gondolin, or other OS/container mechanisms.
 
-There are no environment variables that define tool or filesystem permissions. Environment variables such as `PI_CODING_AGENT_DIR` change where configuration is loaded, `PI_OFFLINE` disables startup network traffic, and `PI_TELEMETRY` controls telemetry, but none grants or denies execution rights.
+Configuration files can define project trust defaults, package/resource loading, and extension loading. They do not define native allow/ask/deny permissions. The relevant files are `~/.pi/agent/settings.json`, `<repo>/.pi/settings.json`, and `~/.pi/agent/trust.json`. Project settings are loaded only after project trust is granted.
 
-### CLI parameters and precedence
+Observed local configuration on this host:
 
-The permission-adjacent CLI parameters are:
+- `/Users/ken/.pi/agent/settings.json` exists and contains only `lastChangelogVersion`, `defaultProvider`, and `defaultModel`.
+- `/Users/ken/.pi/agent/trust.json` does not exist.
+- This repository has no `.pi/settings.json`.
+- The session `$HOME` also had `/Users/ken/.claudine/.pi/agent/auth.json`, but no settings or trust file.
 
-| Parameter | Effect |
-| :----- | :----- |
-| `--tools <list>` / `-t <list>` | Allowlist tool names for the session |
-| `--exclude-tools <list>` / `-xt <list>` | Denylist tool names for the session |
-| `--no-builtin-tools` / `-nbt` | Disable built-in tools, keep extension/custom tools |
-| `--no-tools` / `-nt` | Disable all tools |
-| `--no-extensions` / `-ne` | Disable auto-discovered extensions |
-| `--no-skills` / `-ns` | Disable skill discovery |
-| `--no-prompt-templates` / `-np` | Disable prompt template discovery |
-| `--no-themes` | Disable theme discovery |
-| `--no-context-files` / `-nc` | Disable AGENTS.md/CLAUDE.md discovery |
-| `--approve` / `-a` | Trust project-local resources for this run |
-| `--no-approve` / `-na` | Ignore project-local resources for this run |
+Environment variables that influence security-adjacent behavior are mostly path and startup-network switches. `PI_CODING_AGENT_DIR` moves the whole agent config directory, `PI_CODING_AGENT_SESSION_DIR` moves session storage, `PI_PACKAGE_DIR` changes package asset lookup, `PI_OFFLINE` disables startup network operations, `PI_SKIP_VERSION_CHECK` disables the version check, and `PI_TELEMETRY` affects telemetry/provider-attribution headers. None of these variables grants or denies tool execution.
 
-Precedence for configuration that Pi does support is:
+Permission-adjacent CLI switches have higher precedence than config and env where they apply:
 
-**CLI flags > environment variables (where they apply) > project settings (`.pi/settings.json`) > user/global settings (`~/.pi/agent/settings.json`).**
+| CLI switch | Effect |
+| --- | --- |
+| `--tools <list>` / `-t <list>` | Exposes only the comma-separated tool names. |
+| `--exclude-tools <list>` / `-xt <list>` | Removes the comma-separated tool names. |
+| `--no-tools` / `-nt` | Starts with no active tools by using an empty allowlist. |
+| `--no-builtin-tools` / `-nbt` | Disables default built-in tools but keeps extension/custom tools enabled. |
+| `--extension <path>` / `-e <path>` | Loads an explicit extension for the run. |
+| `--no-extensions` / `-ne` | Disables auto-discovered extensions; explicit `-e` still loads. |
+| `--skill <path>` | Loads an explicit skill. |
+| `--no-skills` / `-ns` | Disables skill discovery and loading. |
+| `--prompt-template <path>` | Loads explicit prompt templates. |
+| `--no-prompt-templates` / `-np` | Disables prompt-template discovery and loading. |
+| `--theme <path>` | Loads an explicit theme. |
+| `--no-themes` | Disables theme discovery and loading. |
+| `--no-context-files` / `-nc` | Disables `AGENTS.md` and `CLAUDE.md` context loading. |
+| `--approve` / `-a` | Trusts project-local Pi resources for this run. |
+| `--no-approve` / `-na` | Ignores project-local Pi resources for this run. |
+| `--offline` | Disables startup network operations for this run. |
+| `--mode text|json|rpc` | Selects output/UI protocol. |
+| `--print` / `-p` | Runs one non-interactive prompt and exits. |
+| `--no-session` | Avoids saving a persistent session transcript. |
+| `--session-dir <dir>` | Overrides session storage location for the run. |
 
-Because there is no permission-rule surface, there is no conflict resolution between allow and deny rules. `--tools` and `--exclude-tools` are applied as simple set operations at startup.
+Precedence is best summarized as:
 
-### Permission policy vs tool visibility
+```text
+CLI flags > extension hook decisions at runtime > environment path/network switches > trusted project settings > trust.json saved decisions/defaultProjectTrust > user settings
+```
 
-Pi does not separate approval policy from tool visibility because it has no approval policy. The CLI flags only control which tools are visible and callable. Once a tool is visible, it runs with the OS user's permissions without further prompting.
+This is not a single unified policy stack. CLI tool switches affect tool visibility before the model sees tools. Extension hooks act later, around runtime events. Project trust gates loading of project-local configuration and code.
+
+Permission/approval policy is distinct from tool visibility. Pi core supports tool visibility but not native approval policy. If `bash` is visible, Pi core does not ask before running shell commands. If `write` is visible, Pi core does not ask before writing. Approval prompts require extension code or external wrapping.
 
 ## Permissions Use Cases
 
 ### Default
 
-If no environment variable, config file, or CLI switch is provided, Pi's effective permissions are the same as the launching user. The model can read any file the user can read, write any file the user can write, run any shell command the user can run, and make outbound network requests if the host allows them. All built-in tools are enabled and no approval prompts are shown.
+With no relevant CLI flags, env vars, config, or saved trust decision, Pi starts with the default active built-in tools: `read`, `bash`, `edit`, and `write`. These tools run with the Pi process permissions. Pi also ships `grep`, `find`, and `ls` as built-in read-only tools, but they are normally activated explicitly, such as with `--tools read,grep,find,ls`, or by extension/runtime tool changes.
 
-A Claudine `PolicyEngine` description of this posture is not possible today. `PolicyEngine` models providers with explicit permission axes (allow/ask/deny for read, write, execute, network, MCP, agents), and Pi is not one of its supported backends. Without a Pi backend, `PolicyEngine` would return `Unknown` for every query. Adding Pi support would require treating Pi as a special all-permissive provider and mapping its CLI tool flags into canonical rules.
+Project trust defaults to `ask` for interactive sessions when trust-requiring project resources exist. In non-interactive modes, `ask` behaves as not trusted unless a saved trust decision or `--approve` says otherwise. `AGENTS.md` and `CLAUDE.md` context files still load unless `--no-context-files` is used.
+
+PolicyEngine is not ergonomic for this default because Pi core does not expose a native policy grammar. A future Pi backend could represent the default as:
+
+- tool visibility: `read`, `bash`, `edit`, `write`
+- approval mode: no native prompts
+- filesystem/process/network: OS-user permissions
+- project config: gated by project trust
+
+Without code changes, PolicyEngine cannot define this use case as Pi-native policy because there is no Pi provider backend and no Pi rule syntax to emit.
 
 ### Whitelisting
 
-Pi has no built-in whitelisting mode, but you can approximate one with the CLI tool flags:
+Pi can start from fewer visible tools, but it does not have a native "ask for needed permissions" mode. The closest native pattern is CLI allowlisting:
 
 ```bash
-# Start in a read-only mode: only read/search/ls tools are available
-pi --tools read,grep,find,ls -p "Review the code"
-
-# Disable bash for a session while keeping everything else
-pi --exclude-tools bash -p "Explain this file"
-
-# Disable all built-in tools and load only a custom, audited tool set
-pi --no-builtin-tools -e ./restricted-tools.ts
-
-# Start with no tools at all, then add back only what is needed
-pi --no-tools --tools read -p "Summarize this file"
+pi --tools read,grep,find,ls -p "Review the code without changing it"
+pi --tools read -p "Read only the files I mention"
+pi --exclude-tools bash -p "Use file tools but do not run commands"
 ```
 
-To add interactive confirmation, you must write an extension that listens to `tool_call` events. The [permission-gate.ts example](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/extensions/permission-gate.ts) prompts before `rm -rf`, `sudo`, or `chmod/chown 777` and blocks in non-interactive mode.
-
-The best **CLI-only, session-scoped** way to start with no permissions or no tools is:
+To start with no model-callable tools for one Claudine-controlled session, the best CLI-only invocation is:
 
 ```bash
-pi --no-tools
+pi --no-tools --no-extensions --no-skills --no-prompt-templates --no-context-files --no-themes --no-approve --offline --no-session
 ```
 
-This disables all built-in and extension tools for the session. You can add back specific built-in tools with `--tools <list>` or load a vetted extension with `--extension <path>`. For a fully locked-down posture that also blocks auto-discovered extensions, combine with `--no-extensions`:
+This is session-scoped and does not mutate the user's Pi config. It disables all tools, disables automatic extension/resource/context loading, declines project-local Pi resources, disables startup network operations, and avoids persistent session state.
+
+Limitations:
+
+- It is not an OS sandbox.
+- Pi can still contact the selected model provider unless the model/provider configuration itself prevents that.
+- It does not provide an interactive escalation channel to add a tool mid-run from the CLI.
+- Explicit `--extension` paths would still run if Claudine supplied them.
+- Runtime code still runs with the launching user's permissions.
+
+Additional permissions can be granted by choosing a more permissive allowlist at launch:
 
 ```bash
-pi --no-tools --no-extensions -e ./permission-gate.ts -p "Review with gate"
+pi --tools read,grep,find,ls --no-extensions --no-context-files -p "Analyze only"
+pi --tools read,bash --exclude-tools write,edit -p "Run read-only diagnostics"
+pi --tools read,edit,write --exclude-tools bash -p "Patch files without shell commands"
 ```
 
-`PolicyEngine` cannot describe this use case for Pi without a new backend. The engine has no way to know that `--tools read,grep,find,ls` maps to `can_read(path) -> Allow` and `can_execute(command) -> Deny`, because Pi does not persist that policy in a config file or expose it through a provider-native model.
+PolicyEngine could model these as tool-visibility rules, but not as approval rules. A useful PolicyEngine improvement would be a separate `ToolVisibility` surface plus a provider capability flag that says "visible means executable without native approval."
 
 ### YOLO
 
-Pi has no YOLO or bypass-permissions mode. The default behavior is already fully permissive: all tools run without prompting and the agent acts with the user's OS permissions. There is no flag, environment variable, or setting that switches into or out of a "run everything" mode because that is the baseline.
+Pi has no explicit YOLO mode. There is no `--yolo`, approval-mode flag, env var, or settings key for bypassing prompts because Pi core has no native permission prompts to bypass.
+
+In practice, Pi's default is permissive: active tools execute as the OS user. That default is available in both interactive and non-interactive sessions. What is allowed is whatever the active tools, extensions, OS account, shell, filesystem permissions, network policy, and provider credentials allow. What is not allowed is anything outside those OS/runtime boundaries, or any tool call blocked by an extension.
 
 ### Root User
 
-Pi does not change its behavior when started as `root` or under `sudo`. It continues to run with the permissions of the launching process, which in this case are elevated. There is no special root block or bypass-permissions refusal. Because there is no YOLO mode, the question of whether it is allowed as root does not apply.
+I found no current source branch that changes Pi's permission behavior when the process runs as root. Pi relies on the OS account boundary, so running as root expands the effective filesystem/process permissions available to tools and extensions. There is still no special YOLO switch; the same permissive default applies with root's larger OS privileges.
 
 ### Configuring the Default
 
-There are no files that configure default execution permissions for Pi. The files that come closest are general settings files:
+Pi settings use JSON:
 
-| Scope | Path | What it controls |
-| :----- | :----- | :----- |
-| User | `~/.pi/agent/settings.json` | Global settings, resource paths, packages, model defaults |
-| Repo | `.pi/settings.json` | Project settings that override global settings |
+```json
+{
+  "defaultProjectTrust": "ask",
+  "extensions": ["/path/to/extension.ts"],
+  "packages": ["npm:some-pi-package@1.0.0"],
+  "skills": ["/path/to/skills"],
+  "prompts": ["/path/to/prompts"],
+  "themes": ["/path/to/theme.json"],
+  "sessionDir": "/tmp/pi-sessions",
+  "images": {
+    "blockImages": true
+  },
+  "httpProxy": "http://127.0.0.1:7890"
+}
+```
 
-Neither file has a `permissions` key or a grammar for allow/ask/deny rules. The only trust-related file is `~/.pi/agent/trust.json`, which stores saved project-trust decisions, not tool permissions.
+User scope:
 
-You can influence the tool surface by adding extension paths to `settings.json` under the `extensions` or `packages` keys, but those extensions themselves define the policy in code, not in a declarative permission grammar.
+- macOS/Linux/Windows home-relative: `.pi/agent/settings.json`
+- saved trust decisions: `.pi/agent/trust.json`
+
+Repo scope:
+
+- `.pi/settings.json`
+- `.pi/extensions`, `.pi/skills`, `.pi/prompts`, `.pi/themes`
+- `.pi/SYSTEM.md`, `.pi/APPEND_SYSTEM.md`
+
+There is no native `permissions` key. Extension packages may define their own config grammar, but that grammar belongs to the extension, not Pi core.
 
 ### Extending the Base
 
-Because Pi does not have layered permission policies, you cannot override a user-scope permission rule with a repo-scope rule. The closest analogue is overriding which resources and tools load:
+Examples:
 
-```bash
-# User settings might load a global permission-gate extension,
-# but the repo can still request a different extension via CLI.
-pi --no-extensions -e ./repo/strict-gate.ts -p "run tests"
-```
-
-In this example the CLI explicitly disables all auto-discovered extensions and loads only `strict-gate.ts`. That is a resource-loading override, not a permission-rule override.
+- A user config can set `"defaultProjectTrust": "never"` to avoid loading project-local Pi resources by default; `pi --approve` overrides that for one run.
+- A user config can load global extensions, while `pi --no-extensions` disables auto-discovery for one session.
+- A trusted repo can add `.pi/settings.json` with project packages/extensions; `pi --no-approve` ignores those resources for one session.
+- A default session may expose `read,bash,edit,write`; `pi --tools read,grep,find,ls` replaces that with a read/search allowlist.
+- A global extension can implement a policy gate; `pi --no-extensions` removes that auto-discovered gate unless the gate is supplied explicitly with `-e`.
 
 ## Tools and Permissions
 
-Pi's built-in tools are:
+Pi core ships these built-in tools:
 
-| Tool | Gated by permissions? | Notes |
-| :----- | :----- | :----- |
-| `read` | No | Reads files with the user's OS permissions |
-| `write` | No | Creates/overwrites files with the user's OS permissions |
-| `edit` | No | Edits files with the user's OS permissions |
-| `bash` | No | Runs shell commands with the user's OS permissions |
-| `grep` | No | Searches file contents |
-| `find` | No | Finds files by name or pattern |
-| `ls` | No | Lists directory contents |
+| Tool | Default active? | Notes |
+| --- | --- | --- |
+| `read` | Yes | Reads files, including supported images. |
+| `bash` | Yes | Executes shell commands. |
+| `edit` | Yes | Edits files with find/replace style operations. |
+| `write` | Yes | Creates or overwrites files. |
+| `grep` | No | Read-only search tool, commonly enabled in read-only allowlists. |
+| `find` | No | Read-only file glob/search tool, commonly enabled in read-only allowlists. |
+| `ls` | No | Read-only directory listing tool, commonly enabled in read-only allowlists. |
 
-Permissions map to tool calls only through:
+Permissions map to tool calls only indirectly:
 
-1. **Tool availability** — `--tools`, `--exclude-tools`, `--no-builtin-tools`, and `--no-tools` include or exclude tools from the active set.
-2. **Extension gates** — a `tool_call` handler can block or allow individual calls based on arbitrary logic.
-3. **Host permissions** — the underlying OS user determines what files and commands are actually accessible.
+- `--tools` and `--exclude-tools` change whether a tool can be called.
+- Extension `tool_call` handlers can inspect the tool name and input, mutate input, or return `{ block: true, reason }`.
+- Extension `tool_result` handlers can rewrite returned content.
+- Extension `before_provider_request` handlers can inspect or replace provider payloads.
+- Extension `user_bash` handlers can intercept user `!`/`!!` shell commands.
 
-There is no native permission-rule grammar. Pi does not support decisions such as `allow`, `ask`, `deny`, `prompt`, or `forbidden` as static configuration. Approval modes, partial modes, and command-pattern matching must be implemented in extension code.
+Native permission entities and adjacent controls are:
+
+| Entity | Native names | Native rule support |
+| --- | --- | --- |
+| Tool | `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, extension tools | Visibility only; block via extension hook. |
+| Command | `bash`, `user_bash`, slash commands | No static command policy; extension hooks can intercept. |
+| Path | Tool input paths | No static path policy; extension code can inspect. |
+| Workspace | project trust, `trust.json`, `defaultProjectTrust` | Gates project-local resource loading. |
+| Extension | `--extension`, settings `extensions`, packages | Trusted code with full process permissions. |
+| Hook | `tool_call`, `tool_result`, `project_trust`, provider hooks | Procedural extension control. |
+| Slash command | built-in, extension, prompt-template, skill commands | Workflow surface, not native permission policy. |
+| MCP | none in core | Extension/package only. |
+| Agent/subagent | none in core | Example extension only. |
+| Sandbox | none in core | External/container/extension only. |
+
+Pi's native rule grammar is minimal because there is no static policy language. The only native decision-like hook for tool calls is extension-provided blocking:
+
+```typescript
+pi.on("tool_call", async (event, ctx) => {
+  if (event.toolName === "bash" && String(event.input.command).includes("rm -rf")) {
+    return { block: true, reason: "Dangerous command" };
+  }
+});
+```
+
+Matcher semantics are therefore whatever the extension implements: regular expressions, globs, prefixes, path normalization, model classification, UI prompts, or external policy calls. Conflict precedence is procedural: handlers run in extension load order, later handlers see earlier mutations, and the first blocking result blocks the tool. If no hook blocks, a visible tool executes.
+
+Pi has no native approval modes or aliases such as plan, auto-edit, accept-edits, classifier mode, or bypass mode. The example `plan-mode` extension implements a read-only exploration mode with `/plan`, `--plan`, and `Ctrl+Alt+P`, but that is extension behavior. The same is true for third-party permission packages.
+
+Pi core approvals do not persist because Pi core has no per-tool approvals. Project trust persists in `trust.json`. Extension-provided approvals may persist only if the extension implements persistence.
 
 ## Sandboxing, Trust, and Administrative Controls
 
-### Sandboxing
+Pi has no built-in sandbox. Built-in tools, extension tools, package installs, shell commands, language servers, and test commands run as ordinary local processes with the Pi process permissions.
 
-Pi has no built-in sandbox. The documentation describes three external containerization patterns:
+External isolation patterns documented by Pi:
 
-| Pattern | What is isolated | Best for |
-| :----- | :----- | :----- |
-| Gondolin extension | Built-in tools and `!` commands | Local micro-VM isolation while keeping auth on host |
-| Plain Docker | Whole `pi` process | Simple local isolation |
-| OpenShell | Whole `pi` process | Policy-controlled local or remote managed sandbox |
+| Pattern | Isolated surface | Notes |
+| --- | --- | --- |
+| Gondolin extension | Built-in tools and `!` commands | Host Pi keeps auth; tool execution is routed into a local Linux micro-VM. Other custom extension tools still run on the host unless they delegate too. |
+| Plain Docker | Whole Pi process | Simple local isolation; API keys and mounted files enter the container. |
+| OpenShell | Whole Pi process | Policy-controlled sandbox with filesystem, process, network, credential, and inference controls when configured through an OpenShell gateway. |
+| Example sandbox extension | Bash tool | Example extension using `@anthropic-ai/sandbox-runtime`; not core behavior. |
 
-These are not Pi-native controls. They rely on the user configuring a separate isolation layer.
+Project trust is a resource-loading gate. It applies when Pi finds trust-requiring resources such as `.pi/settings.json`, `.pi/extensions`, `.pi/skills`, `.pi/prompts`, `.pi/themes`, `.pi/SYSTEM.md`, `.pi/APPEND_SYSTEM.md`, or project `.agents/skills`. Trusting allows those resources to load. Declining skips them.
 
-### Trust and administrative controls
+Trust does not gate:
 
-**Folder/project trust**: On interactive startup, Pi asks before trusting a project folder that contains project-local settings, resources, or `.agents/skills`. Trusting a project allows `.pi/settings.json`, `.pi` resources, missing package installs, and project extensions to load. Untrusted folders ignore those project-local surfaces. Trust decisions are saved in `~/.pi/agent/trust.json`.
+- ordinary filesystem access by active tools
+- `AGENTS.md` and `CLAUDE.md` context files, unless `--no-context-files` is used
+- global/user extensions
+- explicit CLI `-e` extensions
+- model output or prompt injection from loaded context
 
-In non-interactive modes (`-p`, `--mode json`, `--mode rpc`), the trust prompt is skipped and `defaultProjectTrust` (`ask`, `always`, `never`) controls fallback behavior. `--approve`/`--no-approve` override this for one run.
+No managed/admin policy layer was found. No native safe mode was found. No provider-reserved protected paths were found in Pi core; examples such as blocking `.env`, `.git/`, or `node_modules/` are extension code.
 
-There are no managed or admin policy layers.
+The honest security posture is a combination of advisory/runtime controls:
 
-### Protected paths
-
-Pi does not maintain a provider-reserved protected-path list. The `protected-paths.ts` example extension blocks writes to `.env`, `.git/`, and `node_modules/`, but that is sample code, not a Pi guarantee.
+- Tool visibility: native, static per run.
+- Project trust: native input-loading guard.
+- Extension gates: procedural, trusted code, best-effort unless the extension itself uses OS isolation.
+- Sandbox: not native; external or extension-provided.
 
 ## MCP and Permissions
 
-Pi does not include built-in MCP support. The documentation explicitly says "No MCP" and recommends building CLI tools as skills or adding MCP through an extension. Because there is no native MCP stack, there are no native MCP permission rules either.
+Pi core does not include built-in MCP. Current Pi usage documentation explicitly says Pi intentionally does not include built-in MCP, subagents, permission popups, plan mode, to-dos, or background bash; those workflows are expected to be built or installed as extensions/packages.
 
-If an extension adds MCP servers, their safety depends entirely on:
+Because MCP is extension/package-defined, there are no native Pi server filters, tool filters, resource filters, trust flags, response interception rules, or sandbox routing rules for MCP. An MCP extension would run with the same process permissions as Pi unless it delegates work to a container, VM, remote gateway, or OS sandbox.
 
-- the sandbox or container in which Pi runs,
-- any permission-gate extension that blocks risky tool calls,
-- the host OS permissions available to the Pi process.
+Permissions can make MCP safer only through non-core mechanisms:
 
-There is no `mcp__<server>__<tool>` allow/ask/deny syntax and no `PolicyEngine` mapping for MCP under Pi.
+- Run Pi in Docker/OpenShell or another OS sandbox before enabling MCP.
+- Use `--no-extensions` by default and load only a vetted MCP extension with `-e`.
+- Use `--tools`/`--exclude-tools` if the MCP extension registers named tools that Pi can filter.
+- Add an extension `tool_call` gate to filter MCP-like tools by server/tool/resource name.
+- Add `tool_result` or provider hooks to redact responses if the extension exposes those data paths.
+
+The Pi package catalog currently lists `pi-permission-system`, a third-party extension that advertises centralized permission gates for tool, bash, MCP, skill, and special operations. That is useful current ecosystem context, but it is not Pi core behavior and should not be treated as a native provider permission grammar.
 
 ## Non-Interactive Behavior
 
-In non-interactive `-p` mode, JSON mode, and RPC mode, Pi cannot show interactive permission prompts. Project trust dialogs are skipped; `defaultProjectTrust` or `--approve`/`--no-approve` controls whether project resources load. Without an extension that implements confirmation, every visible tool executes with the OS user's permissions. There is no programmatic approval channel.
+Print mode (`-p`) and JSON mode do not provide extension UI prompts. Extension gates that need confirmation must choose a default behavior; Pi's own `permission-gate.ts` example blocks dangerous commands when no UI is available. RPC mode has an extension UI channel, so extension prompts can be handled programmatically, but native project trust still does not prompt in non-interactive modes.
 
-## Sources
+For project trust, non-interactive modes use saved trust decisions, `defaultProjectTrust`, and `--approve`/`--no-approve`. With the default `defaultProjectTrust: "ask"` and no saved decision, trust-requiring project resources are ignored.
 
-- [Pi website](https://pi.dev/)
-- [Pi GitHub repository](https://github.com/earendil-works/pi)
-- [Pi coding agent README](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md)
-- [Containerization patterns](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/containerization.md)
-- [Settings documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/settings.md)
-- [Extensions documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md)
-- [Permission gate example](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/extensions/permission-gate.ts)
-- [Protected paths example](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/extensions/protected-paths.ts)
+Pi core has no programmatic approval channel for native tool calls because there is no native approval system. Extension-provided approval channels are extension-specific.
 
 ## Changelog
 
-- 2026-07-02: Refreshed research against Pi v0.73.1, pi.dev, and current GitHub documentation. Added missing CLI flags, environment variables, containerization patterns, project trust details, and all schema-required frontmatter fields. Confirmed Pi still has no native permission system, MCP support, or approval modes.
+- 2026-07-03: Refreshed against current Pi source and docs. Replaced legacy `os: all` config metadata with schema-valid per-OS records. Confirmed Pi core remains permissive by default with no native permission prompts, no explicit YOLO switch, no built-in MCP, no native sandbox, and no managed policy layer.
+- 2026-07-03: Corrected default tool description: Pi defaults to `read`, `bash`, `edit`, and `write`; `grep`, `find`, and `ls` are built-in read-only tools but are not in the default active set.
+- 2026-07-03: Added extension hook semantics, headless behavior, and the current optional `pi-permission-system` package as non-core context.
+- 2026-07-02: Prior research reported Pi v0.73.1 behavior, documented tool visibility switches, project trust, and lack of native permissions.
+
+## Sources
+
+- [Pi README, Permissions & Containerization](https://github.com/earendil-works/pi#permissions--containerization)
+- [Pi Security docs](https://pi.dev/docs/latest/security)
+- [Pi Containerization docs](https://pi.dev/docs/latest/containerization)
+- [Pi Extensions docs](https://pi.dev/docs/latest/extensions)
+- [Pi Usage docs](https://pi.dev/docs/latest/usage)
+- [Pi Settings docs](https://pi.dev/docs/latest/settings)
+- [Pi package catalog: pi-permission-system](https://pi.dev/packages/pi-permission-system)
+- [Pi source: CLI args](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/cli/args.ts)
+- [Pi source: settings manager](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/settings-manager.ts)
+- [Pi source: project trust](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/project-trust.ts)
+- [Pi source: SDK tool options](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/sdk.ts)
+- [Pi source: AgentSession tool registry](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/agent-session.ts)
+- [Pi source: extension event types](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/extensions/types.ts)
+- [Pi source: permission-gate example](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/extensions/permission-gate.ts)
+- [Pi source: plan-mode example](https://github.com/earendil-works/pi/tree/main/packages/coding-agent/examples/extensions/plan-mode)
+- [Pi source: subagent example](https://github.com/earendil-works/pi/tree/main/packages/coding-agent/examples/extensions/subagent)
