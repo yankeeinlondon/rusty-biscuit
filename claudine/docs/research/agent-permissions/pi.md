@@ -40,10 +40,15 @@ cli_params:
 env_vars: []
 
 config_files:
-  user: ~/.pi/agent/settings.json
-  repo: .pi/settings.json
+  - os: all
+    user: ~/.pi/agent/settings.json
+    repo: .pi/settings.json
 
-precedence: "CLI flags > environment variables (where they apply) > project settings (.pi/settings.json) > user/global settings (~/.pi/agent/settings.json)"
+precedence:
+  - source: CLI flags > environment variables > project settings > user/global settings
+    scope: [permissions]
+    merge_strategy: none
+    notes: "Previous prose summary: CLI flags > environment variables (where they apply) > project settings (.pi/settings.json) > user/global settings (~/.pi/agent/settings.json)."
 
 default_posture: "When nothing is configured, Pi runs with full access to the launching user's filesystem, shell, network, and credentials. All built-in tools are enabled and no interactive permission prompts or denials are issued."
 

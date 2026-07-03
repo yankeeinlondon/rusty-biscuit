@@ -84,10 +84,15 @@ env_vars:
     effect: Set by host platforms that embed Claude Code and manage model provider routing. When set, provider-selection, endpoint, and auth variables in settings files are ignored.
 
 config_files:
-  user: ~/.claude/settings.json
-  repo: .claude/settings.json
+  - os: all
+    user: ~/.claude/settings.json
+    repo: .claude/settings.json
 
-precedence: "managed settings > CLI flags > environment variables (where they apply) > local project settings (.claude/settings.local.json) > shared project settings (.claude/settings.json) > user settings (~/.claude/settings.json). Deny rules from any scope override allow rules."
+precedence:
+  - source: managed settings > CLI flags > environment variables > local project settings > shared project settings > user settings
+    scope: [permissions]
+    merge_strategy: none
+    notes: "Previous prose summary: managed settings > CLI flags > environment variables (where they apply) > local project settings (.claude/settings.local.json) > shared project settings (.claude/settings.json) > user settings (~/.claude/settings.json). Deny rules from any scope override allow rules."
 
 default_posture: "When nothing is configured, Claude Code starts in default permission mode: read-only tools (Read, Grep, Glob, LSP, etc.) run without approval, while Bash commands, file edits, Write, WebFetch, WebSearch, and other state-changing tools prompt for approval on first use."
 

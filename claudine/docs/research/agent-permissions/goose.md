@@ -14,10 +14,15 @@ env_vars:
     effect: URL to a YAML allowlist of MCP server installation commands. When set, Goose only installs extensions whose command exactly matches an entry in the list.
 
 config_files:
-  user: ~/.config/goose/permission.yaml
-  repo: ""
+  - os: all
+    user: ~/.config/goose/permission.yaml
+    repo: ""
 
-precedence: "environment variables > config.yaml GOOSE_MODE > built-in default (auto). Goose CLI has no permission-mode CLI flags; extension flags such as --no-profile add or remove tools for the session but do not override mode or permission.yaml rules."
+precedence:
+  - source: environment variables > config.yaml GOOSE_MODE > built-in default
+    scope: [permissions]
+    merge_strategy: none
+    notes: "Previous prose summary: environment variables > config.yaml GOOSE_MODE > built-in default (auto). Goose CLI has no permission-mode CLI flags; extension flags such as --no-profile add or remove tools for the session but do not override mode or permission.yaml rules."
 
 default_posture: "When nothing is configured, Goose CLI starts in auto mode and auto-approves all tool calls (safety inspectors may still block). No per-tool allow/ask/deny rules are configured."
 

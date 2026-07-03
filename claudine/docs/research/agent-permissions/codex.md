@@ -54,10 +54,15 @@ env_vars:
     effect: Sets where SQLite-backed state is stored. The sqlite_home config option takes precedence, and relative paths resolve from the current working directory.
 
 config_files:
-  user: ~/.codex/config.toml
-  repo: .codex/config.toml
+  - os: all
+    user: ~/.codex/config.toml
+    repo: .codex/config.toml
 
-precedence: "managed requirements > CLI flags and --config overrides > project .codex/config.toml (root to current working directory, closest wins, trusted projects only) > profile files > user ~/.codex/config.toml > system /etc/codex/config.toml > built-in defaults"
+precedence:
+  - source: managed requirements > CLI flags and config overrides > project config > profile files > user config > system config > built-in defaults
+    scope: [permissions]
+    merge_strategy: nearest
+    notes: "Previous prose summary: managed requirements > CLI flags and --config overrides > project .codex/config.toml (root to current working directory, closest wins, trusted projects only) > profile files > user ~/.codex/config.toml > system /etc/codex/config.toml > built-in defaults."
 
 default_posture: "When nothing is configured, Codex adapts to the working directory. Trusted version-controlled folders start in an Auto posture (workspace-write sandbox with on-request approvals). Untrusted or non-version-controlled folders start in read-only sandbox with on-request approvals. Network access is off by default."
 

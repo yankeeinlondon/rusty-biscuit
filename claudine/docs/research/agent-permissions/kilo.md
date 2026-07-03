@@ -38,10 +38,15 @@ env_vars:
     effect: When set, skips loading project-level config files (kilo.json, opencode.json, .kilo/, .kilocode/), so only global, env, and CLI sources shape permissions.
 
 config_files:
-  user: ~/.config/kilo/kilo.json
-  repo: kilo.json
+  - os: all
+    user: ~/.config/kilo/kilo.json
+    repo: kilo.json
 
-precedence: "CLI flags (e.g. --auto, --dangerously-skip-permissions) > KILO_PERMISSION > macOS managed preferences / MDM > managed config directory > active organization config (Kilo Gateway) > KILO_CONFIG_CONTENT > project config (kilo.json and .kilo/) > KILO_CONFIG custom path > global user config (~/.config/kilo/kilo.json) > remote .well-known/opencode. Within a config object, rules are evaluated in order and the last matching rule wins."
+precedence:
+  - source: CLI flags > KILO_PERMISSION > managed preferences and config > organization config > KILO_CONFIG_CONTENT > project config > KILO_CONFIG custom path > global user config > remote well-known config
+    scope: [permissions]
+    merge_strategy: deep
+    notes: "Previous prose summary: CLI flags (e.g. --auto, --dangerously-skip-permissions) > KILO_PERMISSION > macOS managed preferences / MDM > managed config directory > active organization config (Kilo Gateway) > KILO_CONFIG_CONTENT > project config (kilo.json and .kilo/) > KILO_CONFIG custom path > global user config (~/.config/kilo/kilo.json) > remote .well-known/opencode. Within a config object, rules are evaluated in order and the last matching rule wins."
 
 default_posture: "With no configuration, Kilo Code uses permissive defaults: most built-in tools are allowed automatically, while doom_loop and external_directory ask for approval. The read tool is allowed by default, but .env files are denied."
 

@@ -8,38 +8,123 @@
 # Nested shapes use quoted inline-object literals — YAML-native nested
 # mappings are rejected by the SimplifiedSchema parser today.
 $schema:
+    # Date the research file was first created. Optional because update-mode
+    # legacy docs may predate the schema contract.
     created: date
+
+    # Date the provider research was last verified or refreshed.
     last_updated: date(required)
+
+    # Agentic CLI wrapper that produced the research, e.g. `open_code`.
     agent: string(required)
+
+    # Model id used for the research run.
     model: string(required)
 
-    # One record per permissions-related CLI parameter.
+    # One record per permissions-related CLI parameter. `style` captures whether
+    # the provider exposes it as `--flag value`, `key=value`, or a positional arg;
+    # examples should be complete enough to drive future wrapper/catalog tests.
     cli_params: "{ param: string(required), style: enum(equals,switch,positional; required), description: string(required), example: string, example_description: string }[]"
 
-    # One record per environment variable that influences permissions.
+    # One record per environment variable that influences permissions or adjacent
+    # security posture. Keep `effect` prose for the first pass; a later closeout
+    # step will derive an enum once the fleet shows the stable categories.
     env_vars: "{ name: string(required), effect: string(required) }[]"
 
-    # Config files that define permissions (relative paths: user scope from
-    # $HOME, repo scope from repo root).
-    config_files: "{ user: string(required), repo: string(required) }"
+    # Config files that define permissions. Use `os: all` only when the user/repo
+    # paths are the same on macOS, Linux, and Windows; otherwise write one record
+    # per OS. Relative user paths are from $HOME; repo paths are from repo root.
+    config_files: "{ os: enum(macos,linux,windows,all; required), user: string(required), repo: string(required), notes: string }[]"
 
-    # Highest-wins ordering across CLI params, env vars, and config files.
-    precedence: string(required)
+    # Ordered highest-to-lowest policy source precedence. Keep `scope` free-form
+    # until the fleet teaches us the stable vocabulary; later tighten it to enums.
+    # `merge_strategy: none` means source replacement, `shallow` means top-level
+    # merge, `deep` means nested merge, and `nearest` means closest/most-specific
+    # source wins within that source family.
+    precedence: "{ source: string(required), scope: string[](required), merge_strategy: enum(none,shallow,deep,nearest; required), notes: string }[]"
 
-    # What the effective permissions are when nothing is configured.
+    # What the effective permissions are when nothing is configured anywhere:
+    # no CLI flags, env vars, user config, repo config, managed policy, or trust
+    # state changes.
     default_posture: string(required)
 
     # Can permissions be scoped per agent/subagent? `fm_properties` lists the
-    # frontmatter/config properties involved.
+    # frontmatter/config properties involved when the provider has agent-scoped
+    # config; leave it empty/omitted when `allowed` is false.
     agent_permissions: "{ allowed: boolean(required), fm_properties: string[] }"
 
     # YOLO / auto-approve support (feeds YoloSupport). `mechanism` names the
-    # flag/env/config switch used.
+    # flag/env/config switch used and should distinguish interactive and
+    # non-interactive availability.
     yolo: "{ has_interactive_yolo: boolean(required), has_non_interactive_yolo: boolean(required), mechanism: string }"
 
-    # Fit assessment of claudine's PolicyEngine for this provider.
+    # Fit assessment of claudine's PolicyEngine for this provider. `ergonomic`
+    # means the provider maps naturally to the current API; `provides_coverage`
+    # means the current API can express the important behavior even if awkwardly.
     policy_engine: "{ ergonomic: boolean(required), provides_coverage: boolean(required), gaps: string[] }"
 
+    # Widened fields for the merged legacy `permissions/` topic. These are optional
+    # so existing docs stay valid until the approved update-mode fleet populates them.
+
+    # Native permission targets or adjacent security-control targets. Use this to
+    # avoid collapsing very different provider concepts into "tool permission":
+    # commands, paths, MCP servers/tools/resources, agents, modes, sandboxes,
+    # hooks, extensions, and slash commands may each be separate entities.
+    permission_entities: "{ entity: enum(tool,tool_group,command,path,workspace,mcp_server,mcp_tool,mcp_resource,agent,subagent,mode,approval_category,sandbox,hook,extension,slash_command,unknown; required), native_names: string[], notes: string }[]"
+
+    # Coarse session modes that change approval behavior, such as plan,
+    # auto-edit, accept-edits, auto/classifier mode, YOLO, or provider-specific
+    # mode names. `aliases` carries CLI/env/config/slash-command spellings.
+    approval_modes: "{ name: string(required), effect: string(required), interactive: boolean, non_interactive: boolean, aliases: string[] }[]"
+
+    # Fine-grained rule system summary. This is about rule semantics inside the
+    # effective policy, not source precedence: decision vocabulary, syntax,
+    # conflict ordering, scope merge behavior, matcher semantics, and fallback.
+    rule_model: "{ decisions: string[], syntax: string, precedence: string, merge_semantics: string, matcher_semantics: string, default_decision: string }"
+
+    # Whether the provider can hide or restrict the tool surface separately from
+    # approving visible tools. Examples include `--tools`, include/exclude lists,
+    # disabled slash commands, or agent tool allowlists.
+    tool_visibility: "{ supported: boolean(required), mechanisms: string[], notes: string }"
+
+    # Provider sandboxing or isolation controls, separate from approval prompts.
+    # Capture OS/container backends and the actual filesystem/network guarantees;
+    # do not call advisory prompts a sandbox.
+    sandbox: "{ supported: boolean(required), modes: string[], backends: string[], filesystem_control: string, network_control: string, notes: string }"
+
+    # Trust and administrator policy controls that gate or constrain ordinary
+    # config. Includes folder/project trust, managed policy/MDM, safe mode, and
+    # similar mechanisms that disable or override lower-precedence sources.
+    trust_and_admin: "{ folder_trust: string, managed_policy: string, safe_mode: string, notes: string }"
+
+    # MCP-specific policy controls. Capture server filters, tool filters, trust
+    # flags, resource access, response interception/sanitization, and whether MCP
+    # execution is inside or outside the provider sandbox.
+    mcp_permissions: "{ supported: boolean(required), server_filters: string[], tool_filters: string[], trust_model: string, notes: string }"
+
+    # Permission behavior in non-interactive/headless/print/exec/run modes:
+    # prompts, programmatic approval channels, automatic exclusion, failure, or
+    # hanging behavior.
+    headless_behavior: string
+
+    # Whether approvals can persist and at what lifetime/granularity: once,
+    # session, project, command pattern, path, permanent, or never.
+    approval_persistence: string
+
+    # Provider-reserved paths or patterns that receive special protection, even
+    # when broad write/YOLO settings would otherwise allow changes.
+    protected_paths: string[]
+
+    # Honest classification of the provider's controls: OS-enforced sandbox,
+    # static policy, managed policy, advisory UX guardrail, or some combination.
+    security_posture: string
+
+    # Update-mode changelog entries. Fresh first-run documents should use [].
     changes: string[]
+
+    # Whether the research found behavior that requires Claudine code changes,
+    # not just docs or generated metadata updates.
     requires_claudine_update: boolean(required)
+
+    # Required when `requires_claudine_update` is true; optional otherwise.
     reason: string

@@ -72,10 +72,15 @@ env_vars:
     effect: Enables or disables host UID/GID mapping for Linux sandboxes.
 
 config_files:
-  user: ~/.gemini/settings.json
-  repo: .gemini/settings.json
+  - os: all
+    user: ~/.gemini/settings.json
+    repo: .gemini/settings.json
 
-precedence: "CLI arguments > environment variables > system settings file > project settings > user settings > system defaults file > built-in defaults. Policy Engine TOML rules use tier precedence: Admin > User > Default (workspace tier is currently disabled)."
+precedence:
+  - source: CLI arguments > environment variables > system settings file > project settings > user settings > system defaults file > built-in defaults
+    scope: [permissions]
+    merge_strategy: none
+    notes: "Previous prose summary: CLI arguments > environment variables > system settings file > project settings > user settings > system defaults file > built-in defaults. Policy Engine TOML rules use tier precedence: Admin > User > Default (workspace tier is currently disabled)."
 
 default_posture: "When nothing is configured, Gemini CLI uses general.defaultApprovalMode='default': read-only tools run automatically, write and shell tools prompt for confirmation, folder trust is disabled, sandboxing is off, and MCP servers require per-server trust."
 

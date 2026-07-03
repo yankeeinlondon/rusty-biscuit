@@ -1,6 +1,13 @@
 ---
 sequence: "@claudine/docs/providers.yaml"
 file: "{{ctx.repo_root}}/claudine/docs/research/agent-permissions/{{state.file}}"
+# NOTE: `grant:` is not implemented yet — until it is, run this sequence with
+# `--yolo` so the provider can Read files under {{state.user_dir}}; without it
+# OpenCode's external_directory permission is auto-rejected in non-interactive
+# mode and the research agent stops prematurely.
+grant:
+    read:
+        - "{{state.user_dir}}"
 agent: opencode
 model: kimi-for-coding/k2p7
 # the frontmatter contract for target documents lives in the schema sidecar
@@ -29,7 +36,17 @@ Use the 'claudine' skill.
 
 ## Document Structure
 
-Your job is to detailed research into the **permissions** features of the **{{state.desc}}**. You are expected to answer the following questions (and use the provided doc structure):
+Your job is to research the **permissions and security-control** features of
+**{{state.desc}}** for Claudine's `PolicyEngine` and provider metadata catalog. The
+legacy `permissions/` topic has been merged into this topic, so answer both the high-level
+permission questions and the lower-level rule/sandbox/trust/MCP questions that affect
+whether Claudine can model or mutate the provider's policy safely.
+
+Do not treat legacy research as current truth. If this is an update run, read the existing
+document and use it only to report changes and avoid losing useful topics; verify all
+facts against current docs, source, and observed config files.
+
+Use this document structure:
 
 - `## Introduction to {{state.name}} Permissions` Section
     - Provide an overview of how permissions are defined in {{state.name}}
@@ -38,6 +55,9 @@ Your job is to detailed research into the **permissions** features of the **{{st
     - Describe the CLI parameters involved in permissions
         - what does each CLI switch do?
         - what precedence do the CLI parameters have versus ENV and config files
+    - Distinguish permission/approval policy from tool visibility. For example, a provider
+      may separately decide which tools are visible to the model and which visible tools
+      are pre-approved.
 - `## Permissions Use Cases` Section
     - **Default**
         - If no ENV, Config files, or CLI switches provided any guidance permissions; what would the **default** permissions be for {{state.name}}
@@ -72,9 +92,40 @@ Your job is to detailed research into the **permissions** features of the **{{st
 - `## Tools and Permissions`
     - List out the tools that {{state.name}} provides by default
     - Describe out permissions map to tool calls
+    - Capture the provider's native permission entities: tool, tool group, command,
+      filesystem path, workspace boundary, MCP server, MCP tool/resource, subagent/agent,
+      mode, approval category, sandbox, hook, extension, slash command, or other
+    - Document the provider's rule grammar, including decisions (`allow`, `ask`, `deny`,
+      `prompt`, `forbidden`, etc.), matcher syntax, wildcard/glob/regex semantics,
+      merge behavior, and conflict precedence
+    - Document approval modes and aliases, especially partial modes such as plan,
+      auto-edit, accept-edits, auto/classifier modes, and provider-specific names
+    - Document whether approvals persist, and if so whether they persist for a session,
+      project, command pattern, path, or permanently
+- `## Sandboxing, Trust, and Administrative Controls`
+    - Describe any sandbox mode separately from approval mode: OS backend, filesystem
+      read/write scope, network controls, process isolation, known platform differences,
+      and failure behavior when sandboxing is unavailable
+    - Describe folder/project trust and whether trust gates project config, memory,
+      extensions, hooks, MCP servers, custom commands, or auto-approval
+    - Describe managed/admin policy layers and whether they replace, merge, or constrain
+      user/repo settings
+    - List protected paths or provider-reserved files that remain guarded even under
+      permissive modes
+    - State the security posture honestly: is the permission system an OS-enforced
+      sandbox, an advisory UX guardrail, a static policy engine, or a combination?
 - `## MCP and Permissions`
     - Describe how permissions and MCP interact
     - How can you use permissions to make MCP safer?
+    - Document server-level filters, tool-level filters, trust flags, resource access,
+      response interception/sanitization, and whether MCP tools run inside or outside
+      the provider's sandbox
+- `## Non-Interactive Behavior`
+    - Explain how permission prompts behave in headless/print/exec/run modes
+    - State whether the provider has a programmatic approval channel, excludes
+      approval-required tools, auto-approves, fails, or can hang when approval is needed
+- `## Sources`
+    - Add all useful resources that you used in your research as Markdown links
 
 ## Task
 
@@ -89,6 +140,9 @@ Follow these steps exactly:
 ::end-block
 - Perform research on topic
     - take your time and make sure to be complete in your research
+    - inspect actual config files under `{{state.user_dir || 'the provider user config directory'}}`
+      when that directory is known and exists; prefer observed current config shapes over
+      stale documentation, and state when no local config exists to inspect
 ::block when="update"
 - Update the document with your research
     - if you don't know something say that; don't make anything up and don't fall back to the old research as proof of anything
@@ -122,16 +176,72 @@ Follow these steps exactly:
         - `example` - an example of using this parameter
         - `example_description` - describe the example you've provided
     - `env_vars` - one record per environment variable that influences permissions: `name` and its `effect`
-    - `config_files` - is a dictionary and you must set both properties:
+    - `config_files` - an array of dictionaries describing where permission
+      configuration can live. Use one `os: all` record only when the paths are the
+      same on macOS, Linux, and Windows; otherwise write separate records:
+        - `os` - one of `macos`, `linux`, `windows`, or `all`
         - `user` - the relative (typically relative to user's home dir) filepath to the configuration file used for user scoped permissions
         - `repo` - the relative (from repo root) filepath to the configuration file used for repo scoped permissions
-    - `precedence` - the highest-wins ordering across CLI params, env vars, and config files (e.g. "cli > env > repo config > user config")
+        - `notes` - OS-specific path or config-scope caveats
+    - `precedence` - ordered highest-to-lowest policy source precedence. Do not add
+      a numeric rank; the array order is the rank. Use multiple records when one
+      source has different behavior for different scopes:
+        - `source` - provider-native source name such as `cli`, `env`, `repo_config`,
+          `user_config`, `managed_policy`, or the provider's exact term
+        - `scope` - string array of affected policy surfaces, such as
+          `approval_mode`, `sandbox`, `rules`, `mcp`, `tool_visibility`,
+          `agent_permissions`, or provider-native names. This is intentionally
+          free-form for the first pass; we will enum it after the fleet lands.
+        - `merge_strategy` - `none` for replacement/override, `shallow` for
+          top-level merge, `deep` for nested merge, or `nearest` when closest or
+          most-specific scope wins inside that source family
+        - `notes` - caveats such as trust gates, safe mode disabling a source,
+          admin policy constraining rather than overriding, or rule conflicts like
+          deny-wins
     - `default_posture` - a one-to-two sentence summary of the effective permissions when nothing is configured
     - `agent_permissions`
         - `allowed` - set to true/false based on whether {{state.name}} allows permissions to be set on an agent/subagent scoped basis
         - `fm_properties` - a string array of the frontmatter/config properties involved in agent-scoped permissions (omit when `allowed` is false)
     - `yolo` - `has_interactive_yolo` / `has_non_interactive_yolo` booleans plus `mechanism` naming the flag/env/config switch used
     - `policy_engine` - `ergonomic` / `provides_coverage` booleans plus a `gaps` string array listing anything the PolicyEngine cannot express for {{state.name}}
+    - `permission_entities` - one record per native entity the provider can target with
+      permissions or adjacent security controls:
+        - `entity` - one of `tool`, `tool_group`, `command`, `path`, `workspace`,
+          `mcp_server`, `mcp_tool`, `mcp_resource`, `agent`, `subagent`, `mode`,
+          `approval_category`, `sandbox`, `hook`, `extension`, `slash_command`, or
+          `unknown`
+        - `native_names` - provider-native names or config keys for that entity
+        - `notes` - how the entity is evaluated or why it matters
+    - `approval_modes` - one record per coarse session mode:
+        - `name` - provider-native mode name
+        - `effect` - what it changes
+        - `interactive` - whether it is available in interactive sessions
+        - `non_interactive` - whether it is available in non-interactive sessions
+        - `aliases` - CLI/config/env/slash-command aliases
+    - `rule_model` - structured summary of fine-grained rules:
+        - `decisions` - provider-native decision values
+        - `syntax` - compact description of rule syntax
+        - `precedence` - conflict ordering (for example deny > ask > allow)
+        - `merge_semantics` - how scopes combine, override, intersect, or deep-merge
+        - `matcher_semantics` - glob/regex/prefix/path/shell-pattern details
+        - `default_decision` - what happens when no rule matches
+    - `tool_visibility` - whether the provider separately supports hiding/restricting
+      tools independent of approval, with `mechanisms` and `notes`
+    - `sandbox` - whether the provider has sandboxing, including supported `modes`,
+      OS/container `backends`, `filesystem_control`, `network_control`, and `notes`
+    - `trust_and_admin` - summarize folder/project trust, managed/admin policy, safe mode,
+      and any notes about precedence or disabled project-local surfaces
+    - `mcp_permissions` - whether MCP permissions are supported, with server filters,
+      tool filters, trust model, and notes about resources, response interception, or
+      sandbox bypass
+    - `headless_behavior` - one-to-two sentences about permissions in non-interactive
+      modes
+    - `approval_persistence` - one-to-two sentences about session/project/permanent
+      approval persistence
+    - `protected_paths` - list provider-reserved paths or patterns that are specially
+      protected
+    - `security_posture` - one-to-two sentences classifying the provider's controls as
+      OS-enforced sandbox, advisory guardrail, static policy, managed policy, etc.
     ::block when="update"
     - `changes` - add a list of string descriptions which summarize the changes discovered since the last research was done
     ::end-block

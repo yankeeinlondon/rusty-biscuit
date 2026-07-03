@@ -31,10 +31,15 @@ env_vars:
     effect: Points to a custom config file path; that file may define permissions and is loaded between global and project config.
 
 config_files:
-  user: ~/.config/opencode/opencode.json
-  repo: opencode.json
+  - os: all
+    user: ~/.config/opencode/opencode.json
+    repo: opencode.json
 
-precedence: "CLI flags (e.g. --auto) > environment variables (OPENCODE_PERMISSION, OPENCODE_CONFIG_CONTENT) > managed config files / MDM > custom config path (OPENCODE_CONFIG) > project opencode.json > .opencode agent directories > global ~/.config/opencode/opencode.json > remote .well-known/opencode. Within a config, agent-specific permission objects override global permission objects."
+precedence:
+  - source: CLI flags > environment variables > managed config > custom config path > project config > agent directories > global user config > remote well-known config
+    scope: [permissions]
+    merge_strategy: deep
+    notes: "Previous prose summary: CLI flags (e.g. --auto) > environment variables (OPENCODE_PERMISSION, OPENCODE_CONFIG_CONTENT) > managed config files / MDM > custom config path (OPENCODE_CONFIG) > project opencode.json > .opencode agent directories > global ~/.config/opencode/opencode.json > remote .well-known/opencode. Within a config, agent-specific permission objects override global permission objects."
 
 default_posture: "With no configuration, OpenCode uses permissive defaults: most built-in tools are allowed automatically, while doom_loop and external_directory ask for approval. The read tool is allowed by default, but .env files are denied."
 

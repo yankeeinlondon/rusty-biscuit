@@ -75,10 +75,15 @@ cli_params:
 env_vars: []
 
 config_files:
-  user: ~/.kimi/config.toml
-  repo: ""
+  - os: all
+    user: ~/.kimi/config.toml
+    repo: ""
 
-precedence: "CLI flags > configuration file (~/.kimi/config.toml). No environment variables that influence Kimi Code CLI permission settings were identified."
+precedence:
+  - source: CLI flags > configuration file
+    scope: [permissions]
+    merge_strategy: none
+    notes: "Previous prose summary: CLI flags > configuration file (~/.kimi/config.toml). No environment variables that influence Kimi Code CLI permission settings were identified."
 
 default_posture: "With no configuration, Kimi Code CLI starts in interactive default mode: read-only tools (Glob, Grep, ReadFile, ReadMediaFile, TaskList, TaskOutput, SearchWeb, FetchURL, etc.) run without approval, while Shell, WriteFile, StrReplaceFile, TaskStop, ExitPlanMode, and MCP tool calls prompt for confirmation on each use."
 

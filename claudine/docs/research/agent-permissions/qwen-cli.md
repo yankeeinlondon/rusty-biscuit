@@ -72,10 +72,15 @@ env_vars:
     effect: Changes the global configuration directory (default ~/.qwen), affecting where user-scoped settings, skills, agents, and memory are loaded.
 
 config_files:
-  user: ~/.qwen/settings.json
-  repo: .qwen/settings.json
+  - os: all
+    user: ~/.qwen/settings.json
+    repo: .qwen/settings.json
 
-precedence: "CLI flags > environment variables > system settings file (/etc/qwen-code/settings.json) > project settings (.qwen/settings.json) > user settings (~/.qwen/settings.json) > system defaults file > hardcoded defaults. Within permission rules, deny > ask > allow, and a deny rule from any scope overrides allow rules from any scope."
+precedence:
+  - source: CLI flags > environment variables > system settings file > project settings > user settings > system defaults file > hardcoded defaults
+    scope: [permissions]
+    merge_strategy: none
+    notes: "Previous prose summary: CLI flags > environment variables > system settings file (/etc/qwen-code/settings.json) > project settings (.qwen/settings.json) > user settings (~/.qwen/settings.json) > system defaults file > hardcoded defaults. Within permission rules, deny > ask > allow, and a deny rule from any scope overrides allow rules from any scope."
 
 default_posture: "With no configuration, Qwen Code starts in default approval mode (Ask Permissions): read-only built-in tools run without confirmation, while file edits, shell commands, web fetches, MCP tool calls, and other state-changing actions prompt for approval."
 
