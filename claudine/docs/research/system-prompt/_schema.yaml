@@ -26,7 +26,7 @@ $schema:
     cli_params: "{ flag: string(required), mode: enum(append,replace,modify,inspect,disable,other,unknown; required), value_shape: string, description: string(required), example: string, notes: string }[]"
 
     # Non-CLI files or config surfaces that affect the effective system prompt.
-    config_sources: "{ os: enum(macos,linux,windows,all; required), scope: enum(user,repo,system,agent,subagent,extension,other; required), path: string(required), mode: enum(append,replace,modify,inspect,disable,other,unknown; required), format: enum(markdown,yaml,json,jsonc,toml,text,other,unknown), notes: string }[]"
+    config_sources: "{ os: enum(macos,linux,windows; required), scope: enum(user,repo,system,agent,subagent,extension,other; required), path: string(required), mode: enum(append,replace,modify,inspect,disable,other,unknown; required), format: enum(markdown,yaml,json,jsonc,toml,text,other,unknown), notes: string }[]"
 
     # Environment variables that affect prompt discovery, replacement, export, or formatting.
     env_vars: "{ name: string(required), effect: string(required), mode: enum(append,replace,modify,inspect,disable,other,unknown) }[]"
