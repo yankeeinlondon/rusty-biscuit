@@ -1,9 +1,9 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-02
-last_updated: 2026-07-02
-agent: open_code
-model: kimi-for-coding/k2p7
+last_updated: 2026-07-03
+agent: codex
+model: default
 
 summary: LM Studio is a local LLM runner and server for macOS, Windows, and Linux with a closed-source app/server plus open-source CLI and SDKs, serving GGUF and MLX models through a native REST API plus OpenAI- and Anthropic-compatible endpoints.
 homepage: https://lmstudio.ai
@@ -33,10 +33,10 @@ platforms:
     process_model: both
     service: macOS app login item / tray; `lms daemon up` for llmster; foreground `lms server start`
     notes: >
-      Requires Apple Silicon (M1/M2/M3/M4) and macOS 14.0+. Observed on this host as
-      `/Applications/LM Studio.app` (v0.4.12+1) running `--run-as-service` and `lms` at
-      `~/.cache/lm-studio/bin/lms`. The install script places the CLI alongside the app
-      data directory.
+      Requires Apple Silicon (M1/M2/M3/M4) and macOS 14.0+. Intel Macs are not
+      supported. Observed on this host as `/Applications/LM Studio.app` (v0.4.12+1)
+      running `--run-as-service` and `lms` at `/Users/ken/.cache/lm-studio/bin/lms`.
+      `lms --version` printed CLI commit `0b2a176`.
   - os: linux
     support: native
     binary: lms
@@ -45,9 +45,9 @@ platforms:
     process_model: both
     service: systemd when configured via headless docs; foreground `lms server start`
     notes: >
-      Ubuntu 20.04+ is required; newer Ubuntu versions are not well tested. x64 and
-      ARM64 (aarch64) are supported. The install script installs `llmster` and `lms`
-      for headless/server use.
+      Ubuntu 20.04+ is required; Ubuntu versions newer than 22 are documented as less
+      tested. x64 and ARM64 (aarch64) are supported. The install script installs
+      `llmster` and `lms` for headless/server use.
   - os: windows
     support: native
     binary: lms.exe
@@ -175,7 +175,8 @@ metadata_endpoints:
     auth_gated: false
     response_hint: '{"error":"Unexpected endpoint or method. (GET /)"}'
     notes: >
-      No dedicated health endpoint exists. Observed on this host: GET / returns 200 with
+      No dedicated health endpoint exists. Observed on this host after starting the
+      server with `HOME=/Users/ken lms server start --port 1234`: GET / returns 200 with
       an "Unexpected endpoint or method" error body. The same response is returned for
       /health, so neither is a reliable positive health marker; use /v1/models or
       /api/v1/models instead.
@@ -189,6 +190,16 @@ metadata_endpoints:
       Observed on this host with LM Studio 0.4.12+1 returning HTTP 200 with an
       "Unexpected endpoint or method" error body. It does not expose a
       machine-readable OpenAPI schema at this path.
+  - purpose: metrics
+    method: get
+    path: /metrics
+    gated_by: ""
+    auth_gated: false
+    response_hint: '{"error":"Unexpected endpoint or method. (GET /metrics)"}'
+    notes: >
+      Observed on this host with LM Studio 0.4.12+1 returning HTTP 200 with the standard
+      LM Studio "Unexpected endpoint or method" error body. Official API docs do not list
+      a metrics endpoint.
 
 detection:
   - os: all
@@ -240,7 +251,9 @@ detection:
     notes: >
       Observed on this host. Port 1234 is shared with other runners (e.g. none known at
       1234 specifically, but always verify the response shape). The `owned_by` value
-      `organization_owner` is a strong identity marker.
+      `organization_owner` is a strong identity marker. The server was initially stopped
+      on this host; the positive probe was observed after starting it with
+      `HOME=/Users/ken lms server start --port 1234`.
   - os: all
     method: http
     target: "GET /api/v1/models"
@@ -406,6 +419,8 @@ model_store_paths:
 hardware_acceleration:
   - metal
   - cuda
+  - rocm
+  - vulkan
   - cpu
 
 concurrency:
@@ -439,6 +454,7 @@ traps:
   - "The `lms` CLI ships with LM Studio but only works after LM Studio has been run at least once; bootstrap it with `~/.lmstudio/bin/lms bootstrap` on macOS/Linux or `%USERPROFILE%/.lmstudio/bin/lms.exe bootstrap` on Windows."
   - "`GET /` and `GET /health` return HTTP 200 with an `Unexpected endpoint or method` error body; they are not positive health checks."
   - "`lms server start` without `--port` reuses the last-used port (stored in http-server-config.json), not necessarily 1234."
+  - "In wrapper sessions with a synthetic HOME, `lms` may look for `.lmstudio-home-pointer` and `.internal/lms-key-2` under the wrapper home. On this host, `HOME=/Users/ken` was required before calling `lms server start`."
   - "`justInTimeModelLoading` changes whether `/v1/models` lists all downloaded models or only loaded ones."
   - "The `/openapi.json` endpoint returns HTTP 200 with an `Unexpected endpoint or method` error body, so it cannot be used as a formal schema source today."
 
@@ -457,7 +473,12 @@ opencode_example: |
     }
   }
 
-changes: []
+changes:
+  - "Refreshed metadata on 2026-07-03 with current official docs and local LM Studio 0.4.12+1 observations."
+  - "Confirmed the local server was installed but initially stopped; `HOME=/Users/ken lms server start --port 1234` was required in this session because synthetic HOME made `lms` look in `/Users/ken/.claudine/.lmstudio`."
+  - "Observed live metadata endpoint shapes for `/v1/models`, `/api/v1/models`, `/api/v0/models`, `/`, `/health`, `/metrics`, `/v1`, and `/openapi.json`."
+  - "Added `/metrics` as an observed negative metadata endpoint and clarified that `/` and `/health` are not positive health checks."
+  - "Updated platform notes with current system requirement details and expanded hardware backends to include ROCm and Vulkan based on LM Studio release notes."
 requires_claudine_update: true
 reason: >
   LM Studio is a new local runner entry with distinct detection signals (the `lms`
@@ -591,8 +612,15 @@ The `lms` CLI ships with LM Studio, but official docs say LM Studio must be run 
 least once before `lms` works. Bootstrap the CLI with `~/.lmstudio/bin/lms bootstrap`
 on macOS/Linux or `cmd /c %USERPROFILE%/.lmstudio/bin/lms.exe bootstrap` on Windows.
 
-`GET /openapi.json` is not a schema endpoint on LM Studio 0.4.12+1 as observed on
-this host; it returns HTTP 200 with an `Unexpected endpoint or method` error body.
+`GET /openapi.json`, `GET /metrics`, `GET /`, and `GET /health` are not schema,
+metrics, or health endpoints on LM Studio 0.4.12+1 as observed on this host. They
+return HTTP 200 with an `Unexpected endpoint or method` error body, so detectors
+should use `/v1/models` or `/api/v1/models` and check the response shape.
+
+This session runs with a synthetic `HOME`. `lms server start --port 1234` initially
+failed because the CLI looked under `/Users/ken/.claudine/.lmstudio`; setting
+`HOME=/Users/ken` made it use `/Users/ken/.lmstudio-home-pointer` and start the
+server correctly.
 
 ## Models
 
@@ -611,7 +639,7 @@ Studio catalog, Hugging Face, or imported manually.
 
 | Capability | Support |
 |---|---|
-| Hardware acceleration | Metal (macOS), CUDA (Windows/Linux), CPU fallback |
+| Hardware acceleration | Metal (macOS), CUDA, ROCm, Vulkan, CPU fallback |
 | Multi-model serving | Yes |
 | Parallel requests | Yes (llama.cpp engine since 0.4.0) |
 | SSE streaming | Yes |
@@ -662,12 +690,33 @@ codex --oss -m openai/gpt-oss-20b
 LM Studio does not ship a runner-native `lms launch <agent>` command; integration is
 done by starting the server and pointing the agent CLI at it.
 
+## Changelog
+
+- 2026-07-03: Refreshed by Codex against current LM Studio docs and local LM Studio
+  0.4.12+1 observations. Confirmed `lms` at `/Users/ken/.cache/lm-studio/bin/lms`,
+  CLI commit `0b2a176`, `/Applications/LM Studio.app`, pointer file
+  `/Users/ken/.lmstudio-home-pointer`, and server config port/bind/JIT settings.
+- 2026-07-03: Observed the server was initially stopped; after starting it with
+  `HOME=/Users/ken lms server start --port 1234`, confirmed `/v1/models`,
+  `/api/v1/models`, and `/api/v0/models` response shapes and stopped the server again.
+- 2026-07-03: Added observed negative endpoint notes for `/`, `/health`, `/metrics`,
+  `/v1`, and `/openapi.json`; all return LM Studio's `Unexpected endpoint or method`
+  response rather than a health, metrics, or schema document.
+- 2026-07-03: Updated platform notes from current system requirements and expanded
+  hardware backend metadata to include ROCm and Vulkan release-note evidence.
+
 ## Sources
 
 - [LM Studio homepage](https://lmstudio.ai)
 - [LM Studio docs](https://lmstudio.ai/docs)
 - [LM Studio developer docs](https://lmstudio.ai/docs/developer)
 - [lms CLI docs](https://lmstudio.ai/docs/cli)
+- [lms server start](https://lmstudio.ai/docs/cli/serve/server-start)
+- [lms server status](https://lmstudio.ai/docs/cli/serve/server-status)
+- [lms daemon up](https://lmstudio.ai/docs/cli/daemon/daemon-up)
+- [System requirements](https://lmstudio.ai/docs/app/system-requirements)
+- [Download an LLM](https://lmstudio.ai/docs/app/basics/download-model)
+- [Import models](https://lmstudio.ai/docs/app/advanced/import-model)
 - [Introducing lms](https://lmstudio.ai/blog/lms)
 - [OpenAI-compatible endpoints](https://lmstudio.ai/docs/developer/openai-compat)
 - [Anthropic-compatible endpoints](https://lmstudio.ai/docs/developer/anthropic-compat)
@@ -675,9 +724,13 @@ done by starting the server and pointing the agent CLI at it.
 - [REST API v0 endpoints](https://lmstudio.ai/docs/developer/rest/endpoints)
 - [Authentication](https://lmstudio.ai/docs/developer/core/authentication)
 - [Server settings](https://lmstudio.ai/docs/developer/core/server/settings)
+- [Serve on local network](https://lmstudio.ai/docs/developer/core/server/serve-on-network)
 - [Headless mode / llmster](https://lmstudio.ai/docs/developer/core/headless)
 - [Claude Code integration](https://lmstudio.ai/docs/integrations/claude-code)
 - [Codex integration](https://lmstudio.ai/docs/integrations/codex)
 - [API changelog](https://lmstudio.ai/docs/developer/api-changelog)
 - [LM Studio 0.4.0 release notes](https://lmstudio.ai/blog/0.4.0)
+- [LM Studio 0.4.1 changelog](https://lmstudio.ai/changelog/lmstudio-v0.4.1)
+- [LM Studio 0.3.19 release notes](https://lmstudio.ai/blog/lmstudio-v0.3.19)
+- [LM Studio 0.3.30 release notes](https://lmstudio.ai/blog/lmstudio-v0.3.30)
 - [lms CLI on GitHub](https://github.com/lmstudio-ai/lms)
