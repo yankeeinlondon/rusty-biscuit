@@ -48,6 +48,13 @@ $schema:
     # state changes.
     default_posture: string(required)
 
+    # CLI-only way to start from no permissions for one session, intended for a
+    # future Claudine wrapper feature that disables all provider capabilities and
+    # then explicitly adds back only what the user requested. Do not include
+    # persistent config-file approaches here unless the CLI has no equivalent;
+    # record that limitation instead.
+    cli_zero_permissions: "{ supported: boolean(required), invocation: string, mechanism: string, limitations: string }"
+
     # Can permissions be scoped per agent/subagent? `fm_properties` lists the
     # frontmatter/config properties involved when the provider has agent-scoped
     # config; leave it empty/omitted when `allowed` is false.

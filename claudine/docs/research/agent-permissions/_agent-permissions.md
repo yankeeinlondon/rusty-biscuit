@@ -70,6 +70,12 @@ Use this document structure:
             - set the "default permissions" to **no permissions** and then require that any _needed_ permissions be:
                 - asked for in an interactive session
                 - explicitly declared with the CLI or config files
+        - Identify the best **CLI-only, session-scoped** invocation for starting with
+          no permissions or no tools. This is for a future Claudine wrapper feature:
+          Claudine should be able to launch the provider in a locked-down posture and
+          then explicitly add back only the permissions the user requested, without
+          mutating the user's provider config or affecting provider runs outside
+          Claudine.
         - Illustrate how additional permissions could be given via the CLI with a few concrete examples
         - How would you use the `PolicyEngine` to describe this?
             - is the use of the PolicyEngine ergonomic for use with {{state.name}}?
@@ -199,6 +205,16 @@ Follow these steps exactly:
           admin policy constraining rather than overriding, or rule conflicts like
           deny-wins
     - `default_posture` - a one-to-two sentence summary of the effective permissions when nothing is configured
+    - `cli_zero_permissions` - the CLI-only, session-scoped way to start with no
+      permissions or no tools:
+        - `supported` - true if {{state.name}} can be launched from the CLI in a
+          no-permissions/no-tools baseline without mutating provider config
+        - `invocation` - the complete CLI invocation or flag set Claudine could use
+        - `mechanism` - which provider mechanism this uses, such as empty tool
+          allowlist, restrictive approval mode, deny-all rule, read-only sandbox, or
+          provider-native no-tools flag
+        - `limitations` - what remains allowed, what cannot be disabled by CLI, and
+          whether additional permissions can be added back via CLI in the same run
     - `agent_permissions`
         - `allowed` - set to true/false based on whether {{state.name}} allows permissions to be set on an agent/subagent scoped basis
         - `fm_properties` - a string array of the frontmatter/config properties involved in agent-scoped permissions (omit when `allowed` is false)
