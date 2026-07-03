@@ -1,0 +1,35 @@
+# SimplifiedSchema for the MCP research topic.
+#
+# Captures provider MCP configuration, security, sync/import/export, and runtime
+# injection behavior for Claudine's mcp module.
+$schema:
+    created: date
+    last_updated: date(required)
+    agent: string(required)
+    model: string(required)
+
+    docs: url
+    support: enum(import_sync,runtime_injection,manual_config,partial,none,unknown; required)
+
+    # MCP config files by OS/scope.
+    config_files: "{ os: enum(macos,linux,windows,all; required), scope: enum(user,repo,system,managed,plugin,other; required), path: string(required), format: enum(json,jsonc,yaml,toml,ini,text,other), notes: string }[]"
+
+    # CLI and env surfaces for MCP config.
+    cli_params: "{ flag: string(required), description: string(required), example: string }[]"
+    env_vars: "{ name: string(required), effect: string(required) }[]"
+
+    # Server definition shape and supported transports.
+    server_schema: "{ transports: string[], command_fields: string[], http_fields: string[], env_shape: string, auth_shape: string, notes: string }"
+
+    # Import/export/sync behavior Claudine can automate.
+    sync_behavior: "{ import_supported: boolean(required), export_supported: boolean(required), apply_supported: boolean, merge_strategy: enum(none,shallow,deep,nearest,replace,unknown), notes: string }"
+
+    # Runtime injection support without mutating user config.
+    runtime_injection: "{ supported: boolean(required), mechanism: string, limitations: string }"
+
+    # MCP permission/security model.
+    security: "{ tool_filtering: string, server_trust: string, env_sanitization: string, sandbox_interaction: string, response_filtering: string, notes: string }"
+
+    changes: string[]
+    requires_claudine_update: boolean(required)
+    reason: string
