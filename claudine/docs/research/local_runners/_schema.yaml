@@ -74,7 +74,7 @@ $schema:
     detection: "{ os: enum(macos,linux,windows,all; required), method: enum(binary,process,port,http,config_file,app_bundle,service; required), target: string(required), expect: string, confidence: enum(source_code,observed,documented,inferred; required), notes: string }[]"
 
     config_mechanism: enum(config_file,env_vars,cli_flags,gui,mixed; required)
-    config_files: "{ os: enum(macos,linux,windows,all; required), path: string(required), format: enum(json,jsonc,yaml,toml,ini,text,other; required), role: string, notes: string }[]"
+    config_files: "{ os: enum(macos,linux,windows; required), path: string(required), format: enum(json,jsonc,yaml,toml,ini,text,other; required), role: string, notes: string }[]"
     env_vars: "{ name: string(required), effect: string(required) }[]"
 
     # How model ids are written for this runner (e.g. `name[:tag]` for Ollama,
@@ -88,7 +88,7 @@ $schema:
     # model_acquisition notes, not here.
     model_formats: string[](required)
     model_acquisition: "{ method: enum(registry,huggingface,manual,in_app; required), example: string, notes: string }[]"
-    model_store_paths: "{ os: enum(macos,linux,windows,all; required), path: string(required), notes: string }[]"
+    model_store_paths: "{ os: enum(macos,linux,windows; required), path: string(required), notes: string }[]"
 
     hardware_acceleration: string[](required)
     concurrency: "{ multi_model: boolean, parallel_requests: boolean, notes: string }"
