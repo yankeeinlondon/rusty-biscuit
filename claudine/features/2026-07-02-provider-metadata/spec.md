@@ -667,6 +667,33 @@ Ordered by leverage; several are prerequisites for codegen landing cleanly:
 
 Phases 2–4 can interleave; the ordering above is dependency-driven, not strictly serial.
 
+## Supplemental Design Documents (2026-07-02)
+
+Brainstorm-driven refinements resolving this spec's ambiguities; where a design doc
+rules on a point, the design doc wins over the sketch here:
+
+- [design/catalog-generation.md](design/catalog-generation.md) — field source matrix
+  (roster/research/facts/overrides), gen-crate dependency design (`catalog-types` leaf
+  crate), precedence/merge algebra, generate UX + drift lifecycle, onboarding state
+  machine; rules on Open Questions 3, 4, 5 and confirms 1, 2.
+- [design/module-split.md](design/module-split.md) — `provider/<slug>/` layout
+  (`data.rs`/`behavior.rs`/temporary `legacy.rs`), parser placement, AgentCapabilities
+  retirement order.
+- [design/pipeline-dry.md](design/pipeline-dry.md) — workstream 0 (wrapper↔composition
+  shared prep stages), mechanical dispatch inventory, CLI drift-guard design,
+  WrapperProfile disposition table.
+- [design/signal-detection.md](design/signal-detection.md) — detection-record grammar
+  (path subset, operators, priority), declarative/bespoke boundary + migration map,
+  `SignalEvent` sink contract, `signals check` semantics, harvest v1 scope.
+- [design/model-catalog-boundary.md](design/model-catalog-boundary.md) — identity key
+  representation, `models-catalog.json` artifact contract, plan-endpoint/local-runner
+  offering identity (rules refinement 4), `family_latest` semantics, `model_catalog`
+  runtime migration, regeneration policy.
+- [design/render-components.md](design/render-components.md) — functional render
+  components (`AgentPrompt`, `ToolUse`, `ThinkingToken`, …), policy-not-provider
+  contract, `EventRenderer` dispatch table, streaming span contract, DisplayPolicy
+  ownership; supersedes the Rendering Consistency sketch.
+
 ## Open Questions
 
 1. ~~**Corrections/overrides home**~~ — *provisionally decided:*
