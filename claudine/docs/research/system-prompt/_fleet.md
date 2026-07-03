@@ -29,6 +29,7 @@ failure:
     message: "💥 the System Prompt research on **{{state.name}}** failed to complete!"
     warn: "The System Prompt research on **{{state.name}}** failed to complete! (err: {{err.message}})"
 ---
+# System Prompt Research on {{state.name}}
 
 ## Skills
 
@@ -43,7 +44,13 @@ prompt replacement, prompt append, prompt inspection, and prompt export.
 
 This topic feeds Claudine's `SystemPromptSpec` and wrapper-level
 `--append-system-prompt` / `--replace-system-prompt` delivery. The output must be useful
-to someone implementing a wrapper, not merely a summary of docs.
+to someone implementing a wrapper, not merely a summary of docs. Boundary: the agent-cli
+topic's switch inventory records the *existence* of system-prompt-related flags; this
+topic owns their semantics and delivery behavior.
+
+Prior-generation research files in this directory (`qwen.md`, `roo.md`) are validation
+assets for humans — do not open, paraphrase, or cite them; your research must be
+independent.
 
 Write the result to `{{file}}`. Include `$schema: ./_schema.yaml` in frontmatter so the
 document can be validated, but treat the instructions below as the source of what
@@ -214,8 +221,7 @@ config_sources:
     path: "AGENTS.md"
     mode: append
     format: markdown
-    notes: "Repo-relative prompt source on macOS; add Linux and Windows records explicitly."
-    notes: "Discovered from the working directory and appended as project instructions."
+    notes: "Discovered from the working directory and appended as project instructions; repo-relative prompt source on macOS — add Linux and Windows records explicitly."
 ```
 
 ```yaml
@@ -250,26 +256,6 @@ format_recommendations:
   replace_format: markdown
   rationale: "Provider prompt files are Markdown-centric; XML wrappers add tokens without documented benefit."
 ```
-
-## Research Questions
-
-- What CLI switches are involved in affecting the system prompt? What does each switch
-  do?
-- What other ways, other than CLI switches, can manipulate what the system prompt will
-  be?
-- Can agents or subagents have their own system prompt distinct from an orchestrator?
-- What quirks and workarounds do developers talk about with regard to {{state.name}} and
-  system prompts?
-- Have there been any recent changes to how system prompts can be manipulated? If so,
-  when?
-- What format works best when appending to the system prompt? What format works best
-  when replacing the system prompt: pure Markdown, XML wrapper of Markdown, or another
-  format?
-- Does the provider offer a way to inspect, dump, or export the effective built-in
-  prompt?
-- Can append/replace be done without mutating user config?
-- How do prompt layers interact with skills, memories, slash commands, project files,
-  MCP servers, tools, agents, subagents, and extension systems?
 
 ## Body Structure
 
