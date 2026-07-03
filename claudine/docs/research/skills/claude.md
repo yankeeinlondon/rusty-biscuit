@@ -1,7 +1,7 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-02
-last_updated: 2026-07-02
+last_updated: 2026-07-03
 agent: open_code
 model: kimi-for-coding/k2p7
 
@@ -12,29 +12,77 @@ skills_docs: https://code.claude.com/docs/en/skills
 support: first_class
 
 locations:
-  - os: all
+  - os: macos
     scope: system
-    path: /Library/Application Support/ClaudeCode/managed-skills/ (macOS), /etc/claude-code/managed-skills/ (Linux/WSL), C:\Program Files\ClaudeCode\managed-skills\ (Windows)
-    notes: System-wide managed skills directory. Skipped when CLAUDE_CODE_DISABLE_POLICY_SKILLS=1.
-  - os: all
+    path: /Library/Application Support/ClaudeCode/managed-skills/
+    notes: System-wide managed skills directory. Skipped when CLAUDE_CODE_DISABLE_POLICY_SKILLS=1. Not observed on this host.
+  - os: linux
     scope: system
-    path: Managed settings (server-delivered, MDM plist, Windows registry, managed-settings.json)
-    notes: Enterprise scope delivered via claude.ai admin console or Claude apps gateway.
-  - os: all
+    path: /etc/claude-code/managed-skills/
+    notes: System-wide managed skills directory on Linux and WSL. Skipped when CLAUDE_CODE_DISABLE_POLICY_SKILLS=1.
+  - os: windows
+    scope: system
+    path: "C:\\Program Files\\ClaudeCode\\managed-skills\\"
+    notes: System-wide managed skills directory on Windows. Skipped when CLAUDE_CODE_DISABLE_POLICY_SKILLS=1.
+  - os: macos
+    scope: system
+    path: /Library/Application Support/ClaudeCode/managed-settings.json
+    notes: File-based managed policy settings. Also supports a managed-settings.d/ drop-in directory beside it.
+  - os: linux
+    scope: system
+    path: /etc/claude-code/managed-settings.json
+    notes: File-based managed policy settings. Also supports a managed-settings.d/ drop-in directory beside it.
+  - os: windows
+    scope: system
+    path: "C:\\Program Files\\ClaudeCode\\managed-settings.json"
+    notes: File-based managed policy settings. Also supports a managed-settings.d/ drop-in directory beside it. Legacy C:\\ProgramData\ClaudeCode\\ path removed in v2.1.75.
+  - os: macos
     scope: user
     path: ~/.claude/skills/<skill-name>/SKILL.md
-    notes: Personal skills available across all projects. On Windows resolves to %USERPROFILE%\.claude\skills\.
-  - os: all
+    notes: Personal skills available across all projects. Symlinks to skill directories are followed. Observed on this host.
+  - os: linux
+    scope: user
+    path: ~/.claude/skills/<skill-name>/SKILL.md
+    notes: Personal skills available across all projects. Symlinks to skill directories are followed.
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.claude\\skills\\<skill-name>\\SKILL.md"
+    notes: Personal skills available across all projects. Symlinks to skill directories are followed.
+  - os: macos
     scope: repo
     path: .claude/skills/<skill-name>/SKILL.md
-    notes: Project-scoped, team-shareable. Loaded from the launch directory and every parent up to repo root; also discovered in nested subdirectories on demand.
-  - os: all
+    notes: Project-scoped, team-shareable. Loaded from the launch directory and every parent up to the repository root; also discovered in nested subdirectories on demand. Requires accepting the workspace trust dialog for permission-related frontmatter to take effect.
+  - os: linux
+    scope: repo
+    path: .claude/skills/<skill-name>/SKILL.md
+    notes: Project-scoped, team-shareable. Loaded from the launch directory and every parent up to the repository root; also discovered in nested subdirectories on demand. Requires accepting the workspace trust dialog for permission-related frontmatter to take effect.
+  - os: windows
+    scope: repo
+    path: ".claude\\skills\\<skill-name>\\SKILL.md"
+    notes: Project-scoped, team-shareable. Loaded from the launch directory and every parent up to the repository root; also discovered in nested subdirectories on demand. Requires accepting the workspace trust dialog for permission-related frontmatter to take effect.
+  - os: macos
     scope: repo
     path: .claude/commands/<command>.md
     notes: Legacy custom slash commands. Still supported and share the same frontmatter model; a skill takes precedence if both share a name.
-  - os: all
+  - os: linux
+    scope: repo
+    path: .claude/commands/<command>.md
+    notes: Legacy custom slash commands. Still supported and share the same frontmatter model; a skill takes precedence if both share a name.
+  - os: windows
+    scope: repo
+    path: ".claude\\commands\\<command>.md"
+    notes: Legacy custom slash commands. Still supported and share the same frontmatter model; a skill takes precedence if both share a name.
+  - os: macos
     scope: extension
     path: <plugin>/skills/<skill-name>/SKILL.md
+    notes: Plugin skills are namespaced as plugin-name:skill-name and load only when the plugin is enabled.
+  - os: linux
+    scope: extension
+    path: <plugin>/skills/<skill-name>/SKILL.md
+    notes: Plugin skills are namespaced as plugin-name:skill-name and load only when the plugin is enabled.
+  - os: windows
+    scope: extension
+    path: "<plugin>\\skills\\<skill-name>\\SKILL.md"
     notes: Plugin skills are namespaced as plugin-name:skill-name and load only when the plugin is enabled.
 
 format:
@@ -67,17 +115,17 @@ format:
     - metadata (Agent Skills standard)
   body_format: markdown
   notes: |
-    Claude Code implements the Agent Skills open standard but relaxes it: no field is strictly required and `description` is only recommended. `SKILL.md` is the required entry point; supporting files live beside it and are referenced from the body. Frontmatter strings may include `${CLAUDE_SKILL_DIR}`, `${CLAUDE_PROJECT_DIR}`, and argument substitutions.
+    Claude Code implements the Agent Skills open standard but relaxes it: no field is strictly required and `description` is only recommended. `SKILL.md` is the required entry point; supporting files live beside it and are referenced from the body. Frontmatter strings may include `${CLAUDE_SKILL_DIR}`, `${CLAUDE_PROJECT_DIR}`, and argument substitutions. A skill directory that also contains `.claude-plugin/plugin.json` loads as a skills-directory plugin named `<name>@skills-dir` and can bundle agents, hooks, MCP servers, and output styles.
 
 discovery:
   mechanism: |
-    File-system watcher scans managed, user, project, nested project, and --add-dir `.claude/skills/` directories at startup and watches them for changes. Skills are loaded progressively: `name`/`description` metadata is always in context; the full body loads when the skill is invoked by the user (`/skill-name`) or by the model (unless `disable-model-invocation: true`). Legacy `.claude/commands/*.md` are discovered the same way.
+    File-system watcher scans managed, user, project, nested project, and --add-dir `.claude/skills/` directories at startup and watches them for changes. Skills are loaded progressively: `name`/`description` metadata is always in context; the full body loads when the skill is invoked by the user (`/skill-name`) or by the model (unless `disable-model-invocation: true`). Legacy `.claude/commands/*.md` are discovered the same way. Creating a top-level skills directory that did not exist when the session started requires a restart so the new directory can be watched.
   precedence: |
     Enterprise/managed > personal (`~/.claude/skills/`) > project (`.claude/skills/`) > plugin (namespaced). A user/project skill with the same name as a bundled skill overrides the bundled version. Nested project skills with clashing names are qualified by subdirectory path, e.g. `apps/web:deploy`, and the variant matching the working files is preferred. `skillOverrides` in settings can demote or hide a skill regardless of scope.
   enable_disable: |
-    Per-skill: `disable-model-invocation: true` blocks the model from auto-invoking; `user-invocable: false` hides it from the `/` menu; `skillOverrides` can set a skill to `on`, `name-only`, `user-invocable-only`, or `off`. Global toggles: `--disable-slash-commands` disables all skills/commands for the session; `--bare` / `CLAUDE_CODE_SIMPLE` and `--safe-mode` / `CLAUDE_CODE_SAFE_MODE` skip skill discovery; `CLAUDE_CODE_DISABLE_BUNDLED_SKILLS` disables only bundled skills; `CLAUDE_CODE_DISABLE_POLICY_SKILLS` skips managed skills.
+    Per-skill: `disable-model-invocation: true` blocks the model from auto-invoking and preloading into subagents; `user-invocable: false` hides it from the `/` menu; `skillOverrides` can set a skill to `on`, `name-only`, `user-invocable-only`, or `off`. Global toggles: `--disable-slash-commands` disables all skills/commands for the session; `--bare` / `CLAUDE_CODE_SIMPLE` and `--safe-mode` / `CLAUDE_CODE_SAFE_MODE` skip skill discovery; `CLAUDE_CODE_DISABLE_BUNDLED_SKILLS` disables only bundled skills; `CLAUDE_CODE_DISABLE_POLICY_SKILLS` skips managed skills.
   notes: |
-    Plugin skills are managed through `/plugin` and are not affected by `skillOverrides`. Live change detection covers `SKILL.md` text only; plugin-side `hooks/`, `.mcp.json`, `agents/`, and `output-styles/` require `/reload-plugins`.
+    Plugin skills are managed through `/plugin` and are not affected by `skillOverrides`. Live change detection covers `SKILL.md` text only; plugin-side `hooks/`, `.mcp.json`, `agents/`, and `output-styles/` require `/reload-plugins`. Project skills require workspace trust before permission-related frontmatter such as `allowed-tools` takes effect.
 
 portability:
   portable: true
@@ -116,8 +164,11 @@ cli_params:
   - flag: --settings <file-or-json>
     description: Session-only settings overlay, including skillOverrides.
     example: claude --settings ./ci-settings.json
-  - flag: --allowedTools / --disallowedTools
-    description: Permission rules that can allow or deny the Skill tool or specific skills, e.g. Skill(commit) or Skill(deploy *).
+  - flag: --allowedTools / --allowed-tools
+    description: Permission rules that can allow the Skill tool or specific skills, e.g. Skill(commit) or Skill(deploy *).
+    example: claude --allowedTools "Skill(commit)"
+  - flag: --disallowedTools / --disallowed-tools
+    description: Permission rules that can deny the Skill tool or specific skills, e.g. Skill(deploy *).
     example: claude --disallowedTools "Skill(deploy *)"
 
 env_vars:
@@ -140,7 +191,10 @@ env_vars:
   - name: SLASH_COMMAND_TOOL_CHAR_BUDGET
     effect: Override the character budget for skill metadata shown to the Skill tool.
 
-changes: []
+changes:
+  - "Split location records from 'os: all' into separate macOS, Linux, and Windows entries per schema requirements."
+  - "Verified official docs for skills, settings, env vars, CLI reference, and the Agent Skills open specification."
+  - "Confirmed managed settings drop-in directory behavior, managed-skills trust requirements, and symlink following for user/project skills."
 
 requires_claudine_update: true
 reason: |
@@ -159,17 +213,16 @@ Skills are also a packaging boundary: a skill directory can contain supporting r
 
 Skill resources are stored by scope:
 
-| Scope | Location | Notes |
-|---|---|---|
-| Managed / system | macOS `/Library/Application Support/ClaudeCode/managed-skills/`, Linux/WSL `/etc/claude-code/managed-skills/`, Windows `C:\Program Files\ClaudeCode\managed-skills\` | System-wide managed skills. Can be skipped with `CLAUDE_CODE_DISABLE_POLICY_SKILLS=1`. |
-| Enterprise | Server-managed settings, MDM plist, Windows registry, or `managed-settings.json` | Organization-wide delivery. Highest precedence. |
-| Personal | `~/.claude/skills/<skill-name>/SKILL.md` | Applies across all projects. |
-| Project | `.claude/skills/<skill-name>/SKILL.md` | Shared with repository collaborators. |
-| Nested project | `packages/frontend/.claude/skills/<skill-name>/SKILL.md` | Discovered when working in that subdirectory; clashing names are qualified as `packages/frontend:skill-name`. |
-| Legacy commands | `.claude/commands/<command>.md` and `~/.claude/commands/<command>.md` | Still discovered; same frontmatter; lower precedence than a skill with the same name. |
-| Plugin | `<plugin>/skills/<skill-name>/SKILL.md` | Namespaced as `plugin-name:skill-name`; requires the plugin to be enabled. |
+| Scope | macOS | Linux / WSL | Windows | Notes |
+|---|---|---|---|---|
+| Managed / system | `/Library/Application Support/ClaudeCode/managed-skills/` | `/etc/claude-code/managed-skills/` | `C:\Program Files\ClaudeCode\managed-skills\` | System-wide managed skills. Can be skipped with `CLAUDE_CODE_DISABLE_POLICY_SKILLS=1`. Not observed locally. |
+| Managed policy | `/Library/Application Support/ClaudeCode/managed-settings.json` + optional `managed-settings.d/` | `/etc/claude-code/managed-settings.json` + optional `managed-settings.d/` | `C:\Program Files\ClaudeCode\managed-settings.json` + optional `managed-settings.d/` | Organization-wide policy. Highest precedence. Legacy `C:\ProgramData\ClaudeCode\managed-settings.json` removed in v2.1.75. |
+| Personal | `~/.claude/skills/<skill-name>/SKILL.md` | `~/.claude/skills/<skill-name>/SKILL.md` | `%USERPROFILE%\.claude\skills\<skill-name>\SKILL.md` | Applies across all projects. Local host observed real skills and symlinks to external skill directories. |
+| Project | `.claude/skills/<skill-name>/SKILL.md` | `.claude/skills/<skill-name>/SKILL.md` | `.claude\skills\<skill-name>\SKILL.md` | Shared with repository collaborators. Discovered from launch directory and every parent up to repo root, plus nested subdirectories on demand. Requires workspace trust. |
+| Legacy commands | `.claude/commands/<command>.md` | `.claude/commands/<command>.md` | `.claude\commands\<command>.md` | Still discovered; same frontmatter; lower precedence than a skill with the same name. |
+| Plugin | `<plugin>/skills/<skill-name>/SKILL.md` | `<plugin>/skills/<skill-name>/SKILL.md` | `<plugin>\skills\<skill-name>\SKILL.md` | Namespaced as `plugin-name:skill-name`; requires the plugin to be enabled. |
 
-On Windows, `~/.claude` resolves to `%USERPROFILE%\.claude`. Project skills are discovered from the launch directory and every parent up to the repository root, and `.claude/skills/` inside `--add-dir` directories are also loaded.
+On Windows, `~/.claude` resolves to `%USERPROFILE%\.claude`. A `<skill-name>` entry in the personal or project locations may be a symlink to a directory elsewhere on disk; Claude Code follows the symlink and reads `SKILL.md` from the target, deduplicating if the same target is reachable from more than one location. Plugin skills handle symlinks differently.
 
 ## File Format
 
@@ -195,7 +248,7 @@ Commonly recognized frontmatter fields:
 | `when_to_use` | Extra trigger phrases, counted toward the 1,536-character skill-listing cap. |
 | `argument-hint` | Autocomplete hint for arguments. |
 | `arguments` | Named positional arguments for `$name` substitution. |
-| `disable-model-invocation` | When `true`, only the user can invoke the skill. |
+| `disable-model-invocation` | When `true`, only the user can invoke the skill and it is not preloaded into subagents. |
 | `user-invocable` | When `false`, hides the skill from the `/` menu. |
 | `allowed-tools` | Tool allowlist while the skill is active. |
 | `disallowed-tools` | Tools removed from the model's pool while the skill is active. |
@@ -208,9 +261,11 @@ Commonly recognized frontmatter fields:
 
 The body supports string substitutions such as `$ARGUMENTS`, `$0`..`$N`, `$name`, `${CLAUDE_SESSION_ID}`, `${CLAUDE_EFFORT}`, `${CLAUDE_SKILL_DIR}`, and `${CLAUDE_PROJECT_DIR}`. Dynamic context can be injected with `` !`command` `` inline or ` ```! ` fenced blocks.
 
+A skill folder that also contains `.claude-plugin/plugin.json` loads as a skills-directory plugin named `<name>@skills-dir`, allowing it to bundle agents, hooks, MCP servers, and output styles. For project `.claude/skills/`, this requires accepting the workspace trust dialog.
+
 ## Discovery and Precedence
 
-Claude Code watches the configured skill directories at startup and reloads `SKILL.md` changes during a session. Discovery order and precedence are:
+Claude Code watches configured skill directories at startup and reloads `SKILL.md` changes during a session. Discovery order and precedence are:
 
 1. Managed / enterprise settings and system managed-skills directory.
 2. Personal `~/.claude/skills/`.
@@ -222,7 +277,7 @@ A user or project skill with the same name as a bundled skill overrides the bund
 
 Enable/disable mechanisms:
 
-- `disable-model-invocation: true` — blocks the model from auto-invoking the skill.
+- `disable-model-invocation: true` — blocks the model from auto-invoking the skill and prevents preloading into subagents.
 - `user-invocable: false` — hides the skill from the user menu but lets the model use it.
 - `skillOverrides` in settings — per-skill states: `on`, `name-only`, `user-invocable-only`, `off`.
 - `--disable-slash-commands` — disables all skills/commands for the session.
@@ -230,6 +285,8 @@ Enable/disable mechanisms:
 - `CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1` — disables only bundled skills.
 - `CLAUDE_CODE_DISABLE_POLICY_SKILLS=1` — skips system-wide managed skills.
 - Permission rules such as `Skill(deploy *)` can allow or deny the Skill tool globally or per skill.
+
+Plugin skills are not affected by `skillOverrides`. Live change detection covers `SKILL.md` text only; plugin-side `hooks/`, `.mcp.json`, `agents/`, and `output-styles/` require `/reload-plugins`.
 
 ## Portability
 
@@ -259,6 +316,10 @@ For Claudine's cross-provider resource linking:
 - Account for `skillOverrides` and `disable-model-invocation`/`user-invocable` when deciding whether a linked skill is active or visible in a target provider.
 - Bundled skills (`/code-review`, `/debug`, `/loop`, etc.) are replaceable by user/project skills with the same name; link them only if a custom override exists.
 - Managed/system skills should be excluded from user-controlled sync unless `CLAUDE_CODE_DISABLE_POLICY_SKILLS` is considered.
+
+## Changelog
+
+- **2026-07-03** — Split location records from `os: all` into per-OS records (macOS, Linux, Windows) to satisfy the schema contract. Verified paths and behavior against current official documentation. Added explicit managed-policy location records and skills-directory plugin notes. Confirmed local `~/.claude/skills/` contains real skills and symlinks to external directories.
 
 ## Sources
 

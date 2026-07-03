@@ -29,6 +29,7 @@ failure:
     message: "💥 the Agent Skills research on **{{state.name}}** failed to complete!"
     warn: "The Agent Skills research on **{{state.name}}** failed to complete! (err: {{err.message}})"
 ---
+# Agent Skills Research on {{state.name}}
 
 ## Skills
 
@@ -36,8 +37,10 @@ Use the 'claudine' skill.
 
 ## Scope
 
-Research **Agent Skills** for **{{state.desc}}**. This topic feeds Claudine's
-shared-resource linking module and portability classification, so the goal is to
+Research **Agent Skills** for **{{state.desc}}**. Prior-generation research in
+`../cross-referencing/` and `../skillsets/` are validation assets for humans — do not
+open, paraphrase, or cite them; your research must be independent. This topic feeds
+Claudine's shared-resource linking module and portability classification, so the goal is to
 understand how this provider implements, discovers, scopes, loads, and applies Agent
 Skills.
 
@@ -47,6 +50,11 @@ implementation: storage locations, file names, metadata, discovery rules, loadin
 behavior, and runtime behavior. Do not dilute the topic into generic memories, ordinary
 project instructions, chat history, transient session context, or provider documentation
 pages unless the provider explicitly loads those surfaces as Agent Skills.
+
+Boundary against the slash-commands topic: slash-commands owns invocation grammar and
+command-shaped entries — including providers that unify commands into skills, where the
+command surface is still slash-commands' ground; this topic owns packaging, activation,
+and discovery.
 
 Write the result to `{{file}}`. Include `$schema: ./_schema.yaml` in frontmatter so the
 document can be validated, but treat the instructions below as the source of what
@@ -99,7 +107,7 @@ frontmatter as follows:
     directories, rules, or conventions rather than a dedicated command or branded
     feature.
   - `unknown`: use only when current sources are unavailable or contradictory after
-    serious research; explain the gap in `gaps` or the body.
+    serious research; explain the gap in the body's Gaps/Notes prose.
   - `none`: schema compatibility value only. Do not use it for this fleet unless the
     provider has been removed, is not actually an agentic CLI, or cannot load any
     user-authored behavior at all. If research seems to point here, keep digging and
@@ -199,10 +207,13 @@ portability:
 ## Body Structure
 
 - `## Overview`
-- `## Locations`
-- `## File Format`
-- `## Discovery and Precedence`
-- `## Portability`
+- `## Locations` — exact template paths per OS and scope, noting which were observed
+  locally versus documented only.
+- `## File Format` — file names, frontmatter keys, body format, and a small real example
+  of a skill artifact.
+- `## Discovery and Precedence` — how skills are found, ordered, shadowed,
+  enabled/disabled, and trust-gated.
+- `## Portability` — which artifacts link as-is, which need rewriting, and why.
 - `## Claudine Linking Notes`
 - `## Changelog` when `update` is true
 - `## Sources`
