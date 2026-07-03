@@ -23,8 +23,11 @@ success:
               - error: "research file was not updated"
         - when: "frontmatter(file, 'last_updated') == ctx.today"
           action:
-              - info: "The research on **{{state.name}}** completed successfully: {{ link(file) }}"
-              - message: "🎉  the research on **{{state.name}}** completed successfully"
+              - info: "The **MCP** research on **{{state.name}}** completed successfully: {{ link(file) }}"
+              - message: "🎉  the **MCP** research on **{{state.name}}** completed successfully"
+failure:
+    message: "💥 the MCP research on **{{state.name}}** failed to complete!"
+    warn: "The MCP research on **{{state.name}}** failed to complete! (err: {{err.message}})"
 ---
 
 ## Skills
@@ -153,22 +156,34 @@ protocol:
 ### Config Files
 
 `config_files` records persistent files that define MCP servers or MCP-related policy.
-Use separate records for user, repo, managed/system, plugin, and OS-specific paths.
+Use separate macOS, Linux, and Windows records for every filesystem path. Do not use
+`os: all` for paths; Windows path syntax alone makes that ambiguous. Also use separate
+records for user, repo, managed/system, and plugin scopes.
 
 Example:
 
 ```yaml
 config_files:
-  - os: all
+  - os: macos
     scope: user
     path: "~/.provider/mcp.json"
     format: json
-    notes: "Primary user-level MCP server config."
-  - os: all
+    notes: "Primary user-level MCP server config on macOS."
+  - os: linux
+    scope: user
+    path: "~/.config/provider/mcp.json"
+    format: json
+    notes: "Primary user-level MCP server config on Linux; verify exact XDG behavior."
+  - os: windows
+    scope: user
+    path: "%APPDATA%\\Provider\\mcp.json"
+    format: json
+    notes: "Primary user-level MCP server config on Windows."
+  - os: macos
     scope: repo
     path: ".provider/mcp.json"
     format: json
-    notes: "Repo-local MCP servers; loaded only after project trust."
+    notes: "Repo-local MCP servers; add Linux and Windows records explicitly."
   - os: windows
     scope: user
     path: "%APPDATA%\\Provider\\mcp.json"
