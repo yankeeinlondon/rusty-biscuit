@@ -21,6 +21,10 @@ success:
           action:
               - stderr: "The step reported success but <b>{{file}}</b> was not updated — <code>last_updated</code> is not {{ctx.today}}."
               - error: "research file was not updated"
+        - when: "frontmatter(file, 'last_updated') == ctx.today"
+          action:
+              - info: "The research on **{{state.name}}** completed successfully: {{ link(file) }}"
+              - message: "🎉  the research on **{{state.name}}** completed successfully"
 ---
 
 ## Skills
