@@ -681,7 +681,9 @@ Phases 2–4 can interleave; the ordering above is dependency-driven, not strict
 ## Supplemental Design Documents (2026-07-02)
 
 Brainstorm-driven refinements resolving this spec's ambiguities; where a design doc
-rules on a point, the design doc wins over the sketch here:
+rules on a point, the design doc wins over the sketch here. Execution sequencing for
+all of it lives in [implementation-plan.md](implementation-plan.md) (phases A–I, with
+the Kilo → Pi → Antigravity provider-onboarding validation ladder):
 
 - [design/catalog-generation.md](design/catalog-generation.md) — field source matrix
   (roster/research/facts/overrides), gen-crate dependency design (`catalog-types` leaf
