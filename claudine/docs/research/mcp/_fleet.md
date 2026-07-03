@@ -29,6 +29,7 @@ failure:
     message: "💥 the MCP research on **{{state.name}}** failed to complete!"
     warn: "The MCP research on **{{state.name}}** failed to complete! (err: {{err.message}})"
 ---
+# MCP Research on {{state.name}}
 
 ## Skills
 
@@ -36,447 +37,239 @@ Use the 'claudine' skill.
 
 ## Scope
 
-Research Model Context Protocol support for **{{state.desc}}**. This topic feeds
+Research Model Context Protocol (MCP) support for **{{state.desc}}**. This topic feeds
 Claudine's MCP catalog, import/export/sync behavior, runtime injection, and provider
-security posture. Write the result to `{{file}}` and include `$schema: ./_schema.yaml`
-in frontmatter.
-
-## Required Frontmatter
-
-Populate every applicable field from `./_schema.yaml`:
-
-- `created`, `last_updated`, `agent`, `model`
-- `docs`
-- `support`
-- `protocol`
-- `config_files`
-- `cli_params`
-- `env_vars`
-- `server_schema`
-- `server_capabilities`
-- `client_capabilities`
-- `tool_surface`
-- `resource_surface`
-- `prompt_surface`
-- `sync_behavior`
-- `runtime_injection`
-- `authorization`
-- `security`
-- `gaps`
-- `changes`
-- `requires_claudine_update`
-- `reason`
-
-Use `support: none` only when MCP support is clearly absent. Use `unknown` where the
-current documentation does not prove the answer.
-
-## Frontmatter Field Guide
-
-Use this section as the authoritative meaning of each schema property.
-
-### Identity and Docs
-
-- `created`: Date this provider file was first created. Set only on first creation.
-  Example: `created: 2026-07-02`
-- `last_updated`: Date this research was verified. Always set to `{{ctx.today}}`.
-- `agent`: Research runner. Set to `{{env.AGENT}}`.
-- `model`: Research model. Set to `{{env.MODEL || 'default'}}`.
-- `docs`: Primary official MCP docs URL for this provider. If no MCP-specific docs
-  exist, use the best official config/integration docs and explain the gap in `gaps`
-  or the body.
-
-### MCP Concepts to Preserve
-
-Do not reduce MCP to "tool server config." The protocol has distinct surfaces that
-providers expose differently:
-
-- **Tools** are model-controlled functions (`tools/list`, `tools/call`). They need
-  visibility, approval, timeout, result-sanitization, and audit handling.
-- **Resources** are application-controlled context identified by URI. Clients decide how
-  users or models select them; resource templates and subscriptions may exist.
-- **Prompts** are user-controlled prompt templates. Providers may expose them as slash
-  commands, palette actions, or not at all.
-- **Roots** are client-provided filesystem/workspace boundaries. Servers may ask for
-  `roots/list`; provider clients decide what roots they expose.
-- **Sampling** lets servers ask the client to make an LLM call. This is powerful and
-  should have explicit user approval.
-- **Elicitation** lets servers ask the client to collect structured user input. It must
-  not be used for sensitive information.
-- **Transports** matter: stdio is local subprocess JSON-RPC; Streamable HTTP is the
-  modern remote transport; HTTP+SSE/SSE is legacy/compatibility; custom transports may
-  exist.
-- **Authorization** differs by transport: HTTP MCP may use OAuth-style authorization;
-  stdio should receive credentials via environment/config/credential stores, not the
-  HTTP auth flow.
-
-Research must explicitly say which of these surfaces the provider supports, hides,
-forwards, filters, or ignores.
-
-### Support
-
-`support` is the highest-value classification for Claudine:
-
-- `import_sync`: Claudine can reasonably import/export/sync MCP servers with the
-  provider's persistent config.
-- `runtime_injection`: The provider can accept MCP servers for a single run without
-  mutating user config.
-- `manual_config`: The provider supports MCP, but only through user-edited config files
-  or UI setup that Claudine should not mutate automatically.
-- `partial`: MCP exists but important behavior is missing, unstable, plugin-only,
-  one-transport-only, or not available in the CLI mode Claudine wraps.
-- `none`: Clear evidence MCP is not supported.
-- `unknown`: Current evidence is insufficient.
-
-Choose the strongest true value for Claudine's integration path. For example, if a
-provider supports both persistent config sync and one-run runtime injection, use
-`runtime_injection` and describe sync support in `sync_behavior`.
-
-Example:
-
-```yaml
-support: runtime_injection
-```
-
-### Protocol
-
-`protocol` records protocol generation and transport behavior. Look for explicit
-protocol version dates, supported transports, session handling, and whether legacy
-HTTP+SSE/SSE is still accepted.
-
-Example:
-
-```yaml
-protocol:
-  versions: ["2025-06-18"]
-  transports: [stdio, streamable_http]
-  lifecycle: "Initializes each server at session start; reconnects failed stdio servers only after restart."
-  notes: "Remote servers use Streamable HTTP; legacy SSE config is still accepted for compatibility."
-```
-
-### Config Files
-
-`config_files` records persistent files that define MCP servers or MCP-related policy.
-Use separate macOS, Linux, and Windows records for every filesystem path. Do not use
-`os: all` for paths; Windows path syntax alone makes that ambiguous. Also use separate
-records for user, repo, managed/system, and plugin scopes.
-
-Example:
-
-```yaml
-config_files:
-  - os: macos
-    scope: user
-    path: "~/.provider/mcp.json"
-    format: json
-    notes: "Primary user-level MCP server config on macOS."
-  - os: linux
-    scope: user
-    path: "~/.config/provider/mcp.json"
-    format: json
-    notes: "Primary user-level MCP server config on Linux; verify exact XDG behavior."
-  - os: windows
-    scope: user
-    path: "%APPDATA%\\Provider\\mcp.json"
-    format: json
-    notes: "Primary user-level MCP server config on Windows."
-  - os: macos
-    scope: repo
-    path: ".provider/mcp.json"
-    format: json
-    notes: "Repo-local MCP servers; add Linux and Windows records explicitly."
-  - os: windows
-    scope: user
-    path: "%APPDATA%\\Provider\\mcp.json"
-    format: json
-    notes: "Windows user config path."
-```
-
-### CLI Params
-
-`cli_params` is for MCP-specific commands and switches: add/list/remove/import/export,
-enable/disable MCP mode, select servers, trust servers, or point to config files. Do not
-include unrelated general CLI flags.
-
-Example:
-
-```yaml
-cli_params:
-  - flag: "mcp add"
-    description: "Adds a persistent MCP server to provider config."
-    example: "provider mcp add filesystem -- npx -y @modelcontextprotocol/server-filesystem ."
-  - flag: "--mcp-config"
-    description: "Uses an alternate MCP config file for this run."
-    example: "provider run --mcp-config ./mcp.json \"inspect tools\""
-```
-
-### Environment Variables
-
-`env_vars` captures variables that affect MCP config, runtime injection, auth, or server
-visibility. Do not list provider-wide variables unless they change MCP behavior.
-
-Example:
-
-```yaml
-env_vars:
-  - name: PROVIDER_MCP_CONFIG
-    effect: "Overrides the MCP config file path for the session."
-  - name: PROVIDER_CONFIG_CONTENT
-    effect: "Allows passing inline JSON config that can include MCP server definitions."
-```
-
-### Server Schema
-
-`server_schema` describes the accepted shape of one MCP server definition, not the whole
-config file. Capture transports and field names using provider-native keys.
-
-- `transports`: Accepted transport kinds, such as `stdio`, `sse`, `streamable_http`,
-  `http`, or provider-native names.
-- `command_fields`: Keys used for command/stdio servers.
-- `http_fields`: Keys used for remote HTTP/SSE servers.
-- `env_shape`: How per-server env vars are represented.
-- `auth_shape`: How auth headers/tokens/OAuth references are represented.
-- `notes`: Required fields, unsupported transports, schema URLs, and provider quirks.
-
-Example:
-
-```yaml
-server_schema:
-  transports: ["stdio", "streamable_http", "sse"]
-  command_fields: ["command", "args", "env", "cwd"]
-  http_fields: ["url", "headers", "oauth"]
-  env_shape: "env is an object mapping variable names to string values."
-  auth_shape: "HTTP servers may use OAuth token storage; static headers are supported."
-  notes: "Server id is the map key under mcpServers."
-```
-
-### Server Capabilities
-
-`server_capabilities` records which MCP server features the provider exposes to users
-and models. The provider may support MCP tools while ignoring resources/prompts, or it
-may support resources in UI only.
-
-Example:
-
-```yaml
-server_capabilities:
-  tools: full
-  resources: partial
-  prompts: none
-  tool_list_changed: true
-  resource_subscribe: false
-  resource_list_changed: false
-  prompt_list_changed: false
-  notes: "Tools are available to the model; resources can be selected manually but are not auto-discovered by the model."
-```
-
-### Client Capabilities
-
-`client_capabilities` records what the provider client offers back to MCP servers. This
-is the side many provider docs omit, but it matters for security and interoperability:
-roots define filesystem boundaries; sampling can trigger nested LLM calls; elicitation
-can ask the user for structured input.
-
-Example:
-
-```yaml
-client_capabilities:
-  roots: partial
-  sampling: none
-  elicitation: unknown
-  notes: "Provider exposes the workspace root to stdio servers but does not document sampling/createMessage support."
-```
-
-### Tool Surface
-
-`tool_surface` is about model-visible tools, not server configuration. Capture how tools
-are discovered, whether users can filter individual tools, how approvals work, and
-whether results are sanitized before reaching the model.
-
-Example:
-
-```yaml
-tool_surface:
-  discovery: "Provider calls tools/list at server startup and refreshes when list_changed is received."
-  filtering: "Server-level include/exclude lists can hide tools from the model."
-  approval: "MCP tool calls use the same approval prompt as native tools."
-  result_handling: "Text/image/resource_link results are passed to the model; tool errors surface with isError."
-  annotations_trusted: "Tool annotations are displayed but not treated as trusted policy."
-  notes: "No per-argument approval policy; approval prompt shows full arguments."
-```
-
-### Resource Surface
-
-`resource_surface` records whether resource listing, reading, templates, subscriptions,
-and URI schemes are surfaced. Distinguish resources from tools returning resource links.
-
-Example:
-
-```yaml
-resource_surface:
-  supported: true
-  uri_schemes: ["file", "git", "https", "custom"]
-  templates: true
-  subscriptions: false
-  exposure_model: "Resources appear in a picker; model cannot autonomously read arbitrary resources."
-  notes: "Resource links returned by tools are clickable but are not necessarily in resources/list."
-```
-
-### Prompt Surface
-
-`prompt_surface` records whether MCP prompt templates are exposed and how users invoke
-them. Prompts are user-controlled by protocol design; do not describe them as automatic
-model tools unless the provider actually does that.
-
-Example:
-
-```yaml
-prompt_surface:
-  supported: true
-  invocation: "Displayed as slash commands under /mcp:<server>:<prompt>."
-  arguments: "Prompt arguments are collected through a command form."
-  exposure_model: "User-selected only; the model does not invoke prompts autonomously."
-  notes: "Prompt list changes require restarting the session."
-```
-
-### Sync Behavior
-
-`sync_behavior` describes what Claudine can automate against persistent provider config.
-Be precise about import versus export:
-
-- `import_supported`: Claudine can read provider config and normalize it into its MCP
-  catalog.
-- `export_supported`: Claudine can write provider-shaped config from its catalog.
-- `apply_supported`: Claudine can safely apply changes through provider CLI/API rather
-  than editing files directly.
-- `merge_strategy`: How provider config combines user/repo/managed/plugin sources.
-
-Example:
-
-```yaml
-sync_behavior:
-  import_supported: true
-  export_supported: true
-  apply_supported: false
-  merge_strategy: replace
-  notes: "Provider reads one JSON file; Claudine must rewrite the mcpServers object atomically."
-```
-
-### Runtime Injection
-
-`runtime_injection` is about one-run MCP server injection without permanently mutating
-provider user or repo config. This is especially important for Claudine wrappers.
-
-Example:
-
-```yaml
-runtime_injection:
-  supported: true
-  mechanism: "Set PROVIDER_CONFIG_CONTENT to a JSON object containing mcpServers before launching the child process."
-  limitations: "Inline config replaces the normal user config for that run; must merge user settings manually."
-```
-
-If runtime injection is not supported, state the closest alternative and why it is not
-safe for one-run use.
-
-### Authorization
-
-`authorization` records credential handling for MCP servers. For HTTP/Streamable HTTP,
-look for OAuth support, token storage, token audience/resource binding, static headers,
-and whether credentials are per-user or per-project. For stdio, look for explicit env
-vars and whether secrets inherit from the provider process.
-
-Example:
-
-```yaml
-authorization:
-  oauth: true
-  credential_storage: "OAuth tokens stored in ~/.provider/mcp-oauth-tokens.json."
-  token_scope: "Per remote server URL; refresh token stored by provider."
-  stdio_secret_delivery: "Per-server env object; process env is otherwise inherited."
-  notes: "Static Authorization headers are accepted but discouraged for shared repo config."
-```
-
-### Security
-
-`security` captures the provider's MCP trust and permission model. This field should
-answer how dangerous MCP tools are constrained and whether Claudine needs additional
-guardrails.
-
-Example:
-
-```yaml
-security:
-  tool_filtering: "Per-server allowedTools can hide tools before the model sees them."
-  server_trust: "Repo MCP config is ignored until the project is trusted."
-  env_sanitization: "Server env vars are explicit per server; process env is otherwise inherited."
-  sandbox_interaction: "MCP server subprocesses run outside the provider sandbox unless launched through the sandbox wrapper."
-  response_filtering: "No native MCP response sanitization; wrapper must inspect tool results."
-  notes: "OAuth tokens are stored in the provider's credential store."
-```
-
-Look specifically for:
-
-- server allowlists or denylists
-- tool include/exclude filters
-- repo trust gates
-- admin/managed policy restrictions
-- whether MCP subprocesses inherit user env
-- where secrets are stored
-- whether MCP tools run inside sandbox/container boundaries
-- whether the provider scans or filters MCP tool results for prompt injection
-- whether roots constrain filesystem-like MCP servers
-- whether sampling and elicitation require explicit user consent
-
-### Change Flags
-
-- `changes`: Update-mode changelog entries. Fresh first-run docs should use `[]`.
-- `requires_claudine_update`: Set `true` only when the research implies a Claudine code
-  or generated metadata change, not merely because documentation changed.
-- `reason`: Required when `requires_claudine_update` is `true`; otherwise use an empty
-  string or omit if the schema allows.
-
-## Research Questions
-
-- Does the provider support MCP by import/sync, runtime injection, manual config, or not at all?
-- Which MCP protocol version/generation and transports does it support: stdio,
-  Streamable HTTP, legacy HTTP+SSE/SSE, or custom?
-- Where are MCP server definitions stored by OS and scope?
-- What server definition shape is accepted for command, HTTP/SSE, stdio, auth, and env?
-- Does it expose MCP tools, resources, and prompts? If only tools, say so explicitly.
-- Does it expose client capabilities to servers: roots, sampling, and elicitation?
-- Are there CLI switches or commands for listing, importing, exporting, applying, or syncing servers?
-- Can Claudine inject MCP servers for one run without mutating user config?
-- How are server trust, tool filtering, environment sanitization, sandboxing, and response filtering handled?
-- Which environment variables affect MCP behavior?
-- Does MCP behavior differ between interactive, non-interactive, ACP, IDE, or server modes?
-- Are repo-level MCP configs gated by project trust or safe mode?
-- Are MCP approval prompts governed by the same permission model as native tools?
-- Can individual MCP tools be hidden from the model separately from approval policy?
-- Are MCP resources exposed to the user, the model, or both? Are URI templates or subscriptions supported?
-- Are MCP prompts exposed as slash commands, command palette entries, or hidden?
-- Are MCP roots derived from the workspace, provider config, launch cwd, or user selection?
-- Can MCP servers request sampling or elicitation, and can the user deny those requests?
-- Where are credentials stored, and can Claudine avoid reading or writing secrets?
-- What happens when a configured MCP server fails to start, emits stderr, or hangs?
-
-## Body Structure
+security posture, so the goal is to understand how this provider configures, exposes,
+constrains, and secures MCP servers.
+
+Boundary against the `hooks` topic: `hooks` owns lifecycle-event semantics (native event
+inventories, payloads, return contracts). This topic owns the MCP surfaces — server
+configuration, protocol/transport coverage, tool/resource/prompt exposure,
+authorization, security, and MCP notifications. If MCP activity fires a provider
+lifecycle event, record the MCP side here and leave the event semantics to `hooks`.
+
+**Never cite Claudine's own documentation as evidence.** Claudine's `mcp` module docs
+describe *Claudine's* catalog and injection behavior, NOT provider behavior. Verify
+every claim against the provider's primary sources — official docs, source code,
+release notes, `--help`, and local inspection.
+
+Prior-generation research files in this directory (`qwen.md`, `roo.md`) are validation
+assets for humans — do NOT open, paraphrase, or cite them; your research must be
+independent.
+
+Write the result to `{{file}}`. Include `$schema: ./_schema.yaml` in frontmatter so the
+document can be validated, but treat the instructions below as the source of what
+high-quality research must contain.
+
+## Document Structure
+
+Do not reduce MCP to "tool server config". The protocol has distinct surfaces — tools,
+resources, prompts, roots, sampling, elicitation — and providers expose each
+differently. The body must say explicitly which surfaces the provider supports, hides,
+forwards, filters, or ignores. Ask "which mechanisms exist and how do they work",
+never "does {{state.name}} support X". Write the body with these H2 sections:
 
 - `## Overview`
+    - Summarize provider MCP support and the strongest integration path available to
+      Claudine: import/export/sync against persistent config, one-run runtime
+      injection, manual-only config, partial support, or none. When several paths are
+      true, lead with the strongest one (a provider with both persistent sync and
+      one-run injection is a runtime-injection provider whose sync story belongs in
+      Import, Export, and Sync)
+    - Give a one-line inventory of which MCP surfaces are exposed versus ignored; the
+      later sections expand each
 - `## Protocol and Transports`
+    - Protocol generation: cite explicit protocol version dates when docs expose them;
+      otherwise describe the observed feature generation
+    - Transports: stdio is local subprocess JSON-RPC; Streamable HTTP is the modern
+      remote transport; HTTP+SSE/SSE is legacy/compatibility; custom transports may
+      exist. Which does the provider accept, and is legacy SSE still tolerated?
+    - Session lifecycle: when servers connect, reconnect behavior, and how
+      `list_changed` notifications are handled
 - `## Configuration`
+    - Every persistent file that defines MCP servers or MCP policy, by OS and scope.
+      State macOS, Linux, and Windows paths separately — never claim one path covers
+      all OSes; Windows path syntax alone makes that ambiguous. Use separate entries
+      for user, repo, managed/system, and plugin scopes
+    - CLI commands and switches that add/list/remove/import/export servers, enable or
+      trust them, or point at alternate config files
+    - Environment variables that change MCP config, injection, auth, or server
+      visibility — not provider-wide variables unless they change MCP behavior
 - `## Server Definition Shape`
+    - The accepted shape of ONE server definition (not the whole config file), using
+      provider-native keys: command/stdio fields, remote HTTP fields, how per-server
+      env vars are represented, how auth headers/tokens/OAuth references are
+      represented, required fields, and quirks
 - `## Tools, Resources, and Prompts`
+    - Tools are model-controlled (`tools/list`, `tools/call`): document discovery,
+      per-tool filtering separate from approval policy, approval flow, timeouts,
+      result handling before output reaches the model, and whether tool annotations
+      are treated as trusted
+    - Resources are application-controlled context identified by URI: listing/reading,
+      templates, subscriptions, URI schemes, and who selects them — user, model, or
+      both. Distinguish real resources from tools that merely return resource links
+    - Prompts are user-controlled templates: are they exposed as slash commands,
+      palette actions, or not at all? Do not describe them as automatic model tools
+      unless the provider actually does that
 - `## Roots, Sampling, and Elicitation`
+    - These are the client capabilities the provider offers BACK to servers — the side
+      provider docs usually omit, but it matters for security and interoperability
+    - Roots are client-provided filesystem/workspace boundaries: what does the
+      provider answer to `roots/list`, and where does that boundary come from?
+    - Sampling lets servers request LLM calls through the client — powerful; does the
+      provider support it, and is explicit user approval required?
+    - Elicitation lets servers collect structured user input — it must not carry
+      sensitive information; is it supported and gated?
 - `## Import, Export, and Sync`
+    - Be precise about direction: can Claudine read provider config and normalize it
+      (import), write provider-shaped config (export), or apply changes through the
+      provider CLI/API instead of editing files directly?
+    - How the provider combines user/repo/managed/plugin config sources (merge,
+      shadow, replace, nearest-wins)
 - `## Runtime Injection`
+    - Can MCP servers be injected for a single run without permanently mutating user
+      or repo config? Name the exact mechanism (flag, env var, inline config) and its
+      limitations — this matters most for Claudine wrappers
+    - If unsupported, state the closest alternative and why it is not safe for
+      one-run use
 - `## Authorization and Credentials`
+    - Authorization differs by transport: HTTP/Streamable HTTP may use OAuth-style
+      flows (token storage, token audience/resource binding, static headers); stdio
+      servers should receive secrets via env/config/credential stores, not the HTTP
+      auth flow
+    - Where credentials are stored, per-user versus per-project, and whether Claudine
+      can avoid reading or writing secrets
 - `## Security Model`
+    - Server allowlists/denylists, and per-tool include/exclude filters separate from
+      approval policy
+    - Repo trust gates, safe mode, and admin/managed policy restrictions
+    - Whether MCP subprocesses inherit the user environment, and where secrets end up
+    - Sandbox/container boundaries around MCP servers, and whether tool results are
+      scanned or filtered for prompt injection
+    - Whether roots constrain filesystem-like servers, and whether sampling and
+      elicitation require explicit user consent
 - `## Mode-Specific Behavior`
+    - Differences between interactive, non-interactive/headless, ACP, IDE, and server
+      modes — especially whether MCP approvals ride the same permission model as
+      native tools, and which modes drop MCP entirely
 - `## Failure Modes`
+    - What happens when a configured server fails to start, emits stderr, hangs, or
+      returns oversized output; retry/reconnect and timeout behavior
 - `## Gaps`
+    - Claims that could not be verified and protocol surfaces the provider docs do
+      not describe clearly enough
 - `## Claudine Integration Notes`
-- `## Changelog` when `update` is true
+    - What Claudine's catalog, sync, and injection layers should do — and avoid — for
+      this provider
+- `## Changelog`
+    - only when `update` is true
 - `## Sources`
+    - all useful resources you used in your research, as Markdown links; every
+      mechanism claim needs a URL or an observed-on-host reference
 
-Use current official documentation and local inspection where available. Cite sources as
-Markdown links.
+## Task
+
+Follow these steps exactly:
+
+::block when="update"
+- Read existing research in `{{file}}`
+
+    > **Note:** agentic CLIs change rapidly, so assume the prior research is out of
+    > date. You are reading it primarily to report changes into the `## Changelog`
+    > section. Never substitute information from the old research for doing your own
+    > up-to-date research.
+
+::end-block
+- Perform research on the topic using official documentation first, then source code,
+  release notes, `--help`, and local inspection
+
+    > **Evidence requirement:** you have read access to `{{state.user_dir}}` on this
+    > host. Inspect the *actual* MCP config files there and prefer what you observe
+    > over what documentation claims. Negative probes are evidence too ("no MCP key
+    > exists in the real config" is a finding). Unanswered is not the same as omitted
+    > — record `unknown` with a note rather than dropping a field, and never invent
+    > behavior to complete the exercise.
+
+::block when="update"
+- Update the document with your research
+- Add an entry to the `## Changelog` section
+::end-block
+::block when="!update"
+- Write and save research to `{{file}}`, with the body organized per the Document
+  Structure above
+::end-block
+- Set the `$schema` property of `{{file}}` to the string `./_schema.yaml`
+
+    > This is a file reference to this topic's schema sidecar. Read `_schema.yaml`
+    > (it sits next to this sequence file) before filling frontmatter — it is the
+    > authoritative field contract, expressed as a `SimpleSchema`, and
+    > `md schema validate` will enforce it against everything you write.
+
+- Now capture the facts you documented above into the document's frontmatter:
+    ::block when="!update"
+    - `created` - set to "{{ctx.today}}"
+    ::end-block
+    - `last_updated` - set to "{{ctx.today}}"
+    - `agent` - set to "{{env.AGENT}}"
+    - `model` - set to "{{env.MODEL || 'default' }}"
+    - `docs` - the best official MCP docs URL; when no MCP-specific page exists, use
+      the best official config/integration docs and explain the gap in `gaps` or the
+      body
+    - `support` - the integration-path classification you justified in `## Overview`.
+      Choose the strongest true value for Claudine: `import_sync` >
+      `runtime_injection` > `manual_config` > `partial`. Use `none` only with clear
+      evidence MCP is unsupported, and `unknown` only when current evidence is
+      insufficient
+    - `protocol` - the versions, transports, and lifecycle facts from
+      `## Protocol and Transports`
+    - `config_files` - one record per OS + scope + path from `## Configuration`; use
+      template paths (e.g. `~/.provider/mcp.json`), and never a single record
+      claiming to cover all OSes
+    - `cli_params` - the MCP-specific commands/switches from `## Configuration` only —
+      no unrelated general flags
+    - `env_vars` - the MCP-affecting variables from `## Configuration` only
+    - `server_schema` - the single-server shape from `## Server Definition Shape`,
+      using provider-native key names
+    - `server_capabilities` - the tools/resources/prompts coverage and the
+      `list_changed`/subscribe flags from `## Tools, Resources, and Prompts`
+    - `client_capabilities` - the roots/sampling/elicitation coverage from
+      `## Roots, Sampling, and Elicitation`
+    - `tool_surface` - discovery, filtering, approval, result handling, and
+      annotation-trust facts from `## Tools, Resources, and Prompts`
+    - `resource_surface` / `prompt_surface` - the exposure models from
+      `## Tools, Resources, and Prompts`
+    - `sync_behavior` - the import/export/apply directions and merge strategy from
+      `## Import, Export, and Sync`
+    - `runtime_injection` - the mechanism and limitations from `## Runtime Injection`
+    - `authorization` - the credential-handling facts from
+      `## Authorization and Credentials`
+    - `security` - the trust/filtering/sandboxing answers from `## Security Model`
+    - `gaps` - the unverified claims listed in `## Gaps`
+    ::block when="update"
+    - `changes` - a list of string descriptions summarizing the changes discovered
+      since the last research was done
+    ::end-block
+    ::block when="!update"
+    - `changes` - set to `[]`
+    ::end-block
+    - `requires_claudine_update` - set to true/false based on whether you believe
+      Claudine code or generated metadata must change because of your research —
+      not merely because documentation changed
+        - if `true`, you must also set the `reason` frontmatter property to describe
+          why
+
+## Output
+
+::file @prompts/make-it-markdown.md
+
+## Exit Criteria
+
+You are done with this task when the Markdown "{{file}}" has been saved with:
+
+1. all research in the body of the document, organized per the Document Structure
+2. all Frontmatter properties set
+3. running `md schema validate '{{file}}'` returns `true` (indicating that all
+   Frontmatter was set correctly)
+
+- you do not need to run any tests or lints
+- this task had no code modifications in it
