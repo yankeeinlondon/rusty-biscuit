@@ -16,7 +16,7 @@ $schema:
     hooks: "{ native_event: string(required), claudine_event: enum(initialize,start,prompt,tool_call,tool_result,permission,subagent_start,subagent_stop,notification,success,failure,finalize,loop,blocked,unknown,none; required), timing: enum(pre,post,around,async,unknown), blocking: boolean, payload_schema: string, return_contract: string, notes: string }[]"
 
     # How hooks are configured/installed.
-    config_files: "{ os: enum(macos,linux,windows,all; required), scope: enum(user,repo,system,managed,other; required), path: string(required), format: enum(json,jsonc,yaml,toml,ini,text,other), notes: string }[]"
+    config_files: "{ os: enum(macos,linux,windows; required), scope: enum(user,repo,system,managed,other; required), path: string(required), format: enum(json,jsonc,yaml,toml,ini,text,other), notes: string }[]"
     cli_params: "{ flag: string(required), description: string(required), example: string }[]"
 
     # Payload and response semantics that adapters must model.

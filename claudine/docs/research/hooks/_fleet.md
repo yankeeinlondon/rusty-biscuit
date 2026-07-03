@@ -23,8 +23,8 @@ success:
               - error: "research file was not updated"
         - when: "frontmatter(file, 'last_updated') == ctx.today"
           action: 
-            - info: "The Hooks research on **{{state.name}}** completed successfully: {{ link(file) }}"
-            - message: "🎉  the Hooks research on **{{state.name}}** completed successfully"
+            - info: "The **Hooks** research on **{{state.name}}** completed successfully: {{ link(file) }}"
+            - message: "🎉  the **Hooks** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the Hooks research on **{{state.name}}** failed to complete!"
     warn: "The Hooks research on **{{state.name}}** failed to complete! (err: {{err.message}})"
@@ -112,23 +112,34 @@ hooks:
 
 ### Config Files
 
-`config_files` records where hooks are configured or installed. Use one `os: all` record
-only when the path is truly the same on macOS, Linux, and Windows.
+`config_files` records where hooks are configured or installed. Use separate macOS,
+Linux, and Windows records for every filesystem path. Do not use `os: all` for paths;
+Windows path syntax alone makes that ambiguous.
 
 Example:
 
 ```yaml
 config_files:
-  - os: all
+  - os: macos
     scope: user
     path: "~/.claude/settings.json"
     format: json
-    notes: "User-level hook configuration."
-  - os: all
+    notes: "User-level hook configuration on macOS."
+  - os: linux
+    scope: user
+    path: "~/.claude/settings.json"
+    format: json
+    notes: "User-level hook configuration on Linux."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.claude\\settings.json"
+    format: json
+    notes: "User-level hook configuration on Windows."
+  - os: macos
     scope: repo
     path: ".claude/settings.json"
     format: json
-    notes: "Repo-level hook configuration; may require project trust."
+    notes: "Repo-level hook configuration; add Linux and Windows records explicitly."
 ```
 
 ### CLI Params
