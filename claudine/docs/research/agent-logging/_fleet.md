@@ -30,8 +30,11 @@ success:
               - error: "research file was not updated"
         - when: "frontmatter(file, 'last_updated') == ctx.today"
           action:
-              - info: "The research on **{{state.name}}** completed successfully: {{ link(file) }}"
-              - message: "🎉  the research on **{{state.name}}** completed successfully"
+              - info: "The **Agent Logging** research on **{{state.name}}** completed successfully: {{ link(file) }}"
+              - message: "🎉  the **Agent Logging** research on **{{state.name}}** completed successfully"
+failure:
+    message: "💥 the Agent Logging research on **{{state.name}}** failed to complete!"
+    warn: "The Agent Logging research on **{{state.name}}** failed to complete! (err: {{err.message}})"
 ---
 
 ## Skills
