@@ -11,7 +11,6 @@ pub mod messaging_block;
 pub mod migration;
 pub(crate) mod opencode;
 pub(crate) mod qwen;
-pub(crate) mod roo;
 mod trait_def;
 pub mod tts;
 
@@ -32,7 +31,6 @@ pub(crate) use goose::GooseConfigurator;
 pub(crate) use kimicode::KimiCodeConfigurator;
 pub(crate) use opencode::OpenCodeConfigurator;
 pub(crate) use qwen::QwenConfigurator;
-pub(crate) use roo::RooConfigurator;
 
 use std::path::PathBuf;
 
@@ -156,9 +154,9 @@ mod tests {
     }
 
     #[test]
-    fn discover_agents_full_returns_all_eight() {
+    fn discover_agents_full_returns_all_providers() {
         let agents = discover_agents_full();
-        assert_eq!(agents.len(), 8);
+        assert_eq!(agents.len(), 7);
 
         // Check all providers are present
         let providers: Vec<_> = agents.iter().map(|a| a.provider).collect();
@@ -169,7 +167,6 @@ mod tests {
         assert!(providers.contains(&Provider::KimiCode));
         assert!(providers.contains(&Provider::OpenCode));
         assert!(providers.contains(&Provider::QwenCode));
-        assert!(providers.contains(&Provider::RooCode));
     }
 
     #[test]

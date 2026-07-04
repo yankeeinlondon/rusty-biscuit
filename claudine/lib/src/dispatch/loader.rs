@@ -1154,7 +1154,6 @@ mod tests {
             Provider::KimiCode,
             Provider::OpenCode,
             Provider::QwenCode,
-            Provider::RooCode,
         ];
 
         let dir = tempfile::tempdir().unwrap();

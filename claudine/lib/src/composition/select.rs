@@ -25,7 +25,7 @@ pub fn build_installed_snapshot(
     let runnable: Vec<Provider> = installed
         .iter()
         .copied()
-        .filter(|p| !excluded.contains(p) && *p != Provider::RooCode)
+        .filter(|p| !excluded.contains(p))
         .collect();
 
     let mut binary_paths = BTreeMap::new();
@@ -564,8 +564,6 @@ pub fn build_candidate_set(installed: &[Provider], excluded: &BTreeSet<Provider>
         .iter()
         .copied()
         .filter(|p| !excluded.contains(p))
-        // RooCode is a VS Code extension, not a wrappable CLI
-        .filter(|p| *p != Provider::RooCode)
         .collect()
 }
 
@@ -613,7 +611,7 @@ mod tests {
         let runnable: Vec<Provider> = installed
             .iter()
             .copied()
-            .filter(|p| !excluded.contains(p) && *p != Provider::RooCode)
+            .filter(|p| !excluded.contains(p))
             .collect();
         InstalledProviderSnapshot {
             runnable,
@@ -923,7 +921,7 @@ mod tests {
         );
 
         let plan = build_picker_plan(&prepared, &snapshot, None).unwrap();
-        // Should be in display order, excluding RooCode
+        // Should be in display order
         assert_eq!(plan.options.len(), 3);
         assert_eq!(plan.options[0].provider, Provider::Claude);
         assert_eq!(plan.options[1].provider, Provider::Codex);

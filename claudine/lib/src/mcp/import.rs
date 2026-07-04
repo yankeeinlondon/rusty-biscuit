@@ -328,26 +328,6 @@ pub(crate) fn discover_opencode_configs(repo_root: Option<&Path>) -> Vec<(PathBu
     configs
 }
 
-pub(crate) fn discover_roo_configs(repo_root: Option<&Path>) -> Vec<(PathBuf, Scope)> {
-    let _home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let mut configs = Vec::new();
-    if let Some(root) = repo_root {
-        let repo_config = root.join(".roo").join("mcp.json");
-        if repo_config.exists() {
-            configs.push((repo_config, Scope::Repo(root.to_path_buf())));
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let global = _home
-            .join("Library/Application Support/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json");
-        if global.exists() {
-            configs.push((global, Scope::User));
-        }
-    }
-    configs
-}
-
 fn discover_claude_plugin_configs(plugin_root: &Path) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(plugin_root) else {
         return Vec::new();
@@ -715,63 +695,6 @@ pub(crate) fn parse_opencode_mcp(config_path: &Path) -> Result<Vec<(String, McpS
                 server.set_provider_override("opencode", field, value);
             }
         }
-
-        result.push((name.clone(), server));
-    }
-
-    Ok(result)
-}
-
-/// Parse Roo Code's MCP config (`.roo/mcp.json` or `mcp_settings.json`).
-pub(crate) fn parse_roo_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
-    let content = fs::read_to_string(config_path)?;
-    let doc: Value = serde_json::from_str(&content)?;
-
-    // Roo uses mcpServers as an object (like Claude/Gemini)
-    let Some(servers) = doc.get("mcpServers").and_then(|v| v.as_object()) else {
-        return Ok(Vec::new());
-    };
-
-    let now = Utc::now();
-    let mut result = Vec::new();
-
-    for (name, def) in servers {
-        let transport = match def.get("transportType").and_then(|v| v.as_str()) {
-            Some("sse") => McpTransport::Sse,
-            Some("streamableHttp") => McpTransport::Http,
-            _ => McpTransport::Stdio,
-        };
-
-        let command = def
-            .get("command")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        let args = parse_string_array(def.get("args"));
-        let env = parse_string_map(def.get("env"));
-        let url = def.get("url").and_then(|v| v.as_str()).map(String::from);
-
-        let server = McpServer {
-            id: slugify(name),
-            aliases: Vec::new(),
-            transport,
-            command,
-            args,
-            cwd: None,
-            env,
-            url,
-            headers: HashMap::new(),
-            enabled_tools: Vec::new(),
-            disabled_tools: Vec::new(),
-            required: false,
-            metadata: McpServerMetadata {
-                description: None,
-                created_from: None,
-                fingerprint: String::new(),
-                created_at: now,
-                updated_at: now,
-            },
-            provider_overrides: HashMap::new(),
-        };
 
         result.push((name.clone(), server));
     }

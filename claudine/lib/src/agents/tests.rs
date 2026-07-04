@@ -366,29 +366,3 @@ fn snapshot_qwen_paths_formats_and_permissions() {
     );
 }
 
-#[test]
-fn snapshot_roo_paths_formats_and_permissions() {
-    assert_eq!(
-        capability_snapshot(agent_for(Provider::RooCode)),
-        CapabilitySnapshot {
-            id: Provider::RooCode,
-            config_format: Some(ConfigFormat::Mixed),
-            skill_status: CapabilityStatus::Supported,
-            skill_user_paths: vec![
-                "~/.roo/skills".to_string(),
-                "~/.roo/skills-<modeSlug>".to_string()
-            ],
-            slash_status: CapabilityStatus::Supported,
-            slash_format: CommandFormat::Markdown,
-            slash_custom_supported: true,
-            subagent_status: CapabilityStatus::Partial,
-            subagent_format: AgentDefinitionFormat::ModesYaml,
-            permission_modes: vec![
-                "auto-approve (default)".to_string(),
-                "manual approval (--require-approval)".to_string(),
-            ],
-            yolo_equivalent: None,
-            sandbox_modes: vec![],
-        }
-    );
-}

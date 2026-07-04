@@ -175,7 +175,7 @@ impl ModelCatalogService {
     /// reuses the cached OpenCode result. Static-source providers
     /// (Claude, Codex) write the static list to cache without spawning
     /// any subprocess. Providers without a source (Gemini, Goose, Kimi,
-    /// Roo) are no-ops.
+    /// no-ops.
     ///
     /// Never panics; failures are silently ignored so stale cache or
     /// static fallback remains available.
@@ -216,7 +216,7 @@ impl ModelCatalogService {
     /// ## Static and no-source providers
     ///
     /// Static-source providers (Claude, Codex) and no-source providers
-    /// (Gemini, Goose, Kimi, Roo) are essentially free to refresh, so
+    /// (Gemini, Goose, Kimi) are essentially free to refresh, so
     /// this delegates to [`refresh_provider_blocking`](Self::refresh_provider_blocking) which writes the
     /// static list to cache without spawning any subprocess.
     ///
@@ -529,14 +529,13 @@ mod tests {
 
     #[test]
     fn refresh_provider_blocking_no_source_no_subprocess() {
-        // Providers without a dynamic source (Gemini, Goose, Kimi, Roo)
+        // Providers without a dynamic source (Gemini, Goose, Kimi)
         // must never spawn the opencode subprocess.
         let tmp = tempfile::tempdir().unwrap();
         let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
         service.refresh_provider_blocking(Provider::Gemini);
         service.refresh_provider_blocking(Provider::Goose);
         service.refresh_provider_blocking(Provider::KimiCode);
-        service.refresh_provider_blocking(Provider::RooCode);
         assert_eq!(service.opencode_fetch_attempts(), 0);
     }
 
