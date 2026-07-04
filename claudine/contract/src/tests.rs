@@ -833,7 +833,7 @@ fn support_matrix_enables_only_curated_providers() {
         ProviderSupport::Rejected(_)
     ));
     // Every provider appears exactly once in the matrix.
-    assert_eq!(support_matrix().len(), 8);
+    assert_eq!(support_matrix().len(), 7);
 }
 
 #[test]
@@ -856,7 +856,6 @@ fn auth_env_vars_are_explicit_for_all_providers() {
         auth_env_vars(Provider::QwenCode),
         &["DASHSCOPE_API_KEY", "QWEN_API_KEY"]
     );
-    assert!(auth_env_vars(Provider::RooCode).is_empty());
 }
 
 // -- process runner: concurrent pipe draining --------------------------------

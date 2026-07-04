@@ -63,7 +63,6 @@ pub(crate) fn auth_env_vars(provider: Provider) -> &'static [&'static str] {
         Provider::KimiCode => &["MOONSHOT_API_KEY", "KIMI_API_KEY"],
         Provider::OpenCode => &["OPENCODE_API_KEY"],
         Provider::QwenCode => &["DASHSCOPE_API_KEY", "QWEN_API_KEY"],
-        Provider::RooCode => &[],
         // `Provider` is non-exhaustive, but every known variant is enumerated
         // above. A new provider must update this match rather than silently
         // receiving no forwarded auth variables.
