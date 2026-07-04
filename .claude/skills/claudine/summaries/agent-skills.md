@@ -1,81 +1,162 @@
 # Agent Skill Support Across Agentic CLI Providers
 
-Skills matter because they give an agent durable, task-specific operating knowledge without forcing every prompt to restate context. A good skill packages routing metadata, instructions, reference material, scripts, templates, and sometimes provider-specific permissions or tools into a reusable unit. That makes agent behavior more predictable: the model can discover the right procedure, load only the detail it needs, and apply a workflow consistently across sessions and repositories.
+Agent skills matter because they turn task knowledge into durable, reusable operating procedure. A good skill packages routing metadata, instructions, reference material, scripts, templates, and sometimes provider-specific permissions or tools into a unit the agent can discover and load only when relevant. That makes agent behavior more predictable across sessions: the model does not need every prompt to restate the release process, review rubric, migration checklist, or domain-specific debugging playbook.
 
-Cross-provider skill portability is valuable for the same reason Claudine exists: teams do not want their operational knowledge locked inside one agentic CLI. If a repository has a mature release skill, review skill, migration skill, or domain-specific debugging skill, that knowledge should be linkable into every supported provider with a clear understanding of what survives unchanged and what becomes provider-specific. Portability is not binary. The same `SKILL.md` may be structurally portable while its activation rules, tool permissions, sidecars, scripts, or path assumptions are not.
+Cross-provider portability is valuable for the same reason Claudine exists. Teams should not have to rewrite their operational knowledge every time they switch between Claude Code, Codex, Gemini CLI, Goose, Kimi, OpenCode, Qwen, Pi, or Kilo. But portability is not binary. The current provider set broadly converges on `SKILL.md` as the common artifact, yet differs in metadata validation, scope paths, precedence, trust gates, activation tools, permission semantics, sidecars, package systems, and extension formats. Claudine's portability classification has to capture those layers rather than treating a linked skill as automatically equivalent everywhere.
 
-The first three researched providers, Claude Code, Codex, and Gemini CLI, all now have first-class skill support and all align around the Agent Skills `SKILL.md` convention. That common core is meaningful: each provider understands a directory containing `SKILL.md`, YAML frontmatter, and Markdown instructions, with `name` and `description` as the main cross-tool routing fields. The differences begin immediately after that shared center.
+## High-Level Finding
 
-## Provider Comparison
+The current skills research shows first-class Agent Skills support across the researched provider roster relevant to Claudine's linking work. The common center is a directory containing `SKILL.md` with YAML frontmatter and Markdown instructions. Most providers also preserve adjacent `scripts/`, `references/`, `assets/`, examples, or templates as part of the skill package.
 
-| Provider    | Support Level | Entry Point | Standard User Scope                                                                         | Standard Repo Scope                                                               | Activation Model                                                                                       |
-|-------------|--------------:|-------------|---------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------|
-| Claude Code | First class   | `SKILL.md`  | `~/.claude/skills/<skill-name>/SKILL.md`                                                    | `.claude/skills/<skill-name>/SKILL.md`                                            | Explicit `/skill-name`, automatic model invocation from metadata, and subagent preload unless disabled |
-| Codex       | First class   | `SKILL.md`  | `~/.agents/skills/<skill-name>/SKILL.md` and legacy `~/.codex/skills/<skill-name>/SKILL.md` | `.agents/skills/<skill-name>/SKILL.md`                                            | Explicit `$skill-name` or `/skills`, plus implicit model selection unless blocked by sidecar policy    |
-| Gemini CLI  | First class   | `SKILL.md`  | `~/.gemini/skills/<skill-name>/SKILL.md` and `~/.agents/skills/<skill-name>/SKILL.md`       | `.gemini/skills/<skill-name>/SKILL.md` and `.agents/skills/<skill-name>/SKILL.md` | Model proposes `activate_skill`; user consent injects the full skill body and resources                |
+The divergence is in the edges:
 
-## Common Portable Core
+| Provider    | Support     | Primary Entry Point                 | Main User Scope                                                                                  | Main Repo Scope                                                                            | Activation Shape                                                                    |
+|-------------|-------------|-------------------------------------|--------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------|
+| Claude Code | First class | `SKILL.md`                          | `~/.claude/skills/<name>/SKILL.md`                                                               | `.claude/skills/<name>/SKILL.md`                                                           | Explicit `/name`, model invocation, subagent preload, settings overrides            |
+| Codex       | First class | `SKILL.md`                          | `~/.agents/skills/` and `~/.codex/skills/`                                                       | `.agents/skills/`                                                                          | Explicit `$name` or `/skills`, implicit model selection, sidecar policy             |
+| Gemini CLI  | First class | `SKILL.md`                          | `~/.gemini/skills/` and `~/.agents/skills/`                                                      | `.gemini/skills/` and `.agents/skills/`                                                    | Model proposes `activate_skill`; user consent loads body/resources                  |
+| Goose       | First class | `SKILL.md`                          | `~/.agents/skills/`, provider config-dir skills, `~/.claude/skills/`, `~/.config/agents/skills/` | `.agents/skills/`, `.goose/skills/`, `.claude/skills/`                                     | Summon extension lists and loads skills; `/skills` can load explicitly              |
+| Kimi Code   | First class | `SKILL.md` or flat `<name>.md`      | `~/.kimi/skills/`, `~/.claude/skills/`, `~/.codex/skills/`, generic agent dirs                   | `.kimi/skills/`, `.claude/skills/`, `.codex/skills/`, `.agents/skills/`                    | Prompt-visible metadata plus explicit `/skill:<name>` and `/flow:<name>`            |
+| OpenCode    | First class | `SKILL.md`                          | `~/.config/opencode/{skill,skills}/`, `~/.claude/skills/`, `~/.agents/skills/`                   | `.opencode/{skill,skills}/`, `.claude/skills/`, `.agents/skills/`                          | Model sees `<available_skills>` and calls `skill` tool with permission check        |
+| Qwen Code   | First class | `SKILL.md`                          | `~/.qwen/skills/` and `~/.agents/skills/`                                                        | `.qwen/skills/` and `.agents/skills/`                                                      | Model invocation through Skill tool, direct slash invocation, path-gated activation |
+| Pi          | First class | `SKILL.md` or Pi-native flat `*.md` | `~/.pi/agent/skills/` and `~/.agents/skills/`                                                    | `.pi/skills/` and `.agents/skills/`                                                        | Model-visible metadata when `read` is available; explicit `/skill:<name>`           |
+| Kilo Code   | First class | `SKILL.md`                          | `~/.kilo/skills/`, `~/.kilocode/skills/`, `~/.agents/skills/`, `~/.claude/skills/`               | `.kilo/{skill,skills}/`, `.kilocode/{skill,skills}/`, `.agents/skills/`, `.claude/skills/` | Model sees skill list and calls `skill` tool, filtered by permission policy         |
 
-The portable core across these providers is:
+## Portable Core
 
-| Asset                                                   | Portability                                                                 |
-|---------------------------------------------------------|-----------------------------------------------------------------------------|
-| `SKILL.md` directory entry point                        | Portable across all three                                                   |
-| YAML frontmatter                                        | Portable when limited to standard Agent Skills keys                         |
-| `name`                                                  | Portable, but validation differs by provider                                |
-| `description`                                           | Portable and important for automatic routing                                |
-| Markdown body                                           | Mostly portable when it avoids provider-specific commands, tools, and paths |
-| `license`, `compatibility`, `metadata`                  | Portable standard metadata                                                  |
-| Supporting `references/`, `assets/`, `scripts/` folders | Structurally portable, but contents may be host- or provider-specific       |
+The most portable unit is the skill directory rooted at `SKILL.md`.
 
-The reusable artifact Claudine should treat as the highest-confidence portable unit is therefore the skill directory rooted at `SKILL.md`, with standard frontmatter and provider-neutral Markdown. Everything outside that center needs classification.
+| Asset                                  | Portability                                                                                             |
+|----------------------------------------|---------------------------------------------------------------------------------------------------------|
+| `SKILL.md` entry point                 | Portable across the researched providers, except Pi and Kimi also accept flat `.md` forms in some roots |
+| YAML frontmatter                       | Portable when limited to standard Agent Skills keys                                                     |
+| `name`                                 | Portable in concept, but validation, defaults, and directory-name matching differ                       |
+| `description`                          | The most important routing field; missing descriptions often hide or reject a skill                     |
+| Markdown body                          | Mostly portable when it avoids provider-specific tool names, commands, paths, and activation language   |
+| `license`, `compatibility`, `metadata` | Generally portable standard metadata                                                                    |
+| Adjacent files                         | Structurally portable, but host/runtime/provider assumptions require review                             |
+
+The safest canonical representation for Claudine is therefore: a directory named for the skill, containing `SKILL.md`, standard `name` and `description` frontmatter, provider-neutral Markdown, and relative sibling assets.
 
 ## Format And Metadata Differences
 
-Claude Code implements the Agent Skills standard but relaxes it. `SKILL.md` is the required entry point, but Claude allows frontmatter fields to be omitted and can default `name` from the directory name. It recognizes many Claude-specific fields, including `when_to_use`, `argument-hint`, `arguments`, `disable-model-invocation`, `user-invocable`, `allowed-tools`, `disallowed-tools`, `model`, `effort`, `context`, `agent`, `hooks`, `paths`, and `shell`. This makes Claude skills expressive, but it also creates a wide non-portable edge.
+The providers agree on the broad shape but not on strictness.
 
-Codex is stricter about the standard shape. It requires `name` and `description`, requires `name` to match the parent directory, and validates the name as lowercase letters, numbers, and hyphens with additional length and hyphen-placement rules. Codex also supports a provider-specific `agents/openai.yaml` sidecar for interface, implicit invocation policy, and MCP tool dependencies. That sidecar is useful inside Codex but should be treated as Codex-specific metadata during linking.
+Claude Code implements the Agent Skills standard but is permissive. `SKILL.md` is the entry point, but fields can be omitted and `name` can default from the directory. Claude recognizes many provider-specific keys: `when_to_use`, `argument-hint`, `arguments`, `disable-model-invocation`, `user-invocable`, `allowed-tools`, `disallowed-tools`, `model`, `effort`, `context`, `agent`, `hooks`, `paths`, and `shell`.
 
-Gemini CLI also requires `name` and `description`; a missing field silently skips the skill. Its `name` comes from frontmatter rather than the directory name, and invalid filename characters are normalized. `SKILL.md` must appear either at the root of a skills directory or one directory deep, and the filename is case-sensitive on case-sensitive filesystems. Gemini intentionally ignores provider-specific frontmatter from other tools, which makes some linked skills appear to work while quietly losing behavior.
+Codex is stricter. It requires `name` and `description`; `name` must match the parent directory and follow lowercase alphanumeric hyphen rules. Codex also supports a provider-specific `agents/openai.yaml` sidecar for interface, implicit invocation policy, and MCP tool dependencies.
+
+Gemini CLI requires `name` and `description`; missing fields silently skip the skill. It takes `name` from frontmatter, not the directory, normalizes invalid filename characters, and ignores provider-specific frontmatter from other tools.
+
+Goose requires `name` and `description` and reads `metadata` as the agentskills.io free-form bag. Goose-specific `argument-hint` and `arguments` survive as untyped properties. It records non-`SKILL.md` files as supporting files that can be loaded by the skill runtime.
+
+Kimi is notably lenient. `name` and `description` are optional at parse time: `name` defaults from the directory or flat filename, and `description` falls back to the first non-empty body line or `"No description provided."`. Kimi also supports `type: flow` for Mermaid/D2 flow skills, which is provider-specific.
+
+OpenCode's docs require `name` and `description`, strict name grammar, and directory-name matching, but current source is more permissive: it accepts any string `name`, treats `description` as optional, and does not enforce directory parity. In practice, skills without descriptions are hidden from the model-facing skill list.
+
+Qwen requires frontmatter bounded by `---`, and requires `name` and `description`. It recognizes Qwen-specific keys including camelCase `allowedTools`, `hooks`, `model`, `paths`, `priority`, `argument-hint`, `when_to_use`, `disable-model-invocation`, and `user-invocable`.
+
+Pi requires a non-blank `description`; `name` can default from the parent directory, and Pi intentionally does not enforce `name == directory_name`. It accepts direct root `*.md` skills in Pi-native roots but not in `.agents/skills` roots.
+
+Kilo's docs require `name` and `description`, but current source enforces only `name`; description-less skills load into the registry but are filtered out of the prompt formatter. Kilo also does not currently enforce the documented directory-name match.
 
 ## Scope And Path Differences
 
-Claude Code uses `.claude` as its provider namespace. It supports managed system skills, user skills under `~/.claude/skills/`, project skills under `.claude/skills/`, legacy `.claude/commands/*.md`, and plugin skills under `<plugin>/skills/`. It also supports nested project skills and qualified names for collisions in monorepos.
+The major interoperability path is `.agents/skills/`. Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Pi, and Kilo all use or scan `.agents/skills/` in at least one scope. Claude Code does not treat `.agents/skills/` as its native path; its canonical namespace is `.claude/skills/`.
 
-Codex uses the cross-tool `.agents` namespace as its preferred modern location, while still scanning legacy/default locations under `~/.codex/skills/`. User skills can live under `~/.agents/skills/` or `~/.codex/skills/`; repo skills live under `.agents/skills/` from the launch directory up to the Git repository root, plus a parent-directory shared scope. Codex also has bundled system skills under `$CODEX_HOME/skills/.system/`, Linux admin skills under `/etc/codex/skills/`, and plugin skills.
+Provider-branded paths remain important:
 
-Gemini CLI supports both Gemini-specific and cross-tool locations. User skills can live under `~/.gemini/skills/` or `~/.agents/skills/`; workspace skills can live under `.gemini/skills/` or `.agents/skills/`. Within a tier, `.agents/skills/` takes precedence over `.gemini/skills/`. Gemini also has built-in npm-package skills and extension-bundled skills under `~/.gemini/extensions/<extension>/skills/`.
+| Provider    | Branded User Paths                                    | Branded Repo Paths                                   |
+|-------------|-------------------------------------------------------|------------------------------------------------------|
+| Claude Code | `~/.claude/skills/`                                   | `.claude/skills/`                                    |
+| Codex       | `~/.codex/skills/` plus `$CODEX_HOME/skills/.system/` | none branded; repo uses `.agents/skills/`            |
+| Gemini CLI  | `~/.gemini/skills/`                                   | `.gemini/skills/`                                    |
+| Goose       | provider config-dir `skills/` path                    | `.goose/skills/`                                     |
+| Kimi Code   | `~/.kimi/skills/`, plus Claude/Codex brand fallbacks  | `.kimi/skills/`, `.claude/skills/`, `.codex/skills/` |
+| OpenCode    | `~/.config/opencode/{skill,skills}/`                  | `.opencode/{skill,skills}/`                          |
+| Qwen Code   | `~/.qwen/skills/`                                     | `.qwen/skills/`                                      |
+| Pi          | `~/.pi/agent/skills/`                                 | `.pi/skills/`                                        |
+| Kilo Code   | `~/.kilo/skills/`, `~/.kilocode/skills/`              | `.kilo/{skill,skills}/`, `.kilocode/{skill,skills}/` |
 
-## Activation Differences
+There are also provider-managed and non-user scopes: Claude managed skills, Codex bundled/admin/plugin skills, Gemini built-ins/extensions, Goose plugins/built-ins, Kimi built-ins/plugins, OpenCode built-ins/configured URLs, Qwen bundled/extension skills, Pi package and extension-discovered resources, and Kilo built-ins/URL caches/marketplace-installed skills. Claudine should inventory these, but not silently sync them as ordinary user-authored skills.
 
-The biggest portability risk is activation semantics.
+## Discovery And Precedence
 
-Claude Code makes skill metadata available up front, then progressively loads the full body when the model or user invokes the skill. A skill can be explicitly invoked as a slash command, auto-invoked from `description`, hidden from user invocation, blocked from model invocation, or routed into a subagent. Claude also has global and per-skill controls such as safe mode, bare mode, `skillOverrides`, and policy-managed skills.
+Precedence is not portable.
 
-Codex also uses progressive disclosure. It scans metadata at session start, then loads the body only when selected. Users can explicitly invoke a skill with `$skill-name`, and the model may implicitly select a skill from its `description`. Codex-specific `agents/openai.yaml` can disable implicit invocation while preserving explicit use. Individual skills can also be disabled through `[[skills.config]]` entries in `~/.codex/config.toml`.
+Claude uses managed > personal > project > plugin, with nested project disambiguation and `skillOverrides` able to hide or demote skills.
 
-Gemini CLI adds a consent gate. It scans enabled skills and injects `name` and `description` into the system prompt, but activation happens through the `activate_skill` tool. The model proposes a skill, the user sees a confirmation prompt, and only after approval is the body loaded and the skill directory added to allowed file paths. Built-in skills are pre-approved. Workspace skills are additionally gated by folder trust unless the workspace is trusted by settings, CLI flag, or environment variable.
+Codex orders from lower to higher priority as system/bundled, admin, user, repo, plugin. Same-name conflicts are not merged; both can remain available in the selector.
 
-## Portability Classification Implications
+Gemini orders built-in \< extension \< user \< workspace. Within user and workspace tiers, `.agents/skills/` beats `.gemini/skills/`.
 
-Claudine should classify skills as layered resources rather than single files with a yes/no portability bit.
+Goose scans project first, then global, then plugin, then built-in, and first encounter wins. Its project order is `.agents/skills`, `.goose/skills`, `.claude/skills`; global order is `~/.agents/skills`, Goose config-dir skills, `~/.claude/skills`, and `~/.config/agents/skills`.
 
-The base layer is portable when a skill has a valid `SKILL.md`, standard Agent Skills frontmatter, and provider-neutral Markdown. Claude, Codex, and Gemini can all consume that center with path-specific linking.
+Kimi uses first match wins across a prioritized root list. Project brand directories outrank project generic directories, which outrank user brand and user generic directories, then extra paths, plugin roots, and built-ins. Brand priority is `kimi > claude > codex`.
 
-The provider metadata layer is conditionally portable. Claude fields such as `context`, `agent`, `hooks`, `paths`, `shell`, `disable-model-invocation`, and `user-invocable` need Claude-specific handling. Codex `agents/openai.yaml`, MCP dependency declarations, and `policy.allow_implicit_invocation` need Codex-specific handling. Gemini activation consent, extension packaging, `.skill` archives, trust gates, and `.agents` precedence rules need Gemini-specific handling.
+OpenCode uses last-writer-wins. It registers built-ins first, then external global and project paths, native config directories, configured `skills.paths[]`, and URL-backed skills. Later same-name entries replace earlier ones.
 
-The executable/resource layer is host-sensitive. `scripts/`, inline shell commands, tool allowlists, MCP dependencies, and file references may depend on OS, shell, language runtime, repository layout, or provider tool names. These should be marked as non-portable or requiring rewrite unless Claudine can prove they are generic.
+Qwen uses project > user > extension > bundled. Duplicate names are shadowed by the first higher-precedence tier, and model-facing lists are alphabetically sorted; `priority` only affects `/skills` display.
 
-For linking strategy, the practical point of view is:
+Pi uses first-writer-wins with collision diagnostics. Trusted project `.pi/skills` and project `.agents/skills` are added before user native and user `.agents` paths. CLI and extension paths are merged into the effective list with canonical path de-duplication.
 
-| Classification                 | Meaning                                                                                    | Linking Behavior                                                               |
-|--------------------------------|--------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
-| Portable                       | Standard `SKILL.md` content can be linked as-is                                            | Symlink or copy into provider skill root                                       |
-| Portable With Provider Mapping | Core skill travels, but metadata needs translation or omission                             | Link core files and emit provider-specific sidecars/config where supported     |
-| Linked But Degraded            | Provider will load the skill but ignore some semantics                                     | Link with warnings that activation, permissions, or tools changed              |
-| Rewrite Required               | Skill depends on provider-only behavior or host-specific execution                         | Do not silently link as equivalent; require explicit rewrite or scoped warning |
-| Non-Portable                   | Built-in, managed, plugin-only, or policy-controlled asset cannot be represented elsewhere | Inventory only; do not sync as a user/repo skill                               |
+Kilo uses last-one-wins by frontmatter `name`. Built-ins are seeded first; compatibility directories, Kilo config directories, configured paths, and URL-backed sources can override earlier entries.
 
-The initial provider set suggests Claudine should prefer a canonical Agent Skills directory as the source representation, then project it into provider-specific roots: `.claude/skills/` for Claude, `.agents/skills/` for Codex, and either `.agents/skills/` or `.gemini/skills/` for Gemini depending on desired precedence. The `.agents/skills/` path is especially important because both Codex and Gemini treat it as a first-class interoperability location.
+## Activation Mechanics
 
-The key design requirement is transparency. A linked skill should not imply identical behavior unless activation, metadata, permissions, resources, and host dependencies are equivalent. Claudine’s portability classification should explain what moved unchanged, what was translated, what was ignored, and what still requires provider-specific maintenance.
+Activation is where a linked skill can most easily change behavior.
+
+Claude Code progressively loads skills. Metadata is available up front; the full body loads through explicit slash invocation, model invocation from `description`, or subagent preload. Frontmatter and settings can disable model invocation, hide user invocation, alter tool permissions, or route behavior through agents/hooks.
+
+Codex also uses progressive disclosure. Users can invoke `$skill-name` or `/skills`; the model may select a skill from its description. `agents/openai.yaml` can disable implicit invocation while preserving explicit use.
+
+Gemini adds a consent gate. The model proposes a skill through `activate_skill`; the user confirms; only then are the body and resources injected and the skill directory added to allowed paths. Built-ins are pre-approved.
+
+Goose relies on the Summon built-in extension. Skills are exposed through the extension and `/skills`; disabling Summon disables all skill discovery and loading.
+
+Kimi injects skill name/path/description grouped by scope, then lets the model read the skill. Users can explicitly invoke `/skill:<name>`. Flow skills add `/flow:<name>` and diagram-driven execution semantics.
+
+OpenCode shows `<available_skills>` entries and requires the model to call the `skill` tool. Loading runs through permission checks. Agent-level `tools.skill: false` or `permission.skill` rules can hide or reject skills.
+
+Qwen supports both model invocation and direct user invocation. `disable-model-invocation`, `user-invocable`, `skills.disabled`, safe mode, bare mode, extension enablement, and path-gated activation all affect whether a skill appears or can be used.
+
+Pi appends `<available_skills>` only when the `read` tool is available. `disable-model-invocation` hides the skill from model discovery but not explicit `/skill:<name>`. Project resources are trust-gated.
+
+Kilo formats an available-skill list and loads bodies through a `skill` tool filtered by permission policy. It can hide skills by denying the `skill` permission globally or per name.
+
+## Portability Classification
+
+Claudine should classify skills as layered resources.
+
+| Layer                                 | Portable?              | Notes                                                                                                                                             |
+|---------------------------------------|------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| Standard `SKILL.md` directory         | Usually portable       | Best canonical artifact when it has `name`, `description`, provider-neutral Markdown, and relative assets                                         |
+| Standard metadata                     | Mostly portable        | `name`, `description`, `license`, `compatibility`, `metadata` are the safest keys                                                                 |
+| Provider metadata                     | Provider-specific      | Claude hooks/agents/context, Codex sidecars, Qwen hooks/paths, Pi trust/package wiring, OpenCode/Kilo URL sources, etc. need mapping or filtering |
+| Activation controls                   | Conditional            | `disable-model-invocation`, `user-invocable`, implicit policy, consent gates, and path activation differ by provider                              |
+| Permissions/tool allowlists           | Usually rewrite-needed | Tool names and permission grammars are provider-specific                                                                                          |
+| Scripts/assets                        | Host-sensitive         | Preserve structurally, but flag OS, shell, runtime, binary, and repo-layout assumptions                                                           |
+| Built-ins/extensions/plugins/packages | Usually non-portable   | Inventory as provider-managed unless materialized as a normal user/repo skill directory                                                           |
+
+A practical Claudine classification should look like this:
+
+| Classification                 | Meaning                                                                                                              | Linking Behavior                                                             |
+|--------------------------------|----------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------|
+| Portable                       | Standard `SKILL.md` content can be linked with no semantic rewrite beyond path placement                             | Symlink or copy into provider skill root                                     |
+| Portable With Provider Mapping | Core skill travels, but metadata or activation controls need translation or omission                                 | Link core files and emit provider-specific sidecars/config where supported   |
+| Linked But Degraded            | Target provider loads the skill but ignores some semantics                                                           | Link with warnings about ignored activation, permissions, tools, or metadata |
+| Rewrite Required               | Skill depends on provider-only behavior, flat-file shape, sidecar config, package wiring, or host-specific execution | Do not present as equivalent; require explicit rewrite or scoped warning     |
+| Non-Portable                   | Built-in, managed, bundled, plugin-only, extension-only, trust-state, cache-state, or policy-controlled asset        | Inventory only; do not sync as a user/repo skill                             |
+
+## Implications For Claudine
+
+Claudine should use the Agent Skills directory as the canonical source representation where possible, then project it into provider-specific roots. `.agents/skills/` is the most important cross-provider path because it is first-class or scanned by Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Pi, and Kilo. `.claude/skills/` remains essential because Claude Code is the origin of the convention and several providers scan it as a compatibility path.
+
+The linker should never imply identical behavior just because two providers can parse `SKILL.md`. It should report four facts for every linked skill:
+
+1. What moved unchanged: `SKILL.md`, standard frontmatter, Markdown body, sibling assets.
+2. What was mapped: path placement, frontmatter keys, invocation flags, sidecars, or provider config.
+3. What was ignored or degraded: unsupported metadata, activation controls, permissions, hooks, model selectors, path gates, package manifests.
+4. What remains host-specific: scripts, binaries, OS paths, shell assumptions, MCP dependencies, and repository layout assumptions.
+
+The strategic point of view is that Claudine should optimize for transparent interoperability, not false equivalence. A linked skill is useful when the agent can discover and apply the same operational knowledge. It is only portable when the target provider preserves the same routing, activation, permission, resource, and execution semantics. Where it cannot, Claudine's portability classification should make the loss explicit and keep provider-owned assets out of the shared skill pool.
