@@ -21,7 +21,7 @@ use crate::provider::output_format::{
     EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
 };
 use crate::provider::path_template::PathTemplate;
-use crate::provider::prompt_args::{COMMON_VALUE_TAKING_FLAGS, PromptArgConventions};
+use crate::provider::prompt_args::PromptArgConventions;
 use crate::provider::reasoning::{ReasoningCustomTag, ReasoningSupport};
 use crate::provider::system_prompt::{
     SystemPromptCustomTag, SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
@@ -79,7 +79,6 @@ pub(in crate::provider) static GOOSE_INFO: ProviderInfo = ProviderInfo {
     prompt_arg_conventions: PromptArgConventions {
         prompt_flags: &["-t", "--text"],
         entrypoint: Some("run"),
-        value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
     },
     static_models: &[],
     dynamic_source: ModelCatalogSource::None,

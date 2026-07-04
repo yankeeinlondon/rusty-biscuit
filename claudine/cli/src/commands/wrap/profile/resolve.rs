@@ -8,7 +8,7 @@
 
 use std::path::PathBuf;
 
-use claudine::provider::PromptArgConventions;
+use claudine::provider::{COMMON_VALUE_TAKING_FLAGS, PromptArgConventions};
 use color_eyre::eyre::{Result, bail, eyre};
 
 use super::{PromptSource, WrapperProfile, has_flag, non_empty_env_var};
@@ -277,16 +277,16 @@ fn find_positional_prompt_index(args: &[String], conv: &PromptArgConventions) ->
 
         // Skip value-taking flags so their values are not mistaken for
         // positional prompts. Handle both `--flag value` and
-        // `--flag=value` shapes.
+        // `--flag=value` shapes. The shared union list is deliberate
+        // (OQ7a ruling): over-skipping an unknown flag's value is harmless.
         if let Some(eq_idx) = arg.find('=')
-            && conv
-                .value_taking_flags
+            && COMMON_VALUE_TAKING_FLAGS
                 .iter()
                 .any(|flag| arg[..eq_idx] == **flag)
         {
             continue;
         }
-        if conv.value_taking_flags.iter().any(|flag| arg == *flag) {
+        if COMMON_VALUE_TAKING_FLAGS.iter().any(|flag| arg == *flag) {
             skip_next = true;
             continue;
         }
