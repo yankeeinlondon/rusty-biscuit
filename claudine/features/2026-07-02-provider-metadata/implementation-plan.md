@@ -109,9 +109,25 @@ Consumes closeout-track topics as they land; repeats per topic:
    (57 overrides classified catalog-data vs behavior).
 3. Migrate `catalog-data` overrides method-by-method to catalog-driven defaults;
    delete as they zero out. Behavior overrides stay.
+4. **Behavior-gap triage** (per topic): `requires_claudine_update` flags and
+   summary-surfaced gaps (provider-native capability with no Claudine last mile)
+   become explicit backlog items, each with a disposition — implement now, schedule,
+   or won't-do — reviewed at the same checkpoint. First known instance, from
+   `docs/research/summary/mcp.md`: Goose/Kimi/Qwen MCP import/export/injection and a
+   Claude runtime injector for its native `--mcp-config`. From
+   `docs/research/summary/agent-logging.md`: provider-log evidence adapters (WAL-aware
+   SQLite readers for OpenCode/Kilo/Goose/Codex, Gemini `$set`-aware transcript parsing,
+   Pi tree-preserving reader) and Kimi Wire protocol-version tolerance (observed 1.9
+   parser pin vs 1.10 server = live breakage; triage early). Both the agent-cli and
+   agent-logging summaries flag missing Roo research coverage as a roster gap. From
+   `docs/research/summary/agent-permissions.md`: decide the Goose wrapper's default
+   posture (Goose's own default `GOOSE_MODE=auto` is effectively YOLO); model OpenCode
+   `--auto` as auto-reply-*once*, not a standing approval; note Kimi's only precise
+   programmatic approval transport is ACP (feeds the ACP-adoption question).
 
 Exit: static-fact overrides at zero; profile is a genuine behavior shim; table A
-fields all research-fed or facts-fed with a tracked graduation queue.
+fields all research-fed or facts-fed with a tracked graduation queue; every landed
+topic's behavior gaps carry a disposition (no surfaced-only flags remain).
 
 ## Phase E — signal catalog (spec Phase 2s; design/signal-detection.md)
 
@@ -137,6 +153,10 @@ claudine-gen consumption (expected-offering records with `catalog_id` joins;
 plan-endpoint + local-runner offerings first-class in the mapping layer) →
 `family_latest` resolution + staleness warnings → staged per-provider demotion of
 dynamic listing to a drift channel emitting SignalEvents (couples to Phase E sink).
+Per-provider listing sources for that staging (agent-models summary): programmatic —
+Codex `debug models [--bundled]`, OpenCode `models --refresh`, Kilo `models` + gateway
+REST, Kimi `/v1/models` + ACP `available_models`, Pi `--list-models` + RPC; none —
+Claude/Gemini/Goose/Qwen, whose resolved model is only observable from runtime output.
 ► **CHECKPOINT F (Ken):** artifact schema review before claudine consumes it.
 
 ## Phase G — rendering buildout (interleaves after C)
@@ -156,6 +176,10 @@ report (closeout well underway).
 - **M-Kilo** — graduation #1. OpenCode-fork cousin: smallest behavior delta, so the
   process is the test: variant wiring (3 hand edits, compiler-walked) →
   `generate kilo --scaffold` → behavior half → graduation report clean.
+  Caveat (agent-logging summary): Kilo is **split-lineage** — the CLI is an OpenCode
+  fork (XDG paths even on macOS, e.g. `~/.local/share/kilo/kilo.db`) while the IDE
+  extensions are Roo forks with Roo-style task files. M-Kilo targets the CLI only;
+  do not collapse the two product surfaces into one provider shape.
   ► **CHECKPOINT H1 (Ken):** process retro — scaffold quality, generate UX, report
   accuracy; adjust before Pi.
 - **M-Pi** — graduation #2, the sterner behavior test (bespoke models.json/API

@@ -70,9 +70,9 @@ Authoritative detail lives in `docs/topics/provider-metadata.md`. In brief:
   system-prompt, ACP, resume, MCP (config/security/events).
   Environment variables are intentionally captured inside the domain topics they
   affect rather than as a standalone topic.
-- Some research topics carry a `target_schema` (SimpleSchema) so their frontmatter is
-  machine-validated (`md schema validate`); others (usage, agent-cli,
-  non-interactive-sessions) do not yet.
+- Research topics are machine-validated (`md schema validate`) via `_schema.yaml`
+  sidecars; as of 2026-07-03 every live topic directory carries one (usage, agent-cli,
+  and non-interactive-sessions — previously schema-less — included).
 
 ## Architecture
 
@@ -259,20 +259,20 @@ Two sources of new fields:
 
 | Catalog section | Research topic | Example fields |
 |------------------|---------------|----------------|
-| `logging` | agent-logging | log directory per OS, format, has-desktop-app, desktop-log parity, schema URL |
-| `models` | agent-models | **out-of-box focus**: default offerings (exact accepted strings + `catalog_id` mapping), selection mechanisms, precedence, dynamic listing |
+| `logging` | agent-logging *(summary: `docs/research/summary/agent-logging.md`)* | log directory per OS, format, has-desktop-app, desktop-log parity, schema URL, native-SQLite/WAL (`live_locked`) surfaces, per-site time semantics |
+| `models` | agent-models *(summary: `docs/research/summary/agent-models.md` — selector taxonomy + resolution-graph framing)* | **out-of-box focus**: default offerings (exact accepted strings + `catalog_id` mapping), selection mechanisms, precedence, dynamic listing (programmatic: Codex/OpenCode/Kilo/Kimi/Pi; none: Claude/Gemini/Goose/Qwen — runtime observation required), selector kind (pinned / rolling alias / router / provider-model pair / managed key / fuzzy pattern / variant), auxiliary-model roles (fast/planner/editor/small/subagent/per-command) |
 | `model_config` | *(authored 2026-07-02 — `docs/research/model-config/`, sidecar validated, dry-run clean ×9; fleet run pending)* | **user-extension focus**: config file/schema for adding models, API-standard (`openai_compatible`/`anthropic_compatible`/`bespoke`), adapter mechanism (e.g. OpenCode's `npm` key), base-URL delivery, metadata-override shape (cost/limit/modalities), merge-vs-shadow semantics against the built-in catalog, per-runner local-model support (ollama, oMLX, LM Studio, llama.cpp, vLLM) |
-| `permissions` | agent-permissions | permission CLI params, config file paths (user/repo), agent-scoped permissions, policy-engine fit; **v2 schema planned** (2026-07-02): per-OS config paths, official-schema classification, defaults-when-unspecified, YOLO defaults, permission CLI switches + env vars |
+| `permissions` | agent-permissions | permission CLI params, config file paths (user/repo), agent-scoped permissions, policy-engine fit; **v2 schema planned** (2026-07-02): per-OS config paths, official-schema classification, defaults-when-unspecified, YOLO defaults, permission CLI switches + env vars; summary (`docs/research/summary/agent-permissions.md`) proposes six catalog axes — approval decision, tool visibility, sandbox posture, source loading, non-interactive behavior, persistence — plus a per-provider PolicyEngine fidelity classification (Claude closest fit; Codex/OpenCode/Qwen good; Gemini translation-heavy; Goose/Kimi coarse mode/tool-visibility projections only) |
 | `non_interactive` | non-interactive-sessions | headless invocation, output formats, structured stream/event contract, schema URL/type, use-case detectability matrix (cap approaching/capped/no-funds/auth/…) |
 | `usage` | usage | usage-data acquisition strategy (api/cli/pty-scrape), dashboard URL |
-| `cli` | agent-cli | version, homepage/repo/docs URLs, full switch inventory (or a pointer to it) |
+| `cli` | agent-cli *(summary: `docs/research/summary/agent-cli.md` — proposes the durable-identity vs observed-surface split)* | version-probe command, homepage/repo/docs URLs, binaries + alt-binary/shim names per OS, package-name↔command mapping + legacy-collision warnings, install-method families, config-root env var, primary non-interactive entry point; full switch inventories stay research-side (drift too fast) |
 | `system_prompt` | system-prompt | append/replace support, prompt delivery strategy, config/memory files, prompt layers, agent/subagent prompt isolation, format recommendations |
-| `acp` | acp | launch mode, protocol version, capabilities, reverse requests, filesystem/terminal delegation, Rust client guidance, compatibility quirks |
+| `acp` | acp | launch mode, protocol version, capabilities, reverse requests, filesystem/terminal delegation, Rust client guidance, compatibility quirks; **approval-transport precision** per provider (fail-closed `session/request_permission` loop vs fail-open hooks vs none) — where a provider's native permission surface is fail-open/coarse (Kimi today), ACP is a candidate PolicyEngine *enforcement* plane, not just a client integration; capability facts are provider-version-scoped (same `since`/`until` mechanism as signal records — e.g. Kimi `fsCapabilities` is only advertised ≥0.15.0, and clients must send `protocolVersion: 1`, not `0.23`) |
 | `local_runners` | *(authored + verified 2026-07-02 — `docs/research/local_runners/`, 5 runner docs + `local-runners` skill; see `spike-local-runners.md`)* | **runner-side focus**: per-OS binaries/installs, OpenAI/Anthropic API surfaces, detection probes (a future `sniff` surface), config, model-id grammar, traps |
-| `hooks` | *(planned — decided 2026-07-02, green-field prompt; see `hl-approach.md` §A)* | per-event payload schemas, `capability: can_block/can_mutate/observe_only`, config file/format/section, mapping onto the Claudine-owned canonical-event enum |
+| `hooks` | *(planned — decided 2026-07-02, green-field prompt; see `hl-approach.md` §A)* | per-event payload schemas, `capability: can_block/can_mutate/observe_only`, config file/format/section, mapping onto the Claudine-owned canonical-event enum, **failure semantics per hook engine** (fail-open vs fail-closed — a forced answer, like `unit`/`zone`; e.g. Kimi hook timeouts/crashes fail open, which disqualifies its hooks as a policy boundary) |
 | `skills` / `slash_commands` / `subagents` | agent-skills / slash-commands / subagents *(planned — decided 2026-07-02, three topics sharing one vocabulary block; see `hl-approach.md` §A)* | config formats, user/repo scopes with per-OS paths, recognized/required metadata keys, invocation grammar (commands) — feeds the `linking` portability classification |
 | `resume` | *(planned)* | resume flags, session-ID injection pattern |
-| `mcp` | *(planned)* | config location/format, security posture, event visibility |
+| `mcp` | *(authored — `docs/research/mcp/` fleet + `_schema.yaml` sidecar; cross-provider summary at `docs/research/summary/mcp.md`)* | config location/format, security posture, event visibility |
 | `signals` | *(planned — see [Signal Catalog](#signal-catalog--fine-grained-event-semantics))* | detection records: match/extract paths, units, timezones, version vocabularies, evidence fixtures |
 
 Decision, 2026-07-02: there is no standalone `streaming` research topic for this
@@ -290,6 +290,30 @@ API endpoints live in `model_config`, approval and sandbox variables live in
 general process/CLI variables live in `agent-cli`. Generator work that needs an
 allow-list or sanitization inventory should collect `env_vars` from those domain
 topics and keep the consumer context attached.
+
+Expectation, 2026-07-03: research-surfaced **behavior gaps** — provider-native capability
+that exists but has no Claudine last mile — are *triaged into explicit work items* when
+their topic lands in Phase D of the implementation plan; surfacing alone
+(`requires_claudine_update`, generate-report listings) is not completion. First known
+instance, from the MCP cross-provider summary (`docs/research/summary/mcp.md`): Goose,
+Kimi, and Qwen have meaningful provider-native MCP support but no Claudine
+import/export/runtime path, and Claude Code's native `--mcp-config` one-run mechanism has
+no Claudine runtime injector. This gap was unintended and only became visible through the
+summary pass — treat the summaries as a standing drift-detection surface.
+
+Further instances from the 2026-07-03 summaries: the agent-logging summary proposes a
+provider-log **evidence adapter** layer feeding `claudine logs` as a federated
+observability surface (WAL-aware SQLite readers for OpenCode/Kilo/Goose/Codex state,
+Gemini `$set`-aware transcript parsing, a Pi tree-preserving transcript reader, and Kimi
+Wire protocol-version tolerance — the observed 1.9 parser pin vs 1.10 server is live
+breakage, so triage that one early). Both the agent-cli and agent-logging summaries flag
+missing Roo research coverage as an explicit roster gap rather than something to infer
+from adjacent providers. From the agent-permissions summary: Goose's source default
+(`GOOSE_MODE=auto`) is effectively YOLO — it auto-approves every visible tool and
+ignores `permission.yaml` — so the Goose wrapper's default posture needs an explicit
+decision; OpenCode `--auto` auto-replies only *once* per promptable request (not a
+standing approval); and Kimi's only precise programmatic approval transport is ACP,
+which couples this workstream to the ACP-adoption question.
 
 ❓ OPEN: how much of B belongs in compiled `ProviderInfo` vs staying research-only (consumed
 by docs/reporting tooling but not compiled)? Proposal: research frontmatter is a superset;
@@ -570,7 +594,14 @@ records which binary+version produced it, and even roster identity facts (`binar
    rolling alias is an offering whose catalog mapping targets a *family*, not a pinned
    model — the mapping record needs to express that distinction (e.g.
    `resolves: pinned | family_latest`), and signal/reporting consumers must expect the
-   concrete model behind such an offering to change between sessions.
+   concrete model behind such an offering to change between sessions. The agent-models
+   summary (2026-07-03) widens this beyond two values — observed selector kinds also
+   include account-dependent defaults (Claude `default`), routers (Gemini `auto`,
+   `kilo-auto/*` tiers), provider/model pairs (Goose), managed platform keys
+   (`kimi-code/kimi-for-coding`), fuzzy/scoped patterns and thinking suffixes (Pi
+   `sonnet:high`), and runtime variants (Qwen `/model --fast|--vision|--voice`) —
+   design the `resolves`/selector-kind enum backwards from that list, and model the
+   offering↔canonical join as a resolution graph rather than a flat table.
 3. **Freshness** — generated enums/metadata need regeneration cadence + a generated-at
    stamp (the planned `ContentPolicy` concept applies here too); Parsera is a third-party
    data-quality dependency worth a validation pass.
@@ -724,7 +755,12 @@ the Kilo → Pi → Antigravity provider-onboarding validation ladder):
 3. **`config_format` granularity** — per provider or per config-file entry
    (`PathTemplate` + format pairs)?
 4. **Compiled subset boundary** — confirm the "research is a superset; mapping registry
-   declares the compiled subset" proposal.
+   declares the compiled subset" proposal. Supporting evidence (2026-07-03): the
+   agent-cli cross-provider summary independently converged on a concrete partition —
+   durable identity facts (binaries/aliases per OS, docs URLs, config roots, version
+   probes, primary non-interactive entry points) compile; observed surface (full switch
+   inventories, latest versions, update mechanics, hidden commands) stays research-side
+   with provenance and `last_verified` stamps.
 5. **Prompt delivery** — does `PromptDeliverySpec` ever become data, or is it accepted as
    permanent behavior-half code? (Topic doc rates it highest-effort/highest-value.)
 6. ~~**Declarative detection at runtime?**~~ — *decided:* records both document AND drive
