@@ -89,6 +89,9 @@ Exit: no hand-written provider data remains; CI enforces regeneration equality.
 
 1. Shared prep stages (design/pipeline-dry.md): extract OpenCode model resolution,
    shadow-home env, Codex output prep into `exec_prep/`; both pipelines consume them.
+   Include an `OPENCODE_CONFIG_CONTENT` **merge contract**: system-prompt injection,
+   MCP injection, and permission overlays all write this one env var (system-prompt
+   summary) — the shared prep stage must merge, never overwrite.
 2. `FinalMessage` renderable component (design/render-components.md migration 1)
    retires the ×3 Codex rendering; `lib/src/render/` module is born.
 3. **AgentCapabilities retirement** (design/module-split.md): migrate
@@ -112,18 +115,13 @@ Consumes closeout-track topics as they land; repeats per topic:
 4. **Behavior-gap triage** (per topic): `requires_claudine_update` flags and
    summary-surfaced gaps (provider-native capability with no Claudine last mile)
    become explicit backlog items, each with a disposition — implement now, schedule,
-   or won't-do — reviewed at the same checkpoint. First known instance, from
-   `docs/research/summary/mcp.md`: Goose/Kimi/Qwen MCP import/export/injection and a
-   Claude runtime injector for its native `--mcp-config`. From
-   `docs/research/summary/agent-logging.md`: provider-log evidence adapters (WAL-aware
-   SQLite readers for OpenCode/Kilo/Goose/Codex, Gemini `$set`-aware transcript parsing,
-   Pi tree-preserving reader) and Kimi Wire protocol-version tolerance (observed 1.9
-   parser pin vs 1.10 server = live breakage; triage early). Both the agent-cli and
-   agent-logging summaries flag missing Roo research coverage as a roster gap. From
-   `docs/research/summary/agent-permissions.md`: decide the Goose wrapper's default
-   posture (Goose's own default `GOOSE_MODE=auto` is effectively YOLO); model OpenCode
-   `--auto` as auto-reply-*once*, not a standing approval; note Kimi's only precise
-   programmatic approval transport is ACP (feeds the ACP-adoption question).
+   or won't-do — reviewed at the same checkpoint. The seeded backlog lives in
+   [summary-triage.md](summary-triage.md) (2026-07-03, one section per summary,
+   disposition checkboxes). Two items are flagged **triage early** there: Kimi Wire
+   1.9-pin vs 1.10-server (live breakage) and Codex's 10-event hook system (Claudine's
+   notify-only-era Codex registration under-covers the canonical events). The
+   cross-topic **Roo refresh sweep** consolidates Roo's missing/stale research across
+   six topics into one item.
 
 Exit: static-fact overrides at zero; profile is a genuine behavior shim; table A
 fields all research-fed or facts-fed with a tracked graduation queue; every landed
@@ -142,6 +140,12 @@ topic's behavior gaps carry a disposition (no surfaced-only flags remain).
 4. Migration map executions: Claude rate-limit records; OpenCode 429 cascade as
    priority-ordered records (bespoke locator only if the path grammar can't reach);
    temporal guards named in taxonomy as permanent bespoke, emitting through the sink.
+   New declarative-record candidates from the NIS summary: Qwen exit-code
+   classification (53 max-turns / 55 wall-clock / 130 interrupt — terminate with
+   stderr only, bypassing `result`) and the Goose error-then-`complete` taint rule.
+   Record-grammar extensions: the `source` enum needs an `acp` value (ACP
+   `session/update` streams) and must distinguish promoted-structured stderr
+   (OpenCode `--print-logs`) from diagnostic stderr.
 5. Harvest v1 (unmatched error/warning events only, scrubbed, capped) ships last.
 
 ## Phase F — model-catalog boundary (parallel track, unchained-ai side)
@@ -156,7 +160,11 @@ dynamic listing to a drift channel emitting SignalEvents (couples to Phase E sin
 Per-provider listing sources for that staging (agent-models summary): programmatic —
 Codex `debug models [--bundled]`, OpenCode `models --refresh`, Kilo `models` + gateway
 REST, Kimi `/v1/models` + ACP `available_models`, Pi `--list-models` + RPC; none —
-Claude/Gemini/Goose/Qwen, whose resolved model is only observable from runtime output.
+Claude/Gemini/Goose/Qwen. Correction from the non-interactive-sessions summary
+(2026-07-03): for Claude/Gemini/Qwen the resolved model is observable from runtime
+stream output (Gemini emits model metadata in `init`), but **Goose's stream has no init
+event and never emits requested/resolved provider/model** — Goose resolution is
+config/wrapper-side only, so its drift channel needs a different source.
 ► **CHECKPOINT F (Ken):** artifact schema review before claudine consumes it.
 
 ## Phase G — rendering buildout (interleaves after C)
@@ -180,10 +188,22 @@ report (closeout well underway).
   fork (XDG paths even on macOS, e.g. `~/.local/share/kilo/kilo.db`) while the IDE
   extensions are Roo forks with Roo-style task files. M-Kilo targets the CLI only;
   do not collapse the two product surfaces into one provider shape.
+  Ladder inputs from the 2026-07-03 summaries: adapter contract is
+  `kilo run --auto --format json --dir <cwd>`; `kilo run` denies questions and
+  auto-rejects permissions by default; a structured `error` event outranks exit 0;
+  Kilo ACP lacks `session/cancel` and needs a `session/request_permission` handler
+  before the integration is usable.
   ► **CHECKPOINT H1 (Ken):** process retro — scaffold quality, generate UX, report
   accuracy; adjust before Pi.
 - **M-Pi** — graduation #2, the sterner behavior test (bespoke models.json/API
   surface). Proves the data/behavior seam on a non-cousin.
+  Ladder inputs from the 2026-07-03 summaries: Pi core has **no native MCP and no
+  subagents** (both exist only via executable TypeScript extensions) and **no
+  permission system** (external sandboxing required — feeds the permissions six-axis
+  classification); headless determinism set is `pi --mode json` +
+  `--no-approve --no-extensions --no-skills --no-prompt-templates --no-context-files`;
+  ACP requires an external adapter with two divergent lines (registry `svkozak/pi-acp`
+  vs the more capable `@victor-software-house/pi-acp`) — a version-drift surface.
   ► **CHECKPOINT H2 (Ken):** second retro; confirm the process is provider-shape
   independent.
 - **M-Antigravity** — true end-to-end. Roster entry lands only AFTER the closeout
