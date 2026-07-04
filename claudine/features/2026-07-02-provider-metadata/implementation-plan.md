@@ -90,6 +90,36 @@ stale topic-doc tables (topic doc gets a pointer). Output feeds C, D, and I sizi
    source (roster | topic | facts). Facts files scraped for all 8 providers.
    ► **CHECKPOINT B (Ken):** review the matrix — it is the contract everything else
    consumes; wrong source declarations are expensive later.
+
+   > **Checkpoint B rulings (2026-07-04, Ken):** (1) **Roo Code is fully removed**
+   > (enum variant, roster entry, research documents, facts file) rather than kept
+   > dormant; the roster gains a `skip_research: true` entry flag for future
+   > keep-identity-but-skip-fleets deprecations (fleet fan-out excludes the entry;
+   > `claudine-gen` fails loudly if asked to generate a skipped provider).
+   > (2) **Canonical slugs** ratified: `kimi`, `opencode`, `qwen` (roster `file:`
+   > stem == slug fleet-wide; Rust `Provider` variants and serde forms unchanged).
+   > (3) **Major-version policy**: ratified as specified — see spec.md
+   > "Major-version changes are new providers" (new binary / wire protocol / config
+   > surface ⇒ new roster entry with its own slug, never a mutation; Kimi v1→v2
+   > precedent, `skip_research` or removal for the old entry).
+   > (4) **Field-keyed matrix ratifications (round 2):** `billing_models` stays a
+   > facts field, ratified even without a live consumer; `supports_skills` trusts
+   > the recent skills research round and graduates research-fed at v1 via the
+   > `support` enum→bool mapping (`first_class`/`partial` → `true`,
+   > `convention_only`/`none`/`unknown` → `false`; goose/kimi `false` constants
+   > ruled stale, adopted through v1's diff-reviewed regeneration); `config_paths`
+   > naming ratified with the two-population decision (agent-cli key renamed
+   > `config_files` → `config_paths` feeding the existing catalog field;
+   > model-config key renamed `config_files` → `model_config_paths` as a distinct
+   > population; table-A `config_files` retired as a separate field —
+   > `ConfigFileSpec` becomes `config_paths`' future richer type); registry
+   > vocabulary extensions approved as proposed (StringArray, Record, optionality
+   > markers, multi-path research sources; `allowed_env_keys` stays facts rather
+   > than multi-topic machinery). (5) Matrix Open question 7 (shared-constant
+   > fields) ruled 2026-07-04, approved as recommended: `value_taking_flags` is
+   > hoisted to shared code (per-provider field removed; union semantics stand),
+   > and `structured_stream_flag` derives from `output_formats` (dropped from
+   > table A). All Checkpoint B questions are now closed; generator v1 proceeds.
 3. **Generator v1**: registry covers all current fields; `data.rs` generated
    byte-stable for all 8; drift test + CI `--check` land; `catalog.json` superset
    emitted; `--mapping` rendered by claudine-cli through renderable components.

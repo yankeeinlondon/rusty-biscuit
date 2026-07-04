@@ -238,6 +238,17 @@ Note: a roster entry without research/generation (Pi, Kilo today) is valid — t
 deliberately runs ahead of code support. The generate report lists roster entries that have
 research but no catalog module, as the graduation queue.
 
+### Major-version changes are new providers
+
+When a provider's major version changes its binary name, its wire protocol/parsing, or its
+config surface (the Kimi v1 → v2 precedent: new binary, new parsing), it enters the roster
+as a **new entry with its own slug** — never by mutating the existing entry. Version-suffixed
+slugs are the naming convention (`kimi` is v2 today; a hypothetical v3 with a new binary would
+be `kimi3`, or the vendor's new name if it rebrands). Both entries may coexist during a short
+dual-support transition window; the old entry is then removed outright (the Roo removal
+precedent) or flagged `skip_research`. Catalog history lives in git, not in dual-version code
+paths.
+
 ## Metadata Expansion
 
 Two sources of new fields:
@@ -246,7 +257,7 @@ Two sources of new fields:
 
 | Field | Source today | Notes |
 |-------|--------------|-------|
-| `config_format` | legacy `AgentCapabilities` | per config file, not per provider? (❓ OPEN) |
+| `config_format` | legacy `AgentCapabilities` | RESOLVED (2026-07-04): per config-file entry, but not as a standalone table-A field — the interim `config_files: &[ConfigFileSpec]` proposal is retired; `ConfigFileSpec` (path + format + scope) becomes the eventual richer TYPE of the existing `config_paths` field (fed by the agent-cli topic's `config_paths` key, renamed from `config_files`). The model-config topic's model-extension file list is a distinct population (key renamed to `model_config_paths`), covered by a future `model_config_paths` catalog field when needed |
 | `billing_models` | legacy `BillingCapabilities` | |
 | `model_cli_flag` | wrapper `apply_model` overrides | |
 | `sandbox` (`SandboxSupport`) | wrapper `apply_sandbox` overrides | |
@@ -258,7 +269,7 @@ Two sources of new fields:
 | `non_interactive_conflicting_flags` | wrapper overrides | |
 | `allowed_env_keys` | wrapper overrides | drawn from domain-topic `env_vars` fields; no standalone env-vars topic |
 | `suppress_structured_stderr_on_success` | wrapper override | |
-| `model_required_in_non_tty` | hardcoded OpenCode check in `composition/select.rs` | |
+| `model_required_in_non_tty` | hardcoded OpenCode check in `cli/src/commands/wrap/composition/mod.rs` (~970) → `profile/resolve.rs` | |
 | `platform_kind` | *(new, 2026-07-02)* | `VendorPlatform` (Claude Code, Codex — predominantly own-vendor models) vs `AgentAggregator` (OpenCode, Pi, Goose — model-agnostic); predicts model-selection UX centrality and API-shim flexibility |
 
 **B. New, fed by research topics** (each topic's `target_schema` maps to a catalog section):
@@ -757,8 +768,14 @@ the Kilo → Pi → Antigravity provider-onboarding validation ladder):
    confirm.
 2. ~~**Generator home**~~ — *provisionally decided:* dedicated `claudine/gen` crate (see
    Codegen mechanics). Ken to confirm.
-3. **`config_format` granularity** — per provider or per config-file entry
-   (`PathTemplate` + format pairs)?
+3. ~~**`config_format` granularity**~~ — *decided (2026-07-04, Checkpoint B round 2):*
+   per config-file entry, but not as a standalone field: `ConfigFileSpec`
+   (`PathTemplate` + format + scope) becomes the eventual richer type of the existing
+   `config_paths` catalog field (upgrade deferred until the agent-cli schema carries
+   `format`; graduation note, not a v1 change). The model-config topic's
+   model-extension file list is a distinct population (frontmatter key
+   `model_config_paths`), covered by a future `model_config_paths` catalog field when
+   needed. Full ruling record: field-source-matrix.md, Open question 5.
 4. **Compiled subset boundary** — confirm the "research is a superset; mapping registry
    declares the compiled subset" proposal. Supporting evidence (2026-07-03): the
    agent-cli cross-provider summary independently converged on a concrete partition —
