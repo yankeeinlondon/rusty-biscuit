@@ -13,6 +13,7 @@ harness = false
 
 [dependencies]
 # Internal
+claudine-catalog-types = { path = "../catalog-types" }
 sniff = { path = "../../sniff/lib" }
 biscuit-hash = { path = "../../biscuit-hash/lib", features = ["xx_hash", "blake3"] }
 biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml", "json5"] }

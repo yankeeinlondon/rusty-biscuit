@@ -40,11 +40,13 @@ default:
     just --list | grep -v 'default'
     echo
 
-# Build the library, contract adapter, and CLI
+# Build the catalog types, library, contract adapter, CLI, and generator
 build *args="":
+    @just _build claudine-catalog-types "Claudine Catalog Types" {{ args }}
     @just _build claudine "Claudine Library" {{ args }}
     @just _build claudine-contract "Claudine Contract Library" {{ args }}
     @just _build claudine-cli "Claudine CLI" {{ args }}
+    @just _build claudine-gen "Claudine Catalog Generator" {{ args }}
 
 # Install the CLI
 install *args="":
@@ -57,9 +59,11 @@ install *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
+    @just _sanity claudine-catalog-types
     @just _sanity claudine
     @just _sanity claudine-contract
     @just _sanity claudine-cli
+    @just _sanity claudine-gen
 
 # test just the CLI in Claudine
 test-cli *args="":
@@ -75,11 +79,13 @@ test-rendezvous *args:
     @just _test rendezvous-daemon {{ args }}
     @just _test rendezvous-client {{ args }}
 
-# Test the library, contract adapter, and CLI.
+# Test the catalog types, library, contract adapter, CLI, and generator.
 test *args="":
+    @just _test claudine-catalog-types {{ args }}
     @just _test claudine {{ args }}
     @just _test claudine-contract {{ args }}
     @just _test claudine-cli {{ args }}
+    @just _test claudine-gen {{ args }}
 
 # test just the contract adapter library
 test-contract *args="":
@@ -162,9 +168,11 @@ lint-lifecycle-doc-facets:
 lint:
     @just lint-transport
     @just lint-lifecycle-doc-facets
+    @just _lint claudine-catalog-types
     @just _lint claudine
     @just _lint claudine-contract
     @just _lint claudine-cli
+    @just _lint claudine-gen
 
 # Criterion benches for the runtime hot paths.
 bench *args="":
@@ -176,11 +184,13 @@ coverage *args="":
     @just _coverage claudine-contract {{ args }}
     @just _coverage claudine-cli {{ args }}
 
-# Doctests for the library, contract adapter, and CLI.
+# Doctests for the catalog types, library, contract adapter, CLI, and generator.
 doctest *args="":
+    @just _doctest claudine-catalog-types {{ args }}
     @just _doctest claudine {{ args }}
     @just _doctest claudine-contract {{ args }}
     @just _doctest claudine-cli {{ args }}
+    @just _doctest claudine-gen {{ args }}
 
 # not applicable: claudine has no cargo-fuzz targets (Phase 5 scope)
 fuzz:
@@ -204,7 +214,7 @@ lint-fix:
 
 # Validate the source code without doing a full build
 check:
-    @cargo check -p claudine -p claudine-contract -p claudine-cli
+    @cargo check -p claudine-catalog-types -p claudine -p claudine-contract -p claudine-cli -p claudine-gen
 
 # Run the latest debug build of the Claudine CLI
 cli *args="":
