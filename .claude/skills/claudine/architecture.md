@@ -13,7 +13,7 @@ claudine/lib/src/
 ├── composition/  → Markdown frontmatter composition (inline and chained prompt pipelines)
 ├── config/       → Agent detection, hook registration, atomic writes, backups
 ├── dispatch/     → Event processing pipeline (loader, template, matcher, runner)
-├── events/       → Normalized event model and types (16 events, 8 providers)
+├── events/       → Normalized event model and types (16 events, 7 providers)
 ├── linking/      → Cross-provider skill synchronization (4 resource types) with portability classification
 ├── mcp/          → MCP catalog, defaults, import/export, session, and injection
 ├── permissions/  → Provider-agnostic PolicyEngine for permission queries and mutation planning
@@ -25,24 +25,24 @@ claudine/lib/src/
 
 ## Event Support Matrix
 
-| Event | Claude | Codex | Gemini | Goose | Kimi | OpenCode | Qwen | Roo |
-|-------|:------:|:-----:|:------:|:-----:|:----:|:--------:|:----:|:---:|
-| session_start | ✓ | ○ | ✓ | - | - | ✓ | - | - |
-| session_end | ✓ | - | ✓ | - | - | ✓ | - | - |
-| before_prompt | ✓ | ○ | ✓ | - | ○ | ✓ | - | - |
-| before_tool | ✓ | ○ | ✓ | - | ○ | ✓ | - | - |
-| after_tool | ✓ | ○ | ✓ | - | ○ | ✓ | - | - |
-| tool_error | ✓ | ○ | - | - | ○ | - | - | - |
-| permission_request | ✓ | - | - | - | ○ | ✓ | - | - |
-| human_in_the_loop | ✓ | - | - | - | - | - | - | - |
-| turn_complete | ✓ | ✓ | ✓ | ○ | ○ | ✓ | ○ | ○ |
-| turn_error | - | ○ | - | ○ | ○ | ✓ | ○ | ○ |
-| subagent_start | ✓ | - | - | ○ | ○ | - | - | - |
-| subagent_stop | ✓ | - | - | ○ | ○ | - | - | - |
-| before_model | - | - | ✓ | - | - | ✓ | - | - |
-| after_model | - | ○ | ✓ | ○ | ○ | ✓ | ○ | ○ |
-| before_compact | ✓ | - | ✓ | - | ○ | ✓ | - | - |
-| notification | ✓ | ○ | ✓ | ○ | ○ | ✓ | ○ | ○ |
+| Event | Claude | Codex | Gemini | Goose | Kimi | OpenCode | Qwen |
+|-------|:------:|:-----:|:------:|:-----:|:----:|:--------:|:----:|
+| session_start | ✓ | ○ | ✓ | - | - | ✓ | - |
+| session_end | ✓ | - | ✓ | - | - | ✓ | - |
+| before_prompt | ✓ | ○ | ✓ | - | ○ | ✓ | - |
+| before_tool | ✓ | ○ | ✓ | - | ○ | ✓ | - |
+| after_tool | ✓ | ○ | ✓ | - | ○ | ✓ | - |
+| tool_error | ✓ | ○ | - | - | ○ | - | - |
+| permission_request | ✓ | - | - | - | ○ | ✓ | - |
+| human_in_the_loop | ✓ | - | - | - | - | - | - |
+| turn_complete | ✓ | ✓ | ✓ | ○ | ○ | ✓ | ○ |
+| turn_error | - | ○ | - | ○ | ○ | ✓ | ○ |
+| subagent_start | ✓ | - | - | ○ | ○ | - | - |
+| subagent_stop | ✓ | - | - | ○ | ○ | - | - |
+| before_model | - | - | ✓ | - | - | ✓ | - |
+| after_model | - | ○ | ✓ | ○ | ○ | ✓ | ○ |
+| before_compact | ✓ | - | ✓ | - | ○ | ✓ | - |
+| notification | ✓ | ○ | ✓ | ○ | ○ | ✓ | ○ |
 
 **Legend:** ✓ = Hook support (config file), ○ = NonHook (wrapper/proxy required), - = Not supported
 
@@ -68,7 +68,7 @@ pub enum AgenticEvent {
 
 ### Provider Enum
 
-8-variant enum (Claude, Codex, Gemini, Goose, KimiCode, OpenCode, QwenCode, RooCode) with slug, docs URL, event support queries, and native event name mappings:
+7-variant enum (Claude, Codex, Gemini, Goose, KimiCode, OpenCode, QwenCode) with slug, docs URL, event support queries, and native event name mappings:
 
 - `EventSupportLevel` — `Hook` | `NonHook` | `NotSupported` per provider-event pair
 
@@ -129,7 +129,6 @@ Each provider has its own adapter implementing the `ProviderAdapter` trait. The 
 | `goose` | Stream-json + env var (type/event field) | Implemented (non-blocking) |
 | `kimicode` | Wire mode JSON-RPC (event_name/method field) | Implemented (blocking: tool, permission) |
 | `qwen` | Stream-json output (event_name/type field) | Implemented (blocking: permission) |
-| `roo` | Stream-json event emitter (event_name/type field) | Implemented (non-blocking) |
 
 ### Claude Code
 
@@ -218,15 +217,6 @@ Events via stream-json output (NonHook, blocking for permission):
 {"type": "system", ...}
 ```
 
-### Roo Code
-
-Events via stream-json event emitter (NonHook, non-blocking):
-
-```json
-{"type": "event", "event_name": "tool_complete", ...}
-{"type": "message", ...}
-```
-
 ## Dispatch Pipeline
 
 The core event processing pipeline runs in 6 steps:
@@ -306,7 +296,7 @@ pub struct RepoOverrideConfig {
 ### Config Management
 
 - `detect_agents()` — returns detected providers with their configurators
-- `discover_agents_full()` — all 8 providers with install/registration status (`AgentInfo`)
+- `discover_agents_full()` — all 7 providers with install/registration status (`AgentInfo`)
 - `get_configurator(provider)` — returns the configurator for a specific provider
 - `AgentConfigurator` trait — `register()`, `deregister()`, `is_registered()`, `registered_events()`, `create_minimal_config()`, `supports_config_registration()`, `registerable_events()`, `is_cli_installed()`
 
@@ -314,7 +304,7 @@ Configurators handle each provider's config format:
 - **Claude/Gemini**: JSON `settings.json` with hooks array
 - **Codex**: TOML `config.toml` with notify section (format-preserving via `toml_edit`)
 - **OpenCode**: JSON `opencode.json` with plugins
-- **Goose/KimiCode/Qwen/Roo**: Wrapper-only (no config-based registration)
+- **Goose/KimiCode/Qwen**: Wrapper-only (no config-based registration)
 
 Atomic file writes (`config::atomic`) prevent corruption during concurrent access. Config backup utilities (`config::backup`) preserve originals before modification.
 
@@ -438,7 +428,6 @@ Full, CustomFormat, Limited, None
 | KimiCode | `~/.config/agents/skills/` | `.kimi/skills/` | `.claude/skills`, `.agents/skills`, `.codex/skills` |
 | OpenCode | `~/.config/opencode/skills/` | `.opencode/skills/` | `.claude/skills`, `.agents/skills` |
 | QwenCode | `~/.qwen/skills/` | `.qwen/skills/` | -- |
-| RooCode | `~/.roo/skills/` | `.roo/skills/` | -- |
 
 Note: OpenCode also reads `.claude/skills/` directly
 
@@ -463,7 +452,7 @@ Note: OpenCode also reads `.claude/skills/` directly
 ## Key Lessons
 
 - **Hook handlers must respond fast**: `claudine handle` enforces a hard **5-second execution deadline** (overridable via `CLAUDINE_HANDLE_DEADLINE_SECONDS`) to prevent blocking the parent agent session. When exceeded, the handler aborts and exits 124. Bash and messenger actions also have tighter 3s timeouts when running inside a hook handler. Phase-level tracing spans ensure any hang is diagnostic.
-- **All 8 adapters are implemented**: each provider adapter has full event mapping, metadata extraction, and tests. Claude, Gemini, OpenCode, and Codex use config-based hooks; Goose, KimiCode, Qwen, and Roo parse stream-json or wire-mode payloads directly. KimiCode and Qwen support blocking responses; Goose and Roo are observation-only.
+- **All 7 adapters are implemented**: each provider adapter has full event mapping, metadata extraction, and tests. Claude, Gemini, OpenCode, and Codex use config-based hooks; Goose, KimiCode, and Qwen parse stream-json or wire-mode payloads directly. KimiCode and Qwen support blocking responses; Goose is observation-only.
 - **Sound effects are fire-and-forget**: TTS and sound playback spawn tokio tasks to avoid blocking the event pipeline. Log and report actions run inline because they're fast.
 - **Atomic writes prevent config corruption**: all config file mutations go through `config::atomic` to handle concurrent hook firings safely.
 - **Runtime config precompiles regexes**: matcher patterns and Call action mapper regexes are compiled once at config load time, failing fast on invalid patterns with contextual error messages.

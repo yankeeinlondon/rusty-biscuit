@@ -1,15 +1,15 @@
 ---
 name: claudine
-description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Roo), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
-last_updated: 2026-07-02
-hash: bbb32528c11dc53d-327999798bca59c6
+description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
+last_updated: 2026-07-04
+hash: 3633bb398108735f-6ab85cc9e8b63d81
 ---
 
 ## Overview
 
-Claudine is a universal event handler, shared-resource linker, MCP catalog manager, and composition harness for agentic CLIs. It normalizes **16 lifecycle events** across **8 providers** (Claude Code, Codex CLI, Gemini CLI, Goose, Kimi Code, OpenCode, Qwen Code, and Roo Code) into a single configuration model, fires **6 action types** — TTS, sound effects, logging, shell commands, reports, and blocking calls — when those events fire, synchronizes skills/commands/agents/scripts between providers, manages a provider-agnostic MCP catalog plus provider-specific import/sync/runtime behavior, and provides three Markdown composition commands (`compose`, `inline-compose`, `sequence`) that flow through the same wrapper-grade execution pipeline as the provider wrappers.
+Claudine is a universal event handler, shared-resource linker, MCP catalog manager, and composition harness for agentic CLIs. It normalizes **16 lifecycle events** across **7 providers** (Claude Code, Codex CLI, Gemini CLI, Goose, Kimi Code, OpenCode, and Qwen Code) into a single configuration model, fires **6 action types** — TTS, sound effects, logging, shell commands, reports, and blocking calls — when those events fire, synchronizes skills/commands/agents/scripts between providers, manages a provider-agnostic MCP catalog plus provider-specific import/sync/runtime behavior, and provides three Markdown composition commands (`compose`, `inline-compose`, `sequence`) that flow through the same wrapper-grade execution pipeline as the provider wrappers.
 
-The **8 providers** above are the compiled `Provider` enum; the research roster (`claudine/docs/providers.yaml`) intentionally runs ahead of it (Pi and Kilo Code are researched but not yet code-supported; Roo is paused). Automating that gap — research-driven provider metadata, codegen, and the model ground-truth catalog — is an active workstream specced in `claudine/features/2026-07-02-provider-metadata/spec.md`; consult it before extending provider metadata by hand.
+The **7 providers** above are the compiled `Provider` enum; the research roster (`claudine/docs/providers.yaml`) intentionally runs ahead of it (Pi and Kilo Code are researched but not yet code-supported). Roo Code support was removed in 2026-07; major provider version changes enter the roster as new entries rather than mutating existing ones (see "Major-version changes are new providers" in the spec below). Automating that gap — research-driven provider metadata, codegen, and the model ground-truth catalog — is an active workstream specced in `claudine/features/2026-07-02-provider-metadata/spec.md`; consult it before extending provider metadata by hand.
 
 The package follows the monorepo `lib` + `cli` split: library crate `claudine`, CLI crate `claudine-cli` (binary `claudine`). A third sub-crate, `claudine-contract` (`claudine/contract`), implements `biscuit_contract::inference::InferenceAdapter` by running a provider as a single non-interactive, **tool-free, filesystem-isolated** session and returning its final assistant text — letting deterministic consumers (Reaper, Darkmatter) delegate to an agentic CLI via `Arc<dyn InferenceAdapter>` without depending on `claudine` directly. It depends on `claudine` (lib) but **not** `claudine-cli`. v1 enables Claude and Codex; other providers are reported `Unsupported`. See `claudine/contract/README.md` for the provider support matrix and security posture, and the `biscuit-contract` skill for the contract itself.
 
@@ -28,7 +28,7 @@ Twenty modules plus the shared error type and the flat `provider_id` leaf. Full 
 |--------|----------------|
 | `actions` | Hook action types and responses |
 | `adapters` | Provider-specific event parsers |
-| `agents` | Capability catalog for all 8 CLIs |
+| `agents` | Capability catalog for all 7 CLIs |
 | `badges` | Styled terminal badge constants |
 | `composition` | Markdown frontmatter composition (direct/inline/sequence) plus the loop engine |
 | `config` | Agent detection, hook registration, atomic writes, backups |
@@ -136,7 +136,7 @@ Claudine stores normalized MCP data in `~/.claudine/mcp/catalog.json`, `~/.claud
 
 Provider rollout:
 
-- **Import and sync:** Claude, Codex, Gemini, OpenCode, Roo
+- **Import and sync:** Claude, Codex, Gemini, OpenCode
 - **Runtime wrapper injection:** Codex, Gemini, OpenCode
 - **No MCP support yet:** Goose, Kimi, Qwen
 
@@ -191,13 +191,13 @@ docs below for depth. Generated by `claudine sequence` from the prompt documents
 
 Each Agentic CLI's provided hooks, payloads, and return types.
 
-- [Claude Code](research/hooks/claude-code.md) · [Codex](research/hooks/codex.md) · [Gemini CLI](research/hooks/gemini-cli.md) · [Goose](research/hooks/goose.md) · [Kimi Code](research/hooks/kimi-code.md) · [OpenCode](research/hooks/opencode.md) · [Qwen CLI](research/hooks/qwen-cli.md) · [Roo Code](research/hooks/roo-code.md)
+- [Claude Code](research/hooks/claude-code.md) · [Codex](research/hooks/codex.md) · [Gemini CLI](research/hooks/gemini-cli.md) · [Goose](research/hooks/goose.md) · [Kimi Code](research/hooks/kimi-code.md) · [OpenCode](research/hooks/opencode.md) · [Qwen CLI](research/hooks/qwen-cli.md)
 
 ### Cross-referencing Research
 
 Each Agentic CLI's support for skills, slash commands, agents/subagents, and shared scripts folders.
 
-- [Claude Code](research/cross-referencing/claude-code.md) · [Codex](research/cross-referencing/codex.md) · [Gemini CLI](research/cross-referencing/gemini-cli.md) · [Goose](research/cross-referencing/goose.md) · [Kimi Code](research/cross-referencing/kimi-code.md) · [OpenCode](research/cross-referencing/opencode.md) · [Qwen CLI](research/cross-referencing/qwen-cli.md) · [Roo Code](research/cross-referencing/roo-code.md)
+- [Claude Code](research/cross-referencing/claude-code.md) · [Codex](research/cross-referencing/codex.md) · [Gemini CLI](research/cross-referencing/gemini-cli.md) · [Goose](research/cross-referencing/goose.md) · [Kimi Code](research/cross-referencing/kimi-code.md) · [OpenCode](research/cross-referencing/opencode.md) · [Qwen CLI](research/cross-referencing/qwen-cli.md)
 
 ### ACP Support
 
