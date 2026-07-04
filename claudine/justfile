@@ -240,10 +240,22 @@ readme:
 
 # publish summary research to the claudine skill
 publish-summary-research:
-    @echo
-    md compose ./docs/research/summary/mcp.md > ../.claude/skills/claudine/summaries/mcp.md
-    md compose ./docs/research/summary/acp.md > ../.claude/skills/claudine/summaries/acp.md
-    md compose ./docs/research/summary/agent-logging.md > ../.claude/skills/claudine/summaries/agent-logging.md
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo
+    dest="../.claude/skills/claudine/summaries"
+    mkdir -p "${dest}"
+    for src in ./docs/research/summary/*.md; do
+        name="$(basename "${src}")"
+        out="$(md compose "${src}")"
+        # a summary whose sequence has not run yet composes to an empty body
+        if [ -z "${out//[[:space:]]/}" ]; then
+            echo -e "{{ DIM }}skipped ${name} (no generated body yet){{ RESET }}"
+            continue
+        fi
+        printf '%s\n' "${out}" > "${dest}/${name}"
+        echo -e "{{ GREEN }}published{{ RESET }} ${name}"
+    done
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 
