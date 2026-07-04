@@ -225,66 +225,13 @@ pub use yolo::YoloSupport;
 
 ## Decentralized Provider Info
 
-Despite the centralized catalog, several sites across the codebase still encode provider-specific facts imperatively rather than declaratively. The following inventory is maintained so authors know where drift lives today and can evaluate whether a new catalog field would let a site become provider-agnostic.
+The hand-maintained dispatch tables that previously lived in this section rotted (dead line references into pre-refactor files, undercounted `Provider::` refs) and are superseded by a **mechanical, regenerable inventory**:
 
-### Lib Crate
+- **Inventory file**: [`docs/providers/dispatch-inventory.json`](../providers/dispatch-inventory.json) — one record per dispatch site in `claudine/cli/src/**` with repo-relative path, line, pattern form (`match-provider`, `matches-macro`, `eq-comparison`, `ne-comparison`, `tuple-array`, `let-pattern`, `provider-arm`, `direct-ref`), the provider variants named, and an `exempt_candidate` tag marking the blanket-exemption candidates from `design/pipeline-dry.md` (`commands/wrap/profile/*.rs`, the clap mapping in `main.rs`, test paths).
+- **Drift check**: `cargo nextest run -p claudine-cli --test dispatch_inventory` regenerates the inventory in-memory and byte-compares it against the committed file; it runs as part of `just test`, so dispatch changes without an inventory update fail CI.
+- **Regeneration**: after intentional dispatch changes, bless the committed file with `CLAUDINE_UPDATE_INVENTORY=1 cargo nextest run -p claudine-cli --test dispatch_inventory`.
 
-| File | Lines | Provider(s) singled out | What is hardcoded |
-|------|-------|------------------------|-------------------|
-| `lib/src/stream/providers/mod.rs` | 37–48 | All | Semantic-parser factory dispatch. Each `Provider` variant maps to a distinct parser type. This is an intentional factory site, but it means adding a new provider requires a new parser implementation plus a new factory arm. |
-| `lib/src/composition/select.rs` | 171 | OpenCode | Hard error when no model is selected in non-TTY mode: `"OpenCode requires a model in non-interactive mode"`. This could move to a `model_required_in_non_tty: bool` catalog field. |
-| `lib/src/linking/agents.rs` | 166, 426 | Claude | `if provider == Provider::Claude { continue; }` skips that exclude Claude from agent-linking loops (Claude is the canonical source). |
-| `lib/src/linking/commands.rs` | 175, 505 | Claude | Same Claude-skip pattern for command linking. |
-| `lib/src/linking/skills/native.rs` | 51 | Claude | Claude-skip in native skill linking. |
-| `lib/src/linking/skills/portable.rs` | 194 | Claude | Claude-skip in portable skill missing-link checking. |
-
-### CLI Crate — Wrapper Execution (`wrap/`)
-
-| File | Lines | Provider(s) singled out | What is hardcoded |
-|------|-------|------------------------|-------------------|
-| `cli/src/main.rs` | 23–31 | All 8 variants | CLI command-to-provider mapping. Each `Commands::*` variant maps to its `Provider` enum variant. This is structural dispatch and cannot be avoided without changing the clap derive hierarchy. |
-| `cli/src/commands/wrap/mod.rs` | 558–579 | OpenCode | OpenCode model resolution via `apply_opencode_model_resolution`. Replaces the generic trait path because OpenCode uses a wire-envelope model flag rather than a CLI `--model` flag. |
-| `cli/src/commands/wrap/mod.rs` | 583–596 | OpenCode | Universal `--model` flag is skipped for OpenCode in non-interactive mode; interactive OpenCode with `--model` is special-cased. |
-| `cli/src/commands/wrap/mod.rs` | 599–601 | OpenCode | Non-interactive validation is bypassed for OpenCode because it has its own model resolution. |
-| `cli/src/commands/wrap/mod.rs` | 692 | Codex, Gemini | MCP shadow-home is only created for Codex and Gemini: `matches!(provider, Provider::Codex \| Provider::Gemini)`. |
-| `cli/src/commands/wrap/mod.rs` | 1028 | Codex | `StructuredCodexOutput::prepare` is invoked only for Codex when structured output is requested. |
-| `cli/src/commands/wrap/mod.rs` | 1289–1308 | Codex | Final assistant message is read from `--output-last-message` file and rendered to stdout after the stream ends. |
-| `cli/src/commands/wrap/composition/mod.rs` | 865 | Codex, Gemini | Same MCP shadow-home gate as `wrap/mod.rs`. |
-| `cli/src/commands/wrap/composition/mod.rs` | 1074–1090 | OpenCode | Same OpenCode model resolution as `wrap/mod.rs`. |
-| `cli/src/commands/wrap/composition/mod.rs` | 1093–1119 | OpenCode | Same `--model` skip logic as `wrap/mod.rs`. |
-| `cli/src/commands/wrap/composition/mod.rs` | 1122–1124 | OpenCode | Same validation bypass as `wrap/mod.rs`. |
-| `cli/src/commands/wrap/composition/mod.rs` | 1254–1260 | Codex | `StructuredCodexOutput::prepare` for Codex (slightly different condition: also triggered for interactive inline). |
-| `cli/src/commands/wrap/policy.rs` | 59 | Codex | `can_write` sandbox logic only for Codex. Checks `--dangerously-bypass-approvals-and-sandbox` or `--yolo`, then evaluates sandbox mode. |
-| `cli/src/commands/wrap/policy.rs` | 179–229 | OpenCode, Codex | `build_structured_plumbing` branches on provider to build the correct semantic parser + stderr bridge: OpenCode gets `OpenCodeLogBridge`, Codex gets `CodexLogBridge`, all others get plain `ObservedSemanticSink`. |
-| `cli/src/commands/wrap/harness_orch.rs` | 531–549 | Codex | Codex final assistant message rendering inside the harness loop (duplicate of `wrap/mod.rs`). |
-| `cli/src/commands/wrap/repo_home.rs` | 147 | Codex | `needs_shadow_home` matches on `Provider::Codex` when codex repo prompts exist. |
-| `cli/src/commands/wrap/repo_home.rs` | 190 | Codex | Repo-scoped resource materialization is Codex-only (`materialize_codex_prompts`). |
-| `cli/src/commands/wrap/live_semantic_sink/mod.rs` | 391–397 | Codex | Codex tool-result display: suppress the summary line for successful non-file tools. |
-| `cli/src/commands/wrap/live_semantic_sink/mod.rs` | 400–405 | Codex | Codex tool-result body rendering: show the raw body in `Normal` verbosity. |
-| `cli/src/commands/wrap/live_semantic_sink/mod.rs` | 465 | OpenCode | OpenCode `step_phase` info events are suppressed from human-visible output. |
-| `cli/src/commands/wrap/inline.rs` | 9–16 | Codex, Gemini, OpenCode | `strip_prompt_tags_for_provider` strips MCP tags only for Codex, Gemini, and OpenCode. |
-| `cli/src/commands/wrap/harness_orch.rs` | ~640 | Codex | Codex last-message file extraction for captured/non-structured attempts inside the harness loop. |
-
-### CLI Crate — WrapperProfile Trait Overrides
-
-The `WrapperProfile` trait intentionally allows per-provider overrides for behavior that does not yet fit in the typed catalog. The following methods are overridden by one or more providers:
-
-| Method | Overridden By | Could Be Catalog-Driven? |
-|--------|--------------|--------------------------|
-| `prompt_delivery` | All 8 providers | **High effort**. Delivery interacts with entrypoints, mode switching, and wire-RPC. |
-| `build_resume_args` | Claude, Codex, Kimi, Qwen | **Medium effort**. A `ResumeSupport` descriptor with flag + session-ID pattern would cover most cases. |
-| `apply_sandbox` | Codex, Qwen | **Low effort**. A `SandboxSupport` enum analogous to `YoloSupport` would suffice. |
-| `supports_interactive_inline_closure` | Codex | **Trivial**. Add `supports_interactive_inline_closure: bool` to `ProviderInfo`. |
-| `stdout_noise_prefixes` | Gemini | **Low effort**. Add `stdout_noise_prefixes` and `stderr_noise_prefixes` to `ProviderInfo`. |
-| `stderr_noise_prefixes` | Codex, Gemini, OpenCode | **Low effort**. Same as above. |
-| `apply_model` | Goose, OpenCode | **Medium effort**. Add `model_cli_flag: Option<&'static str>` (see Gap 3 above). |
-| `apply_system_prompt` | Claude, Codex, Gemini, Goose, Kimi, OpenCode, Qwen | **Medium effort**. Most providers could be covered by extending `SystemPromptSpec` with flag templates. |
-| `apply_structured_stream` | Claude, Codex, Gemini, Kimi, OpenCode, Qwen | **Medium effort**. Could be driven by a `structured_stream_flag: Option<&'static str>` catalog field. |
-| `apply_non_interactive_flags` | Gemini, Qwen | **Low effort**. Flags that conflict with non-interactive mode could be listed in `ProviderInfo`. |
-| `validate_non_interactive_requirements` | (none today) | N/A |
-| `prepare_captured_output` / `parse_captured_output` | Gemini | **Low effort**. Captured-output format could be a catalog field. |
-| `suppress_structured_stderr_on_success` | Gemini | **Low effort**. A bool in `ProviderInfo`. |
-| `allowed_env_keys` | Codex, Gemini, Kimi, OpenCode, Qwen | **Low effort**. A static slice in `ProviderInfo`. |
+Lib-crate dispatch is not part of this inventory; it is enforced (with an explicit allow-list of authorized sites) by the `no_unauthorized_match_provider_in_lib` guard described under "Source-Scan Drift Guard" below. The WrapperProfile override classification formerly tabulated here is generated from this inventory during the WrapperProfile disposition work (`design/pipeline-dry.md`, workstream 3).
 
 ## Ensuring a Single Source of Truth
 

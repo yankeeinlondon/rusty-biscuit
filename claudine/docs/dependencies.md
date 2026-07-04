@@ -29,3 +29,18 @@
   system-installed protobuf compiler, its `build.rs` uses `protoc-bin-vendored`
   to supply a bundled `protoc` on macOS, Windows, and Linux. CI workflows also
   install `protoc` (`arduino/setup-protoc`) as a backstop.
+
+## Provider-Catalog Generation (Phase A1)
+
+- `claudine-catalog-types` (`claudine/catalog-types`) is a leaf crate — serde
+  and `strum` only — holding the coerced catalog enums (`ModelCatalogSource`),
+  the shared detection vocab (`Unit`/`Zone`/`Confidence`), and the
+  `DisplayPolicy`/`EventClass` render-policy shells. Both `claudine` (library)
+  and `claudine-gen` depend on it; `strum`'s variant-name introspection backs
+  the generator's schema↔catalog enum-subset gate.
+- `claudine-gen` (`claudine/gen`) depends on `darkmatter` (frontmatter parsing
+  plus SimplifiedSchema sidecar validation), `serde`/`serde_json`/
+  `serde_yaml_ng`, `clap`, and `thiserror` — and deliberately NOT on the
+  `claudine` library or CLI (bootstrap rule: a broken generated catalog must
+  never block building the tool that regenerates it). `claudine-cli` shells
+  out to the `claudine-gen` binary for `claudine providers generate`.

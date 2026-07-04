@@ -158,7 +158,12 @@ Follow these steps exactly:
       abbreviated. Add `alias` when a short form exists, `context_window` when
       documented, and `is_default: true` on the model used when none is specified
     - `model_selection` - one record per mechanism documented in `## Model Selection`,
-      with the `site` and `example` shown there
+      with the `site` and `example` shown there. **One selection site per record**:
+      for `env_var` records, `site` must be a single environment-variable name
+      (`UPPER_SNAKE_CASE`, nothing else) — never pack a family like
+      `"VAR_A / VAR_B"` into one record. Give each variable its own record and
+      describe the family relationship in `notes`. Compound sites cannot feed the
+      generated catalog (`claudine-gen` reports them as skipped records)
     - `precedence` - the highest-wins ordering you established in `## Model Selection`
       (e.g. "cli_flag > env_var > config_file")
     - `dynamic_listing` - the facts from `## Dynamic Listing`: `available`, plus

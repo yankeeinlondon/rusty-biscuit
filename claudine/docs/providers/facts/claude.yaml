@@ -1,0 +1,10 @@
+# Topic-less catalog facts for the claude provider.
+#
+# Field-source matrix (design/catalog-generation.md): this file owns values
+# whose research topic has not landed yet. Keys are catalog field names.
+# Seeded from the hand-written `CLAUDE_INFO` constants via
+# `claudine providers --describe --format json | claudine-gen scrape-facts claude`.
+# When a field's research topic lands, the mapping registry re-points the
+# field and generation ERRORS while this file still carries the key
+# (delete-on-graduate).
+supports_skills: true
