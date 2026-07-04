@@ -79,8 +79,6 @@ pub enum SystemPromptCustomTag {
         note = "Replaced by ConfigKeyFile/ConfigKeyInline in SystemPromptDelivery; kept for one deprecation cycle"
     )]
     CodexInstructionsFile,
-    /// Roo Code: per-mode system prompt files under `.roo/`.
-    RooModePromptFile,
 }
 
 /// System-prompt delivery split by entrypoint mode.

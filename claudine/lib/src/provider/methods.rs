@@ -247,7 +247,6 @@ mod tests {
             (Provider::KimiCode, "kimi_code"),
             (Provider::OpenCode, "open_code"),
             (Provider::QwenCode, "qwen_code"),
-            (Provider::RooCode, "roo_code"),
         ];
         for (variant, expected) in cases {
             let json = serde_json::to_value(variant).unwrap();
@@ -264,7 +263,6 @@ mod tests {
         assert_eq!(Provider::KimiCode.to_string(), "Kimi Code");
         assert_eq!(Provider::OpenCode.to_string(), "OpenCode");
         assert_eq!(Provider::QwenCode.to_string(), "Qwen Code");
-        assert_eq!(Provider::RooCode.to_string(), "Roo Code");
     }
 
     #[test]
@@ -282,21 +280,19 @@ mod tests {
         assert!(Provider::Gemini.supports_skills());
         assert!(Provider::OpenCode.supports_skills());
         assert!(Provider::QwenCode.supports_skills());
-        assert!(Provider::RooCode.supports_skills());
         assert!(!Provider::Goose.supports_skills());
         assert!(!Provider::KimiCode.supports_skills());
     }
 
     #[test]
-    fn as_slug_returns_snake_case() {
+    fn as_slug_returns_canonical_slugs() {
         assert_eq!(Provider::Claude.as_slug(), "claude");
         assert_eq!(Provider::Codex.as_slug(), "codex");
         assert_eq!(Provider::Gemini.as_slug(), "gemini");
         assert_eq!(Provider::Goose.as_slug(), "goose");
-        assert_eq!(Provider::KimiCode.as_slug(), "kimi_code");
-        assert_eq!(Provider::OpenCode.as_slug(), "open_code");
-        assert_eq!(Provider::QwenCode.as_slug(), "qwen_code");
-        assert_eq!(Provider::RooCode.as_slug(), "roo_code");
+        assert_eq!(Provider::KimiCode.as_slug(), "kimi");
+        assert_eq!(Provider::OpenCode.as_slug(), "opencode");
+        assert_eq!(Provider::QwenCode.as_slug(), "qwen");
     }
 
     #[test]
@@ -309,7 +305,6 @@ mod tests {
             Provider::KimiCode,
             Provider::OpenCode,
             Provider::QwenCode,
-            Provider::RooCode,
         ] {
             let url = provider.docs_url();
             assert!(
@@ -435,19 +430,6 @@ mod tests {
         assert!(!Provider::QwenCode.supports_event(&SubagentStop));
         assert!(!Provider::QwenCode.supports_event(&BeforeModel));
         assert!(!Provider::QwenCode.supports_event(&BeforeCompact));
-    }
-
-    #[test]
-    fn supports_event_roocode() {
-        use crate::events::AgenticEvent::*;
-
-        assert!(Provider::RooCode.supports_event(&SessionStart));
-        assert!(Provider::RooCode.supports_event(&BeforeTool));
-        assert!(Provider::RooCode.supports_event(&AfterModel));
-        assert!(Provider::RooCode.supports_event(&HumanInTheLoop));
-        assert!(!Provider::RooCode.supports_event(&BeforePrompt));
-        assert!(!Provider::RooCode.supports_event(&PermissionRequest));
-        assert!(!Provider::RooCode.supports_event(&BeforeCompact));
     }
 
     #[test]
@@ -588,31 +570,6 @@ mod tests {
     }
 
     #[test]
-    fn event_support_level_roocode_all_non_hook() {
-        use crate::events::AgenticEvent::*;
-
-        assert!(
-            Provider::RooCode
-                .event_support_level(&TurnComplete)
-                .is_supported()
-                && !Provider::RooCode
-                    .event_support_level(&TurnComplete)
-                    .is_hook()
-        );
-        assert!(
-            Provider::RooCode
-                .event_support_level(&BeforeTool)
-                .is_supported()
-                && !Provider::RooCode.event_support_level(&BeforeTool).is_hook()
-        );
-        assert!(
-            !Provider::RooCode
-                .event_support_level(&BeforePrompt)
-                .is_supported()
-        );
-    }
-
-    #[test]
     fn supports_event_via_hook() {
         use crate::events::AgenticEvent::*;
         assert!(Provider::Claude.supports_event_via_hook(&TurnComplete));
@@ -625,7 +582,6 @@ mod tests {
         assert!(!Provider::Goose.supports_event_via_hook(&TurnComplete));
         assert!(!Provider::KimiCode.supports_event_via_hook(&TurnComplete));
         assert!(!Provider::QwenCode.supports_event_via_hook(&TurnComplete));
-        assert!(!Provider::RooCode.supports_event_via_hook(&TurnComplete));
     }
 
     #[test]
@@ -676,10 +632,6 @@ mod tests {
             Provider::parse_cli_name("QWEN_CODE"),
             Some(Provider::QwenCode)
         );
-        assert_eq!(
-            Provider::parse_cli_name("Roo Code"),
-            Some(Provider::RooCode)
-        );
         assert_eq!(Provider::parse_cli_name(""), None);
     }
 
@@ -709,7 +661,6 @@ mod tests {
         assert_eq!(Provider::KimiCode.sniff_ai_cli(), AiCli::KimiCli);
         assert_eq!(Provider::OpenCode.sniff_ai_cli(), AiCli::Opencode);
         assert_eq!(Provider::QwenCode.sniff_ai_cli(), AiCli::QwenCli);
-        assert_eq!(Provider::RooCode.sniff_ai_cli(), AiCli::Roo);
     }
 
     #[test]
@@ -721,7 +672,6 @@ mod tests {
         assert_eq!(Provider::KimiCode.agent_offset(), ".kimi");
         assert_eq!(Provider::OpenCode.agent_offset(), ".opencode");
         assert_eq!(Provider::QwenCode.agent_offset(), ".qwen");
-        assert_eq!(Provider::RooCode.agent_offset(), ".roo");
     }
 
     #[test]

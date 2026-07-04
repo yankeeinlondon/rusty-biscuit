@@ -57,9 +57,6 @@ pub enum ReasoningCustomTag {
     /// Goose: reasoning effort is delegated through provider-specific
     /// environment variables (e.g. `GEMINI3_THINKING_LEVEL`).
     GooseDelegated,
-    /// Roo Code: reasoning surface is provider-specific, mediated by
-    /// the underlying VSCode extension's mode configuration.
-    RooModeBased,
     /// Catch-all for not-yet-categorized reasoning surfaces.
     Other,
 }

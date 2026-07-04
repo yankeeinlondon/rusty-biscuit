@@ -16,7 +16,6 @@ use super::goose::GOOSE_INFO;
 use super::kimi::KIMI_INFO;
 use super::opencode::OPENCODE_INFO;
 use super::qwen::QWEN_INFO;
-use super::roo::ROO_INFO;
 
 /// The canonical provider registry, initialized on first access.
 pub(crate) static REGISTRY: OnceLock<[&'static ProviderInfo; PROVIDER_COUNT]> = OnceLock::new();
@@ -36,7 +35,6 @@ pub fn provider_info(provider: Provider) -> &'static ProviderInfo {
             &KIMI_INFO,
             &OPENCODE_INFO,
             &QWEN_INFO,
-            &ROO_INFO,
         ]
     });
     registry[provider as usize]

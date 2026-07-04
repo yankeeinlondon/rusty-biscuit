@@ -35,7 +35,6 @@ mod prompt_args;
 mod qwen;
 mod reasoning;
 mod registry;
-mod roo;
 mod system_prompt;
 mod yolo;
 

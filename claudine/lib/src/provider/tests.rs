@@ -783,6 +783,49 @@ fn no_unauthorized_match_provider_in_lib() {
     );
 }
 
+/// Shrink-only guard for the TEMPORARY `provider/<slug>/legacy.rs` files.
+///
+/// The module split (design/module-split.md) relocated each provider's
+/// legacy `AgentCapabilities` builders into a `legacy.rs` slated for
+/// deletion at AgentCapabilities retirement. Nothing new may ever be added:
+/// the set of `legacy.rs` files may only shrink from the eight recorded
+/// here. Deleting one is fine (do NOT re-add it to this list); a new one
+/// appearing fails this guard.
+#[test]
+fn provider_legacy_files_only_shrink() {
+    use std::fs;
+    use std::path::Path;
+
+    let allowed: &[&str] = &[
+        "claude", "codex", "gemini", "goose", "kimi", "opencode", "qwen",
+    ];
+
+    let provider_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/provider");
+    let mut unexpected = Vec::new();
+    for entry in fs::read_dir(&provider_dir).expect("src/provider must be readable") {
+        let path = entry.expect("readable dir entry").path();
+        if !path.is_dir() || !path.join("legacy.rs").is_file() {
+            continue;
+        }
+        let slug = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_string();
+        if !allowed.contains(&slug.as_str()) {
+            unexpected.push(slug);
+        }
+    }
+
+    assert!(
+        unexpected.is_empty(),
+        "New provider legacy.rs file(s) found for {unexpected:?}. The legacy \
+         `AgentCapabilities` tree is retirement-only (design/module-split.md): \
+         new providers must not add a `legacy.rs`; put typed catalog data in \
+         `data.rs` and trait impls in `behavior.rs` instead."
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Phase 5: typed catalog property tests
 // ---------------------------------------------------------------------------
@@ -1052,8 +1095,8 @@ fn representative_payload_for(provider: Provider) -> Option<serde_json::Value> {
         Provider::Gemini => serde_json::json!({"hook_event_name": "BeforeAgent"}),
         Provider::OpenCode => serde_json::json!({"event_type": "session.idle"}),
         Provider::KimiCode => serde_json::json!({"method": "notification"}),
-        // Goose, Qwen, and Roo do not detect via raw payload shape today.
-        Provider::Goose | Provider::QwenCode | Provider::RooCode => return None,
+        // Goose and Qwen do not detect via raw payload shape today.
+        Provider::Goose | Provider::QwenCode => return None,
     })
 }
 
@@ -1500,7 +1543,6 @@ fn detect_from_payload_has_no_provider_specific_branches() {
         "Provider::KimiCode",
         "Provider::Goose",
         "Provider::QwenCode",
-        "Provider::RooCode",
         "looks_like_codex_payload",
         "hook_event_name",
         "event_type",
