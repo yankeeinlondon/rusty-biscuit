@@ -552,7 +552,7 @@ cli_switches:
     description: "Follows LiteRT server logs."
     example: "gemini gemma logs --follow"
     notes: "Alias: `-f`."
-config_files:
+config_paths:
   - os: macos
     scope: user
     path: ~/.gemini/settings.json

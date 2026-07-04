@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-178702e10af81bb0
-last_updated: 2026-06-30
+hash: ef46db3751d8e999-947af31e798bc8d0
+last_updated: 2026-07-04
 ---
 # Claudine Composition
 
@@ -318,10 +318,6 @@ OpenCode requires a model in non-interactive mode. If no model survives the reso
 ```
 OpenCode requires a model in non-interactive mode; set --model, OPENCODE_MODEL, or MODEL
 ```
-
-### Roo Exclusion
-
-Roo Code is excluded from composition provider selection because it is a VS Code extension rather than a wrappable CLI. Roo does not appear in the TTY picker and is silently filtered from the installed-provider snapshot in non-TTY resolution.
 
 ### Shorthand Flags
 

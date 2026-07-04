@@ -53,10 +53,6 @@ describe *Claudine's* catalog and injection behavior, NOT provider behavior. Ver
 every claim against the provider's primary sources — official docs, source code,
 release notes, `--help`, and local inspection.
 
-Prior-generation research files in this directory (`qwen.md`, `roo.md`) are validation
-assets for humans — do NOT open, paraphrase, or cite them; your research must be
-independent.
-
 Write the result to `{{file}}`. Include `$schema: ./_schema.yaml` in frontmatter so the
 document can be validated, but treat the instructions below as the source of what
 high-quality research must contain.

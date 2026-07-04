@@ -6,7 +6,7 @@ agent: open_code
 model: kimi-for-coding/k2p7
 has_official_schema: formal
 schema_url: https://app.kilo.ai/config.json
-config_files:
+model_config_paths:
   - scope: user
     path: ~/.config/kilo/kilo.jsonc
     format: jsonc

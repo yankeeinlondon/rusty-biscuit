@@ -48,10 +48,6 @@ to someone implementing a wrapper, not merely a summary of docs. Boundary: the a
 topic's switch inventory records the *existence* of system-prompt-related flags; this
 topic owns their semantics and delivery behavior.
 
-Prior-generation research files in this directory (`qwen.md`, `roo.md`) are validation
-assets for humans — do not open, paraphrase, or cite them; your research must be
-independent.
-
 Write the result to `{{file}}`. Include `$schema: ./_schema.yaml` in frontmatter so the
 document can be validated, but treat the instructions below as the source of what
 high-quality research must contain.

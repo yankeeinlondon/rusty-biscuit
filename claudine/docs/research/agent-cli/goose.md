@@ -679,7 +679,7 @@ cli_switches:
     description: "Path to bundled-extensions JSON file."
     example: "goose validate-extensions bundled-extensions.json"
     notes: "Hidden command positional argument."
-config_files:
+config_paths:
   - os: macos
     scope: user
     path: "~/.config/goose/config.yaml"

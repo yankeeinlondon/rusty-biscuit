@@ -608,7 +608,7 @@ cli_switches:
     description: "No native opencode run CLI flag for inline/file system-prompt replacement or append was observed in local help, official CLI docs, or v1.17.13 run source."
     example: "opencode run \"prompt\""
     notes: "OpenCode uses agents and config instructions for prompt/instruction delivery. Defer Claudine wrapper semantics to the sibling system-prompt topic."
-config_files:
+config_paths:
   - os: macos
     scope: user
     path: "~/.config/opencode/opencode.json"
@@ -1034,7 +1034,7 @@ changes:
   - "Recorded local help/docs discrepancy: installed CLI exposes providers with auth alias, while official docs list auth."
   - "Added locally observed console command, which is present in the installed binary/source but omitted from the official CLI docs page."
   - "Expanded environment variable inventory to match the 2026-07-03 official CLI docs, including model-fetch and experimental feature variables."
-  - "Reworked config_files frontmatter into per-OS records required by the sidecar schema instead of invalid os: all records."
+  - "Reworked config_paths frontmatter into per-OS records required by the sidecar schema instead of invalid os: all records."
   - "Confirmed local machine-readable probes: debug config JSON, debug paths text, debug skill JSON, session list JSON, db JSON, db path text, generate OpenAPI JSON, and auth/providers list text."
 requires_claudine_update: true
 reason: "Claudine provider metadata/wrappers should reflect the current OpenCode command aliases (providers/auth), local console command, expanded env-var surface, per-OS config path records, and confirmed machine-introspection commands."
@@ -1215,7 +1215,7 @@ No native run-level system-prompt delivery flag was observed. Use OpenCode confi
 - 2026-07-03: Verified latest upstream and local installed OpenCode version remains `1.17.13`.
 - 2026-07-03: Recorded local help/docs discrepancy for `providers` versus `auth`, and documented `console` as locally present but omitted from the official CLI page.
 - 2026-07-03: Expanded the environment variable inventory to match the 2026-07-03 official CLI docs, including model-fetch and experimental feature variables.
-- 2026-07-03: Reworked `config_files` frontmatter into per-OS records required by `_schema.yaml`; removed invalid `os: all` records from the prior version.
+- 2026-07-03: Reworked `config_paths` frontmatter into per-OS records required by `_schema.yaml`; removed invalid `os: all` records from the prior version.
 - 2026-07-03: Confirmed local machine-readable probes for config, paths, skills, sessions, database, OpenAPI generation, and provider/auth listing.
 
 ## Sources

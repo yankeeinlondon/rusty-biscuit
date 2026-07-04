@@ -21,7 +21,7 @@ $schema:
     schema_url: url
 
     # One record per config file where model configuration can live.
-    config_files: "{ scope: enum(user,repo,env; required), path: string(required), format: enum(json,jsonc,toml,yaml,other; required), notes: string }[]"
+    model_config_paths: "{ scope: enum(user,repo,env; required), path: string(required), format: enum(json,jsonc,toml,yaml,other; required), notes: string }[]"
 
     # One record per API standard the provider supports for user-added models.
     # `base_url_site` / `auth_site` name the config keys or env vars involved;

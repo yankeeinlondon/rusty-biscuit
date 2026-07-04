@@ -7,8 +7,8 @@ prompt: |-
   - identify what CLI switches or prompt frontmatter has an impact on each step and what that impact is
 
   After fully documenting the flows add a section called `## Future Improvements` and add any improvements you think could be made to the current flow
-last_updated: 2026-06-28
-hash: 7738d51f4cfa73e2-aed7bc2afc2e5d25
+last_updated: 2026-07-04
+hash: 7738d51f4cfa73e2-83b6b84817b7ee16
 ---
 Let me explore the composition-related source code and documentation to trace the exact execution flows.Now let me read the existing composition topic doc and the key source files for precision:Now let me read the critical execution pipeline files:Now let me read the remaining portions of the composition executor to get the full execution pipeline:Now I have a comprehensive understanding of all three flows. Let me compose the complete Markdown body.Now I have all the details needed. Let me produce the comprehensive Markdown body content:Now I have all the details. Let me compose the full Markdown document body:
 
@@ -119,7 +119,7 @@ All three commands share the same bootstrap path before diverging:
 
 Before clap parses anything, `argv::normalize()` applies four syntactic rewrite rules in fixed order:
 
-1. **Rule 1** — Rewrites provider boolean flags (`--claude`, `--codex`, `--gemini`, `--goose`, `--kimi`, `--opencode`, `--qwen`, `--roo`) to `--provider <slug>` on composition subcommands only, so wrapper passthrough is preserved.
+1. **Rule 1** — Rewrites provider boolean flags (`--claude`, `--codex`, `--gemini`, `--goose`, `--kimi`, `--opencode`, `--qwen`) to `--provider <slug>` on composition subcommands only, so wrapper passthrough is preserved.
 2. **Rule 2** — Canonicalizes `--provider <value>` / `--provider=<value>` via `Provider::fuzzy_match_cli_name` (e.g. `cl` → `claude`).
 3. **Rule 4** — Hoists a trailing `--help` / `-h` to argv position 1 on composition subcommands so the root custom help handler fires.
 4. **Rule 3** — Inserts a single `--` separator before the first `key=value` setter that follows an interleaved flag after a previously seen positional, fixing ambiguous arg boundaries.
@@ -752,10 +752,6 @@ OpenCode requires a model in non-interactive mode. If no model survives the reso
 ```text
 OpenCode requires a model in non-interactive mode; set --model, OPENCODE_MODEL, or MODEL
 ```
-
-### Roo Exclusion
-
-Roo Code is excluded from composition provider selection because it is a VS Code extension rather than a wrappable CLI. Roo does not appear in the TTY picker and is silently filtered from the installed-provider snapshot in non-TTY resolution.
 
 ### Shorthand Flags
 

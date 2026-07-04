@@ -308,7 +308,7 @@ cli_switches:
     description: "Sets `default_model` after importing a catalog provider."
     example: "kimi provider catalog add anthropic --api-key sk-ant-... --default-model claude-opus-4-7"
     notes: "Current docs document this under `provider catalog add`."
-config_files:
+config_paths:
   - os: macos
     scope: user
     path: /Users/<name>/.kimi-code/config.toml

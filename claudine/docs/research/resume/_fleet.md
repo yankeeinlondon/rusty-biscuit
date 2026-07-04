@@ -47,10 +47,6 @@ topic owns session identity, persistence, and re-entry semantics. Record the
 resume-relevant invocations here, but leave stream/format depth to that topic; it
 reciprocally leaves resume semantics to this one.
 
-Prior-generation research files in this directory (`overview.md`, `qwen.md`, `roo.md`)
-are validation assets for humans — do NOT open, paraphrase, or cite them; your research
-must be independent.
-
 ## What Resume Means
 
 For this research, **resume** means any provider-supported way to continue, reopen,

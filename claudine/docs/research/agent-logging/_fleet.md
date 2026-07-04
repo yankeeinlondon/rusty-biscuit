@@ -46,8 +46,6 @@ Use the 'claudine' skill.
 
 This topic covers the **log surfaces**, **record semantics**, and **time semantics** of {{state.name}}: where logs live on disk, how they are organized and archived, what record types they contain, and how their timestamps behave. It feeds Claudine's log ingestion and observability layers. Boundaries against sibling topics: the hooks topic owns lifecycle-event semantics, and the usage topic owns quota inspection — mention those surfaces here only where they explain a log record.
 
-Prior-generation research files in this directory (`roo-code.md`) are validation assets for humans — do not open, paraphrase, or cite them; your research must be independent.
-
 ## Document Structure
 
 Your job is to do detailed research into the **logging** features of the **{{state.desc}}**. You are expected to answer the following questions:

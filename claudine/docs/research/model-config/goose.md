@@ -5,7 +5,7 @@ last_updated: 2026-07-02
 agent: open_code
 model: kimi-for-coding/k2p7
 has_official_schema: none
-config_files:
+model_config_paths:
   - scope: user
     path: ~/.config/goose/config.yaml
     format: yaml

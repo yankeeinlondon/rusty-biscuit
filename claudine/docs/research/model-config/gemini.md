@@ -6,7 +6,7 @@ agent: open_code
 model: kimi-for-coding/k2p7
 has_official_schema: formal
 schema_url: https://raw.githubusercontent.com/google-gemini/gemini-cli/main/schemas/settings.schema.json
-config_files:
+model_config_paths:
   - scope: user
     path: ~/.gemini/settings.json
     format: json

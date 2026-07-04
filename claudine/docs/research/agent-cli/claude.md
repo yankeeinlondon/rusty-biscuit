@@ -737,7 +737,7 @@ cli_switches:
     description: "Maximum minutes to wait for an ultrareview."
     example: "claude ultrareview --timeout 10 --json"
     notes: "Scoped to `ultrareview`."
-config_files:
+config_paths:
   - os: macos
     scope: user
     path: "~/.claude/settings.json"

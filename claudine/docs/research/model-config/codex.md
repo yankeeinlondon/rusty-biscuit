@@ -7,7 +7,7 @@ model: kimi-for-coding/k2p7
 has_official_schema: formal
 schema_url: https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/config.schema.json
 
-config_files:
+model_config_paths:
   - scope: user
     path: ~/.codex/config.toml
     format: toml

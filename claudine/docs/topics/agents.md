@@ -17,11 +17,10 @@ The `claudine agents [FILTER...]` subcommand reports on the current state of **a
 Agents differ from skills in several important ways that affect discovery, validation, and linking:
 
 1. **Single files, not directory bundles.** Most providers define agents as individual files (e.g., `researcher.md`) rather than skill-style directories containing `SKILL.md` plus supporting files.
-2. **Format heterogeneity.** While skills are universally Markdown with YAML frontmatter, agents span Markdown (Claude, Codex, Gemini, OpenCode, Qwen), YAML (Goose recipes, KimiCode agents, Roo Code mode definitions) — each with a different schema.
-3. **Terminology divergence.** Goose calls them "recipes", Roo Code calls them "modes", KimiCode uses "agents" but with a YAML-only schema. The CLI normalizes all of these under the "agents" umbrella.
-4. **Roo Code structural anomaly.** Roo Code stores mode definitions in a single `.roomodes` file at the repo root OR `.roo/custom_modes.yaml` at user level, not as individual files in a directory.
-5. **No `FileSystem` tree.** Since agents are single files, the Detail View shows file content (frontmatter and opening lines) rather than a directory tree.
-6. **Canonical provider must use Markdown.** Because cross-format conversion (Markdown ↔ YAML) is out of scope, only Markdown-based providers are eligible to be the canonical provider for agents. This excludes Goose (YAML recipes), KimiCode (YAML with Markdown sidecar), and Roo Code (YAML mode definitions) from canonical selection. During `claudine init`, these providers must not appear as options for the agent canonical provider.
+2. **Format heterogeneity.** While skills are universally Markdown with YAML frontmatter, agents span Markdown (Claude, Codex, Gemini, OpenCode, Qwen), YAML (Goose recipes, KimiCode agents) — each with a different schema.
+3. **Terminology divergence.** Goose calls them "recipes", KimiCode uses "agents" but with a YAML-only schema. The CLI normalizes all of these under the "agents" umbrella.
+4. **No `FileSystem` tree.** Since agents are single files, the Detail View shows file content (frontmatter and opening lines) rather than a directory tree.
+5. **Canonical provider must use Markdown.** Because cross-format conversion (Markdown ↔ YAML) is out of scope, only Markdown-based providers are eligible to be the canonical provider for agents. This excludes Goose (YAML recipes) and KimiCode (YAML with Markdown sidecar) from canonical selection. During `claudine init`, these providers must not appear as options for the agent canonical provider.
 
 ## Provider Support Matrix
 
@@ -34,7 +33,6 @@ Agents differ from skills in several important ways that affect discovery, valid
 | KimiCode  | CustomFormat  | YAML     | `.kimi/agents`             | `.kimi/agents`                  | `name`, `system_prompt_path`, `tools`       | `extend`, `system_prompt_args`, `exclude_tools`, `subagents`                             |
 | OpenCode  | Full          | Markdown | `.opencode/agents`         | `.config/opencode/agents`       | `description`                               | `mode`, `model`, `temperature`, `top_p`, `tools`, `permission`, `steps`, `color`, `hidden`, `disable`, `prompt` |
 | Qwen      | Full          | Markdown | `.qwen/agents`             | `.qwen/agents`                  | `name`, `description`                       | `tools`, `color`                                                                         |
-| Roo Code  | CustomFormat  | YAML     | `.roomodes`                | `.roo/custom_modes.yaml`        | `slug`, `name`, `roleDefinition`, `groups`  | `description`, `whenToUse`, `customInstructions`                                         |
 
 ## Reporting Sections
 
@@ -54,7 +52,7 @@ The reporting is broken down into the following sections:
    - the _canonical_ base providers will be defined in the user and repo configuration files and are set when the user runs `claudine init` (via an interactive Q and A).
        - obviously if the current working directory is **not** a git repo then we only report on the user scoped canonical provider
    - to provide symbolic links _to_ agents we need to isolate which provider will _provide_ the agent sources ... the "canonical provider" is the designated provider of agents.
-   - **Only Markdown-based providers** are eligible as canonical for agents (see Key Differences #6). YAML-based providers (Goose, KimiCode, Roo Code) are excluded because cross-format conversion is not yet supported.
+   - **Only Markdown-based providers** are eligible as canonical for agents (see Key Differences #5). YAML-based providers (Goose, KimiCode) are excluded because cross-format conversion is not yet supported.
    - based on this context here are two examples of what **line 5** of the Header Intro section might look like:
        - example 1 (user & repo): `<blue><b>Canonical Providers:</b></blue> user: <b>{user-provider}</b>, repo: <b>{repo-provider}</b>`
        - example 2 (user only): `<blue><b>Canonical Providers:</b></blue> user: <b>{user-provider}</b>`
@@ -72,7 +70,7 @@ The reporting is broken down into the following sections:
           - Then a blank line
           - Now we show the **agent file content preview**: read the agent file and display up to 20 lines of its content using a `CodeBlock`-style rendering (or equivalent)
               - For Markdown agents: show the frontmatter block and the first few lines of body content
-              - For YAML agents (Goose, KimiCode, Roo Code): show the first 20 lines of the YAML file
+              - For YAML agents (Goose, KimiCode): show the first 20 lines of the YAML file
               - Left margin of 2 characters
           - If the agent specifies a `model` property, append a warning line after the content preview:
             `<dim><i><orange>note:</orange> this agent specifies a <b>model</b> property which limits cross-provider shareability</i></dim>`
@@ -123,15 +121,13 @@ The reporting is broken down into the following sections:
 
    CLIs ignore frontmatter properties they don't recognize. This means we can add _all_ alias variants directly into the canonical source file and continue to symlink everywhere. This is a one-time enrichment of the canonical file — after which symlinks keep everything in sync by definition, avoiding the drift risk of derived copies.
 
-   For example, if the canonical agent has `name: Code Review`, the fix adds `title: Code Review` and `slug: code-review` to the same frontmatter block. The file now satisfies Claude (which reads `name`), Goose (which reads `title`), and Roo Code (which reads `slug`) — all through the same symlink.
+   For example, if the canonical agent has `name: Code Review`, the fix adds `title: Code Review` to the same frontmatter block. The file now satisfies Claude (which reads `name`) and Goose (which reads `title`) — both through the same symlink.
 
    Known property aliases:
 
    | Canonical Property | Alias Property      | Target Provider | Derivation                                                   |
    |--------------------|---------------------|-----------------|--------------------------------------------------------------|
    | `name`             | `title`             | Goose           | Copied as-is — same semantic meaning                         |
-   | `name`             | `slug`              | Roo Code        | Derived as kebab-case (e.g., "Code Review" → `code-review`)  |
-   | `description`      | `whenToUse`         | Roo Code        | Copied as-is — `description` typically describes when to use  |
 
    The fix inserts missing aliases and tracks them as `aliases_inserted` in the Fix Summary.
 
@@ -151,12 +147,9 @@ The reporting is broken down into the following sections:
 
    **Fixes that cannot be automated:**
 
-   - **Format conversion** (Markdown → YAML for Goose, KimiCode, Roo Code): Structural differences between Markdown frontmatter and YAML schemas are too significant for automated conversion. Tracked as `format_incompatible`.
+   - **Format conversion** (Markdown → YAML for Goose, KimiCode): Structural differences between Markdown frontmatter and YAML schemas are too significant for automated conversion. Tracked as `format_incompatible`.
    - **`model` property translation**: Provider-specific. Planned for Phase 2 (see `model-property-design.md`). In Phase 1, flagged as `ModelPropertyNotShareable`. See [Non-Portable Assets](non-portable-assets.md) for the full portability analysis of `model`, `tools`, and `skills`.
-   - **`description` → `roleDefinition`** (Roo Code): Unlike the aliases above, `roleDefinition` is semantically distinct from `description` — it defines the agent's persona, not just when to use it. This requires human authoring and is not auto-aliased.
    - **`system_prompt_path` for KimiCode**: KimiCode agents require a file path to an external system prompt. This has no equivalent in other providers and cannot be derived.
-   - **`groups` for Roo Code**: The `groups` array (e.g., `["read", "edit", "browser"]`) defines permission boundaries. There is no universal equivalent — requires human configuration.
-   - **Roo Code single-file merging**: Since Roo Code stores all modes in one file, inserting a new mode requires parsing and modifying the existing YAML structure, which carries risk of corrupting other mode entries. Flagged but not auto-fixed.
 
 6. Exceptions
 
@@ -166,7 +159,7 @@ The reporting is broken down into the following sections:
 
    **Format-incompatible providers** are rendered as simple one-liners in an unordered list, with no sub-bullets:
    - `<b>{provider}</b> — ❌ uses a non-standard format which is incompatible with Claudine.`
-   - Examples: Goose (YAML recipes), KimiCode (YAML), Roo Code (YAML mode definitions)
+   - Examples: Goose (YAML recipes), KimiCode (YAML)
 
    **Regular providers** are grouped by provider with a header line showing provider name, user agent path, and repo agent path:
    - `<b>{provider} [ user:</b> ~/{user_path}<b>, repo:</b> <magenta>{repo_path}</magenta> ]`
@@ -204,7 +197,7 @@ The reporting is broken down into the following sections:
        - the message `<dim><i>using parameters in the CLI call will act as <b>filters</b> to help reduce the agents to only those you are interested in</i></dim>`
        - only shown when no filter parameters were provided
    - **format warning**
-       - the message `<dim><i>agents with <orange>CustomFormat</orange> providers (Goose, KimiCode, Roo Code) require format conversion and cannot be directly symlinked</i></dim>`
+       - the message `<dim><i>agents with <orange>CustomFormat</orange> providers (Goose, KimiCode) require format conversion and cannot be directly symlinked</i></dim>`
        - only shown when there is at least one `FormatIncompatible` exception being reported
    - **property passthrough notes** (verbose only)
        - only shown when the `-v` / `--verbose` flag is used AND at least one agent in the listing has properties that are only consumed by a subset of CLIs
@@ -331,14 +324,6 @@ When the canonical source format does not match the target provider's expected f
 - The `--fix` operation increments the `format_incompatible` counter
 - A future enhancement may support format conversion (Markdown frontmatter to YAML and vice versa), but this is out of scope for the initial implementation
 
-### Roo Code Special Handling
-
-Roo Code stores all mode definitions in a single file (`.roomodes` or `.roo/custom_modes.yaml`) rather than individual files. This means:
-
-- **Discovery**: Parse the YAML file and extract individual mode entries
-- **Linking**: Cannot create per-agent symlinks; the entire modes file is the unit of linking
-- **Exceptions**: Missing/Invalid exceptions reference the modes file, not individual agent paths
-
 ## Agent Discovery
 
 Agent discovery follows the same pattern as skill discovery but adapted for single files:
@@ -347,7 +332,6 @@ Agent discovery follows the same pattern as skill discovery but adapted for sing
 2. For each directory, scan for agent files matching the provider's expected format:
    - Markdown providers: `*.md` files
    - YAML providers: `*.yaml` and `*.yml` files
-   - Roo Code: parse the single modes file
 3. Parse each agent file to extract name, description, and properties
 4. Determine scope (User, RepoMasked, Repo) based on path location
 5. Flag agents with non-portable properties (`model`, `tools`, `skills`) as having limited shareability — see [Non-Portable Assets](non-portable-assets.md)

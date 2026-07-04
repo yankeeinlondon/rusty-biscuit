@@ -151,7 +151,7 @@ Follow these steps exactly:
       schema for its config file, "informal" if only documented prose/examples exist,
       otherwise "none"
     - `schema_url` - the URL of the (formal preferred) config schema; omit when none
-    - `config_files` - one record per config file that accepts model configuration:
+    - `model_config_paths` - one record per config file that accepts model configuration:
       `scope` (`user`/`repo`/`env`), `path` (template form, e.g.
       `~/.config/opencode/opencode.jsonc`), `format`, `notes`
     - `api_standards` - one record per supported standard for user-added models:

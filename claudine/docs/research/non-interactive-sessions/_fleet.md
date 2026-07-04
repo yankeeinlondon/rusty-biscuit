@@ -32,10 +32,6 @@ failure:
 Research how **{{state.desc}}** behaves when it runs as a **non-interactive agent
 session**.
 
-Prior-generation research files in this directory (`qwen.md`, `roo-code.md`,
-`codex-gotchas.md`, `codex-tools-and-events.md`) are validation assets for humans — do
-not open, paraphrase, or cite them; your research must be independent.
-
 When an agent runs non-interactively, Claudine is not just trying to get the final answer
 as text. Claudine is acting as a wrapper around an autonomous process. It needs to see
 what is happening while the run is still active: which model is being used, which tools

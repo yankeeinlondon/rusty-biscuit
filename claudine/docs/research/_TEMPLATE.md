@@ -77,9 +77,10 @@ success:
    not in the capture list, not a YAML comment. Negative probes are evidence too
    ("the endpoint 404s" is a finding); unanswered ≠ omitted — record `unknown` with
    a note rather than dropping a field.
-2. **Legacy quarantine** (in Scope), naming the actual files: *"Prior-generation
-   research files in this directory (e.g. `claude-code.md`, `gemini-cli.md`,
-   `qwen.md`, `roo-code.md`) are validation assets for humans — do NOT open,
+2. **Legacy quarantine** (in Scope), naming the actual files — include this only
+   when prior-generation files are actually present in the topic directory:
+   *"Prior-generation research files in this directory (e.g. `gemini-cli.md`,
+   `kimi-code-cli.md`) are validation assets for humans — do NOT open,
    paraphrase, or cite them; your research must be independent."*
 3. **Capability framing**: ask "which mechanisms exist and how do they work", never
    "does X support Y". Add topic-specific anti-pattern guards where a failure class

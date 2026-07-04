@@ -43,10 +43,6 @@ depth (replace-vs-append semantics, file-vs-inline forms, mode interactions). Th
 topic's switch inventory records that those flags *exist* — flag name, value shape, one
 example — and defers their semantics to that topic; do not duplicate its research here.
 
-Prior-generation research files in this directory (`claude-code.md`, `gemini-cli.md`,
-`roo-code.md`) are validation assets for humans — do NOT open, paraphrase, or cite
-them; your research must be independent.
-
 ## Document Structure
 
 The research deliverable is a prose document a maintainer can learn the provider's CLI
@@ -172,7 +168,7 @@ Follow these steps exactly:
     - `subcommands` - from `## Subcommands`, with `non_interactive` reflecting your
       TTY analysis
     - `cli_switches` - the inventory from `## CLI Switch Inventory`
-    - `config_files` - from `## Configuration Discovery`; one record per OS — file
+    - `config_paths` - from `## Configuration Discovery`; one record per OS — file
       paths must be recorded separately for macOS, Linux, and Windows (never one
       record for all OSes; Windows paths always differ)
     - `env_vars` - from `## Environment Variables`

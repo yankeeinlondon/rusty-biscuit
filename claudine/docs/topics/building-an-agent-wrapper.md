@@ -1,7 +1,7 @@
 ---
 prompt: |-
     The claudine package wraps a number of popular agentic CLI providers including Claude Code, Codex, Qwen CLI, Kimi 
-    CLI, Gemini CLI, Goose, OpenCode, and Roo Code. 
+    CLI, Gemini CLI, Goose, and OpenCode. 
     
     In adding support for these platforms we had to a good amount of research but hopefully all of the key salient
     information on each platform is now metadata in the code base. 
@@ -31,7 +31,7 @@ I have enough context. Let me write the document body now.
 ```markdown
 # Building an Agent Wrapper
 
-Claudine supports eight agentic CLI providers today, and the architecture is deliberately built so that a ninth provider should mostly be a matter of populating typed metadata and implementing a small number of focused traits. This document walks through where each piece of provider-specific information lives in the codebase, what gaps still exist, and the practical steps and pitfalls of adding a new provider.
+Claudine supports seven agentic CLI providers today, and the architecture is deliberately built so that an eighth provider should mostly be a matter of populating typed metadata and implementing a small number of focused traits. This document walks through where each piece of provider-specific information lives in the codebase, what gaps still exist, and the practical steps and pitfalls of adding a new provider.
 
 ## Metadata
 
@@ -56,7 +56,7 @@ Display order is fixed in `PROVIDERS_DISPLAY_ORDER` so matrix-style reporting is
 
 ### Agent capability catalog
 
-The richer descriptive metadata lives under [`claudine/lib/src/provider/`](../../lib/src/provider/). Phase 2 of the centralized providers refactor moved the per-provider data construction from `agents/<provider>.rs` thin facade structs into one `<NAME>_INFO: ProviderInfo` constant per provider (`provider/claude.rs`, `provider/codex.rs`, …, `provider/roo.rs`). The shared shape is still defined in [`agents/model.rs`](../../lib/src/agents/model.rs), and `crate::agents::Agent` is implemented directly on `ProviderInfo` so legacy `agents::agent_for(provider)` returns the same `'static` reference as `provider::provider_info(provider)`.
+The richer descriptive metadata lives under [`claudine/lib/src/provider/`](../../lib/src/provider/). Phase 2 of the centralized providers refactor moved the per-provider data construction from `agents/<provider>.rs` thin facade structs into one `<NAME>_INFO: ProviderInfo` constant per provider (`provider/<slug>/data.rs`; the four behavior-trait impls live beside it in `provider/<slug>/behavior.rs`). The shared shape is still defined in [`agents/model.rs`](../../lib/src/agents/model.rs), and `crate::agents::Agent` is implemented directly on `ProviderInfo` so legacy `agents::agent_for(provider)` returns the same `'static` reference as `provider::provider_info(provider)`.
 
 `AgentCapabilities` aggregates:
 
@@ -120,8 +120,6 @@ Direct provider wrappers (`claudine claude`, `claudine codex`, …) live behind 
 - `build_resume_args()` / `supports_resume()` / `supports_interactive_inline_closure()` — session resume and inline-compose closure support.
 - `allowed_env_keys()` — env vars that bypass the sensitive-key sanitizer.
 
-Roo Code is intentionally absent from this dispatch (`profile_for_provider(Provider::RooCode)` returns `None`) because it runs as a VS Code extension and has no standalone CLI binary.
-
 ### Linking metadata (cross-provider sync)
 
 [`claudine/lib/src/linking/capabilities.rs`](../../lib/src/linking/capabilities.rs) defines `ProviderCapabilities`, parallel to the agent catalog but focused on cross-provider portability. Each `LinkableResource` (`Skill`, `Command`, `Agent`, `Script`) gets a `ResourceSupport` carrying:
@@ -138,7 +136,7 @@ Roo Code is intentionally absent from this dispatch (`profile_for_provider(Provi
 MCP capability is split between three surfaces:
 
 - The normalized catalog itself is provider-agnostic and lives under `~/.claudine/mcp/` (`catalog.json`, `defaults.json`, `provider-state.json`).
-- Per-provider import/sync logic lives in [`claudine/lib/src/mcp/import.rs`](../../lib/src/mcp/import.rs) and [`mcp/state.rs`](../../lib/src/mcp/state.rs) — only the providers wired in actually appear (Claude, Codex, Gemini, OpenCode, Roo at the time of writing).
+- Per-provider import/sync logic lives in [`claudine/lib/src/mcp/import.rs`](../../lib/src/mcp/import.rs) and [`mcp/state.rs`](../../lib/src/mcp/state.rs) — only the providers wired in actually appear (Claude, Codex, Gemini, OpenCode at the time of writing).
 - Per-provider runtime injection logic lives in [`mcp/inject.rs`](../../lib/src/mcp/inject.rs); only Codex, Gemini, and OpenCode currently implement runtime injection. Other providers print a guidance message pointing at `claudine mcp export <provider> --apply`.
 
 ### Logging and reporting
@@ -166,7 +164,7 @@ The merged catalog is cached at `~/.claudine/cache/models/<provider>.json` and f
 
 The seam between user input and the wrapper is the argv pre-parser in [`claudine/cli/src/argv.rs`](../../cli/src/argv.rs) (`argv::normalize`). Per-provider concerns:
 
-- **Provider booleans** (`--claude`, `--codex`, `--gemini`, `--goose`, `--kimi`, `--opencode`, `--qwen`, `--roo`) are rewritten to `--provider <slug>` on composition subcommands. Adding a new provider means extending the rewrite table here.
+- **Provider booleans** (`--claude`, `--codex`, `--gemini`, `--goose`, `--kimi`, `--opencode`, `--qwen`) are rewritten to `--provider <slug>` on composition subcommands. Adding a new provider means extending the rewrite table here.
 - **`COMPOSITION_FLAGS_WITH_VALUE`** must be kept in sync with the value-bearing clap surface of `ComposeArgs` and `SequenceArgs`. The drift-detection test `composition_flags_with_value_matches_clap_surface` enforces this.
 
 ### ACP support
@@ -251,7 +249,7 @@ After the centralized-providers refactor, adding a ninth provider has a much sma
 
 ## Things to Look Out For
 
-These are the most common failure modes and surprises observed while integrating the eight existing providers.
+These are the most common failure modes and surprises observed while integrating the seven existing providers.
 
 ### Provider identity is split across packages
 
@@ -262,7 +260,7 @@ A new `Provider` variant compiles only after `sniff::programs::AiCli` carries a 
 There are three completely different mechanisms for getting events out of a provider:
 
 - **Native hooks** (config-file based — Claude, Gemini, OpenCode plugins, Codex `notify`).
-- **Stream parsing** (Goose, Qwen, Codex JSONL, Roo Code emitter).
+- **Stream parsing** (Goose, Qwen, Codex JSONL).
 - **Wire-mode proxy** (Kimi `--wire`).
 
 `EventSupportLevel` distinguishes `Hook` from `NonHook` but does not name *which* non-hook mechanism is in play. When you see `NonHook` in the matrix you must read the configurator and the adapter to know whether claudine intercepts the CLI launch, parses its stdout, or proxies a JSON-RPC channel. Plan the architecture decision early — it shapes the rest of the wrapper profile.
@@ -329,9 +327,9 @@ Providers don't just *write* their resources to their own directories — most a
 
 Linker conflict reports rely on this metadata being accurate; getting it wrong produces false-positive "incompatible" markings or, worse, silent silent skips.
 
-### Roo Code is the canonical edge case
+### Not every provider has a binary
 
-Roo Code is included in `Provider` and the linking matrix but has no `WrapperProfile` — the CLI's `wrapper_for(Provider::RooCode)` registry returns `None` because it runs as a VS Code extension. Treat it as a reminder: not every provider has a binary. If a new provider follows the same pattern (Cursor agent panel, IntelliJ plugin, Zed assistant, …), do the metadata work in `provider/<name>.rs` and skip the wrapper rather than writing a no-op profile.
+Roo Code, removed from the roster in 2026-07, was the canonical example: it lived in `Provider` and the linking matrix but had no `WrapperProfile` because it ran as a VS Code extension. If a new provider follows the same pattern (Cursor agent panel, IntelliJ plugin, Zed assistant, …), do the metadata work in `provider/<name>.rs` and skip the wrapper rather than writing a no-op profile.
 
 ### Test coverage is the safety net
 

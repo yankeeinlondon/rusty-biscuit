@@ -6,7 +6,7 @@ agent: open_code
 model: kimi-for-coding/k2p7
 has_official_schema: informal
 
-config_files:
+model_config_paths:
   - scope: user
     path: ~/.qwen/settings.json
     format: json

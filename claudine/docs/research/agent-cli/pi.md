@@ -421,7 +421,7 @@ cli_switches:
     description: "Reinstalls Pi even if the current version is latest."
     example: "pi update --self --force"
     notes: ""
-config_files:
+config_paths:
   - os: macos
     scope: env
     path: "$PI_CODING_AGENT_DIR"

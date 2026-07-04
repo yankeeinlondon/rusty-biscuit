@@ -40,7 +40,6 @@ It is intentionally separate from `ProtectService`.
 - Gemini
 - OpenCode
 - Qwen
-- Roo
 - Goose
 - Kimi
 
@@ -542,7 +541,7 @@ Backends do not all support every axis or mutation shape equally.
 Use capability metadata before assuming support:
 
 ```rust
-let caps = engine.capabilities(Provider::RooCode)?;
+let caps = engine.capabilities(Provider::Goose)?;
 
 if caps.mcp_queries {
     let result = snapshot.can_use_mcp_server("filesystem");

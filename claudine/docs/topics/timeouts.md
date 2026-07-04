@@ -577,7 +577,6 @@ inert).
 | Kimi Code | parsed | parsed | (n/a) | (n/a) | parsed | parsed |
 | OpenCode | **silent** | parsed | **stderr-promoted** | **stderr-promoted** | parsed | parsed |
 | Qwen Code | parsed | parsed | (n/a) | (n/a) | parsed | parsed |
-| Roo Code | parsed | parsed | parsed | parsed | parsed | parsed |
 
 The OpenCode row is the structurally important one and is detailed
 below. "stderr-promoted" entries mean the event is not on stdout NDJSON

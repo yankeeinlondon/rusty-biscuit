@@ -709,7 +709,7 @@ cli_switches:
     description: "Enable per-tier HTTP rate limiting."
     example: "qwen serve --rate-limit"
     notes: "Related numeric flags: --rate-limit-prompt, --rate-limit-mutation, --rate-limit-read, --rate-limit-window-ms."
-config_files:
+config_paths:
   - os: macos
     scope: user
     path: "~/.qwen/settings.json"

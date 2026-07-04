@@ -685,7 +685,7 @@ cli_switches:
     description: "No supported system-prompt delivery flag was found in installed 7.3.45."
     example: "kilo run --system-prompt 'x' 'task'"
     notes: "Negative probe: `--system-prompt`, `--append-system-prompt`, and `--replace-system-prompt` all exited 1 and printed help. Defer semantics to the sibling system-prompt topic if Kilo adds these flags later."
-config_files:
+config_paths:
   - os: macos
     scope: user
     path: "~/.config/kilo/kilo.jsonc"

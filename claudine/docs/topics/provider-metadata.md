@@ -10,9 +10,9 @@ categories:
 
 ### Why Metadata is Important
 
-Claudine normalizes eight agentic CLIs (Claude Code, Codex CLI, Gemini CLI, Goose, Kimi Code, OpenCode, Qwen Code, and Roo Code) into a single configuration model. Each provider differs in dozens of material ways: binary name, config file paths, stream protocol, hook event names, YOLO flag, reasoning controls, system prompt delivery mechanism, model catalog source, and more. Without a type-strong, centralized catalog, these differences leak into scattered `match Provider { ... }` blocks across the codebase, creating a maintenance burden that grows with every new provider.
+Claudine normalizes seven agentic CLIs (Claude Code, Codex CLI, Gemini CLI, Goose, Kimi Code, OpenCode, and Qwen Code) into a single configuration model. Each provider differs in dozens of material ways: binary name, config file paths, stream protocol, hook event names, YOLO flag, reasoning controls, system prompt delivery mechanism, model catalog source, and more. Without a type-strong, centralized catalog, these differences leak into scattered `match Provider { ... }` blocks across the codebase, creating a maintenance burden that grows with every new provider.
 
-The `ProviderInfo` struct solves this by serving as the **single authoritative record** for every static fact about a provider. Each of the eight `Provider` variants maps to exactly one `&'static ProviderInfo` constant served from the central registry. The struct is intentionally non-optional for identity fields (`display_name`, `slug`, `binary`, `agent_offset`, `cli_aliases`, `docs_url`) so a compile-time gap is impossible. Behavior that is genuinely dynamic (payload detection, MCP import/export, stream parser construction, hook registration) lives behind four focused trait objects on the same struct, so a single registry lookup returns both data and behavior.
+The `ProviderInfo` struct solves this by serving as the **single authoritative record** for every static fact about a provider. Each of the seven `Provider` variants maps to exactly one `&'static ProviderInfo` constant served from the central registry. The struct is intentionally non-optional for identity fields (`display_name`, `slug`, `binary`, `agent_offset`, `cli_aliases`, `docs_url`) so a compile-time gap is impossible. Behavior that is genuinely dynamic (payload detection, MCP import/export, stream parser construction, hook registration) lives behind four focused trait objects on the same struct, so a single registry lookup returns both data and behavior.
 
 The design goal is that **all code variation between providers should be driven exclusively by `ProviderInfo` metadata**. When a feature needs to branch on provider identity, it should consult `provider_info(provider).<field>` or call a method on one of the four behavior traits, never match directly on `Provider` variants outside the registry.
 
@@ -289,7 +289,7 @@ In the CLI crate, `WrapperProfile` provides default implementations that derive 
 
 **Current pain**: Today, adding a provider requires changes in at least 4-6 files: the provider module (catalog data), the wrapper profile (CLI behavior), the stream parser factory, and the adapter module. The wrapper profile changes are the most complex and error-prone because they encode runtime behavior in imperative code rather than declarative data.
 
-**Blocking factor**: `prompt_delivery` is the highest-value but highest-effort migration. The delivery mechanism interacts with entrypoints, mode switching, prompt flags, and the wire-RPC protocol. A full abstraction that handles all eight providers' delivery patterns is a significant design effort.
+**Blocking factor**: `prompt_delivery` is the highest-value but highest-effort migration. The delivery mechanism interacts with entrypoints, mode switching, prompt flags, and the wire-RPC protocol. A full abstraction that handles all seven providers' delivery patterns is a significant design effort.
 
 **Effort**: High for prompt delivery. Low-to-medium for the other methods.
 

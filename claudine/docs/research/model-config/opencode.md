@@ -6,7 +6,7 @@ agent: open_code
 model: kimi-for-coding/k2p7
 has_official_schema: formal
 schema_url: https://opencode.ai/config.json
-config_files:
+model_config_paths:
   - scope: user
     path: ~/.config/opencode/opencode.json
     format: jsonc
@@ -140,7 +140,7 @@ changes:
   - 'Reclassified oMLX from unsupported to first_class (via `omlx launch opencode`), with manual OpenAI-compatible base-URL setup on http://localhost:8000/v1, consistent with local-runner ground truth.'
   - 'Confirmed Ollama first-class integration via `ollama launch opencode` and `ollama launch opencode --config`.'
   - 'Updated cloud-bridge guidance: OpenCode can be routed at any OpenAI-compatible cloud endpoint directly; non-OpenAI-compatible vendor APIs require a translation proxy such as LiteLLM.'
-  - 'Added managed macOS MDM preferences (ai.opencode.managed) to config_files; dropped OPENCODE_CONFIG_DIR because it does not accept model configuration directly.'
+  - 'Added managed macOS MDM preferences (ai.opencode.managed) to model_config_paths; dropped OPENCODE_CONFIG_DIR because it does not accept model configuration directly.'
 requires_claudine_update: true
 reason: 'Claudine should treat Ollama and oMLX as first-class OpenCode integrations (`ollama launch opencode`, `omlx launch opencode`) and LM Studio, llama.cpp, and vLLM as valid OpenAI-compatible base-URL-override targets for OpenCode, rather than unsupported or Anthropic-compatible paths.'
 ---

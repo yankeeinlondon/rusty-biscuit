@@ -24,7 +24,7 @@ Every event is serialized as a single-line JSON record with these fields:
 
 | Field               | Type              | Description                                                      |
 |---------------------|-------------------|------------------------------------------------------------------|
-| `provider`          | `String`          | Which CLI fired the event (`claude`, `open_code`, `gemini`, etc) |
+| `provider`          | `String`          | Which CLI fired the event (`claude`, `opencode`, `gemini`, etc)  |
 | `event`             | `String`          | One of 16 normalized event types (see below)                     |
 | `timestamp`         | `DateTime<Utc>`   | When the event occurred                                          |
 | `session_id`        | `Option<String>`  | Session UUID (null for some OpenCode events)                     |

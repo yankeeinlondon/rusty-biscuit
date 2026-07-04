@@ -755,7 +755,7 @@ cli_switches:
     description: "Config override for replacing built-in model instructions from a file."
     example: "codex -c model_instructions_file='./instructions.txt'"
     notes: "No dedicated local CLI flag exists; record only existence here and defer semantics to the sibling system-prompt topic."
-config_files:
+config_paths:
   - os: macos
     scope: user
     path: "$CODEX_HOME/config.toml; default /Users/<user>/.codex/config.toml"
