@@ -563,6 +563,7 @@ mod tests {
                 crate::commands::providers::ProvidersArgs {
                     describe: false,
                     format: crate::commands::providers::ProvidersFormat::Text,
+                    command: None,
                 }
             ))),
             None

@@ -1,10 +1,13 @@
-use color_eyre::eyre::{Result, WrapErr};
+use std::path::PathBuf;
+use std::process::Command;
+
+use color_eyre::eyre::{Result, WrapErr, bail};
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::utils::layout::{Alignment, Length, Edges};
-use clap::{Args, ValueEnum};
+use clap::{Args, Subcommand, ValueEnum};
 use claudine::events::AgenticEvent;
 use claudine::linking::{LinkableResource, capabilities_for};
 use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
@@ -36,6 +39,26 @@ pub struct ProvidersArgs {
     /// Output format. Only meaningful with `--describe`.
     #[arg(long, value_enum, default_value_t = ProvidersFormat::Text)]
     pub format: ProvidersFormat,
+
+    #[command(subcommand)]
+    pub command: Option<ProvidersCommand>,
+}
+
+/// Subcommands under `claudine providers`.
+#[derive(Debug, Subcommand)]
+pub enum ProvidersCommand {
+    /// Run the provider-catalog generator (shells out to `claudine-gen`;
+    /// this CLI never links the generator).
+    Generate(GenerateArgs),
+}
+
+/// Arguments accepted by `claudine providers generate`.
+#[derive(Debug, Args)]
+pub struct GenerateArgs {
+    /// Print the generator's mapping registry (field -> source -> coercion)
+    /// as JSON. Without this flag, runs the report-only drift check.
+    #[arg(long)]
+    pub mapping: bool,
 }
 
 fn supports_custom_resource(provider: Provider, resource: LinkableResource) -> bool {
@@ -54,6 +77,9 @@ fn supported_hook_count(provider: Provider) -> usize {
 
 /// Show provider capabilities for skills, slash commands, agents, and hooks.
 pub fn run(args: ProvidersArgs) -> Result<()> {
+    if let Some(ProvidersCommand::Generate(generate)) = args.command {
+        return run_generate(generate);
+    }
     if args.describe {
         return run_describe(args.format);
     }
@@ -98,6 +124,63 @@ pub fn run(args: ProvidersArgs) -> Result<()> {
     log::data(&format!("\n{rendered}"));
 
     Ok(())
+}
+
+/// Shells out to the `claudine-gen` binary (raw stdout pass-through; CLI
+/// rendering of the mapping arrives with generator v1 in Phase B).
+fn run_generate(args: GenerateArgs) -> Result<()> {
+    let gen_arg = if args.mapping { "mapping" } else { "check" };
+    let mut command = match resolve_gen_binary() {
+        Some(binary) => Command::new(binary),
+        None => match repo_root_for_cargo_fallback() {
+            Some(root) => {
+                let mut cargo = Command::new("cargo");
+                cargo
+                    .args(["run", "-p", "claudine-gen", "--quiet", "--"])
+                    .current_dir(root);
+                cargo
+            }
+            None => bail!(
+                "could not find the `claudine-gen` binary (looked next to this \
+                 executable and on PATH) and no repo root is detectable for a \
+                 `cargo run -p claudine-gen` fallback.\n\
+                 Install it with `cargo install --path claudine/gen` or run from \
+                 inside the rusty-biscuit repo."
+            ),
+        },
+    };
+    let status = command
+        .arg(gen_arg)
+        .status()
+        .wrap_err("failed to launch claudine-gen")?;
+    if !status.success() {
+        bail!("claudine-gen {gen_arg} exited with {status}");
+    }
+    Ok(())
+}
+
+/// Resolution order: sibling of the current executable, then `$PATH`.
+fn resolve_gen_binary() -> Option<PathBuf> {
+    let name = if cfg!(windows) {
+        "claudine-gen.exe"
+    } else {
+        "claudine-gen"
+    };
+    if let Ok(exe) = std::env::current_exe() {
+        let sibling = exe.with_file_name(name);
+        if sibling.is_file() {
+            return Some(sibling);
+        }
+    }
+    which::which(name).ok()
+}
+
+/// A git root that looks like a cargo workspace, for the dev-checkout
+/// `cargo run -p claudine-gen` fallback.
+fn repo_root_for_cargo_fallback() -> Option<PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    let root = biscuit_file::find_git_root(&cwd).ok().flatten()?;
+    root.join("Cargo.toml").is_file().then_some(root)
 }
 
 /// Render structured provider catalog data sourced from
