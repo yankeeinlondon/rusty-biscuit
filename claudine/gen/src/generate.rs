@@ -461,7 +461,7 @@ fn emit_fragment(slug: &str, fields: &[ResolvedField]) -> String {
          //\n\
          // Walking-skeleton (Phase A1) data fragment for the `{slug}` provider:\n\
          // the mapped subset of the `CLAUDE_INFO` field expressions in\n\
-         // `claudine/lib/src/provider/claude.rs`. Inputs: docs/providers.yaml,\n\
+         // `claudine/lib/src/provider/claude/data.rs`. Inputs: docs/providers.yaml,\n\
          // docs/providers/facts/{slug}.yaml, docs/providers/overrides/{slug}.yaml,\n\
          // and the research frontmatter named by the mapping registry.\n\
          // Regenerate with `claudine-gen generate`; drift-check with\n\

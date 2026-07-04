@@ -19,7 +19,7 @@ pub mod registry;
 pub mod schema_compat;
 
 pub use errors::GenError;
-pub use facts::scrape_facts;
+pub use facts::{MATRIX_FACTS_FIELDS, scrape_facts};
 pub use generate::{
     CheckOutcome, CoercionSkip, Generation, Provenance, ResolvedField, check_area,
     committed_fragment_path, find_area, generate_for_area,

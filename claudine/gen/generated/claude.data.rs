@@ -2,7 +2,7 @@
 //
 // Walking-skeleton (Phase A1) data fragment for the `claude` provider:
 // the mapped subset of the `CLAUDE_INFO` field expressions in
-// `claudine/lib/src/provider/claude.rs`. Inputs: docs/providers.yaml,
+// `claudine/lib/src/provider/claude/data.rs`. Inputs: docs/providers.yaml,
 // docs/providers/facts/claude.yaml, docs/providers/overrides/claude.yaml,
 // and the research frontmatter named by the mapping registry.
 // Regenerate with `claudine-gen generate`; drift-check with

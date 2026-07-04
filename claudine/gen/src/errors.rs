@@ -29,6 +29,13 @@ pub enum GenError {
     #[error("no `{slug}` entry (matched on `slug:`) in roster `{path}`")]
     RosterEntryMissing { slug: String, path: PathBuf },
 
+    #[error(
+        "roster entry `{slug}` is flagged `skip_research: true` in `{path}` — the entry \
+         keeps its identity in the roster but is excluded from research fan-out and \
+         generation; remove the flag to re-activate it"
+    )]
+    RosterEntrySkipped { slug: String, path: PathBuf },
+
     #[error("roster entry `{slug}` is missing key `{key}`")]
     RosterKeyMissing { slug: String, key: &'static str },
 

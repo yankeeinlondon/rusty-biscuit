@@ -119,6 +119,24 @@ fn generate(fixture: &Fixture) -> Result<claudine_gen::Generation, GenError> {
     generate_for_area(dir.path(), "claude")
 }
 
+/// `skip_research: true` keeps the entry's identity in the roster but makes
+/// generating it a loud, typed failure — never a silent skip.
+#[test]
+fn skip_research_roster_entry_is_rejected_loudly() {
+    let dir = tempfile::tempdir().unwrap();
+    write_area(dir.path(), &Fixture::default());
+    let skipped_roster = ROSTER.replace(
+        "      repo_dir: \".claude\"\n",
+        "      repo_dir: \".claude\"\n      skip_research: true\n",
+    );
+    fs::write(dir.path().join("docs/providers.yaml"), skipped_roster).unwrap();
+    let err = generate_for_area(dir.path(), "claude").unwrap_err();
+    match err {
+        GenError::RosterEntrySkipped { slug, .. } => assert_eq!(slug, "claude"),
+        other => panic!("expected RosterEntrySkipped, got: {other}"),
+    }
+}
+
 #[test]
 fn skeleton_generates_from_all_declared_sources() {
     let generation = generate(&Fixture::default()).unwrap();

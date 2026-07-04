@@ -53,9 +53,10 @@ pub struct ProviderInputs {
 ///
 /// ## Errors
 ///
-/// Fails loudly on missing roster entry, unparsable YAML, a missing
-/// research document/sidecar, or research frontmatter that does not
-/// satisfy its sidecar schema.
+/// Fails loudly on missing roster entry, a roster entry flagged
+/// `skip_research: true` (a skipped provider must never generate
+/// silently), unparsable YAML, a missing research document/sidecar, or
+/// research frontmatter that does not satisfy its sidecar schema.
 pub fn load(area: &Path, slug: &str, topics: &[&str]) -> Result<ProviderInputs, GenError> {
     let roster = load_roster_entry(&area.join("docs/providers.yaml"), slug)?;
     let facts = load_optional_yaml_map(&area.join(format!("docs/providers/facts/{slug}.yaml")))?;
@@ -85,7 +86,8 @@ pub fn load(area: &Path, slug: &str, topics: &[&str]) -> Result<ProviderInputs, 
     })
 }
 
-/// Finds the roster entry whose `slug:` key equals `slug`.
+/// Finds the roster entry whose `slug:` key equals `slug`, refusing
+/// entries flagged `skip_research: true`.
 fn load_roster_entry(path: &Path, slug: &str) -> Result<Value, GenError> {
     let value = read_yaml(path)?;
     let entries = value
@@ -95,14 +97,21 @@ fn load_roster_entry(path: &Path, slug: &str) -> Result<Value, GenError> {
             path: path.to_path_buf(),
             message: "expected a top-level `list:` sequence".into(),
         })?;
-    entries
+    let entry = entries
         .iter()
         .find(|entry| entry.get("slug").and_then(Value::as_str) == Some(slug))
         .cloned()
         .ok_or_else(|| GenError::RosterEntryMissing {
             slug: slug.to_string(),
             path: path.to_path_buf(),
-        })
+        })?;
+    if entry.get("skip_research").and_then(Value::as_bool) == Some(true) {
+        return Err(GenError::RosterEntrySkipped {
+            slug: slug.to_string(),
+            path: path.to_path_buf(),
+        });
+    }
+    Ok(entry)
 }
 
 /// Loads a YAML mapping file into a key → value map; absent file ⇒ empty.

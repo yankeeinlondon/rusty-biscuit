@@ -33,7 +33,7 @@ fn committed_fragment_matches_regenerated_inputs() {
 }
 
 /// Exit criterion 1: every generated field expression is byte-identical to
-/// the hand-written text in `lib/src/provider/claude.rs`.
+/// the hand-written text in `lib/src/provider/claude/data.rs`.
 ///
 /// Matching approach: the generated fragment emits one
 /// `    field: expr,` line per registry entry at the same four-space
@@ -43,8 +43,8 @@ fn committed_fragment_matches_regenerated_inputs() {
 #[test]
 fn generated_field_expressions_byte_match_hand_written_claude_rs() {
     let generation = generate_for_area(area(), "claude").expect("generation must succeed");
-    let claude_rs = std::fs::read_to_string(area().join("lib/src/provider/claude.rs"))
-        .expect("hand-written claude.rs must exist");
+    let claude_rs = std::fs::read_to_string(area().join("lib/src/provider/claude/data.rs"))
+        .expect("hand-written claude/data.rs must exist");
     let block = claude_rs
         .split("static CLAUDE_INFO: ProviderInfo = ProviderInfo {")
         .nth(1)
