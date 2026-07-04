@@ -57,7 +57,7 @@ pub(crate) fn full_menu(ctx: &RootContext) -> Vec<String> {
 
     // 1. Composition.
     menu.extend_from_slice(&["compose", "inline-compose", "sequence"]);
-    // 2. Wrappers — `roo` is intentionally absent (catalog-only provider).
+    // 2. Wrappers.
     menu.extend_from_slice(&[
         "claude", "codex", "gemini", "goose", "kimi", "opencode", "qwen",
     ]);

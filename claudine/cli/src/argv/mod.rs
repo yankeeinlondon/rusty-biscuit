@@ -220,7 +220,7 @@ fn normalize_inner(raw: Vec<OsString>, completion_active: bool) -> Vec<OsString>
                 }
 
                 if let Some(value_text) = text.strip_prefix("--provider=") {
-                    // Rule 2 (equals form): `--provider=oc` → `--provider=open_code`
+                    // Rule 2 (equals form): `--provider=oc` → `--provider=opencode`
                     if is_fuzzy_provider_value(value_text)
                         && let Some(provider) = Provider::fuzzy_match_cli_name(value_text)
                     {

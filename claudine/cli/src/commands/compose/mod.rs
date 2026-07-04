@@ -39,8 +39,8 @@ pub(crate) use setters::{json_type_name, merge_set_overrides, parse_composition_
 ///
 /// ## Notes
 ///
-/// The eight provider boolean fields (`claude`, `codex`, `gemini`, `goose`,
-/// `kimicode`, `opencode`, `qwen`, `roo`) are handled entirely by the
+/// The seven provider boolean fields (`claude`, `codex`, `gemini`, `goose`,
+/// `kimicode`, `opencode`, `qwen`) are handled entirely by the
 /// pre-clap argv normalizer in [`crate::argv`]: Rule 1 rewrites each
 /// `--<provider>` token to the canonical `--provider <slug>` pair before
 /// clap ever sees it. The struct fields and clap `#[arg(...)]` declarations
@@ -82,10 +82,6 @@ pub struct SharedComposeArgs {
     /// Use Qwen Code.
     #[arg(long = "qwen", group = "compose_provider")]
     pub qwen: bool,
-
-    /// Use Roo Code.
-    #[arg(long = "roo", group = "compose_provider")]
-    pub roo: bool,
 
     /// Exclude providers from automatic selection (repeatable).
     #[arg(long = "exclude", value_name = "PROVIDER", value_parser = provider_value_parser())]

@@ -639,7 +639,6 @@ mod tests {
             Provider::KimiCode,
             Provider::OpenCode,
             Provider::QwenCode,
-            Provider::RooCode,
         ] {
             let events = provider_hook_events(provider);
             for event in events {

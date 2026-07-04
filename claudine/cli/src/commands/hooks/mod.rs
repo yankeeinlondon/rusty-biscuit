@@ -52,7 +52,8 @@ pub struct HooksArgs {
 }
 
 /// All supported providers in display order.
-pub(super) const ALL_PROVIDERS: [Provider; 8] = PROVIDERS_DISPLAY_ORDER;
+pub(super) const ALL_PROVIDERS: [Provider; claudine::provider::PROVIDER_COUNT] =
+    PROVIDERS_DISPLAY_ORDER;
 /// Keep provider names from wrapping into multi-line labels in narrow terminals.
 const PROVIDER_COLUMN_MIN_WIDTH: usize = 11;
 

@@ -69,11 +69,11 @@ Just a body.
 ";
 
 /// Fixture with a valid but not-installed `agent` frontmatter value.
-/// The test harness only stubs `goose` on PATH, so `roo` is not installed.
+/// The test harness only stubs `goose` on PATH, so `qwen` is not installed.
 const FIXTURE_NOT_INSTALLED: &str = "\
 ---
 name: Not Installed Doc
-agent: roo
+agent: qwen
 ---
 Just a body.
 ";
@@ -745,7 +745,7 @@ fn level2_dry_run_not_installed_renders_yellow_dim_in_tmux() {
         "expected 'Agent Not Installed' in Agent cell.\nplain:\n{plain}",
     );
     assert!(
-        plain.contains("Roo"),
+        plain.contains("Qwen"),
         "expected the not-installed provider name in Agent cell.\nplain:\n{plain}",
     );
 

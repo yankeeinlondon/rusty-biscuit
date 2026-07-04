@@ -240,10 +240,6 @@ mod tests {
             Provider::QwenCode,
             LinkableResource::Command
         ));
-        assert!(supports_custom_resource(
-            Provider::RooCode,
-            LinkableResource::Command
-        ));
         assert!(!supports_custom_resource(
             Provider::KimiCode,
             LinkableResource::Command
@@ -275,7 +271,6 @@ mod tests {
         assert_eq!(supported_hook_count(Provider::Goose), 0);
         assert_eq!(supported_hook_count(Provider::KimiCode), 0);
         assert_eq!(supported_hook_count(Provider::QwenCode), 0);
-        assert_eq!(supported_hook_count(Provider::RooCode), 0);
     }
 
     #[test]

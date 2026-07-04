@@ -96,7 +96,7 @@ async fn run_set_favorite_agent(value: &str) -> color_eyre::Result<()> {
             Some(provider) => Some(provider),
             None => {
                 return Err(color_eyre::eyre::eyre!(
-                    "unknown provider '{value}' — try one of: claude, codex, gemini, goose, kimi, opencode, qwen, roo (or pass `none` to clear)"
+                    "unknown provider '{value}' — try one of: claude, codex, gemini, goose, kimi, opencode, qwen (or pass `none` to clear)"
                 ));
             }
         },

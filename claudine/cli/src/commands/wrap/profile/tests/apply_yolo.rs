@@ -422,12 +422,7 @@ fn direct_provider_yolo_flag_is_rejected_with_guidance() {
 
 /// Documented "no wrapper" providers. Must stay in lock-step with the
 /// `None` slots in [`WRAPPER_REGISTRY`].
-const NO_WRAPPER: &[Provider] = &[Provider::RooCode];
-
-#[test]
-fn roo_code_has_no_wrapper_profile() {
-    assert!(profile_for_provider(Provider::RooCode).is_none());
-}
+const NO_WRAPPER: &[Provider] = &[];
 
 /// Phase 3 invariant: the array-backed [`WRAPPER_REGISTRY`] either
 /// returns a wrapper whose `provider()` matches the lookup key, or

@@ -592,11 +592,10 @@ static GOOSE: GooseWrapper = GooseWrapper;
 ///
 /// ## Documented "no wrapper" exceptions
 ///
-/// - [`Provider::RooCode`] — Roo Code runs exclusively as a VS Code
-///   extension, so there is no standalone CLI binary to wrap. Any future
-///   provider that is intentionally unwrapped must be added to this table
-///   *and* to the `NO_WRAPPER` allow-list referenced by
-///   `wrapper_registry_covers_every_provider_and_documents_exceptions`.
+/// Currently none. Any future provider that is intentionally unwrapped
+/// must use a `None` slot in this table *and* be added to the
+/// `NO_WRAPPER` allow-list referenced by
+/// `wrapper_registry_covers_every_provider_and_documents_exceptions`.
 ///
 /// Slot order MUST match `Provider as usize` — see
 /// `claudine::provider::identity::PROVIDERS_DISPLAY_ORDER`.
@@ -608,7 +607,6 @@ static WRAPPER_REGISTRY: [Option<&'static dyn WrapperProfile>; PROVIDER_COUNT] =
     /* 4: KimiCode */ Some(&KIMI),
     /* 5: OpenCode */ Some(&OPENCODE),
     /* 6: QwenCode */ Some(&QWEN),
-    /* 7: RooCode  */ None,
 ];
 
 /// Look up the wrapper profile for a given provider.
