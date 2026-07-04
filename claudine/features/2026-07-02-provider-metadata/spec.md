@@ -116,9 +116,12 @@ value, the correction must live somewhere durable. Overrides are expected to be 
 exceptional* — every override is also a signal the research prompt needs improving, and the
 generate report lists active overrides so they get revisited rather than fossilizing.
 
-**Proposed home (pending confirmation):** `docs/providers/overrides/<slug>.yaml`, mirroring
-the research frontmatter shape (topic-sectioned keys) so an override is written by copying
-the wrong key and correcting its value. Human-owned; sequences never touch it. Alternatives
+**Home (ratified at Checkpoint A, 2026-07-04):** `docs/providers/overrides/<slug>.yaml`,
+**field-keyed** — each entry keys on the catalog field name and carries `{value, reason}`
+(whole-key replacement; a `reason:` is mandatory). The earlier topic-sectioned-mirror
+proposal is retired: overrides target catalog fields, not research topics, and the
+field-keyed shape is what the generator's collision/staleness gates validate against.
+Human-owned; sequences never touch it. Alternatives
 considered: a `curated:` section inside `providers.yaml` (mixes ownership in the roster
 file), protected frontmatter keys in the research docs (relies on LLM compliance rather
 than a mechanical guarantee), or no overrides layer at all (a persistent LLM blind spot

@@ -64,6 +64,17 @@ demonstrated by tests.
 shape, generate UX (diff/confirm/decline→override), before the pattern is multiplied
 by 36 fields × 8 providers.
 
+> **Checkpoint A rulings (2026-07-04, Ken):** (1) override files are **field-keyed**
+> `{value, reason}` (spec's topic-sectioned mirror retired; spec.md amended);
+> (2) the declarative `RegistryEntry` + named-`Coercion`-enum registry shape is
+> ratified as the Phase B pattern; (3) inventory records carry a derived
+> `dispatch_class: conditional | reference` (pattern-set v2) — Phase D's disposition
+> table and Phase I's guard seed filter on it; (4) coercions must never drop input
+> silently — skips are collected on `Generation` and printed by the generate/check
+> reports (compound env-var sites were the motivating case), and the agent-models
+> fleet prompt now mandates one env var per `model_selection` record for the next
+> closeout refresh.
+
 **A2. Mechanical dispatch inventory** (design/pipeline-dry.md; parallel with A1,
 cheap): the scan script + committed inventory (path, line, pattern form, providers
 named) covering the extended pattern set (`match`, `matches!`, `==`). Replaces the
