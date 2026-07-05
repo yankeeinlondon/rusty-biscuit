@@ -12,7 +12,7 @@
 //! [`EXCLUDED_SERIALIZED_FIELDS`] with a justification — the
 //! registry-covers-all-fields guard enforces exactly-one-of.
 
-use claudine_catalog_types::{ModelCatalogSource, ResumeSupport};
+use claudine_catalog_types::{ModelCatalogSource, PlatformKind, ResumeSupport};
 use serde_json::{Value, json};
 use strum::VariantNames;
 
@@ -187,6 +187,8 @@ pub enum Coercion {
     FlagListToStringSlice,
     /// Facts snake_case member list → `&[BillingModel]`.
     BillingModelList,
+    /// Facts `platform_kind` enum member → `PlatformKind` expression.
+    PlatformKindMember,
 }
 
 impl Coercion {
@@ -224,6 +226,7 @@ impl Coercion {
             Coercion::CliFlagSitesToFlag => "cli_flag_sites_to_flag",
             Coercion::FlagListToStringSlice => "flag_list_to_string_slice",
             Coercion::BillingModelList => "billing_model_list",
+            Coercion::PlatformKindMember => "platform_kind_member",
         }
     }
 }
@@ -269,7 +272,7 @@ pub const SKILL_SUPPORT_MEMBERS: &[&str] =
     &["first_class", "partial", "convention_only", "none", "unknown"];
 
 /// The generator-v1 mapping registry, in `ProviderInfo` serialization
-/// order (10 roster + 9 research + 22 facts = 41 fields).
+/// order (10 roster + 9 research + 23 facts = 42 fields).
 pub const REGISTRY: &[RegistryEntry] = &[
     entry(
         "provider",
@@ -447,7 +450,7 @@ pub const REGISTRY: &[RegistryEntry] = &[
             key: "output_formats",
         },
         &[SchemaExpectation::RecordArray {
-            required_fields: &["format", "native_name", "selector"],
+            required_fields: &["format", "native_name", "selector", "companion_flags"],
         }],
         Coercion::OutputFormatRecords,
         "Output formats supported in non-interactive mode",
@@ -681,6 +684,18 @@ pub const REGISTRY: &[RegistryEntry] = &[
         Coercion::BoolLiteral,
         "Whether the provider hard-requires an explicit model in non-TTY sessions",
     ),
+    entry(
+        "platform_kind",
+        DeclaredSource::Facts {
+            key: "platform_kind",
+        },
+        &[SchemaExpectation::EnumSubsetOf {
+            rust_enum: "PlatformKind",
+            variants: PlatformKind::VARIANTS,
+        }],
+        Coercion::PlatformKindMember,
+        "Whether the CLI fronts the vendor's own models or aggregates providers",
+    ),
 ];
 
 /// Serialized `--describe` fields deliberately NOT in the registry, with
@@ -756,8 +771,8 @@ mod tests {
         };
         assert_eq!(count("roster"), 10, "roster rows");
         assert_eq!(count("research"), 9, "research rows");
-        assert_eq!(count("facts"), 22, "facts rows");
-        assert_eq!(REGISTRY.len(), 41, "total serialized fields");
+        assert_eq!(count("facts"), 23, "facts rows");
+        assert_eq!(REGISTRY.len(), 42, "total serialized fields");
     }
 
     #[test]

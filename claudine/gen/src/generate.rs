@@ -8,7 +8,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use claudine_catalog_types::{ModelCatalogSource, ResumeSupport};
+use claudine_catalog_types::{ModelCatalogSource, PlatformKind, ResumeSupport};
 use serde_json::Value;
 use strum::{IntoEnumIterator, VariantNames};
 
@@ -661,6 +661,19 @@ fn coerce_to_catalog_shape(
             Ok(Value::Array(flags))
         }
         Coercion::BillingModelList => expect_string_array(entry, raw),
+        Coercion::PlatformKindMember => {
+            let member = raw.as_str().ok_or_else(|| GenError::UnmappableValue {
+                field: entry.field,
+                message: format!("expected a platform kind enum member, got `{raw}`"),
+            })?;
+            if !PlatformKind::VARIANTS.contains(&member) {
+                return Err(GenError::UnmappableValue {
+                    field: entry.field,
+                    message: format!("`{member}` is not a PlatformKind member"),
+                });
+            }
+            Ok(raw.clone())
+        }
         // Facts-shaped records pass through; emit.rs validates loudly.
         Coercion::PathTemplateList
         | Coercion::EventMappingRecords

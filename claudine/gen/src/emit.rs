@@ -309,6 +309,25 @@ pub fn billing_models(
     Ok(render_slice(&elements, level))
 }
 
+/// Platform-kind member → `PlatformKind::<Variant>` path expression.
+pub fn platform_kind(
+    field: &'static str,
+    value: &Value,
+    ctx: &mut EmitCtx,
+) -> Result<String, GenError> {
+    ctx.import("crate::provider::platform_kind::PlatformKind");
+    let member = expect_str(field, value, "a platform-kind member")?;
+    match member {
+        known @ ("vendor_platform" | "agent_aggregator") => {
+            Ok(format!("PlatformKind::{}", pascal(known)))
+        }
+        other => Err(unmappable(
+            field,
+            format!("`{other}` is not a PlatformKind wire form"),
+        )),
+    }
+}
+
 /// `&[PathTemplate::Static("..."), ...]` from a catalog-shaped string
 /// array (research-fed path fields).
 pub fn path_list_from_strings(
@@ -506,6 +525,7 @@ pub fn output_formats(
         let cli_flag = optional_string_literal(field, get(field, record, "cli_flag")?)?;
         let stdin = expect_bool(field, get(field, record, "stdin_supported")?, "`stdin_supported`")?;
         let selector = output_format_selector(field, get(field, record, "selector")?, level + 2, ctx)?;
+        let companions = str_slice(field, get(field, record, "companion_flags")?, level + 2)?;
         let inner = indent(level + 2);
         elements.push(format!(
             "OutputFormatSupport {{\n\
@@ -514,6 +534,7 @@ pub fn output_formats(
              {inner}cli_flag: {cli_flag},\n\
              {inner}stdin_supported: {stdin},\n\
              {inner}selector: {selector},\n\
+             {inner}companion_flags: {companions},\n\
              {}}}",
             indent(level + 1)
         ));
@@ -1264,6 +1285,10 @@ pub fn emit_data_file(
     push(
         "model_required_in_non_tty",
         bool_literal("model_required_in_non_tty", lookup("model_required_in_non_tty")?)?,
+    );
+    push(
+        "platform_kind",
+        platform_kind("platform_kind", lookup("platform_kind")?, &mut ctx)?,
     );
 
     // Supporting items (emitted after INFO).
