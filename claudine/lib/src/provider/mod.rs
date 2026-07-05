@@ -258,9 +258,9 @@ pub struct ProviderInfo {
     /// enum. Empty for providers whose catalog is dynamic or unavailable.
     pub static_models: &'static [&'static str],
 
-    /// Source of this provider's dynamic model catalog. See
+    /// Source of this provider's model catalog. See
     /// [`ModelCatalogSource`] for the variants.
-    pub dynamic_source: ModelCatalogSource,
+    pub model_catalog_source: ModelCatalogSource,
 
     /// Provider-specific environment variables consulted (in order) for the
     /// `MODEL` selection chain. Consumed by `composition::select`.

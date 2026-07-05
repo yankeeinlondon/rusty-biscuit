@@ -122,8 +122,7 @@ fn build_codex_agent_capabilities() -> AgentCapabilities {
             },
             logging: LoggingCapabilities {
                 session_locations: vec![
-                    "~/.codex/sessions/YYYY/MM/DD/<session-id>/",
-                    "~/.codex/history.jsonl",
+                    "~/.codex/sessions/{YYYY}/{MM}/{DD}/rollout-{local_iso_ts}-{session_id}.jsonl",
                 ],
                 log_locations: vec!["~/.codex/log/codex-tui.log", "~/.codex/shell_snapshots/"],
                 debug_controls: vec!["--debug <level>", "RUST_LOG"],

@@ -123,7 +123,7 @@ fn build_claude_agent_capabilities() -> AgentCapabilities {
             },
             logging: LoggingCapabilities {
                 session_locations: vec![
-                    "~/.claude/projects/<encoded-directory>/<session-uuid>.jsonl",
+                    "~/.claude/projects/{sanitized_cwd}/{session_id}.jsonl",
                 ],
                 log_locations: vec!["~/.claude/projects/"],
                 debug_controls: vec!["--verbose"],

@@ -43,6 +43,31 @@ pub fn build_installed_snapshot(
     }
 }
 
+/// Detect which providers have a runnable agentic CLI on `PATH`.
+///
+/// Only `ExecutableSource::Path` discoveries count as installed. sniff's
+/// program lookup falls back to macOS app bundles when the `PATH` probe
+/// misses, and for agentic providers that fallback finds the *desktop* GUI
+/// app (`/Applications/Claude.app`, `/Applications/Qwen.app`, ...) — a
+/// binary that cannot run a terminal session. Counting it would select a
+/// provider the harness cannot actually launch and would leak host state
+/// past a deliberately restricted `PATH`. This mirrors the direct wrapper's
+/// `which`-based binary resolution, so "installed" means the same thing on
+/// both surfaces.
+pub fn detect_installed_providers(
+    clients: &sniff::programs::InstalledAiClients,
+) -> Vec<Provider> {
+    PROVIDERS_DISPLAY_ORDER
+        .into_iter()
+        .filter(|p| {
+            matches!(
+                clients.path_with_source(p.sniff_ai_cli()),
+                Some((_, sniff::programs::ExecutableSource::Path))
+            )
+        })
+        .collect()
+}
+
 /// Classify a frontmatter `agent` value against the installed-provider
 /// snapshot and return the corresponding [`AgentResolutionState`].
 ///
@@ -863,7 +888,7 @@ mod tests {
     fn model_catalog_skips_invalid_list_entries() {
         let prepared = make_prepared_composition(
             None,
-            Some(ModelHint::List(vec!["not-real".into(), "o3-mini".into()])),
+            Some(ModelHint::List(vec!["not-real".into(), "gpt-5.5".into()])),
         );
         let catalog = crate::model_catalog::ModelCatalogService::new();
         let (model, reason) = resolve_model_with_env(
@@ -873,7 +898,7 @@ mod tests {
             |_| None,
             Some(&catalog),
         );
-        assert_eq!(model, Some("o3-mini".to_string()));
+        assert_eq!(model, Some("gpt-5.5".to_string()));
         assert!(matches!(reason, ModelResolutionReason::FrontmatterList));
     }
 
@@ -897,7 +922,7 @@ mod tests {
 
     #[test]
     fn model_catalog_valid_single_hint_accepted() {
-        let prepared = make_prepared_composition(None, Some(ModelHint::Single("o3-mini".into())));
+        let prepared = make_prepared_composition(None, Some(ModelHint::Single("gpt-5.5".into())));
         let catalog = crate::model_catalog::ModelCatalogService::new();
         let (model, reason) = resolve_model_with_env(
             Provider::Codex,
@@ -906,7 +931,7 @@ mod tests {
             |_| None,
             Some(&catalog),
         );
-        assert_eq!(model, Some("o3-mini".to_string()));
+        assert_eq!(model, Some("gpt-5.5".to_string()));
         assert!(matches!(reason, ModelResolutionReason::FrontmatterSingle));
     }
 
@@ -1283,5 +1308,33 @@ mod tests {
         .unwrap();
         assert_eq!(target.provider, Provider::OpenCode);
         assert_eq!(target.model, Some("gpt-4o".to_string()));
+    }
+
+    // -- detect_installed_providers ---------------------------------------
+
+    /// A macOS app-bundle discovery is the provider's *desktop* app, not the
+    /// CLI; it must never count as an installed agentic CLI.
+    #[test]
+    fn detect_installed_providers_ignores_app_bundle_discoveries() {
+        use sniff::programs::{AiCli, ExecutableSource, InstalledAiClients};
+
+        let clients = InstalledAiClients::default()
+            .with_program(
+                AiCli::Claude,
+                PathBuf::from("/stub/bin/claude"),
+                ExecutableSource::Path,
+            )
+            .with_program(
+                AiCli::QwenCli,
+                PathBuf::from("/Applications/Qwen.app/Contents/MacOS/Qwen"),
+                ExecutableSource::MacOsAppBundle,
+            );
+
+        let installed = detect_installed_providers(&clients);
+        assert!(installed.contains(&Provider::Claude));
+        assert!(
+            !installed.contains(&Provider::QwenCode),
+            "bundle-sourced Qwen must not be treated as installed: {installed:?}"
+        );
     }
 }

@@ -14,34 +14,45 @@ use tokio::sync::OnceCell;
 use super::cache::{ModelCache, ModelCacheEntry};
 use super::config::merge_overrides;
 use super::provider_sources::{
-    CatalogFetchError, fetch_opencode_models, fetch_provider_catalog, static_catalog_for_provider,
+    CatalogFetchError, fetch_provider_catalog, fetch_shell_command_models,
+    static_catalog_for_provider,
 };
 use crate::config::claudine_config::{ClaudineConfig, ProviderModelOverride};
 use crate::provider::{ModelCatalogSource, Provider, provider_info};
 
-/// Memoized outcome of an `opencode models` subprocess attempt.
+/// A `ShellCommand` catalog source's identity: `(program, args)`.
+type ShellCommandKey = (&'static str, &'static [&'static str]);
+
+/// Memoized outcome of one shell-command subprocess attempt.
 ///
 /// Using [`tokio::sync::OnceCell`] guarantees the initialization closure
 /// runs **at most once** even with multiple concurrent callers; later
 /// callers wait for the in-flight initialization to complete and then
 /// observe the cached result. Both successful and failed outcomes are
 /// memoized so transient errors are not retried within this scope.
-type OpencodeDedupSlot = Arc<OnceCell<Result<Vec<String>, CatalogFetchError>>>;
+type ShellDedupSlot = Arc<OnceCell<Result<Vec<String>, CatalogFetchError>>>;
 
-/// Pluggable async fetcher used by [`ModelCatalogService`] for the
-/// OpenCode dynamic source.
+/// Per-command dedup slots, keyed so distinct `ShellCommand` sources never
+/// share a memoized result.
+type ShellDedupMap = Arc<std::sync::Mutex<HashMap<ShellCommandKey, ShellDedupSlot>>>;
+
+/// Pluggable async fetcher used by [`ModelCatalogService`] for
+/// `ShellCommand` dynamic sources.
 ///
-/// Production code wires this to [`fetch_opencode_models`]; tests can
+/// Production code wires this to [`fetch_shell_command_models`]; tests can
 /// inject a fake to avoid spawning real subprocesses while still
 /// exercising the dedup contract under concurrency.
-type OpencodeFetcher = Arc<
-    dyn Fn() -> Pin<Box<dyn Future<Output = Result<Vec<String>, CatalogFetchError>> + Send>>
+type ShellCommandFetcher = Arc<
+    dyn Fn(
+            &'static str,
+            &'static [&'static str],
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, CatalogFetchError>> + Send>>
         + Send
         + Sync,
 >;
 
-fn default_opencode_fetcher() -> OpencodeFetcher {
-    Arc::new(|| Box::pin(fetch_opencode_models()))
+fn default_shell_command_fetcher() -> ShellCommandFetcher {
+    Arc::new(|program, args| Box::pin(fetch_shell_command_models(program, args)))
 }
 
 /// Unified model catalog service.
@@ -53,25 +64,26 @@ fn default_opencode_fetcher() -> OpencodeFetcher {
 pub struct ModelCatalogService {
     cache: ModelCache,
     overrides: HashMap<Provider, ProviderModelOverride>,
-    /// In-memory dedup cache for the OpenCode dynamic source.
+    /// In-memory dedup cache for `ShellCommand` dynamic sources, keyed
+    /// by `(program, args)`.
     ///
-    /// Populated the first time the OpenCode fetcher runs for this
-    /// service instance and reused for any later `OpenCode` or
-    /// `QwenCode` refresh in the same scope. Cloning the service shares
-    /// this cache because [`Arc`] is reference-counted, and the
-    /// underlying [`tokio::sync::OnceCell`] coordinates concurrent
-    /// initialization so the fetcher runs exactly once even when both
-    /// providers refresh simultaneously.
-    opencode_dedup: OpencodeDedupSlot,
-    /// Function used to fetch the OpenCode model list. Defaults to
-    /// [`fetch_opencode_models`]; tests can substitute a fake via
-    /// [`Self::set_opencode_fetcher`].
-    opencode_fetcher: OpencodeFetcher,
-    /// Number of times the OpenCode fetcher initialization closure has
+    /// A slot is populated the first time its command's fetcher runs for
+    /// this service instance and reused by any later refresh of the same
+    /// command in the same scope. Cloning the service shares this cache
+    /// because [`Arc`] is reference-counted, and the underlying
+    /// [`tokio::sync::OnceCell`] coordinates concurrent initialization
+    /// so the fetcher runs exactly once per command even when refreshes
+    /// race.
+    shell_dedup: ShellDedupMap,
+    /// Function used to fetch a shell-command model list. Defaults to
+    /// [`fetch_shell_command_models`]; tests can substitute a fake via
+    /// [`Self::set_shell_command_fetcher`].
+    shell_command_fetcher: ShellCommandFetcher,
+    /// Number of times a shell-command fetcher initialization closure has
     /// actually executed for this service instance. Increments inside
     /// the [`OnceCell`] init closure so it accurately reflects real
     /// dedup behavior. Used by tests.
-    opencode_fetch_attempts: Arc<AtomicUsize>,
+    shell_command_fetch_attempts: Arc<AtomicUsize>,
 }
 
 impl std::fmt::Debug for ModelCatalogService {
@@ -80,12 +92,12 @@ impl std::fmt::Debug for ModelCatalogService {
             .field("cache", &self.cache)
             .field("overrides", &self.overrides)
             .field(
-                "opencode_dedup_initialized",
-                &self.opencode_dedup.initialized(),
+                "shell_dedup_commands",
+                &self.shell_dedup.lock().map(|map| map.len()).unwrap_or(0),
             )
             .field(
-                "opencode_fetch_attempts",
-                &self.opencode_fetch_attempts.load(Ordering::SeqCst),
+                "shell_command_fetch_attempts",
+                &self.shell_command_fetch_attempts.load(Ordering::SeqCst),
             )
             .finish()
     }
@@ -103,9 +115,9 @@ impl ModelCatalogService {
         Self {
             cache: ModelCache::new(),
             overrides: HashMap::new(),
-            opencode_dedup: Arc::new(OnceCell::new()),
-            opencode_fetcher: default_opencode_fetcher(),
-            opencode_fetch_attempts: Arc::new(AtomicUsize::new(0)),
+            shell_dedup: ShellDedupMap::default(),
+            shell_command_fetcher: default_shell_command_fetcher(),
+            shell_command_fetch_attempts: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -114,9 +126,9 @@ impl ModelCatalogService {
         Self {
             cache: ModelCache::new(),
             overrides,
-            opencode_dedup: Arc::new(OnceCell::new()),
-            opencode_fetcher: default_opencode_fetcher(),
-            opencode_fetch_attempts: Arc::new(AtomicUsize::new(0)),
+            shell_dedup: ShellDedupMap::default(),
+            shell_command_fetcher: default_shell_command_fetcher(),
+            shell_command_fetch_attempts: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -125,9 +137,9 @@ impl ModelCatalogService {
         Self {
             cache: ModelCache::with_dir(cache_dir),
             overrides: HashMap::new(),
-            opencode_dedup: Arc::new(OnceCell::new()),
-            opencode_fetcher: default_opencode_fetcher(),
-            opencode_fetch_attempts: Arc::new(AtomicUsize::new(0)),
+            shell_dedup: ShellDedupMap::default(),
+            shell_command_fetcher: default_shell_command_fetcher(),
+            shell_command_fetch_attempts: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -139,9 +151,9 @@ impl ModelCatalogService {
         Self {
             cache: ModelCache::with_dir(cache_dir),
             overrides,
-            opencode_dedup: Arc::new(OnceCell::new()),
-            opencode_fetcher: default_opencode_fetcher(),
-            opencode_fetch_attempts: Arc::new(AtomicUsize::new(0)),
+            shell_dedup: ShellDedupMap::default(),
+            shell_command_fetcher: default_shell_command_fetcher(),
+            shell_command_fetch_attempts: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -170,12 +182,11 @@ impl ModelCatalogService {
 
     /// Best-effort blocking refresh for a single provider.
     ///
-    /// Performs at most one `opencode models` subprocess per service
-    /// instance: a `QwenCode` refresh that follows an `OpenCode` refresh
-    /// reuses the cached OpenCode result. Static-source providers
-    /// (Claude, Codex) write the static list to cache without spawning
-    /// any subprocess. Providers without a source (Gemini, Goose, Kimi,
-    /// no-ops.
+    /// Performs at most one subprocess per `ShellCommand` source per
+    /// service instance: a repeat refresh of the same command reuses the
+    /// memoized result. Static-source providers write the static list to
+    /// cache without spawning any subprocess; providers without a source
+    /// are no-ops.
     ///
     /// Never panics; failures are silently ignored so stale cache or
     /// static fallback remains available.
@@ -215,8 +226,8 @@ impl ModelCatalogService {
     ///
     /// ## Static and no-source providers
     ///
-    /// Static-source providers (Claude, Codex) and no-source providers
-    /// (Gemini, Goose, Kimi) are essentially free to refresh, so
+    /// Static-source providers (e.g. Claude, Codex, Qwen) and no-source
+    /// providers are essentially free to refresh, so
     /// this delegates to [`refresh_provider_blocking`](Self::refresh_provider_blocking) which writes the
     /// static list to cache without spawning any subprocess.
     ///
@@ -234,14 +245,14 @@ impl ModelCatalogService {
         }
 
         let info = provider_info(provider);
-        match info.dynamic_source {
+        match info.model_catalog_source {
             ModelCatalogSource::None | ModelCatalogSource::Static => {
                 // Cheap: no subprocess spawn. Run inline so callers
                 // observe the static catalog immediately.
                 self.refresh_provider_blocking(provider);
                 return;
             }
-            ModelCatalogSource::OpencodeCli | ModelCatalogSource::OpencodeCliQwenFiltered => {}
+            ModelCatalogSource::ShellCommand { .. } => {}
         }
 
         // Cold-start fallback: no cache exists yet. We must block so the
@@ -285,24 +296,20 @@ impl ModelCatalogService {
 
     /// Refresh the catalog for a single provider with in-process dedup.
     ///
-    /// This is the async counterpart of [`refresh_provider_blocking`](Self::refresh_provider_blocking). It
-    /// shares the OpenCode subprocess result between `OpenCode` and
-    /// `QwenCode` refreshes so a `--qwen` run never repeats the
-    /// `opencode models` call.
+    /// This is the async counterpart of [`refresh_provider_blocking`](Self::refresh_provider_blocking). A
+    /// `ShellCommand` source's subprocess result is memoized per command,
+    /// so repeat refreshes within one service scope never repeat the
+    /// spawn.
     pub async fn refresh_provider(
         &self,
         provider: Provider,
     ) -> Result<Vec<String>, CatalogFetchError> {
-        let fetched = match provider_info(provider).dynamic_source {
+        let fetched = match provider_info(provider).model_catalog_source {
             ModelCatalogSource::None => Vec::new(),
             ModelCatalogSource::Static => static_catalog_for_provider(provider),
-            ModelCatalogSource::OpencodeCli => self.fetch_opencode_with_dedup().await?,
-            ModelCatalogSource::OpencodeCliQwenFiltered => self
-                .fetch_opencode_with_dedup()
-                .await?
-                .into_iter()
-                .filter(|m| m.to_ascii_lowercase().contains("qwen"))
-                .collect(),
+            ModelCatalogSource::ShellCommand { program, args } => {
+                self.fetch_shell_command_with_dedup(program, args).await?
+            }
         };
         let entry = ModelCacheEntry {
             provider,
@@ -313,61 +320,76 @@ impl ModelCatalogService {
         Ok(fetched)
     }
 
-    /// Fetch the OpenCode model catalog, reusing an in-memory result
-    /// captured earlier in the same service-instance scope.
+    /// Fetch one shell-command catalog, reusing an in-memory result
+    /// captured earlier in the same service-instance scope for the same
+    /// `(program, args)` command.
     ///
     /// Concurrency-safe: backed by [`tokio::sync::OnceCell`] so the
-    /// fetcher closure runs at most once even when both an `OpenCode`
-    /// and a `QwenCode` refresh start before either completes. Both
-    /// successful and failed outcomes are memoized so transient errors
-    /// are not retried mid-prep.
-    async fn fetch_opencode_with_dedup(&self) -> Result<Vec<String>, CatalogFetchError> {
-        let fetcher = self.opencode_fetcher.clone();
-        let attempts = self.opencode_fetch_attempts.clone();
-        self.opencode_dedup
-            .get_or_init(|| async move {
-                attempts.fetch_add(1, Ordering::SeqCst);
-                fetcher().await
-            })
-            .await
-            .clone()
+    /// fetcher closure runs at most once per command even when refreshes
+    /// race. Both successful and failed outcomes are memoized so
+    /// transient errors are not retried mid-prep.
+    async fn fetch_shell_command_with_dedup(
+        &self,
+        program: &'static str,
+        args: &'static [&'static str],
+    ) -> Result<Vec<String>, CatalogFetchError> {
+        let slot = {
+            let mut map = self.shell_dedup.lock().expect("shell dedup mutex poisoned");
+            map.entry((program, args)).or_default().clone()
+        };
+        let fetcher = self.shell_command_fetcher.clone();
+        let attempts = self.shell_command_fetch_attempts.clone();
+        slot.get_or_init(|| async move {
+            attempts.fetch_add(1, Ordering::SeqCst);
+            fetcher(program, args).await
+        })
+        .await
+        .clone()
     }
 
-    /// Number of times the OpenCode fetcher initialization closure has
+    /// Number of times a shell-command fetcher initialization closure has
     /// actually run for this service instance.
     ///
     /// Exposed for tests that need to verify the dedup contract.
     #[doc(hidden)]
-    pub fn opencode_fetch_attempts(&self) -> usize {
-        self.opencode_fetch_attempts.load(Ordering::SeqCst)
+    pub fn shell_command_fetch_attempts(&self) -> usize {
+        self.shell_command_fetch_attempts.load(Ordering::SeqCst)
     }
 
-    /// Pre-populate the in-memory OpenCode dedup cache with a known
-    /// result. Used by tests to exercise [`refresh_provider`] without
-    /// shelling out.
+    /// Pre-populate the in-memory dedup cache for one shell command with
+    /// a known result. Used by tests to exercise [`refresh_provider`]
+    /// without shelling out.
     ///
-    /// Idempotent: if the dedup cell is already initialized, the new
-    /// value is silently ignored.
+    /// Idempotent: if the command's dedup cell is already initialized,
+    /// the new value is silently ignored.
     #[doc(hidden)]
-    pub fn prime_opencode_dedup(&self, result: Result<Vec<String>, CatalogFetchError>) {
-        let _ = self.opencode_dedup.set(result);
+    pub fn prime_shell_command_dedup(
+        &self,
+        program: &'static str,
+        args: &'static [&'static str],
+        result: Result<Vec<String>, CatalogFetchError>,
+    ) {
+        let slot = {
+            let mut map = self.shell_dedup.lock().expect("shell dedup mutex poisoned");
+            map.entry((program, args)).or_default().clone()
+        };
+        let _ = slot.set(result);
     }
 
-    /// Replace the OpenCode fetcher with a custom async closure.
+    /// Replace the shell-command fetcher with a custom async closure.
     ///
     /// Test-only helper that lets the dedup contract be exercised
-    /// against an injectable fake source rather than the real
-    /// `opencode models` subprocess.
+    /// against an injectable fake source rather than a real subprocess.
     #[doc(hidden)]
-    pub fn set_opencode_fetcher(&mut self, fetcher: OpencodeFetcher) {
-        self.opencode_fetcher = fetcher;
+    pub fn set_shell_command_fetcher(&mut self, fetcher: ShellCommandFetcher) {
+        self.shell_command_fetcher = fetcher;
     }
 
     /// Refresh all supported providers.
     ///
-    /// Uses [`refresh_provider`](Self::refresh_provider) internally so that
-    /// `OpenCode` and `QwenCode` share the same underlying `opencode models`
-    /// subprocess result (dedup). Static-source providers (Claude, Codex)
+    /// Uses [`refresh_provider`](Self::refresh_provider) internally so
+    /// `ShellCommand` subprocess results are memoized per command.
+    /// Static-source providers (Claude, Codex, Qwen)
     /// write their static lists to cache without spawning any subprocess.
     pub async fn refresh_all(
         &self,
@@ -425,11 +447,20 @@ mod tests {
         DetailedModelOverride, ModelOverrideMode, ProviderModelOverride,
     };
 
+    /// OpenCode's `ShellCommand` identity, destructured from the
+    /// generated catalog so tests stay truthful to the committed data.
+    fn opencode_command() -> (&'static str, &'static [&'static str]) {
+        match provider_info(Provider::OpenCode).model_catalog_source {
+            ModelCatalogSource::ShellCommand { program, args } => (program, args),
+            other => panic!("opencode must be ShellCommand-sourced, got {other:?}"),
+        }
+    }
+
     #[test]
     fn service_validates_static_model() {
         let service = ModelCatalogService::new();
-        assert!(service.is_valid(Provider::Codex, "o3-mini"));
-        assert!(service.is_valid(Provider::Claude, "claude-3-7-sonnet-20250219"));
+        assert!(service.is_valid(Provider::Codex, "gpt-5.5"));
+        assert!(service.is_valid(Provider::Claude, "claude-opus-4-8"));
     }
 
     #[test]
@@ -442,8 +473,8 @@ mod tests {
     #[test]
     fn service_case_insensitive_validation() {
         let service = ModelCatalogService::new();
-        assert!(service.is_valid(Provider::Codex, "O3-MINI"));
-        assert!(service.is_valid(Provider::Claude, "CLAUDE-3-7-SONNET-20250219"));
+        assert!(service.is_valid(Provider::Codex, "GPT-5.5"));
+        assert!(service.is_valid(Provider::Claude, "CLAUDE-OPUS-4-8"));
     }
 
     #[test]
@@ -455,7 +486,7 @@ mod tests {
         );
         let service = ModelCatalogService::with_overrides(overrides);
 
-        assert!(service.is_valid(Provider::Codex, "o3-mini"));
+        assert!(service.is_valid(Provider::Codex, "gpt-5.5"));
         assert!(service.is_valid(Provider::Codex, "custom-codex-model"));
     }
 
@@ -471,17 +502,17 @@ mod tests {
         );
         let service = ModelCatalogService::with_overrides(overrides);
 
-        assert!(!service.is_valid(Provider::Codex, "o3-mini"));
+        assert!(!service.is_valid(Provider::Codex, "gpt-5.5"));
         assert!(service.is_valid(Provider::Codex, "only-this-model"));
     }
 
     #[test]
     fn service_first_valid_finds_match() {
         let service = ModelCatalogService::new();
-        let candidates = vec!["not-real".into(), "o3-mini".into(), "gpt-5.2".into()];
+        let candidates = vec!["not-real".into(), "gpt-5.5".into(), "gpt-5.4".into()];
         assert_eq!(
             service.first_valid(Provider::Codex, &candidates),
-            Some("o3-mini".into())
+            Some("gpt-5.5".into())
         );
     }
 
@@ -493,10 +524,11 @@ mod tests {
     }
 
     #[test]
-    fn gemini_has_no_static_catalog() {
+    fn gemini_static_catalog_is_research_fed() {
+        // Research-fed as of generator v1 (previously empty/None-sourced).
         let service = ModelCatalogService::new();
-        assert!(service.catalog_for(Provider::Gemini).is_empty());
-        assert!(!service.is_valid(Provider::Gemini, "gemini-2.5-pro"));
+        assert!(!service.catalog_for(Provider::Gemini).is_empty());
+        assert!(service.is_valid(Provider::Gemini, "gemini-2.5-pro"));
     }
 
     #[test]
@@ -518,60 +550,61 @@ mod tests {
 
     #[test]
     fn refresh_provider_blocking_static_no_subprocess() {
-        // Static-source providers (Claude, Codex) must never spawn the
-        // opencode subprocess.
+        // Static-source providers (Claude, Codex) must never spawn a
+        // shell-command subprocess.
         let tmp = tempfile::tempdir().unwrap();
         let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
         service.refresh_provider_blocking(Provider::Claude);
         service.refresh_provider_blocking(Provider::Codex);
-        assert_eq!(service.opencode_fetch_attempts(), 0);
+        assert_eq!(service.shell_command_fetch_attempts(), 0);
     }
 
     #[test]
-    fn refresh_provider_blocking_no_source_no_subprocess() {
-        // Providers without a dynamic source (Gemini, Goose, Kimi)
-        // must never spawn the opencode subprocess.
+    fn refresh_provider_blocking_no_shell_source_no_subprocess() {
+        // Providers without a ShellCommand source must never spawn a
+        // subprocess.
         let tmp = tempfile::tempdir().unwrap();
         let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
         service.refresh_provider_blocking(Provider::Gemini);
         service.refresh_provider_blocking(Provider::Goose);
         service.refresh_provider_blocking(Provider::KimiCode);
-        assert_eq!(service.opencode_fetch_attempts(), 0);
+        assert_eq!(service.shell_command_fetch_attempts(), 0);
     }
 
+    /// Qwen left shell sourcing (2026-07-05 ruling): it is Static now,
+    /// so a refresh writes its research-fed list without any subprocess.
     #[test]
-    fn refresh_provider_blocking_qwen_dedupes_opencode_via_primed_cache() {
-        // Pre-populate the in-memory dedup cache so the QwenCode refresh
-        // never reaches the subprocess. Verifies that the fallback path
-        // honors the cache.
+    fn refresh_provider_blocking_qwen_is_static_no_subprocess() {
         let tmp = tempfile::tempdir().unwrap();
         let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
-        service.prime_opencode_dedup(Ok(vec![
-            "qwen-2.5-coder".into(),
-            "gpt-5".into(),
-            "claude-sonnet-4".into(),
-        ]));
 
         service.refresh_provider_blocking(Provider::QwenCode);
-        assert_eq!(service.opencode_fetch_attempts(), 0);
+        assert_eq!(service.shell_command_fetch_attempts(), 0);
 
         let qwen = service.catalog_for(Provider::QwenCode);
-        assert!(qwen.contains(&"qwen-2.5-coder".into()));
-        assert!(!qwen.contains(&"gpt-5".into()));
+        assert!(
+            qwen.contains(&"qwen3-coder-plus".into()),
+            "expected research-fed static model in {qwen:?}"
+        );
     }
 
     #[test]
-    fn refresh_provider_blocking_opencode_then_qwen_dedupes() {
-        // OpenCode refresh primes the dedup cache; QwenCode refresh that
-        // follows must not re-attempt the subprocess. We seed the cache
-        // up front to avoid relying on `opencode` being on PATH.
+    fn refresh_provider_blocking_opencode_twice_dedupes() {
+        // A repeat OpenCode refresh must not re-attempt the subprocess.
+        // We seed the dedup cache up front to avoid relying on
+        // `opencode` being on PATH.
         let tmp = tempfile::tempdir().unwrap();
         let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
-        service.prime_opencode_dedup(Ok(vec!["qwen-coder".into(), "gpt-5.2".into()]));
+        let (program, args) = opencode_command();
+        service.prime_shell_command_dedup(
+            program,
+            args,
+            Ok(vec!["qwen-coder".into(), "gpt-5.2".into()]),
+        );
         service.refresh_provider_blocking(Provider::OpenCode);
-        service.refresh_provider_blocking(Provider::QwenCode);
+        service.refresh_provider_blocking(Provider::OpenCode);
         assert_eq!(
-            service.opencode_fetch_attempts(),
+            service.shell_command_fetch_attempts(),
             0,
             "primed dedup must short-circuit subprocess attempts"
         );
@@ -584,54 +617,64 @@ mod tests {
         // exists. Refresh failures must not corrupt later validation.
         let tmp = tempfile::tempdir().unwrap();
         let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
-        service.prime_opencode_dedup(Err(CatalogFetchError::CliNotFound("opencode".into())));
+        let (program, args) = opencode_command();
+        service.prime_shell_command_dedup(
+            program,
+            args,
+            Err(CatalogFetchError::CliNotFound("opencode".into())),
+        );
         service.refresh_provider_blocking(Provider::OpenCode);
 
         // OpenCode has no static catalog, but is_valid for Claude (a
         // static-source provider) must still work because refreshing
         // OpenCode never touches Claude state.
-        assert!(service.is_valid(Provider::Claude, "claude-3-7-sonnet-20250219"));
+        assert!(service.is_valid(Provider::Claude, "claude-opus-4-8"));
     }
 
     #[test]
-    fn refresh_all_dedupes_opencode_for_opencode_and_qwen() {
-        // refresh_all() must run opencode models at most once when both
-        // OpenCode and QwenCode are refreshed.
+    fn refresh_all_uses_primed_shell_result_and_static_qwen() {
+        // refresh_all() must not spawn any subprocess when OpenCode's
+        // command result is primed, and Qwen (Static since the
+        // 2026-07-05 ruling) refreshes from its compiled list.
         let tmp = tempfile::tempdir().unwrap();
         let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
-        service.prime_opencode_dedup(Ok(vec![
-            "qwen-2.5-coder".into(),
-            "gpt-5".into(),
-            "claude-sonnet-4".into(),
-        ]));
+        let (program, args) = opencode_command();
+        service.prime_shell_command_dedup(
+            program,
+            args,
+            Ok(vec![
+                "qwen-2.5-coder".into(),
+                "gpt-5".into(),
+                "claude-sonnet-4".into(),
+            ]),
+        );
 
         service.refresh_blocking();
 
-        // The dedup mechanism should have prevented multiple subprocess
-        // attempts even though both OpenCode and QwenCode were refreshed.
         assert_eq!(
-            service.opencode_fetch_attempts(),
+            service.shell_command_fetch_attempts(),
             0,
             "primed dedup must short-circuit subprocess attempts in refresh_all"
         );
 
-        // Verify both providers got the expected catalogs
+        // OpenCode reflects the primed shell result; Qwen reflects its
+        // research-fed static list, not the OpenCode output.
         let opencode = service.catalog_for(Provider::OpenCode);
         assert!(opencode.contains(&"qwen-2.5-coder".into()));
         assert!(opencode.contains(&"gpt-5".into()));
 
         let qwen = service.catalog_for(Provider::QwenCode);
-        assert!(qwen.contains(&"qwen-2.5-coder".into()));
+        assert!(qwen.contains(&"qwen3-coder-plus".into()));
         assert!(!qwen.contains(&"gpt-5".into()));
     }
 
     #[tokio::test]
-    async fn concurrent_opencode_qwen_refresh_runs_fetcher_once() {
-        // Drive OpenCode and Qwen refreshes concurrently against an
+    async fn concurrent_opencode_refreshes_run_fetcher_once() {
+        // Drive two OpenCode refreshes concurrently against an
         // injectable fake source that blocks until released. The dedup
         // contract requires the fetcher to run exactly once even when
-        // both callers observe the OnceCell as uninitialized at the
-        // start of their await.
+        // both callers observe the command's OnceCell as uninitialized
+        // at the start of their await.
         use std::time::Duration;
         use tokio::sync::Notify;
 
@@ -645,7 +688,7 @@ mod tests {
         let fetch_count_for_fetcher = fetch_count.clone();
         let started_for_fetcher = started.clone();
         let release_for_fetcher = release.clone();
-        service.set_opencode_fetcher(Arc::new(move || {
+        service.set_shell_command_fetcher(Arc::new(move |_program, _args| {
             let fetch_count = fetch_count_for_fetcher.clone();
             let started = started_for_fetcher.clone();
             let release = release_for_fetcher.clone();
@@ -663,10 +706,10 @@ mod tests {
 
         let s1 = service.clone();
         let s2 = service.clone();
-        let opencode_handle =
+        let first_handle =
             tokio::spawn(async move { s1.refresh_provider(Provider::OpenCode).await });
-        let qwen_handle =
-            tokio::spawn(async move { s2.refresh_provider(Provider::QwenCode).await });
+        let second_handle =
+            tokio::spawn(async move { s2.refresh_provider(Provider::OpenCode).await });
 
         // Wait until the first (and only) fetcher invocation has begun
         // and is parked on `release.notified()`. Then give the second
@@ -677,27 +720,22 @@ mod tests {
         // Release the in-flight fetch so both callers can complete.
         release.notify_waiters();
 
-        let opencode_result = opencode_handle.await.unwrap().unwrap();
-        let qwen_result = qwen_handle.await.unwrap().unwrap();
+        let first_result = first_handle.await.unwrap().unwrap();
+        let second_result = second_handle.await.unwrap().unwrap();
 
         assert_eq!(
             fetch_count.load(Ordering::SeqCst),
             1,
-            "OpenCode fetcher must run exactly once across concurrent refreshes"
+            "shell-command fetcher must run exactly once across concurrent refreshes"
         );
         assert_eq!(
-            service.opencode_fetch_attempts(),
+            service.shell_command_fetch_attempts(),
             1,
             "OnceCell init closure must run exactly once"
         );
 
-        assert!(opencode_result.contains(&"gpt-5".to_string()));
-        assert!(opencode_result.contains(&"qwen-2.5-coder".to_string()));
-
-        // QwenCode source applies the qwen-only filter on top of the
-        // shared list.
-        assert!(qwen_result.contains(&"qwen-2.5-coder".to_string()));
-        assert!(!qwen_result.contains(&"gpt-5".to_string()));
+        assert!(first_result.contains(&"gpt-5".to_string()));
+        assert_eq!(first_result, second_result);
     }
 
     /// W3: when a cache file already exists for a dynamic-source
@@ -730,7 +768,7 @@ mod tests {
         // refresh should never await on it from the caller's thread.
         let parked = Arc::new(Notify::new());
         let parked_for_fetcher = parked.clone();
-        service.set_opencode_fetcher(Arc::new(move || {
+        service.set_shell_command_fetcher(Arc::new(move |_program, _args| {
             let parked = parked_for_fetcher.clone();
             Box::pin(async move {
                 parked.notified().await;
@@ -773,7 +811,12 @@ mod tests {
         // Seed only the in-memory dedup cell so OpenCode "fetch" returns
         // immediately without spawning the real subprocess. The disk
         // cache remains empty, exercising the cold-start fallback.
-        service.prime_opencode_dedup(Err(CatalogFetchError::CliNotFound("opencode".into())));
+        let (program, args) = opencode_command();
+        service.prime_shell_command_dedup(
+            program,
+            args,
+            Err(CatalogFetchError::CliNotFound("opencode".into())),
+        );
 
         // Pre-condition: no on-disk cache.
         assert!(service.cache.read(Provider::OpenCode).is_none());
@@ -799,7 +842,7 @@ mod tests {
         // refresh, so a follow-up read returns the static list.
         let read = service.cache.read(Provider::Claude).unwrap();
         assert!(!read.models.is_empty());
-        assert_eq!(service.opencode_fetch_attempts(), 0);
+        assert_eq!(service.shell_command_fetch_attempts(), 0);
     }
 
     /// W3 escape hatch: `CLAUDINE_BACKGROUND_REFRESH=0` forces the
@@ -818,7 +861,12 @@ mod tests {
             fetched_at: chrono::Utc::now(),
         };
         service.cache.write(&entry).unwrap();
-        service.prime_opencode_dedup(Err(CatalogFetchError::CliNotFound("opencode".into())));
+        let (program, args) = opencode_command();
+        service.prime_shell_command_dedup(
+            program,
+            args,
+            Err(CatalogFetchError::CliNotFound("opencode".into())),
+        );
 
         let prior = std::env::var("CLAUDINE_BACKGROUND_REFRESH").ok();
         unsafe {
@@ -846,19 +894,24 @@ mod tests {
         // to cache correctly.
         let tmp = tempfile::tempdir().unwrap();
         let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
-        // Prime the dedup cache so the OpenCode/Qwen refreshes do not
-        // reach the subprocess.
-        service.prime_opencode_dedup(Ok(vec!["qwen-2.5-coder".into(), "gpt-5".into()]));
+        // Prime the dedup cache so the OpenCode refresh does not reach
+        // the subprocess.
+        let (program, args) = opencode_command();
+        service.prime_shell_command_dedup(
+            program,
+            args,
+            Ok(vec!["qwen-2.5-coder".into(), "gpt-5".into()]),
+        );
         service.refresh_blocking();
 
         assert_eq!(
-            service.opencode_fetch_attempts(),
+            service.shell_command_fetch_attempts(),
             0,
-            "static providers must not trigger opencode subprocess"
+            "static providers must not trigger a shell-command subprocess"
         );
 
         // Static catalogs should still be available via cache
-        assert!(service.is_valid(Provider::Claude, "claude-3-7-sonnet-20250219"));
-        assert!(service.is_valid(Provider::Codex, "o3-mini"));
+        assert!(service.is_valid(Provider::Claude, "claude-opus-4-8"));
+        assert!(service.is_valid(Provider::Codex, "gpt-5.5"));
     }
 }

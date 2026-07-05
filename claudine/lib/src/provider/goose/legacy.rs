@@ -104,7 +104,7 @@ fn build_goose_agent_capabilities() -> AgentCapabilities {
                 notes: vec!["No global cross-provider thinking flag"],
             },
             logging: LoggingCapabilities {
-                session_locations: vec!["~/.local/share/goose/sessions/sessions.db"],
+                session_locations: vec![],
                 log_locations: vec![
                     "~/.local/state/goose/logs/cli/",
                     "~/.local/state/goose/logs/server/",

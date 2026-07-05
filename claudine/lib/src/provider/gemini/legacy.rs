@@ -101,7 +101,7 @@ fn build_gemini_agent_capabilities() -> AgentCapabilities {
                 notes: vec!["Thinking controls are set in settings.json"],
             },
             logging: LoggingCapabilities {
-                session_locations: vec!["~/.gemini/tmp/<project_hash>/chats/"],
+                session_locations: vec!["~/.gemini/tmp/{project_id}/chats/session-{utc_iso_ts}-{short_id}.jsonl"],
                 log_locations: vec![],
                 debug_controls: vec!["--debug"],
                 telemetry_controls: vec!["OpenTelemetry via settings/env"],

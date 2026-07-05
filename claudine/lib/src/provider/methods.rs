@@ -275,13 +275,15 @@ mod tests {
 
     #[test]
     fn supports_skills() {
-        assert!(Provider::Claude.supports_skills());
-        assert!(Provider::Codex.supports_skills());
-        assert!(Provider::Gemini.supports_skills());
-        assert!(Provider::OpenCode.supports_skills());
-        assert!(Provider::QwenCode.supports_skills());
-        assert!(!Provider::Goose.supports_skills());
-        assert!(!Provider::KimiCode.supports_skills());
+        // All seven providers report first-class skill support per the
+        // skills research topic (generator v1 graduation; the old
+        // Goose/Kimi `false` constants were ruled stale - Open question 3).
+        for provider in crate::provider::PROVIDERS_DISPLAY_ORDER {
+            assert!(
+                provider.supports_skills(),
+                "{provider:?} should support skills per the skills research topic"
+            );
+        }
     }
 
     #[test]

@@ -108,7 +108,7 @@ fn build_qwen_agent_capabilities() -> AgentCapabilities {
                 notes: vec!["No dedicated CLI reasoning-effort flag is documented"],
             },
             logging: LoggingCapabilities {
-                session_locations: vec!["~/.qwen/projects/<sanitized-cwd>/chats/"],
+                session_locations: vec!["~/.qwen/projects/{sanitized_cwd}/chats/{session_id}.jsonl"],
                 log_locations: vec!["logs/openai"],
                 debug_controls: vec!["--debug"],
                 telemetry_controls: vec![

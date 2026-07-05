@@ -88,7 +88,7 @@ fn build_kimi_agent_capabilities() -> AgentCapabilities {
                 notes: vec!["Thinking availability is model capability-gated"],
             },
             logging: LoggingCapabilities {
-                session_locations: vec!["~/.kimi/sessions/<dir-hash>/<session-id>/context.jsonl"],
+                session_locations: vec!["~/.kimi/sessions/{md5_cwd}/{session_id}/wire.jsonl"],
                 log_locations: vec![
                     "~/.kimi/logs/kimi.log",
                     "~/.kimi/sessions/<dir-hash>/<session-id>/wire.jsonl",

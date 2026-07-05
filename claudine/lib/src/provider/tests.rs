@@ -181,6 +181,69 @@ fn provider_info_serializes_round_trip() {
     }
 }
 
+/// Twin of claudine-gen's registry-covers-all-fields guard
+/// (`gen/tests/registry_coverage.rs`): the serialized `--describe` key
+/// list is checked in on BOTH sides — the generator asserts its mapping
+/// registry against the list, and this test binds the list to the real
+/// serialization. Adding/removing/reordering a serialized `ProviderInfo`
+/// field must update both copies (and the mapping registry).
+#[test]
+fn serialized_field_list_matches_catalog() {
+    const SERIALIZED_PROVIDER_INFO_FIELDS: &[&str] = &[
+        "provider",
+        "display_name",
+        "slug",
+        "short_name",
+        "binary",
+        "agent_offset",
+        "cli_aliases",
+        "docs_url",
+        "usage_dashboard_url",
+        "sniff_binding",
+        "supports_skills",
+        "stream_protocol",
+        "event_mapping",
+        "resource_support",
+        "session_log_paths",
+        "session_locations",
+        "config_paths",
+        "memory_files",
+        "output_formats",
+        "entrypoints",
+        "system_prompt",
+        "yolo",
+        "reasoning",
+        "known_gaps",
+        "acp",
+        "prompt_arg_conventions",
+        "static_models",
+        "model_catalog_source",
+        "model_env_vars",
+        "cli_sensitive_axes",
+        "repo_home_root_files",
+    ];
+    // serde_json without `preserve_order` sorts map keys, so membership
+    // (not order) is asserted here; the gen-side twin pins the order
+    // against the mapping registry.
+    let mut expected: Vec<&str> = SERIALIZED_PROVIDER_INFO_FIELDS.to_vec();
+    expected.sort_unstable();
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let info = provider_info(provider);
+        let json = serde_json::to_value(info).expect("provider_info serializes");
+        let keys: Vec<&str> = json
+            .as_object()
+            .expect("ProviderInfo serializes as an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys, expected,
+            "{provider:?}: serialized field list drifted — update the checked-in list \
+             here AND in gen/tests/registry_coverage.rs, and extend the mapping registry"
+        );
+    }
+}
+
 /// Every event-mapping row reachable from `info.event_mapping.mappings`
 /// must round-trip through JSON without losing rows.
 #[test]
