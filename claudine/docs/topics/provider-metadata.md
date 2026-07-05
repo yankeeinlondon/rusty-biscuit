@@ -64,7 +64,7 @@ The `ProviderInfo` struct (`lib/src/provider/mod.rs`) carries 36 fields organize
 | `acp` | `AcpSupport` | ACP server mode, client capability, and events captured via ACP |
 | `prompt_arg_conventions` | `PromptArgConventions` | How the provider's CLI represents a prompt on argv |
 | `static_models` | `&'static [&'static str]` | Compiled-in model catalog entries |
-| `dynamic_source` | `ModelCatalogSource` | How dynamic model lists are sourced (`Static`, `OpencodeCli`, etc.) |
+| `model_catalog_source` | `ModelCatalogSource` | How the model catalog is sourced (`None`, `Static`, or `ShellCommand { program, args }`) |
 | `model_env_vars` | `&'static [&'static str]` | Provider-specific MODEL env var chain (e.g. `["CLAUDE_MODEL", "ANTHROPIC_MODEL"]`) |
 | `cli_sensitive_axes` | `CliSensitiveAxes` | Which permission-policy axes CLI flags can override at runtime (10 boolean axes) |
 | `repo_home_root_files` | `&'static [&'static str]` | Root-level files preserved during shadow-HOME isolation |
@@ -85,7 +85,7 @@ Each typed catalog field is backed by a dedicated module under `lib/src/provider
 | `known_gap.rs` | `KnownGapArea` (13 variants), `KnownGap` |
 | `prompt_args.rs` | `PromptArgConventions`, `COMMON_VALUE_TAKING_FLAGS` |
 | `cli_sensitivity.rs` | `CliSensitiveAxes` (10 boolean fields + `NONE`/`ALL` constants) |
-| `model_catalog_source.rs` | `ModelCatalogSource` (4 variants) |
+| `model_catalog_source.rs` | `ModelCatalogSource` (3 variants) |
 
 ### Technical Overview
 

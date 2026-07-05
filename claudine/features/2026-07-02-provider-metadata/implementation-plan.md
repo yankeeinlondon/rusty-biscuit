@@ -120,6 +120,16 @@ stale topic-doc tables (topic doc gets a pointer). Output feeds C, D, and I sizi
    > hoisted to shared code (per-provider field removed; union semantics stand),
    > and `structured_stream_flag` derives from `output_formats` (dropped from
    > table A). All Checkpoint B questions are now closed; generator v1 proceeds.
+   > (6) **`ModelCatalogSource` reshape + rename (2026-07-05):** the enum is
+   > mechanism-only — `None` / `Static` / `ShellCommand { program, args }`
+   > (provider-specific `OpencodeCli`/`OpencodeCliQwenFiltered` variants
+   > deleted); `ProviderInfo.dynamic_source` renamed `model_catalog_source`
+   > everywhere (struct, describe key, override key, catalog.json). Qwen leaves
+   > shell sourcing (research coercion → `static`; override deleted); opencode
+   > pins the ShellCommand object; codex/kimi keep `static` pins (matrix Open
+   > question 8). Generate-time unchained ruling recorded: model ground truth
+   > joins arrive with Phase F's committed unchained-ai artifact — the registry
+   > re-points `static_models` there; the runtime enum stays mechanism-only.
 3. **Generator v1**: registry covers all current fields; `data.rs` generated
    byte-stable for all 8; drift test + CI `--check` land; `catalog.json` superset
    emitted; `--mapping` rendered by claudine-cli through renderable components.

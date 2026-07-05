@@ -101,7 +101,7 @@ rows — see Open questions 1 and 2, RESOLVED.)
 | Field | Rust shape | Declared source | Expected shape | Coercion | Notes |
 | --- | --- | --- | --- | --- | --- |
 | `static_models` | `&'static [&'static str]` | `research:agent-models` `default_models` | RecordArray (requires `id`) | `DefaultModelsToStaticModels` (named): extract `id`, dedup, sort lexically to match hand-written ordering | **Large value drift**: compiled lists are stale hand copies from unchained-ai (codex still lists `gpt-3.5-turbo`/`o3`; research says `gpt-5.5`/`gpt-5.4`…; claude research says `claude-fable-5`/`claude-opus-4-8`…). Graduation regenerates against research — this diff is the point, reviewed at generate time. `catalog_id` joins arrive with Phase F. |
-| `dynamic_source` | `ModelCatalogSource` | `research:agent-models` `dynamic_listing.available` | Boolean, or EnumSubsetOf(ModelCatalogSource) | `DynamicListingToModelCatalogSource` (A1) | A1 entry, unchanged. `true` still needs a variant-selection story (or overrides) for codex/opencode/qwen/kimi in v1 — the boolean cannot pick between `OpencodeCli`/`OpencodeCliQwenFiltered`/etc. |
+| `model_catalog_source` *(renamed from `dynamic_source`, 2026-07-05 ruling)* | `ModelCatalogSource` — reshaped mechanism-only: `None` / `Static` / `ShellCommand { program, args }` (provider-specific `OpencodeCli`/`OpencodeCliQwenFiltered` variants deleted) | `research:agent-models` `dynamic_listing.available` | Boolean, or EnumSubsetOf(ModelCatalogSource) | `DynamicListingToModelCatalogSource` (A1; output vocabulary reshaped) | Catalog/override shape mirrors serde: bare member string for unit variants, externally tagged `{shell_command: {program, args}}` object for the data variant. `false` coerces to `static` (now correct for qwen — research-fed `static_models`; its override is deleted). `true` still cannot select a mechanism: opencode pins the ShellCommand object; codex pins `static` (`codex debug models` is the future ShellCommand candidate, pending verification); kimi pins `static` (listing surfaces are HTTP/ACP, not shell commands — research reports `true`, so the pin cannot be deleted). |
 | `model_env_vars` | `&'static [&'static str]` | `research:agent-models` `model_selection` | RecordArray (requires `method`, `site`) | `EnvVarSitesToStringSlice` (A1, skip-loudly) | A1 entry, unchanged. One-env-var-per-record fleet-prompt mandate already ratified (Checkpoint A ruling 4). |
 | `session_log_paths` | `&'static [PathTemplate]` (serialized `{raw, segments}`) | `research:agent-logging` `surfaces` | RecordArray (requires `role`, `path_macos`, `format`) | `SurfacesToSessionLogPaths` (named): filter `role == session_transcript`, take `path_macos` | Placeholder-grammar drift: constants use `<encoded-directory>`/`<session-uuid>`, research uses `{sanitized_cwd}`/`{session_id}` — graduation must pick one grammar (PathTemplate segments parsing suggests `{…}`; Ken to confirm). Per-OS paths exist in research but the catalog field is single-list today. |
 | `config_paths` | `&'static [PathTemplate]` | `research:agent-cli` `config_paths` (frontmatter key renamed from `config_files`, 2026-07-04 — Open question 5 ruling) | RecordArray (requires `os`, `scope`, `path`) | `ConfigPathRecordsToConfigPaths` (named): filter `os == macos` (user+repo scopes), take `path`, document order | The research records are per-OS; the current catalog field collapses to one list. Per the Open question 5 ruling, `ConfigFileSpec` is this field's eventual richer TYPE (upgrade deferred until the agent-cli schema carries `format` on every record; graduation note, not a v1 change); until then this is a lossy-but-honest projection. |
@@ -502,3 +502,21 @@ The A1 `SchemaExpectation` vocabulary (`String`, `Boolean`, `EnumSubsetOf`,
    `supports_structured_stream()` already derives from `stream_protocol`
    (`profile/mod.rs:516`). Second copies drift; a dedicated field returns only if a
    provider's stream selection stops being expressible in `output_formats`.
+8. **`ModelCatalogSource` reshape + field rename — RESOLVED (2026-07-05, Ken):**
+   the enum becomes mechanism-only — `None` / `Static` /
+   `ShellCommand { program: &'static str, args: &'static [&'static str] }`;
+   the provider-specific `OpencodeCli` / `OpencodeCliQwenFiltered` variants are
+   deleted (no filter parameter — opencode is the only shell-command user:
+   `ShellCommand { program: "opencode", args: &["models"] }`). The `ProviderInfo`
+   field is renamed `dynamic_source` → `model_catalog_source` everywhere (struct,
+   serialized describe key, override key, catalog.json). Qwen leaves shell
+   sourcing entirely: the research coercion (`available: false` → `static`) is
+   now correct because its `static_models` are research-fed, so its override is
+   deleted. Codex keeps a `static` pin (`codex debug models` is the future
+   ShellCommand candidate, pending verification); kimi keeps a `static` pin
+   (research reports `available: true` via HTTP/ACP surfaces — not shell
+   commands — so the pin cannot be deleted); opencode's pin becomes the
+   ShellCommand object (the research boolean cannot express program/args).
+   Generate-time unchained ruling (recorded, no code yet): model ground truth
+   joins arrive with Phase F's committed unchained-ai artifact — the registry
+   will re-point `static_models` there; the runtime enum stays mechanism-only.

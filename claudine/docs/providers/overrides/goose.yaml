@@ -1,0 +1,12 @@
+# Human-owned overrides for the goose provider. Each entry WINS over the
+# field's declared source during generation (whole-key replacement) and MUST
+# carry a `reason:`. Keys are catalog field names; an override for a field
+# with no mapping-registry entry is a generation error.
+model_env_vars:
+    value: ["GOOSE_MODEL"]
+    reason: >-
+        agent-models research enumerates GOOSE_PROVIDER and GOOSE_FAST_MODEL
+        alongside GOOSE_MODEL; those select the provider and the auxiliary
+        fast model, not the wrapper MODEL selection chain that
+        composition::select consumes. Pin GOOSE_MODEL until agent-models
+        records carry a selection-role field (pending schema addition).

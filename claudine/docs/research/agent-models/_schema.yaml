@@ -30,7 +30,7 @@ $schema:
     precedence: string
 
     # Can the CLI enumerate its model catalog programmatically?
-    # (feeds dynamic_source / ModelCatalogSource)
+    # (feeds model_catalog_source / ModelCatalogSource)
     dynamic_listing: "{ available: boolean(required), method: string, example: string }"
 
     changes: string[]

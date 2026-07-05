@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-3c4993b2ba6a72be
-last_updated: 2026-06-30
+hash: ef46db3751d8e999-e5c79125d496b89a
+last_updated: 2026-07-04
 ---
 # Claudine CLI Reference
 
@@ -179,6 +179,15 @@ Show a compact provider capability matrix with provider name as an OSC8 link to 
 ```bash
 claudine providers
 ```
+
+**`claudine providers generate [slug]`** shells out to the `claudine-gen` binary (the CLI never links the generator). Default: forwards to `claudine-gen generate` with inherited stdio — per-file diff + `[y/N/q]` confirmation on a TTY, report-only otherwise; declined drift prints the field-keyed override snippet and exits non-zero.
+
+| Option | Description |
+|--------|-------------|
+| `--dry-run` | Report-only regardless of TTY (forwarded) |
+| `--yes` | Write every drifted file without prompting (forwarded) |
+| `--mapping` | Render the field → source → coercion mapping registry as a table |
+| `--mapping --json` | Raw mapping JSON pass-through |
 
 ---
 

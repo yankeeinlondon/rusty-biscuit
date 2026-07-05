@@ -23,6 +23,8 @@ claudine/lib/src/
 └── error.rs      → ClaudineError enum
 ```
 
+The per-provider modules under `lib/src/provider/<slug>/` split into two halves: `data.rs` is **generated** by `claudine-gen` from roster + facts + research + overrides (regenerate with `claudine providers generate`; drift-checked in CI by the gen crate's drift test / `claudine-gen check`, which also verify the committed `docs/providers/catalog.json` superset), while `behavior.rs` is hand-written. Never edit a `data.rs` by hand — change the owning input file and regenerate.
+
 ## Event Support Matrix
 
 | Event | Claude | Codex | Gemini | Goose | Kimi | OpenCode | Qwen |

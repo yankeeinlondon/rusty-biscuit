@@ -98,7 +98,9 @@ list:
       display_name: OpenCode
       short_name: opencode
       cli_aliases: ["opencode", "open_code", "open-code"]
-      docs_url: https://github.com/opencode-ai/opencode
+      # 2026-07-04: pre-rename GitHub URL (opencode-ai org) replaced with the
+      # product docs site — field-source matrix drift finding 1.
+      docs_url: https://opencode.ai/docs
       sniff_binding: Opencode
       user_dir: "~/.config/opencode"
       repo_dir: ".opencode"

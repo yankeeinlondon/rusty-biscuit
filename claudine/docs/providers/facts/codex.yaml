@@ -2,12 +2,11 @@
 #
 # Field-source matrix (design/catalog-generation.md): this file owns values
 # whose research topic has not landed yet. Keys are catalog field names.
-# Seeded from the hand-written provider constants via
-# `claudine providers --describe --format json | claudine-gen scrape-facts codex`.
+# Seeded once from the hand-written provider constants (the one-time
+# `scrape-facts` bootstrap, retired after seeding).
 # When a field's research topic lands, the mapping registry re-points the
 # field and generation ERRORS while this file still carries the key
 # (delete-on-graduate).
-supports_skills: true
 stream_protocol: jsonl
 event_mapping:
   mappings:
@@ -113,6 +112,11 @@ resource_support:
     properties: null
     repo_path: .codex/agents
     user_path: .codex/agents
+  # Codex custom prompts are deprecated but still supported from user scope.
+  # Codex docs state prompt files live in the local Codex home and are not
+  # shared through the repository, so repo_path is intentionally EMPTY (not
+  # absent). TODO: remove the commands entry when Codex fully drops prompt
+  # files. (Comment preserved from the hand-written codex data.rs.)
   commands:
     also_reads_from: []
     format: Markdown

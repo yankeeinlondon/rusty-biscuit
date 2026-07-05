@@ -18,10 +18,10 @@
     "reference": "code merely names a provider (fixtures, constructor arguments); nothing to migrate"
   },
   "totals": {
-    "sites": 423,
-    "provider_refs": 463,
+    "sites": 424,
+    "provider_refs": 464,
     "by_form": {
-      "direct-ref": 395,
+      "direct-ref": 396,
       "eq-comparison": 14,
       "matches-macro": 4,
       "ne-comparison": 8,
@@ -29,7 +29,7 @@
     },
     "by_dispatch_class": {
       "conditional": 28,
-      "reference": 395
+      "reference": 396
     }
   },
   "sites": [
@@ -286,7 +286,7 @@
     },
     {
       "path": "claudine/cli/src/commands/providers.rs",
-      "line": 232,
+      "line": 397,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -296,7 +296,7 @@
     },
     {
       "path": "claudine/cli/src/commands/providers.rs",
-      "line": 236,
+      "line": 401,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -306,7 +306,7 @@
     },
     {
       "path": "claudine/cli/src/commands/providers.rs",
-      "line": 240,
+      "line": 405,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -316,7 +316,7 @@
     },
     {
       "path": "claudine/cli/src/commands/providers.rs",
-      "line": 244,
+      "line": 409,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -326,7 +326,7 @@
     },
     {
       "path": "claudine/cli/src/commands/providers.rs",
-      "line": 252,
+      "line": 417,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -336,7 +336,7 @@
     },
     {
       "path": "claudine/cli/src/commands/providers.rs",
-      "line": 256,
+      "line": 421,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -346,7 +346,7 @@
     },
     {
       "path": "claudine/cli/src/commands/providers.rs",
-      "line": 260,
+      "line": 425,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -356,7 +356,7 @@
     },
     {
       "path": "claudine/cli/src/commands/providers.rs",
-      "line": 267,
+      "line": 432,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -366,7 +366,7 @@
     },
     {
       "path": "claudine/cli/src/commands/providers.rs",
-      "line": 268,
+      "line": 433,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -376,7 +376,7 @@
     },
     {
       "path": "claudine/cli/src/commands/providers.rs",
-      "line": 269,
+      "line": 434,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -386,7 +386,7 @@
     },
     {
       "path": "claudine/cli/src/commands/providers.rs",
-      "line": 270,
+      "line": 435,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -396,7 +396,7 @@
     },
     {
       "path": "claudine/cli/src/commands/providers.rs",
-      "line": 271,
+      "line": 436,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -406,7 +406,7 @@
     },
     {
       "path": "claudine/cli/src/commands/providers.rs",
-      "line": 272,
+      "line": 437,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -416,7 +416,7 @@
     },
     {
       "path": "claudine/cli/src/commands/providers.rs",
-      "line": 273,
+      "line": 438,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -750,7 +750,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/composition/prep_context.rs",
-      "line": 376,
+      "line": 374,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -760,7 +760,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/composition/prep_context.rs",
-      "line": 409,
+      "line": 407,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -3823,7 +3823,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/selection_ui.rs",
-      "line": 379,
+      "line": 381,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -3833,7 +3833,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/selection_ui.rs",
-      "line": 388,
+      "line": 390,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -3843,7 +3843,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/selection_ui.rs",
-      "line": 397,
+      "line": 399,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -3853,7 +3853,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/selection_ui.rs",
-      "line": 408,
+      "line": 410,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -3863,7 +3863,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/selection_ui.rs",
-      "line": 412,
+      "line": 414,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -3873,7 +3873,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/selection_ui.rs",
-      "line": 421,
+      "line": 427,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -3887,13 +3887,23 @@
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
+        "Gemini"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/selection_ui.rs",
+      "line": 447,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
         "Codex"
       ],
       "exempt_candidate": false
     },
     {
       "path": "claudine/cli/src/commands/wrap/selection_ui.rs",
-      "line": 444,
+      "line": 457,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -3903,7 +3913,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/selection_ui.rs",
-      "line": 525,
+      "line": 538,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -3913,7 +3923,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/selection_ui.rs",
-      "line": 529,
+      "line": 542,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
