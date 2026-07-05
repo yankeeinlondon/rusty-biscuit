@@ -9,7 +9,7 @@
 //! `features/2026-07-02-provider-metadata/design/pipeline-dry.md`
 //! (workstream 0).
 
-use claudine::provider::Provider;
+use claudine::provider::{Provider, provider_info};
 use color_eyre::eyre::Result;
 
 use super::wrap::env::EnvPlan;
@@ -72,7 +72,13 @@ pub(crate) fn resolve_model_and_validate(
     env_sink: &mut dyn FnMut(String, String),
     warn_sink: &mut dyn FnMut(String),
 ) -> Result<Option<OpenCodeModelSource>, ModelStageError> {
-    let opencode_model_source = if provider == Provider::OpenCode {
+    // Gated on the catalog's `model_required_in_non_tty` (OpenCode is the
+    // only provider setting it today, so semantics are identical). The
+    // resolution helper itself is still OpenCode-flavored (OPENCODE_MODEL
+    // env, `OpenCodeEnvSnapshot`) — a future provider setting this bool
+    // needs the helper generalized first.
+    let model_required_in_non_tty = provider_info(provider).model_required_in_non_tty;
+    let opencode_model_source = if model_required_in_non_tty {
         apply_opencode_model_resolution(
             child_args,
             env_sink,
@@ -86,7 +92,7 @@ pub(crate) fn resolve_model_and_validate(
         None
     };
 
-    if (provider != Provider::OpenCode || !non_interactive)
+    if (!model_required_in_non_tty || !non_interactive)
         && let Some(model) = model
     {
         let mut env_overrides = Vec::new();
@@ -98,7 +104,7 @@ pub(crate) fn resolve_model_and_validate(
         }
     }
 
-    if provider != Provider::OpenCode && non_interactive {
+    if !model_required_in_non_tty && non_interactive {
         profile
             .validate_non_interactive_requirements(child_args)
             .map_err(ModelStageError::Validation)?;

@@ -68,10 +68,6 @@ impl WrapperProfile for GooseWrapper {
         ])
     }
 
-    fn supports_resume(&self) -> bool {
-        true
-    }
-
     fn prompt_delivery(
         &self,
         args: &[String],

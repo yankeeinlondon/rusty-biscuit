@@ -2,7 +2,9 @@ use std::path::Path;
 
 use claudine::provider::Provider;
 use claudine::provider::SystemPromptSpec;
-use claudine::provider::{PROVIDER_COUNT, PromptArgConventions, YoloSupport, provider_info};
+use claudine::provider::{
+    PROVIDER_COUNT, PromptArgConventions, ResumeSupport, YoloSupport, provider_info,
+};
 use claudine::stream::StreamProtocol;
 use claudine::system_prompt::PreparedSystemPrompt;
 use color_eyre::eyre::{Result, bail};
@@ -34,8 +36,6 @@ pub(crate) use self::gemini::GeminiWrapper;
 pub(crate) use self::goose::GooseWrapper;
 pub(crate) use self::kimi::KimiWrapper;
 pub(crate) use self::opencode::OpencodeWrapper;
-#[allow(unused_imports)]
-pub(crate) use self::opencode::opencode_default_tui_noise_prefixes;
 pub(crate) use self::qwen::QwenWrapper;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -434,9 +434,9 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// other noise to stdout that contaminates non-interactive output. Lines
     /// starting with any of these prefixes are suppressed.
     ///
-    /// Default: empty (no filtering).
+    /// Default: the central catalog's curated suppression list.
     fn stdout_noise_prefixes(&self) -> &'static [&'static str] {
-        &[]
+        provider_info(self.provider()).stdout_noise_prefixes
     }
 
     // -- Captured output (compose mode) ----------------------------------------
@@ -471,15 +471,17 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// are noisy but harmless. Lines starting with any of these prefixes are
     /// suppressed.
     ///
-    /// Default: empty (no filtering).
+    /// Default: the central catalog's curated suppression list.
     fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
-        &[]
+        provider_info(self.provider()).stderr_noise_prefixes
     }
 
     /// When true, structured non-interactive runs buffer filtered stderr and
     /// only surface it if the provider exits with an error.
+    ///
+    /// Default: reads the central catalog.
     fn suppress_structured_stderr_on_success(&self) -> bool {
-        false
+        provider_info(self.provider()).suppress_structured_stderr_on_success
     }
 
     // -- Prompt-file delivery -------------------------------------------------
@@ -501,9 +503,9 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// Env var names that this provider requires and should bypass the
     /// sensitive-key sanitizer automatically.
     ///
-    /// Default: empty (no automatic includes).
+    /// Default: the central catalog's hand-ruled security allowlist.
     fn allowed_env_keys(&self) -> &'static [&'static str] {
-        &[]
+        provider_info(self.provider()).allowed_env_keys
     }
 
     // -- Structured stream support -------------------------------------------
@@ -539,14 +541,20 @@ pub(crate) trait WrapperProfile: Send + Sync {
 
     /// Whether this provider supports resuming sessions.
     ///
-    /// Defaults to `false`; profiles that override
-    /// [`build_resume_args`](Self::build_resume_args) override this to
-    /// return `true`. Ratified end-state (Ken, 2026-07-04): whenever the
-    /// provider natively supports resume, Claudine must too — a `false`
-    /// here is only ever a not-yet-implemented gap, never a durable
-    /// posture. All 7 current providers implement the pair.
+    /// Defaults to the central catalog's [`ResumeSupport`] level:
+    /// `FirstClass` and `Partial` map to `true`; the mode-scoped
+    /// variants (`InteractiveOnly` / `NonInteractiveOnly`) map to
+    /// `false` pending a mode-aware gate. Ratified end-state (Ken,
+    /// 2026-07-04): whenever the provider natively supports resume,
+    /// Claudine must too — a `false` here is only ever a
+    /// not-yet-implemented gap, never a durable posture. All 7 current
+    /// providers are `FirstClass` and implement
+    /// [`build_resume_args`](Self::build_resume_args).
     fn supports_resume(&self) -> bool {
-        false
+        matches!(
+            provider_info(self.provider()).resume,
+            ResumeSupport::FirstClass | ResumeSupport::Partial
+        )
     }
 
     // -- Structured stream support -------------------------------------------
@@ -555,12 +563,22 @@ pub(crate) trait WrapperProfile: Send + Sync {
     ///
     /// Called only when `supports_structured_stream()` returns true and
     /// the user did not explicitly request an output format.
-    fn apply_structured_stream(&self, _args: &mut Vec<String>) {}
+    ///
+    /// Default implementation derives the argv from the central
+    /// catalog's `Stream`-format [`OutputFormatSupport`] record:
+    /// companion flags first, then the selector.
+    ///
+    /// [`OutputFormatSupport`]: claudine::provider::OutputFormatSupport
+    fn apply_structured_stream(&self, args: &mut Vec<String>) {
+        apply::apply_structured_stream(self.provider(), args)
+    }
 
     /// Whether Claudine can recover a final assistant body after an
     /// interactive session ends for inline composition closure.
+    ///
+    /// Default: reads the central catalog.
     fn supports_interactive_inline_closure(&self) -> bool {
-        false
+        provider_info(self.provider()).supports_interactive_inline_closure
     }
 
     // -- Prompt argv conventions --------------------------------------------
@@ -644,14 +662,6 @@ fn option_value(args: &[String], option: &str) -> Option<String> {
         }
     }
     None
-}
-
-fn push_stream_json_flags(args: &mut Vec<String>, extra: &[&str]) {
-    for flag in extra {
-        args.push((*flag).to_string());
-    }
-    args.push("--output-format".to_string());
-    args.push("stream-json".to_string());
 }
 
 fn prompt_delivery_stdin_or_append(

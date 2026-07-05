@@ -177,10 +177,9 @@ impl WrapperProfile for OpencodeWrapper {
         ])
     }
 
-    fn supports_resume(&self) -> bool {
-        true
-    }
-
+    // Kept as an override (ratified 2026-07-04): these flags bundle the
+    // stderr log-promotion contract (--print-logs --log-level INFO) with
+    // the stream selector — behavior, not catalog data.
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         // OpenCode uses --format json (cataloged) plus --print-logs and
         // --log-level INFO for reliable structured streaming. INFO provides
@@ -194,24 +193,6 @@ impl WrapperProfile for OpencodeWrapper {
         args.push("--log-level".to_string());
         args.push("INFO".to_string());
     }
-
-    fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
-        opencode_default_tui_noise_prefixes()
-    }
-}
-
-/// The default-mode TUI formatter lines that OpenCode keeps emitting to
-/// stderr even when `--format json` is set. Suppressed when wrapping
-/// OpenCode so the NDJSON stream on stdout is the only visible output
-/// surface.
-pub(crate) fn opencode_default_tui_noise_prefixes() -> &'static [&'static str] {
-    &[
-        "\u{2731} ",                         // ✱  — bullet used for Glob/Grep/Read status lines
-        "$ ",                                // bare shell command echo lines
-        "> build ",                          // session banner
-        "\u{2588}\u{2588}\u{2588}\u{2588} ", // ████  — subheader marker
-        "\u{2699} ", // ⚙  — MCP tool-invocation prefix (see investigations.md §0b)
-    ]
 }
 
 #[cfg(test)]

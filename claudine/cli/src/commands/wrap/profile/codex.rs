@@ -88,10 +88,6 @@ impl WrapperProfile for CodexWrapper {
         }
     }
 
-    fn allowed_env_keys(&self) -> &'static [&'static str] {
-        &["OPENAI_API_KEY", "CODEX_API_KEY"]
-    }
-
     fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
         Ok(vec![
             "codex".to_string(),
@@ -99,25 +95,5 @@ impl WrapperProfile for CodexWrapper {
             "resume".to_string(),
             session_id.to_string(),
         ])
-    }
-
-    fn supports_resume(&self) -> bool {
-        true
-    }
-
-    fn apply_structured_stream(&self, args: &mut Vec<String>) {
-        // Codex uses `exec --json` for structured output.
-        // The `exec` subcommand is expected to already be present.
-        if !has_flag(args, "--json") {
-            args.push("--json".to_string());
-        }
-    }
-
-    fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
-        &["Reading prompt from stdin..."]
-    }
-
-    fn supports_interactive_inline_closure(&self) -> bool {
-        true
     }
 }

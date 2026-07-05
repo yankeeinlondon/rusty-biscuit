@@ -161,6 +161,42 @@ pub(super) fn apply_output_format(
 }
 
 /// Catalog-driven default for
+/// [`WrapperProfile::apply_structured_stream`](super::WrapperProfile::apply_structured_stream).
+///
+/// Keyed on the provider's `OutputFormat::Stream` record: the record's
+/// `companion_flags` are pushed first, then its selector. `FlagValue`
+/// pushes are unconditional — structured-stream setup only runs when the
+/// user did not explicitly request a native output format, and this
+/// reproduces the retired `push_stream_json_flags` overrides
+/// byte-for-byte. `Flag`/`TransportFlag` selectors keep the `has_flag`
+/// idempotence guard the retired Codex/Kimi overrides carried.
+/// Providers without a `Stream` record are a no-op.
+pub(super) fn apply_structured_stream(provider: Provider, args: &mut Vec<String>) {
+    let Some(support) = provider_info(provider)
+        .output_formats
+        .iter()
+        .find(|s| s.format == claudine::provider::OutputFormat::Stream)
+    else {
+        return;
+    };
+    for flag in support.companion_flags {
+        args.push((*flag).to_string());
+    }
+    match support.selector {
+        OutputFormatSelector::Flag { flag } | OutputFormatSelector::TransportFlag { flag } => {
+            if !has_flag(args, flag) {
+                args.push(flag.to_string());
+            }
+        }
+        OutputFormatSelector::FlagValue { flag } => {
+            args.push(flag.to_string());
+            args.push(support.native_name.to_string());
+        }
+        OutputFormatSelector::Default | OutputFormatSelector::Positional { .. } => {}
+    }
+}
+
+/// Catalog-driven default for
 /// [`WrapperProfile::apply_system_prompt`](super::WrapperProfile::apply_system_prompt).
 pub(super) fn apply_system_prompt(
     provider: Provider,
