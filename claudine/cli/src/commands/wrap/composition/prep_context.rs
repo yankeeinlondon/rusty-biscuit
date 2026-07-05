@@ -22,9 +22,10 @@ use std::path::{Path, PathBuf};
 
 use claudine::composition::{
     InstalledProviderSnapshot, LaunchWorkspaceContext, build_installed_snapshot,
+    detect_installed_providers,
 };
 use claudine::events::{EnvironmentContext, environment_context_from_sniff_result};
-use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
+use claudine::provider::Provider;
 use claudine::system_prompt::LaunchContext;
 use color_eyre::eyre::Result;
 use sniff::programs::InstalledAiClients;
@@ -217,10 +218,7 @@ impl CompositionPrepContext {
         let installed_snapshot = {
             let _span = tracing::info_span!("compose_prep.installed_clients").entered();
             let clients = InstalledAiClients::new();
-            let installed: Vec<Provider> = PROVIDERS_DISPLAY_ORDER
-                .into_iter()
-                .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
-                .collect();
+            let installed = detect_installed_providers(&clients);
             build_installed_snapshot(&installed, excluded, &clients)
         };
 

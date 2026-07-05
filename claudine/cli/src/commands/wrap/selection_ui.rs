@@ -334,7 +334,9 @@ fn provider_option_to_choice(opt: &ProviderPickerOption) -> ChoiceOption<Provide
 mod tests {
     use super::*;
     use claudine::composition::ModelResolutionReason;
-    use claudine::config::claudine_config::ProviderModelOverride;
+    use claudine::config::claudine_config::{
+        DetailedModelOverride, ModelOverrideMode, ProviderModelOverride,
+    };
     use claudine::model_catalog::ModelCatalogService;
     use std::collections::HashMap;
 
@@ -417,7 +419,18 @@ mod tests {
 
     #[test]
     fn model_column_text_input_when_catalog_empty() {
-        let catalog = ModelCatalogService::new();
+        // Every provider now ships a research-fed static catalog
+        // (generator v1), so an empty catalog must be constructed
+        // explicitly via a replace-mode override with no values.
+        let mut overrides = HashMap::new();
+        overrides.insert(
+            Provider::Gemini,
+            ProviderModelOverride::Detailed(DetailedModelOverride {
+                mode: ModelOverrideMode::Replace,
+                values: vec![],
+            }),
+        );
+        let catalog = ModelCatalogService::with_overrides(overrides);
         let draft = make_draft(Provider::Gemini, false, false, None);
         let columns = build_columns(&[draft], &catalog);
         let model_col = columns.iter().find(|c| c.id() == "model").unwrap();

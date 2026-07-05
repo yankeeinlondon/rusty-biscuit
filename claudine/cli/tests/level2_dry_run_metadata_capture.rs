@@ -46,7 +46,7 @@ use std::time::Duration;
 use test_toolkit::{Level, require_level};
 
 mod common;
-use common::{TestWorkspace, augmented_path, write_executable};
+use common::{TestWorkspace, write_executable};
 
 /// The composition fixture: a `name`/`description` frontmatter (so the Document
 /// cell uses the name and the Description row is present) and a body with no
@@ -119,8 +119,10 @@ fn run_dry_run_compose<H: TerminalHarness>(harness: &mut H) -> DryRunCapture {
     fs::write(&doc, FIXTURE_DOC).unwrap();
 
     let claudine = cargo_bin!("claudine").display().to_string();
-    let path = augmented_path(&bin_dir);
-    let path = path.to_string_lossy().into_owned();
+    // Hermetic PATH: exactly the stub bin dir, so installed/not-installed is
+    // a fact of the fixture, never of the host (a host-installed provider
+    // must not flip the resolution state under test).
+    let path = bin_dir.to_string_lossy().into_owned();
     let home = workspace.path().to_string_lossy().into_owned();
 
     // Run from the (non-repo) workspace so no monorepo `Area` row appears and
@@ -179,8 +181,10 @@ fn run_dry_run_compose_with_doc<H: TerminalHarness>(
     fs::write(&doc, doc_content).unwrap();
 
     let claudine = cargo_bin!("claudine").display().to_string();
-    let path = augmented_path(&bin_dir);
-    let path = path.to_string_lossy().into_owned();
+    // Hermetic PATH: exactly the stub bin dir, so installed/not-installed is
+    // a fact of the fixture, never of the host (a host-installed provider
+    // must not flip the resolution state under test).
+    let path = bin_dir.to_string_lossy().into_owned();
     let home = workspace.path().to_string_lossy().into_owned();
 
     harness
@@ -624,8 +628,10 @@ fn run_dry_run_compose_plain<H: TerminalHarness>(harness: &mut H) -> DryRunCaptu
     fs::write(&doc, FIXTURE_DOC).unwrap();
 
     let claudine = cargo_bin!("claudine").display().to_string();
-    let path = augmented_path(&bin_dir);
-    let path = path.to_string_lossy().into_owned();
+    // Hermetic PATH: exactly the stub bin dir, so installed/not-installed is
+    // a fact of the fixture, never of the host (a host-installed provider
+    // must not flip the resolution state under test).
+    let path = bin_dir.to_string_lossy().into_owned();
     let home = workspace.path().to_string_lossy().into_owned();
 
     harness

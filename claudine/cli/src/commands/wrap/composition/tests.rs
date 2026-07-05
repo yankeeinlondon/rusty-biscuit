@@ -182,11 +182,11 @@ fn catalog_initialized_with_config_overrides() {
         claudine::model_catalog::ModelCatalogService::with_overrides(config.model_overrides);
 
     // Static catalog model should still be valid (additive mode)
-    assert!(catalog.is_valid(Provider::Codex, "o3-mini"));
+    assert!(catalog.is_valid(Provider::Codex, "gpt-5.5"));
     // Override model should also be valid
     assert!(catalog.is_valid(Provider::Codex, "gpt-5"));
     // Non-overridden provider should use static catalog
-    assert!(catalog.is_valid(Provider::Claude, "claude-3-7-sonnet-20250219"));
+    assert!(catalog.is_valid(Provider::Claude, "claude-opus-4-8"));
 }
 
 /// RAII guard that restores the prior value of an env var on drop. Used
@@ -404,7 +404,7 @@ fn opencode_model_env_skips_refresh_for_frontmatter_model() {
     refresh_for_model_validation(&catalog, Provider::OpenCode, &hints, Some(&probe_reason));
 
     // No opencode models subprocess should have been attempted
-    assert_eq!(catalog.opencode_fetch_attempts(), 0);
+    assert_eq!(catalog.shell_command_fetch_attempts(), 0);
 }
 
 #[test]
@@ -424,7 +424,7 @@ fn generic_model_env_skips_refresh_for_frontmatter_model() {
 
     refresh_for_model_validation(&catalog, Provider::OpenCode, &hints, Some(&probe_reason));
 
-    assert_eq!(catalog.opencode_fetch_attempts(), 0);
+    assert_eq!(catalog.shell_command_fetch_attempts(), 0);
 }
 
 #[test]
@@ -475,7 +475,7 @@ fn frontmatter_model_without_env_override_refreshes_dynamic_provider() {
 
     // Refresh should have been attempted (will fail gracefully since
     // opencode is not on PATH, but the attempt counter increments).
-    assert_eq!(catalog.opencode_fetch_attempts(), 1);
+    assert_eq!(catalog.shell_command_fetch_attempts(), 1);
 }
 
 // ------------------------------------------------------------------------

@@ -217,7 +217,7 @@ pub enum TableLayout {
 }
 
 /// The sentinel the table planner emits inline when no layout fits the width.
-const TABLE_WIDTH_ERROR_SENTINEL: &str = "could not be rendered";
+pub const TABLE_WIDTH_ERROR_SENTINEL: &str = "could not be rendered";
 
 /// Renders a table under the width contract, relaxing the shared width pins only
 /// as far as the terminal forces.

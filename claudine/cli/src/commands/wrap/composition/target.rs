@@ -14,9 +14,10 @@ use biscuit_terminal::prelude::TerminalRenderable;
 use claudine::composition::{
     AgentResolutionState, CompositionError, CompositionExecutionRequest, CompositionMode,
     ModelResolutionReason, ResolvedExecutionTarget, agent_state_breakdown,
-    build_installed_snapshot, classify_agent_resolution, invalid_agent_message,
+    build_installed_snapshot, classify_agent_resolution, detect_installed_providers,
+    invalid_agent_message,
 };
-use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
+use claudine::provider::Provider;
 use color_eyre::eyre::{Result, eyre};
 use sniff::programs::InstalledAiClients;
 
@@ -92,10 +93,7 @@ pub(crate) fn resolve_execution_target(
         Some(ref s) => s.clone(),
         None => {
             let clients = InstalledAiClients::new();
-            let installed: Vec<Provider> = PROVIDERS_DISPLAY_ORDER
-                .into_iter()
-                .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
-                .collect();
+            let installed = detect_installed_providers(&clients);
             build_installed_snapshot(&installed, &request.excluded, &clients)
         }
     };
