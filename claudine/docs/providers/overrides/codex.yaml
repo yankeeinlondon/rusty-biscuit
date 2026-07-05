@@ -29,3 +29,12 @@ config_paths:
         entry — config_paths[0] is the load-bearing user-level config path
         for agent discovery (discover_agents_full). Pin today's pair until
         agent-cli mandates one bare path per record.
+model_cli_flag:
+    value: "--model"
+    reason: >-
+        agent-models records the dedicated model flag as the compound site
+        "--model, -m", which the bare-token rule skips loudly — leaving
+        `--oss` (a provider switch to the local open-source backend, not a
+        model selector) as the first bare cli_flag site, so the mechanical
+        result would be wrong. Pin the long-form `--model`. Ruled at
+        Phase D wave 1 (2026-07-04).

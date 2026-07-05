@@ -256,3 +256,21 @@ cli_sensitive_axes:
   use_mcp_tool: false
   write_path: false
 repo_home_root_files: []
+billing_models:
+- subscription
+- per_token
+allowed_env_keys:
+- GEMINI_API_KEY
+- GOOGLE_API_KEY
+stdout_noise_prefixes:
+- "Created execution plan for "
+- "Expanding hook command: "
+- "Hook execution for "
+- "Skill conflict detected: "
+- "[LocalAgentExecutor]"
+stderr_noise_prefixes:
+- "Skill conflict detected: "
+- "[LocalAgentExecutor]"
+suppress_structured_stderr_on_success: true
+supports_interactive_inline_closure: false
+model_required_in_non_tty: false

@@ -270,3 +270,15 @@ cli_sensitive_axes:
   use_mcp_tool: false
   write_path: true
 repo_home_root_files: []
+billing_models:
+- subscription
+- per_token
+allowed_env_keys:
+- OPENAI_API_KEY
+- CODEX_API_KEY
+stdout_noise_prefixes: []
+stderr_noise_prefixes:
+- "Reading prompt from stdin..."
+suppress_structured_stderr_on_success: false
+supports_interactive_inline_closure: true
+model_required_in_non_tty: false

@@ -228,3 +228,11 @@ cli_sensitive_axes:
   use_mcp_tool: false
   write_path: false
 repo_home_root_files: []
+billing_models:
+- provider_only
+allowed_env_keys: []
+stdout_noise_prefixes: []
+stderr_noise_prefixes: []
+suppress_structured_stderr_on_success: false
+supports_interactive_inline_closure: false
+model_required_in_non_tty: false
