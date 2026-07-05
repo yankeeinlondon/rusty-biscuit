@@ -49,7 +49,7 @@ In Darkmatter this would look something like this:
 
 > **NOTE:** the actual syntax, and various options for it's use will be covered later in the [DSL Syntax](#dsl-syntax) section
 
-#### 2. Summarization
+#### 2. Summarization (future)
 
 The ability to inject not the external *document* itself but instead a **summary** of an external document is a powerful feature. This feature will leverage an **LLM*** to produce the summarization and would look something like this in **Darkmatter**:
 
@@ -59,7 +59,7 @@ The document **ABC**, when summarized, is a good example of _less is more_:
 ::summarize ./abc.md
 ```
 
-#### 3. Consolidation
+#### 3. Consolidation (future)
 
 At times you will have a set of documents which you want to consolidate into a cohesive whole. This may involve restructuring and/or supplementation of certain sections from one document into another. To achieve this we will leverage an **LLM** to integrate the documents together in a meaningful way. In **Darkmatter** leveraging this feature will look something like:
 
@@ -69,7 +69,7 @@ At times you will have a set of documents which you want to consolidate into a c
 ::consolidate ./abc.md ./def.md
 ```
 
-#### 4. Topic Extraction
+#### 4. Topic Extraction (future)
 
 Whereas a **Consolidation** attempts to move the content in the various files provided *in it's entirety* into the master document, a **Topic Consolidation** reviews all the documents provided and looks for information on a specified "topic". That topic is then isolated and the various document's information on the topic are consolidated into prose. In **Darkmatter** this would look something like:
 
