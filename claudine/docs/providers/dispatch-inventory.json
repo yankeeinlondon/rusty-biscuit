@@ -18,10 +18,10 @@
     "reference": "code merely names a provider (fixtures, constructor arguments); nothing to migrate"
   },
   "totals": {
-    "sites": 431,
-    "provider_refs": 471,
+    "sites": 433,
+    "provider_refs": 473,
     "by_form": {
-      "direct-ref": 411,
+      "direct-ref": 413,
       "eq-comparison": 9,
       "matches-macro": 4,
       "ne-comparison": 5,
@@ -29,7 +29,7 @@
     },
     "by_dispatch_class": {
       "conditional": 20,
-      "reference": 411
+      "reference": 413
     }
   },
   "sites": [
@@ -1773,7 +1773,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/exec/wiring/tests.rs",
-      "line": 711,
+      "line": 720,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1783,7 +1783,27 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/exec/wiring/tests.rs",
-      "line": 726,
+      "line": 735,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "KimiCode"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/exec/wiring/tests.rs",
+      "line": 824,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "KimiCode"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/exec/wiring/tests.rs",
+      "line": 836,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
