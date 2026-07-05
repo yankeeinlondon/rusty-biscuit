@@ -12,7 +12,7 @@
 //! [`EXCLUDED_SERIALIZED_FIELDS`] with a justification — the
 //! registry-covers-all-fields guard enforces exactly-one-of.
 
-use claudine_catalog_types::ModelCatalogSource;
+use claudine_catalog_types::{ModelCatalogSource, ResumeSupport};
 use serde_json::{Value, json};
 use strum::VariantNames;
 
@@ -175,6 +175,18 @@ pub enum Coercion {
     PromptArgRecord,
     /// Facts axes record → `CliSensitiveAxes` expression.
     AxesRecord,
+    /// resume topic `support` enum member → `ResumeSupport` expression.
+    ResumeSupportMember,
+    /// agent-models `model_selection[]` records → the FIRST
+    /// `method == cli_flag` record whose `site` is a single bare flag
+    /// token (starts with `-`, no whitespace), or null when none exists.
+    /// Non-bare cli_flag sites are skipped loudly.
+    CliFlagSitesToFlag,
+    /// String array → the entries that are single bare flag tokens;
+    /// annotated / prose / env-var entries are skipped loudly.
+    FlagListToStringSlice,
+    /// Facts snake_case member list → `&[BillingModel]`.
+    BillingModelList,
 }
 
 impl Coercion {
@@ -208,6 +220,10 @@ impl Coercion {
             Coercion::AcpRecord => "acp_record",
             Coercion::PromptArgRecord => "prompt_arg_record",
             Coercion::AxesRecord => "axes_record",
+            Coercion::ResumeSupportMember => "resume_support_member",
+            Coercion::CliFlagSitesToFlag => "cli_flag_sites_to_flag",
+            Coercion::FlagListToStringSlice => "flag_list_to_string_slice",
+            Coercion::BillingModelList => "billing_model_list",
         }
     }
 }
@@ -253,7 +269,7 @@ pub const SKILL_SUPPORT_MEMBERS: &[&str] =
     &["first_class", "partial", "convention_only", "none", "unknown"];
 
 /// The generator-v1 mapping registry, in `ProviderInfo` serialization
-/// order (10 roster + 6 research + 15 facts = 31 fields).
+/// order (10 roster + 9 research + 22 facts = 41 fields).
 pub const REGISTRY: &[RegistryEntry] = &[
     entry(
         "provider",
@@ -566,6 +582,105 @@ pub const REGISTRY: &[RegistryEntry] = &[
         Coercion::StringSlice,
         "Root-level repo-home files preserved during shadow-HOME isolation",
     ),
+    entry(
+        "resume",
+        DeclaredSource::Research {
+            topic: "resume",
+            path: "support",
+        },
+        &[SchemaExpectation::EnumSubsetOf {
+            rust_enum: "ResumeSupport",
+            variants: ResumeSupport::VARIANTS,
+        }],
+        Coercion::ResumeSupportMember,
+        "Overall resume support level (level only; argv mechanics stay in wrapper profiles)",
+    ),
+    RegistryEntry {
+        field: "model_cli_flag",
+        source: DeclaredSource::Research {
+            topic: "agent-models",
+            path: "model_selection",
+        },
+        expected: &[SchemaExpectation::RecordArray {
+            required_fields: &["method", "site"],
+        }],
+        coercion: Coercion::CliFlagSitesToFlag,
+        optional: true,
+        description: "Bare CLI flag selecting the model at launch, when one exists",
+    },
+    entry(
+        "non_interactive_conflicting_flags",
+        DeclaredSource::Research {
+            topic: "non-interactive-sessions",
+            path: "claudine_strategy.conflicting_flags",
+        },
+        &[SchemaExpectation::StringArray],
+        Coercion::FlagListToStringSlice,
+        "Flags conflicting with Claudine's non-interactive wrapping strategy (bare tokens only)",
+    ),
+    entry(
+        "billing_models",
+        DeclaredSource::Facts {
+            key: "billing_models",
+        },
+        &[SchemaExpectation::StringArray],
+        Coercion::BillingModelList,
+        "Billing models the provider offers",
+    ),
+    entry(
+        "allowed_env_keys",
+        DeclaredSource::Facts {
+            key: "allowed_env_keys",
+        },
+        &[SchemaExpectation::StringArray],
+        Coercion::StringSlice,
+        "Hand-ruled allowlist of provider env keys bypassing the sensitive-key sanitizer",
+    ),
+    entry(
+        "stdout_noise_prefixes",
+        DeclaredSource::Facts {
+            key: "stdout_noise_prefixes",
+        },
+        &[SchemaExpectation::StringArray],
+        Coercion::StringSlice,
+        "Curated stdout line prefixes suppressed as provider noise (non-interactive mode)",
+    ),
+    entry(
+        "stderr_noise_prefixes",
+        DeclaredSource::Facts {
+            key: "stderr_noise_prefixes",
+        },
+        &[SchemaExpectation::StringArray],
+        Coercion::StringSlice,
+        "Curated stderr line prefixes suppressed as provider noise (all modes)",
+    ),
+    entry(
+        "suppress_structured_stderr_on_success",
+        DeclaredSource::Facts {
+            key: "suppress_structured_stderr_on_success",
+        },
+        &[SchemaExpectation::Boolean],
+        Coercion::BoolLiteral,
+        "Whether structured runs buffer filtered stderr and surface it only on error",
+    ),
+    entry(
+        "supports_interactive_inline_closure",
+        DeclaredSource::Facts {
+            key: "supports_interactive_inline_closure",
+        },
+        &[SchemaExpectation::Boolean],
+        Coercion::BoolLiteral,
+        "Whether a final assistant body is recoverable after an interactive session",
+    ),
+    entry(
+        "model_required_in_non_tty",
+        DeclaredSource::Facts {
+            key: "model_required_in_non_tty",
+        },
+        &[SchemaExpectation::Boolean],
+        Coercion::BoolLiteral,
+        "Whether the provider hard-requires an explicit model in non-TTY sessions",
+    ),
 ];
 
 /// Serialized `--describe` fields deliberately NOT in the registry, with
@@ -640,9 +755,9 @@ mod tests {
                 .count()
         };
         assert_eq!(count("roster"), 10, "roster rows");
-        assert_eq!(count("research"), 6, "research rows");
-        assert_eq!(count("facts"), 15, "facts rows");
-        assert_eq!(REGISTRY.len(), 31, "total serialized fields");
+        assert_eq!(count("research"), 9, "research rows");
+        assert_eq!(count("facts"), 22, "facts rows");
+        assert_eq!(REGISTRY.len(), 41, "total serialized fields");
     }
 
     #[test]

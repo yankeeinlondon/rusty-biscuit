@@ -12,7 +12,14 @@ use std::path::{Path, PathBuf};
 use claudine_gen::{GenError, Provenance, generate_for_area};
 
 /// Research topics the registry consumes (fixture copy set).
-const TOPICS: &[&str] = &["agent-cli", "agent-logging", "agent-models", "skills"];
+const TOPICS: &[&str] = &[
+    "agent-cli",
+    "agent-logging",
+    "agent-models",
+    "non-interactive-sessions",
+    "resume",
+    "skills",
+];
 
 /// The real claudine package-area root.
 fn real_area() -> &'static Path {

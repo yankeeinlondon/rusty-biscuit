@@ -15,7 +15,7 @@
 
 use claudine_gen::{EXCLUDED_SERIALIZED_FIELDS, REGISTRY};
 
-/// The serialized `ProviderInfo` field list (31 keys, describe order).
+/// The serialized `ProviderInfo` field list (41 keys, describe order).
 const SERIALIZED_PROVIDER_INFO_FIELDS: &[&str] = &[
     "provider",
     "display_name",
@@ -48,6 +48,16 @@ const SERIALIZED_PROVIDER_INFO_FIELDS: &[&str] = &[
     "model_env_vars",
     "cli_sensitive_axes",
     "repo_home_root_files",
+    "resume",
+    "model_cli_flag",
+    "non_interactive_conflicting_flags",
+    "billing_models",
+    "allowed_env_keys",
+    "stdout_noise_prefixes",
+    "stderr_noise_prefixes",
+    "suppress_structured_stderr_on_success",
+    "supports_interactive_inline_closure",
+    "model_required_in_non_tty",
 ];
 
 #[test]

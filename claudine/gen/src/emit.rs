@@ -264,6 +264,51 @@ fn stream_protocol_variant(
     Ok(format!("StreamProtocol::{variant}"))
 }
 
+/// Resume-support member → `ResumeSupport::<Variant>` path expression.
+pub fn resume_support(
+    field: &'static str,
+    value: &Value,
+    ctx: &mut EmitCtx,
+) -> Result<String, GenError> {
+    ctx.import("crate::provider::resume_support::ResumeSupport");
+    let member = expect_str(field, value, "a resume-support member")?;
+    match member {
+        known @ ("first_class" | "partial" | "interactive_only" | "non_interactive_only"
+        | "none" | "unknown") => Ok(format!("ResumeSupport::{}", pascal(known))),
+        other => Err(unmappable(
+            field,
+            format!("`{other}` is not a ResumeSupport wire form"),
+        )),
+    }
+}
+
+/// `&[BillingModel::<Variant>, ...]` from a snake_case member list.
+pub fn billing_models(
+    field: &'static str,
+    value: &Value,
+    level: usize,
+    ctx: &mut EmitCtx,
+) -> Result<String, GenError> {
+    let members = expect_array(field, value, "the billing-model list")?;
+    let mut elements = Vec::with_capacity(members.len());
+    for member in members {
+        ctx.import("crate::provider::billing_model::BillingModel");
+        let name = expect_str(field, member, "a billing-model member")?;
+        match name {
+            known @ ("subscription" | "per_token" | "prepaid_credits" | "provider_only") => {
+                elements.push(format!("BillingModel::{}", pascal(known)));
+            }
+            other => {
+                return Err(unmappable(
+                    field,
+                    format!("`{other}` is not a BillingModel wire form"),
+                ));
+            }
+        }
+    }
+    Ok(render_slice(&elements, level))
+}
+
 /// `&[PathTemplate::Static("..."), ...]` from a catalog-shaped string
 /// array (research-fed path fields).
 pub fn path_list_from_strings(
@@ -1172,6 +1217,53 @@ pub fn emit_data_file(
     push(
         "repo_home_root_files",
         str_slice("repo_home_root_files", lookup("repo_home_root_files")?, 1)?,
+    );
+    push("resume", resume_support("resume", lookup("resume")?, &mut ctx)?);
+    push(
+        "model_cli_flag",
+        optional_string_literal("model_cli_flag", lookup("model_cli_flag")?)?,
+    );
+    push(
+        "non_interactive_conflicting_flags",
+        str_slice(
+            "non_interactive_conflicting_flags",
+            lookup("non_interactive_conflicting_flags")?,
+            1,
+        )?,
+    );
+    push(
+        "billing_models",
+        billing_models("billing_models", lookup("billing_models")?, 1, &mut ctx)?,
+    );
+    push(
+        "allowed_env_keys",
+        str_slice("allowed_env_keys", lookup("allowed_env_keys")?, 1)?,
+    );
+    push(
+        "stdout_noise_prefixes",
+        str_slice("stdout_noise_prefixes", lookup("stdout_noise_prefixes")?, 1)?,
+    );
+    push(
+        "stderr_noise_prefixes",
+        str_slice("stderr_noise_prefixes", lookup("stderr_noise_prefixes")?, 1)?,
+    );
+    push(
+        "suppress_structured_stderr_on_success",
+        bool_literal(
+            "suppress_structured_stderr_on_success",
+            lookup("suppress_structured_stderr_on_success")?,
+        )?,
+    );
+    push(
+        "supports_interactive_inline_closure",
+        bool_literal(
+            "supports_interactive_inline_closure",
+            lookup("supports_interactive_inline_closure")?,
+        )?,
+    );
+    push(
+        "model_required_in_non_tty",
+        bool_literal("model_required_in_non_tty", lookup("model_required_in_non_tty")?)?,
     );
 
     // Supporting items (emitted after INFO).

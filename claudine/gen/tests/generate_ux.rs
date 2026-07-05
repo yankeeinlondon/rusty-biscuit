@@ -38,7 +38,14 @@ fn full_fixture() -> tempfile::TempDir {
     copy_file("docs/providers/catalog.json");
     copy_dir("docs/providers/facts");
     copy_dir("docs/providers/overrides");
-    for topic in ["agent-cli", "agent-logging", "agent-models", "skills"] {
+    for topic in [
+        "agent-cli",
+        "agent-logging",
+        "agent-models",
+        "non-interactive-sessions",
+        "resume",
+        "skills",
+    ] {
         copy_dir(&format!("docs/research/{topic}"));
     }
     for slug in claudine_gen::PROVIDER_SLUGS {

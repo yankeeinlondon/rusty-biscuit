@@ -8,9 +8,9 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use claudine_catalog_types::ModelCatalogSource;
+use claudine_catalog_types::{ModelCatalogSource, ResumeSupport};
 use serde_json::Value;
-use strum::IntoEnumIterator;
+use strum::{IntoEnumIterator, VariantNames};
 
 use crate::emit::{self, FieldValue};
 use crate::errors::GenError;
@@ -373,6 +373,14 @@ fn is_env_var_ident(site: &str) -> bool {
         && chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
 }
 
+/// A single bare flag token: starts with `-` and contains no whitespace.
+/// Compound sites ("--model / -m", "--model, -m"), annotated sites
+/// ("--interactive when ..."), and env-var entries are excluded by
+/// construction.
+fn is_bare_flag_token(site: &str) -> bool {
+    site.starts_with('-') && !site.chars().any(char::is_whitespace)
+}
+
 /// A bare, usable config path: rejects prose annotations ("a; b",
 /// "a, b", "a or b"), `<placeholder>` grammar, and env-var references
 /// (`$VAR`) that no `PathContext` can resolve. Rejected records are
@@ -583,6 +591,76 @@ fn coerce_to_catalog_shape(
             }
             Ok(Value::Array(paths))
         }
+        Coercion::ResumeSupportMember => {
+            let member = raw.as_str().ok_or_else(|| GenError::UnmappableValue {
+                field: entry.field,
+                message: format!("expected a resume support enum member, got `{raw}`"),
+            })?;
+            if !ResumeSupport::VARIANTS.contains(&member) {
+                return Err(GenError::UnmappableValue {
+                    field: entry.field,
+                    message: format!("`{member}` is not a ResumeSupport member"),
+                });
+            }
+            Ok(raw.clone())
+        }
+        Coercion::CliFlagSitesToFlag => {
+            let records = raw.as_array().ok_or_else(|| GenError::UnmappableValue {
+                field: entry.field,
+                message: "expected an array of selection records".into(),
+            })?;
+            let mut flag = None;
+            let mut dropped = Vec::new();
+            for record in records {
+                if record.get("method").and_then(Value::as_str) != Some("cli_flag") {
+                    continue;
+                }
+                let Some(site) = record.get("site").and_then(Value::as_str) else {
+                    continue;
+                };
+                if !is_bare_flag_token(site) {
+                    dropped.push(site.to_string());
+                } else if flag.is_none() {
+                    flag = Some(site.to_string());
+                }
+            }
+            if !dropped.is_empty() {
+                skips.push(CoercionSkip {
+                    field: entry.field,
+                    reason: "site is not a single bare flag token",
+                    records: dropped,
+                });
+            }
+            Ok(flag.map(Value::String).unwrap_or(Value::Null))
+        }
+        Coercion::FlagListToStringSlice => {
+            let items = raw.as_array().ok_or_else(|| GenError::UnmappableValue {
+                field: entry.field,
+                message: "expected an array of flag entries".into(),
+            })?;
+            let mut flags = Vec::new();
+            let mut dropped = Vec::new();
+            for item in items {
+                let text = item.as_str().ok_or_else(|| GenError::UnmappableValue {
+                    field: entry.field,
+                    message: format!("expected string elements, got `{item}`"),
+                })?;
+                if is_bare_flag_token(text) {
+                    flags.push(Value::String(text.to_string()));
+                } else {
+                    dropped.push(text.to_string());
+                }
+            }
+            if !dropped.is_empty() {
+                skips.push(CoercionSkip {
+                    field: entry.field,
+                    reason: "entry is not a single bare flag token",
+                    records: dropped,
+                });
+            }
+            Ok(Value::Array(flags))
+        }
+        Coercion::BillingModelList => expect_string_array(entry, raw),
         // Facts-shaped records pass through; emit.rs validates loudly.
         Coercion::PathTemplateList
         | Coercion::EventMappingRecords
@@ -641,6 +719,20 @@ mod tests {
         assert!(!is_env_var_ident("lowercase"));
         assert!(!is_env_var_ident(""));
         assert!(!is_env_var_ident("1ABC"));
+    }
+
+    #[test]
+    fn bare_flag_token_accepts_flags_and_rejects_annotations() {
+        assert!(is_bare_flag_token("--model"));
+        assert!(is_bare_flag_token("-m"));
+        assert!(is_bare_flag_token("--prompt-interactive"));
+        assert!(!is_bare_flag_token("--model / -m"));
+        assert!(!is_bare_flag_token("--model, -m"));
+        assert!(!is_bare_flag_token("--model  (goose run)"));
+        assert!(!is_bare_flag_token("--output-format json for live wrapping"));
+        assert!(!is_bare_flag_token("GOOSE_MODE=approve"));
+        assert!(!is_bare_flag_token("no --json for live parsing"));
+        assert!(!is_bare_flag_token(""));
     }
 
     #[test]
