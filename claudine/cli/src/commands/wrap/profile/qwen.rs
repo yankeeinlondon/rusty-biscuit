@@ -107,6 +107,10 @@ impl WrapperProfile for QwenWrapper {
         ])
     }
 
+    fn supports_resume(&self) -> bool {
+        true
+    }
+
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         // Qwen uses the catalog-default --output-format stream-json via
         // push_stream_json_flags, with no extra flags. Structured-stream

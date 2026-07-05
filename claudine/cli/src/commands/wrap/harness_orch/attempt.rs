@@ -4,7 +4,6 @@ use claudine::provider::Provider;
 use claudine::stream::stderr::Verbosity;
 use color_eyre::eyre::Result;
 use std::collections::HashMap;
-use std::io::{IsTerminal, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tracing::info_span;
@@ -240,21 +239,11 @@ pub(crate) fn execute_harness_attempt(
             && !summary.assistant_text.is_empty()
             && !crate::output::user_interrupt_observed()
         {
-            section_stream.enter_final_stdout();
-            let text = &summary.assistant_text;
-            if std::io::stdout().is_terminal() {
-                let rendered = crate::output::render_assistant_markdown(text, term);
-                std::io::stdout().write_all(rendered.as_bytes())?;
-                if !rendered.ends_with('\n') {
-                    std::io::stdout().write_all(b"\n")?;
-                }
-            } else {
-                std::io::stdout().write_all(text.as_bytes())?;
-                if !text.ends_with('\n') {
-                    std::io::stdout().write_all(b"\n")?;
-                }
-            }
-            std::io::stdout().flush()?;
+            crate::output::emit_final_message(
+                &summary.assistant_text,
+                term,
+                Some(&section_stream),
+            )?;
         }
 
         super::super::policy::emit_stream_summary(
@@ -329,19 +318,7 @@ pub(crate) fn execute_harness_attempt(
         let response = profile.parse_captured_output(&stdout);
 
         if !response.trim().is_empty() {
-            if std::io::stdout().is_terminal() {
-                let rendered = crate::output::render_assistant_markdown(&response, term);
-                std::io::stdout().write_all(rendered.as_bytes())?;
-                if !rendered.ends_with('\n') {
-                    std::io::stdout().write_all(b"\n")?;
-                }
-            } else {
-                std::io::stdout().write_all(response.as_bytes())?;
-                if !response.ends_with('\n') {
-                    std::io::stdout().write_all(b"\n")?;
-                }
-            }
-            std::io::stdout().flush()?;
+            crate::output::emit_final_message(&response, term, None)?;
         }
 
         if !stderr.trim().is_empty() {
@@ -379,17 +356,12 @@ pub(crate) fn execute_harness_attempt(
         )?;
         let perf = Some(result.telemetry.into_agent_perf(None));
         let termination = result.termination;
-        let response = if provider == Provider::Codex {
-            if let Some(output) = structured_codex_output {
-                let text = std::fs::read_to_string(&output.last_message_path).unwrap_or_default();
-                let _ = std::fs::remove_file(&output.last_message_path);
-                text
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        };
+        // `structured_codex_output` is only prepared for Codex
+        // (exec_prep::prepare_codex_structured_output), so no provider
+        // check is needed here.
+        let response = structured_codex_output
+            .map(|output| output.take_last_message())
+            .unwrap_or_default();
 
         (
             result.data,

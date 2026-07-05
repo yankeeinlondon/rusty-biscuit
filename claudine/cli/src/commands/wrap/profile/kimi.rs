@@ -86,6 +86,10 @@ impl WrapperProfile for KimiWrapper {
         ])
     }
 
+    fn supports_resume(&self) -> bool {
+        true
+    }
+
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         // Wire mode is the structured-stream channel for Kimi: a single
         // `--wire` flag selects the JSON-RPC line protocol on stdin/stdout

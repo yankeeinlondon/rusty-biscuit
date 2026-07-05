@@ -101,6 +101,10 @@ impl WrapperProfile for CodexWrapper {
         ])
     }
 
+    fn supports_resume(&self) -> bool {
+        true
+    }
+
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         // Codex uses `exec --json` for structured output.
         // The `exec` subcommand is expected to already be present.

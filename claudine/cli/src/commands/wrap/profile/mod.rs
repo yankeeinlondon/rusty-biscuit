@@ -539,13 +539,14 @@ pub(crate) trait WrapperProfile: Send + Sync {
 
     /// Whether this provider supports resuming sessions.
     ///
-    /// Defaults to `provider_info(self.provider()).agent_capabilities().runtime.non_interactive.resume_supported`.
+    /// Defaults to `false`; profiles that override
+    /// [`build_resume_args`](Self::build_resume_args) override this to
+    /// return `true`. Ratified end-state (Ken, 2026-07-04): whenever the
+    /// provider natively supports resume, Claudine must too — a `false`
+    /// here is only ever a not-yet-implemented gap, never a durable
+    /// posture. All 7 current providers implement the pair.
     fn supports_resume(&self) -> bool {
-        provider_info(self.provider())
-            .agent_capabilities()
-            .runtime
-            .non_interactive
-            .resume_supported
+        false
     }
 
     // -- Structured stream support -------------------------------------------

@@ -76,6 +76,10 @@ impl WrapperProfile for ClaudeWrapper {
         ])
     }
 
+    fn supports_resume(&self) -> bool {
+        true
+    }
+
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         // Claude needs --print --verbose alongside stream-json for reliable
         // structured output. The typed catalog does not model "extra flags
