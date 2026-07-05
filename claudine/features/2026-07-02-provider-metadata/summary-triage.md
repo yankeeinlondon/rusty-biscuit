@@ -18,7 +18,7 @@
 ## Agent Logging (`summary/agent-logging.md`)
 
 - [ ] Provider-log **evidence adapters** feeding `claudine logs` as a federated observability layer: WAL-aware SQLite readers (OpenCode, Kilo CLI, Goose, Codex state DBs), Gemini `$set`-aware transcript parsing, Pi tree-preserving transcript reader
-- [ ] Kimi Wire protocol-version tolerance — observed 1.9 parser pin vs 1.10 server is live breakage (**triage early**)
+- [I] Kimi Wire protocol-version tolerance — observed 1.9 parser pin vs 1.10 server is live breakage (**triage early**). **Ruled (Ken, 2026-07-04): option D — full 1.10 adoption**, not just a version-tolerance window: relax the strict `WIRE_PROTOCOL_VERSION` equality in `validate_initialize_response` to accept {1.9, 1.10} with a remediation-bearing failure on unknown versions, AND model the 1.10 event surface the parser lacks (`StepRetry` retry observability, `StatusUpdate.mcp_status`, the richer `Notification` payload) plus the unmodeled on-disk surfaces (`tasks/`, compaction snapshots `context_{N}.jsonl`). Version-scope the facts per the kimi-cli (1.x, `~/.kimi`) vs Kimi Code (0.x, `~/.kimi-code`) product split. Queued as its own work item after Phase D step 3
 - [ ] Shared path/volatility inventory: resume storage (Codex `state_5.sqlite`, session indexes, Kimi state files) overlaps the shadow-home volatile-SQLite skip list and the evidence-adapter plan — one inventory, multiple consumers
 
 ## Agent Permissions (`summary/agent-permissions.md`)
@@ -48,7 +48,7 @@
 
 ## Hooks (`summary/hooks.md`)
 
-- [ ] **Codex is no longer notify-only**: first-class 10-event hook system (blocking, `updatedInput` mutation, permission allow/deny) — Claudine's Codex registration under-covers the canonical events (**triage early**)
+- [S] **Codex is no longer notify-only**: first-class 10-event hook system (blocking, `updatedInput` mutation, permission allow/deny) — Claudine's Codex registration under-covers the canonical events (**triage early**). **Ruled `[S]` (Ken, 2026-07-05):** scheduled as its own work item after Phase D step 3, alongside the Kimi Wire option-D work. Phasing: (1) registration writer (install/uninstall/sync/backups beside the kept notify wrapper) + `claudine handle` payload adapter (Claude-like stdin JSON) + codex `event_mapping` facts update/regen — observability parity first; (2) blocking-semantics wiring (PolicyEngine/protect for prompt/tool_call/permission) + registration-health kill-switch detection — after the `after_compact` canonical-enum ruling so compaction events land once. Research caveat carried: PreToolUse interception is explicitly incomplete (unified_exec/WebSearch bypass) — hooks-based protect is defense-in-depth, never a boundary
 - [ ] No `after_compact` canonical event — Codex/Kimi/Qwen `PostCompact` + OpenCode `session.compacted` all collapse into `notification` (canonical-enum change; Phase A1 catalog-types)
 - [ ] Tool-selection phase (Gemini `BeforeToolSelection`, OpenCode `tool.definition`) is unmappable to `before_tool` — fires before a concrete tool call exists
 - [ ] OpenCode blocking authority requires dedicated plugin hooks, NOT the observe-only event bus — verify which mechanism Claudine bridges

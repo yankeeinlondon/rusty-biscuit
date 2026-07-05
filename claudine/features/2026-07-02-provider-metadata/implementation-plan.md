@@ -226,6 +226,49 @@ topic's behavior gaps carry a disposition (no surfaced-only flags remain).
 > summary-triage.md (superseded by Checkpoint B's Roo removal). Verified: full
 > unit suite + lint + gen check clean; L2 123/126 with only the 3 known
 > host-specific detail-pane failures.
+>
+> **Checkpoint D rulings, first batch (2026-07-04, Ken):** (1) **Kimi Wire →
+> option D, full 1.10 adoption** (`[I]` in summary-triage.md: version window
+> {1.9, 1.10} + model `StepRetry`/`mcp_status`/richer `Notification` + the
+> `tasks/`/compaction surfaces; version-scoped facts per the kimi-cli 1.x vs
+> Kimi Code 0.x product split; queued after step 3). (2) **`platform_kind`**:
+> gemini/qwen/kimi ruled `vendor_platform`; field landed facts-fed for all 7
+> the same day (registry 42). (3) **`sandbox` deferred** — no catalog field
+> until the permissions six-axis work provides a consumer. (4) **PathTemplate
+> grammar = `{snake_case}`** — audit found the committed catalog already
+> conformant; no migration. (5) **`stream_protocol` → framing vocabulary at
+> the NIS-graduation moment** (option b).
+>
+> **Checkpoint D rulings, second batch:** (2026-07-04) disposition-table asks
+> 1–3 **approved** — the 17 clean catalog-data migrations, the C1
+> `apply_structured_stream` split (derive for codex/kimi/gemini/qwen; claude
+> via a `companion_flags` slot on the Stream `output_formats` record; opencode
+> stays behavior), and C2 `apply_non_interactive_flags` stays behavior. Step-3
+> migration unblocked. (2026-07-05) **Codex 10-event hooks ruled `[S]`** —
+> scheduled after step 3 alongside the Kimi Wire option-D work; two-phase plan
+> and caveats recorded in summary-triage.md.
+>
+> **Phase D step-3 completion (2026-07-05):** the ratified migrations shipped
+> and verified (unit + lint + gen check clean; L2 = only the 3 known
+> host-specific failures; inventory re-blessed 431/20). 22 overrides + 2
+> helpers deleted; `platform_kind` landed facts-fed (registry 42);
+> **static-fact overrides at zero** — remaining profile impls are identity or
+> ratified behavior. C1 implementation detail: `companion_flags` added to
+> `OutputFormatSupport` (claude Stream record `["--print", "--verbose"]`);
+> the derived default keys on the `OutputFormat::Stream` record — `FlagValue`
+> selectors push unconditionally (exact `push_stream_json_flags` semantics),
+> `Flag`/`TransportFlag` keep the has-flag guard. **Judgment call for review
+> (codex facts fix, override-as-ground-truth):** codex's Stream record was
+> `schema-json`/`--output-schema`, which could not reproduce the override's
+> `--json`; the Stream record is now `jsonl`/`--json` and the schema-json
+> record was kept re-labeled `format: json` (argv detection and
+> `apply_output_format(Json)` behavior preserved). Side effect:
+> `claudine codex --output stream` now maps to `--json` instead of the
+> previously nonsensical `--output-schema schema-json` (no test asserted the
+> old argv). Rationale comments live in `facts/codex.yaml`. Step 4 (rolling
+> topic rounds + remaining triage sections) and the two scheduled work items
+> (Kimi Wire option D `[I]`, Codex hooks `[S]`) are the open Phase D tail;
+> skill/docs drift refresh remains Phase I item 3.
 
 ## Phase E — signal catalog (spec Phase 2s; design/signal-detection.md)
 

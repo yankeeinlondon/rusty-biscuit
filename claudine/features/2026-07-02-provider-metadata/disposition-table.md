@@ -21,6 +21,17 @@
 > Claudine resume; only the support LEVEL graduates to catalog data
 > (`resume: ResumeSupport`, wave-1 field). `build_resume_args` argv mechanics
 > stay behavior on all 7 profiles.
+>
+> **EXECUTED (2026-07-05).** The ratified migrations shipped: 22 overrides +
+> 2 helpers (`opencode_default_tui_noise_prefixes`, `push_stream_json_flags`)
+> deleted; 6 trait defaults + the new derived `apply_structured_stream` read
+> the catalog; the 3 `exec_prep` OpenCode conditionals read
+> `model_required_in_non_tty` (inventory re-blessed: 431 sites / 20
+> conditional, was 433/23). Remaining impls per provider (incl. the two
+> mandatory methods): claude 4, codex 6, gemini 9, goose 5, kimi 4,
+> opencode 9, qwen 8 — every remaining override is identity or ratified
+> behavior; **static-fact overrides are at zero.** The tables below describe
+> the PRE-migration roster (the checkpoint input) — line refs are historical.
 
 ## Classification key
 
@@ -137,24 +148,27 @@ wrapper_stages.rs, inline.rs, composition) are stream/display/policy dispatch �
 Phase G (EventRenderer/DisplayPolicy) and Phase I territory, not profile
 migration.
 
-## Checkpoint D open questions (need Ken)
+## Checkpoint D questions — status
 
-1. **C1 ratification** — derived `apply_structured_stream` default for
-   codex/kimi/gemini/qwen; claude pending `companion_flags`; opencode stays
-   behavior. Approve as recommended?
-2. **C2** — keep `apply_non_interactive_flags` behavior (semantic mismatch with
-   the research field). Approve?
-3. **`platform_kind` values** for the undecided providers: gemini/qwen/kimi are
-   vendor CLIs with aggregator traits (matrix flagged these as Ken's call).
-   Proposed: gemini `vendor_platform`, qwen `vendor_platform`, kimi
-   `vendor_platform` (each predominantly fronts its vendor's models; aggregator
-   traits are secondary). claude/codex `vendor_platform`, goose/opencode
-   `agent_aggregator` are spec-given.
-4. **`sandbox` enum design** — permissions research vocabulary is now in hand
-   (modes/backends per provider; kimi/opencode `supported: false`). Proposal to
-   follow at the checkpoint; not a wave-1 field.
-5. **`session_log_paths` placeholder grammar** — `{sanitized_cwd}`-style
-   (research) vs `<encoded-directory>`-style (constants); matrix recommends
-   `{…}`. Ratify so the agent-logging graduation can proceed.
-6. **`stream_protocol` vocabulary** — claude constant `stream-json` vs NIS
-   `data_format: ndjson`; needs a vocabulary ruling before NIS graduation.
+**RATIFIED (Ken, 2026-07-04) — step-3 migration unblocked:**
+
+1. **The 17 clean catalog-data migrations** (table above) — defaults derive
+   from `provider_info()`, overrides deleted. **Approved.**
+2. **C1** — derived `apply_structured_stream` default for codex/kimi/gemini/qwen;
+   claude via the `companion_flags` slot on the Stream `output_formats` record;
+   opencode stays behavior. **Approved as split.**
+3. **C2** — `apply_non_interactive_flags` (gemini, qwen) stays behavior
+   (semantic mismatch with the research field). **Approved.**
+
+**Ruled (Ken, 2026-07-04):**
+
+4. **`platform_kind` values** — all three undecided providers (gemini/qwen/kimi)
+   are `vendor_platform` (aggregator traits are escape hatches, not primary UX);
+   field landed facts-fed same day.
+5. **`sandbox` enum** — **deferred**: no catalog field until the permissions
+   six-axis work (schema v2) provides a real consumer.
+6. **`session_log_paths` grammar** — `{snake_case}` ratified; audit found the
+   committed catalog already conformant (no migration).
+7. **`stream_protocol` vocabulary** — normalize to framing vocab (`ndjson`/
+   `jsonl`/`json-rpc`) and graduate from NIS, executed at the NIS-graduation
+   moment (variant rename is a shape change).
