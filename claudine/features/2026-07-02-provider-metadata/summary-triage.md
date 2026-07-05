@@ -114,4 +114,4 @@
 
 ## Cross-Topic
 
-- [ ] **Roo refresh sweep** — Roo research is missing/stale across six topics (agent-cli, agent-logging, hooks, resume, acp, subagents) and absent from skills/permissions rosters; one consolidated sweep, not per-topic patches
+- [W] **Roo refresh sweep** — Roo research is missing/stale across six topics (agent-cli, agent-logging, hooks, resume, acp, subagents) and absent from skills/permissions rosters; one consolidated sweep, not per-topic patches. **Won't-do (2026-07-04): superseded by Checkpoint B's full Roo Code removal** (enum variant, roster entry, research documents, facts file all deleted); there is no Roo surface left to refresh

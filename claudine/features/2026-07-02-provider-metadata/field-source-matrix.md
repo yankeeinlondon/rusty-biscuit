@@ -108,6 +108,11 @@ rows — see Open questions 1 and 2, RESOLVED.)
 
 ### Table-A research rows (field not yet in `ProviderInfo`)
 
+> **Phase D wave-1 stamp (2026-07-04):** `model_cli_flag`, `resume` (as
+> `ResumeSupport`, support level only per the resume-parity ruling), and
+> `non_interactive_conflicting_flags` are now live `ProviderInfo` fields;
+> `sandbox` remains held for enum design (Checkpoint D question).
+
 | Field *(table A)* | Rust shape (proposed) | Declared source | Expected shape | Coercion | Notes |
 | --- | --- | --- | --- | --- | --- |
 | `config_files` — **RETIRED as a separate field (2026-07-04, Open question 5 RESOLVED)** | — (`ConfigFileSpec` becomes the eventual richer TYPE of `config_paths`, above) | `research:model-config` `model_config_paths` (frontmatter key renamed from `config_files`, 2026-07-04) feeds a future `model_config_paths` catalog field when needed | — | — | The two research populations are genuinely different and stay two fields: agent-cli's general config-file inventory feeds the existing `config_paths`; model-config's model-extension file list is a distinct population, covered by a future `model_config_paths` catalog field (not a v1 field). The spec's `config_format` retirement stands — per-entry format arrives with the `ConfigFileSpec` type upgrade to `config_paths`. |
@@ -150,6 +155,14 @@ Scrape determinism note: nested object keys are emitted in lexical order
 | `repo_home_root_files` | `&'static [&'static str]` | StringArray *(vocab gap)* | `string_slice` | Shadow-home sync knowledge (claude: `.claude.json`; empty elsewhere). agent-cli `config_paths` records the same path with `scope: user`, but "lives at $HOME root AND must be shadow-synced" is a Claudine operational fact — likely permanent facts. |
 
 ### Table-A facts rows (no current constant — no scrape; `TODO` at scaffold time)
+
+> **Phase D wave-1 stamp (2026-07-04):** `billing_models` (legacy values
+> recovered from `edd22f733^`), `allowed_env_keys`, `stdout_noise_prefixes`,
+> `stderr_noise_prefixes`, `suppress_structured_stderr_on_success`,
+> `supports_interactive_inline_closure`, and `model_required_in_non_tty` are
+> now live facts-fed `ProviderInfo` fields. Still table-A-only:
+> `prompt_delivery` (strategy enum design pending) and `platform_kind`
+> (provider values pending Ken's call) — both Checkpoint D questions.
 
 | Field *(table A)* | Rust shape (proposed) | Coercion sketch | Graduation |
 | --- | --- | --- | --- |

@@ -203,6 +203,30 @@ Exit: static-fact overrides at zero; profile is a genuine behavior shim; table A
 fields all research-fed or facts-fed with a tracked graduation queue; every landed
 topic's behavior gaps carry a disposition (no surfaced-only flags remain).
 
+> **Phase D wave-1 status (2026-07-04):** steps 1–2 executed, awaiting Checkpoint D.
+> (a) Goose `static_models` pinned to `[]` by override (Ken's ruling, this prompt) —
+> the research list was aggregator-contaminated picker examples. (b) **Field
+> expansion wave 1 landed**: 10 new `ProviderInfo` fields — research-fed
+> `resume: ResumeSupport` (support level only, per the resume-parity ruling),
+> `model_cli_flag` (new `CliFlagSitesToFlag` skip-loudly coercion),
+> `non_interactive_conflicting_flags` (new `FlagListToStringSlice`); facts-fed
+> `billing_models` (values recovered from the deleted legacy tree at `edd22f733^`),
+> `allowed_env_keys`, `stdout_noise_prefixes`, `stderr_noise_prefixes`,
+> `suppress_structured_stderr_on_success`, `supports_interactive_inline_closure`,
+> `model_required_in_non_tty`. Registry now 41 entries (10 roster + 9 research +
+> 22 facts); `ResumeSupport`/`BillingModel` enums live in catalog-types. Four
+> `model_cli_flag` overrides pin `--model` (goose: aggregator `--provider`-first
+> ordering; codex/gemini/opencode: compound `"--model, -m"` sites defeat the
+> bare-token rule) — the agent-models fleet prompt should gain a one-bare-flag-
+> per-site mandate at the next refresh (mirror of Checkpoint A ruling 4). NO
+> consumer wired: all 66 profile overrides intact pending Checkpoint D. (c) The
+> disposition table lives in [disposition-table.md](disposition-table.md) —
+> live count is **66** (not 57/67): 17 clean catalog-data, 8 ruled candidates,
+> 7 identity, 34 behavior. (d) Roo refresh sweep closed won't-do in
+> summary-triage.md (superseded by Checkpoint B's Roo removal). Verified: full
+> unit suite + lint + gen check clean; L2 123/126 with only the 3 known
+> host-specific detail-pane failures.
+
 ## Phase E — signal catalog (spec Phase 2s; design/signal-detection.md)
 
 1. Taxonomy + `SignalEvent` in catalog-types; detection-record schema sidecar
