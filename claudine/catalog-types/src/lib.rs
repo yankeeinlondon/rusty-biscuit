@@ -13,11 +13,13 @@
 mod billing_model;
 mod display_policy;
 mod model_catalog_source;
+mod platform_kind;
 mod resume_support;
 mod vocab;
 
 pub use billing_model::BillingModel;
 pub use display_policy::{DisplayPolicy, EventClass, ToolResultSummary};
 pub use model_catalog_source::ModelCatalogSource;
+pub use platform_kind::PlatformKind;
 pub use resume_support::ResumeSupport;
 pub use vocab::{Confidence, Unit, Zone};
