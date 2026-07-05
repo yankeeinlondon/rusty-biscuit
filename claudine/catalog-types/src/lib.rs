@@ -10,10 +10,14 @@
 //! (`design/catalog-generation.md` F1, `design/signal-detection.md` shared
 //! vocab, `design/render-components.md` DisplayPolicy ownership).
 
+mod billing_model;
 mod display_policy;
 mod model_catalog_source;
+mod resume_support;
 mod vocab;
 
+pub use billing_model::BillingModel;
 pub use display_policy::{DisplayPolicy, EventClass, ToolResultSummary};
 pub use model_catalog_source::ModelCatalogSource;
+pub use resume_support::ResumeSupport;
 pub use vocab::{Confidence, Unit, Zone};
