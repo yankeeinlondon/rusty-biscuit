@@ -735,4 +735,91 @@ mod tests {
             assert!(arm["properties"].get("owner").is_some());
         }
     }
+
+    // ── `generated` baseline merge audit (Phase 2) ──────────────────────────
+
+    /// A baseline `generated; required` property must NOT get force-added to
+    /// the merged `required` list. The convert layer suppresses the
+    /// `required` entry for generated properties, so by the time the baseline
+    /// reaches `merge_baseline` its `required` array already excludes the
+    /// generated property — the merge has nothing to copy over. This test
+    /// proves that contract end-to-end (SimplifiedSchema → JSON Schema →
+    /// merge_baseline) and guards against a future regression that re-introduces
+    /// generated properties into the baseline `required` list.
+    #[test]
+    fn baseline_generated_required_property_is_not_force_added_to_required() {
+        // Build the baseline via the real convert path so the audit reflects
+        // the actual baseline shape a library caller hands to merge_baseline.
+        let baseline_yaml = "ctx_today: 'string(generated; required)'";
+        let baseline_value: YamlValue = serde_yaml_ng::from_str(baseline_yaml).unwrap();
+        let baseline_schema = parse_yaml_schema(&baseline_value).unwrap();
+        let baseline_json = to_json_schema(&baseline_schema).unwrap();
+
+        // Sanity: the generated property is absent from the baseline's own
+        // `required` array (this is the convert-level suppression).
+        assert!(
+            baseline_json.get("required").is_none(),
+            "baseline must not carry a static `required` entry for a generated property: {baseline_json:?}"
+        );
+
+        // A document schema that does not declare `ctx_today`.
+        let doc = json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string" }
+            }
+        });
+        let merged = merge_baseline(&baseline_json, doc).unwrap();
+
+        // The generated property is copied across (it is baseline-only), but
+        // the merged `required` list must NOT contain it.
+        assert!(
+            merged["properties"].get("ctx_today").is_some(),
+            "generated baseline property should be merged into properties: {merged:?}"
+        );
+        let required = merged.get("required").and_then(|r| r.as_array());
+        match required {
+            None => { /* no required array at all — also fine */ }
+            Some(arr) => {
+                let names: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
+                assert!(
+                    !names.contains(&"ctx_today"),
+                    "generated baseline property must not be force-added to required: {merged:?}"
+                );
+            }
+        }
+    }
+
+    /// End-to-end: a baseline that models `ctx` as a nested object with a
+    /// `generated; required` inner `today` property merges cleanly, and an
+    /// authored document omitting `ctx` entirely validates. This mirrors the
+    /// motivating `darkmatter.yaml` baseline shape.
+    #[test]
+    fn baseline_nested_ctx_generated_validates_when_ctx_absent() {
+        use crate::markdown::schemas::validate::build_validator;
+        let baseline_yaml = "ctx:\n  today: \"date(generated; required)\"";
+        let baseline_value: YamlValue = serde_yaml_ng::from_str(baseline_yaml).unwrap();
+        let baseline_schema = parse_yaml_schema(&baseline_value).unwrap();
+        let baseline_json = to_json_schema(&baseline_schema).unwrap();
+
+        let doc = json!({"type": "object", "properties": {}});
+        let merged = merge_baseline(&baseline_json, doc).unwrap();
+        let validator = build_validator(&merged, None, None).unwrap();
+
+        // Authored document omits `ctx` entirely — validates.
+        assert!(
+            validator.is_valid(&json!({ "title": "Hello" })),
+            "authored doc omitting generated ctx must validate: merged={merged:?}"
+        );
+        // Host supplies a wrongly-typed `ctx.today` — fails type validation.
+        assert!(
+            !validator.is_valid(&json!({ "ctx": { "today": 42 } })),
+            "wrongly-typed ctx.today must fail: merged={merged:?}"
+        );
+        // Host supplies a correctly-typed `ctx.today` — validates.
+        assert!(
+            validator.is_valid(&json!({ "ctx": { "today": "2026-07-04" } })),
+            "correctly-typed ctx.today must validate: merged={merged:?}"
+        );
+    }
 }

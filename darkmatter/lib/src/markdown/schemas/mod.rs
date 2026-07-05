@@ -1318,4 +1318,86 @@ mod tests {
             "validate must not mutate root-union eager-file input",
         );
     }
+
+    // ── `generated` baseline integration (Phase 2) ─────────────────────────
+    //
+    // End-to-end at the public `DarkmatterSchemas` API: an authored document
+    // omitting a baseline `ctx.today` `generated; required` property validates
+    // cleanly (spec semantics point 1), while a wrongly-typed `ctx.today`
+    // value fails type validation (point 3).
+
+    /// Builds a baseline `SimplifiedSchema` from a YAML body.
+    fn baseline_from_yaml(yaml_body: &str) -> SimplifiedSchema {
+        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml_body).expect("yaml parse");
+        super::simplified::parse_yaml_schema(&value).expect("baseline schema parse")
+    }
+
+    #[test]
+    fn baseline_generated_ctx_validates_when_authored_doc_omits_ctx() {
+        let baseline = baseline_from_yaml(
+            "ctx:\n  today: \"date(generated; required) -> today's date, host-supplied\"",
+        );
+        let api = DarkmatterSchemas::new()
+            .with_baseline(baseline)
+            .expect("baseline converts");
+
+        // Authored document omits `ctx` entirely — validates (spec point 1).
+        let md = md_with_schema("title: Hello\n");
+        let report = api.validate(&md).expect("validate");
+        assert!(
+            report.valid,
+            "authored doc omitting generated ctx must validate: {:?}",
+            report.problems,
+        );
+    }
+
+    #[test]
+    fn baseline_generated_ctx_type_checks_wrongly_typed_value() {
+        let baseline = baseline_from_yaml(
+            "ctx:\n  today: \"date(generated; required) -> today's date, host-supplied\"",
+        );
+        let api = DarkmatterSchemas::new()
+            .with_baseline(baseline)
+            .expect("baseline converts");
+
+        // Host supplies a wrongly-typed `ctx.today` — fails validation
+        // (spec point 3: the non-nullable type semantics of `required` are
+        // preserved even though static presence is suppressed). A numeric
+        // value against `date` (`{ type: "string", format: "date" }`) is
+        // rejected by the format/type check.
+        let md = md_with_schema("ctx:\n  today: 42\n");
+        let report = api.validate(&md).expect("validate");
+        assert!(
+            !report.valid,
+            "wrongly-typed ctx.today must fail validation: {:?}",
+            report.problems,
+        );
+        assert!(
+            report
+                .problems
+                .iter()
+                .any(|p| p.path == "/ctx/today"),
+            "expected a problem on /ctx/today: {:?}",
+            report.problems,
+        );
+    }
+
+    #[test]
+    fn baseline_generated_ctx_accepts_correctly_typed_value() {
+        let baseline = baseline_from_yaml(
+            "ctx:\n  today: \"date(generated; required) -> today's date, host-supplied\"",
+        );
+        let api = DarkmatterSchemas::new()
+            .with_baseline(baseline)
+            .expect("baseline converts");
+
+        // Host supplies a correctly-typed `ctx.today` — validates.
+        let md = md_with_schema("ctx:\n  today: 2026-07-04\n");
+        let report = api.validate(&md).expect("validate");
+        assert!(
+            report.valid,
+            "correctly-typed ctx.today must validate: {:?}",
+            report.problems,
+        );
+    }
 }
