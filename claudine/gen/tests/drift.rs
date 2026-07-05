@@ -1,11 +1,13 @@
-//! Drift and byte-equivalence tests over the REAL committed inputs.
+//! Drift tests over the REAL committed inputs.
 //!
 //! The drift test and the CLI `check` subcommand are the same code path:
-//! both call [`claudine_gen::check_area`].
+//! both call [`claudine_gen::check_area`]. For every provider slug,
+//! `generate(committed inputs)` must byte-equal the committed
+//! `lib/src/provider/<slug>/data.rs`.
 
 use std::path::Path;
 
-use claudine_gen::{CheckOutcome, check_area, generate_for_area};
+use claudine_gen::{CheckOutcome, PROVIDER_SLUGS, check_area, check_catalog, generate_all};
 
 /// The claudine package-area root (parent of this crate's manifest dir).
 fn area() -> &'static Path {
@@ -14,59 +16,43 @@ fn area() -> &'static Path {
         .expect("gen crate lives under the claudine package area")
 }
 
-/// Gate (d): generate(committed inputs) == committed fragment file.
+/// generate(committed inputs) == committed lib/src/provider/<slug>/data.rs
+/// for all seven providers.
 #[test]
-fn committed_fragment_matches_regenerated_inputs() {
-    let (_, outcome) = check_area(area(), "claude").expect("generation must succeed");
-    match outcome {
+fn committed_data_matches_regenerated_inputs() {
+    for slug in PROVIDER_SLUGS {
+        let (_, outcome) = check_area(area(), slug)
+            .unwrap_or_else(|err| panic!("generation for `{slug}` must succeed: {err}"));
+        match outcome {
+            CheckOutcome::Clean => {}
+            CheckOutcome::Drift { details } => panic!(
+                "drift between committed inputs and lib/src/provider/{slug}/data.rs — \
+                 run `claudine-gen generate`:\n{}",
+                details.join("\n")
+            ),
+            CheckOutcome::MissingCommitted { path } => panic!(
+                "committed data.rs missing at {} — run `claudine-gen generate`",
+                path.display()
+            ),
+        }
+    }
+}
+
+/// build_catalog(committed inputs) == committed docs/providers/catalog.json
+/// (the full-scope superset projection travels with the compiled subset).
+#[test]
+fn committed_catalog_matches_regenerated_inputs() {
+    let generations = generate_all(area()).expect("full-scope generation must succeed");
+    match check_catalog(area(), &generations).expect("catalog check must run") {
         CheckOutcome::Clean => {}
         CheckOutcome::Drift { details } => panic!(
-            "drift between committed inputs and gen/generated/claude.data.rs — \
+            "drift between committed inputs and docs/providers/catalog.json — \
              run `claudine-gen generate`:\n{}",
             details.join("\n")
         ),
         CheckOutcome::MissingCommitted { path } => panic!(
-            "committed fragment missing at {} — run `claudine-gen generate`",
+            "committed catalog.json missing at {} — run `claudine-gen generate`",
             path.display()
         ),
-    }
-}
-
-/// Exit criterion 1: every generated field expression is byte-identical to
-/// the hand-written text in `lib/src/provider/claude/data.rs`.
-///
-/// Matching approach: the generated fragment emits one
-/// `    field: expr,` line per registry entry at the same four-space
-/// indentation the `CLAUDE_INFO` initializer uses, so each non-comment
-/// fragment line must appear VERBATIM (full-line equality, indentation
-/// included) inside the `CLAUDE_INFO = ProviderInfo { ... }` block.
-#[test]
-fn generated_field_expressions_byte_match_hand_written_claude_rs() {
-    let generation = generate_for_area(area(), "claude").expect("generation must succeed");
-    let claude_rs = std::fs::read_to_string(area().join("lib/src/provider/claude/data.rs"))
-        .expect("hand-written claude/data.rs must exist");
-    let block = claude_rs
-        .split("static CLAUDE_INFO: ProviderInfo = ProviderInfo {")
-        .nth(1)
-        .expect("CLAUDE_INFO initializer present")
-        .split("\n};")
-        .next()
-        .expect("CLAUDE_INFO initializer terminated");
-
-    let field_lines: Vec<&str> = generation
-        .fragment
-        .lines()
-        .filter(|line| !line.trim().is_empty() && !line.trim_start().starts_with("//"))
-        .collect();
-    assert_eq!(
-        field_lines.len(),
-        claudine_gen::REGISTRY.len(),
-        "one generated line per registry entry"
-    );
-    for line in field_lines {
-        assert!(
-            block.lines().any(|hand_written| hand_written == line),
-            "generated `{line}` has no byte-identical line in CLAUDE_INFO"
-        );
     }
 }

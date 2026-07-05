@@ -1,11 +1,16 @@
 //! The mapping registry: catalog field → declared source → coercion.
 //!
-//! This is the walking-skeleton (Phase A1) subset — six entries spanning
-//! every source kind in the field-source matrix
-//! (`design/catalog-generation.md`). Phase B extends it to every
-//! `ProviderInfo` field. Entry order is emission order and must follow the
-//! field order of the hand-written `CLAUDE_INFO` constant so byte
-//! comparison stays line-oriented.
+//! Generator v1 (Phase B item 3): one entry per serialized `ProviderInfo`
+//! field, in serialization order (which follows the struct's declaration
+//! order). The field-source matrix
+//! (`features/2026-07-02-provider-metadata/field-source-matrix.md`) is the
+//! ruled contract behind every source declaration. Table-A fields (no
+//! current constant) are deferred to Phase D; `structured_stream_flag` is
+//! retired outright (OQ7b).
+//!
+//! Serialized fields with NO entry here must appear in
+//! [`EXCLUDED_SERIALIZED_FIELDS`] with a justification — the
+//! registry-covers-all-fields guard enforces exactly-one-of.
 
 use claudine_catalog_types::ModelCatalogSource;
 use serde_json::{Value, json};
@@ -47,11 +52,18 @@ pub enum SchemaExpectation {
     String,
     /// A boolean (sidecar `boolean` or `boolish`).
     Boolean,
-    /// An `enum(...)` feeding a Rust enum: the sidecar members must be a
-    /// subset of the strum-introspected variant names.
+    /// An array of plain strings.
+    StringArray,
+    /// An `enum(...)` feeding a Rust enum (or a coercion's fixed
+    /// vocabulary): the sidecar members must be a subset of the declared
+    /// member names.
     EnumSubsetOf {
         rust_enum: &'static str,
         variants: &'static [&'static str],
+    },
+    /// A single inline-object record carrying at least these fields.
+    Record {
+        required_fields: &'static [&'static str],
     },
     /// An array of inline-object records carrying at least these fields.
     RecordArray {
@@ -65,8 +77,12 @@ impl SchemaExpectation {
         match self {
             SchemaExpectation::String => "string".into(),
             SchemaExpectation::Boolean => "boolean".into(),
+            SchemaExpectation::StringArray => "string[]".into(),
             SchemaExpectation::EnumSubsetOf { rust_enum, .. } => {
                 format!("enum(subset of {rust_enum})")
+            }
+            SchemaExpectation::Record { required_fields } => {
+                format!("record(requires {})", required_fields.join(", "))
             }
             SchemaExpectation::RecordArray { required_fields } => {
                 format!("record_array(requires {})", required_fields.join(", "))
@@ -77,28 +93,88 @@ impl SchemaExpectation {
 
 /// How a source value becomes a Rust field expression.
 ///
-/// Each coercion has two halves: a research/source-side *extraction* that
-/// produces a catalog-shaped intermediate JSON value, and a shared
-/// *expression* half that turns a catalog-shaped value into Rust text.
-/// Overrides supply catalog-shaped values directly, so they flow through
-/// the expression half only — override and source values are compared in
-/// the same shape for the staleness lint.
+/// Each coercion has two halves: a source-side *extraction* that produces
+/// a catalog-shaped intermediate JSON value
+/// (`generate::coerce_to_catalog_shape`), and an *expression* half that
+/// turns a catalog-shaped value into Rust text (`emit`). Overrides supply
+/// catalog-shaped values directly, so they flow through the expression
+/// half only — override and source values are compared in the same shape
+/// for the staleness lint. Coercions that can drop input records must
+/// collect loud skips (Checkpoint A ruling 4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Coercion {
     /// String scalar → `&'static str` literal.
     StringLiteral,
+    /// String-or-absent → `Option<&'static str>` literal.
+    OptionalStringLiteral,
     /// Boolean → `bool` literal.
     BoolLiteral,
+    /// String array → `&'static [&'static str]` (shared list emitter).
+    StringSlice,
+    /// Roster slug → `Provider::<Variant>` path expression via the fixed
+    /// `emit::PROVIDER_VARIANTS` map. Generation references a variant, it
+    /// can never create one (onboarding step 3 hand wiring).
+    ProviderVariantFromSlug,
+    /// Roster binding name → `AiCli::<Variant>` path expression.
+    SniffBindingVariant,
+    /// skills topic `support` enum → bool: `first_class`/`partial` → true,
+    /// `convention_only`/`none`/`unknown` → false (Open question 3 ruling).
+    SkillSupportToBool,
+    /// Kebab-case protocol wire form (or null) →
+    /// `Option<StreamProtocol>` path expression.
+    StreamProtocolWire,
+    /// agent-models `default_models[]` records → the deduplicated,
+    /// lexically sorted list of `id` strings.
+    DefaultModelsToStaticModels,
     /// agent-models `dynamic_listing.available` → [`ModelCatalogSource`]
-    /// path expression. `false` maps to `static`; `true` is unmappable in
-    /// the skeleton (selecting a dynamic variant needs Phase B data) and
-    /// demands an override.
+    /// expression. `false` maps to `static`; `true` cannot select a
+    /// mechanism (the boolean carries no program/args information) and
+    /// demands a field-keyed override pinning today's value — a bare
+    /// member string for the unit variants, or the externally tagged
+    /// `{shell_command: {program, args}}` object.
     DynamicListingToModelCatalogSource,
     /// agent-models `model_selection[]` records → the list of bare env-var
     /// identifiers (`method == "env_var"` and `site` is a single
-    /// `[A-Z][A-Z0-9_]*` token; compound "A / B" sites are excluded),
-    /// document order, deduplicated.
+    /// `[A-Z][A-Z0-9_]*` token; compound "A / B" sites are skipped
+    /// loudly), document order, deduplicated.
     EnvVarSitesToStringSlice,
+    /// agent-logging `surfaces[]` records → `path_macos` of every
+    /// `role == session_transcript` record, document order. Annotated
+    /// pseudo-paths (containing " (") are skipped loudly.
+    SurfacesToSessionLogPaths,
+    /// agent-cli `config_paths[]` records → `path` of every macOS
+    /// user/repo-scoped record, document order. Non-bare paths (prose
+    /// annotations, `<...>` placeholders, env-var references) are skipped
+    /// loudly.
+    ConfigPathRecordsToConfigPaths,
+    /// Facts `[{raw, segments}]` records → `&[PathTemplate]` expression
+    /// (`Static` only; templated segments have no current constant).
+    PathTemplateList,
+    /// Facts event-mapping table → the named `EventMappingTable` static.
+    EventMappingRecords,
+    /// Facts resource-support record → the `LazyLock`-backed
+    /// `ProviderCapabilities` builder.
+    ResourceSupportRecord,
+    /// Facts output-format records → `&[OutputFormatSupport]`.
+    OutputFormatRecords,
+    /// Facts entrypoint records → `&[EntrypointSpec]`.
+    EntrypointRecords,
+    /// Facts system-prompt record → `&'static SystemPromptSpec`
+    /// (referencing the shared memory-files const).
+    SystemPromptSpecRecord,
+    /// Facts YOLO record → [`YoloSupport`] expression.
+    YoloRecordToYoloSupport,
+    /// Facts reasoning record → `ReasoningSupport` expression.
+    ReasoningRecord,
+    /// Facts known-gap records → `&[KnownGap]`.
+    KnownGapRecords,
+    /// Facts ACP record → `AcpSupport` expression.
+    AcpRecord,
+    /// Facts prompt-arg record → `PromptArgConventions` expression
+    /// (post-OQ7a shape: `prompt_flags` + `entrypoint`).
+    PromptArgRecord,
+    /// Facts axes record → `CliSensitiveAxes` expression.
+    AxesRecord,
 }
 
 impl Coercion {
@@ -106,11 +182,32 @@ impl Coercion {
     pub fn label(&self) -> &'static str {
         match self {
             Coercion::StringLiteral => "string_literal",
+            Coercion::OptionalStringLiteral => "optional_string_literal",
             Coercion::BoolLiteral => "bool_literal",
+            Coercion::StringSlice => "string_slice",
+            Coercion::ProviderVariantFromSlug => "provider_variant_from_slug",
+            Coercion::SniffBindingVariant => "sniff_binding_variant",
+            Coercion::SkillSupportToBool => "skill_support_to_bool",
+            Coercion::StreamProtocolWire => "stream_protocol_wire",
+            Coercion::DefaultModelsToStaticModels => "default_models_to_static_models",
             Coercion::DynamicListingToModelCatalogSource => {
                 "dynamic_listing_to_model_catalog_source"
             }
             Coercion::EnvVarSitesToStringSlice => "env_var_sites_to_string_slice",
+            Coercion::SurfacesToSessionLogPaths => "surfaces_to_session_log_paths",
+            Coercion::ConfigPathRecordsToConfigPaths => "config_path_records_to_config_paths",
+            Coercion::PathTemplateList => "path_template_list",
+            Coercion::EventMappingRecords => "event_mapping_records",
+            Coercion::ResourceSupportRecord => "resource_support_record",
+            Coercion::OutputFormatRecords => "output_format_records",
+            Coercion::EntrypointRecords => "entrypoint_records",
+            Coercion::SystemPromptSpecRecord => "system_prompt_spec_record",
+            Coercion::YoloRecordToYoloSupport => "yolo_record_to_yolo_support",
+            Coercion::ReasoningRecord => "reasoning_record",
+            Coercion::KnownGapRecords => "known_gap_records",
+            Coercion::AcpRecord => "acp_record",
+            Coercion::PromptArgRecord => "prompt_arg_record",
+            Coercion::AxesRecord => "axes_record",
         }
     }
 }
@@ -124,65 +221,365 @@ pub struct RegistryEntry {
     pub source: DeclaredSource,
     pub expected: &'static [SchemaExpectation],
     pub coercion: Coercion,
+    /// Optionality marker (Open question 6): a missing source key (or
+    /// explicit null) resolves to JSON null instead of erroring.
+    pub optional: bool,
+    /// One-line field description (feeds `--mapping` and generated docs).
+    pub description: &'static str,
 }
 
-/// The A1 mapping registry, in `CLAUDE_INFO` field order.
+/// Convenience: the common non-optional entry shape.
+const fn entry(
+    field: &'static str,
+    source: DeclaredSource,
+    expected: &'static [SchemaExpectation],
+    coercion: Coercion,
+    description: &'static str,
+) -> RegistryEntry {
+    RegistryEntry {
+        field,
+        source,
+        expected,
+        coercion,
+        optional: false,
+        description,
+    }
+}
+
+/// The skills-topic `support` vocabulary consumed by
+/// [`Coercion::SkillSupportToBool`]. A sidecar member outside this list
+/// fails the schema↔catalog gate before any research value is read.
+pub const SKILL_SUPPORT_MEMBERS: &[&str] =
+    &["first_class", "partial", "convention_only", "none", "unknown"];
+
+/// The generator-v1 mapping registry, in `ProviderInfo` serialization
+/// order (10 roster + 6 research + 15 facts = 31 fields).
 pub const REGISTRY: &[RegistryEntry] = &[
-    RegistryEntry {
-        field: "slug",
-        source: DeclaredSource::Roster { key: "slug" },
-        expected: &[SchemaExpectation::String],
-        coercion: Coercion::StringLiteral,
-    },
-    RegistryEntry {
-        field: "binary",
-        source: DeclaredSource::Roster { key: "binary" },
-        expected: &[SchemaExpectation::String],
-        coercion: Coercion::StringLiteral,
-    },
-    RegistryEntry {
-        field: "agent_offset",
-        source: DeclaredSource::Roster { key: "repo_dir" },
-        expected: &[SchemaExpectation::String],
-        coercion: Coercion::StringLiteral,
-    },
-    RegistryEntry {
-        field: "supports_skills",
-        source: DeclaredSource::Facts {
-            key: "supports_skills",
+    entry(
+        "provider",
+        DeclaredSource::Roster { key: "slug" },
+        &[SchemaExpectation::String],
+        Coercion::ProviderVariantFromSlug,
+        "Canonical Provider enum variant, resolved from the roster slug",
+    ),
+    entry(
+        "display_name",
+        DeclaredSource::Roster {
+            key: "display_name",
         },
-        expected: &[SchemaExpectation::Boolean],
-        coercion: Coercion::BoolLiteral,
-    },
+        &[SchemaExpectation::String],
+        Coercion::StringLiteral,
+        "Friendly display name (distinct from the roster `name` heading)",
+    ),
+    entry(
+        "slug",
+        DeclaredSource::Roster { key: "slug" },
+        &[SchemaExpectation::String],
+        Coercion::StringLiteral,
+        "Canonical snake-case slug for file paths and JSON keys",
+    ),
+    entry(
+        "short_name",
+        DeclaredSource::Roster { key: "short_name" },
+        &[SchemaExpectation::String],
+        Coercion::StringLiteral,
+        "Short display name used in event logs and CLI output",
+    ),
+    entry(
+        "binary",
+        DeclaredSource::Roster { key: "binary" },
+        &[SchemaExpectation::String],
+        Coercion::StringLiteral,
+        "Provider binary name on $PATH",
+    ),
+    entry(
+        "agent_offset",
+        DeclaredSource::Roster { key: "repo_dir" },
+        &[SchemaExpectation::String],
+        Coercion::StringLiteral,
+        "Agent offset directory used for shadow-HOME isolation",
+    ),
+    entry(
+        "cli_aliases",
+        DeclaredSource::Roster {
+            key: "cli_aliases",
+        },
+        &[SchemaExpectation::StringArray],
+        Coercion::StringSlice,
+        "CLI alias forms accepted on the command line",
+    ),
+    entry(
+        "docs_url",
+        DeclaredSource::Roster { key: "docs_url" },
+        &[SchemaExpectation::String],
+        Coercion::StringLiteral,
+        "Provider documentation homepage (roster-owned; topic URLs are verification inputs)",
+    ),
     RegistryEntry {
-        field: "dynamic_source",
-        source: DeclaredSource::Research {
+        field: "usage_dashboard_url",
+        source: DeclaredSource::Roster {
+            key: "usage_dashboard_url",
+        },
+        expected: &[SchemaExpectation::String],
+        coercion: Coercion::OptionalStringLiteral,
+        optional: true,
+        description: "Usage / billing dashboard URL when one exists",
+    },
+    entry(
+        "sniff_binding",
+        DeclaredSource::Roster {
+            key: "sniff_binding",
+        },
+        &[SchemaExpectation::String],
+        Coercion::SniffBindingVariant,
+        "sniff AiCli variant used for install detection",
+    ),
+    entry(
+        "supports_skills",
+        DeclaredSource::Research {
+            topic: "skills",
+            path: "support",
+        },
+        &[SchemaExpectation::EnumSubsetOf {
+            rust_enum: "skill-support vocabulary (SkillSupportToBool)",
+            variants: SKILL_SUPPORT_MEMBERS,
+        }],
+        Coercion::SkillSupportToBool,
+        "Whether the provider supports skill discovery (graduated facts -> research at v1)",
+    ),
+    RegistryEntry {
+        field: "stream_protocol",
+        source: DeclaredSource::Facts {
+            key: "stream_protocol",
+        },
+        expected: &[SchemaExpectation::String],
+        coercion: Coercion::StreamProtocolWire,
+        optional: true,
+        description: "Structured stream format used in non-interactive mode, when present",
+    },
+    entry(
+        "event_mapping",
+        DeclaredSource::Facts {
+            key: "event_mapping",
+        },
+        &[SchemaExpectation::Record {
+            required_fields: &["mappings"],
+        }],
+        Coercion::EventMappingRecords,
+        "Canonical event -> support-level/native-name/alias/registration table",
+    ),
+    entry(
+        "resource_support",
+        DeclaredSource::Facts {
+            key: "resource_support",
+        },
+        &[SchemaExpectation::Record {
+            required_fields: &["skills", "commands", "agents", "scripts", "skill_frontmatter"],
+        }],
+        Coercion::ResourceSupportRecord,
+        "Resource portability descriptor (skills/commands/agents/scripts specs)",
+    ),
+    entry(
+        "session_log_paths",
+        DeclaredSource::Research {
+            topic: "agent-logging",
+            path: "surfaces",
+        },
+        &[SchemaExpectation::RecordArray {
+            required_fields: &["role", "path_macos", "format"],
+        }],
+        Coercion::SurfacesToSessionLogPaths,
+        "Per-session transcript templates ({placeholder} grammar, from logging surfaces)",
+    ),
+    entry(
+        "session_locations",
+        DeclaredSource::Facts {
+            key: "session_locations",
+        },
+        &[SchemaExpectation::RecordArray {
+            required_fields: &["raw", "segments"],
+        }],
+        Coercion::PathTemplateList,
+        "Ancillary session-state directory templates",
+    ),
+    entry(
+        "config_paths",
+        DeclaredSource::Research {
+            topic: "agent-cli",
+            path: "config_paths",
+        },
+        &[SchemaExpectation::RecordArray {
+            required_fields: &["os", "scope", "path"],
+        }],
+        Coercion::ConfigPathRecordsToConfigPaths,
+        "User / repo config file templates (macOS projection of the agent-cli inventory)",
+    ),
+    entry(
+        "memory_files",
+        DeclaredSource::Facts {
+            key: "memory_files",
+        },
+        &[SchemaExpectation::RecordArray {
+            required_fields: &["raw", "segments"],
+        }],
+        Coercion::PathTemplateList,
+        "Memory / instruction files contributing to the system prompt hierarchy",
+    ),
+    entry(
+        "output_formats",
+        DeclaredSource::Facts {
+            key: "output_formats",
+        },
+        &[SchemaExpectation::RecordArray {
+            required_fields: &["format", "native_name", "selector"],
+        }],
+        Coercion::OutputFormatRecords,
+        "Output formats supported in non-interactive mode",
+    ),
+    entry(
+        "entrypoints",
+        DeclaredSource::Facts {
+            key: "entrypoints",
+        },
+        &[SchemaExpectation::RecordArray {
+            required_fields: &["mode", "required_flags"],
+        }],
+        Coercion::EntrypointRecords,
+        "Available non-interactive (and selected interactive) entrypoints",
+    ),
+    entry(
+        "system_prompt",
+        DeclaredSource::Facts {
+            key: "system_prompt",
+        },
+        &[SchemaExpectation::Record {
+            required_fields: &["append", "replace", "memory_files"],
+        }],
+        Coercion::SystemPromptSpecRecord,
+        "Typed system-prompt delivery descriptor (append/replace x interactive/non-interactive)",
+    ),
+    entry(
+        "yolo",
+        DeclaredSource::Facts { key: "yolo" },
+        &[SchemaExpectation::String, SchemaExpectation::Record { required_fields: &[] }],
+        Coercion::YoloRecordToYoloSupport,
+        "Typed YOLO / auto-approve descriptor",
+    ),
+    entry(
+        "reasoning",
+        DeclaredSource::Facts { key: "reasoning" },
+        &[SchemaExpectation::String, SchemaExpectation::Record { required_fields: &[] }],
+        Coercion::ReasoningRecord,
+        "Typed reasoning / extended-thinking descriptor",
+    ),
+    entry(
+        "known_gaps",
+        DeclaredSource::Facts { key: "known_gaps" },
+        &[SchemaExpectation::RecordArray {
+            required_fields: &["area", "note"],
+        }],
+        Coercion::KnownGapRecords,
+        "Known gaps in provider capability data, classified by area (human-curated)",
+    ),
+    entry(
+        "acp",
+        DeclaredSource::Facts { key: "acp" },
+        &[SchemaExpectation::Record {
+            required_fields: &["server_mode", "client_supported", "events_via_acp"],
+        }],
+        Coercion::AcpRecord,
+        "Typed ACP capability descriptor",
+    ),
+    entry(
+        "prompt_arg_conventions",
+        DeclaredSource::Facts {
+            key: "prompt_arg_conventions",
+        },
+        &[SchemaExpectation::Record {
+            required_fields: &["prompt_flags"],
+        }],
+        Coercion::PromptArgRecord,
+        "Native-CLI prompt argv conventions (prompt flags + entrypoint; OQ7a shape)",
+    ),
+    entry(
+        "static_models",
+        DeclaredSource::Research {
+            topic: "agent-models",
+            path: "default_models",
+        },
+        &[SchemaExpectation::RecordArray {
+            required_fields: &["id"],
+        }],
+        Coercion::DefaultModelsToStaticModels,
+        "Compiled-in model id list (deduplicated, lexically sorted research ids)",
+    ),
+    entry(
+        "model_catalog_source",
+        DeclaredSource::Research {
             topic: "agent-models",
             path: "dynamic_listing.available",
         },
         // Boolean today; the enum arm admits a future sidecar that reports
         // the catalog source directly — its members must then be a subset
         // of the Rust variants (the schema<->catalog compatibility gate).
-        expected: &[
+        // `shell_command` carries data, so its catalog/override shape is
+        // the externally tagged object, not a bare member string.
+        &[
             SchemaExpectation::Boolean,
             SchemaExpectation::EnumSubsetOf {
                 rust_enum: "ModelCatalogSource",
                 variants: ModelCatalogSource::VARIANTS,
             },
         ],
-        coercion: Coercion::DynamicListingToModelCatalogSource,
-    },
-    RegistryEntry {
-        field: "model_env_vars",
-        source: DeclaredSource::Research {
+        Coercion::DynamicListingToModelCatalogSource,
+        "Source of the provider's model catalog",
+    ),
+    entry(
+        "model_env_vars",
+        DeclaredSource::Research {
             topic: "agent-models",
             path: "model_selection",
         },
-        expected: &[SchemaExpectation::RecordArray {
+        &[SchemaExpectation::RecordArray {
             required_fields: &["method", "site"],
         }],
-        coercion: Coercion::EnvVarSitesToStringSlice,
-    },
+        Coercion::EnvVarSitesToStringSlice,
+        "Env vars consulted (in order) for the wrapper MODEL selection chain",
+    ),
+    entry(
+        "cli_sensitive_axes",
+        DeclaredSource::Facts {
+            key: "cli_sensitive_axes",
+        },
+        &[SchemaExpectation::Record {
+            required_fields: &["read_path", "write_path", "execute_command"],
+        }],
+        Coercion::AxesRecord,
+        "Permission-policy axes a provider's CLI flags can override at runtime",
+    ),
+    entry(
+        "repo_home_root_files",
+        DeclaredSource::Facts {
+            key: "repo_home_root_files",
+        },
+        &[SchemaExpectation::StringArray],
+        Coercion::StringSlice,
+        "Root-level repo-home files preserved during shadow-HOME isolation",
+    ),
+];
+
+/// Serialized `--describe` fields deliberately NOT in the registry, with
+/// the matrix's justification. The registry-covers-all-fields guard
+/// asserts every serialized field is registry-covered XOR listed here.
+pub const EXCLUDED_SERIALIZED_FIELDS: &[(&str, &str)] = &[
+    // The behavior half (trait objects, fn-pointer accessors) is absent
+    // from the serialized payload by construction and permanently owned by
+    // behavior.rs — matrix exclusion 1. `resource_support.provider` (the
+    // nested duplicate of the top-level discriminator) is not a top-level
+    // field; the record emitter reproduces it from the `provider` row —
+    // matrix exclusion 2. Neither appears as a serialized top-level key,
+    // so this list is currently empty of live entries and exists to hold
+    // future justified exclusions.
 ];
 
 /// Looks up a registry entry by field name.
@@ -211,11 +608,13 @@ pub fn mapping_json() -> Value {
                     .map(SchemaExpectation::label)
                     .collect::<Vec<_>>(),
                 "coercion": entry.coercion.label(),
+                "optional": entry.optional,
+                "description": entry.description,
             })
         })
         .collect();
     json!({
-        "provider_scope": "claude",
+        "provider_scope": "all",
         "fields": fields,
     })
 }
@@ -233,9 +632,37 @@ mod tests {
     }
 
     #[test]
+    fn registry_matches_matrix_source_counts() {
+        let count = |kind: &str| {
+            REGISTRY
+                .iter()
+                .filter(|entry| entry.source.kind() == kind)
+                .count()
+        };
+        assert_eq!(count("roster"), 10, "roster rows");
+        assert_eq!(count("research"), 6, "research rows");
+        assert_eq!(count("facts"), 15, "facts rows");
+        assert_eq!(REGISTRY.len(), 31, "total serialized fields");
+    }
+
+    #[test]
     fn mapping_json_covers_every_entry() {
         let value = mapping_json();
         assert_eq!(value["fields"].as_array().unwrap().len(), REGISTRY.len());
-        assert_eq!(value["provider_scope"], "claude");
+        assert_eq!(value["provider_scope"], "all");
+    }
+
+    /// `supports_skills` graduated facts → research (Open question 3): the
+    /// registry must never declare it facts again without a matrix ruling.
+    #[test]
+    fn supports_skills_is_research_declared() {
+        let entry = entry_for("supports_skills").expect("registered");
+        assert!(matches!(
+            entry.source,
+            DeclaredSource::Research {
+                topic: "skills",
+                path: "support"
+            }
+        ));
     }
 }

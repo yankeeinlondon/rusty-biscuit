@@ -11,18 +11,23 @@
 //! Design authority: `claudine/features/2026-07-02-provider-metadata/`
 //! (spec.md + design/catalog-generation.md).
 
+pub mod apply;
+pub mod catalog;
+pub mod emit;
 pub mod errors;
-pub mod facts;
 pub mod generate;
 pub mod inputs;
 pub mod registry;
 pub mod schema_compat;
 
+pub use apply::{ApplyOutcome, DeclinedDrift, Decision, apply_generations, override_snippet};
+pub use catalog::{build_catalog, catalog_path, check_catalog};
 pub use errors::GenError;
-pub use facts::{MATRIX_FACTS_FIELDS, scrape_facts};
 pub use generate::{
-    CheckOutcome, CoercionSkip, Generation, Provenance, ResolvedField, check_area,
-    committed_fragment_path, find_area, generate_for_area,
+    CheckOutcome, CoercionSkip, Generation, PROVIDER_SLUGS, Provenance, ResolvedField,
+    check_area, committed_data_path, diff_lines, find_area, generate_all, generate_for_area,
 };
-pub use registry::{Coercion, DeclaredSource, REGISTRY, RegistryEntry, SchemaExpectation,
-    mapping_json};
+pub use registry::{
+    Coercion, DeclaredSource, EXCLUDED_SERIALIZED_FIELDS, REGISTRY, RegistryEntry,
+    SchemaExpectation, mapping_json,
+};

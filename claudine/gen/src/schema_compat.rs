@@ -118,6 +118,31 @@ fn check_atom(entry: &RegistryEntry, path: &str, atom: &PropertyAtom) -> Result<
                     return Ok(());
                 }
             }
+            SchemaExpectation::StringArray => {
+                if atom.is_array && atom.ty == TypeExpr::Primitive(SimplifiedType::String) {
+                    return Ok(());
+                }
+            }
+            SchemaExpectation::Record { required_fields } => {
+                if !atom.is_array
+                    && let TypeExpr::InlineObject(shape) = &atom.ty
+                {
+                    let missing: Vec<&str> = required_fields
+                        .iter()
+                        .filter(|f| !shape.properties.contains_key(**f))
+                        .copied()
+                        .collect();
+                    if missing.is_empty() {
+                        return Ok(());
+                    }
+                    return Err(GenError::SchemaIncompatible {
+                        field: entry.field,
+                        path: path.to_string(),
+                        found: format!("record missing fields [{}]", missing.join(", ")),
+                        expected: expectation.label(),
+                    });
+                }
+            }
             SchemaExpectation::EnumSubsetOf {
                 rust_enum,
                 variants,

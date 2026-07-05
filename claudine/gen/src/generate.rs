@@ -1,8 +1,9 @@
-//! The generation pipeline: gates → value resolution → fragment emission.
+//! The generation pipeline: gates → value resolution → data.rs emission.
 //!
 //! `generate` and `check` share one code path (`--check` IS the drift
 //! test): both call [`generate_for_area`], and `check` additionally
-//! byte-compares the emitted fragment against the committed file.
+//! byte-compares the emitted file against the committed
+//! `lib/src/provider/<slug>/data.rs`.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -11,6 +12,7 @@ use claudine_catalog_types::ModelCatalogSource;
 use serde_json::Value;
 use strum::IntoEnumIterator;
 
+use crate::emit::{self, FieldValue};
 use crate::errors::GenError;
 use crate::inputs::{self, ProviderInputs};
 use crate::registry::{Coercion, DeclaredSource, REGISTRY, RegistryEntry, entry_for};
@@ -33,11 +35,12 @@ pub enum Provenance {
     },
 }
 
-/// One generated field: the Rust expression plus its provenance.
+/// One resolved field: the catalog-shaped value plus its provenance.
 #[derive(Debug, Clone)]
 pub struct ResolvedField {
     pub field: &'static str,
-    pub expr: String,
+    /// Catalog-shaped value (the shape overrides are authored in).
+    pub value: Value,
     pub provenance: Provenance,
 }
 
@@ -63,14 +66,32 @@ pub struct CoercionSkip {
 pub struct Generation {
     pub slug: String,
     pub fields: Vec<ResolvedField>,
-    /// The emitted `data.rs` fragment (deterministic, byte-stable).
-    pub fragment: String,
+    /// The emitted `data.rs` file text (deterministic, byte-stable).
+    pub data_rs: String,
     /// Coercion skips gathered during value mapping (never empty silently —
     /// the report prints every entry).
     pub skips: Vec<CoercionSkip>,
+    /// Topic → schema-validated, coerced frontmatter — the superset the
+    /// committed `catalog.json` projects (mapped and unmapped fields).
+    pub research: std::collections::BTreeMap<String, Value>,
 }
 
-/// Outcome of comparing a generation against the committed fragment.
+/// Every generated provider slug, `PROVIDERS_DISPLAY_ORDER` order. The
+/// catalog document requires the full scope, so this is the single list
+/// the CLI, the drift test, and [`generate_all`] share.
+pub const PROVIDER_SLUGS: &[&str] = &[
+    "claude", "codex", "gemini", "goose", "kimi", "opencode", "qwen",
+];
+
+/// Generates every provider in [`PROVIDER_SLUGS`] order.
+pub fn generate_all(area: &Path) -> Result<Vec<Generation>, GenError> {
+    PROVIDER_SLUGS
+        .iter()
+        .map(|slug| generate_for_area(area, slug))
+        .collect()
+}
+
+/// Outcome of comparing a generation against the committed file.
 #[derive(Debug)]
 pub enum CheckOutcome {
     Clean,
@@ -78,9 +99,9 @@ pub enum CheckOutcome {
     MissingCommitted { path: PathBuf },
 }
 
-/// The committed fragment path for a provider under an area root.
-pub fn committed_fragment_path(area: &Path, slug: &str) -> PathBuf {
-    area.join(format!("gen/generated/{slug}.data.rs"))
+/// The committed generated-data path for a provider under an area root.
+pub fn committed_data_path(area: &Path, slug: &str) -> PathBuf {
+    area.join(format!("lib/src/provider/{slug}/data.rs"))
 }
 
 /// Walks upward from `from` to find the claudine package area (the
@@ -127,26 +148,45 @@ pub fn generate_for_area(area: &Path, slug: &str) -> Result<Generation, GenError
 
     // Gate 2: source collisions (a value arriving from a source other than
     // the field's declared one; overrides are the sanctioned exception).
+    // A facts file still carrying a research-graduated key (e.g.
+    // `supports_skills`) fails here — delete-on-graduate is enforced.
     check_collisions(&inputs)?;
 
-    // Value mapping + override application.
+    // Value mapping + override application, then whole-file emission.
     let (fields, skips) = resolve_fields(&inputs)?;
-    let fragment = emit_fragment(slug, &fields);
+    let values: Vec<FieldValue<'_>> = fields
+        .iter()
+        .map(|f| FieldValue {
+            field: f.field,
+            value: &f.value,
+        })
+        .collect();
+    let display_name = fields
+        .iter()
+        .find(|f| f.field == "display_name")
+        .and_then(|f| f.value.as_str())
+        .ok_or_else(|| GenError::MissingValue {
+            field: "display_name",
+            message: "display_name did not resolve to a string".into(),
+        })?
+        .to_string();
+    let data_rs = emit::emit_data_file(slug, &display_name, &values)?;
 
     Ok(Generation {
         slug: slug.to_string(),
         fields,
-        fragment,
+        data_rs,
         skips,
+        research: inputs.research,
     })
 }
 
-/// Generates and byte-compares against the committed fragment. This is the
+/// Generates and byte-compares against the committed data.rs. This is the
 /// single code path behind both the CLI `check` subcommand and the nextest
 /// drift test.
 pub fn check_area(area: &Path, slug: &str) -> Result<(Generation, CheckOutcome), GenError> {
     let generation = generate_for_area(area, slug)?;
-    let committed_path = committed_fragment_path(area, slug);
+    let committed_path = committed_data_path(area, slug);
     if !committed_path.is_file() {
         return Ok((
             generation,
@@ -159,15 +199,15 @@ pub fn check_area(area: &Path, slug: &str) -> Result<(Generation, CheckOutcome),
         path: committed_path.clone(),
         source,
     })?;
-    if committed == generation.fragment {
+    if committed == generation.data_rs {
         return Ok((generation, CheckOutcome::Clean));
     }
-    let details = diff_lines(&committed, &generation.fragment);
+    let details = diff_lines(&committed, &generation.data_rs);
     Ok((generation, CheckOutcome::Drift { details }))
 }
 
 /// Line-oriented drift summary (committed vs regenerated).
-fn diff_lines(committed: &str, generated: &str) -> Vec<String> {
+pub fn diff_lines(committed: &str, generated: &str) -> Vec<String> {
     let committed: Vec<&str> = committed.lines().collect();
     let generated: Vec<&str> = generated.lines().collect();
     let mut details = Vec::new();
@@ -233,7 +273,7 @@ fn resolve_fields(
     let mut skips = Vec::new();
     for entry in REGISTRY {
         let source_value = extract_catalog_value(entry, inputs, &mut skips);
-        let (catalog_value, provenance) = match inputs.overrides.get(entry.field) {
+        let (value, provenance) = match inputs.overrides.get(entry.field) {
             Some(over) => {
                 let suppressed = source_value.ok();
                 let stale = suppressed.as_ref() == Some(&over.value);
@@ -253,10 +293,9 @@ fn resolve_fields(
                 },
             ),
         };
-        let expr = catalog_expr(entry, &catalog_value)?;
         fields.push(ResolvedField {
             field: entry.field,
-            expr,
+            value,
             provenance,
         });
     }
@@ -271,26 +310,26 @@ fn extract_catalog_value(
     skips: &mut Vec<CoercionSkip>,
 ) -> Result<Value, GenError> {
     let raw = match entry.source {
-        DeclaredSource::Roster { key } => {
-            inputs
-                .roster
-                .get(key)
-                .cloned()
-                .ok_or(GenError::RosterKeyMissing {
+        DeclaredSource::Roster { key } => match inputs.roster.get(key) {
+            Some(value) => value.clone(),
+            None if entry.optional => Value::Null,
+            None => {
+                return Err(GenError::RosterKeyMissing {
                     slug: inputs.slug.clone(),
                     key,
-                })?
-        }
-        DeclaredSource::Facts { key } => {
-            inputs
-                .facts
-                .get(key)
-                .cloned()
-                .ok_or_else(|| GenError::MissingValue {
+                });
+            }
+        },
+        DeclaredSource::Facts { key } => match inputs.facts.get(key) {
+            Some(value) => value.clone(),
+            None if entry.optional => Value::Null,
+            None => {
+                return Err(GenError::MissingValue {
                     field: entry.field,
                     message: format!("facts file has no `{key}` key"),
-                })?
-        }
+                });
+            }
+        },
         DeclaredSource::Research { topic, path } => {
             let frontmatter =
                 inputs
@@ -300,10 +339,18 @@ fn extract_catalog_value(
                         field: entry.field,
                         message: format!("no research loaded for topic `{topic}`"),
                     })?;
-            walk_path(frontmatter, path).ok_or_else(|| GenError::MissingValue {
-                field: entry.field,
-                message: format!("frontmatter path `{path}` not found in topic `{topic}`"),
-            })?
+            match walk_path(frontmatter, path) {
+                Some(value) => value,
+                None if entry.optional => Value::Null,
+                None => {
+                    return Err(GenError::MissingValue {
+                        field: entry.field,
+                        message: format!(
+                            "frontmatter path `{path}` not found in topic `{topic}`"
+                        ),
+                    });
+                }
+            }
         }
     };
     coerce_to_catalog_shape(entry, &raw, skips)
@@ -318,18 +365,69 @@ fn walk_path(value: &Value, path: &str) -> Option<Value> {
     Some(current.clone())
 }
 
+/// A single bare env-var identifier: `[A-Z][A-Z0-9_]*`. Compound sites
+/// ("A / B") and annotated sites are excluded by construction.
+fn is_env_var_ident(site: &str) -> bool {
+    let mut chars = site.chars();
+    matches!(chars.next(), Some('A'..='Z'))
+        && chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// A bare, usable config path: rejects prose annotations ("a; b",
+/// "a, b", "a or b"), `<placeholder>` grammar, and env-var references
+/// (`$VAR`) that no `PathContext` can resolve. Rejected records are
+/// skipped loudly and, where they hollow out the projection, pinned back
+/// via field-keyed overrides.
+fn is_bare_config_path(path: &str) -> bool {
+    !(path.contains(';')
+        || path.contains(", ")
+        || path.contains(" or ")
+        || path.contains('<')
+        || path.contains('$'))
+}
+
+/// Shared shape check: value must be an array of strings.
+fn expect_string_array(entry: &RegistryEntry, raw: &Value) -> Result<Value, GenError> {
+    let items = raw.as_array().ok_or_else(|| GenError::UnmappableValue {
+        field: entry.field,
+        message: format!("expected a string array, got `{raw}`"),
+    })?;
+    for item in items {
+        if !item.is_string() {
+            return Err(GenError::UnmappableValue {
+                field: entry.field,
+                message: format!("expected string elements, got `{item}`"),
+            });
+        }
+    }
+    Ok(raw.clone())
+}
+
 /// Source-side half of a coercion: raw source value → catalog-shaped value.
+///
+/// Record-shaped facts coercions extract as identity — the facts file
+/// already carries the catalog shape, and the expression half in [`emit`]
+/// performs the loud shape validation.
 fn coerce_to_catalog_shape(
     entry: &RegistryEntry,
     raw: &Value,
     skips: &mut Vec<CoercionSkip>,
 ) -> Result<Value, GenError> {
     match entry.coercion {
-        Coercion::StringLiteral => match raw {
+        Coercion::StringLiteral
+        | Coercion::ProviderVariantFromSlug
+        | Coercion::SniffBindingVariant => match raw {
             Value::String(_) => Ok(raw.clone()),
             other => Err(GenError::UnmappableValue {
                 field: entry.field,
                 message: format!("expected a string, got `{other}`"),
+            }),
+        },
+        Coercion::OptionalStringLiteral | Coercion::StreamProtocolWire => match raw {
+            Value::Null | Value::String(_) => Ok(raw.clone()),
+            other => Err(GenError::UnmappableValue {
+                field: entry.field,
+                message: format!("expected a string or null, got `{other}`"),
             }),
         },
         Coercion::BoolLiteral => match raw {
@@ -339,12 +437,47 @@ fn coerce_to_catalog_shape(
                 message: format!("expected a boolean, got `{other}`"),
             }),
         },
+        Coercion::StringSlice => expect_string_array(entry, raw),
+        Coercion::SkillSupportToBool => {
+            let member = raw.as_str().ok_or_else(|| GenError::UnmappableValue {
+                field: entry.field,
+                message: format!("expected a support enum member, got `{raw}`"),
+            })?;
+            // Open question 3 ruling: first_class/partial -> true;
+            // convention_only/none/unknown -> false.
+            match member {
+                "first_class" | "partial" => Ok(Value::Bool(true)),
+                "convention_only" | "none" | "unknown" => Ok(Value::Bool(false)),
+                other => Err(GenError::UnmappableValue {
+                    field: entry.field,
+                    message: format!("`{other}` is not a known skills `support` member"),
+                }),
+            }
+        }
+        Coercion::DefaultModelsToStaticModels => {
+            let records = raw.as_array().ok_or_else(|| GenError::UnmappableValue {
+                field: entry.field,
+                message: "expected an array of default-model records".into(),
+            })?;
+            let mut ids = BTreeSet::new();
+            for record in records {
+                let id = record.get("id").and_then(Value::as_str).ok_or_else(|| {
+                    GenError::UnmappableValue {
+                        field: entry.field,
+                        message: format!("default-model record has no string `id`: `{record}`"),
+                    }
+                })?;
+                ids.insert(id.to_string());
+            }
+            Ok(Value::Array(ids.into_iter().map(Value::String).collect()))
+        }
         Coercion::DynamicListingToModelCatalogSource => match raw {
             Value::Bool(false) => Ok(Value::String("static".into())),
             Value::Bool(true) => Err(GenError::UnmappableValue {
                 field: entry.field,
-                message: "dynamic listing is available but the skeleton cannot select a \
-                          dynamic catalog variant yet (Phase B)"
+                message: "dynamic listing is available but the boolean cannot select a \
+                          catalog mechanism — pin today's value with a field-keyed \
+                          override until agent-models grows a typed source key"
                     .into(),
             }),
             // A future enum-typed sidecar reports the member directly.
@@ -384,93 +517,116 @@ fn coerce_to_catalog_shape(
             }
             Ok(Value::Array(vars))
         }
-    }
-}
-
-/// A single bare env-var identifier: `[A-Z][A-Z0-9_]*`. Compound sites
-/// ("A / B") and annotated sites are excluded by construction.
-fn is_env_var_ident(site: &str) -> bool {
-    let mut chars = site.chars();
-    matches!(chars.next(), Some('A'..='Z'))
-        && chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
-}
-
-/// Expression half of a coercion: catalog-shaped value → Rust field
-/// expression text. Overrides flow through here too, so an override is
-/// validated against the same shape as the field it replaces.
-fn catalog_expr(entry: &RegistryEntry, value: &Value) -> Result<String, GenError> {
-    match entry.coercion {
-        Coercion::StringLiteral => value
-            .as_str()
-            .map(|s| format!("{s:?}"))
-            .ok_or_else(|| GenError::UnmappableValue {
+        Coercion::SurfacesToSessionLogPaths => {
+            let records = raw.as_array().ok_or_else(|| GenError::UnmappableValue {
                 field: entry.field,
-                message: format!("expected a string, got `{value}`"),
-            }),
-        Coercion::BoolLiteral => value
-            .as_bool()
-            .map(|b| b.to_string())
-            .ok_or_else(|| GenError::UnmappableValue {
-                field: entry.field,
-                message: format!("expected a boolean, got `{value}`"),
-            }),
-        Coercion::DynamicListingToModelCatalogSource => {
-            let member = value.as_str().ok_or_else(|| GenError::UnmappableValue {
-                field: entry.field,
-                message: format!("expected an enum member string, got `{value}`"),
+                message: "expected an array of logging-surface records".into(),
             })?;
-            model_catalog_source_expr(entry, member)
-        }
-        Coercion::EnvVarSitesToStringSlice => {
-            let items = value.as_array().ok_or_else(|| GenError::UnmappableValue {
-                field: entry.field,
-                message: format!("expected a string array, got `{value}`"),
-            })?;
-            let mut literals = Vec::with_capacity(items.len());
-            for item in items {
-                let s = item.as_str().ok_or_else(|| GenError::UnmappableValue {
-                    field: entry.field,
-                    message: format!("expected a string element, got `{item}`"),
-                })?;
-                literals.push(format!("{s:?}"));
+            let mut paths = Vec::new();
+            let mut dropped = Vec::new();
+            for record in records {
+                if record.get("role").and_then(Value::as_str) != Some("session_transcript") {
+                    continue;
+                }
+                let Some(path) = record.get("path_macos").and_then(Value::as_str) else {
+                    continue;
+                };
+                // " (" marks an annotated pseudo-path (e.g. a SQLite table
+                // note), not a filesystem template.
+                if path.contains(" (") {
+                    dropped.push(path.to_string());
+                } else {
+                    paths.push(Value::String(path.to_string()));
+                }
             }
-            Ok(format!("&[{}]", literals.join(", ")))
+            if !dropped.is_empty() {
+                skips.push(CoercionSkip {
+                    field: entry.field,
+                    reason: "path_macos is an annotated pseudo-path, not a path template",
+                    records: dropped,
+                });
+            }
+            Ok(Value::Array(paths))
         }
+        Coercion::ConfigPathRecordsToConfigPaths => {
+            let records = raw.as_array().ok_or_else(|| GenError::UnmappableValue {
+                field: entry.field,
+                message: "expected an array of config-path records".into(),
+            })?;
+            let mut paths = Vec::new();
+            let mut dropped = Vec::new();
+            for record in records {
+                if record.get("os").and_then(Value::as_str) != Some("macos") {
+                    continue;
+                }
+                if !matches!(
+                    record.get("scope").and_then(Value::as_str),
+                    Some("user") | Some("repo")
+                ) {
+                    continue;
+                }
+                let Some(path) = record.get("path").and_then(Value::as_str) else {
+                    continue;
+                };
+                if !is_bare_config_path(path) {
+                    dropped.push(path.to_string());
+                } else {
+                    paths.push(Value::String(path.to_string()));
+                }
+            }
+            if !dropped.is_empty() {
+                skips.push(CoercionSkip {
+                    field: entry.field,
+                    reason: "path is not a bare filesystem template",
+                    records: dropped,
+                });
+            }
+            Ok(Value::Array(paths))
+        }
+        // Facts-shaped records pass through; emit.rs validates loudly.
+        Coercion::PathTemplateList
+        | Coercion::EventMappingRecords
+        | Coercion::ResourceSupportRecord
+        | Coercion::OutputFormatRecords
+        | Coercion::EntrypointRecords
+        | Coercion::SystemPromptSpecRecord
+        | Coercion::YoloRecordToYoloSupport
+        | Coercion::ReasoningRecord
+        | Coercion::KnownGapRecords
+        | Coercion::AcpRecord
+        | Coercion::PromptArgRecord
+        | Coercion::AxesRecord => Ok(raw.clone()),
     }
 }
 
-/// snake_case member → `ModelCatalogSource::<Variant>` path expression.
-/// An unknown member is the "new variant needed" moment and fails loudly.
-fn model_catalog_source_expr(entry: &RegistryEntry, member: &str) -> Result<String, GenError> {
+/// snake_case member → unit `ModelCatalogSource` variant name. An unknown
+/// member is the "new variant needed" moment and fails loudly;
+/// `shell_command` carries data and must be authored as the externally
+/// tagged object, never a bare member string.
+pub(crate) fn model_catalog_source_variant(
+    field: &'static str,
+    member: &str,
+) -> Result<String, GenError> {
+    if member == "shell_command" {
+        return Err(GenError::UnmappableValue {
+            field,
+            message: "`shell_command` carries data — author the object form \
+                      `{shell_command: {program, args}}`, not a bare member string"
+                .into(),
+        });
+    }
     ModelCatalogSource::iter()
         .find(|variant| <&'static str>::from(*variant) == member)
-        .map(|variant| format!("ModelCatalogSource::{variant:?}"))
+        .map(|variant| match variant {
+            ModelCatalogSource::None => "None".to_string(),
+            ModelCatalogSource::Static => "Static".to_string(),
+            // Unreachable: the guard above rejected the member string.
+            ModelCatalogSource::ShellCommand { .. } => unreachable!(),
+        })
         .ok_or_else(|| GenError::UnmappableValue {
-            field: entry.field,
+            field,
             message: format!("`{member}` is not a ModelCatalogSource variant"),
         })
-}
-
-/// Emits the committed fragment text: a stable header plus one
-/// `field: expr,` line per registry entry, indented to match the
-/// hand-written `CLAUDE_INFO` initializer.
-fn emit_fragment(slug: &str, fields: &[ResolvedField]) -> String {
-    let mut out = String::new();
-    out.push_str(&format!(
-        "// GENERATED by claudine-gen — DO NOT EDIT BY HAND.\n\
-         //\n\
-         // Walking-skeleton (Phase A1) data fragment for the `{slug}` provider:\n\
-         // the mapped subset of the `CLAUDE_INFO` field expressions in\n\
-         // `claudine/lib/src/provider/claude/data.rs`. Inputs: docs/providers.yaml,\n\
-         // docs/providers/facts/{slug}.yaml, docs/providers/overrides/{slug}.yaml,\n\
-         // and the research frontmatter named by the mapping registry.\n\
-         // Regenerate with `claudine-gen generate`; drift-check with\n\
-         // `claudine-gen check` (the same code path as the nextest drift test).\n"
-    ));
-    for field in fields {
-        out.push_str(&format!("    {}: {},\n", field.field, field.expr));
-    }
-    out
 }
 
 #[cfg(test)]
@@ -488,18 +644,42 @@ mod tests {
     }
 
     #[test]
-    fn model_catalog_source_expr_maps_snake_members() {
-        let entry = &REGISTRY[4];
+    fn bare_config_path_rejects_annotations_and_placeholders() {
+        assert!(is_bare_config_path("~/.claude/settings.json"));
+        assert!(is_bare_config_path(".claude/settings.local.json"));
+        assert!(is_bare_config_path("~/.qwen/debug/*.txt"));
+        assert!(!is_bare_config_path(
+            "$CODEX_HOME/config.toml; default /Users/<user>/.codex/config.toml"
+        ));
+        assert!(!is_bare_config_path("/Users/<name>/.kimi-code/config.toml"));
+        assert!(!is_bare_config_path("AGENTS.override.md, AGENTS.md"));
+        assert!(!is_bare_config_path("a.md or b.md"));
+        assert!(!is_bare_config_path("$CODEX_HOME/auth.json"));
+    }
+
+    #[test]
+    fn model_catalog_source_variant_maps_snake_members() {
         assert_eq!(
-            model_catalog_source_expr(entry, "static").unwrap(),
-            "ModelCatalogSource::Static"
+            model_catalog_source_variant("model_catalog_source", "static").unwrap(),
+            "Static"
         );
         assert_eq!(
-            model_catalog_source_expr(entry, "opencode_cli").unwrap(),
-            "ModelCatalogSource::OpencodeCli"
+            model_catalog_source_variant("model_catalog_source", "none").unwrap(),
+            "None"
         );
         assert!(matches!(
-            model_catalog_source_expr(entry, "telepathic"),
+            model_catalog_source_variant("model_catalog_source", "telepathic"),
+            Err(GenError::UnmappableValue { .. })
+        ));
+    }
+
+    /// `shell_command` as a bare member string must fail loudly: the
+    /// variant carries `program`/`args` and only the object form can
+    /// supply them.
+    #[test]
+    fn model_catalog_source_variant_rejects_bare_shell_command() {
+        assert!(matches!(
+            model_catalog_source_variant("model_catalog_source", "shell_command"),
             Err(GenError::UnmappableValue { .. })
         ));
     }

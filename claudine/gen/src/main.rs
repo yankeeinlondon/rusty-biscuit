@@ -5,18 +5,18 @@
 //! user-facing UX lives in claudine-cli without the CLI linking the
 //! generator (bootstrap rule).
 
-use std::io::Read;
+use std::io::{BufRead, IsTerminal, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
-use claudine_gen::{CheckOutcome, GenError, Provenance};
+use claudine_gen::{CheckOutcome, Decision, GenError, PROVIDER_SLUGS, Provenance};
 
 #[derive(Debug, Parser)]
 #[command(
     name = "claudine-gen",
-    about = "Deterministic provider-catalog generator (research -> data.rs)"
+    about = "Deterministic provider-catalog generator (research -> data.rs + catalog.json)"
 )]
 struct Cli {
     /// Claudine package-area root (the directory containing docs/providers.yaml).
@@ -36,29 +36,46 @@ struct Cli {
 enum Command {
     /// Print the mapping registry (field -> source -> coercion) as JSON.
     Mapping,
-    /// Regenerate committed data fragments and report provenance.
-    Generate,
+    /// Regenerate `lib/src/provider/<slug>/data.rs` plus the committed
+    /// `docs/providers/catalog.json`, confirming each drifted file on a
+    /// TTY (`[y/N/q]`). Non-TTY stdin is report-only; declined or
+    /// unwritten drift exits non-zero.
+    Generate {
+        /// Regenerate a single provider's data.rs (default: all).
+        /// catalog.json always spans every provider.
+        slug: Option<String>,
+        /// Write every drifted file without prompting (CI-style
+        /// unconditional writes — the pre-v1 `generate` behavior).
+        #[arg(long)]
+        yes: bool,
+        /// Report-only regardless of TTY: print diffs, write nothing.
+        #[arg(long, conflicts_with = "yes")]
+        dry_run: bool,
+    },
     /// Report-only drift check: regenerate from committed inputs and
-    /// byte-compare against the committed fragment. Exits non-zero on
-    /// drift. Same code path as the nextest drift test.
-    Check,
-    /// One-time bootstrap: read a serialized ProviderInfo array
-    /// (`claudine providers --describe --format json`) on stdin and print
-    /// the facts YAML for the provider. Retire after seeding.
-    ScrapeFacts {
-        /// Provider slug to scrape (e.g. `claude`).
-        slug: String,
+    /// byte-compare against the committed data.rs files and catalog.json.
+    /// Exits non-zero on drift. Same code path as the nextest drift test.
+    Check {
+        /// Check a single provider's data.rs (default: all).
+        /// catalog.json is always checked against the full scope.
+        slug: Option<String>,
     },
 }
 
-const PROVIDER_SLUGS: &[&str] = &["claude"];
+/// `Some(slug)` → a one-element list; `None` → every provider.
+fn slug_scope(slug: &Option<String>) -> Vec<&str> {
+    match slug {
+        Some(one) => vec![one.as_str()],
+        None => PROVIDER_SLUGS.to_vec(),
+    }
+}
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let command = if cli.mapping {
         Command::Mapping
     } else {
-        cli.command.unwrap_or(Command::Check)
+        cli.command.unwrap_or(Command::Check { slug: None })
     };
     match run(cli.area, command) {
         Ok(code) => code,
@@ -79,51 +96,59 @@ fn run(area: Option<PathBuf>, command: Command) -> Result<ExitCode, GenError> {
             );
             Ok(ExitCode::SUCCESS)
         }
-        Command::Generate => {
+        Command::Generate { slug, yes, dry_run } => {
             let area = resolve_area(area)?;
-            for slug in PROVIDER_SLUGS {
-                let generation = claudine_gen::generate_for_area(&area, slug)?;
-                let path = claudine_gen::committed_fragment_path(&area, slug);
-                if let Some(parent) = path.parent() {
-                    std::fs::create_dir_all(parent).map_err(|source| GenError::Io {
-                        path: parent.to_path_buf(),
-                        source,
-                    })?;
-                }
-                std::fs::write(&path, &generation.fragment).map_err(|source| GenError::Io {
-                    path: path.clone(),
-                    source,
-                })?;
-                println!("wrote {}", path.display());
-                report_provenance(&generation);
-            }
-            Ok(ExitCode::SUCCESS)
+            run_generate(&area, &slug, yes, dry_run)
         }
-        Command::Check => {
+        Command::Check { slug } => {
             let area = resolve_area(area)?;
             let mut drifted = false;
+            let mut generations = Vec::with_capacity(PROVIDER_SLUGS.len());
+            let scope = slug_scope(&slug);
+            // catalog.json spans every provider, so generate the full
+            // roster even when only one data.rs is being checked.
             for slug in PROVIDER_SLUGS {
                 let (generation, outcome) = claudine_gen::check_area(&area, slug)?;
-                match outcome {
-                    CheckOutcome::Clean => {
-                        println!("{slug}: clean (inputs match the committed fragment)");
-                    }
-                    CheckOutcome::Drift { details } => {
-                        drifted = true;
-                        println!("{slug}: DRIFT — regenerate with `claudine-gen generate`:");
-                        for line in details {
-                            println!("  {line}");
+                if scope.contains(slug) {
+                    match outcome {
+                        CheckOutcome::Clean => {
+                            println!("{slug}: clean (inputs match the committed data.rs)");
+                        }
+                        CheckOutcome::Drift { details } => {
+                            drifted = true;
+                            println!("{slug}: DRIFT — regenerate with `claudine-gen generate`:");
+                            for line in details {
+                                println!("  {line}");
+                            }
+                        }
+                        CheckOutcome::MissingCommitted { path } => {
+                            drifted = true;
+                            println!(
+                                "{slug}: committed data.rs missing at {} — run `claudine-gen generate`",
+                                path.display()
+                            );
                         }
                     }
-                    CheckOutcome::MissingCommitted { path } => {
-                        drifted = true;
-                        println!(
-                            "{slug}: committed fragment missing at {} — run `claudine-gen generate`",
-                            path.display()
-                        );
-                    }
+                    report_provenance(&generation);
                 }
-                report_provenance(&generation);
+                generations.push(generation);
+            }
+            match claudine_gen::check_catalog(&area, &generations)? {
+                CheckOutcome::Clean => {
+                    println!("catalog.json: clean (inputs match the committed catalog)");
+                }
+                CheckOutcome::Drift { details } => {
+                    drifted = true;
+                    println!("catalog.json: DRIFT — regenerate with `claudine-gen generate`:");
+                    print_capped_diff(&details, "  ");
+                }
+                CheckOutcome::MissingCommitted { path } => {
+                    drifted = true;
+                    println!(
+                        "catalog.json missing at {} — run `claudine-gen generate`",
+                        path.display()
+                    );
+                }
             }
             Ok(if drifted {
                 ExitCode::FAILURE
@@ -131,21 +156,114 @@ fn run(area: Option<PathBuf>, command: Command) -> Result<ExitCode, GenError> {
                 ExitCode::SUCCESS
             })
         }
-        Command::ScrapeFacts { slug } => {
-            let mut input = String::new();
-            std::io::stdin()
-                .read_to_string(&mut input)
-                .map_err(|source| GenError::Io {
-                    path: PathBuf::from("<stdin>"),
-                    source,
-                })?;
-            let payload: serde_json::Value =
-                serde_json::from_str(&input).map_err(|err| GenError::Json {
-                    message: err.to_string(),
-                })?;
-            print!("{}", claudine_gen::scrape_facts(&payload, &slug)?);
-            Ok(ExitCode::SUCCESS)
+    }
+}
+
+/// The `generate` UX: per-file diff + confirmation, decline → override
+/// scaffolding, non-zero exit while drift remains unreconciled.
+fn run_generate(
+    area: &std::path::Path,
+    slug: &Option<String>,
+    yes: bool,
+    dry_run: bool,
+) -> Result<ExitCode, GenError> {
+    let scope = slug_scope(slug);
+    let generations = claudine_gen::generate_all(area)?;
+
+    let interactive = !yes && !dry_run && std::io::stdin().is_terminal();
+    let report_only = dry_run || (!yes && !interactive);
+    if report_only && !dry_run {
+        println!("stdin is not a TTY — report-only (pass --yes to write unconditionally)");
+    }
+
+    let mut decide = |path: &std::path::Path, diff: &[String]| -> Decision {
+        println!(
+            "{}: {} differing line{}",
+            path.display(),
+            diff.len(),
+            if diff.len() == 1 { "" } else { "s" }
+        );
+        print_capped_diff(diff, "  ");
+        if yes {
+            println!("  writing (--yes)");
+            return Decision::Accept;
         }
+        if report_only {
+            return Decision::Decline;
+        }
+        prompt_decision(path)
+    };
+    let outcome = claudine_gen::apply_generations(area, &scope, &generations, &mut decide)?;
+
+    for path in &outcome.written {
+        println!("wrote {}", path.display());
+    }
+    for generation in &generations {
+        if scope.contains(&generation.slug.as_str()) {
+            report_provenance(generation);
+        }
+    }
+
+    if outcome.declined.is_empty() {
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    println!();
+    if report_only {
+        println!(
+            "{} file(s) drifted — rerun on a TTY to confirm per file, or pass --yes",
+            outcome.declined.len()
+        );
+    } else {
+        println!(
+            "{} declined file(s) remain unreconciled — pin the committed value with an \
+             override, or revert the offending input, then regenerate:",
+            outcome.declined.len()
+        );
+    }
+    for declined in &outcome.declined {
+        println!("  declined: {}", declined.path.display());
+        if let Some(snippet) = &declined.override_snippet {
+            for line in snippet.lines() {
+                println!("    {line}");
+            }
+        }
+    }
+    Ok(ExitCode::FAILURE)
+}
+
+/// `[y/N/q]` prompt on stdin (default No; `q` stops prompting entirely).
+fn prompt_decision(path: &std::path::Path) -> Decision {
+    loop {
+        print!(
+            "write {}? [y/N/q] ",
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.display().to_string())
+        );
+        let _ = std::io::stdout().flush();
+        let mut line = String::new();
+        if std::io::stdin().lock().read_line(&mut line).is_err() || line.is_empty() {
+            // EOF mid-session: stop prompting, decline the rest.
+            return Decision::Quit;
+        }
+        match line.trim().to_ascii_lowercase().as_str() {
+            "y" | "yes" => return Decision::Accept,
+            "" | "n" | "no" => return Decision::Decline,
+            "q" | "quit" => return Decision::Quit,
+            other => println!("unrecognized `{other}` — expected y, n, or q"),
+        }
+    }
+}
+
+/// Compact diff: the first lines verbatim, then an elision count.
+fn print_capped_diff(details: &[String], indent: &str) {
+    const MAX_LINES: usize = 20;
+    for line in details.iter().take(MAX_LINES) {
+        println!("{indent}{line}");
+    }
+    if details.len() > MAX_LINES {
+        println!("{indent}… {} more differing lines", details.len() - MAX_LINES);
     }
 }
 
