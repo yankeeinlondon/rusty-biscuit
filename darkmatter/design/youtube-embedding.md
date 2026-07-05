@@ -1,4 +1,4 @@
-# Youtube Embeddings
+# YouTube Embeddings
 
 ## Functional Goal
 
