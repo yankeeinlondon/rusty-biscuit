@@ -60,6 +60,7 @@
 
 ## Session Resumption (`summary/session-resumption.md`)
 
+- [x] **Resume parity (ruled by Ken, 2026-07-04):** if the provider natively supports resume, Claudine must support using it. The gemini/goose/opencode wrapper gap (stale legacy `resume_supported: false` despite first-class provider support) was closed same-day: all 7 profiles now implement `supports_resume` + `build_resume_args` from the research-ratified argv forms, guarded by `every_provider_profile_supports_resume`. Remaining half: graduate `ResumeSpec` into the typed catalog (Phase D field expansion) so support derives from catalog data and only argv mechanics stay behavior
 - [ ] Handle capture + persistence is THE prerequisite: capture a stable session handle early (structured output/hooks/list APIs), persist in run metadata, resume by explicit handle — "continue latest"/pickers are not recovery primitives
 - [ ] Resume does not restore launch environment (model/sandbox/approval/cwd/MCP may be recalculated) — record launch metadata and reapply
 - [ ] Serialize resume attempts per provider session id (Claude warns of interleaved transcript writes)
