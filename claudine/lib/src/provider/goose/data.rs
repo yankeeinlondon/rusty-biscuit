@@ -19,6 +19,7 @@ use crate::events::AgenticEvent;
 use crate::linking::capabilities::{ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport, SkillFrontmatter, SupportLevel};
 use crate::provider::{OutputFormatSelector, ProviderInfo};
 use crate::provider::acp::{AcpEvent, AcpServerMode, AcpSupport};
+use crate::provider::billing_model::BillingModel;
 use crate::provider::cli_sensitivity::CliSensitiveAxes;
 use crate::provider::event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
 use crate::provider::identity::Provider;
@@ -27,6 +28,7 @@ use crate::provider::output_format::{EntrypointMode, EntrypointSpec, OutputForma
 use crate::provider::path_template::PathTemplate;
 use crate::provider::prompt_args::PromptArgConventions;
 use crate::provider::reasoning::{ReasoningCustomTag, ReasoningSupport};
+use crate::provider::resume_support::ResumeSupport;
 use crate::provider::system_prompt::{SystemPromptCustomTag, SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
 use crate::provider::yolo::YoloSupport;
 
@@ -134,14 +136,7 @@ pub(in crate::provider) static GOOSE_INFO: ProviderInfo = ProviderInfo {
         prompt_flags: &["-t", "--text"],
         entrypoint: Some("run"),
     },
-    static_models: &[
-        "claude-4.5-sonnet",
-        "claude-sonnet-4-5",
-        "gemini-2.0-flash",
-        "gemini-2.5-pro",
-        "gpt-5",
-        "qwen2.5",
-    ],
+    static_models: &[],
     model_catalog_source: ModelCatalogSource::Static,
     model_env_vars: &["GOOSE_MODEL"],
     cli_sensitive_axes: CliSensitiveAxes {
@@ -157,6 +152,16 @@ pub(in crate::provider) static GOOSE_INFO: ProviderInfo = ProviderInfo {
         modify_provider_config: false,
     },
     repo_home_root_files: &[],
+    resume: ResumeSupport::FirstClass,
+    model_cli_flag: Some("--model"),
+    non_interactive_conflicting_flags: &["--interactive"],
+    billing_models: &[BillingModel::ProviderOnly],
+    allowed_env_keys: &[],
+    stdout_noise_prefixes: &[],
+    stderr_noise_prefixes: &[],
+    suppress_structured_stderr_on_success: false,
+    supports_interactive_inline_closure: false,
+    model_required_in_non_tty: false,
 };
 
 /// Event-mapping table (also referenced directly by behavior modules).

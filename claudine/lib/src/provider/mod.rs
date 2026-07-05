@@ -16,6 +16,7 @@
 
 mod acp;
 mod behavior;
+mod billing_model;
 mod claude;
 mod cli_sensitivity;
 mod codex;
@@ -35,6 +36,7 @@ mod prompt_args;
 mod qwen;
 mod reasoning;
 mod registry;
+mod resume_support;
 mod system_prompt;
 mod yolo;
 
@@ -45,6 +47,7 @@ pub use acp::{AcpEvent, AcpServerMode, AcpSupport};
 pub use behavior::{
     AdapterBehavior, BoxedSemanticEventSink, ConfiguratorBehavior, McpBehavior, ProviderBehavior,
 };
+pub use billing_model::BillingModel;
 pub use cli_sensitivity::CliSensitiveAxes;
 pub use errors::{ConfigError, McpError};
 pub use event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
@@ -60,6 +63,7 @@ pub use path_template::{GlobKind, PathContext, PathSegment, PathTemplate};
 pub use prompt_args::{COMMON_VALUE_TAKING_FLAGS, PromptArgConventions};
 pub use reasoning::{ReasoningCustomTag, ReasoningSupport};
 pub use registry::{all_providers, provider_info};
+pub use resume_support::ResumeSupport;
 pub use system_prompt::{
     SystemPromptCustomTag, SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
 };
@@ -258,6 +262,50 @@ pub struct ProviderInfo {
     /// Root-level files in the repo home that must be preserved during
     /// shadow-HOME isolation. Empty for providers without such files.
     pub repo_home_root_files: &'static [&'static str],
+
+    /// Overall resume support level for session continuation.
+    ///
+    /// Support LEVEL only — session-id capture and resume argv mechanics
+    /// deliberately stay out of the catalog (2026-07-04 resume-parity
+    /// ruling); the wrapper profiles own those.
+    pub resume: ResumeSupport,
+
+    /// Bare CLI flag that selects the model at launch (e.g. `--model`),
+    /// when the provider exposes one.
+    pub model_cli_flag: Option<&'static str>,
+
+    /// Provider flags that conflict with Claudine's non-interactive
+    /// wrapping strategy. Bare flag tokens only; annotated research
+    /// entries are excluded at generation.
+    pub non_interactive_conflicting_flags: &'static [&'static str],
+
+    /// Billing models the provider offers.
+    pub billing_models: &'static [BillingModel],
+
+    /// Hand-ruled security allowlist of provider env keys that bypass the
+    /// wrapper's sensitive-key sanitizer. Never auto-widened from
+    /// research.
+    pub allowed_env_keys: &'static [&'static str],
+
+    /// Curated suppression list: stdout line prefixes stripped as
+    /// provider noise in non-interactive mode.
+    pub stdout_noise_prefixes: &'static [&'static str],
+
+    /// Curated suppression list: stderr line prefixes stripped as
+    /// provider noise in all modes.
+    pub stderr_noise_prefixes: &'static [&'static str],
+
+    /// Whether structured non-interactive runs buffer filtered stderr and
+    /// surface it only when the provider exits with an error.
+    pub suppress_structured_stderr_on_success: bool,
+
+    /// Whether a final assistant body is recoverable after an interactive
+    /// session ends, closing inline composition.
+    pub supports_interactive_inline_closure: bool,
+
+    /// Whether the provider hard-requires an explicit model selection in
+    /// non-TTY sessions.
+    pub model_required_in_non_tty: bool,
 }
 
 impl ProviderInfo {

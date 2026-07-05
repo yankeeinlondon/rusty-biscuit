@@ -19,6 +19,7 @@ use crate::events::AgenticEvent;
 use crate::linking::capabilities::{ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport, SkillFrontmatter, SupportLevel};
 use crate::provider::{OutputFormatSelector, ProviderInfo};
 use crate::provider::acp::{AcpServerMode, AcpSupport};
+use crate::provider::billing_model::BillingModel;
 use crate::provider::cli_sensitivity::CliSensitiveAxes;
 use crate::provider::event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
 use crate::provider::identity::Provider;
@@ -27,6 +28,7 @@ use crate::provider::output_format::{EntrypointMode, EntrypointSpec, OutputForma
 use crate::provider::path_template::PathTemplate;
 use crate::provider::prompt_args::PromptArgConventions;
 use crate::provider::reasoning::ReasoningSupport;
+use crate::provider::resume_support::ResumeSupport;
 use crate::provider::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
 use crate::provider::yolo::YoloSupport;
 use crate::stream::StreamProtocol;
@@ -176,6 +178,16 @@ pub(in crate::provider) static CODEX_INFO: ProviderInfo = ProviderInfo {
         modify_provider_config: true,
     },
     repo_home_root_files: &[],
+    resume: ResumeSupport::FirstClass,
+    model_cli_flag: Some("--model"),
+    non_interactive_conflicting_flags: &[],
+    billing_models: &[BillingModel::Subscription, BillingModel::PerToken],
+    allowed_env_keys: &["OPENAI_API_KEY", "CODEX_API_KEY"],
+    stdout_noise_prefixes: &[],
+    stderr_noise_prefixes: &["Reading prompt from stdin..."],
+    suppress_structured_stderr_on_success: false,
+    supports_interactive_inline_closure: true,
+    model_required_in_non_tty: false,
 };
 
 /// Event-mapping table (also referenced directly by behavior modules).

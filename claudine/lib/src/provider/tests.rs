@@ -220,6 +220,16 @@ fn serialized_field_list_matches_catalog() {
         "model_env_vars",
         "cli_sensitive_axes",
         "repo_home_root_files",
+        "resume",
+        "model_cli_flag",
+        "non_interactive_conflicting_flags",
+        "billing_models",
+        "allowed_env_keys",
+        "stdout_noise_prefixes",
+        "stderr_noise_prefixes",
+        "suppress_structured_stderr_on_success",
+        "supports_interactive_inline_closure",
+        "model_required_in_non_tty",
     ];
     // serde_json without `preserve_order` sorts map keys, so membership
     // (not order) is asserted here; the gen-side twin pins the order
