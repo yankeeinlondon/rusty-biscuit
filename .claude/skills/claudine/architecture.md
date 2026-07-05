@@ -8,7 +8,6 @@ Deep technical documentation for Claudine's event model, provider adapters, disp
 claudine/lib/src/
 ├── actions/      → Hook action types and response model
 ├── adapters/     → Provider-specific event parsers (ProviderAdapter trait)
-├── agents/       → Agent capability catalog and registry
 ├── badges/       → Styled terminal badge constants (YOLO, Non-Interactive, Interactive, etc.)
 ├── composition/  → Markdown frontmatter composition (inline and chained prompt pipelines)
 ├── config/       → Agent detection, hook registration, atomic writes, backups
@@ -17,6 +16,7 @@ claudine/lib/src/
 ├── linking/      → Cross-provider skill synchronization (4 resource types) with portability classification
 ├── mcp/          → MCP catalog, defaults, import/export, session, and injection
 ├── permissions/  → Provider-agnostic PolicyEngine for permission queries and mutation planning
+├── render/       → Functional render components (FinalMessage); provider variance enters as data, never `match provider`
 ├── reporting/    → JSONL-to-SQLite reporting index, sync, and typed queries
 ├── services/     → Cross-provider runtime policy services (ProtectService)
 ├── stream/       → Structured stream parsing for 6 providers + summary/reporting

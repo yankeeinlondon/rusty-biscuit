@@ -2,7 +2,7 @@
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
 last_updated: 2026-07-04
-hash: 3633bb398108735f-47c15a293e9b0681
+hash: 3633bb398108735f-3ed96854591c88ee
 ---
 
 ## Overview
@@ -28,7 +28,6 @@ Twenty modules plus the shared error type and the flat `provider_id` leaf. Full 
 |--------|----------------|
 | `actions` | Hook action types and responses |
 | `adapters` | Provider-specific event parsers |
-| `agents` | Capability catalog for all 7 CLIs |
 | `badges` | Styled terminal badge constants |
 | `composition` | Markdown frontmatter composition (direct/inline/sequence) plus the loop engine |
 | `config` | Agent detection, hook registration, atomic writes, backups |
@@ -42,6 +41,7 @@ Twenty modules plus the shared error type and the flat `provider_id` leaf. Full 
 | `permissions` | Provider-agnostic policy engine (`PolicyEngine`) |
 | `protect` | Standalone regex deny catalog (bash commands, write/edit paths, MCP responses) |
 | `prompt_reporting` | System/user prompt reporting types and rendering |
+| `render` | Functional render components (`FinalMessage`); consume data + policy, never `match provider` |
 | `reporting` | JSONL-to-SQLite metrics index |
 | `runaway` | Pure content-guard detector (exit-expressions, group-cycle repetition, volume cap) + per-layer config; trips map to `ProcessTermination::Aborted` |
 | `stream` | Structured stream parsing for 6 providers (typed models in `stream::protocol`) |

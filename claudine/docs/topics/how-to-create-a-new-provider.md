@@ -155,14 +155,13 @@ Four trait objects on `ProviderInfo` carry dynamic behavior. Most providers only
 | `cli_sensitive_axes` | `CliSensitiveAxes` | Which permission axes CLI flags can override |
 | `repo_home_root_files` | `&'static [&'static str]` | Root files preserved during shadow-HOME isolation |
 
-### Legacy Compatibility
+### Linking Facade
 
-Two fn-pointer fields bridge to pre-refactoring systems:
+One fn-pointer field bridges to the cross-provider linking layer:
 
-- `agent_capabilities_fn`: Returns `&'static AgentCapabilities`
 - `resource_support_fn`: Returns `&'static ProviderCapabilities`
 
-Both are built via `LazyLock` in the provider module and are tested for agreement with the typed catalog.
+It is built via `LazyLock` in the provider module and is tested for agreement with the typed catalog. (The former `agent_capabilities_fn` bridge was deleted with the legacy `AgentCapabilities` tree at retirement — see `features/2026-07-02-provider-metadata/design/module-split.md`.)
 
 ---
 

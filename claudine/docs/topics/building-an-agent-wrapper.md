@@ -54,29 +54,11 @@ Per-variant data attached directly to `Provider`:
 
 Display order is fixed in `PROVIDERS_DISPLAY_ORDER` so matrix-style reporting is deterministic.
 
-### Agent capability catalog
+### Provider catalog (`ProviderInfo`)
 
-The richer descriptive metadata lives under [`claudine/lib/src/provider/`](../../lib/src/provider/). Phase 2 of the centralized providers refactor moved the per-provider data construction from `agents/<provider>.rs` thin facade structs into one `<NAME>_INFO: ProviderInfo` constant per provider (`provider/<slug>/data.rs`; the four behavior-trait impls live beside it in `provider/<slug>/behavior.rs`). The shared shape is still defined in [`agents/model.rs`](../../lib/src/agents/model.rs), and `crate::agents::Agent` is implemented directly on `ProviderInfo` so legacy `agents::agent_for(provider)` returns the same `'static` reference as `provider::provider_info(provider)`.
+The richer descriptive metadata lives under [`claudine/lib/src/provider/`](../../lib/src/provider/): one `<NAME>_INFO: ProviderInfo` constant per provider in `provider/<slug>/data.rs` (**generated** by `claudine-gen` — never hand-edited), with the four behavior-trait impls beside it in `provider/<slug>/behavior.rs`. The typed catalog fields on `ProviderInfo` (identity, path templates, output formats, entrypoints, system-prompt/YOLO/reasoning descriptors, known gaps, ACP support, prompt-arg conventions, model catalog data) are the descriptive surface; `claudine providers --describe --format json` serializes them.
 
-`AgentCapabilities` aggregates:
-
-- `AgentMeta` — `id`, `display_name`, `binary`.
-- `AgentDocs` — homepage and per-feature documentation URLs (skills, slash, subagents, scripts).
-- `ConfigCapabilities` — `user_files`, `project_files`, `local_files`, plus a `ConfigFormat` enum (`Json`, `Jsonc`, `Toml`, `Yaml`, `Mixed`).
-- `RuntimeCapabilities` — bundles seven sub-structs:
-
-    - `ModelCapabilities` (CLI flags, `/`-commands, aliases, precedence, notes)
-    - `NonInteractiveCapabilities` (entrypoints, stdin, output formats, structured output, resume, limitations)
-    - `SystemPromptCapabilities` (supplement sources, replacement mechanisms, memory files)
-    - `PermissionCapabilities` (modes, yolo flag, sandbox modes, allow/denylist controls)
-    - `ReasoningCapabilities` (`ReasoningStyle::{NamedLevels, NumericBudget, BinaryToggle, ProviderSpecific, NotDocumented}`)
-    - `LoggingCapabilities` (session and log locations, debug and telemetry controls)
-    - `BillingCapabilities` (`BillingModel::{Subscription, PerToken, PrepaidCredits, ProviderOnly}` plus notes)
-
-- `SkillsCapabilities`, `SlashCommandCapabilities`, `SubagentCapabilities`, `ScriptCapabilities` — each carries a `CapabilityStatus`, a `PathDiscovery` (user / project / admin / extension paths plus precedence rules), an optional `FrontmatterContract`, and the activation/invocation enums.
-- `ConfidenceProfile` — a coarse `Confidence::{High, Medium, Low}` per area plus a `gaps: Vec<&'static str>` of explicit research debt.
-
-The central `ProviderInfo` registry lives in [`provider/registry.rs`](../../lib/src/provider/registry.rs) (`provider_info(Provider)`, `all_providers()`). The legacy [`agents/registry.rs`](../../lib/src/agents/registry.rs) `agent_for(Provider)` / `all_agents()` / `parse_agent_id()` API remains, but is now a thin forwarding layer that returns the same `'static ProviderInfo` reference.
+The central `ProviderInfo` registry lives in [`provider/registry.rs`](../../lib/src/provider/registry.rs) (`provider_info(Provider)`, `all_providers()`). The legacy `agents::AgentCapabilities` string-heavy 80-field tree, its `Agent` trait, and the `agent_for` forwarding registry were retired in Phase C of the provider-metadata workstream (2026-07); the typed catalog fields replaced every live consumer.
 
 ### Hook events and native-name mappings
 
@@ -185,12 +167,11 @@ The centralized-providers refactor (`features/2026-04-26-centralized-providers/`
 - **Phase 5** replaced descriptive `Vec<&'static str>` capability fields with typed catalog data: `PathTemplate`, `OutputFormatSupport`, `EntrypointSpec`, `SystemPromptSpec`, `YoloSupport`, `ReasoningSupport`, and `KnownGap`.
 - **Phase 6** thinned `WrapperProfile` so ordinary behavior reads from `provider_info` and the composition flag drift surface is derived from clap at runtime.
 - **Phase 7** added the `AcpSupport` descriptor, the `EventSupportLevel::Acp` variant, and the `claudine hooks --capture-method` output.
-- **Phase 8** consolidated the `impl Provider` blocks (CLI aliases, sniff binding, payload detection, slug, doc URLs, agent offset, event mapping accessors, `Display`) into [`provider/methods.rs`](../../lib/src/provider/methods.rs) and retired the per-provider thin facade structs that previously lived in `agents/<name>.rs`. The `AgentId` alias and the `crate::events::Provider` and `events::PROVIDERS_DISPLAY_ORDER` re-exports remain in place as `#[deprecated]` shims and will be removed in the post-Phase-8 cleanup release, matching the deprecation window described in the design's §"Deprecation Mechanics" (see [`claudine/lib/src/events/provider.rs`](../../lib/src/events/provider.rs) and [`claudine/lib/src/agents/mod.rs`](../../lib/src/agents/mod.rs)). All in-repo consumers now import from `crate::provider::*`.
+- **Phase 8** consolidated the `impl Provider` blocks (CLI aliases, sniff binding, payload detection, slug, doc URLs, agent offset, event mapping accessors, `Display`) into [`provider/methods.rs`](../../lib/src/provider/methods.rs) and retired the per-provider thin facade structs that previously lived in `agents/<name>.rs`. The `crate::events::Provider` and `events::PROVIDERS_DISPLAY_ORDER` re-exports remain in place as `#[deprecated]` shims (see [`claudine/lib/src/events/provider.rs`](../../lib/src/events/provider.rs)); the `AgentId` alias was removed with the `agents` module at the AgentCapabilities retirement (provider-metadata Phase C, 2026-07). All in-repo consumers now import from `crate::provider::*`.
 
 Open items that remain advisory rather than typed:
 
-- `LoggingCapabilities` documents native session/log locations as descriptive strings; resolution helpers for native session paths are still TBD.
-- `ConfidenceProfile.gaps` is now a typed `Vec<KnownGap>` on `ProviderInfo.known_gaps`, but `RuntimeCapabilities` retains free-form `notes` fields where the spec explicitly allows them.
+- Native session/log locations are typed path templates (`session_log_paths`, `session_locations`), but resolution helpers for native session paths are still TBD.
 
 ## Checklist
 
@@ -209,7 +190,7 @@ After the centralized-providers refactor, adding a ninth provider has a much sma
     - Identity (`display_name`, `slug`, `binary`, `agent_offset`, `cli_aliases`, `docs_url`, `usage_dashboard_url`, `sniff_binding`, `supports_skills`).
     - `event_mapping: &EventMappingTable` describing every supported `AgenticEvent` row (support level, native name, parse aliases, registration target).
     - The four behavior fields (`behavior`, `mcp`, `adapter`, `configurator`). Implement only what the provider supports; defaults return typed `NotSupported`.
-    - The `agent_capabilities_fn` and `resource_support_fn` accessors backed by per-provider `LazyLock<AgentCapabilities>` / `LazyLock<ProviderCapabilities>`.
+    - The `resource_support_fn` accessor backed by a per-provider `LazyLock<ProviderCapabilities>`.
     - Phase 5 typed catalog data: `session_log_paths`, `session_locations`, `config_paths`, `memory_files`, `output_formats`, `entrypoints`, `system_prompt`, `yolo`, `reasoning`, `known_gaps`, `acp`, `prompt_arg_conventions`.
 
 - [ ] Register `&<NAME>_INFO` in [`provider/registry.rs`](../../lib/src/provider/registry.rs).
