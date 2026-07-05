@@ -32,7 +32,6 @@ use crate::provider::yolo::YoloSupport;
 use crate::stream::StreamProtocol;
 
 use super::behavior::GEMINI_PROVIDER;
-use super::legacy::agent_capabilities;
 
 static GEMINI_RESOURCE_SUPPORT: LazyLock<ProviderCapabilities> =
     LazyLock::new(build_resource_support);
@@ -59,7 +58,6 @@ pub(in crate::provider) static GEMINI_INFO: ProviderInfo = ProviderInfo {
     mcp: &GEMINI_PROVIDER,
     adapter: &GEMINI_PROVIDER,
     configurator: &GEMINI_PROVIDER,
-    agent_capabilities_fn: agent_capabilities,
     resource_support_fn: resource_support,
     session_log_paths: &[
         PathTemplate::Static("~/.gemini/tmp/{project_id}/chats/session-{utc_iso_ts}-{short_id}.jsonl"),

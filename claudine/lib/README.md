@@ -10,7 +10,6 @@ The library is organized into eighteen top-level modules plus the shared error t
 claudine/lib/src/
 ├── actions/        → Hook action types and response model
 ├── adapters/       → Provider-specific event parsers
-├── agents/         → Agent capability catalog and registry (forwarding facades over `provider/`)
 ├── badges.rs       → Styled terminal badge constants (YOLO, Non-Interactive, Interactive, etc.)
 ├── composition/    → Markdown frontmatter composition (inline, direct, and sequence pipelines)
 ├── config/         → Agent detection and hook registration
@@ -81,14 +80,6 @@ Key types:
 - `AcpSupport`, `AcpServerMode`, `AcpEvent` — typed ACP capability descriptor surfaced by `claudine hooks --capture-method`
 
 Adding an eighth provider is a matter of: adding the `Provider` variant, creating one `provider/<name>.rs` file with a `<NAME>_INFO: ProviderInfo` constant, registering it in `provider/registry.rs`, and adding a CLI-side `WrapperProfile` entry. See [`docs/topics/building-an-agent-wrapper.md`](../docs/topics/building-an-agent-wrapper.md) for the full checklist.
-
-### Agents (`agents`)
-
-Capability model shared across all 7 supported agentic CLIs. After Phase 8 of the centralized-providers refactor this module is a thin forwarding layer over [`crate::provider`](#provider-catalog-provider):
-
-- `Agent` trait — shared interface for capability descriptors (`id()`, `capabilities()`, `supports_skills()`, `supports_custom_slash_commands()`, `supports_subagents()`, `validate()`). Implemented directly on `crate::provider::ProviderInfo` so `agent_for(provider)` and `provider_info(provider)` return references to the same `'static` record.
-- `AgentCapabilities` — full capability model covering meta, docs, config, runtime, skills, commands, subagents, scripts, and confidence
-- `agent_for(provider)` / `all_agents()` / `parse_agent_id(input)` — forwarding facades over `crate::provider::provider_info(provider)` and `Provider::parse_cli_name(input)`
 
 ### Adapters (`adapters`)
 

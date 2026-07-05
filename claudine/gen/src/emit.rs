@@ -1108,13 +1108,12 @@ pub fn emit_data_file(
     );
     push("event_mapping", format!("&{event_static}"));
     // Behavior wiring: fixed structural boilerplate parameterized by the
-    // provider ident; the implementations live in behavior.rs / legacy.rs.
+    // provider ident; the implementations live in behavior.rs.
     let provider_static = format!("{prefix}_PROVIDER");
     push("behavior", format!("&{provider_static}"));
     push("mcp", format!("&{provider_static}"));
     push("adapter", format!("&{provider_static}"));
     push("configurator", format!("&{provider_static}"));
-    push("agent_capabilities_fn", "agent_capabilities".to_string());
     push("resource_support_fn", "resource_support".to_string());
     push(
         "session_log_paths",
@@ -1312,9 +1311,7 @@ fn render_imports(paths: &BTreeSet<String>, provider_static: &str) -> String {
         }
         out.push('\n');
     }
-    out.push_str(&format!(
-        "use super::behavior::{provider_static};\nuse super::legacy::agent_capabilities;\n"
-    ));
+    out.push_str(&format!("use super::behavior::{provider_static};\n"));
     out
 }
 

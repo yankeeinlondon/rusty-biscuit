@@ -31,7 +31,6 @@ use crate::provider::system_prompt::{SystemPromptCustomTag, SystemPromptDelivery
 use crate::provider::yolo::YoloSupport;
 
 use super::behavior::GOOSE_PROVIDER;
-use super::legacy::agent_capabilities;
 
 static GOOSE_RESOURCE_SUPPORT: LazyLock<ProviderCapabilities> =
     LazyLock::new(build_resource_support);
@@ -58,7 +57,6 @@ pub(in crate::provider) static GOOSE_INFO: ProviderInfo = ProviderInfo {
     mcp: &GOOSE_PROVIDER,
     adapter: &GOOSE_PROVIDER,
     configurator: &GOOSE_PROVIDER,
-    agent_capabilities_fn: agent_capabilities,
     resource_support_fn: resource_support,
     session_log_paths: &[],
     session_locations: &[

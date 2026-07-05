@@ -33,7 +33,6 @@ use crate::provider::yolo::YoloSupport;
 use crate::stream::StreamProtocol;
 
 use super::behavior::OPENCODE_PROVIDER;
-use super::legacy::agent_capabilities;
 
 static OPENCODE_RESOURCE_SUPPORT: LazyLock<ProviderCapabilities> =
     LazyLock::new(build_resource_support);
@@ -60,7 +59,6 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
     mcp: &OPENCODE_PROVIDER,
     adapter: &OPENCODE_PROVIDER,
     configurator: &OPENCODE_PROVIDER,
-    agent_capabilities_fn: agent_capabilities,
     resource_support_fn: resource_support,
     session_log_paths: &[],
     session_locations: &[],

@@ -6,9 +6,9 @@
 
 use serde::Serialize;
 
-/// Coarse area in which a known gap lives. Mirrors the agent capability
-/// areas exposed by [`crate::agents::AgentCapabilities`] plus a small
-/// catch-all set.
+/// Coarse area in which a known gap lives. Mirrors the capability areas
+/// of the retired legacy `AgentCapabilities` tree plus a small catch-all
+/// set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum KnownGapArea {

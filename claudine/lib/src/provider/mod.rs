@@ -68,7 +68,6 @@ pub use yolo::YoloSupport;
 use serde::{Serialize, Serializer};
 use sniff::programs::AiCli;
 
-use crate::agents::AgentCapabilities;
 use crate::linking::capabilities::ProviderCapabilities;
 use crate::stream::StreamProtocol;
 
@@ -96,13 +95,11 @@ fn serialize_resource_support<S: Serializer>(
 /// All static fields are `&'static` references or trivially copyable values
 /// so a `ProviderInfo` lives in the binary's read-only data segment with no
 /// heap allocation. Trait-object fields are skipped during serialization
-/// because they are not data; the `fn`-pointer accessors
-/// (`agent_capabilities_fn`, `resource_support_fn`) are not themselves data.
-/// The legacy [`AgentCapabilities`] accessor is skipped so structured JSON
-/// exposes only typed top-level catalog fields plus the `resource_support`
-/// descriptor. Every other catalog field is serializable so the JSON output
-/// round-trips the catalog without information loss. JSON is the authoritative
-/// descriptive surface for the typed catalog half.
+/// because they are not data; the `fn`-pointer accessor
+/// (`resource_support_fn`) is not itself data and serializes through the
+/// descriptor it resolves. Every other catalog field is serializable so the
+/// JSON output round-trips the catalog without information loss. JSON is the
+/// authoritative descriptive surface for the typed catalog half.
 #[derive(Debug, Serialize)]
 pub struct ProviderInfo {
     /// Canonical [`Provider`] identifier for this entry.
@@ -169,22 +166,10 @@ pub struct ProviderInfo {
     #[serde(skip)]
     pub configurator: &'static dyn ConfiguratorBehavior,
 
-    /// Accessor for the provider's full agent capability descriptor.
-    ///
-    /// The accessor returns a `'static` reference into a per-provider
-    /// `LazyLock<AgentCapabilities>` defined alongside the provider's
-    /// [`ProviderInfo`] constant. It exists only for compatibility with the
-    /// legacy `agents::registry::agent_for` facade and is skipped during
-    /// serialization so structured describe JSON cannot expose the old
-    /// string-heavy capability tree.
-    #[serde(skip)]
-    pub agent_capabilities_fn: fn() -> &'static AgentCapabilities,
-
     /// Accessor for the provider's resource portability descriptor used by
     /// cross-provider linking.
     ///
-    /// As with [`agent_capabilities_fn`](Self::agent_capabilities_fn), the
-    /// underlying data is built once via a `LazyLock` and lives in the
+    /// The underlying data is built once via a `LazyLock` and lives in the
     /// provider module so the linking facade can forward to it. The
     /// fn-pointer is serialized via `serialize_resource_support` under the
     /// canonical `resource_support` key so the typed catalog half of the
@@ -276,28 +261,9 @@ pub struct ProviderInfo {
 }
 
 impl ProviderInfo {
-    /// Returns the provider's full [`AgentCapabilities`] descriptor.
-    pub fn agent_capabilities(&self) -> &'static AgentCapabilities {
-        (self.agent_capabilities_fn)()
-    }
-
     /// Returns the provider's resource portability descriptor used by the
     /// cross-provider linking layer.
     pub fn resource_support(&self) -> &'static ProviderCapabilities {
         (self.resource_support_fn)()
-    }
-}
-
-// Implementing [`crate::agents::Agent`] on `ProviderInfo` lets the legacy
-// `agents::agent_for(provider)` registry forward straight to
-// [`provider_info`] without keeping per-provider
-// thin facade structs around.
-impl crate::agents::Agent for ProviderInfo {
-    fn id(&self) -> Provider {
-        self.provider
-    }
-
-    fn capabilities(&self) -> &AgentCapabilities {
-        self.agent_capabilities()
     }
 }

@@ -1,8 +1,8 @@
 //! Typed reasoning / extended-thinking metadata.
 //!
 //! Phase 5 of the centralized providers refactor replaces the
-//! `(ReasoningStyle, Vec<&'static str>)` pair on
-//! [`ReasoningCapabilities`](crate::agents::ReasoningCapabilities) with
+//! `(ReasoningStyle, Vec<&'static str>)` pair on the retired legacy
+//! `ReasoningCapabilities` tree with
 //! a structured [`ReasoningSupport`] enum that distinguishes named-level,
 //! numeric-budget, binary-toggle, and provider-specific reasoning surfaces.
 

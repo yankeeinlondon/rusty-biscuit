@@ -170,7 +170,6 @@ fn provider_info_serializes_round_trip() {
             "adapter",
             "configurator",
             "capabilities",
-            "agent_capabilities_fn",
             "resource_support_fn",
         ] {
             assert!(
@@ -305,20 +304,6 @@ fn provider_info_json_round_trips_well_known_keys() {
 }
 
 #[test]
-fn agent_capabilities_facade_matches_catalog() {
-    use crate::agents::agent_for;
-
-    for provider in PROVIDERS_DISPLAY_ORDER {
-        let from_facade = agent_for(provider).capabilities();
-        let from_catalog = provider_info(provider).agent_capabilities();
-        assert_eq!(
-            from_facade, from_catalog,
-            "{provider:?}: agent_for facade does not match provider_info catalog"
-        );
-    }
-}
-
-#[test]
 fn resource_support_facade_matches_catalog() {
     use crate::linking::capabilities::capabilities_for;
 
@@ -345,336 +330,6 @@ fn resource_support_facade_matches_catalog() {
             from_facade.scripts.level, from_catalog.scripts.level,
             "{provider:?}: scripts support level mismatch"
         );
-    }
-}
-
-#[test]
-fn agent_capabilities_id_matches_provider() {
-    for provider in PROVIDERS_DISPLAY_ORDER {
-        let caps = provider_info(provider).agent_capabilities();
-        assert_eq!(
-            caps.meta.id, provider,
-            "{provider:?}: agent_capabilities meta.id mismatch"
-        );
-    }
-}
-
-fn path_templates_raw(paths: &[super::PathTemplate]) -> Vec<&'static str> {
-    paths.iter().map(super::PathTemplate::raw).collect()
-}
-
-fn path_bufs_raw(paths: &[std::path::PathBuf]) -> Vec<String> {
-    paths
-        .iter()
-        .map(|path| path.to_string_lossy().into_owned())
-        .collect()
-}
-
-fn assert_legacy_paths_in_catalog(
-    provider: Provider,
-    label: &str,
-    legacy_paths: &[std::path::PathBuf],
-    catalog_paths: &[super::PathTemplate],
-) {
-    let catalog_raw = path_templates_raw(catalog_paths);
-    for path in path_bufs_raw(legacy_paths) {
-        assert!(
-            catalog_raw.iter().any(|raw| *raw == path),
-            "{provider:?}: legacy {label} path {path:?} missing from typed catalog {catalog_raw:?}"
-        );
-    }
-}
-
-fn delivery_supported(delivery: super::SystemPromptDelivery) -> bool {
-    !matches!(delivery, super::SystemPromptDelivery::Unsupported)
-}
-
-fn replacement_supported(info: &super::ProviderInfo) -> bool {
-    delivery_supported(info.system_prompt.replace.interactive)
-        || delivery_supported(info.system_prompt.replace.non_interactive)
-}
-
-fn yolo_matches_legacy(legacy: Option<&str>, yolo: super::YoloSupport) -> bool {
-    let Some(legacy) = legacy else {
-        return matches!(yolo, super::YoloSupport::None);
-    };
-    let normalized = legacy.replace(' ', "=");
-    match yolo {
-        super::YoloSupport::None => false,
-        super::YoloSupport::DirectFlag { native_flag } => {
-            legacy == native_flag || normalized == native_flag
-        }
-        super::YoloSupport::DirectFlagWithAlias {
-            native_flag,
-            aliases,
-        } => {
-            legacy == native_flag
-                || normalized == native_flag
-                || aliases
-                    .iter()
-                    .any(|alias| legacy == *alias || normalized == *alias)
-        }
-        super::YoloSupport::NonInteractiveOnly {
-            non_interactive_flag,
-        } => legacy == non_interactive_flag || normalized == non_interactive_flag,
-        super::YoloSupport::EnvVar { env_var, value } => {
-            legacy.contains(env_var) && legacy.contains(value)
-        }
-    }
-}
-
-fn has_catalog_resume_entrypoint(info: &super::ProviderInfo) -> bool {
-    info.entrypoints.iter().any(|entrypoint| {
-        entrypoint.required_flags.iter().any(|flag| {
-            matches!(
-                *flag,
-                "-c" | "--continue" | "-r" | "--resume" | "resume" | "--resume-session"
-            )
-        }) || entrypoint.subcommand == Some("resume")
-    })
-}
-
-#[test]
-fn agent_capabilities_identity_and_docs_match_typed_catalog() {
-    for provider in PROVIDERS_DISPLAY_ORDER {
-        let info = provider_info(provider);
-        let caps = info.agent_capabilities();
-
-        assert_eq!(caps.meta.id, info.provider, "{provider:?}: id mismatch");
-        assert!(
-            caps.meta.display_name == info.display_name
-                || caps.meta.display_name.contains(info.display_name),
-            "{provider:?}: legacy display name {:?} does not follow typed display policy {:?}",
-            caps.meta.display_name,
-            info.display_name
-        );
-        assert_eq!(
-            caps.meta.binary, info.binary,
-            "{provider:?}: binary mismatch"
-        );
-        assert!(
-            caps.docs.homepage.is_some()
-                || caps.docs.docs.is_some()
-                || caps.docs.skills_docs.is_some()
-                || caps.docs.slash_docs.is_some()
-                || caps.docs.subagents_docs.is_some()
-                || caps.docs.scripts_docs.is_some(),
-            "{provider:?}: legacy docs surface is empty while typed docs_url is {:?}",
-            info.docs_url
-        );
-    }
-}
-
-#[test]
-fn agent_capabilities_config_paths_match_typed_catalog() {
-    for provider in PROVIDERS_DISPLAY_ORDER {
-        let info = provider_info(provider);
-        let caps = info.agent_capabilities();
-
-        assert_legacy_paths_in_catalog(
-            provider,
-            "user config",
-            &caps.config.user_files,
-            info.config_paths,
-        );
-        assert_legacy_paths_in_catalog(
-            provider,
-            "project config",
-            &caps.config.project_files,
-            info.config_paths,
-        );
-        assert_legacy_paths_in_catalog(
-            provider,
-            "local config",
-            &caps.config.local_files,
-            info.config_paths,
-        );
-    }
-}
-
-#[test]
-fn agent_capabilities_runtime_matches_typed_catalog() {
-    for provider in PROVIDERS_DISPLAY_ORDER {
-        let info = provider_info(provider);
-        let caps = info.agent_capabilities();
-        let non_interactive = &caps.runtime.non_interactive;
-
-        assert_eq!(
-            non_interactive.supported,
-            !info.entrypoints.is_empty(),
-            "{provider:?}: non-interactive support drifted"
-        );
-        assert_eq!(
-            non_interactive.structured_output_supported,
-            info.stream_protocol.is_some()
-                || info
-                    .output_formats
-                    .iter()
-                    .any(|format| !matches!(format.format, super::OutputFormat::Text)),
-            "{provider:?}: structured output support drifted"
-        );
-        if has_catalog_resume_entrypoint(info) || !non_interactive.resume_supported {
-            assert_eq!(
-                non_interactive.resume_supported,
-                has_catalog_resume_entrypoint(info),
-                "{provider:?}: resume support drifted where the typed catalog can represent it"
-            );
-        }
-
-        for entrypoint in info.entrypoints {
-            let mut fragments = vec![info.binary];
-            if let Some(subcommand) = entrypoint.subcommand {
-                fragments.push(subcommand);
-            }
-            fragments.extend(entrypoint.required_flags.iter().copied());
-            assert!(
-                non_interactive
-                    .entrypoints
-                    .iter()
-                    .any(|legacy| { fragments.iter().all(|fragment| legacy.contains(fragment)) }),
-                "{provider:?}: typed entrypoint fragments {fragments:?} missing from legacy entrypoints {:?}",
-                non_interactive.entrypoints
-            );
-        }
-
-        for output_format in info.output_formats {
-            assert!(
-                non_interactive
-                    .output_formats
-                    .iter()
-                    .any(|legacy| legacy.contains(output_format.native_name)),
-                "{provider:?}: typed output format {:?} missing from legacy output formats {:?}",
-                output_format.native_name,
-                non_interactive.output_formats
-            );
-        }
-    }
-}
-
-#[test]
-fn agent_capabilities_system_prompt_permissions_and_reasoning_match_typed_catalog() {
-    use crate::agents::ReasoningStyle;
-
-    for provider in PROVIDERS_DISPLAY_ORDER {
-        let info = provider_info(provider);
-        let caps = info.agent_capabilities();
-
-        let legacy_memory = &caps.runtime.system_prompt.memory_files;
-        for memory_file in info.memory_files {
-            assert!(
-                legacy_memory.contains(&memory_file.raw()),
-                "{provider:?}: typed memory file {:?} missing from legacy system prompt memory files {:?}",
-                memory_file.raw(),
-                legacy_memory
-            );
-        }
-        assert_eq!(
-            caps.runtime.system_prompt.full_replacement_supported,
-            replacement_supported(info),
-            "{provider:?}: system prompt replacement support drifted"
-        );
-
-        assert!(
-            yolo_matches_legacy(caps.runtime.permissions.yolo_equivalent, info.yolo),
-            "{provider:?}: legacy YOLO {:?} does not match typed {:?}",
-            caps.runtime.permissions.yolo_equivalent,
-            info.yolo
-        );
-
-        let reasoning = &caps.runtime.reasoning;
-        match info.reasoning {
-            super::ReasoningSupport::NotSupported | super::ReasoningSupport::NotDocumented => {
-                assert!(
-                    matches!(reasoning.style, ReasoningStyle::NotDocumented)
-                        || reasoning.levels_or_controls.is_empty(),
-                    "{provider:?}: legacy reasoning should be unsupported/undocumented, got {:?}",
-                    reasoning
-                );
-            }
-            super::ReasoningSupport::NamedLevels { levels, .. } => {
-                assert_eq!(
-                    reasoning.style,
-                    ReasoningStyle::NamedLevels,
-                    "{provider:?}: reasoning style drifted"
-                );
-                for level in levels {
-                    assert!(
-                        reasoning.levels_or_controls.contains(level),
-                        "{provider:?}: typed reasoning level {level:?} missing from legacy {:?}",
-                        reasoning.levels_or_controls
-                    );
-                }
-            }
-            super::ReasoningSupport::NumericBudget { flag, .. } => {
-                assert_eq!(
-                    reasoning.style,
-                    ReasoningStyle::NumericBudget,
-                    "{provider:?}: reasoning style drifted"
-                );
-                assert!(
-                    reasoning.levels_or_controls.contains(&flag),
-                    "{provider:?}: typed reasoning flag {flag:?} missing from legacy {:?}",
-                    reasoning.levels_or_controls
-                );
-            }
-            super::ReasoningSupport::BinaryToggle { on, off, .. } => {
-                assert_eq!(
-                    reasoning.style,
-                    ReasoningStyle::BinaryToggle,
-                    "{provider:?}: reasoning style drifted"
-                );
-                for control in [on, off] {
-                    assert!(
-                        reasoning.levels_or_controls.contains(&control),
-                        "{provider:?}: typed reasoning control {control:?} missing from legacy {:?}",
-                        reasoning.levels_or_controls
-                    );
-                }
-            }
-            super::ReasoningSupport::ProviderSpecific(_) => {
-                assert!(
-                    !matches!(reasoning.style, ReasoningStyle::NotDocumented)
-                        && !reasoning.levels_or_controls.is_empty(),
-                    "{provider:?}: provider-specific typed reasoning should retain legacy controls, got {:?}",
-                    reasoning
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn agent_capabilities_logging_and_known_gaps_match_typed_catalog() {
-    for provider in PROVIDERS_DISPLAY_ORDER {
-        let info = provider_info(provider);
-        let caps = info.agent_capabilities();
-        let logging = &caps.runtime.logging;
-
-        let session_log_paths = path_templates_raw(info.session_log_paths);
-        for legacy in &logging.session_locations {
-            assert!(
-                session_log_paths.contains(legacy),
-                "{provider:?}: legacy session log location {legacy:?} missing from typed session_log_paths {session_log_paths:?}"
-            );
-        }
-
-        let legacy_log_locations = &logging.log_locations;
-        for typed in path_templates_raw(info.session_locations) {
-            assert!(
-                legacy_log_locations.contains(&typed),
-                "{provider:?}: typed session location {typed:?} missing from legacy log_locations {legacy_log_locations:?}"
-            );
-        }
-
-        for legacy_gap in &caps.confidence.gaps {
-            assert!(
-                info.known_gaps
-                    .iter()
-                    .any(|gap| { gap.note == *legacy_gap || gap.tracker == Some(*legacy_gap) }),
-                "{provider:?}: legacy confidence gap {legacy_gap:?} missing from typed known_gaps {:?}",
-                info.known_gaps
-            );
-        }
     }
 }
 
@@ -846,22 +501,17 @@ fn no_unauthorized_match_provider_in_lib() {
     );
 }
 
-/// Shrink-only guard for the TEMPORARY `provider/<slug>/legacy.rs` files.
+/// Guard against `provider/<slug>/legacy.rs` files ever returning.
 ///
-/// The module split (design/module-split.md) relocated each provider's
-/// legacy `AgentCapabilities` builders into a `legacy.rs` slated for
-/// deletion at AgentCapabilities retirement. Nothing new may ever be added:
-/// the set of `legacy.rs` files may only shrink from the eight recorded
-/// here. Deleting one is fine (do NOT re-add it to this list); a new one
-/// appearing fails this guard.
+/// The module split (design/module-split.md) parked each provider's legacy
+/// `AgentCapabilities` builders in a TEMPORARY `legacy.rs`; the retirement
+/// (workstream 2) deleted the tree and every `legacy.rs` with it. The set
+/// is now empty and must stay empty: any `legacy.rs` appearing under
+/// `src/provider/` fails this guard.
 #[test]
 fn provider_legacy_files_only_shrink() {
     use std::fs;
     use std::path::Path;
-
-    let allowed: &[&str] = &[
-        "claude", "codex", "gemini", "goose", "kimi", "opencode", "qwen",
-    ];
 
     let provider_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/provider");
     let mut unexpected = Vec::new();
@@ -875,16 +525,14 @@ fn provider_legacy_files_only_shrink() {
             .and_then(|name| name.to_str())
             .unwrap_or_default()
             .to_string();
-        if !allowed.contains(&slug.as_str()) {
-            unexpected.push(slug);
-        }
+        unexpected.push(slug);
     }
 
     assert!(
         unexpected.is_empty(),
-        "New provider legacy.rs file(s) found for {unexpected:?}. The legacy \
-         `AgentCapabilities` tree is retirement-only (design/module-split.md): \
-         new providers must not add a `legacy.rs`; put typed catalog data in \
+        "Provider legacy.rs file(s) found for {unexpected:?}. The legacy \
+         `AgentCapabilities` tree was retired (design/module-split.md): \
+         providers must not have a `legacy.rs`; put typed catalog data in \
          `data.rs` and trait impls in `behavior.rs` instead."
     );
 }
@@ -1362,7 +1010,8 @@ fn codex_system_prompt_uses_config_key_variants() {
 }
 
 /// Every provider's JSON describe surface includes typed resource
-/// portability data and excludes the legacy `AgentCapabilities` tree.
+/// portability data and excludes the retired legacy `AgentCapabilities`
+/// tree.
 #[test]
 fn provider_info_json_includes_resource_support_not_capabilities() {
     for provider in PROVIDERS_DISPLAY_ORDER {

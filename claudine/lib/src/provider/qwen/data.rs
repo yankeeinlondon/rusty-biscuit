@@ -32,7 +32,6 @@ use crate::provider::yolo::YoloSupport;
 use crate::stream::StreamProtocol;
 
 use super::behavior::QWEN_PROVIDER;
-use super::legacy::agent_capabilities;
 
 static QWEN_RESOURCE_SUPPORT: LazyLock<ProviderCapabilities> =
     LazyLock::new(build_resource_support);
@@ -59,7 +58,6 @@ pub(in crate::provider) static QWEN_INFO: ProviderInfo = ProviderInfo {
     mcp: &QWEN_PROVIDER,
     adapter: &QWEN_PROVIDER,
     configurator: &QWEN_PROVIDER,
-    agent_capabilities_fn: agent_capabilities,
     resource_support_fn: resource_support,
     session_log_paths: &[PathTemplate::Static("~/.qwen/projects/{sanitized_cwd}/chats/{session_id}.jsonl")],
     session_locations: &[PathTemplate::Static("logs/openai")],

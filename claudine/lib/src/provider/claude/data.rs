@@ -33,7 +33,6 @@ use crate::provider::yolo::YoloSupport;
 use crate::stream::StreamProtocol;
 
 use super::behavior::CLAUDE_PROVIDER;
-use super::legacy::agent_capabilities;
 
 static CLAUDE_RESOURCE_SUPPORT: LazyLock<ProviderCapabilities> =
     LazyLock::new(build_resource_support);
@@ -60,7 +59,6 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
     mcp: &CLAUDE_PROVIDER,
     adapter: &CLAUDE_PROVIDER,
     configurator: &CLAUDE_PROVIDER,
-    agent_capabilities_fn: agent_capabilities,
     resource_support_fn: resource_support,
     session_log_paths: &[PathTemplate::Static("~/.claude/projects/{sanitized_cwd}/{session_id}.jsonl")],
     session_locations: &[PathTemplate::Static("~/.claude/projects/")],

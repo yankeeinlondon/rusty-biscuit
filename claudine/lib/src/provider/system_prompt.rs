@@ -2,7 +2,7 @@
 //!
 //! Phase 5 of the centralized providers refactor replaces the
 //! free-form `supplement_sources` / `replacement_mechanisms` strings on
-//! [`SystemPromptCapabilities`](crate::agents::SystemPromptCapabilities)
+//! the retired legacy `SystemPromptCapabilities` tree
 //! with structured [`SystemPromptDelivery`] enums describing how each
 //! provider accepts system-prompt overrides in interactive vs
 //! non-interactive mode.
