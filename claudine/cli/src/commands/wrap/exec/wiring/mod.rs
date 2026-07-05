@@ -8,7 +8,9 @@
 //! every stdout line and emits the user-visible event surface, while this
 //! module owns the IO loop that:
 //!
-//! - sends `initialize` and validates the negotiated protocol version,
+//! - sends `initialize` (the semantic parser validates the negotiated
+//!   protocol version) and fails fast when the server answers `init-1`
+//!   with a JSON-RPC error,
 //! - sends the resolved prompt as a `prompt` request after initialize,
 //! - auto-responds to server-initiated `ApprovalRequest`, `QuestionRequest`,
 //!   `ToolCallRequest`, and routes `HookRequest` through Claudine's
@@ -43,7 +45,7 @@ use claudine::stream::logs::EarlyTermination;
 use claudine::stream::parser::{SemanticStreamParser, StreamParseError};
 use claudine::stream::progress::LiveMetrics;
 use claudine::stream::protocol::kimi::{
-    KimiEnvelope, KimiHookRequest, KimiInitializeResult, KimiJsonRpcError, KimiWireRequest,
+    KimiEnvelope, KimiHookRequest, KimiJsonRpcError, KimiWireRequest,
 };
 use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
@@ -58,7 +60,7 @@ use super::{
 // Responsibility split of the Kimi wire transport. Each child glob-imports
 // the shared `use` block above through `use super::*`:
 // - `builders`   — JSON-RPC request/response builders, capabilities, the
-//                  `HookOutcome`/`HookDispatchResult`/`WireInitError` types.
+//                  `HookOutcome`/`HookDispatchResult` types.
 // - `dispatch`   — request classification, hook-event mapping, and the
 //                  canonical hook-dispatch glue (`handle_request_dispatch`).
 // - `writer`     — the single serialized `WireWriter` over child stdin.

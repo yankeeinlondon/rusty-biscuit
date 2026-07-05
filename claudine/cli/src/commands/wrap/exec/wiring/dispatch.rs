@@ -295,3 +295,22 @@ pub(crate) fn is_prompt_response_line(line: &str) -> bool {
     }
     value.get("result").is_some() || value.get("error").is_some()
 }
+
+/// Return true when `line` is a JSON-RPC *error* response to the `init-1`
+/// initialize request.
+///
+/// A server that rejects the handshake (e.g. a strict protocol-version
+/// check on our `initialize` request) answers `init-1` with an error and
+/// will never process the prompt, so no `prompt-2` response ever arrives.
+/// The reader thread treats this like the prompt response — close stdin and
+/// signal completion — so handshake failures fail fast with the
+/// parser-surfaced error instead of hanging until the wall-clock timeout.
+/// A *successful* `init-1` response is not terminal: the session proceeds
+/// to the prompt.
+pub(crate) fn is_initialize_error_line(line: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(line) else {
+        return false;
+    };
+    value.get("id").and_then(Value::as_str) == Some(INITIALIZE_REQUEST_ID)
+        && value.get("error").is_some()
+}
