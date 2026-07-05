@@ -230,6 +230,7 @@ fn serialized_field_list_matches_catalog() {
         "suppress_structured_stderr_on_success",
         "supports_interactive_inline_closure",
         "model_required_in_non_tty",
+        "platform_kind",
     ];
     // serde_json without `preserve_order` sorts map keys, so membership
     // (not order) is asserted here; the gen-side twin pins the order

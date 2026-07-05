@@ -27,6 +27,7 @@ use crate::provider::known_gap::{KnownGap, KnownGapArea};
 use crate::provider::model_catalog_source::ModelCatalogSource;
 use crate::provider::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 use crate::provider::path_template::PathTemplate;
+use crate::provider::platform_kind::PlatformKind;
 use crate::provider::prompt_args::PromptArgConventions;
 use crate::provider::reasoning::ReasoningSupport;
 use crate::provider::resume_support::ResumeSupport;
@@ -81,6 +82,7 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
             selector: OutputFormatSelector::FlagValue {
                 flag: "--output-format",
             },
+            companion_flags: &[],
         },
         OutputFormatSupport {
             format: OutputFormat::Json,
@@ -90,6 +92,7 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
             selector: OutputFormatSelector::FlagValue {
                 flag: "--output-format",
             },
+            companion_flags: &[],
         },
         OutputFormatSupport {
             format: OutputFormat::Stream,
@@ -99,6 +102,7 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
             selector: OutputFormatSelector::FlagValue {
                 flag: "--output-format",
             },
+            companion_flags: &["--print", "--verbose"],
         },
     ],
     entrypoints: &[
@@ -195,6 +199,7 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
     suppress_structured_stderr_on_success: false,
     supports_interactive_inline_closure: false,
     model_required_in_non_tty: false,
+    platform_kind: PlatformKind::VendorPlatform,
 };
 
 /// Event-mapping table (also referenced directly by behavior modules).

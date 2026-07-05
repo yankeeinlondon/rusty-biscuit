@@ -32,6 +32,7 @@ mod model_catalog_source;
 mod opencode;
 mod output_format;
 mod path_template;
+mod platform_kind;
 mod prompt_args;
 mod qwen;
 mod reasoning;
@@ -60,6 +61,7 @@ pub use output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputForm
 // during the migration.
 pub use crate::provider_id::{OutputFormatSelector, PROVIDERS_DISPLAY_ORDER, Provider};
 pub use path_template::{GlobKind, PathContext, PathSegment, PathTemplate};
+pub use platform_kind::PlatformKind;
 pub use prompt_args::{COMMON_VALUE_TAKING_FLAGS, PromptArgConventions};
 pub use reasoning::{ReasoningCustomTag, ReasoningSupport};
 pub use registry::{all_providers, provider_info};
@@ -306,6 +308,13 @@ pub struct ProviderInfo {
     /// Whether the provider hard-requires an explicit model selection in
     /// non-TTY sessions.
     pub model_required_in_non_tty: bool,
+
+    /// What kind of CLI product this is: a vendor platform predominantly
+    /// fronts the vendor's own models (rolling-alias handling matters),
+    /// while an agent aggregator is a model-agnostic front-end where
+    /// provider/model pair selection is the central UX. Human-owned facts
+    /// (spec 2026-07-02 classification; values ratified at Checkpoint D).
+    pub platform_kind: PlatformKind,
 }
 
 impl ProviderInfo {

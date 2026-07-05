@@ -27,6 +27,7 @@ use crate::provider::known_gap::{KnownGap, KnownGapArea};
 use crate::provider::model_catalog_source::ModelCatalogSource;
 use crate::provider::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 use crate::provider::path_template::PathTemplate;
+use crate::provider::platform_kind::PlatformKind;
 use crate::provider::prompt_args::PromptArgConventions;
 use crate::provider::reasoning::ReasoningSupport;
 use crate::provider::resume_support::ResumeSupport;
@@ -86,6 +87,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             selector: OutputFormatSelector::FlagValue {
                 flag: "--format",
             },
+            companion_flags: &[],
         },
     ],
     entrypoints: &[
@@ -206,6 +208,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
     suppress_structured_stderr_on_success: false,
     supports_interactive_inline_closure: false,
     model_required_in_non_tty: true,
+    platform_kind: PlatformKind::AgentAggregator,
 };
 
 /// Event-mapping table (also referenced directly by behavior modules).
