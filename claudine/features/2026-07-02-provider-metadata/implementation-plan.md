@@ -153,6 +153,31 @@ Exit: no hand-written provider data remains; CI enforces regeneration equality.
 Exit: one source of provider truth; three duplicated prep sites gone; first
 functional component live in both pipelines.
 
+> **Phase C completion notes (2026-07-04):** shipped as specified — shared stages in
+> `cli/src/commands/exec_prep/` (`resolve_model_and_validate`, `ensure_shadow_home`,
+> `prepare_codex_structured_output`), `FinalMessage` in `lib/src/render/` (module
+> born) with the CLI sink helper `output::emit_final_message`, and the full
+> AgentCapabilities retirement (agents module, 7× `legacy.rs`, `agent_capabilities_fn`
+> — generator boilerplate updated + all 7 `data.rs` regenerated in the same change;
+> `catalog.json` unchanged since the field was serde-skipped). Conditional dispatch
+> sites 28 → 23; shrink-only legacy guard now asserts an empty set. Two
+> behavior-preserving judgment calls for review: (1) `ensure_shadow_home` was wired
+> into the composition seam only — the direct wrapper's MCP seam keeps its
+> read-only behavior in the degraded shadow-home case; (2) `WrapperProfile::supports_resume`
+> lost its legacy-tree default (the typed catalog cannot represent kimi/qwen
+> resume-without-entrypoint), so the default is now `false` with explicit `true`
+> overrides paired with each `build_resume_args` impl (claude, codex, kimi, qwen).
+>
+> **Post-C ruling (2026-07-04, Ken) — resume parity:** provider-native resume
+> support ⇒ Claudine resume support (spec resume row amended). The legacy
+> `false` values for gemini/goose/opencode were stale — the 2026-07-03
+> session-resumption research rates all 7 first-class — so those three profiles
+> gained `build_resume_args` + `supports_resume` the same day (Goose pinned to
+> explicit `--session-id`, OpenCode to explicit `--session`, per the research
+> cautions; resume passthrough extended with `--print-logs`/`--log-level` so a
+> resumed OpenCode structured run keeps its stderr bridge). `ResumeSpec`
+> catalog graduation stays a Phase D item (summary-triage.md).
+
 ## Phase D — field expansion + WrapperProfile migration (rolling)
 
 Consumes closeout-track topics as they land; repeats per topic:
