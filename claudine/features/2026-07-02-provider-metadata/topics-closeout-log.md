@@ -82,3 +82,23 @@
   general provider fleet.
 - Stopped before the checkpoint-gated pilot/fleet run. Next step is Ken review of the
   widened schema and prompt.
+
+## 2026-07-05 — Status correction (recorded by the provider-metadata track)
+
+- The entry above is stale as a description of current state: the widened-schema
+  permissions fleet **already ran on 2026-07-03** and is committed (`d0702ca93`,
+  "refresh research fleets and topic docs for 7-provider lineup"). Evidence: all 9
+  `agent-permissions/*.md` docs carry `last_updated: 2026-07-03` with the widened
+  fields populated (`rule_model`, `permission_entities`, `sandbox`, `trust_and_admin`,
+  `mcp_permissions`, `cli_zero_permissions`, …), and `precedence` was split into
+  ordered per-source records as scheduled. The cross-provider permissions summary was
+  generated the same day.
+- Still-open follow-ups from the 2026-07-02 entry: derive a typed `env_vars.effect`
+  category enum from the landed fleet data (effect is still prose, as designed for the
+  first pass), and tighten `precedence.scope` to enums now that the fleet has shown
+  the vocabulary.
+- Downstream note: the provider-metadata track's Phase D consumed this topic's landed
+  data through its 2026-07-04/05 checkpoint; the remaining permissions-fed catalog
+  graduations (`yolo` typed switch sites, `cli_sensitive_axes` six-axis booleans)
+  need a **schema v2** addition beyond this widening — proposals tracked in that
+  track's docs.
