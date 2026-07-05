@@ -7,7 +7,6 @@
 //! inline arm it replaced.
 
 use std::collections::HashMap;
-use std::io::{IsTerminal, Write};
 use std::sync::{Arc, Mutex};
 
 use biscuit_terminal::terminal::Terminal;
@@ -169,21 +168,7 @@ pub(crate) fn run_structured_stream_session(
         && !summary.assistant_text.is_empty()
         && !crate::output::user_interrupt_observed()
     {
-        section_stream.enter_final_stdout();
-        let text = &summary.assistant_text;
-        if std::io::stdout().is_terminal() {
-            let rendered = crate::output::render_assistant_markdown(text, term);
-            std::io::stdout().write_all(rendered.as_bytes())?;
-            if !rendered.ends_with('\n') {
-                std::io::stdout().write_all(b"\n")?;
-            }
-        } else {
-            std::io::stdout().write_all(text.as_bytes())?;
-            if !text.ends_with('\n') {
-                std::io::stdout().write_all(b"\n")?;
-            }
-        }
-        std::io::stdout().flush()?;
+        crate::output::emit_final_message(&summary.assistant_text, term, Some(&section_stream))?;
     }
 
     policy::emit_stream_summary(

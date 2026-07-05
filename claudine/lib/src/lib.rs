@@ -1,6 +1,5 @@
 pub mod actions;
 pub mod adapters;
-pub mod agents;
 pub mod badges;
 pub mod composition;
 pub mod config;
@@ -20,6 +19,7 @@ pub mod prompt_reporting;
 pub mod protect;
 pub mod provider;
 pub mod provider_id;
+pub mod render;
 pub mod reporting;
 pub mod runaway;
 pub mod stream;
