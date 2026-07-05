@@ -216,6 +216,14 @@ pub enum Constraint {
     /// Default value (emitted as JSON Schema `default`).
     Default(serde_json::Value),
 
+    /// The value is supplied by the host runtime (e.g. Darkmatter context
+    /// capture) rather than authored in static frontmatter. Static
+    /// authored-document validation skips `required` enforcement for
+    /// `generated` properties; runtime/effective validation still type-checks
+    /// host-supplied values. Orthogonal to `Required`, which controls
+    /// type/nullability.
+    Generated,
+
     // ── numeric ──────────────────────────────────────────────────────────
     /// Inclusive minimum.
     Min(f64),
@@ -273,6 +281,7 @@ impl Constraint {
         match self {
             Constraint::Required => "required",
             Constraint::Default(_) => "default",
+            Constraint::Generated => "generated",
             Constraint::Min(_) => "min",
             Constraint::Max(_) => "max",
             Constraint::Integer => "integer",
@@ -349,5 +358,10 @@ mod tests {
     fn schema_shape_default_is_empty() {
         let shape = SchemaShape::new();
         assert!(shape.properties.is_empty());
+    }
+
+    #[test]
+    fn generated_keyword_is_canonical() {
+        assert_eq!(Constraint::Generated.keyword(), "generated");
     }
 }

@@ -1030,11 +1030,15 @@ impl<'a> Parser<'a> {
             ("not-empty", false) => Constraint::NotEmpty,
             ("integer", false) => Constraint::Integer,
             ("unique", false) => Constraint::Unique,
+            ("generated", false) => Constraint::Generated,
             ("required", true) => {
                 return self.err("`required` does not take arguments", kw_span);
             }
             ("eager", true) => {
                 return self.err("`eager` does not take arguments", kw_span);
+            }
+            ("generated", true) => {
+                return self.err("`generated` does not take arguments", kw_span);
             }
             ("default", true) => {
                 self.lex.pos += 1; // consume (
@@ -1329,6 +1333,38 @@ mod tests {
     fn parses_required_constraint() {
         let atom = parse("string(required)");
         assert_eq!(atom.constraints, vec![Constraint::Required]);
+    }
+
+    #[test]
+    fn parses_generated_constraint() {
+        let atom = parse("string(generated)");
+        assert_eq!(atom.constraints, vec![Constraint::Generated]);
+    }
+
+    #[test]
+    fn parses_generated_with_required() {
+        // `generated` and `required` are orthogonal: `generated` describes
+        // ownership/supply semantics; `required` controls type/nullability.
+        // Both constraints must survive parsing in either order.
+        let atom = parse("string(generated; required)");
+        assert_eq!(
+            atom.constraints,
+            vec![Constraint::Generated, Constraint::Required]
+        );
+        let atom_rev = parse("string(required; generated)");
+        assert_eq!(
+            atom_rev.constraints,
+            vec![Constraint::Required, Constraint::Generated]
+        );
+    }
+
+    #[test]
+    fn generated_takes_no_args() {
+        let err = parse_err("string(generated())");
+        let SchemaError::Grammar { message, .. } = err else {
+            panic!("expected Grammar error, got {err:?}")
+        };
+        assert!(message.contains("does not take arguments"));
     }
 
     #[test]

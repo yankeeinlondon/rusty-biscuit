@@ -137,6 +137,15 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         description: "Provides the value to use when the property is absent.",
         json_schema_effect: "parent's `default` set to the argument",
     },
+    SchemaConstraintDescriptor {
+        name: "generated",
+        keyword: "generated",
+        form: "generated",
+        target_types: "all types",
+        argument_arity: "0",
+        description: "The value is supplied by the host runtime (e.g. Darkmatter context capture), not authored in static frontmatter. Orthogonal to `required`, which controls type/nullability.",
+        json_schema_effect: "emits `x-darkmatter-generated: true`; suppresses the property's static-`required` entry so authored documents validate cleanly when the host has not yet supplied the value",
+    },
     // ── shared scalar / array bounds ───────────────────────────────────
     SchemaConstraintDescriptor {
         name: "min",
@@ -266,6 +275,12 @@ pub const SCHEMA_SHAPE_DESCRIPTORS: &[SchemaShapeDescriptor] = &[
         form: "{ prop: type-expr, ... }",
         example: "{ foo: string(required), bar: number }",
         description: "Use this to validate a nested object without creating a separate schema file.",
+    },
+    SchemaShapeDescriptor {
+        name: "Nested mapping object",
+        form: "YAML mapping under a property",
+        example: "addr:\n  street: string\n  zip: number",
+        description: "Use a YAML mapping as a property value to declare a nested object shape. Equivalent to the inline object literal for the cases both forms can express; the mapping form additionally permits sequence union arms without quoting.",
     },
 ];
 
@@ -590,6 +605,7 @@ mod tests {
         for c in [
             Constraint::Required,
             Constraint::Default(serde_json::Value::Null),
+            Constraint::Generated,
             Constraint::Min(0.0),
             Constraint::Max(0.0),
             Constraint::Integer,
@@ -799,6 +815,34 @@ mod tests {
                     assert!(
                         matches!(atom.ty, TypeExpr::InlineObject(_)),
                         "Inline object literal example did not parse as TypeExpr::InlineObject: {:?}",
+                        atom.ty
+                    );
+                }
+                "Nested mapping object" => {
+                    // The example is a top-level mapping with one property
+                    // whose value is itself a mapping. It must parse as a
+                    // Single schema whose sole property lowers to an
+                    // inline-object atom.
+                    let value: serde_yaml_ng::Value =
+                        serde_yaml_ng::from_str(d.example).expect("yaml must parse");
+                    let schema = parse_yaml_schema(&value)
+                        .expect("nested-mapping example must parse as a SimplifiedSchema");
+                    let shape = match schema {
+                        SimplifiedSchema::Single(s) => s,
+                        other => panic!("expected Single, got {other:?}"),
+                    };
+                    let prop = shape
+                        .properties
+                        .values()
+                        .next()
+                        .expect("nested-mapping example must declare at least one property");
+                    let atom = match prop {
+                        PropertyDef::Single(a) => a,
+                        other => panic!("expected Single atom, got {other:?}"),
+                    };
+                    assert!(
+                        matches!(atom.ty, TypeExpr::InlineObject(_)),
+                        "Nested mapping object example did not lower to TypeExpr::InlineObject: {:?}",
                         atom.ty
                     );
                 }

@@ -111,6 +111,7 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: SimplifiedType) {
         Constraint::NotEmpty => out.push_str("not-empty"),
         Constraint::Integer => out.push_str("integer"),
         Constraint::Unique => out.push_str("unique"),
+        Constraint::Generated => out.push_str("generated"),
 
         Constraint::Min(n) => {
             let _ = write!(out, "min({})", format_number(*n));
@@ -246,6 +247,28 @@ mod tests {
             ty: TypeExpr::Primitive(SimplifiedType::String),
             is_array: false,
             constraints: vec![Constraint::Required],
+            array_constraints: vec![],
+            description: None,
+        });
+    }
+
+    #[test]
+    fn round_trip_generated_string() {
+        round_trip(PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::String),
+            is_array: false,
+            constraints: vec![Constraint::Generated],
+            array_constraints: vec![],
+            description: None,
+        });
+    }
+
+    #[test]
+    fn round_trip_generated_with_required() {
+        round_trip(PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::String),
+            is_array: false,
+            constraints: vec![Constraint::Generated, Constraint::Required],
             array_constraints: vec![],
             description: None,
         });
