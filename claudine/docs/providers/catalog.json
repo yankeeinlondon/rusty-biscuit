@@ -412,6 +412,7 @@
           "value": [
             {
               "cli_flag": "--output-format",
+              "companion_flags": [],
               "format": "text",
               "native_name": "text",
               "selector": {
@@ -422,6 +423,7 @@
             },
             {
               "cli_flag": "--output-format",
+              "companion_flags": [],
               "format": "json",
               "native_name": "json",
               "selector": {
@@ -432,6 +434,10 @@
             },
             {
               "cli_flag": "--output-format",
+              "companion_flags": [
+                "--print",
+                "--verbose"
+              ],
               "format": "stream",
               "native_name": "stream-json",
               "selector": {
@@ -441,6 +447,13 @@
               "stdin_supported": true
             }
           ]
+        },
+        "platform_kind": {
+          "source": {
+            "key": "platform_kind",
+            "kind": "facts"
+          },
+          "value": "vendor_platform"
         },
         "prompt_arg_conventions": {
           "source": {
@@ -5251,6 +5264,7 @@
           "value": [
             {
               "cli_flag": null,
+              "companion_flags": [],
               "format": "text",
               "native_name": "text",
               "selector": {
@@ -5260,6 +5274,7 @@
             },
             {
               "cli_flag": "--json",
+              "companion_flags": [],
               "format": "json",
               "native_name": "jsonl",
               "selector": {
@@ -5269,8 +5284,20 @@
               "stdin_supported": true
             },
             {
-              "cli_flag": "--output-schema",
+              "cli_flag": "--json",
+              "companion_flags": [],
               "format": "stream",
+              "native_name": "jsonl",
+              "selector": {
+                "flag": "--json",
+                "kind": "flag"
+              },
+              "stdin_supported": true
+            },
+            {
+              "cli_flag": "--output-schema",
+              "companion_flags": [],
+              "format": "json",
               "native_name": "schema-json",
               "selector": {
                 "flag": "--output-schema",
@@ -5279,6 +5306,13 @@
               "stdin_supported": true
             }
           ]
+        },
+        "platform_kind": {
+          "source": {
+            "key": "platform_kind",
+            "kind": "facts"
+          },
+          "value": "vendor_platform"
         },
         "prompt_arg_conventions": {
           "source": {
@@ -10042,6 +10076,7 @@
           "value": [
             {
               "cli_flag": "--output-format",
+              "companion_flags": [],
               "format": "text",
               "native_name": "text",
               "selector": {
@@ -10052,6 +10087,7 @@
             },
             {
               "cli_flag": "--output-format",
+              "companion_flags": [],
               "format": "json",
               "native_name": "json",
               "selector": {
@@ -10062,6 +10098,7 @@
             },
             {
               "cli_flag": "--output-format",
+              "companion_flags": [],
               "format": "stream",
               "native_name": "stream-json",
               "selector": {
@@ -10071,6 +10108,13 @@
               "stdin_supported": true
             }
           ]
+        },
+        "platform_kind": {
+          "source": {
+            "key": "platform_kind",
+            "kind": "facts"
+          },
+          "value": "vendor_platform"
         },
         "prompt_arg_conventions": {
           "source": {
@@ -14115,6 +14159,7 @@
           "value": [
             {
               "cli_flag": null,
+              "companion_flags": [],
               "format": "text",
               "native_name": "text",
               "selector": {
@@ -14124,6 +14169,7 @@
             },
             {
               "cli_flag": null,
+              "companion_flags": [],
               "format": "json",
               "native_name": "json",
               "selector": {
@@ -14133,6 +14179,7 @@
             },
             {
               "cli_flag": null,
+              "companion_flags": [],
               "format": "stream",
               "native_name": "stream-json",
               "selector": {
@@ -14141,6 +14188,13 @@
               "stdin_supported": true
             }
           ]
+        },
+        "platform_kind": {
+          "source": {
+            "key": "platform_kind",
+            "kind": "facts"
+          },
+          "value": "agent_aggregator"
         },
         "prompt_arg_conventions": {
           "source": {
@@ -18302,6 +18356,7 @@
           "value": [
             {
               "cli_flag": null,
+              "companion_flags": [],
               "format": "text",
               "native_name": "text",
               "selector": {
@@ -18311,6 +18366,7 @@
             },
             {
               "cli_flag": "--wire",
+              "companion_flags": [],
               "format": "stream",
               "native_name": "stream-json",
               "selector": {
@@ -18320,6 +18376,13 @@
               "stdin_supported": true
             }
           ]
+        },
+        "platform_kind": {
+          "source": {
+            "key": "platform_kind",
+            "kind": "facts"
+          },
+          "value": "vendor_platform"
         },
         "prompt_arg_conventions": {
           "source": {
@@ -22185,6 +22248,7 @@
           "value": [
             {
               "cli_flag": "--format",
+              "companion_flags": [],
               "format": "json",
               "native_name": "json",
               "selector": {
@@ -22194,6 +22258,13 @@
               "stdin_supported": false
             }
           ]
+        },
+        "platform_kind": {
+          "source": {
+            "key": "platform_kind",
+            "kind": "facts"
+          },
+          "value": "agent_aggregator"
         },
         "prompt_arg_conventions": {
           "source": {
@@ -27215,6 +27286,7 @@
           "value": [
             {
               "cli_flag": null,
+              "companion_flags": [],
               "format": "text",
               "native_name": "text",
               "selector": {
@@ -27224,6 +27296,7 @@
             },
             {
               "cli_flag": "--output-format",
+              "companion_flags": [],
               "format": "json",
               "native_name": "json",
               "selector": {
@@ -27234,6 +27307,7 @@
             },
             {
               "cli_flag": "--output-format",
+              "companion_flags": [],
               "format": "stream",
               "native_name": "stream-json",
               "selector": {
@@ -27243,6 +27317,13 @@
               "stdin_supported": true
             }
           ]
+        },
+        "platform_kind": {
+          "source": {
+            "key": "platform_kind",
+            "kind": "facts"
+          },
+          "value": "vendor_platform"
         },
         "prompt_arg_conventions": {
           "source": {

@@ -18,18 +18,18 @@
     "reference": "code merely names a provider (fixtures, constructor arguments); nothing to migrate"
   },
   "totals": {
-    "sites": 433,
-    "provider_refs": 473,
+    "sites": 431,
+    "provider_refs": 471,
     "by_form": {
-      "direct-ref": 410,
-      "eq-comparison": 10,
+      "direct-ref": 411,
+      "eq-comparison": 9,
       "matches-macro": 4,
-      "ne-comparison": 7,
+      "ne-comparison": 5,
       "tuple-array": 2
     },
     "by_dispatch_class": {
-      "conditional": 23,
-      "reference": 410
+      "conditional": 20,
+      "reference": 411
     }
   },
   "sites": [
@@ -75,51 +75,11 @@
     },
     {
       "path": "claudine/cli/src/commands/exec_prep/mod.rs",
-      "line": 75,
-      "form": "eq-comparison",
-      "dispatch_class": "conditional",
-      "providers": [
-        "OpenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/cli/src/commands/exec_prep/mod.rs",
-      "line": 89,
-      "form": "ne-comparison",
-      "dispatch_class": "conditional",
-      "providers": [
-        "OpenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/cli/src/commands/exec_prep/mod.rs",
-      "line": 101,
-      "form": "ne-comparison",
-      "dispatch_class": "conditional",
-      "providers": [
-        "OpenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/cli/src/commands/exec_prep/mod.rs",
-      "line": 156,
+      "line": 162,
       "form": "ne-comparison",
       "dispatch_class": "conditional",
       "providers": [
         "Codex"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/cli/src/commands/exec_prep/mod.rs",
-      "line": 168,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "OpenCode"
       ],
       "exempt_candidate": false
     },
@@ -129,13 +89,13 @@
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
-        "Codex"
+        "OpenCode"
       ],
       "exempt_candidate": false
     },
     {
       "path": "claudine/cli/src/commands/exec_prep/mod.rs",
-      "line": 182,
+      "line": 180,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -145,7 +105,7 @@
     },
     {
       "path": "claudine/cli/src/commands/exec_prep/mod.rs",
-      "line": 191,
+      "line": 188,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -155,11 +115,11 @@
     },
     {
       "path": "claudine/cli/src/commands/exec_prep/mod.rs",
-      "line": 193,
+      "line": 197,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
-        "Claude"
+        "Codex"
       ],
       "exempt_candidate": false
     },
@@ -175,7 +135,7 @@
     },
     {
       "path": "claudine/cli/src/commands/exec_prep/mod.rs",
-      "line": 204,
+      "line": 205,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -185,7 +145,17 @@
     },
     {
       "path": "claudine/cli/src/commands/exec_prep/mod.rs",
-      "line": 225,
+      "line": 210,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/cli/src/commands/exec_prep/mod.rs",
+      "line": 231,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -195,7 +165,7 @@
     },
     {
       "path": "claudine/cli/src/commands/exec_prep/mod.rs",
-      "line": 245,
+      "line": 251,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -205,7 +175,7 @@
     },
     {
       "path": "claudine/cli/src/commands/exec_prep/mod.rs",
-      "line": 264,
+      "line": 270,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -215,7 +185,7 @@
     },
     {
       "path": "claudine/cli/src/commands/exec_prep/mod.rs",
-      "line": 275,
+      "line": 281,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -2653,7 +2623,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/profile/claude.rs",
-      "line": 14,
+      "line": 12,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -2713,7 +2683,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/profile/qwen.rs",
-      "line": 15,
+      "line": 12,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -2838,6 +2808,16 @@
       "dispatch_class": "reference",
       "providers": [
         "QwenCode"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/profile/tests/apply_yolo.rs",
+      "line": 52,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "OpenCode"
       ],
       "exempt_candidate": true
     },

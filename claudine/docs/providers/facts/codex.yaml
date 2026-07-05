@@ -180,20 +180,38 @@ memory_files:
   segments: []
 output_formats:
 - cli_flag: null
+  companion_flags: []
   format: text
   native_name: text
   selector:
     kind: default
   stdin_supported: true
 - cli_flag: --json
+  companion_flags: []
   format: json
   native_name: jsonl
   selector:
     flag: --json
     kind: flag
   stdin_supported: true
-- cli_flag: --output-schema
+# The stream record is the structured-stream ground truth (migrated verbatim
+# from the retired CodexWrapper::apply_structured_stream override): Codex's
+# structured stream is `exec --json` (JSONL), not `--output-schema`.
+- cli_flag: --json
+  companion_flags: []
   format: stream
+  native_name: jsonl
+  selector:
+    flag: --json
+    kind: flag
+  stdin_supported: true
+# schema-json is a single JSON document conforming to a schema — a `json`
+# format, not a stream. Kept (re-labeled from `stream`) so native-output
+# detection of `--output-schema` argv is preserved; `--output json` still
+# resolves to the first json record (jsonl) above.
+- cli_flag: --output-schema
+  companion_flags: []
+  format: json
   native_name: schema-json
   selector:
     flag: --output-schema
@@ -282,3 +300,4 @@ stderr_noise_prefixes:
 suppress_structured_stderr_on_success: false
 supports_interactive_inline_closure: true
 model_required_in_non_tty: false
+platform_kind: vendor_platform
