@@ -6,8 +6,13 @@
 //! on every field; unknown `event.type` / `request.type` discriminants fail
 //! typed deserialization so the semantic parser can fall back to a raw
 //! `ProviderExtension` event.
+//!
+//! Wire 1.10 also introduced on-disk session surfaces — background-task
+//! directories (`tasks/`) and compaction snapshots (`context_{N}.jsonl`) —
+//! that are known but deliberately unmodeled here (deferred; they are
+//! storage artifacts, not wire envelopes).
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 // ----------------------------------------------------------------------------
@@ -30,6 +35,17 @@ use serde_json::Value;
 // whose `type` discriminates the typed `KimiWireEvent`. Request params are
 // decoded into `KimiRequestParams` whose `type` discriminates the typed
 // `KimiWireRequest`.
+
+/// Wire protocol versions this Claudine release can drive. The CLI wiring
+/// advertises the newest entry on its `initialize` request; the semantic
+/// parser accepts any response version in this window and emits a terminal
+/// remediation-bearing `Configuration` error for anything else.
+///
+/// The Wire protocol version is an axis independent of both product version
+/// lines — the legacy Python kimi-cli 1.x (state under `~/.kimi`) and the
+/// TypeScript Kimi Code binary 0.x (state under `~/.kimi-code` /
+/// `KIMI_CODE_HOME`) each negotiate their own Wire revision.
+pub const SUPPORTED_WIRE_PROTOCOL_VERSIONS: &[&str] = &["1.9", "1.10"];
 
 /// Classified JSON-RPC envelope received from `kimi --wire`.
 #[derive(Debug)]
@@ -217,6 +233,11 @@ impl KimiRequestParams {
 /// so it dispatches on the discriminator while consuming the payload as a
 /// strongly-typed struct. Unknown event types fail typed deserialization and
 /// the parser surfaces them via the raw fallback path.
+///
+/// The Wire 1.10 additions (`StepRetry`, `StatusUpdate.mcp_status`, the
+/// richer `Notification` payload) are sourced from the Python kimi-cli Wire
+/// source (`wire/types.py`); parity for the TypeScript kimi-code binary is
+/// unconfirmed — research marks its wire envelope coverage partial.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", content = "payload")]
 pub enum KimiWireEvent {
@@ -228,6 +249,8 @@ pub enum KimiWireEvent {
     StepBegin(KimiStepBegin),
     #[serde(rename = "StepInterrupted")]
     StepInterrupted(KimiStepInterrupted),
+    #[serde(rename = "StepRetry")]
+    StepRetry(KimiStepRetry),
     #[serde(rename = "SteerInput")]
     SteerInput(KimiSteerInput),
     #[serde(rename = "CompactionBegin")]
@@ -348,6 +371,27 @@ pub struct KimiStepInterrupted {
     pub reason: Option<String>,
 }
 
+/// `StepRetry` payload (Wire 1.10) — an API call inside a step failed and is
+/// being retried. `wait_s` is the backoff delay in float seconds;
+/// `error_type` is the originating exception class (e.g.
+/// `APIEmptyResponseError`); `status_code` is the HTTP status when one was
+/// observed.
+#[derive(Debug, Default, Deserialize)]
+pub struct KimiStepRetry {
+    #[serde(default)]
+    pub n: Option<u64>,
+    #[serde(default)]
+    pub next_attempt: Option<u64>,
+    #[serde(default)]
+    pub max_attempts: Option<u64>,
+    #[serde(default)]
+    pub wait_s: Option<f64>,
+    #[serde(default)]
+    pub error_type: Option<String>,
+    #[serde(default)]
+    pub status_code: Option<i64>,
+}
+
 /// `SteerInput` payload — out-of-band steering directive from the user.
 #[derive(Debug, Default, Deserialize)]
 pub struct KimiSteerInput {
@@ -405,7 +449,7 @@ pub struct KimiWireStatusUpdate {
     #[serde(default)]
     pub plan_mode: Option<bool>,
     #[serde(default)]
-    pub mcp_status: Option<Value>,
+    pub mcp_status: Option<KimiMcpStatusSnapshot>,
 }
 
 impl KimiWireStatusUpdate {
@@ -460,7 +504,44 @@ impl KimiWireTokenUsage {
     }
 }
 
-/// `Notification` event payload — server-emitted info notice.
+/// `mcp_status` block on `StatusUpdate` (Wire 1.10) — aggregate MCP server
+/// connection state. Derives `Serialize` (unlike sibling payload structs)
+/// so the parser can project the snapshot into event `extra`.
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct KimiMcpStatusSnapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loading: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connected: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub servers: Option<Vec<KimiMcpServerSnapshot>>,
+}
+
+/// Per-server entry in `mcp_status.servers`. `status` is one of `pending`,
+/// `connecting`, `connected`, `failed`, `unauthorized`.
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct KimiMcpServerSnapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<String>>,
+}
+
+/// `Notification` event payload — server-emitted notice.
+///
+/// Decodes both notification shapes additively: the Wire 1.9 fields
+/// (`level`/`title`/`message`/`source` — also the shape Claudine's own
+/// synthetic warning envelopes use) and the Wire 1.10 replacement payload
+/// (`id`/`category`/`type`/`source_kind`/`source_id`/`title`/`body`/
+/// `severity`/`created_at`/`payload`). The parser resolves the message as
+/// `message` → `body` → `title` and the warning level as `level` →
+/// `severity` so both revisions render.
 #[derive(Debug, Default, Deserialize)]
 pub struct KimiWireNotification {
     #[serde(default)]
@@ -471,6 +552,26 @@ pub struct KimiWireNotification {
     pub message: Option<String>,
     #[serde(default)]
     pub source: Option<String>,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default, rename = "type")]
+    pub notification_type: Option<String>,
+    #[serde(default)]
+    pub source_kind: Option<String>,
+    #[serde(default)]
+    pub source_id: Option<String>,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub severity: Option<String>,
+    /// Float Unix timestamp; unit/timezone are not formally specified
+    /// upstream.
+    #[serde(default)]
+    pub created_at: Option<f64>,
+    #[serde(default)]
+    pub payload: Option<Value>,
 }
 
 /// `PlanDisplay` event payload — Kimi plan-mode rendering surface.
@@ -1172,6 +1273,142 @@ mod tests {
     }
 
     #[test]
+    fn supported_versions_window_covers_both_wire_revisions() {
+        assert_eq!(SUPPORTED_WIRE_PROTOCOL_VERSIONS, &["1.9", "1.10"]);
+    }
+
+    #[test]
+    fn step_retry_decodes_full_payload() {
+        let envelope = serde_json::json!({
+            "type": "StepRetry",
+            "payload": {
+                "n": 3,
+                "next_attempt": 2,
+                "max_attempts": 5,
+                "wait_s": 1.5,
+                "error_type": "APIEmptyResponseError",
+                "status_code": 500
+            }
+        });
+        let event: KimiWireEvent = serde_json::from_value(envelope).unwrap();
+        let KimiWireEvent::StepRetry(retry) = event else {
+            panic!("expected StepRetry");
+        };
+        assert_eq!(retry.n, Some(3));
+        assert_eq!(retry.next_attempt, Some(2));
+        assert_eq!(retry.max_attempts, Some(5));
+        assert_eq!(retry.wait_s, Some(1.5));
+        assert_eq!(retry.error_type.as_deref(), Some("APIEmptyResponseError"));
+        assert_eq!(retry.status_code, Some(500));
+    }
+
+    #[test]
+    fn step_retry_decodes_empty_payload() {
+        let envelope = serde_json::json!({"type": "StepRetry", "payload": {}});
+        let event: KimiWireEvent = serde_json::from_value(envelope).unwrap();
+        let KimiWireEvent::StepRetry(retry) = event else {
+            panic!("expected StepRetry");
+        };
+        assert!(retry.error_type.is_none());
+        assert!(retry.status_code.is_none());
+    }
+
+    #[test]
+    fn status_update_decodes_typed_mcp_status() {
+        let envelope = serde_json::json!({
+            "type": "StatusUpdate",
+            "payload": {
+                "context_tokens": 100,
+                "max_context_tokens": 200,
+                "mcp_status": {
+                    "loading": false,
+                    "connected": 2,
+                    "total": 3,
+                    "tools": 14,
+                    "servers": [
+                        {"name": "weather", "status": "connected", "tools": ["forecast"]},
+                        {"name": "broken", "status": "failed", "tools": []}
+                    ]
+                }
+            }
+        });
+        let event: KimiWireEvent = serde_json::from_value(envelope).unwrap();
+        let KimiWireEvent::StatusUpdate(status) = event else {
+            panic!("expected StatusUpdate");
+        };
+        let snapshot = status.mcp_status.expect("mcp_status");
+        assert_eq!(snapshot.loading, Some(false));
+        assert_eq!(snapshot.connected, Some(2));
+        assert_eq!(snapshot.total, Some(3));
+        assert_eq!(snapshot.tools, Some(14));
+        let servers = snapshot.servers.expect("servers");
+        assert_eq!(servers.len(), 2);
+        assert_eq!(servers[0].name.as_deref(), Some("weather"));
+        assert_eq!(servers[1].status.as_deref(), Some("failed"));
+    }
+
+    #[test]
+    fn notification_decodes_1_10_payload() {
+        let envelope = serde_json::json!({
+            "type": "Notification",
+            "payload": {
+                "id": "notif-1",
+                "category": "task",
+                "type": "task.completed",
+                "source_kind": "background_task",
+                "source_id": "task-9",
+                "title": "Background task finished",
+                "body": "Task `lint` completed",
+                "severity": "info",
+                "created_at": 1751700000.25,
+                "payload": {"exit_code": 0}
+            }
+        });
+        let event: KimiWireEvent = serde_json::from_value(envelope).unwrap();
+        let KimiWireEvent::Notification(notification) = event else {
+            panic!("expected Notification");
+        };
+        assert_eq!(notification.category.as_deref(), Some("task"));
+        assert_eq!(
+            notification.notification_type.as_deref(),
+            Some("task.completed")
+        );
+        assert_eq!(
+            notification.source_kind.as_deref(),
+            Some("background_task")
+        );
+        assert_eq!(notification.body.as_deref(), Some("Task `lint` completed"));
+        assert_eq!(notification.severity.as_deref(), Some("info"));
+        assert_eq!(notification.created_at, Some(1751700000.25));
+        // 1.9 fields are absent on a pure 1.10 payload.
+        assert!(notification.level.is_none());
+        assert!(notification.message.is_none());
+    }
+
+    #[test]
+    fn notification_still_decodes_1_9_payload() {
+        let envelope = serde_json::json!({
+            "type": "Notification",
+            "payload": {
+                "level": "error",
+                "source": "claudine",
+                "message": "Hook dispatch failed: boom"
+            }
+        });
+        let event: KimiWireEvent = serde_json::from_value(envelope).unwrap();
+        let KimiWireEvent::Notification(notification) = event else {
+            panic!("expected Notification");
+        };
+        assert_eq!(notification.level.as_deref(), Some("error"));
+        assert_eq!(
+            notification.message.as_deref(),
+            Some("Hook dispatch failed: boom")
+        );
+        assert!(notification.severity.is_none());
+        assert!(notification.body.is_none());
+    }
+
+    #[test]
     fn tool_call_arguments_string_round_trip() {
         let envelope = serde_json::json!({
             "type": "ToolCall",
@@ -1554,6 +1791,47 @@ mod tests {
             nested_typed > 0,
             "expected at least one nested event to decode"
         );
+    }
+
+    #[test]
+    fn wire_protocol_110_fixture_decodes_new_event_surface() {
+        let envelopes = classify_lines("wire-protocol-110.jsonl");
+        let mut init_version: Option<String> = None;
+        let mut step_retry = 0;
+        let mut mcp_snapshots = 0;
+        let mut rich_notifications = 0;
+        for env in envelopes {
+            match env {
+                KimiEnvelope::SuccessResponse { id, result } if id.as_str() == Some("init-1") => {
+                    let parsed: KimiInitializeResult = serde_json::from_value(result).unwrap();
+                    init_version = parsed.protocol_version;
+                }
+                KimiEnvelope::Notification(params) => match params.into_event() {
+                    Some(KimiWireEvent::StepRetry(retry)) => {
+                        step_retry += 1;
+                        assert_eq!(retry.error_type.as_deref(), Some("APIEmptyResponseError"));
+                        assert_eq!(retry.status_code, Some(500));
+                    }
+                    Some(KimiWireEvent::StatusUpdate(status)) => {
+                        let snapshot = status.mcp_status.expect("typed mcp_status");
+                        assert_eq!(snapshot.connected, Some(1));
+                        mcp_snapshots += 1;
+                    }
+                    Some(KimiWireEvent::Notification(notification)) => {
+                        assert_eq!(notification.category.as_deref(), Some("task"));
+                        assert_eq!(notification.body.as_deref(), Some("Task `lint` completed"));
+                        rich_notifications += 1;
+                    }
+                    Some(_) => {}
+                    None => panic!("1.10 fixture line failed typed decode"),
+                },
+                _ => {}
+            }
+        }
+        assert_eq!(init_version.as_deref(), Some("1.10"));
+        assert_eq!(step_retry, 1);
+        assert_eq!(mcp_snapshots, 1);
+        assert_eq!(rich_notifications, 1);
     }
 
     #[test]
