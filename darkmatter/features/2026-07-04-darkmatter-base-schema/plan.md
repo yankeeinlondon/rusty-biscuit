@@ -5,6 +5,24 @@ created: 2026-07-04
 start_phase: 1
 yolo: true
 spec: darkmatter/features/2026-07-04-darkmatter-base-schema/spec.md
+source_files_during_phase_1:
+  - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+  - darkmatter/lib/src/markdown/schemas/about.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+  - darkmatter/lib/src/markdown/schemas/mod.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages:
+  - darkmatter
 ---
 
 # Execution Plan: Darkmatter Base Frontmatter Schema
@@ -70,52 +88,52 @@ grammar.rs, mod.rs, serialize.rs}`, `darkmatter/lib/src/markdown/schemas/about.r
 
 ### Tasks
 
-- [ ] Add `Constraint::Generated` variant to the `Constraint` enum in
+- [x] Add `Constraint::Generated` variant to the `Constraint` enum in
   `simplified/types.rs`, placed in the "universal" section alongside
   `Required` and `Default`. Add its `keyword()` arm returning `"generated"`.
-- [ ] Teach the string grammar parser (`simplified/grammar.rs`,
+- [x] Teach the string grammar parser (`simplified/grammar.rs`,
   `parse_one_constraint`) to recognize `generated` as a bare no-argument
   constraint keyword (mirrors `required`/`eager`/`integer`). Reject
   `generated(...)` with an arguments error.
-- [ ] Extend the YAML-shape layer (`simplified/mod.rs`, `parse_property_def`)
+- [x] Extend the YAML-shape layer (`simplified/mod.rs`, `parse_property_def`)
   to accept a `YamlValue::Mapping` at a property position as a nested object
   shape: lower it to `PropertyDef::Single(PropertyAtom::bare_inline_object(shape))`
   by recursively parsing each mapping entry's value through
   `parse_property_def` (so nested mappings, sequences, and string type
   expressions all work). Remove the current "reserved for future" rejection at
   line 150.
-- [ ] Extend the YAML-shape layer to accept `YamlValue::Mapping` arms inside a
+- [x] Extend the YAML-shape layer to accept `YamlValue::Mapping` arms inside a
   property-level `Sequence` (union). Each mapping arm lowers to an inline
   object `PropertyAtom`; string arms continue to lower through the grammar.
   Remove the rejection at `simplified/mod.rs:120`.
-- [ ] Enforce the parser rules from spec §"Nested Object Syntax Requirement":
+- [x] Enforce the parser rules from spec §"Nested Object Syntax Requirement":
   (1) a mapping value means "object with these properties," (2) leaf values use
   the existing type-expression grammar including `-> description` and
   `default(...)`, (3) nesting is recursive, (4) sequence values mean property
   unions and a sequence arm may be a type-expression string or a nested
   mapping object shape, (5) a nested mapping without an explicit `type:` key
   is an object shape (not a future long-form descriptor).
-- [ ] Update `serialize_property_atom` (`simplified/serialize.rs`) to emit
+- [x] Update `serialize_property_atom` (`simplified/serialize.rs`) to emit
   `generated` in the constraint list so proptest round-trips stay honest.
-- [ ] Add a `SchemaConstraintDescriptor` entry for `generated` to
+- [x] Add a `SchemaConstraintDescriptor` entry for `generated` to
   `SCHEMA_CONSTRAINT_DESCRIPTORS` in `about.rs` (`form: "generated"`,
   `target_types: "all types"`, `argument_arity: "0"`,
   `json_schema_effect:` describing the `x-darkmatter-generated` extension and
   static-`required` suppression). This must land in the same change as the
   enum variant or the `constraint_set_matches_descriptor_set` parity test
   fails.
-- [ ] Update `SCHEMA_SHAPE_DESCRIPTORS` (`about.rs`) with a descriptor for the
+- [x] Update `SCHEMA_SHAPE_DESCRIPTORS` (`about.rs`) with a descriptor for the
   nested mapping object shape so `md schema about` advertises it.
 
 ### Validation Checkpoint
 
-- [ ] `just test` passes in `darkmatter/` with new unit tests covering: (a)
+- [x] `just test` passes in `darkmatter/` with new unit tests covering: (a)
   `string(generated; required)` parses to two constraints; (b) a nested
   mapping lowers to the same `SchemaShape` as the equivalent quoted inline
   object literal `{ foo: string, bar: number }`; (c) a sequence union with a
   mapping arm lowers correctly; (d) `serialize_property_atom` round-trips
   `generated`; (e) `constraint_set_matches_descriptor_set` passes.
-- [ ] `just lint` passes.
+- [x] `just lint` passes.
 
 ---
 
@@ -133,40 +151,40 @@ are preserved for runtime/effective schemas.
 
 ### Tasks
 
-- [ ] In `convert.rs`, when an atom carries `Constraint::Generated`, emit an
+- [x] In `convert.rs`, when an atom carries `Constraint::Generated`, emit an
   `x-darkmatter-generated: true` annotation on the property's schema object so
   downstream tooling (LSP, completion, runtime validators) can discover the
   ownership/supply semantics.
-- [ ] Define and implement the static-`required` suppression rule: a property
+- [x] Define and implement the static-`required` suppression rule: a property
   whose atom carries `Generated` is **not** added to the parent object's
   `required` array during conversion, even when `Required` is also present.
   This makes an absent `generated` property pass static authored-document
   validation (spec semantics point 1).
-- [ ] Preserve `required` type/nullability: a `string(generated; required)`
+- [x] Preserve `required` type/nullability: a `string(generated; required)`
   atom still lowers to a non-nullable `string` type (no `null` arm added), so
   a host-supplied runtime value is type-checked. Verify the existing
   optional-`null`-arm logic keys off `Required` presence, not `required`-array
   membership.
-- [ ] Audit `resolve.rs` baseline-merge (`merge_baseline_into_document` ~line
+- [x] Audit `resolve.rs` baseline-merge (`merge_baseline_into_document` ~line
   339) so a baseline `generated` property does not get force-added to the
   document-level `required` list during merge. The merge copies baseline
   `required` entries (line 342); confirm `generated` baseline properties are
   excluded there too, or that convert already suppressed them.
-- [ ] Verify the compose-time schema validation stage
+- [x] Verify the compose-time schema validation stage
   (`compose/schema_validation.rs`) and `rewrite.rs` do not regress when a
   `generated` property is absent from authored frontmatter.
 
 ### Validation Checkpoint
 
-- [ ] Snapshot/unit tests in `convert.rs` prove: (1) a `generated` property is
+- [x] Snapshot/unit tests in `convert.rs` prove: (1) a `generated` property is
   absent from the emitted `required` array; (2) the same property carries
   `x-darkmatter-generated: true`; (3) the type remains non-nullable when
   `required` is also present; (4) `generated` + non-required still emits a
   nullable type as before.
-- [ ] A focused integration test shows an authored document omitting a
+- [x] A focused integration test shows an authored document omitting a
   baseline `ctx.*` `generated; required` property validates cleanly, while the
   same document with a wrongly-typed `ctx.today` value fails.
-- [ ] `just test` passes.
+- [x] `just test` passes.
 
 ---
 

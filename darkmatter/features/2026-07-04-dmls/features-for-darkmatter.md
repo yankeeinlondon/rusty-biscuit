@@ -37,7 +37,6 @@ Markdown authors simply define a `$schema` frontmatter property using a grammar 
 In most (all?) Markdown LSP's the focus is on the Markdown document's body. DMLS focuses on _both_ the prose content in the body _and_ the YAML frontmatter. That means we'll likely get no "out of the box" support for the Frontmatter portion but because Darkmatter embues special meaning to certain Frontmatter (in Darkmatter but even more in the Claudine library who uses Darkmatter).
 
 
-
 ## Interpolation
 
 Interpolation 

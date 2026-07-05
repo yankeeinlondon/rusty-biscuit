@@ -1,6 +1,6 @@
 # Baseline SimplifiedSchema for Darkmatter-owned Markdown frontmatter.
-# This file intentionally uses the proposed nested object syntax described in
-# darkmatter/features/2026-07-04-darkmatter-base-schema/spec.md.
+# This is the authored source of truth for the darkmatter base schema; the
+# library loads it via include_str! and the docs transclude it verbatim.
 $schema:
   '$schema': "any -> Declares an inline schema, referenced schema file, root union, or raw JSON Schema for this document. Document schemas override baseline properties on conflict."
 
@@ -17,106 +17,12 @@ $schema:
       value: "any -> Stored hash payload. A string is used for fm, body, simple, and structured hashes; detailed hashes use a nested object."
       ignored: "string[] -> Extra frontmatter keys ignored during hash computation. The managed hash key and last_updated are always ignored and should not be listed."
 
-  # Render style configuration. Runtime validation and application remain
-  # authoritative in darkmatter::style.
-  style:
-    page:
-      left-margin: "string -> Left page margin as a horizontal length such as '2ch' or '10%'."
-      left_margin: "string -> Deprecated snake_case alias for left-margin."
-      right-margin: "string -> Right page margin as a horizontal length such as '2ch' or '10%'."
-      right_margin: "string -> Deprecated snake_case alias for right-margin."
-      top-margin: "number(integer; min(0)) -> Top page margin in terminal rows."
-      top_margin: "number(integer; min(0)) -> Deprecated snake_case alias for top-margin."
-      bottom-margin: "number(integer; min(0)) -> Bottom page margin in terminal rows."
-      bottom_margin: "number(integer; min(0)) -> Deprecated snake_case alias for bottom-margin."
-      left-padding: "string -> Left page padding as a horizontal length."
-      left_padding: "string -> Deprecated snake_case alias for left-padding."
-      right-padding: "string -> Right page padding as a horizontal length."
-      right_padding: "string -> Deprecated snake_case alias for right-padding."
-      top-padding: "number(integer; min(0)) -> Top page padding in terminal rows."
-      top_padding: "number(integer; min(0)) -> Deprecated snake_case alias for top-padding."
-      bottom-padding: "number(integer; min(0)) -> Bottom page padding in terminal rows."
-      bottom_padding: "number(integer; min(0)) -> Deprecated snake_case alias for bottom-padding."
-      max-width: "string -> Maximum page width as a horizontal length."
-      max_width: "string -> Deprecated snake_case alias for max-width."
-      alignment: "enum(left, center, centered, right) -> Page alignment inside the available viewport."
-      color: "string -> Foreground paint color. Accepts Darkmatter style color syntax such as Tailwind names and CSS colors."
-      bg-color: "string -> Background paint color. Accepts Darkmatter style color syntax such as Tailwind names and CSS colors."
-      bg_color: "string -> Deprecated snake_case alias for bg-color."
-      background: "enum(none, subtle, pronounced) -> Page background treatment."
-      stylesheet: "string -> Browser stylesheet reference or inline stylesheet source, resolved by the render pipeline."
-      meta: "object -> Browser meta tag configuration for rendered HTML."
-      code:
-        theme: "string -> Code block syntax-highlighting theme override for code rendered in this page."
-
-    table: &common-style
-      width:
-        - "string -> Component width. Accepts 'auto', 'fit-content', or a horizontal length."
-        - "number(integer; min(0)) -> Component width in character cells."
-      max-width: "string -> Maximum component width as a horizontal length."
-      max_width: "string -> Deprecated snake_case alias for max-width."
-      alignment: "enum(left, center, centered, right) -> Component text/layout alignment."
-      color: "string -> Component foreground paint color."
-      bg-color: "string -> Component background paint color."
-      bg_color: "string -> Deprecated snake_case alias for bg-color."
-      margin:
-        - "string -> Margin shorthand as a horizontal length."
-        - "number(integer; min(0)) -> Margin shorthand in character cells."
-      padding:
-        - "string -> Padding shorthand as a horizontal length."
-        - "number(integer; min(0)) -> Padding shorthand in character cells."
-      border:
-        - "boolean -> Enables or disables a default border."
-        - "enum(thin, medium, thick) -> Border weight shorthand."
-        - left: "boolean -> Whether to draw the left border side."
-          right: "boolean -> Whether to draw the right border side."
-          top: "boolean -> Whether to draw the top border side."
-          bottom: "boolean -> Whether to draw the bottom border side."
-          weight: "enum(thin, medium, thick) -> Border weight."
-          color: "string -> Border paint color."
-          style: "string -> Border line style."
-          radius: "string -> Border radius as a length."
-      emphasis:
-        bold: "boolean -> Render component text in bold."
-        italic: "boolean -> Render component text in italics."
-        underline: "boolean -> Render component text with underline."
-        dim: "boolean -> Render component text dimmed."
-      word-wrap: "enum(normal, break-word, anywhere) -> Component word-wrapping policy."
-      word_wrap: "enum(normal, break-word, anywhere) -> Deprecated snake_case alias for word-wrap."
-
-    block-quote: *common-style
-    block_quote: *common-style
-    disclosure: *common-style
-    code-block: *common-style
-    code_block: *common-style
-    ol: *common-style
-    li: *common-style
-
-    ul:
-      <<: *common-style
-      left-margin: "string -> Additional left margin applied to unordered-list content."
-      left_margin: "string -> Deprecated snake_case alias for left-margin."
-
-    hyperlinks:
-      <<: *common-style
-      local-style: *common-style
-      local_style: *common-style
-
-    images:
-      <<: *common-style
-      local-style: *common-style
-      local_style: *common-style
-
-    hr:
-      width: "string -> Horizontal-rule width as a horizontal length."
-      max-width: "string -> Horizontal-rule maximum width as a horizontal length."
-      max_width: "string -> Deprecated snake_case alias for max-width."
-      color: "string -> Horizontal-rule foreground paint color."
-      bg-color: "string -> Horizontal-rule background paint color."
-      bg_color: "string -> Deprecated snake_case alias for bg-color."
-      alignment: "enum(full, left, center, centered, right) -> Horizontal-rule alignment."
-      kind: "enum(dashes, dots, waves, line-star, line-circle, inset-line, curtain-rod) -> Horizontal-rule visual style."
-      weight: "enum(thin, medium, thick) -> Horizontal-rule visual weight."
+  # Render style configuration. Modeled as a broad `object` in v1 per Non-Goal
+  # 2: the darkmatter::style runtime parser is the authoritative validator and
+  # the shape is still moving. See style::descriptor::SCHEMA for the canonical
+  # leaf catalog and style::parse::ACTIVE_STYLE_WIRING_SUB_SPEC for the active
+  # wiring phase.
+  style: "object -> Render style configuration. Runtime validation and application remain authoritative in darkmatter::style."
 
   change: "any -> Change metadata used by Darkmatter workflows. The v1 baseline accepts all shapes until the public change contract is finalized."
   replace: "object -> Literal text replacement map applied during compose. Keys are source strings and values are replacement strings."
