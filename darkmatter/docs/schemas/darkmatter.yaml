@@ -1,0 +1,233 @@
+# Baseline SimplifiedSchema for Darkmatter-owned Markdown frontmatter.
+# This file intentionally uses the proposed nested object syntax described in
+# darkmatter/features/2026-07-04-darkmatter-base-schema/spec.md.
+$schema:
+  '$schema': "any -> Declares an inline schema, referenced schema file, root union, or raw JSON Schema for this document. Document schemas override baseline properties on conflict."
+
+  title: "string -> Human-readable document title. Used by markdown_title(), reports, diagnostics, and downstream tools that need a display name."
+  description: "string -> Human-readable document summary. Used by reports and diagnostics when identifying a document."
+  tags: "string[] -> Freeform document tags."
+  draft: "boolish -> Author-controlled draft marker. Darkmatter does not use this for compose control but commonly ignores it during hash workflows."
+  last_updated: "date -> Managed content-change date in YYYY-MM-DD form. Hash save and downstream tools may update it when content changes."
+  metadata: "object -> Arbitrary author metadata. Darkmatter preserves it and leaves interpretation to downstream tools."
+
+  hash:
+    - "string -> Stored shorthand hash. The simple form is '<frontmatter>-<body>' with 16 hexadecimal characters per segment."
+    - kind: "enum(fm, body, simple, structured, detailed; default(simple)) -> Hash resolution stored in longhand form."
+      value: "any -> Stored hash payload. A string is used for fm, body, simple, and structured hashes; detailed hashes use a nested object."
+      ignored: "string[] -> Extra frontmatter keys ignored during hash computation. The managed hash key and last_updated are always ignored and should not be listed."
+
+  # Render style configuration. Runtime validation and application remain
+  # authoritative in darkmatter::style.
+  style:
+    page:
+      left-margin: "string -> Left page margin as a horizontal length such as '2ch' or '10%'."
+      left_margin: "string -> Deprecated snake_case alias for left-margin."
+      right-margin: "string -> Right page margin as a horizontal length such as '2ch' or '10%'."
+      right_margin: "string -> Deprecated snake_case alias for right-margin."
+      top-margin: "number(integer; min(0)) -> Top page margin in terminal rows."
+      top_margin: "number(integer; min(0)) -> Deprecated snake_case alias for top-margin."
+      bottom-margin: "number(integer; min(0)) -> Bottom page margin in terminal rows."
+      bottom_margin: "number(integer; min(0)) -> Deprecated snake_case alias for bottom-margin."
+      left-padding: "string -> Left page padding as a horizontal length."
+      left_padding: "string -> Deprecated snake_case alias for left-padding."
+      right-padding: "string -> Right page padding as a horizontal length."
+      right_padding: "string -> Deprecated snake_case alias for right-padding."
+      top-padding: "number(integer; min(0)) -> Top page padding in terminal rows."
+      top_padding: "number(integer; min(0)) -> Deprecated snake_case alias for top-padding."
+      bottom-padding: "number(integer; min(0)) -> Bottom page padding in terminal rows."
+      bottom_padding: "number(integer; min(0)) -> Deprecated snake_case alias for bottom-padding."
+      max-width: "string -> Maximum page width as a horizontal length."
+      max_width: "string -> Deprecated snake_case alias for max-width."
+      alignment: "enum(left, center, centered, right) -> Page alignment inside the available viewport."
+      color: "string -> Foreground paint color. Accepts Darkmatter style color syntax such as Tailwind names and CSS colors."
+      bg-color: "string -> Background paint color. Accepts Darkmatter style color syntax such as Tailwind names and CSS colors."
+      bg_color: "string -> Deprecated snake_case alias for bg-color."
+      background: "enum(none, subtle, pronounced) -> Page background treatment."
+      stylesheet: "string -> Browser stylesheet reference or inline stylesheet source, resolved by the render pipeline."
+      meta: "object -> Browser meta tag configuration for rendered HTML."
+      code:
+        theme: "string -> Code block syntax-highlighting theme override for code rendered in this page."
+
+    table: &common-style
+      width:
+        - "string -> Component width. Accepts 'auto', 'fit-content', or a horizontal length."
+        - "number(integer; min(0)) -> Component width in character cells."
+      max-width: "string -> Maximum component width as a horizontal length."
+      max_width: "string -> Deprecated snake_case alias for max-width."
+      alignment: "enum(left, center, centered, right) -> Component text/layout alignment."
+      color: "string -> Component foreground paint color."
+      bg-color: "string -> Component background paint color."
+      bg_color: "string -> Deprecated snake_case alias for bg-color."
+      margin:
+        - "string -> Margin shorthand as a horizontal length."
+        - "number(integer; min(0)) -> Margin shorthand in character cells."
+      padding:
+        - "string -> Padding shorthand as a horizontal length."
+        - "number(integer; min(0)) -> Padding shorthand in character cells."
+      border:
+        - "boolean -> Enables or disables a default border."
+        - "enum(thin, medium, thick) -> Border weight shorthand."
+        - left: "boolean -> Whether to draw the left border side."
+          right: "boolean -> Whether to draw the right border side."
+          top: "boolean -> Whether to draw the top border side."
+          bottom: "boolean -> Whether to draw the bottom border side."
+          weight: "enum(thin, medium, thick) -> Border weight."
+          color: "string -> Border paint color."
+          style: "string -> Border line style."
+          radius: "string -> Border radius as a length."
+      emphasis:
+        bold: "boolean -> Render component text in bold."
+        italic: "boolean -> Render component text in italics."
+        underline: "boolean -> Render component text with underline."
+        dim: "boolean -> Render component text dimmed."
+      word-wrap: "enum(normal, break-word, anywhere) -> Component word-wrapping policy."
+      word_wrap: "enum(normal, break-word, anywhere) -> Deprecated snake_case alias for word-wrap."
+
+    block-quote: *common-style
+    block_quote: *common-style
+    disclosure: *common-style
+    code-block: *common-style
+    code_block: *common-style
+    ol: *common-style
+    li: *common-style
+
+    ul:
+      <<: *common-style
+      left-margin: "string -> Additional left margin applied to unordered-list content."
+      left_margin: "string -> Deprecated snake_case alias for left-margin."
+
+    hyperlinks:
+      <<: *common-style
+      local-style: *common-style
+      local_style: *common-style
+
+    images:
+      <<: *common-style
+      local-style: *common-style
+      local_style: *common-style
+
+    hr:
+      width: "string -> Horizontal-rule width as a horizontal length."
+      max-width: "string -> Horizontal-rule maximum width as a horizontal length."
+      max_width: "string -> Deprecated snake_case alias for max-width."
+      color: "string -> Horizontal-rule foreground paint color."
+      bg-color: "string -> Horizontal-rule background paint color."
+      bg_color: "string -> Deprecated snake_case alias for bg-color."
+      alignment: "enum(full, left, center, centered, right) -> Horizontal-rule alignment."
+      kind: "enum(dashes, dots, waves, line-star, line-circle, inset-line, curtain-rod) -> Horizontal-rule visual style."
+      weight: "enum(thin, medium, thick) -> Horizontal-rule visual weight."
+
+  change: "any -> Change metadata used by Darkmatter workflows. The v1 baseline accepts all shapes until the public change contract is finalized."
+  replace: "object -> Literal text replacement map applied during compose. Keys are source strings and values are replacement strings."
+  ctx:
+    now: "datetime(generated; required) -> the current date and time in ISO-8601 format, resolved using the host's local timezone."
+    now_utc: "datetime(generated; required) -> the current date and time in ISO-8601 format, resolved using UTC."
+    utc: "datetime(generated; required) -> alias for now_utc; the current UTC date and time in ISO-8601 format."
+    today: "date(generated; required) -> today's date in YYYY-MM-DD form, resolved using the host's local timezone."
+    today_utc: "date(generated; required) -> today's date in YYYY-MM-DD form, resolved using UTC."
+    yesterday: "date(generated; required) -> yesterday's date in YYYY-MM-DD form, resolved using the host's local timezone."
+    yesterday_utc: "date(generated; required) -> yesterday's date in YYYY-MM-DD form, resolved using UTC."
+    tomorrow: "date(generated; required) -> tomorrow's date in YYYY-MM-DD form, resolved using the host's local timezone."
+    tomorrow_utc: "date(generated; required) -> tomorrow's date in YYYY-MM-DD form, resolved using UTC."
+    start_of_week_sun: "date(generated; required) -> start of the current Sunday-based week in YYYY-MM-DD form, resolved using the host's local timezone."
+    start_of_week_sun_utc: "date(generated; required) -> start of the current Sunday-based week in YYYY-MM-DD form, resolved using UTC."
+    start_of_week_mon: "date(generated; required) -> start of the current Monday-based week in YYYY-MM-DD form, resolved using the host's local timezone."
+    start_of_week_mon_utc: "date(generated; required) -> start of the current Monday-based week in YYYY-MM-DD form, resolved using UTC."
+    end_of_week_sun: "date(generated; required) -> end of the current Sunday-based week in YYYY-MM-DD form, resolved using the host's local timezone."
+    end_of_week_sun_utc: "date(generated; required) -> end of the current Sunday-based week in YYYY-MM-DD form, resolved using UTC."
+    end_of_week_mon: "date(generated; required) -> end of the current Monday-based week in YYYY-MM-DD form, resolved using the host's local timezone."
+    end_of_week_mon_utc: "date(generated; required) -> end of the current Monday-based week in YYYY-MM-DD form, resolved using UTC."
+    time: "string(generated; required) -> current time in 12-hour clock form, resolved using the host's local timezone."
+    time_military: "string(generated; required) -> current time in 24-hour clock form, resolved using the host's local timezone."
+    time_utc: "string(generated; required) -> current time in 12-hour clock form, resolved using UTC."
+    time_military_utc: "string(generated; required) -> current time in 24-hour clock form, resolved using UTC."
+    timezone: "string(generated; required) -> timezone abbreviation for the host's local timezone."
+    timezone_offset: "string(generated; required) -> UTC offset for the host's local timezone."
+    timezone_iana: "string(generated; required) -> IANA timezone identifier for the host's local timezone when available."
+    day: "string(generated; required) -> day of the week, resolved using the host's local timezone."
+    dow: "string(generated; required) -> Alias for day."
+    day_abbr: "string(generated; required) -> abbreviated day of the week, resolved using the host's local timezone."
+    dow_abbr: "string(generated; required) -> Alias for day_abbr."
+    day_utc: "string(generated; required) -> day of the week, resolved using UTC."
+    day_abbr_utc: "string(generated; required) -> abbreviated day of the week, resolved using UTC."
+    year: "string(generated; required) -> four-digit year, resolved using the host's local timezone."
+    year_utc: "string(generated; required) -> four-digit year, resolved using UTC."
+    day_of_month: "string(generated; required) -> numeric day of month, resolved using the host's local timezone."
+    day_of_month_suffixed: "string(generated; required) -> day of month with ordinal suffix, resolved using the host's local timezone."
+    month: "string(generated; required) -> two-digit month, resolved using the host's local timezone."
+    month_name: "string(generated; required) -> full month name, resolved using the host's local timezone."
+    month_name_abbr: "string(generated; required) -> abbreviated month name, resolved using the host's local timezone."
+    season: "string(generated; required) -> meteorological season, resolved using the host's local timezone."
+    timestamp: "number(integer; generated; required) -> Unix timestamp in seconds for the captured instant; timezone-independent."
+    timestamp_ms: "number(integer; generated; required) -> Unix timestamp in milliseconds for the captured instant; timezone-independent."
+
+    repo: "string(generated; required) -> Repository name; null when no repository is detected."
+    repo_root: "string(generated; required) -> Absolute repository root path; null when no repository is detected."
+    is_monorepo: "boolean(generated; required) -> Whether the current repository is a monorepo."
+    package_root: "string(generated; required) -> Absolute current package root; null outside a package."
+    package_area_root: "string(generated; required) -> Absolute current package-area root; null outside a package area."
+    packages: "string[](generated; required) -> Workspace package names; null outside a monorepo."
+    packages_list: "string(generated; required) -> Markdown bullet list of workspace packages."
+    package_areas: "string[](generated; required) -> Unique package area names; null outside a monorepo."
+    package_areas_list: "string(generated; required) -> Markdown bullet list of package areas."
+    current_package: "string(generated; required) -> Current package name; null outside a package."
+    current_package_area: "string(generated; required) -> Current package area; null outside a package area."
+    area: "string(generated; required) -> Current package or package-area scope name, or empty string at repo root."
+    area_description: "string(generated; required) -> Human-readable description of the current package or package-area scope."
+    area_root: "string(generated; required) -> Absolute root path for the current area."
+    current_packages: "string(generated; required) -> Markdown bullet list of packages under the current directory."
+    depends_on: "string(generated; required) -> Nested Markdown list of workspace-internal dependencies for the current area."
+    used_by: "string(generated; required) -> Nested Markdown list of workspace-internal dependents for the current area."
+
+    dirty_files: "string(generated; required) -> Comma-separated dirty file paths."
+    dirty_files_list: "string(generated; required) -> Markdown bullet list of dirty file paths."
+    dirty_source_code_files: "string(generated; required) -> Comma-separated dirty source-code file paths."
+    dirty_source_code_files_list: "string(generated; required) -> Markdown bullet list of dirty source-code file paths."
+    staged_files: "string(generated; required) -> Comma-separated staged file paths."
+    staged_files_list: "string(generated; required) -> Markdown bullet list of staged file paths."
+    untracked_files: "string(generated; required) -> Comma-separated untracked file paths."
+    untracked_files_list: "string(generated; required) -> Markdown bullet list of untracked file paths."
+    dirty_packages: "string(generated; required) -> Comma-separated dirty package names."
+    dirty_packages_list: "string(generated; required) -> Markdown bullet list of dirty package names."
+    dirty_package_areas: "string(generated; required) -> Comma-separated dirty package area names."
+    dirty_package_areas_list: "string(generated; required) -> Markdown bullet list of dirty package area names."
+    staged_packages: "string(generated; required) -> Comma-separated staged package names."
+    staged_packages_list: "string(generated; required) -> Markdown bullet list of staged package names."
+    staged_package_areas: "string(generated; required) -> Comma-separated staged package area names."
+    staged_package_areas_list: "string(generated; required) -> Markdown bullet list of staged package area names."
+    current_package_has_staged_files: "boolean(generated; required) -> Whether the current package has staged files."
+    current_package_area_has_staged_files: "boolean(generated; required) -> Whether the current package area has staged files."
+    current_package_has_dirty_files: "boolean(generated; required) -> Whether the current package has dirty files."
+    current_package_area_has_dirty_files: "boolean(generated; required) -> Whether the current package area has dirty files."
+
+    programming_languages_in_repo: "string(generated; required) -> Comma-separated unique programming languages in the repository; null outside a repository."
+    programming_language: "string(generated; required) -> Context-sensitive primary programming language; null outside a repository."
+    package_manager: "string(generated; required) -> Context-sensitive package manager; null when not detected."
+
+    docs_readme: "string(generated; required) -> Comma-separated README paths, scope-filtered to the current area."
+    docs_blast_radius: "string(generated; required) -> Comma-separated docs with blast_radius frontmatter, scope-filtered to the current area."
+    docs_drift: "string(generated; required) -> Comma-separated docs at risk of drift from source changes."
+    docs_skill: "string(generated; required) -> Repo-relative path to the best matching SKILL.md; null when none is found."
+
+    os: "string(generated; required) -> Operating system family such as Windows, macOS, or Linux; null for other OS types."
+    os_distro: "string(generated; required) -> Linux distribution name, or empty string on macOS and Windows."
+    os_package_manager: "string(generated; required) -> Primary system package manager; null when not detected."
+    os_version: "string(generated; required) -> Operating system version."
+    memory_total: "number(integer; generated; required) -> Total system memory in bytes."
+    memory_used: "number(generated; required) -> Percentage of memory currently used."
+    memory_avail: "number(integer; generated; required) -> Available system memory in bytes."
+    cpu_cores: "number(integer; generated; required) -> Logical CPU core count."
+    cpu_arch: "string(generated; required) -> CPU architecture."
+    gpu: "string(generated; required) -> GPU device names as a comma-separated string; null when no GPU is detected."
+    agent: "string(default(unknown); generated; required) -> Executing agentic CLI name from the AGENT environment variable."
+    model: "string(default(default); generated; required) -> Active model identifier from the MODEL environment variable."
+
+  prologue:
+    - "string(default(null)) -> File reference, inline text, or bare filename inserted before the body during transclusion."
+    - "string[] -> Ordered prologue references inserted before the body during transclusion."
+  epilogue:
+    - "string(default(null)) -> File reference, inline text, or bare filename inserted after the body during transclusion."
+    - "string[] -> Ordered epilogue references inserted after the body during transclusion."
+  ignore_invalid: "boolish -> Allows invalid transclusion references to be left in place as warnings instead of aborting composition."
+  interpolate_code_blocks: "boolish -> Enables interpolation inside fenced code blocks. Disabled by default so code examples stay literal."
