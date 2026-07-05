@@ -40,7 +40,7 @@ use sniff::programs::InstalledAiClients;
 use super::env;
 use super::profile::{self, WrapperProfile};
 use super::{
-    HarnessPromptMode, HarnessPromptState, StructuredCodexOutput, apply_composition_shell_overrides,
+    HarnessPromptMode, HarnessPromptState, apply_composition_shell_overrides,
     build_harness_shell_options_with_cache, materialized_harness_prompt_from_prepared,
     resolve_binary_path_direct, run_harness_loop, structured_verbosity, wrap_terminal,
 };
@@ -854,19 +854,11 @@ fn execute_composition_request_inner_with_guard(
 
         if let Some(injector) = injector_for_provider(provider) {
             if !session.servers.is_empty() {
-                if needs_mcp_shadow_home && env_plan.shadow_home_path.is_none() {
-                    let (shadow_env, shadow_path, _) = super::repo_home::build_repo_home_env(
-                        provider,
-                        env_plan.child_cwd.as_path(),
-                        false,
-                        false,
-                        Some(env_plan.child_cwd.as_path()),
-                    )?;
-                    for (key, value) in shadow_env {
-                        env_plan.env.insert(key, value);
-                    }
-                    env_plan.shadow_home_path = shadow_path;
-                }
+                crate::commands::exec_prep::ensure_shadow_home(
+                    provider,
+                    needs_mcp_shadow_home,
+                    &mut env_plan,
+                )?;
                 let shadow = env_plan.shadow_home_path.as_deref();
                 let mut string_env = std::collections::HashMap::new();
                 let result = injector
@@ -964,60 +956,31 @@ fn execute_composition_request_inner_with_guard(
         profile.apply_non_interactive_flags(&mut child_args)?;
     }
 
-    // OpenCode model resolution (replaces apply_non_interactive_defaults +
-    // validate_non_interactive_requirements).
+    // Model resolution, universal --model, and non-interactive validation —
+    // shared prep stage (see `commands::exec_prep`). Unlike the direct
+    // wrapper, composition propagates every failure (including OpenCode
+    // no-model) as an error.
+    let has_model_env = env_plan
+        .env
+        .contains_key(&std::ffi::OsString::from("MODEL"));
     let _opencode_model_source: Option<super::profile::OpenCodeModelSource> =
-        if provider == Provider::OpenCode {
-            let has_model = env_plan
-                .env
-                .contains_key(&std::ffi::OsString::from("MODEL"));
-            super::profile::apply_opencode_model_resolution(
-                &mut child_args,
-                &mut |k, v| {
-                    env_plan.env.insert(k.into(), v.into());
-                },
-                has_model,
-                target.model.as_deref(),
-                effective_non_interactive,
-                &super::profile::OpenCodeEnvSnapshot::from_system(),
-            )?
-        } else {
-            None
-        };
-
-    // Universal --model flag (non-OpenCode providers, and OpenCode interactive).
-    if provider != Provider::OpenCode {
-        if let Some(ref model) = target.model {
-            let mut env_overrides = Vec::new();
-            if let Some(warn) = profile.apply_model(&mut child_args, &mut env_overrides, model)
-                && !silent
-                && !quiet
-            {
-                log::warn(&warn);
-            }
-            for (key, value) in env_overrides {
+        crate::commands::exec_prep::resolve_model_and_validate(
+            provider,
+            profile,
+            &mut child_args,
+            target.model.as_deref(),
+            effective_non_interactive,
+            has_model_env,
+            &mut |key, value| {
                 env_plan.env.insert(key.into(), value.into());
-            }
-        }
-    } else if let Some(ref model) = target.model
-        && !effective_non_interactive
-    {
-        let mut env_overrides = Vec::new();
-        if let Some(warn) = profile.apply_model(&mut child_args, &mut env_overrides, model)
-            && !silent
-            && !quiet
-        {
-            log::warn(&warn);
-        }
-        for (key, value) in env_overrides {
-            env_plan.env.insert(key.into(), value.into());
-        }
-    }
-
-    // Non-OpenCode providers still use the trait-based validation.
-    if provider != Provider::OpenCode && effective_non_interactive {
-        profile.validate_non_interactive_requirements(&child_args)?;
-    }
+            },
+            &mut |warn| {
+                if !silent && !quiet {
+                    log::warn(&warn);
+                }
+            },
+        )
+        .map_err(crate::commands::exec_prep::ModelStageError::into_report)?;
 
     // Universal --output flag
     if let Some(ref output_str) = request.output {
@@ -1203,13 +1166,12 @@ fn execute_composition_request_inner_with_guard(
         profile.apply_structured_stream(&mut child_args);
     }
 
-    let structured_codex_output = if provider == Provider::Codex
-        && (use_structured || (request.session_interactive && is_inline))
-    {
-        Some(StructuredCodexOutput::prepare(&mut child_args))
-    } else {
-        None
-    };
+    let structured_codex_output = crate::commands::exec_prep::prepare_codex_structured_output(
+        provider,
+        use_structured,
+        request.session_interactive && is_inline,
+        &mut child_args,
+    );
 
     // Deliver the prompt after provider-specific flags have been assembled.
     // Some CLIs, notably OpenCode, treat the first positional argument as the

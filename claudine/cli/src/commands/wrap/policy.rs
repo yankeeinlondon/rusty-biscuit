@@ -36,6 +36,17 @@ impl StructuredCodexOutput {
         }
         let _ = fs::remove_file(&self.last_message_path);
     }
+
+    /// Recover the final assistant message on the interactive-Codex path:
+    /// read the `--output-last-message` file (empty when Codex wrote
+    /// nothing) and remove it. Unlike [`Self::apply_to_summary`], the raw
+    /// text is returned even when blank — the interactive caller treats an
+    /// empty response as "no final message" itself.
+    pub(crate) fn take_last_message(&self) -> String {
+        let text = fs::read_to_string(&self.last_message_path).unwrap_or_default();
+        let _ = fs::remove_file(&self.last_message_path);
+        text
+    }
 }
 
 #[derive(Debug, Clone, Default)]
