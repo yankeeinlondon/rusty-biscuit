@@ -16,10 +16,16 @@ pub(crate) fn append_resume_passthrough_args(resume_args: &mut Vec<String>, base
     let mut index = 0;
     while index < base_args.len() {
         match base_args[index].as_str() {
-            "--json" | "--verbose" if !resume_args.iter().any(|arg| arg == &base_args[index]) => {
+            // `--print-logs` (with its `--log-level` below) keeps a resumed
+            // OpenCode structured run on the stderr-bridge contract: without
+            // it the relaunch loses the progress signal the
+            // stalled-generation backstop reads.
+            "--json" | "--verbose" | "--print-logs"
+                if !resume_args.iter().any(|arg| arg == &base_args[index]) =>
+            {
                 resume_args.push(base_args[index].clone());
             }
-            "--output-format" | "--format" | "--output-last-message" => {
+            "--output-format" | "--format" | "--output-last-message" | "--log-level" => {
                 if index + 1 < base_args.len()
                     && !resume_args.iter().any(|arg| arg == &base_args[index])
                 {
@@ -55,4 +61,51 @@ pub(crate) fn check_resume_support(
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn passthrough_carries_opencode_structured_stream_flags() {
+        let mut resume_args = args(&["run", "--session", "ses_123"]);
+        let base = args(&[
+            "run",
+            "--format",
+            "json",
+            "--print-logs",
+            "--log-level",
+            "INFO",
+        ]);
+        append_resume_passthrough_args(&mut resume_args, &base);
+        assert_eq!(
+            resume_args,
+            args(&[
+                "run",
+                "--session",
+                "ses_123",
+                "--format",
+                "json",
+                "--print-logs",
+                "--log-level",
+                "INFO",
+            ])
+        );
+    }
+
+    #[test]
+    fn passthrough_does_not_duplicate_flags_already_present() {
+        let mut resume_args = args(&["--json", "--output-format", "stream-json"]);
+        let base = args(&["--json", "--output-format", "stream-json"]);
+        append_resume_passthrough_args(&mut resume_args, &base);
+        assert_eq!(
+            resume_args,
+            args(&["--json", "--output-format", "stream-json"])
+        );
+    }
 }

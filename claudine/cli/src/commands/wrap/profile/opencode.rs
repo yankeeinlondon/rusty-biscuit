@@ -163,6 +163,24 @@ impl WrapperProfile for OpencodeWrapper {
         }
     }
 
+    fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
+        // Explicit `--session <ses_...>` is the automation-safe selector;
+        // `--continue` is a human convenience whose implicit "latest" can
+        // pick the wrong session (session-resumption research, 2026-07-03).
+        // The `run` entrypoint is included because resume args replace the
+        // base argv wholesale in the harness relaunch.
+        Ok(vec![
+            "opencode".to_string(),
+            "run".to_string(),
+            "--session".to_string(),
+            session_id.to_string(),
+        ])
+    }
+
+    fn supports_resume(&self) -> bool {
+        true
+    }
+
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         // OpenCode uses --format json (cataloged) plus --print-logs and
         // --log-level INFO for reliable structured streaming. INFO provides

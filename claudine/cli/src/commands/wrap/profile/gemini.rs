@@ -146,6 +146,21 @@ impl WrapperProfile for GeminiWrapper {
         ))
     }
 
+    fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
+        // Full session IDs are Gemini's first-class resume selector;
+        // `--resume latest` / numeric indexes are human conveniences and
+        // unsafe for automation (session-resumption research, 2026-07-03).
+        Ok(vec![
+            "gemini".to_string(),
+            "--resume".to_string(),
+            session_id.to_string(),
+        ])
+    }
+
+    fn supports_resume(&self) -> bool {
+        true
+    }
+
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         // Gemini uses the catalog-default --output-format stream-json via
         // push_stream_json_flags, with no extra flags. This override is kept

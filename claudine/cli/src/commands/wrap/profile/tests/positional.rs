@@ -370,6 +370,84 @@ fn kimi_resume_uses_wire_flag() {
 }
 
 #[test]
+fn gemini_resume_uses_explicit_session_id() {
+    let p = profile(Provider::Gemini);
+    let resume = p.build_resume_args("abc-123").unwrap();
+    assert_eq!(
+        resume,
+        vec![
+            "gemini".to_string(),
+            "--resume".to_string(),
+            "abc-123".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn goose_resume_uses_run_with_explicit_session_id() {
+    let p = profile(Provider::Goose);
+    let resume = p.build_resume_args("20260704_1").unwrap();
+    assert_eq!(
+        resume,
+        vec![
+            "goose".to_string(),
+            "run".to_string(),
+            "--resume".to_string(),
+            "--session-id".to_string(),
+            "20260704_1".to_string(),
+        ]
+    );
+    // `prompt_delivery` finds the `run` entrypoint in the resume argv, so
+    // the follow-up prompt lands as `run -t <prompt> ...`.
+    let delivery = p
+        .prompt_delivery(&resume[1..], "follow up", true)
+        .expect("goose prompt_delivery should succeed on resume argv");
+    match delivery {
+        PromptDelivery::InsertArgs { index, args } => {
+            assert_eq!(index, 1);
+            assert_eq!(args, vec!["-t".to_string(), "follow up".to_string()]);
+        }
+        other => panic!("expected InsertArgs delivery, got {other:?}"),
+    }
+}
+
+#[test]
+fn opencode_resume_uses_run_with_explicit_session() {
+    let p = profile(Provider::OpenCode);
+    let resume = p.build_resume_args("ses_abc123").unwrap();
+    assert_eq!(
+        resume,
+        vec![
+            "opencode".to_string(),
+            "run".to_string(),
+            "--session".to_string(),
+            "ses_abc123".to_string(),
+        ]
+    );
+    assert!(!resume.contains(&"--continue".to_string()));
+}
+
+#[test]
+fn every_provider_profile_supports_resume() {
+    // Ratified end-state (2026-07-04): provider-native resume support means
+    // Claudine lifecycle-resume support. All 7 providers have first-class
+    // non-interactive resume per the session-resumption research, so every
+    // profile must implement the `supports_resume` + `build_resume_args`
+    // pair; a `false` is only ever a not-yet-implemented gap.
+    for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
+        let p = profile(provider);
+        assert!(
+            p.supports_resume(),
+            "{provider:?}: profile must support lifecycle resume"
+        );
+        assert!(
+            p.build_resume_args("session-id").is_ok(),
+            "{provider:?}: build_resume_args must produce a resume argv"
+        );
+    }
+}
+
+#[test]
 fn prompt_arg_conventions_opencode_uses_run_entrypoint() {
     let conv = profile(Provider::OpenCode).prompt_arg_conventions();
     assert_eq!(conv.entrypoint, Some("run"));
