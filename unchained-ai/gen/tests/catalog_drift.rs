@@ -26,6 +26,17 @@ fn committed(name: &str) -> String {
         .unwrap_or_else(|e| panic!("cannot read committed artifact {}: {e}", path.display()))
 }
 
+fn is_yyyy_mm_dd(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    value.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit())
+}
+
 #[test]
 fn committed_catalog_matches_rebuild() {
     let generated_at = catalog_generated_at().expect("derive generated_at from provider files");
@@ -53,6 +64,38 @@ fn build_catalog_emits_current_schema_version() {
     let catalog = build_catalog(catalog_generated_at().expect("derive generated_at"));
     assert_eq!(catalog.schema_version, EXPECTED_SCHEMA_VERSION);
     assert_eq!(SCHEMA_VERSION, EXPECTED_SCHEMA_VERSION);
+}
+
+#[test]
+fn committed_catalog_release_dates_are_yyyy_mm_dd() {
+    let catalog: serde_json::Value =
+        serde_json::from_str(&committed("models-catalog.json")).expect("artifact should be JSON");
+    let offerings = catalog["offerings"]
+        .as_array()
+        .expect("artifact offerings should be an array");
+    let mut invalid = Vec::new();
+
+    for offering in offerings {
+        let id = offering["id"].as_str().unwrap_or("<missing id>");
+        let Some(metadata) = offering.get("metadata").and_then(|metadata| metadata.as_object())
+        else {
+            continue;
+        };
+        let Some(release_date) = metadata.get("release_date") else {
+            continue;
+        };
+        match release_date.as_str() {
+            Some(value) if is_yyyy_mm_dd(value) => {}
+            Some(value) => invalid.push(format!("{id}: {value:?}")),
+            None => invalid.push(format!("{id}: non-string release_date")),
+        }
+    }
+
+    assert!(
+        invalid.is_empty(),
+        "metadata.release_date values must be YYYY-MM-DD:\n{}",
+        invalid.join("\n")
+    );
 }
 
 #[test]

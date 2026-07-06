@@ -73,6 +73,9 @@ pub enum ModelsDevError {
 
     #[error("models.dev roster-critical provider bucket is empty: {provider}")]
     EmptyProvider { provider: &'static str },
+
+    #[error("models.dev release_date must be YYYY-MM-DD, got {value:?}")]
+    InvalidReleaseDate { value: String },
 }
 
 /// Provider entry from models.dev.
@@ -218,9 +221,15 @@ pub fn validate_roster_critical_models_dev_providers(
 }
 
 /// Converts a models.dev model into runtime metadata.
-#[must_use]
-pub fn models_dev_to_metadata(model: &ModelsDevModel) -> ProviderModelMetadata {
-    ProviderModelMetadata {
+///
+/// ## Errors
+///
+/// Returns an error when a non-empty `release_date` is not an exact
+/// `YYYY-MM-DD` date.
+pub fn models_dev_to_metadata(
+    model: &ModelsDevModel,
+) -> Result<ProviderModelMetadata, ModelsDevError> {
+    Ok(ProviderModelMetadata {
         display_name: model.name.clone(),
         family: model.family.clone(),
         context_window: model.limit.as_ref().and_then(|limit| limit.context),
@@ -229,9 +238,9 @@ pub fn models_dev_to_metadata(model: &ModelsDevModel) -> ProviderModelMetadata {
         capabilities: models_dev_capabilities(model),
         pricing: model.cost.as_ref().and_then(models_dev_pricing),
         knowledge_cutoff: model.knowledge.clone(),
-        release_date: model.release_date.clone(),
+        release_date: validated_release_date(model.release_date.as_deref())?,
         ..Default::default()
-    }
+    })
 }
 
 /// Finds the models.dev model row for a generated model id within its provider bucket.
@@ -393,6 +402,34 @@ fn per_million_to_per_token(value: f64) -> f64 {
     value / 1_000_000.0
 }
 
+fn validated_release_date(raw: Option<&str>) -> Result<Option<String>, ModelsDevError> {
+    let Some(value) = raw else {
+        return Ok(None);
+    };
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if is_yyyy_mm_dd_date(trimmed) {
+        return Ok(Some(trimmed.to_string()));
+    }
+    Err(ModelsDevError::InvalidReleaseDate {
+        value: value.to_string(),
+    })
+}
+
+fn is_yyyy_mm_dd_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    value.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit())
+        && chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
+}
+
 fn deserialize_optional_string_or_f64<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -541,7 +578,7 @@ mod tests {
     #[test]
     fn test_field_mapping_and_pricing_conversion() {
         let model = fixture_model("anthropic", "claude-opus-4.5");
-        let metadata = models_dev_to_metadata(&model);
+        let metadata = models_dev_to_metadata(&model).expect("fixture date should be valid");
 
         assert_eq!(metadata.display_name.as_deref(), Some("Claude Opus 4.5"));
         assert_eq!(metadata.family.as_deref(), Some("claude-opus"));
@@ -559,7 +596,7 @@ mod tests {
     #[test]
     fn test_canonical_capability_mapping() {
         let model = fixture_model("anthropic", "claude-opus-4.5");
-        let metadata = models_dev_to_metadata(&model);
+        let metadata = models_dev_to_metadata(&model).expect("fixture date should be valid");
 
         assert_eq!(
             metadata.capabilities,
@@ -575,7 +612,7 @@ mod tests {
     #[test]
     fn test_modality_parsing() {
         let model = fixture_model("google", "gemini-2.5-pro");
-        let metadata = models_dev_to_metadata(&model);
+        let metadata = models_dev_to_metadata(&model).expect("fixture date should be valid");
         let modalities = metadata.modalities.expect("modalities should map");
 
         assert_eq!(modalities.input, vec![Modality::Text, Modality::Image]);
@@ -605,13 +642,39 @@ mod tests {
             .get("openai")
             .and_then(|models| models.get("gpt-4.1"))
             .expect("model should deserialize");
-        let metadata = models_dev_to_metadata(model);
+        let metadata = models_dev_to_metadata(model).expect("no release date should be valid");
 
         assert_eq!(metadata.display_name.as_deref(), Some("GPT-4.1"));
         assert_close(
             metadata.pricing.and_then(|pricing| pricing.prompt_per_token),
             Some(0.000002),
         );
+    }
+
+    #[test]
+    fn test_release_date_rejects_partial_dates() {
+        let model = ModelsDevModel {
+            release_date: Some("2026-01".to_string()),
+            ..Default::default()
+        };
+
+        let err = models_dev_to_metadata(&model).expect_err("partial dates should fail loudly");
+
+        assert!(
+            matches!(err, ModelsDevError::InvalidReleaseDate { value } if value == "2026-01")
+        );
+    }
+
+    #[test]
+    fn test_release_date_omits_empty_values() {
+        let model = ModelsDevModel {
+            release_date: Some("   ".to_string()),
+            ..Default::default()
+        };
+
+        let metadata = models_dev_to_metadata(&model).expect("blank date should be omitted");
+
+        assert_eq!(metadata.release_date, None);
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -21,7 +22,7 @@ use generator::ModelEnumGenerator;
 use metadata_generator::MetadataGenerator;
 use models_dev::{
     fetch_models_dev_with_retry, find_models_dev_metadata, models_dev_provider_key,
-    models_dev_to_metadata, validate_models_dev_index,
+    models_dev_to_metadata, validate_models_dev_index, ModelsDevError, ModelsDevIndex,
 };
 
 #[derive(Parser)]
@@ -276,6 +277,33 @@ fn parse_provider_list(input: &str) -> Vec<Provider> {
         .collect()
 }
 
+async fn load_models_dev_index_for_cli<F, Fut>(
+    cli: &Cli,
+    fetch_models_dev: F,
+) -> Result<ModelsDevIndex, GeneratorError>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<ModelsDevIndex, ModelsDevError>>,
+{
+    if cli.dry_run {
+        info!("Dry run enabled; generated files will not be written");
+    }
+
+    info!("Fetching model specs from models.dev...");
+    let index = fetch_models_dev()
+        .await
+        .map_err(|e| GeneratorError::FetchFailed {
+            provider: "models.dev".to_string(),
+            reason: e.to_string(),
+        })?;
+    validate_models_dev_index(&index).map_err(|e| GeneratorError::FetchFailed {
+        provider: "models.dev".to_string(),
+        reason: e.to_string(),
+    })?;
+    info!("Loaded {} provider buckets from models.dev", index.len());
+    Ok(index)
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
@@ -293,24 +321,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_target(false)
         .init();
 
-    let models_dev_index = if cli.dry_run {
-        info!("Skipping models.dev fetch during dry run");
-        None
-    } else {
-        info!("Fetching model specs from models.dev...");
-        let index = fetch_models_dev_with_retry().await.map_err(|e| {
-            GeneratorError::FetchFailed {
-                provider: "models.dev".to_string(),
-                reason: e.to_string(),
-            }
-        })?;
-        validate_models_dev_index(&index).map_err(|e| GeneratorError::FetchFailed {
-            provider: "models.dev".to_string(),
-            reason: e.to_string(),
-        })?;
-        info!("Loaded {} provider buckets from models.dev", index.len());
-        Some(index)
-    };
+    let models_dev_index =
+        load_models_dev_index_for_cli(&cli, fetch_models_dev_with_retry).await?;
 
     // Get all available API keys
     let api_keys = get_api_keys();
@@ -354,15 +366,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut summary = result.summary;
 
     for (provider, model_ids) in &result.provider_model_ids {
-        let models_dev_bucket = models_dev_index
-            .as_ref()
-            .and_then(|index| models_dev_provider_key(*provider).and_then(|key| index.get(key)));
+        let models_dev_bucket =
+            models_dev_provider_key(*provider).and_then(|key| models_dev_index.get(key));
         let mut provider_matched = 0;
 
         for model_id in model_ids {
             let models_dev_metadata = models_dev_bucket
                 .and_then(|bucket| find_models_dev_metadata(model_id, *provider, bucket))
-                .map(models_dev_to_metadata);
+                .map(models_dev_to_metadata)
+                .transpose()
+                .map_err(|e| GeneratorError::FetchFailed {
+                    provider: "models.dev".to_string(),
+                    reason: format!("{provider:?}/{model_id}: {e}"),
+                })?;
 
             let provider_native = if *provider == Provider::OpenRouter {
                 result
@@ -414,6 +430,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
 
     #[test]
     fn test_existing_model_ids_reads_generated_model_comments() {
@@ -442,5 +459,31 @@ pub enum ProviderModelXai {
         let _ = std::fs::remove_dir(dir);
 
         assert_eq!(ids, vec!["grok-4.3".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn test_dry_run_generation_validates_models_dev_source() {
+        let cli = Cli {
+            output: None,
+            providers: None,
+            skip: None,
+            verbose: 0,
+            dry_run: true,
+        };
+        let fetched = Cell::new(false);
+
+        let err = load_models_dev_index_for_cli(&cli, || {
+            fetched.set(true);
+            async { Ok(ModelsDevIndex::new()) }
+        })
+        .await
+        .expect_err("dry-run should still reject degraded models.dev data");
+
+        assert!(fetched.get(), "dry-run should fetch models.dev data");
+        let message = err.to_string();
+        assert!(
+            message.contains("models.dev response is implausibly thin"),
+            "unexpected error: {message}"
+        );
     }
 }
