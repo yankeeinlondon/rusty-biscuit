@@ -32,7 +32,18 @@ relative to that timestamp.
 
 ## `schema_version` compatibility
 
-Consumers must fail loudly on a `schema_version` mismatch. Breaking artifact
-changes bump it — including curation-table changes (variant vocabulary, vendor
-aliases, identity-bearing serving tags) that would move existing identity
-keys.
+Current schema: **v2**. v2 adds `metadata.release_date`, a source release-date
+string that is omitted when unknown.
+
+Consumers must fail loudly on a `schema_version` mismatch. v1 is unsupported
+after the v2 migration; consumers must reject it instead of silently treating
+missing `release_date` as an older compatible shape. Breaking artifact changes
+bump the version again — including curation-table changes (variant vocabulary,
+vendor aliases, identity-bearing serving tags) that would move existing
+identity keys.
+
+The current Claudine reader is `claudine-gen`'s artifact loader, which consumes
+only the committed `models-catalog.json` projection needed for `catalog_id`
+joins. It accepts v2 and rejects v1; the drift gate in
+`unchained-ai/gen/tests/catalog_drift.rs` also asserts that regenerated
+artifacts emit v2.

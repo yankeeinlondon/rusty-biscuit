@@ -8,8 +8,10 @@
 use std::path::PathBuf;
 
 use unchained_ai_gen::catalog::{
-    build_catalog, catalog_generated_at, schema_json, to_canonical_json,
+    build_catalog, catalog_generated_at, schema_json, to_canonical_json, SCHEMA_VERSION,
 };
+
+const EXPECTED_SCHEMA_VERSION: u32 = 2;
 
 fn artifact_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -47,8 +49,16 @@ fn committed_schema_matches_rebuild() {
 }
 
 #[test]
+fn build_catalog_emits_current_schema_version() {
+    let catalog = build_catalog(catalog_generated_at().expect("derive generated_at"));
+    assert_eq!(catalog.schema_version, EXPECTED_SCHEMA_VERSION);
+    assert_eq!(SCHEMA_VERSION, EXPECTED_SCHEMA_VERSION);
+}
+
+#[test]
 fn catalog_shape_sanity_floors() {
     let catalog = build_catalog(catalog_generated_at().expect("derive generated_at"));
+    assert_eq!(catalog.schema_version, EXPECTED_SCHEMA_VERSION);
     // Loose empirical floors (662 offerings / 1 gap / 131 groups at first
     // emission) so routine regeneration does not flake.
     assert!(

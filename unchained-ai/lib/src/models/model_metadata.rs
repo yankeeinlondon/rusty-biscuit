@@ -1,9 +1,9 @@
 //! Runtime metadata types for model capabilities and specifications.
 //!
 //! This module provides types for representing model metadata fetched from
-//! external sources like the Parsera LLM Specs API and provider-native APIs
-//! (e.g., OpenRouter). These types are used at runtime to query model
-//! capabilities, context windows, modalities, pricing, and more.
+//! external catalog sources and provider-native APIs (e.g., OpenRouter). These
+//! types are used at runtime to query model capabilities, context windows,
+//! modalities, pricing, and more.
 
 use std::str::FromStr;
 
@@ -93,14 +93,15 @@ impl ModelModalities {
     }
 }
 
-/// Metadata about a model from provider-native and external specification sources.
+/// Metadata about a model from provider-native and external catalog sources.
 ///
-/// This struct contains rich metadata populated from sources like the Parsera
-/// LLM Specs API and provider-native APIs (e.g., OpenRouter's `/api/v1/models`).
-/// All fields are optional since not all models have complete metadata available
+/// This struct contains rich metadata populated from provider-native APIs
+/// (e.g., OpenRouter's `/api/v1/models`) and external model catalogs. All
+/// fields are optional since not all models have complete metadata available
 /// from every source.
 ///
-/// Data merging priority: Provider-Native > Parsera.
+/// Data merging priority: provider-native metadata wins over external catalog
+/// metadata per field.
 #[derive(Debug, Clone, Default)]
 pub struct ProviderModelMetadata {
     /// Human-readable display name (e.g., "GPT-4o mini").
@@ -138,6 +139,9 @@ pub struct ProviderModelMetadata {
 
     /// Unix timestamp of when the model was created.
     pub created: Option<u32>,
+
+    /// Source-provided model release date, usually `YYYY-MM-DD`.
+    pub release_date: Option<String>,
 }
 
 impl ProviderModelMetadata {
@@ -281,6 +285,7 @@ mod tests {
         assert_eq!(metadata.default_parameters, None);
         assert_eq!(metadata.knowledge_cutoff, None);
         assert_eq!(metadata.created, None);
+        assert_eq!(metadata.release_date, None);
     }
 
     #[test]

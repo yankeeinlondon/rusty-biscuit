@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-07-02T21:18:37.971184+00:00
+//! Generated: 2026-07-06T22:44:36.054955+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: OpenRouter
 //!
@@ -310,6 +310,8 @@ pub enum ProviderModelOpenRouter {
     Morph___Morph__V3__Fast,
     /// Model: `morph/morph-v3-large`
     Morph___Morph__V3__Large,
+    /// Model: `nex-agi/nex-n2-mini`
+    Nex__Agi___Nex__N2__Mini,
     /// Model: `nex-agi/nex-n2-pro`
     Nex__Agi___Nex__N2__Pro,
     /// Model: `nousresearch/hermes-3-llama-3.1-405b`
@@ -626,8 +628,12 @@ pub enum ProviderModelOpenRouter {
     Switchpoint___Router,
     /// Model: `tencent/hunyuan-a13b-instruct`
     Tencent___Hunyuan__A13b__Instruct,
+    /// Model: `tencent/hy3`
+    Tencent___Hy3,
     /// Model: `tencent/hy3-preview`
     Tencent___Hy3__Preview,
+    /// Model: `tencent/hy3:free`
+    Tencent___Hy3__Free,
     /// Model: `thedrummer/cydonia-24b-v4.1`
     Thedrummer___Cydonia__24b__V4_1,
     /// Model: `thedrummer/rocinante-12b`

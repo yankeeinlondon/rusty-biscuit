@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-07-02T21:18:35.630755+00:00
+//! Generated: 2026-07-06T22:44:33.473171+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: Anthropic
 //!

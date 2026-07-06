@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-07-02T21:18:36.826344+00:00
+//! Generated: 2026-07-06T22:44:34.678190+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: Mistral
 //!
@@ -134,8 +134,6 @@ pub enum ProviderModelMistral {
     Voxtral__Mini__Tts__2603,
     /// Model: `voxtral-mini-tts-latest`
     Voxtral__Mini__Tts__Latest,
-    /// Model: `voxtral-mini-tts-mellon-greek-2606-solutions`
-    Voxtral__Mini__Tts__Mellon__Greek__2606__Solutions,
     /// Model: `voxtral-small-2507`
     Voxtral__Small__2507,
     /// Model: `voxtral-small-latest`

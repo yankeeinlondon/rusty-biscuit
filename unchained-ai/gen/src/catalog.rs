@@ -21,9 +21,10 @@ use unchained_ai::models::identity::ModelIdentity;
 use unchained_ai::models::model_metadata::ProviderModelMetadata;
 use unchained_ai::rigging::providers::models::ProviderModel;
 
-/// Version of the artifact shape. Breaking changes to the JSON layout — and
-/// curation changes that would move existing identity keys — bump this.
-pub const SCHEMA_VERSION: u32 = 1;
+/// Version of the artifact shape. v2 adds serialized metadata `release_date`.
+/// Breaking changes to the JSON layout — and curation changes that would move
+/// existing identity keys — bump this.
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// Serving tags that change what the offering *is*, not how it is delivered.
 ///
@@ -125,6 +126,8 @@ pub struct OfferingMetadata {
     pub knowledge_cutoff: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_date: Option<String>,
 }
 
 /// Input/output modalities as lowercase strings (`text`, `image`, `audio`,
@@ -522,6 +525,7 @@ fn metadata_from(meta: &ProviderModelMetadata) -> OfferingMetadata {
         }),
         knowledge_cutoff: meta.knowledge_cutoff.clone(),
         created: meta.created,
+        release_date: meta.release_date.clone(),
     }
 }
 
@@ -655,5 +659,31 @@ mod tests {
         let reverse = fixture_catalog(&["a/model-1", "b/model-1"]);
         assert_eq!(forward, reverse);
         assert_eq!(forward.offerings[0].id, "a/model-1");
+    }
+
+    #[test]
+    fn metadata_serializes_release_date_and_skips_none() {
+        let source = ProviderModelMetadata {
+            release_date: Some("2026-07-06".to_string()),
+            ..ProviderModelMetadata::default()
+        };
+        let offering = offering_for("anthropic/claude-opus-4-8", Some(metadata_from(&source)));
+        let json = serde_json::to_value(&offering).unwrap();
+        assert_eq!(json["metadata"]["release_date"], "2026-07-06");
+        let round_trip: Offering = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            round_trip
+                .metadata
+                .and_then(|metadata| metadata.release_date)
+                .as_deref(),
+            Some("2026-07-06")
+        );
+
+        let without_release =
+            serde_json::to_value(offering_for("anthropic/claude-sonnet-4-5", None)).unwrap();
+        assert!(
+            without_release.get("metadata").is_none(),
+            "release_date must be absent when no source date is known"
+        );
     }
 }

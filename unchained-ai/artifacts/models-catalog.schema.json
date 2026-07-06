@@ -304,6 +304,12 @@
             }
           ]
         },
+        "release_date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "supported_parameters": {
           "type": [
             "array",

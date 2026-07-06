@@ -150,7 +150,7 @@ check:
 generate-models *args="":
     @echo ""
     @echo -e "{{ BOLD }}Regenerating unchained-ai provider models & metadata{{ RESET }}"
-    @echo -e "{{ ITALIC }}Fetching live model lists from provider APIs and metadata from Parsera...{{ RESET }}"
+    @echo -e "{{ ITALIC }}Fetching live model lists from provider APIs and metadata from models.dev...{{ RESET }}"
     @echo ""
     @cargo run -p unchained-ai-gen -- -v {{ args }}
 

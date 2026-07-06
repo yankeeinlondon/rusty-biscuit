@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-07-02T21:18:39.396253+00:00
+//! Generated: 2026-07-06T22:44:37.286219+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: ZenMux
 //!
@@ -16,8 +16,6 @@ use model_id::ModelId;
     returns = "crate::models::model_metadata::ModelMetadata"
 )]
 pub enum ProviderModelZenMux {
-    /// Model: `anthropic/claude-3.5-haiku`
-    Anthropic___Claude__3_5__Haiku,
     /// Model: `anthropic/claude-fable-5`
     Anthropic___Claude__Fable__5,
     /// Model: `anthropic/claude-fable-5-free`
@@ -256,6 +254,8 @@ pub enum ProviderModelZenMux {
     Stepfun___Step__3_7__Flash,
     /// Model: `stepfun/step-3.7-flash-free`
     Stepfun___Step__3_7__Flash__Free,
+    /// Model: `tencent/hy3`
+    Tencent___Hy3,
     /// Model: `tencent/hy3-preview`
     Tencent___Hy3__Preview,
     /// Model: `x-ai/grok-4.2-fast`

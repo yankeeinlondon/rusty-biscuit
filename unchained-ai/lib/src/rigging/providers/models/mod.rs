@@ -257,8 +257,9 @@ impl ProviderModel {
     /// Returns metadata for this model if available.
     ///
     /// Delegates to the underlying provider-specific enum's `metadata()` method.
-    /// Metadata is fetched from the Parsera LLM Specs API at build time
-    /// and includes context window, modalities, and capabilities.
+    /// Metadata is enriched at build time and includes context window,
+    /// modalities, pricing, capabilities, and source release dates when
+    /// available.
     #[must_use]
     pub fn metadata(&self) -> Option<&'static ProviderModelMetadata> {
         match self {
@@ -547,7 +548,7 @@ mod tests {
 
     /// Test metadata accessor methods return None for unknown models.
     ///
-    /// With the empty placeholder metadata file, all models should return None.
+    /// Bespoke model IDs do not have generated metadata entries.
     #[test]
     fn test_metadata_accessors_return_none_for_unknown() {
         let model =
@@ -580,6 +581,24 @@ mod tests {
         let o3 = ProviderModelOpenAi::O3;
         let meta = o3.metadata();
         assert!(meta.is_some(), "OpenAI O3 should have metadata");
+    }
+
+    #[test]
+    fn test_direct_anthropic_models_have_priced_metadata() {
+        for model in ProviderModelAnthropic::ALL {
+            let metadata = model
+                .metadata()
+                .unwrap_or_else(|| panic!("{} is missing metadata", model.model_id()));
+            let pricing = metadata
+                .pricing
+                .as_ref()
+                .unwrap_or_else(|| panic!("{} is missing pricing", model.model_id()));
+            assert!(
+                pricing.prompt_per_token.is_some() || pricing.completion_per_token.is_some(),
+                "{} is missing per-token pricing",
+                model.model_id()
+            );
+        }
     }
 
     /// Test that Bespoke variants return None for metadata on individual enums.
