@@ -42,7 +42,7 @@ pub(crate) struct TreeBuildContext<'a> {
     pub local_hyperlink_style: Option<&'a CommonStyle>,
     /// Local image override from `style.images.local-style`.
     pub local_image_style: Option<&'a CommonStyle>,
-    /// HR defaults projected from `style.hr.*` or the deprecated top-level `hr:`.
+    /// HR defaults projected from `style.hr.*` or explicit render options.
     pub hr_defaults: Option<&'a HorizontalRuleAttrs>,
 }
 

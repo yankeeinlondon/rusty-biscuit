@@ -691,10 +691,9 @@ impl Markdown {
     /// through the wired [`TerminalCodeRenderer`] hook. This is the only HTML
     /// render path; the legacy event-stream serializer has been deleted.
     ///
-    /// When `options.hr_defaults` is unset, a document's deprecated top-level
-    /// `hr:` frontmatter still seeds bare-rule defaults — restoring the bespoke
-    /// serializer's direct-API fallback so `as_html(HtmlOptions::default())`
-    /// honors it without routing through a [`DarkmatterPage`](crate::layout::DarkmatterPage).
+    /// Bare-rule defaults come from [`HtmlOptions::hr_defaults`]. Document
+    /// frontmatter is honored only when callers parse `style.hr.*` and project
+    /// it into those options or a [`DarkmatterPage`](crate::layout::DarkmatterPage).
     ///
     /// ## Examples
     ///
@@ -722,9 +721,9 @@ impl Markdown {
     /// styled headings, and formatted block elements including inline images
     /// (via Kitty/iTerm2 protocols through biscuit-terminal).
     ///
-    /// When `options.hr_defaults` is unset, a document's deprecated top-level
-    /// `hr:` frontmatter still seeds bare-rule defaults — the direct-API
-    /// counterpart to the [`as_html`](Self::as_html) fallback.
+    /// Bare-rule defaults come from [`TerminalOptions::hr_defaults`](output::TerminalOptions::hr_defaults).
+    /// Document frontmatter is honored only when callers parse `style.hr.*` and
+    /// project it into those options or a [`DarkmatterPage`](crate::layout::DarkmatterPage).
     ///
     /// ## Examples
     ///

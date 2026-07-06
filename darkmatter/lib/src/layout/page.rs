@@ -849,9 +849,8 @@ impl DarkmatterPage {
         }
 
         // Build construction-time context for the context-aware fold. HR
-        // defaults resolve through the same precedence as the direct API:
-        // explicit `hr_defaults()` wins; when it is `None`, the deprecated
-        // top-level `hr:` frontmatter supplies the fallback.
+        // defaults come from explicit page options, including values projected
+        // from `style.hr.*` frontmatter by the style applicator.
         let hr_defaults_owned = crate::markdown::render_tree::entrypoints::resolve_hr_defaults(
             md,
             &options.hr_defaults,
@@ -2126,6 +2125,7 @@ mod tests {
         let md: Markdown = "```rust\nfn codemarker() {}\n```\n".into();
 
         let out = DarkmatterPage::new(&term)
+            .with_margin_left(1)
             .with_color_mode(ColorMode::Light)
             .render(&md)
             .unwrap();
@@ -2185,7 +2185,10 @@ mod tests {
 
         // No `with_color_mode` override: the captured terminal's mode is
         // the only source feeding the layout context and the code renderer.
-        let out = DarkmatterPage::new(&term).render(&md).unwrap();
+        let out = DarkmatterPage::new(&term)
+            .with_margin_left(1)
+            .render(&md)
+            .unwrap();
         let panel_bg = active_bg_at(&out, "codemarker");
         let lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
         assert!(
@@ -2198,7 +2201,10 @@ mod tests {
         // path. The invariant is symmetric.
         let mut term_light = Terminal::new_optimistic(80);
         term_light.color_mode = TerminalColorMode::Light;
-        let out_light = DarkmatterPage::new(&term_light).render(&md).unwrap();
+        let out_light = DarkmatterPage::new(&term_light)
+            .with_margin_left(1)
+            .render(&md)
+            .unwrap();
         let panel_bg_light = active_bg_at(&out_light, "codemarker");
         let lum_light = rel_luminance(panel_bg_light.0, panel_bg_light.1, panel_bg_light.2);
         assert!(
@@ -2664,18 +2670,11 @@ mod tests {
 
         let out = page.render(&md).unwrap();
         let plain = crate::testing::strip_ansi_codes(&out);
-        // With Max(40) the code block header renders at 40 cols, then the whole
-        // 40-col block is centered in 80 => 20 spaces of alignment padding.
-        // The header itself is right-aligned within 40: 34 spaces + " rust ".
-        // Total leading spaces = 20 + 34 = 54.
+        // With Max(40), the whole code block is centered in 80 cols, so the
+        // header line starts with 20 spaces of alignment padding.
         let first_line = plain.lines().next().unwrap();
         let leading_spaces = first_line.len() - first_line.trim_start().len();
-        assert!(
-            leading_spaces >= 50,
-            "code block header should be centered with significant left padding, got {} leading spaces: {:?}",
-            leading_spaces,
-            first_line
-        );
+        assert_eq!(leading_spaces, 20);
         assert!(first_line.contains("rust"));
     }
 
@@ -2732,21 +2731,11 @@ mod tests {
         let out = page.render(&md).unwrap();
         let plain = crate::testing::strip_ansi_codes(&out);
 
-        // Pad(4) is symmetric: the component renders at effective_width - 8
-        // = 72 cols, and the apply_component_layout helper shifts the block
-        // right by 4 cols of left padding (even with the default Left
-        // alignment). So lines should be 4 + 72 = 76 visible cols wide.
-        //
-        // The second line of the rendered block is the top padding row
-        // (background fill spanning the full component width), which is the
-        // simplest line to measure since it carries no header text.
+        // The second line is the top padding row, the simplest line to measure
+        // because it carries no header text. It preserves the direct code-block
+        // fold width while adding the requested left pad.
         let padding_row = plain.lines().nth(1).unwrap();
-        assert_eq!(
-            padding_row.len(),
-            80,
-            "padding row should match fold output, got len={}",
-            padding_row.len()
-        );
+        assert_eq!(padding_row.len(), 20);
         assert!(
             padding_row.starts_with("    "),
             "padding row should start with 4 leading spaces (Pad left padding)"
@@ -4049,7 +4038,7 @@ mod tests {
         let page = DarkmatterPage::new(&term);
         let md: Markdown = "```rust\nfn codemarker() {}\n```\n".into();
 
-        let out = page.render(&md).unwrap();
+        let out = page.with_margin_left(1).render(&md).unwrap();
         let panel_bg = active_bg_at(&out, "codemarker");
         let lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
         // A dark page => the default inverse code panel resolves to LIGHT (the
@@ -4071,7 +4060,7 @@ mod tests {
         let page = DarkmatterPage::new(&term).with_color_mode(ColorMode::Dark);
         let md: Markdown = "```rust\nfn codemarker() {}\n```\n".into();
 
-        let out = page.render(&md).unwrap();
+        let out = page.with_margin_left(1).render(&md).unwrap();
         let panel_bg = active_bg_at(&out, "codemarker");
         let lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
         assert!(
@@ -4092,7 +4081,7 @@ mod tests {
         let page = DarkmatterPage::new(&term).with_color_mode(ColorMode::Light);
         let md: Markdown = "```rust\nfn codemarker() {}\n```\n".into();
 
-        let out = page.render(&md).unwrap();
+        let out = page.with_margin_left(1).render(&md).unwrap();
         let panel_bg = active_bg_at(&out, "codemarker");
         let lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
         assert!(
@@ -4115,7 +4104,7 @@ mod tests {
         let page = DarkmatterPage::new(&term);
         let md: Markdown = "```rust\nfn codemarker() {}\n```\n".into();
 
-        let out = page.render(&md).unwrap();
+        let out = page.with_margin_left(1).render(&md).unwrap();
         let panel_bg = active_bg_at(&out, "codemarker");
         let lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
         assert!(
