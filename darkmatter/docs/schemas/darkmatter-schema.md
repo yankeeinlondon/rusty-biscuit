@@ -28,6 +28,9 @@ so the documentation and validation source stay in lock step.
 - Unknown frontmatter keys remain allowed. The base schema validates
   Darkmatter-owned properties but does not close the frontmatter namespace to
   user-defined keys.
+- `ctx` is a Darkmatter-owned namespace. Darkmatter may merge an authored
+  `ctx` object for compatibility, but document authors should not define custom
+  `ctx.*` keys because they collide with the runtime context namespace.
 - `generated` properties, such as `ctx.today`, are supplied by the host
   (Darkmatter context capture, Claudine, or another runtime) and are not
   expected to be authored in static frontmatter. They are omitted from static

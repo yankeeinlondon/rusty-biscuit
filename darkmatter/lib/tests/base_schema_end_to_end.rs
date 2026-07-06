@@ -160,7 +160,7 @@ fn sequence_union_arms_accept_nested_mapping_object_shapes() {
 }
 
 #[test]
-fn base_schema_ctx_is_open_for_user_context_keys() {
+fn base_schema_ctx_is_darkmatter_owned_generated_context() {
     let report = validate_with_base("title: Context Example\n");
     assert!(
         report.valid,
@@ -168,11 +168,17 @@ fn base_schema_ctx_is_open_for_user_context_keys() {
         report.problems
     );
 
-    let custom_ctx = validate_with_base("ctx:\n  project_slug: biscuit\n");
+    let generated_ctx = validate_with_base("ctx:\n  today: 2026-07-04\n");
     assert!(
-        custom_ctx.valid,
-        "custom user ctx keys must pass the base schema: {:?}",
-        custom_ctx.problems
+        generated_ctx.valid,
+        "known generated ctx keys must pass when present: {:?}",
+        generated_ctx.problems
+    );
+
+    let unknown_ctx = validate_with_base("ctx:\n  project_slug: biscuit\n");
+    assert!(
+        !unknown_ctx.valid,
+        "custom user ctx keys are not part of the base schema"
     );
 
     let json = darkmatter_base_json_schema();
@@ -183,8 +189,9 @@ fn base_schema_ctx_is_open_for_user_context_keys() {
         .and_then(|arms| arms.iter().find(|arm| arm["type"].as_str() == Some("object")))
         .unwrap_or(ctx);
     assert_eq!(ctx_object["type"].as_str(), Some("object"));
+    assert_eq!(ctx_object["additionalProperties"].as_bool(), Some(false));
     assert!(
-        ctx_object.get("additionalProperties").is_none(),
-        "base ctx must remain open for user-defined keys: {ctx_object:?}"
+        ctx_object["properties"]["today"]["x-darkmatter-generated"].as_bool() == Some(true),
+        "base ctx must expose generated metadata for known runtime keys: {ctx_object:?}"
     );
 }

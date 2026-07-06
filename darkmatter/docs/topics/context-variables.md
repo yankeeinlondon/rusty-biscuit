@@ -4,7 +4,7 @@ Context variables are variables which Darkmatter provides to the **Interpolation
 
 ## Overcoming `ctx` Conflicts
 
-- It is recommended that document authors not use the `ctx` frontmatter variable because of the namespace collision it causes
+- Document authors are strongly discouraged from using the `ctx` frontmatter variable because it collides with Darkmatter's runtime context namespace
 - However, when composing a document with `md compose`, if the document DOES have a `ctx` property defined then we will merge the two dictionaries; Darkmatter's runtime values take precedence over the page's when `ctx` keys overlap
 - We will report to STDERR this event as a warning with a message of:
 
