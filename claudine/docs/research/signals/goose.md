@@ -1,7 +1,7 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-05
-last_updated: 2026-07-05
+last_updated: 2026-07-06
 agent: codex
 model: default
 docs: https://goose-docs.ai/docs/guides/running-tasks/
@@ -58,19 +58,6 @@ records:
     vocabulary: ["Authentication error", "Context length exceeded", "Rate limit exceeded", "Server error", "Network error", "Request failed", "Execution error", "Usage data error", "Unsupported operation", "Endpoint not found (404)", "Credits exhausted", "Provider refused request"]
     confidence: source_code
     evidence: ./fixtures/goose/stream-server-error-message.jsonl
-  - id: stream-retries_exhausted-recipe
-    signal: retries_exhausted
-    source: stream
-    locator: "type=message"
-    detection: declarative
-    priority: 50
-    match_path: message.content[0].text
-    match_op: substring_ci
-    match_value: "Maximum retry attempts"
-    distinguish: "This is Goose recipe retry exhaustion from `RetryManager`, not an HTTP/provider retry budget. It appears as assistant text after success checks fail too many times."
-    vocabulary: ["Skipped", "MaxAttemptsReached", "SuccessChecksPassed", "Retried"]
-    confidence: source_code
-    evidence: ./fixtures/goose/stream-retries-exhausted-message.jsonl
   - id: stream-tokens_consumed-complete
     signal: tokens_consumed
     source: stream
@@ -126,9 +113,6 @@ extractions:
   - record: stream-provider_overloaded-server-error-text
     field: message
     path: message.content[0].text
-  - record: stream-retries_exhausted-recipe
-    field: message
-    path: message.content[0].text
   - record: stream-tokens_consumed-complete
     field: total
     path: total_tokens
@@ -174,7 +158,8 @@ extractions:
 bespoke_rationale:
   - "stream-session_tainted-error-then-complete: Goose can emit a stream `error` frame and then still emit the terminal `complete` frame after the loop. Detecting taint requires cross-record state, not a single-payload match."
 gaps:
-  - "No installed Goose binary was available in this workspace, so fixtures are scrubbed source-derived shapes rather than live captured runs."
+  - "All goose fixtures are source_shape provenance (serializer-faithful shapes derived verbatim from block/goose source at 65eed515559af22dde2ba965335e331422f60c26, not live captures) per the 2026-07-06 provenance ruling; live captures should replace them via harvest when goose runs under claudine."
+  - "retries_exhausted has NO record: RetryManager's 'Maximum retry attempts (...) exceeded.' message never reaches any output surface at commit 65eed515 (the MaxAttemptsReached path returns without yielding an AgentEvent::Message, and emit_stream_event only fires on yielded messages) — the signal is wire-invisible; re-check on future goose versions."
   - "Goose docs document `--output-format json|stream-json` but do not publish a complete JSON schema for `StreamEvent`, `MessageContent`, or session SQLite rows; source is the authority for field names."
   - "Goose has typed `ProviderError::RateLimitExceeded` and optional `retry_delay`, but the CLI stream path wraps most provider errors into assistant text and does not expose `retry_delay` in `stream-json` frames."
   - "Goose has no native `usage_cap_approaching` or `usage_capped` signal distinct from rate limits or credits exhausted in the inspected code."
@@ -267,13 +252,13 @@ Network errors are deliberately not mapped to provider overload: Goose has a sep
 
 ### `retries_exhausted`
 
-Goose recipe retry logic lives in `RetryManager`. When success checks keep failing and the configured maximum is reached, it appends assistant text beginning `Maximum retry attempts (...) exceeded.` The retry result enum vocabulary is `Skipped`, `MaxAttemptsReached`, `SuccessChecksPassed`, and `Retried`.
+Goose recipe retry logic lives in `RetryManager`. When success checks keep failing and the configured maximum is reached, it appends `Maximum retry attempts (...) exceeded.` to the in-loop conversation — but source tracing at commit 65eed515 shows that message **never reaches any output surface**: on `MaxAttemptsReached` the agent wrapper returns without yielding an `AgentEvent::Message`, and `emit_stream_event` only fires on yielded messages. The retry result enum vocabulary is `Skipped`, `MaxAttemptsReached`, `SuccessChecksPassed`, and `Retried`.
 
-This signal is recipe-wrapper retry exhaustion, not HTTP client retry exhaustion. It is useful operationally because the run has stopped after a retry budget, but Claudine should not treat it as a provider rate-limit retry.
+No detection record is emitted for this signal: a stream fixture for it would be wire-impossible, and there is nothing observable to match. Recipe retry exhaustion is currently invisible on the wire; if a future goose version surfaces it, the signal is recipe-wrapper exhaustion, not a provider rate-limit retry.
 
 ### `session_tainted`
 
-In `stream-json`, `handle_agent_error` emits an `error` event for an unhandled agent error. After the stream loop breaks, the surrounding `process_agent_response` code still emits a terminal `complete` event. This means a stream can contain `{"type":"error"}` followed by `{"type":"complete"}`. Claudine must remember the earlier error and treat the session outcome as failed.
+In `stream-json`, `handle_agent_error` emits an `error` event for an unhandled agent error. After the stream loop breaks, the surrounding `process_agent_response` code still emits a terminal `complete` event. This means a stream can contain an `error` event followed by a `complete` event; because `StreamEvent::Complete` serializes `total_tokens` unconditionally, the trailing frame is at minimum `{"type":"complete","total_tokens":null}` (never a bare `{"type":"complete"}`). Claudine must remember the earlier error and treat the session outcome as failed.
 
 This requires bespoke detection because no single payload proves the contradiction.
 
