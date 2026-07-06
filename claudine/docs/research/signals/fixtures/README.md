@@ -35,10 +35,22 @@ Signal-kind names below follow the canonical `SignalKind` taxonomy in
 4. **Human-reviewed before commit.** Every file in this tree was line-verified during
    curation (2026-07-05 seed pass); future additions (including harvest promotions
    from `~/.claudine/harvest/`) require the same review.
-5. **No fabrication.** Every line originates from committed test data (inline Rust
-   test payloads unescaped to the real wire line, committed fixture files, or curated
-   lines from committed session captures). Missing shapes are recorded as gaps to
-   capture live, never synthesized.
+5. **No fabrication — provenance is first-class.** Every fixture carries exactly one
+   of four provenance classes, recorded in [`provenance.yaml`](provenance.yaml) (the
+   CI-enforced machine record; `gen/tests/fixtures_provenance.rs` asserts the
+   file↔entry bijection, the class vocabulary, and a non-empty source per entry):
+   - `capture` — real wire/live-run bytes from an actual provider session.
+   - `test_vector` — originates from claudine's committed parser test data (inline
+     Rust test payloads unescaped to the real wire line, committed fixture files, or
+     curated lines from committed session captures — the seed pass).
+   - `source_shape` — synthesized byte-shape verified **verbatim** against pinned
+     provider source. Legitimate ONLY when verbatim-verified against a pinned
+     commit/tag AND labeled as `source_shape` in the manifest.
+   - `docs_example` — verbatim from official provider documentation.
+
+   Never author payload bytes from memory — a fixture you typed is not evidence.
+   Shapes that cannot be evidenced under one of the four classes are recorded as
+   gaps to capture live, never synthesized.
 
 Sources below are relative to the repo root; `errors.rs` means
 `claudine/lib/src/stream/logs/opencode/errors.rs`, `protocol/` and `providers/` mean
@@ -82,13 +94,24 @@ Line numbers are as of the 2026-07-05 seed pass.
 | `result-usage-stats.jsonl` | protocol/gemini.rs:290 | token usage (`result.stats`: totals, cached, duration, tool calls) | clean, verified |
 | `result-usage-per-model-live.jsonl` | lib/tests/fixtures/providers/gemini.ndjson:78 (live capture) | token usage with per-model breakdown (`stats.models{...}`) — also evidences which models actually served the session | clean, verified |
 
-## goose/ (0 files)
+## goose/ (8 files)
 
 Goose has no stream parser today — Claudine integrates it hook/adapter-only — so its
-corpus starts empty (`.gitkeep` placeholder). The error-then-`complete` taint fixtures
-called out in the signals design must come from live capture; do not synthesize them.
+corpus had no seed-pass rows. The fleet pass added 8 `source_shape` fixtures,
+re-derived 2026-07-06 per the provenance ruling (the originals were fabricated and
+replaced) against `block/goose` commit `65eed515559af22dde2ba965335e331422f60c26`.
+Per-file provenance lives in `provenance.yaml` and the detection records in
+`../goose.md`; no per-file table is kept here. Live captures should supersede these
+via harvest.
 
-## kimi/ (4 files)
+## kilo/ (12 files)
+
+Fleet-added, all `source_shape`: byte-shapes verified against pinned Kilo Code source
+`Kilo-Org/kilocode` commit `1fc8f066fd263455d77fed269a8bcfcd57309a55` (package
+version 7.4.1). Per-file provenance is in `provenance.yaml`; the detection records in
+`../kilo.md` carry the signal mapping.
+
+## kimi/ (7 files)
 
 | Fixture | Source | Signal(s) evidenced | Scrub |
 | --- | --- | --- | --- |
@@ -96,6 +119,14 @@ called out in the signals design must come from live capture; do not synthesize 
 | `wire-protocol-110.jsonl` | protocol/fixtures/kimi/wire-protocol-110.jsonl (verbatim copy) | provider version (protocol 1.10, server 1.47.0), generation retried (`StepRetry` with `error_type`, `status_code: 500`, backoff), token usage (`StatusUpdate` with `token_usage` + `mcp_status`), notification (`task.completed`) | clean, verified |
 | `wire-cancelled-interrupt.jsonl` | protocol/fixtures/kimi/wire-cancelled.jsonl lines 2,3,82,94,95,96 (curated subset) | interrupt/cancellation (cancel result, `TurnEnd`, prompt result `status: cancelled`) | clean, verified; line 1 of the source (init dump embedding the capturing user's full skill catalog) deliberately excluded |
 | `status-update-token-usage.jsonl` | protocol/fixtures/kimi/wire-greet.jsonl line 53 | token usage (`StatusUpdate`, `mcp_status: null` variant — complements the populated `mcp_status` in `wire-protocol-110.jsonl`) | clean, verified |
+
+Fleet-added `source_shape` fixtures (verified verbatim against `MoonshotAI/kimi-cli`
+commit `2c34efb`, tag 1.48.0 — see `provenance.yaml`):
+
+- `wire-max-steps-reached.jsonl` — `source_shape` (wire typed models)
+- `wire-question-request.jsonl` — `source_shape` (wire typed models)
+- `step-retry-rate-limit.jsonl` — `source_shape` (wire typed models); a genuine
+  live capture is still wanted (see Gaps)
 
 `wire-greet.jsonl`, `wire-subagent.jsonl`, and `wire-tool-shell.jsonl` were evaluated
 and skipped as tool/content traffic: their only signal-shaped lines are the init
@@ -135,7 +166,19 @@ above (uncaught fatal, legacy usage cap, asset load failure) and it carries a pe
 home path; the mixed-format interleaving it exercises is parser robustness, not a
 signal story.
 
-## qwen/ (5 files)
+## pi/ (15 files)
+
+Fleet-added, all `source_shape`: byte-shapes verified against pinned
+`earendil-works/pi` commit `2e4ad6a09423002f58b9a5dc2749f7db7929d0f0`. The two auth
+fixtures (`stream-auth-invalid-no-api-key.jsonl`, `stream-auth-invalid-oauth.jsonl`)
+and `exit-no-models-available.json` carry verbatim source message templates;
+`stream-usage-capped-quota.jsonl`, `stream-no-funds-billing.jsonl`,
+`stream-rate-limited-message.jsonl`, `stream-provider-overloaded-message.jsonl`, and
+`rpc-extension-ui-request.jsonl` carry exemplar (non-verbatim) provider message text
+inside a verified event shape. Per-file provenance is in `provenance.yaml`; the
+detection records in `../pi.md` carry the signal mapping.
+
+## qwen/ (8 files)
 
 | Fixture | Source | Signal(s) evidenced | Scrub |
 | --- | --- | --- | --- |
@@ -145,14 +188,22 @@ signal story.
 | `result-usage.jsonl` | protocol/qwen.rs:353 | token usage (`result.usage`) | clean, verified |
 | `summary-token-usage.jsonl` | protocol/qwen.rs:386 (also providers/qwen.rs:475) | token usage (`summary.token_usage` — alternate event + key spelling) | clean, verified |
 
+Fleet-added `source_shape` fixtures (verbatim strings verified against
+`QwenLM/qwen-code` v0.19.6 — see `provenance.yaml`):
+
+- `result-auth-missing-api-key.jsonl` — `source_shape`
+- `result-loop-detected.jsonl` — `source_shape`
+- `system-init-model-version.jsonl` — `source_shape`
+
 ## Gaps (to capture, not synthesize)
 
 - **qwen exit codes 53/55/130** — these failure modes bypass the `result` event
   entirely and surface as stderr text + process exit code only. No committed fixture
   exists for any of them; capturing them requires a live run (harvest or manual).
   Recorded here instead of fabricating payloads.
-- **goose** — entire corpus empty (hook/adapter-only, no stream parser). The
-  error-then-`complete` taint scenario needs live capture.
+- **goose** — corpus is `source_shape` only (hook/adapter-only, no stream parser);
+  live captures should supersede it, and the error-then-`complete` taint scenario
+  in particular still wants live-capture confirmation.
 - **claude top-level reset spellings** — `ClaudeRateLimit` supports top-level
   `resetsAt` and `reset_at` (seconds) fallbacks (protocol/claude.rs:338-341,
   `resolved_reset_at`), but no committed test payload exercises either top-level
@@ -167,8 +218,9 @@ signal story.
   no model-resolved fixture.
 - **gemini rate limit / auth** — no rate-limit-shaped or auth-shaped payload exists
   in any gemini test or fixture. To capture.
-- **kimi rate limit / usage cap** — wire fixtures cover auth expiry, retry, interrupt,
-  version, and token usage, but no rate-limit or usage-cap JSON-RPC error has been
+- **kimi rate limit / usage cap** — `step-retry-rate-limit.jsonl` now covers the
+  rate-limit retry shape as `source_shape` (verified against kimi-cli source), but a
+  genuine live capture is still wanted, and no usage-cap JSON-RPC error has been
   captured yet.
 - **opencode 1.17.8 coverage** — the dotted 1.17.8 format is only evidenced for the
   usage-cap branch and the stream-start negative (matching what the tests cover);

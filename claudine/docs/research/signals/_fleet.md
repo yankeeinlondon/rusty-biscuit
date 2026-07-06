@@ -117,6 +117,15 @@ If research cannot establish a unit, zone, or vocabulary member, it must emit `u
 
 Every record MUST cite an `evidence` fixture under `claudine/docs/research/signals/fixtures/<provider-slug>/`. A seeded corpus already exists there (being added in a parallel change) — reuse seeded fixtures where they prove the record; capture NEW fixtures when a record has no seeded evidence.
 
+**Evidence ladder (in strict preference order):**
+
+1. **Reuse** a seeded/manifested fixture that already proves the record.
+2. **Live capture** if the provider binary is available — run it and keep the real bytes (provenance class `capture`).
+3. **Verbatim payload lines** lifted from the provider's own committed tests or official docs, with a permalink to the pinned commit/tag or URL (provenance class `source_shape` / `docs_example`).
+4. **No fixture obtainable** → mark the record `confidence: inferred` and add a `gaps` entry. **Never author payload bytes yourself — a fixture you typed from memory is not evidence.**
+
+Every NEW fixture REQUIRES an entry in `fixtures/provenance.yaml` (its provenance `class` plus a terse `source`); CI enforces the manifest↔corpus bijection.
+
 **Scrubbing rules:** no session IDs, no real home paths, no user content beyond what the signal shape needs (a capped event needs the envelope and rate-limit fields, not the prompt text). A record with no obtainable fixture must be `confidence: inferred` with a `gaps` entry explaining why.
 
 ### Priority Discipline

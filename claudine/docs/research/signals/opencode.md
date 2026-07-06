@@ -20,7 +20,7 @@ records:
     until: "v1.17.7"
     confidence: source_code
     evidence: ./fixtures/opencode/usage-cap-legacy-retry-wrapped.txt
-    notes: "Legacy log lines use `LEVEL <timestamp> +<delta>ms service=llm ... error=<JSON>`. Priority evidence: ./fixtures/opencode/usage-cap-wins-over-retries.txt (cap+retry markers on one line → cap wins); negative twin for the advisory branch: ./fixtures/opencode/usage-cap-advisory-no-error-tag.txt."
+    notes: "Legacy log lines use `LEVEL <timestamp> +<delta>ms service=llm ... error=<JSON>`. Priority evidence: ./fixtures/opencode/usage-cap-wins-over-retries.txt (cap+retry markers on one line → cap wins); negative twin for the advisory branch: ./fixtures/opencode/usage-cap-advisory-no-error-tag.txt; matches the serialized LogClassification output of claudine's promoted-stderr classifier (glue mode); detection vocabulary lives in errors.rs"
   - id: stderr_promoted-usage_capped-1178
     signal: usage_capped
     source: stderr_promoted
@@ -35,6 +35,7 @@ records:
     since: "v1.17.8"
     confidence: source_code
     evidence: ./fixtures/opencode/stream-error-1178-usage-cap.txt
+    notes: "Matches the serialized LogClassification output of claudine's promoted-stderr classifier (glue mode); detection vocabulary lives in errors.rs"
   - id: stderr_promoted-retries_exhausted-429
     signal: retries_exhausted
     source: stderr_promoted
@@ -48,6 +49,7 @@ records:
     vocabulary: ["UsageCap", "RetriesExhausted", "Overloaded", "RateLimited"]
     confidence: source_code
     evidence: ./fixtures/opencode/429-retry-exhausted.txt
+    notes: "Matches the serialized LogClassification output of claudine's promoted-stderr classifier (glue mode); detection vocabulary lives in errors.rs"
   - id: stderr_promoted-provider_overloaded-429
     signal: provider_overloaded
     source: stderr_promoted
@@ -61,6 +63,7 @@ records:
     vocabulary: ["UsageCap", "RetriesExhausted", "Overloaded", "RateLimited"]
     confidence: source_code
     evidence: ./fixtures/opencode/429-overload.txt
+    notes: "Matches the serialized LogClassification output of claudine's promoted-stderr classifier (glue mode); detection vocabulary lives in errors.rs"
   - id: stderr_promoted-rate_limited-429
     signal: rate_limited
     source: stderr_promoted
@@ -74,6 +77,7 @@ records:
     vocabulary: ["UsageCap", "RetriesExhausted", "Overloaded", "RateLimited"]
     confidence: source_code
     evidence: ./fixtures/opencode/429-plain-rate-limited.txt
+    notes: "Matches the serialized LogClassification output of claudine's promoted-stderr classifier (glue mode); detection vocabulary lives in errors.rs"
   - id: stderr_promoted-auth_invalid-invalid-key
     signal: auth_invalid
     source: stderr_promoted
@@ -87,6 +91,7 @@ records:
     vocabulary: ["AuthFailure"]
     confidence: source_code
     evidence: ./fixtures/opencode/auth-failure-invalid-key.txt
+    notes: "Matches the serialized LogClassification output of claudine's promoted-stderr classifier (glue mode); detection vocabulary lives in errors.rs"
   - id: stderr_promoted-provider_version-boot
     signal: provider_version
     source: stderr_promoted
@@ -100,6 +105,7 @@ records:
     vocabulary: ["BootBanner"]
     confidence: source_code
     evidence: ./fixtures/opencode/version-announcement.txt
+    notes: "Matches the serialized LogClassification output of claudine's promoted-stderr classifier (glue mode); detection vocabulary lives in errors.rs"
   - id: stderr_promoted-model_resolved-llm-call
     signal: model_resolved
     source: stderr_promoted
@@ -113,6 +119,7 @@ records:
     vocabulary: ["LlmCall"]
     confidence: source_code
     evidence: ./fixtures/opencode/stream-start-1178.txt
+    notes: "Matches the serialized LogClassification output of claudine's promoted-stderr classifier (glue mode); detection vocabulary lives in errors.rs"
 extractions:
   - record: stderr_promoted-usage_capped-legacy
     field: message
