@@ -12,7 +12,7 @@
 //! [`EXCLUDED_SERIALIZED_FIELDS`] with a justification — the
 //! registry-covers-all-fields guard enforces exactly-one-of.
 
-use claudine_catalog_types::{ModelCatalogSource, PlatformKind, ResumeSupport};
+use claudine_catalog_types::{AcpServerMode, ModelCatalogSource, PlatformKind, ResumeSupport};
 use serde_json::{Value, json};
 use strum::VariantNames;
 
@@ -168,8 +168,15 @@ pub enum Coercion {
     ReasoningRecord,
     /// Facts known-gap records → `&[KnownGap]`.
     KnownGapRecords,
-    /// Facts ACP record → `AcpSupport` expression.
+    /// Mixed-source `AcpSupport` expression: `server_mode` comes from the
+    /// declared research source (acp topic `support` member), while
+    /// `client_supported`/`events_via_acp` merge in from the facts `acp`
+    /// record (Ken, 2026-07-05 graduation ruling). The facts record must
+    /// NOT carry `server_mode` — delete-on-graduate applies to the
+    /// sub-field.
     AcpRecord,
+    /// Facts unmapped-native-event records → `&[UnmappedNativeEvent]`.
+    UnmappedNativeEventRecords,
     /// Facts prompt-arg record → `PromptArgConventions` expression
     /// (post-OQ7a shape: `prompt_flags` + `entrypoint`).
     PromptArgRecord,
@@ -220,6 +227,7 @@ impl Coercion {
             Coercion::ReasoningRecord => "reasoning_record",
             Coercion::KnownGapRecords => "known_gap_records",
             Coercion::AcpRecord => "acp_record",
+            Coercion::UnmappedNativeEventRecords => "unmapped_native_event_records",
             Coercion::PromptArgRecord => "prompt_arg_record",
             Coercion::AxesRecord => "axes_record",
             Coercion::ResumeSupportMember => "resume_support_member",
@@ -272,7 +280,7 @@ pub const SKILL_SUPPORT_MEMBERS: &[&str] =
     &["first_class", "partial", "convention_only", "none", "unknown"];
 
 /// The generator-v1 mapping registry, in `ProviderInfo` serialization
-/// order (10 roster + 9 research + 23 facts = 42 fields).
+/// order (10 roster + 10 research + 22 facts = 42 fields).
 pub const REGISTRY: &[RegistryEntry] = &[
     entry(
         "provider",
@@ -411,17 +419,6 @@ pub const REGISTRY: &[RegistryEntry] = &[
         "Per-session transcript templates ({placeholder} grammar, from logging surfaces)",
     ),
     entry(
-        "session_locations",
-        DeclaredSource::Facts {
-            key: "session_locations",
-        },
-        &[SchemaExpectation::RecordArray {
-            required_fields: &["raw", "segments"],
-        }],
-        Coercion::PathTemplateList,
-        "Ancillary session-state directory templates",
-    ),
-    entry(
         "config_paths",
         DeclaredSource::Research {
             topic: "agent-cli",
@@ -502,12 +499,20 @@ pub const REGISTRY: &[RegistryEntry] = &[
     ),
     entry(
         "acp",
-        DeclaredSource::Facts { key: "acp" },
-        &[SchemaExpectation::Record {
-            required_fields: &["server_mode", "client_supported", "events_via_acp"],
+        // Mixed source (see the AcpRecord coercion doc): the declared
+        // research path feeds `server_mode`; the facts `acp` record feeds
+        // `client_supported`/`events_via_acp`.
+        DeclaredSource::Research {
+            topic: "acp",
+            path: "support",
+        },
+        &[SchemaExpectation::EnumSubsetOf {
+            rust_enum: "AcpServerMode",
+            variants: AcpServerMode::VARIANTS,
         }],
         Coercion::AcpRecord,
-        "Typed ACP capability descriptor",
+        "Typed ACP capability descriptor (server_mode research-graduated 2026-07-05; \
+         client_supported/events_via_acp stay facts-fed)",
     ),
     entry(
         "prompt_arg_conventions",
@@ -696,6 +701,18 @@ pub const REGISTRY: &[RegistryEntry] = &[
         Coercion::PlatformKindMember,
         "Whether the CLI fronts the vendor's own models or aggregates providers",
     ),
+    entry(
+        "unmapped_native_events",
+        DeclaredSource::Facts {
+            key: "unmapped_native_events",
+        },
+        &[SchemaExpectation::RecordArray {
+            required_fields: &["native_event", "description", "remediation"],
+        }],
+        Coercion::UnmappedNativeEventRecords,
+        "Provider-native hook events with no 16-event mapping (configure in the provider); \
+         graduation candidate: hooks topic `hooks[]` records with claudine_event == unknown",
+    ),
 ];
 
 /// Serialized `--describe` fields deliberately NOT in the registry, with
@@ -770,8 +787,8 @@ mod tests {
                 .count()
         };
         assert_eq!(count("roster"), 10, "roster rows");
-        assert_eq!(count("research"), 9, "research rows");
-        assert_eq!(count("facts"), 23, "facts rows");
+        assert_eq!(count("research"), 10, "research rows");
+        assert_eq!(count("facts"), 22, "facts rows");
         assert_eq!(REGISTRY.len(), 42, "total serialized fields");
     }
 

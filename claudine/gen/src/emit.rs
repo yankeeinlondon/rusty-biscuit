@@ -847,6 +847,33 @@ pub fn known_gaps(
     Ok(render_struct_slice(&elements, level))
 }
 
+pub fn unmapped_native_events(
+    field: &'static str,
+    value: &Value,
+    level: usize,
+    ctx: &mut EmitCtx,
+) -> Result<String, GenError> {
+    let records = expect_array(field, value, "the unmapped-native-event list")?;
+    let mut elements = Vec::with_capacity(records.len());
+    for record in records {
+        ctx.import("crate::provider::unmapped_native_event::UnmappedNativeEvent");
+        let native_event =
+            expect_str(field, get(field, record, "native_event")?, "`native_event`")?;
+        let description = expect_str(field, get(field, record, "description")?, "`description`")?;
+        let remediation = expect_str(field, get(field, record, "remediation")?, "`remediation`")?;
+        let inner = indent(level + 2);
+        elements.push(format!(
+            "UnmappedNativeEvent {{\n\
+             {inner}native_event: {native_event:?},\n\
+             {inner}description: {description:?},\n\
+             {inner}remediation: {remediation:?},\n\
+             {}}}",
+            indent(level + 1)
+        ));
+    }
+    Ok(render_struct_slice(&elements, level))
+}
+
 pub fn acp(
     field: &'static str,
     value: &Value,
@@ -1186,10 +1213,6 @@ pub fn emit_data_file(
         path_list_from_strings("session_log_paths", lookup("session_log_paths")?, 1, &mut ctx)?,
     );
     push(
-        "session_locations",
-        path_list_from_records("session_locations", lookup("session_locations")?, 1, &mut ctx)?,
-    );
-    push(
         "config_paths",
         path_list_from_strings("config_paths", lookup("config_paths")?, 1, &mut ctx)?,
     );
@@ -1289,6 +1312,15 @@ pub fn emit_data_file(
     push(
         "platform_kind",
         platform_kind("platform_kind", lookup("platform_kind")?, &mut ctx)?,
+    );
+    push(
+        "unmapped_native_events",
+        unmapped_native_events(
+            "unmapped_native_events",
+            lookup("unmapped_native_events")?,
+            1,
+            &mut ctx,
+        )?,
     );
 
     // Supporting items (emitted after INFO).

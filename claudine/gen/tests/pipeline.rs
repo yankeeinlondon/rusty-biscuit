@@ -13,6 +13,7 @@ use claudine_gen::{GenError, Provenance, generate_for_area};
 
 /// Research topics the registry consumes (fixture copy set).
 const TOPICS: &[&str] = &[
+    "acp",
     "agent-cli",
     "agent-logging",
     "agent-models",
@@ -119,6 +120,10 @@ fn pipeline_generates_from_all_declared_sources() {
     // Facts-fed values.
     assert!(data_rs.contains("    stream_protocol: Some(StreamProtocol::StreamJson),\n"));
     assert!(data_rs.contains("pub(in crate::provider) static CLAUDE_EVENT_MAPPING"));
+    // Mixed-source acp record: research-fed server_mode (acp topic
+    // `support`) joined with the facts client/events halves.
+    assert!(data_rs.contains("        server_mode: AcpServerMode::Adapter,\n"));
+    assert!(data_rs.contains("        client_supported: false,\n"));
 }
 
 /// Compound `site` records ("A / B") fail the bare-identifier rule; the
@@ -206,6 +211,32 @@ fn graduated_supports_skills_in_facts_is_a_source_collision() {
             offending,
         } => {
             assert_eq!(field, "supports_skills");
+            assert_eq!(declared, "research");
+            assert_eq!(offending, "facts");
+        }
+        other => panic!("expected SourceCollision, got: {other}"),
+    }
+}
+
+/// The acp graduation gate (2026-07-05, delete-on-graduate for the
+/// sub-field): a facts `acp` record still carrying `server_mode` is a loud
+/// source collision, not a silently shadowed value.
+#[test]
+fn graduated_acp_server_mode_in_facts_is_a_source_collision() {
+    let fixture = Fixture::new();
+    fixture.replace(
+        "docs/providers/facts/claude.yaml",
+        "acp:\n  client_supported: false",
+        "acp:\n  server_mode: adapter\n  client_supported: false",
+    );
+    let err = fixture.generate().unwrap_err();
+    match err {
+        GenError::SourceCollision {
+            field,
+            declared,
+            offending,
+        } => {
+            assert_eq!(field, "acp.server_mode");
             assert_eq!(declared, "research");
             assert_eq!(offending, "facts");
         }

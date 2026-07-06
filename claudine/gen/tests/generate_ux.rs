@@ -39,6 +39,7 @@ fn full_fixture() -> tempfile::TempDir {
     copy_dir("docs/providers/facts");
     copy_dir("docs/providers/overrides");
     for topic in [
+        "acp",
         "agent-cli",
         "agent-logging",
         "agent-models",

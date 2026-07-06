@@ -32,7 +32,6 @@ const SERIALIZED_PROVIDER_INFO_FIELDS: &[&str] = &[
     "event_mapping",
     "resource_support",
     "session_log_paths",
-    "session_locations",
     "config_paths",
     "memory_files",
     "output_formats",
@@ -59,6 +58,7 @@ const SERIALIZED_PROVIDER_INFO_FIELDS: &[&str] = &[
     "supports_interactive_inline_closure",
     "model_required_in_non_tty",
     "platform_kind",
+    "unmapped_native_events",
 ];
 
 #[test]

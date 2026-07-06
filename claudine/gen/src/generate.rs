@@ -8,7 +8,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use claudine_catalog_types::{ModelCatalogSource, PlatformKind, ResumeSupport};
+use claudine_catalog_types::{AcpServerMode, ModelCatalogSource, PlatformKind, ResumeSupport};
 use serde_json::Value;
 use strum::{IntoEnumIterator, VariantNames};
 
@@ -232,6 +232,13 @@ fn check_collisions(inputs: &ProviderInputs) -> Result<(), GenError> {
         match entry_for(key) {
             None => return Err(GenError::UnknownFactsKey { key: key.clone() }),
             Some(entry) if !matches!(entry.source, DeclaredSource::Facts { .. }) => {
+                // Sanctioned mixed source: the acp record's facts half
+                // (`client_supported`/`events_via_acp`) is consumed by the
+                // AcpRecord coercion alongside the research-declared
+                // `server_mode` (2026-07-05 graduation ruling).
+                if entry.coercion == Coercion::AcpRecord {
+                    continue;
+                }
                 return Err(GenError::SourceCollision {
                     field: key.clone(),
                     declared: entry.source.kind().to_string(),
@@ -353,7 +360,56 @@ fn extract_catalog_value(
             }
         }
     };
+    if entry.coercion == Coercion::AcpRecord {
+        return acp_catalog_record(entry, &raw, inputs);
+    }
     coerce_to_catalog_shape(entry, &raw, skips)
+}
+
+/// Builds the catalog-shaped `acp` record from its two sources: the
+/// research-declared `support` member (→ `server_mode`) plus the facts
+/// `acp` record's `client_supported`/`events_via_acp` (2026-07-05
+/// graduation ruling). A facts record still carrying `server_mode` fails
+/// loudly — delete-on-graduate applies to the sub-field.
+fn acp_catalog_record(
+    entry: &RegistryEntry,
+    raw: &Value,
+    inputs: &ProviderInputs,
+) -> Result<Value, GenError> {
+    let member = raw.as_str().ok_or_else(|| GenError::UnmappableValue {
+        field: entry.field,
+        message: format!("expected an ACP support enum member, got `{raw}`"),
+    })?;
+    if !AcpServerMode::VARIANTS.contains(&member) {
+        return Err(GenError::UnmappableValue {
+            field: entry.field,
+            message: format!("`{member}` is not an AcpServerMode member"),
+        });
+    }
+    let facts = inputs
+        .facts
+        .get("acp")
+        .ok_or_else(|| GenError::MissingValue {
+            field: entry.field,
+            message: "facts file has no `acp` key (client_supported/events_via_acp)".into(),
+        })?;
+    if facts.get("server_mode").is_some() {
+        return Err(GenError::SourceCollision {
+            field: "acp.server_mode".to_string(),
+            declared: "research".to_string(),
+            offending: "facts".to_string(),
+        });
+    }
+    let mut record = serde_json::Map::new();
+    record.insert("server_mode".into(), Value::String(member.to_string()));
+    for key in ["client_supported", "events_via_acp"] {
+        let value = facts.get(key).ok_or_else(|| GenError::MissingValue {
+            field: entry.field,
+            message: format!("facts `acp` record has no `{key}` key"),
+        })?;
+        record.insert(key.to_string(), value.clone());
+    }
+    Ok(Value::Object(record))
 }
 
 /// Walks a dot-separated path into a JSON object.
@@ -674,6 +730,10 @@ fn coerce_to_catalog_shape(
             }
             Ok(raw.clone())
         }
+        // The mixed-source acp record is assembled upstream in
+        // `extract_catalog_value` (research + facts) and never reaches this
+        // single-source coercion table.
+        Coercion::AcpRecord => unreachable!("AcpRecord is handled in extract_catalog_value"),
         // Facts-shaped records pass through; emit.rs validates loudly.
         Coercion::PathTemplateList
         | Coercion::EventMappingRecords
@@ -684,7 +744,7 @@ fn coerce_to_catalog_shape(
         | Coercion::YoloRecordToYoloSupport
         | Coercion::ReasoningRecord
         | Coercion::KnownGapRecords
-        | Coercion::AcpRecord
+        | Coercion::UnmappedNativeEventRecords
         | Coercion::PromptArgRecord
         | Coercion::AxesRecord => Ok(raw.clone()),
     }
