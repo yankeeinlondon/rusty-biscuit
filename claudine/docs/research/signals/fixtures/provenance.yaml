@@ -209,7 +209,7 @@ fixtures:
     source: "errors.rs:1552"
   - file: opencode/429-retry-exhausted.txt
     class: test_vector
-    source: "errors.rs:1468"
+    source: "errors.rs:1468, with the providerID/modelID tags real service=llm lines carry added so `signals check` can replay the provider/model extractions"
   - file: opencode/usage-cap-advisory-no-error-tag.txt
     class: test_vector
     source: "errors.rs:1531"
@@ -218,7 +218,7 @@ fixtures:
     source: "lib/tests/fixtures/logs/opencode-429-overload.txt (verbatim copy; same line at errors.rs:1430)"
   - file: opencode/429-plain-rate-limited.txt
     class: test_vector
-    source: "errors.rs:1449"
+    source: "errors.rs:1449, with the providerID/modelID tags real service=llm lines carry added so `signals check` can replay the provider/model extractions"
   - file: opencode/stream-start-1178.txt
     class: test_vector
     source: "errors.rs:937"

@@ -1,7 +1,7 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-05
-last_updated: 2026-07-05
+last_updated: 2026-07-06
 agent: codex
 model: default
 records:
@@ -218,7 +218,7 @@ extractions:
     field: request_id
     path: payload.properties.status.requestID
   - record: stream-human_input_requested-offline
-    field: message
+    field: prompt
     path: payload.properties.status.message
   - record: stream-interrupted-aborted
     field: message
@@ -227,7 +227,7 @@ extractions:
     field: provider
     path: payload.properties.model.providerID
   - record: stream-model_resolved-model-switched
-    field: model
+    field: resolved
     path: payload.properties.model.id
   - record: stream-model_resolved-model-switched
     field: variant
@@ -293,7 +293,7 @@ extractions:
     field: provider
     path: row.data.model.providerID
   - record: sqlite-model_resolved-step-finish-routed
-    field: model
+    field: resolved
     path: row.data.model.modelID
   - record: sqlite-interrupted-aborted
     field: message
@@ -309,7 +309,8 @@ gaps:
   - "session.next.* records (generation_retried, tokens_consumed step-ended, model_resolved model-switched) are gated behind flags.experimentalEventSystem (processor.ts dual-write) — default installs may never emit them."
   - "Base.timestamp is V2Schema.DateTimeUtcFromMillis (encoded epoch-millis) while the runtime publishes a DateTime — whether the SSE wire carries ISO or millis is unpinned; the occurred_at extraction's unit: iso8601 is plausible but unverified."
   - "step-finish rows carry both tokens_consumed and model_resolved payloads; under group-level first-match-wins the sqlite-model_resolved-step-finish-routed record (priority 20) is unreachable behind sqlite-tokens_consumed-step-finish (priority 10) — needs the per-signal evaluation ruling."
-changes: []
+changes:
+  - "2026-07-06: renamed extraction fields to the canonical SignalEvent payload names — model_resolved `model` → `resolved` (stream and sqlite) and human_input_requested `message` → `prompt`."
 requires_claudine_update: true
 reason: "Kilo exposes new source-code-backed stream and SQLite signal records that Claudine's generated detection catalog does not currently include."
 ---

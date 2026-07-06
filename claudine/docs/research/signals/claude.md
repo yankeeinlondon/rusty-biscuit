@@ -1,7 +1,7 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-05
-last_updated: 2026-07-05
+last_updated: 2026-07-06
 agent: codex
 model: default
 docs: https://code.claude.com/docs/en/agent-sdk/typescript
@@ -107,8 +107,7 @@ records:
     detection: declarative
     priority: 80
     match_path: apiKeySource
-    match_op: regex
-    match_value: "^.+$"
+    match_op: exists
     distinguish: "`apiKeySource` is authentication metadata on the same init frame as the resolved model. It identifies the credential source, not whether authentication succeeded."
     vocabulary: ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "none", "unknown"]
     confidence: observed
@@ -120,8 +119,7 @@ records:
     detection: declarative
     priority: 90
     match_path: total_cost_usd
-    match_op: regex
-    match_value: "^[0-9]+(\\.[0-9]+)?$"
+    match_op: exists
     distinguish: "Current result envelopes use `total_cost_usd`; this record should win over legacy `cost_usd` when both are present."
     vocabulary: ["success", "error_during_execution", "error_max_turns", "error_max_budget_usd", "error_max_structured_output_retries"]
     confidence: source_code
@@ -133,8 +131,7 @@ records:
     detection: declarative
     priority: 100
     match_path: cost_usd
-    match_op: regex
-    match_value: "^[0-9]+(\\.[0-9]+)?$"
+    match_op: exists
     distinguish: "Legacy result envelopes used `cost_usd`; keep it lower priority than `total_cost_usd` because Claudine's parser prefers the newer field."
     vocabulary: ["success", "error_during_execution", "error_max_turns", "error_max_budget_usd", "error_max_structured_output_retries"]
     confidence: observed
@@ -154,7 +151,7 @@ records:
     evidence: ./fixtures/claude/billing-error-synthetic-result.jsonl
 extractions:
   - record: stream-usage_cap_approaching-approaching_limit
-    field: lifts_at
+    field: resets_at
     path: rate_limit_info.resetsAt
     unit: unix_seconds
     zone: utc
@@ -162,7 +159,7 @@ extractions:
     field: window
     path: rate_limit_info.rateLimitType
   - record: stream-usage_cap_approaching-allowed_warning
-    field: lifts_at
+    field: resets_at
     path: rate_limit_info.resetsAt
     unit: unix_seconds
     zone: utc
@@ -172,8 +169,7 @@ extractions:
   - record: stream-rate_limited-throttled
     field: retry_after
     path: retry_after_ms
-    unit: unix_millis
-    notes: "Schema has no duration-millis unit; current fixture field is a millisecond duration, not a Unix timestamp."
+    unit: duration_millis
   - record: stream-rate_limited-throttled
     field: message
     path: message
@@ -187,7 +183,7 @@ extractions:
     field: message
     path: message.content[0].text
   - record: stream-model_resolved-init
-    field: model
+    field: resolved
     path: model
   - record: stream-auth_kind_detected-init
     field: auth_kind
@@ -233,11 +229,12 @@ gaps:
   - "No scrubbed fixture yet for `SDKPermissionDeniedMessage` or non-empty `result.permission_denials`; permission_denied_read/write mapping needs tool-name/path semantics from live payloads."
   - "No scrubbed fixture yet for `SDKSystemMessage` with `claude_code_version`; provider_version is source-confirmed by SDK types but omitted from records until a fixture exists."
   - "No scrubbed fixture yet for `SDKControlElicitationRequest`, `SDKElicitationCompleteMessage`, or `request_user_dialog`; human_input_requested is documented/source-confirmed but omitted from records until an emitted stream/control fixture exists."
-  - "The schema enum has `unix_millis` but no duration-millis unit. `retry_after_ms` is a duration in milliseconds; the extraction records it as `unix_millis` only because the sidecar cannot express duration milliseconds."
   - "Current SDK `0.3.201` types list `SDKRateLimitInfo.status` as `allowed | allowed_warning | rejected`, while seeded fixtures include observed `approaching_limit` and legacy `is_throttled`; Claudine must keep compatibility with both shapes."
   - "Older rate_limit_info.status vocabulary: claudine's parser (protocol/claude.rs resolved_is_throttled) treats status in {limited, blocked} and overageStatus == blocked as throttled; these members were absent from the observed vocabulary and need fixture evidence."
   - "Top-level resetsAt / reset_at (seconds) spellings are supported by claudine's parser (protocol/claude.rs:338-341, resolved_reset_at) but no fixture exercises either; the usage_capped record consequently has no lifts_at extraction."
-changes: []
+changes:
+  - "2026-07-06: rewrote the total_cost_usd, cost_usd, and apiKeySource numeric/any-value regex presence proxies to `match_op: exists`; retry_after extraction now uses the new `duration_millis` unit, and the unit-lie gap entry plus body quirk are removed."
+  - "2026-07-06: renamed extraction fields to the canonical SignalEvent payload names — usage_cap_approaching `lifts_at` → `resets_at` (the variant field is `resets_at`; `lifts_at` belongs to usage_capped) and model_resolved `model` → `resolved`."
 requires_claudine_update: true
 reason: "Claude Code signal detection is codegen-wired and this research adds declarative records for usage-cap warnings, throttling, billing/no-funds, model/auth metadata, token usage cost spellings, and a bespoke session-taint rule."
 ---
@@ -300,7 +297,7 @@ Authorization and permission denial have two SDK surfaces. `SDKPermissionDeniedM
 
 `tokens_consumed` maps to terminal `result` envelopes. Current SDK result types require `total_cost_usd`, `usage`, `modelUsage`, `duration_ms`, `duration_api_ms`, `num_turns`, and `permission_denials`. Seeded fixtures show both current `total_cost_usd` and legacy `cost_usd`; Claudine's parser prefers `total_cost_usd` when both are present.
 
-Useful extraction paths are `usage.input_tokens`, `usage.output_tokens`, `usage.cache_read_input_tokens`, and the cost field. Token counts are in tokens and costs are USD. `duration_ms` and `duration_api_ms` are millisecond durations, but the signal schema does not currently include duration milliseconds.
+Useful extraction paths are `usage.input_tokens`, `usage.output_tokens`, `usage.cache_read_input_tokens`, and the cost field. Token counts are in tokens and costs are USD. `duration_ms` and `duration_api_ms` are millisecond durations.
 
 ## Retries, Overload, and Stream Failures
 
@@ -331,8 +328,6 @@ Result cost spelling also drifted. Current SDK result types use `total_cost_usd`
 The SDK union has expanded beyond the current seeded Claude stream corpus: model refusal fallback, permission denied, API retry, auth status, user dialogs, elicitation, binary version, context usage, and experimental usage control responses are source-confirmed but not yet fixture-backed.
 
 ## Quirks and Gaps
-
-`retry_after_ms` is a duration in milliseconds, but `_schema.yaml` lacks a duration-milliseconds unit. The frontmatter uses `unix_millis` only as a schema-constrained placeholder and records the mismatch in `gaps`.
 
 `apiKeySource` and `model` share the same `init` frame. If the generated engine is truly first-match-wins across all records rather than per-signal extraction, Claudine may need a multi-signal emission rule or a generated overlap exemption for metadata-bearing init frames.
 

@@ -1,7 +1,7 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-05
-last_updated: 2026-07-05
+last_updated: 2026-07-06
 agent: codex
 model: default
 docs: https://developers.openai.com/codex/noninteractive
@@ -53,8 +53,7 @@ records:
     detection: declarative
     priority: 40
     match_path: usage.input_tokens
-    match_op: regex
-    match_value: "^[0-9]+$"
+    match_op: exists
     distinguish: "`turn.completed` is the terminal usage envelope for `codex exec --json`; it differs from app-server live token-count notifications because exec only emits the flattened total when the turn completes."
     vocabulary: ["turn.completed"]
     since: rust-v0.142.5
@@ -112,7 +111,8 @@ gaps:
   - "Current source maps `ModelRerouted` to a non-fatal `item.completed` error item whose message is formatted as `model rerouted: from -> to (reason)`. No scrubbed exec fixture exists, and the message is not structured enough for high-confidence model_fallback extraction."
   - "No exec stream fixture was found for permission-denied read/write. Codex permission prompts and declines are visible as item/status or app-server approval flows, but mapping read versus write denial requires live payloads with paths and decisions."
   - "No provider_version record is available from `codex exec --json`; version is discoverable through CLI/package metadata and local files, not the primary stream."
-changes: []
+changes:
+  - "2026-07-06: rewrote the turn_completed usage.input_tokens numeric-regex presence proxy to `match_op: exists`."
 requires_claudine_update: true
 reason: "Codex signal detection is codegen-wired and this research adds Codex stream records for usage caps, generic rate limits, token usage, and resumability while documenting current source drift that Claudine must account for."
 ---

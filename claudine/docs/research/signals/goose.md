@@ -91,8 +91,7 @@ records:
     detection: declarative
     priority: 10
     match_path: total_tokens
-    match_op: regex
-    match_value: "^[0-9]+$"
+    match_op: exists
     distinguish: "The `usage_ledger` table is Goose's durable per-message usage ledger. It differs from the stream `complete` event because it can include model, cache-token, cost, and compaction fields for historical rows."
     vocabulary: ["provider_reported", "estimated", "carried_forward"]
     confidence: source_code
@@ -167,7 +166,8 @@ gaps:
   - "Goose's model and provider selections are stored in session rows (`provider_name`, `model_config_json`) and config, but the CLI stream has no stable `model_resolved`, `model_fallback`, or `provider_version` event."
   - "Ctrl+C cancels the in-process token and may add tool-response repair messages, but there is no stable stream `interrupted` terminal event."
   - "Action-required tool confirmations and elicitations are intercepted by the CLI before normal stream emission; non-interactive elicitation returns an error. This is not yet a clean `human_input_requested` stream record."
-changes: []
+changes:
+  - "2026-07-06: rewrote the usage_ledger total_tokens numeric-regex presence proxy to `match_op: exists`."
 requires_claudine_update: true
 reason: "Goose has source-backed stream and SQLite signal records that Claudine can codegen for token usage, no-funds, provider error classes, recipe retry exhaustion, and stream taint detection."
 ---

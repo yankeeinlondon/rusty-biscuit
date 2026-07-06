@@ -1,7 +1,7 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-05
-last_updated: 2026-07-05
+last_updated: 2026-07-06
 agent: codex
 model: default
 docs: https://geminicli.com/docs/cli/headless/
@@ -28,8 +28,7 @@ records:
     detection: declarative
     priority: 30
     match_path: stats.total_tokens
-    match_op: regex
-    match_value: "^[0-9]+$"
+    match_op: exists
     distinguish: "`result.stats` is the terminal aggregate usage envelope for stream-json. It differs from ordinary `message` chunks and from `error` warnings because it is emitted at final outcome time."
     vocabulary: ["result"]
     since: "0.1.20"
@@ -50,7 +49,7 @@ records:
     evidence: ./fixtures/gemini/result-turn-limit.jsonl
 extractions:
   - record: stream-model_resolved-init
-    field: model
+    field: resolved
     path: model
   - record: stream-model_resolved-init
     field: session_id
@@ -87,7 +86,9 @@ gaps:
   - "Authentication failures are validated before the main noninteractive loop. JSON output is handled specially, but `stream-json` auth validation exits with code 53 after logging diagnostics rather than emitting a structured stream event. No fixture-backed `auth_invalid` record is available."
   - "Gemini CLI exposes native ACP. ACP session updates include usage, model usage, available commands, and auth-required failures in source, but no committed Gemini ACP fixture exists in the signal corpus. ACP records should be added only after scrubbed session/update fixtures are captured."
   - "The stream-json formatter emits ISO 8601 UTC timestamps, but the current records do not extract timestamps because the normalized payload fields for these signals do not require them."
-changes: []
+changes:
+  - "2026-07-06: rewrote the result stats.total_tokens numeric-regex presence proxy to `match_op: exists`."
+  - "2026-07-06: renamed the model_resolved extraction field `model` → `resolved` to match the canonical SignalEvent::ModelResolved payload field."
 requires_claudine_update: true
 reason: "Gemini signal detection is codegen-wired and this research adds fixture-backed stream records for Gemini model resolution, token metering, and turn-limit failures while documenting several native but currently unrecorded signal gaps."
 ---

@@ -1,7 +1,7 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-05
-last_updated: 2026-07-05
+last_updated: 2026-07-06
 agent: codex
 model: default
 docs: https://opencode.ai/docs/cli/
@@ -188,7 +188,7 @@ extractions:
     field: provider
     path: provider_id
   - record: stderr_promoted-model_resolved-llm-call
-    field: model
+    field: resolved
     path: model_id
 bespoke_rationale: []
 gaps:
@@ -200,7 +200,8 @@ gaps:
   - "Provider reset timestamps inside usage-cap prose do not include an explicit timezone. Claudine's current promoted record parses them as UTC; a provider-local-zone confirmation is still needed."
   - "The Git remote tags visible for `anomalyco/opencode` and `sst/opencode` stop at `v1.4.14`, while the official site changelog documents `v1.17.x`. Version drift records use the observed fixture/source terms `pre-1.17.8` and `v1.17.8` but should be rechecked when release tags are available."
   - "No 1.17.8-format fixture exists for retries_exhausted / provider_overloaded / rate_limited / auth_invalid — only usage_capped has the legacy+1.17.8 pair; ./fixtures/opencode/error-new-format-inline-json.txt is uncited."
-changes: []
+changes:
+  - "2026-07-06: renamed the model_resolved extraction field `model` → `resolved` to match the canonical SignalEvent::ModelResolved payload field (the `model` fields on cap/limit records are unchanged supplementary evidence)."
 requires_claudine_update: true
 reason: "OpenCode signal detection is codegen-wired and this research adds fixture-backed promoted-stderr records for usage caps, retry exhaustion, rate limits, overloads, auth failure, provider version, and model resolution, plus gaps for stream JSON signals Claudine should capture next."
 ---

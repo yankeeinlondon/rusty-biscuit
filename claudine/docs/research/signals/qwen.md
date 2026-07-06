@@ -1,7 +1,7 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-05
-last_updated: 2026-07-05
+last_updated: 2026-07-06
 agent: codex
 model: default
 docs: https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/
@@ -80,8 +80,7 @@ records:
     detection: declarative
     priority: 60
     match_path: usage.input_tokens
-    match_op: regex
-    match_value: "^[0-9]+$"
+    match_op: exists
     distinguish: "`result.usage` is the terminal aggregate token envelope for current headless `stream-json`. It differs from assistant-message `message.usage`, which is per assistant message, and from compatibility `summary.token_usage`."
     vocabulary: ["result", "success", "error_during_execution"]
     since: "0.19.6"
@@ -94,8 +93,7 @@ records:
     detection: declarative
     priority: 70
     match_path: token_usage.input_tokens
-    match_op: regex
-    match_value: "^[0-9]+$"
+    match_op: exists
     distinguish: "This compatibility spelling uses `summary.token_usage` rather than current `result.usage`. It should not shadow the current result record."
     vocabulary: ["summary"]
     confidence: observed
@@ -113,19 +111,19 @@ records:
     evidence: ./fixtures/qwen/result-loop-detected.jsonl
 extractions:
   - record: stream-model_resolved-system-init
-    field: model
+    field: resolved
     path: model
   - record: stream-model_resolved-system-init
     field: session_id
     path: session_id
   - record: stream-model_resolved-system-session_start
-    field: model
+    field: resolved
     path: model
   - record: stream-model_resolved-system-session_start
     field: session_id
     path: session_id
   - record: stream-model_resolved-init-legacy
-    field: model
+    field: resolved
     path: model
   - record: stream-model_resolved-init-legacy
     field: session_id
@@ -166,7 +164,9 @@ gaps:
   - "The compatibility `init` and `summary` fixtures are proven by the local seeded corpus and Claudine parser support, but current upstream `v0.19.6` headless source favors `system/subtype=init` and `result.usage`. Maintainers should treat the compatibility records as drift tolerance rather than current upstream contract."
   - "usage.cache_read_input_tokens and usage.total_tokens (and the summary.token_usage equivalents) are source-confirmed optional fields with no fixture evidence; extractions deferred until a fixture carries them."
   - "claudine's parser (protocol/qwen.rs:66-80) accepts system/subtype=session_start and legacy init but ignores the current upstream system/subtype=init — the priority-10 record requires a parser change to be consumable."
-changes: []
+changes:
+  - "2026-07-06: rewrote both tokens_consumed numeric-regex presence proxies (result.usage and summary.token_usage input_tokens) to `match_op: exists`."
+  - "2026-07-06: renamed the three model_resolved extraction fields `model` → `resolved` to match the canonical SignalEvent::ModelResolved payload field."
 requires_claudine_update: true
 reason: "Qwen signal detection is codegen-wired and this research adds Qwen stream records for model resolution, rate limits, auth preflight failures, token metering, and a native loop-guard catalog entry while documenting first-match-wins and stream-projection gaps that generated detection must respect."
 ---

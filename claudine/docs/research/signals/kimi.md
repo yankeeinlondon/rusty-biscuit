@@ -1,7 +1,7 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-05
-last_updated: 2026-07-05
+last_updated: 2026-07-06
 agent: codex
 model: default
 docs: https://moonshotai.github.io/kimi-cli/en/customization/wire-mode.html
@@ -69,8 +69,7 @@ records:
     detection: declarative
     priority: 50
     match_path: params.payload.token_usage.output
-    match_op: regex
-    match_value: "^[0-9]+$"
+    match_op: exists
     distinguish: "`StatusUpdate.token_usage` is the step usage envelope. Other `StatusUpdate` messages may only update plan mode or MCP state and should not be counted as token-metering events."
     vocabulary: ["StatusUpdate"]
     confidence: source_code
@@ -135,7 +134,7 @@ extractions:
     path: params.payload.max_attempts
     unit: requests
   - record: stream-rate_limited-step_retry-429
-    field: wait
+    field: retry_after
     path: params.payload.wait_s
     unit: duration_secs
   - record: stream-rate_limited-step_retry-429
@@ -193,7 +192,7 @@ extractions:
     field: status
     path: result.status
   - record: stream-turn_limit_reached-max_steps
-    field: steps
+    field: limit
     path: result.steps
     unit: requests
   - record: stream-human_input_requested-question_request
@@ -215,7 +214,9 @@ gaps:
   - "The wire docs are first-class, but some source events are ahead of the rendered docs: current source includes `Notification` and `MCPLoadingBegin`/`MCPLoadingEnd` in the event union while the inspected English wire-mode page's event list omits MCP loading events."
   - "unsupported_protocol_version is synthesized wrapper-side by claudine when initialize's result.protocol_version falls outside {1.9, 1.10} — a negative match the declarative grammar cannot express; record as wrapper-bespoke when the engine lands."
   - "auth_kind_detected is unrecorded — no wire surface announcing the auth mechanism was identified."
-changes: []
+changes:
+  - "2026-07-06: rewrote the StatusUpdate token_usage.output numeric-regex presence proxy to `match_op: exists`."
+  - "2026-07-06: renamed extraction fields to the canonical SignalEvent payload names — rate_limited `wait` → `retry_after` and turn_limit_reached `steps` → `limit` (the generation_retried record keeps `wait`, which is canonical there)."
 requires_claudine_update: true
 reason: "Kimi signal detection is codegen-wired and this research adds wire-stream records for provider version, auth expiry, rate limiting, retry, token metering, interruption, max-step limits, and reserved human-input requests."
 ---

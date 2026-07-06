@@ -1,7 +1,7 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-05
-last_updated: 2026-07-05
+last_updated: 2026-07-06
 agent: codex
 model: default
 docs: https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/json.md
@@ -104,8 +104,7 @@ records:
     detection: declarative
     priority: 80
     match_path: message.usage.totalTokens
-    match_op: regex
-    match_value: "^[0-9]+$"
+    match_op: exists
     distinguish: "Assistant `message_end` carries the finalized per-response `Usage` object. It should run after error-class records so zero-usage provider failures are not reduced to token metering."
     vocabulary: ["message_end"]
     confidence: source_code
@@ -153,8 +152,7 @@ records:
     detection: declarative
     priority: 20
     match_path: message.usage.totalTokens
-    match_op: regex
-    match_value: "^[0-9]+$"
+    match_op: exists
     distinguish: "Pi persists assistant messages to session JSONL on `message_end`. This is retrospective token metering and should not replace the live stream record when Claudine is supervising a running process."
     vocabulary: ["message"]
     confidence: source_code
@@ -247,9 +245,9 @@ extractions:
     field: max_attempts
     path: maxAttempts
   - record: stream-generation_retried-auto_retry_start
-    field: delay_ms
+    field: wait
     path: delayMs
-    notes: "Pi emits milliseconds; the schema has no duration_millis unit, so unit is intentionally omitted."
+    unit: duration_millis
   - record: stream-generation_retried-auto_retry_start
     field: message
     path: errorMessage
@@ -257,7 +255,7 @@ extractions:
     field: provider
     path: provider
   - record: session_log-model_resolved-model_change
-    field: model
+    field: resolved
     path: modelId
   - record: session_log-model_resolved-model_change
     field: timestamp
@@ -302,7 +300,7 @@ extractions:
     field: method
     path: method
   - record: stream-human_input_requested-extension-ui
-    field: message
+    field: prompt
     path: message
   - record: exit-auth_invalid-no-models
     field: message
@@ -320,7 +318,9 @@ gaps:
   - "Pi's internal provider request timeout and subprocess signal handlers can end a run without a JSONL timeout signal. Claudine should keep its own `timeout` and `step_timeout` guards."
   - "RPC `extension_ui_request` is recorded as `human_input_requested`, but this is RPC-mode stdout rather than ordinary `--mode json` print-mode output. Claudine must decide whether a Pi integration uses RPC mode before enabling this record."
   - "Fixture provenance: the two auth fixtures and exit-no-models-available.json carry verbatim Pi source message templates; stream-usage-capped-quota / stream-no-funds-billing / stream-rate-limited-message / stream-provider-overloaded-message / rpc-extension-ui-request use envelope shapes faithful to the cited source types but exemplar provider text — shape-synthesized, not live captures."
-changes: []
+changes:
+  - "2026-07-06: rewrote both message.usage.totalTokens numeric-regex presence proxies (stream and session_log) to `match_op: exists`; delay_ms extraction now uses the new `duration_millis` unit; amended the quirk about inexpressible field presence."
+  - "2026-07-06: renamed extraction fields to the canonical SignalEvent payload names — generation_retried `delay_ms` → `wait`, model_resolved `model` → `resolved`, and human_input_requested `message` → `prompt`."
 requires_claudine_update: true
 reason: "Pi signal detection is codegen-wired and this research adds Pi records for JSONL stream message errors, retry lifecycle events, token usage, session-log model and resume metadata, RPC extension input requests, and startup exit auth failures."
 ---
@@ -413,7 +413,7 @@ No per-signal version drift was established for the records above. The docs link
 
 Pi's most important quirk is that provider operational failures are string-normalized, not enum-normalized. Claudine can detect many critical failures, but the strongest machine-readable fields are `message.stopReason`, `message.usage`, retry lifecycle records, and session entries.
 
-The JSONPath schema cannot express "field exists" or "field A differs from field B." That matters for `responseModel`: existence implies a concrete upstream model when it differs from the requested model, but a simple record would overlap token metering on the same `message_end` payload.
+The schema's `match_op: exists` covers plain field presence, but the JSONPath schema still cannot express "field A differs from field B." That matters for `responseModel`: existence implies a concrete upstream model when it differs from the requested model, but a simple record would overlap token metering on the same `message_end` payload.
 
 `delayMs` is milliseconds, but the signal schema currently has `duration_secs` and no duration-milliseconds unit. The extraction keeps `delay_ms` with a note and no unit.
 
