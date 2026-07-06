@@ -120,38 +120,55 @@ cli_params:
 env_vars:
   - name: GEMINI_SANDBOX
     effect: "Enables sandboxing and optionally selects the backend: true, docker, podman, sandbox-exec, runsc, or lxc. Environment selection has precedence over settings files."
+    effect_category: sandbox_control
   - name: GEMINI_SANDBOX_IMAGE
     effect: Selects a custom Docker/Podman image or LXC container name for sandboxing.
+    effect_category: sandbox_control
   - name: GEMINI_SANDBOX_PROXY_COMMAND
     effect: Configures the sandbox proxy command used by proxied sandbox profiles.
+    effect_category: sandbox_control
   - name: GEMINI_CLI_TRUST_WORKSPACE
     effect: When true, trusts the current workspace for the session, equivalent to --skip-trust.
+    effect_category: workspace_trust
   - name: GEMINI_CLI_TRUSTED_FOLDERS_PATH
     effect: Overrides the path of trustedFolders.json.
+    effect_category: config_path_override
   - name: GEMINI_CLI_SYSTEM_SETTINGS_PATH
     effect: Overrides the path to the system-wide settings override file.
+    effect_category: config_path_override
   - name: GEMINI_CLI_SYSTEM_DEFAULTS_PATH
     effect: Overrides the path to the system-wide defaults file.
+    effect_category: config_path_override
   - name: GEMINI_CLI_HOME
     effect: Relocates Gemini CLI user state and config from ~/.gemini to a separate directory.
+    effect_category: state_home_relocation
   - name: SEATBELT_PROFILE
     effect: Selects a macOS Seatbelt profile such as permissive-open, permissive-proxied, restrictive-open, restrictive-proxied, strict-open, or strict-proxied.
+    effect_category: sandbox_control
   - name: SANDBOX_MOUNTS
     effect: Adds container sandbox mounts as comma-separated from:to:opts entries. Missing opts default to read-only.
+    effect_category: sandbox_control
   - name: SANDBOX_FLAGS
     effect: Passes extra flags to Docker or Podman sandbox commands.
+    effect_category: sandbox_control
   - name: SANDBOX_SET_UID_GID
     effect: Forces or disables Linux UID/GID mapping in container sandboxes.
+    effect_category: sandbox_control
   - name: SANDBOX_PORTS
     effect: Exposes additional ports to the sandbox container.
+    effect_category: sandbox_control
   - name: SANDBOX_ENV
     effect: Passes comma-separated key=value environment variables into the sandbox.
+    effect_category: sandbox_control
   - name: BUILD_SANDBOX
     effect: Requests automatic local sandbox image build when running from source; npm installs require a prebuilt image.
+    effect_category: sandbox_control
   - name: DEBUG
     effect: Enables debug logging. Project .env DEBUG is automatically excluded; use shell env or .gemini/.env for Gemini-specific debug.
+    effect_category: none
   - name: GEMINI_CLI
     effect: Set to 1 in subprocesses launched by run_shell_command so child scripts can detect Gemini CLI execution.
+    effect_category: other
 
 config_files:
   - os: macos
@@ -169,27 +186,27 @@ config_files:
 
 precedence:
   - source: cli
-    scope: [approval_mode, sandbox, policy_paths, mcp, tool_visibility, trust, output]
+    scope: [approval_mode, sandbox, config_loading, mcp, tool_visibility, trust, other]
     merge_strategy: none
     notes: CLI arguments are session-scoped and override environment variables and settings for the same scalar surface. --policy and --admin-policy add TOML policy sources rather than replacing all policy.
   - source: environment variables
-    scope: [sandbox, trust, config_paths, user_home, debug]
+    scope: [sandbox, trust, config_loading, other]
     merge_strategy: none
     notes: Environment variables override settings files for their surfaces and can relocate user/system config paths.
   - source: system_settings
-    scope: [settings, mcp, tool_visibility, sandbox, admin_controls]
+    scope: [general_config, mcp, tool_visibility, sandbox]
     merge_strategy: shallow
     notes: System overrides have final precedence among settings files. Scalars replace lower scopes; arrays and objects are merged, with mcpServers of the same name taking the higher-precedence definition.
   - source: project_config
-    scope: [settings, mcp, tool_visibility, sandbox, hooks, commands, skills]
+    scope: [general_config, mcp, tool_visibility, sandbox, hooks, slash_commands, skills]
     merge_strategy: shallow
     notes: Project .gemini/settings.json overrides user settings but is ignored in untrusted folders.
   - source: user_config
-    scope: [settings, mcp, tool_visibility, sandbox]
+    scope: [general_config, mcp, tool_visibility, sandbox]
     merge_strategy: shallow
     notes: User settings override system defaults. The observed local ~/.gemini/settings.json had no permission policy rules; it configured auth selection, preview/session settings, shell color, ripgrep, and UI status.
   - source: system_defaults
-    scope: [settings]
+    scope: [general_config]
     merge_strategy: shallow
     notes: Lowest settings-file layer after application defaults.
   - source: admin_policy

@@ -27,21 +27,25 @@ $schema:
     cli_params: "{ param: string(required), style: enum(equals,switch,positional; required), description: string(required), example: string, example_description: string }[]"
 
     # One record per environment variable that influences permissions or adjacent
-    # security posture. Keep `effect` prose for the first pass; a later closeout
-    # step will derive an enum once the fleet shows the stable categories.
-    env_vars: "{ name: string(required), effect: string(required) }[]"
+    # security posture. `effect` prose stays authoritative for specifics (value
+    # sets, version gates, precedence quirks, hardening direction); the derived
+    # `effect_category` is the queryable index. `none` is a first-class category
+    # for verified non-permission vars; use `other` only when nothing fits.
+    # Optional until the next refresh backfills it (established widening pattern).
+    env_vars: "{ name: string(required), effect: string(required), effect_category: enum(sandbox_control,none,state_home_relocation,config_path_override,tool_surface,security_hardening,customization_lockdown,credential,threat_detection,policy_overlay,config_injection,config_source_toggle,approval_mode,network_control,workspace_trust,other) }[]"
 
     # Config files that define permissions. File paths must be recorded separately
     # for macOS, Linux, and Windows. Relative user paths are from $HOME; repo paths
     # are from repo root.
     config_files: "{ os: enum(macos,linux,windows; required), user: string(required), repo: string(required), notes: string }[]"
 
-    # Ordered highest-to-lowest policy source precedence. Keep `scope` free-form
-    # until the fleet teaches us the stable vocabulary; later tighten it to enums.
+    # Ordered highest-to-lowest policy source precedence. `scope` uses the enum
+    # vocabulary derived from the landed 2026-07-03 fleet data (ratified
+    # 2026-07-05); anything the vocabulary can't express belongs in `notes`.
     # `merge_strategy: none` means source replacement, `shallow` means top-level
     # merge, `deep` means nested merge, and `nearest` means closest/most-specific
     # source wins within that source family.
-    precedence: "{ source: string(required), scope: string[](required), merge_strategy: enum(none,shallow,deep,nearest; required), notes: string }[]"
+    precedence: "{ source: string(required), scope: enum(rules,mcp,approval_mode,sandbox,tool_visibility,general_config,config_loading,agents,extensions,hooks,skills,slash_commands,customization_resources,security_controls,trust,workspace,provider_model,other)[](required), merge_strategy: enum(none,shallow,deep,nearest; required), notes: string }[]"
 
     # What the effective permissions are when nothing is configured anywhere:
     # no CLI flags, env vars, user config, repo config, managed policy, or trust

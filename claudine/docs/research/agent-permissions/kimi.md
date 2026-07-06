@@ -110,30 +110,43 @@ cli_params:
 env_vars:
   - name: KIMI_SHARE_DIR
     effect: "Changes the runtime data directory from ~/.kimi to the provided path; config.toml, mcp.json, sessions, credentials, logs, and plan files move with it. This indirectly changes which permission defaults, hooks, MCP servers, and session approvals are loaded."
+    effect_category: state_home_relocation
   - name: KIMI_BASE_URL
     effect: "Overrides the configured base_url for kimi-type providers. It does not grant or deny tools, but it can redirect model traffic."
+    effect_category: none
   - name: KIMI_API_KEY
     effect: "Overrides the configured API key for kimi-type providers. It does not grant tool permissions, but it can enable provider access in CI or wrappers."
+    effect_category: credential
   - name: KIMI_MODEL_NAME
     effect: "Overrides the provider model identifier. No direct permission effect."
+    effect_category: none
   - name: KIMI_MODEL_MAX_CONTEXT_SIZE
     effect: "Overrides the model context size. No direct permission effect."
+    effect_category: none
   - name: KIMI_MODEL_CAPABILITIES
     effect: "Overrides model capabilities such as thinking, image_in, or video_in. This can affect whether media-reading features are usable but is not an approval rule."
+    effect_category: none
   - name: KIMI_MODEL_TEMPERATURE
     effect: "Generation parameter override. No direct permission effect."
+    effect_category: none
   - name: KIMI_MODEL_TOP_P
     effect: "Generation parameter override. No direct permission effect."
+    effect_category: none
   - name: KIMI_MODEL_MAX_TOKENS
     effect: "Generation parameter override. No direct permission effect."
+    effect_category: none
   - name: KIMI_MODEL_THINKING_KEEP
     effect: "Controls Moonshot preserved-thinking request behavior when thinking is enabled. No direct tool permission effect."
+    effect_category: none
   - name: OPENAI_BASE_URL
     effect: "Overrides base_url for OpenAI-compatible providers. No direct tool permission effect."
+    effect_category: none
   - name: OPENAI_API_KEY
     effect: "Overrides API key for OpenAI-compatible providers. No direct tool permission effect."
+    effect_category: credential
   - name: KIMI_CLI_GIT_BASH_PATH
     effect: "On Windows, points Shell execution at a specific Git Bash bash.exe. This changes the command execution backend but not the approval policy."
+    effect_category: none
 
 config_files:
   - os: macos
@@ -151,19 +164,19 @@ config_files:
 
 precedence:
   - source: runtime_session_state
-    scope: [approval_mode, approval_persistence, workspace]
+    scope: [approval_mode, workspace]
     merge_strategy: none
     notes: "When resuming a session, state.json restores yolo, afk, auto_approve_actions, plan_mode, and additional_dirs. CLI --plan and --add-dir can change the resumed state for the session."
   - source: cli
-    scope: [approval_mode, tool_visibility, mcp, workspace, headless_mode, config_source]
+    scope: [approval_mode, tool_visibility, mcp, workspace, other, config_loading]
     merge_strategy: none
     notes: "CLI flags are temporary invocation controls. --config and --config-file replace the default config source. --agent/--agent-file replace the agent tool surface. --mcp-config-file/--mcp-config add invocation MCP configs; ~/.kimi/mcp.json is loaded only when no MCP config file is provided."
   - source: env
-    scope: [config_location, provider, model, shell_backend]
+    scope: [config_loading, provider_model, security_controls]
     merge_strategy: none
     notes: "KIMI_SHARE_DIR changes where config/session/MCP data is read. Provider/model environment variables override provider/model fields after config loading. No environment variable directly selects yolo, afk, plan, or hook rules."
   - source: user_config
-    scope: [approval_mode, hooks, mcp_client, services, skills]
+    scope: [approval_mode, hooks, mcp, customization_resources, skills]
     merge_strategy: none
     notes: "~/.kimi/config.toml supplies default_yolo, default_plan_mode, hooks, services, and extra_skill_dirs. It is the only persisted config scope for permission defaults."
 

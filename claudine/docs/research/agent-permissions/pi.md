@@ -110,16 +110,22 @@ cli_params:
 env_vars:
   - name: PI_CODING_AGENT_DIR
     effect: "Overrides the Pi agent configuration directory, which changes where settings.json, trust.json, models.json, auth.json, extensions, skills, prompts, themes, and sessions are read from."
+    effect_category: state_home_relocation
   - name: PI_CODING_AGENT_SESSION_DIR
     effect: "Overrides session storage unless --session-dir is provided."
+    effect_category: state_home_relocation
   - name: PI_PACKAGE_DIR
     effect: "Overrides the package asset directory; this affects built-in assets and package/resource lookup, including extension package contents."
+    effect_category: state_home_relocation
   - name: PI_OFFLINE
     effect: "Disables startup network operations when set to 1/true/yes, including update checks, package update checks, and install/update telemetry."
+    effect_category: network_control
   - name: PI_SKIP_VERSION_CHECK
     effect: "Skips the startup latest-version request to pi.dev without disabling other network operations."
+    effect_category: network_control
   - name: PI_TELEMETRY
     effect: "Overrides install/update telemetry and provider attribution headers when set to 1/true/yes or 0/false/no. It does not grant or deny tool permissions."
+    effect_category: none
 
 config_files:
   - os: macos
@@ -149,27 +155,27 @@ config_files:
 
 precedence:
   - source: cli
-    scope: [tool_visibility, project_trust, resource_loading, startup_network, session_storage, output_mode]
+    scope: [tool_visibility, trust, config_loading, other]
     merge_strategy: none
     notes: "CLI flags are session-scoped. --tools creates an allowlist, --exclude-tools removes names, --no-tools creates an empty allowlist, --approve/--no-approve override project trust for the run, and --offline overrides startup network behavior."
   - source: extension_hooks
-    scope: [tool_calls, user_bash, provider_payload, project_trust, tool_visibility, slash_command]
+    scope: [other, trust, tool_visibility, slash_commands]
     merge_strategy: shallow
     notes: "Loaded extensions run in load order. tool_call handlers can mutate input; the first { block: true } result blocks the call. Extension code is trusted code running with the Pi process permissions."
   - source: env
-    scope: [config_paths, session_storage, package_assets, startup_network, telemetry]
+    scope: [config_loading, other]
     merge_strategy: none
     notes: "Environment variables mostly move config/storage locations or disable startup network/telemetry surfaces. They do not define allow/ask/deny policy."
   - source: repo_config
-    scope: [settings, packages, extensions, skills, prompts, themes, system_prompt]
+    scope: [general_config, customization_resources, extensions, skills]
     merge_strategy: shallow
     notes: "Project .pi/settings.json overlays global settings after project trust. Nested setting objects are merged at the top nested-object level; arrays and scalars replace. Project settings do not contain a native permissions key."
   - source: trust_store
-    scope: [project_trust]
+    scope: [trust]
     merge_strategy: nearest
     notes: "Saved trust decisions in trust.json apply by closest current or parent directory before defaultProjectTrust."
   - source: user_config
-    scope: [settings, packages, extensions, skills, prompts, themes, system_prompt]
+    scope: [general_config, customization_resources, extensions, skills]
     merge_strategy: shallow
     notes: "User/global settings provide the baseline. defaultProjectTrust is documented as a global-only setting."
 

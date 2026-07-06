@@ -105,28 +105,40 @@ cli_params:
 env_vars:
   - name: CLAUDE_CODE_ENABLE_AUTO_MODE
     effect: "Set to 1 to make auto mode available on Amazon Bedrock, Google Cloud Vertex AI, Microsoft Foundry, and signed-in Claude apps gateway sessions. Auto mode is available by default on the Anthropic API. Requires v2.1.158+."
+    effect_category: approval_mode
   - name: CLAUDE_CODE_MCP_ALLOWLIST_ENV
     effect: "Set to 1 to spawn stdio MCP servers with only a safe baseline environment plus the server's configured env, rather than inheriting the user's full shell environment."
+    effect_category: security_hardening
   - name: CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
     effect: "Set to 1 to strip Anthropic and cloud-provider credentials from subprocess environments (Bash tool, hooks, MCP stdio servers). On Linux, also runs Bash subprocesses in an isolated PID namespace."
+    effect_category: security_hardening
   - name: CLAUDE_CODE_SIMPLE
     effect: "Set to 1 to run with a minimal system prompt and only Bash, file read, and file edit tools. Disables auto-discovery of hooks, skills, plugins, MCP servers, auto memory, and CLAUDE.md. Equivalent to --bare."
+    effect_category: customization_lockdown
   - name: CLAUDE_CODE_SAFE_MODE
     effect: "Set to 1 to start in safe mode. Disables CLAUDE.md, skills, plugins, hooks, MCP servers, custom commands/agents, output styles, workflows, themes, keybindings, status line, file-suggestion commands, LSP, and auto-memory. Permissions work normally."
+    effect_category: customization_lockdown
   - name: ENABLE_CLAUDEAI_MCP_SERVERS
     effect: "Set to false to disable claude.ai MCP connectors for the session. Same effect as the disableClaudeAiConnectors setting, but does not affect servers passed via --mcp-config."
+    effect_category: tool_surface
   - name: CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST
     effect: "Set by host platforms that embed Claude Code and manage model provider routing. When set, provider-selection, endpoint, and auth variables in settings files are ignored."
+    effect_category: other
   - name: CLAUDE_CODE_DISABLE_POLICY_SKILLS
     effect: "Set to 1 to skip loading skills from the system-wide managed skills directory, useful for container/CI sessions."
+    effect_category: config_source_toggle
   - name: CLAUDE_CODE_PERFORCE_MODE
     effect: "Set to 1 to enable Perforce-aware write protection, preventing edits on files lacking the owner-write bit."
+    effect_category: security_hardening
   - name: CLAUDE_CODE_POWERSHELL_RESPECT_EXECUTION_POLICY
     effect: "Set to 1 to stop bypassing PowerShell execution policy for tool calls, hooks, and status line commands."
+    effect_category: security_hardening
   - name: CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS
     effect: "Set to 1 in non-interactive mode (-p) to disable all built-in subagent types such as Explore and Plan."
+    effect_category: tool_surface
   - name: CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT
     effect: "Idle timeout in milliseconds for remote MCP tool calls before the call aborts (default 300000). Affects MCP execution, not permission policy."
+    effect_category: none
 
 config_files:
   - os: macos
@@ -144,39 +156,39 @@ config_files:
 
 precedence:
   - source: managed settings
-    scope: [permissions, sandbox, rules, mcp, hooks, auto_mode, tool_visibility, agent_permissions]
+    scope: [rules, sandbox, mcp, hooks, approval_mode, tool_visibility, agents]
     merge_strategy: none
     notes: "Server-managed (claude.ai admin console) and endpoint-managed (MDM plist, Windows registry, system managed-settings.json) sources cannot be overridden by CLI, env, or user/project/local settings. Within managed sources, a policyHelper preempts all other managed sources; otherwise server-managed wins over endpoint-managed. Permission deny rules still merge across all scopes and always beat allow rules."
   - source: cli
-    scope: [permission_mode, allowedTools, disallowedTools, tools, add_dir, safe_mode, bare, mcp_config, strict_mcp_config, setting_sources, settings]
+    scope: [approval_mode, rules, tool_visibility, workspace, config_loading, mcp, general_config]
     merge_strategy: none
     notes: "CLI flags are temporary session overrides. They cannot override managed settings. For permissions, --allowedTools and --disallowedTools add rules that are evaluated alongside file-based rules."
   - source: environment variables
-    scope: [auto_mode, safe_mode, simple_mode, subprocess_env_scrub, mcp_allowlist_env, claudeai_mcp_servers]
+    scope: [approval_mode, config_loading, security_controls, mcp]
     merge_strategy: none
     notes: "Where an env var and a settings field address the same behavior, the env var takes precedence over the settings field. CLI flags may still override the env var for the same behavior depending on the feature."
   - source: local project settings
-    scope: [permission_rules]
+    scope: [rules]
     merge_strategy: shallow
     notes: ".claude/settings.local.json. Permission allow/ask/deny arrays merge across local/project/user scopes; a deny rule from any scope overrides an allow rule from any scope."
   - source: local project settings
-    scope: [other_settings]
+    scope: [general_config]
     merge_strategy: none
     notes: "Scalars and most objects replace narrower scopes; sandbox arrays merge across scopes unless managed-only locks apply."
   - source: shared project settings
-    scope: [permission_rules]
+    scope: [rules]
     merge_strategy: shallow
     notes: ".claude/settings.json. Permission arrays merge with user/local rules."
   - source: shared project settings
-    scope: [other_settings]
+    scope: [general_config]
     merge_strategy: none
     notes: "Overrides user settings for non-permission-rule keys."
   - source: user settings
-    scope: [permission_rules]
+    scope: [rules]
     merge_strategy: shallow
     notes: "~/.claude/settings.json. Permission arrays merge with project/local rules."
   - source: user settings
-    scope: [other_settings]
+    scope: [general_config]
     merge_strategy: none
     notes: "Baseline personal preferences when no narrower scope overrides them."
 

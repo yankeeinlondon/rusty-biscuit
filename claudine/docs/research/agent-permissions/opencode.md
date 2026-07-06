@@ -75,28 +75,40 @@ cli_params:
 env_vars:
   - name: OPENCODE_PERMISSION
     effect: "Inline JSON object merged into the effective legacy permission config after all file, directory, inline, and managed config sources; useful for session-scoped policy overlays."
+    effect_category: policy_overlay
   - name: OPENCODE_CONFIG_CONTENT
     effect: "Inline JSON/JSONC config loaded near the end of config precedence; can define permission, agent, mcp, plugin, and other security-control settings for one process."
+    effect_category: config_injection
   - name: OPENCODE_CONFIG
     effect: "Path to a custom config file loaded after global config and before project config."
+    effect_category: config_path_override
   - name: OPENCODE_CONFIG_DIR
     effect: "Custom config directory used like the standard config directory for opencode.json/opencode.jsonc, agents, commands, plugins, and related resources."
+    effect_category: config_path_override
   - name: OPENCODE_PURE
     effect: "Truthy value disables external plugins; the CLI --pure flag sets this for the process."
+    effect_category: customization_lockdown
   - name: OPENCODE_DISABLE_PROJECT_CONFIG
     effect: "Truthy value disables project config discovery, including project opencode.json/opencode.jsonc and project .opencode directories."
+    effect_category: config_source_toggle
   - name: OPENCODE_ENABLE_EXA
     effect: "Truthily enables the websearch tool in current public docs when not using the OpenCode provider."
+    effect_category: tool_surface
   - name: OPENCODE_WEBSEARCH_PROVIDER
     effect: "Selects the websearch backend in current source, which affects whether the websearch tool can execute."
+    effect_category: tool_surface
   - name: EXA_API_KEY
     effect: "Credential used by the Exa websearch backend; presence affects websearch availability."
+    effect_category: credential
   - name: PARALLEL_API_KEY
     effect: "Credential used by the Parallel websearch backend; presence affects websearch availability."
+    effect_category: credential
   - name: OPENCODE_SERVER_PASSWORD
     effect: "Enables HTTP Basic Auth for opencode serve/web and is also the default password used by opencode run --attach."
+    effect_category: credential
   - name: OPENCODE_SERVER_USERNAME
     effect: "Overrides the Basic Auth username for opencode serve/web and --attach; defaults to opencode."
+    effect_category: credential
 
 config_files:
   - os: macos
@@ -114,7 +126,7 @@ config_files:
 
 precedence:
   - source: cli
-    scope: [approval_mode, agent_selection, server_auth, plugin_loading, workspace]
+    scope: [approval_mode, agents, security_controls, extensions, workspace]
     merge_strategy: none
     notes: "--auto/--yolo/--dangerously-skip-permissions are session flags. --pure sets OPENCODE_PURE. --agent selects the agent whose permissions are evaluated."
   - source: env_OPENCODE_PERMISSION
@@ -122,39 +134,39 @@ precedence:
     merge_strategy: deep
     notes: "Merged into result.permission after managed config and before legacy tools migration; later rule order can override earlier rules."
   - source: managed_preferences_macos
-    scope: [all_config]
+    scope: [general_config]
     merge_strategy: deep
     notes: "macOS MDM managed preferences under ai.opencode.managed override file, directory, inline, remote, and account config before OPENCODE_PERMISSION is applied."
   - source: managed_config_files
-    scope: [all_config]
+    scope: [general_config]
     merge_strategy: deep
     notes: "System managed opencode.json/opencode.jsonc is loaded from /Library/Application Support/opencode, /etc/opencode, or %ProgramData%\\opencode."
   - source: console_account_config
-    scope: [all_config, provider_policy]
+    scope: [general_config, provider_model]
     merge_strategy: deep
     notes: "Active OpenCode Console organization config is loaded late and can manage providers."
   - source: env_OPENCODE_CONFIG_CONTENT
-    scope: [all_config, rules, agents, mcp, plugins]
+    scope: [general_config, rules, agents, mcp, extensions]
     merge_strategy: deep
     notes: "Inline config is local-scoped and loaded after file and directory config."
   - source: config_directories
-    scope: [rules, agents, commands, plugins, mcp]
+    scope: [rules, agents, slash_commands, extensions, mcp]
     merge_strategy: deep
     notes: "Global, discovered .opencode directories, and OPENCODE_CONFIG_DIR are loaded with nearer project directories applied later."
   - source: repo_config
-    scope: [all_config, rules, agents, mcp, plugins]
+    scope: [general_config, rules, agents, mcp, extensions]
     merge_strategy: nearest
     notes: "Project opencode.json/opencode.jsonc files are discovered upward from the run directory to the worktree and can be disabled with OPENCODE_DISABLE_PROJECT_CONFIG."
   - source: env_OPENCODE_CONFIG
-    scope: [all_config]
+    scope: [general_config]
     merge_strategy: deep
     notes: "Custom config file is loaded after global config and before project config."
   - source: user_config
-    scope: [all_config]
+    scope: [general_config]
     merge_strategy: deep
     notes: "User config includes config.json, opencode.json, and opencode.jsonc in the OpenCode config directory."
   - source: remote_well_known_config
-    scope: [all_config]
+    scope: [general_config]
     merge_strategy: deep
     notes: "Remote .well-known/opencode organizational config loads before user config."
 

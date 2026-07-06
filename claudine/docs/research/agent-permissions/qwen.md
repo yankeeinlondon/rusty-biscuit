@@ -105,38 +105,55 @@ cli_params:
 env_vars:
   - name: QWEN_HOME
     effect: "Changes the global Qwen directory, including user settings, memory, skills, credentials, trusted folders, and runtime state when QWEN_RUNTIME_DIR is unset."
+    effect_category: state_home_relocation
   - name: QWEN_RUNTIME_DIR
     effect: "Separates runtime output such as conversations, logs, and todos from persistent global config."
+    effect_category: state_home_relocation
   - name: QWEN_CODE_SAFE_MODE
     effect: "Truthy values enable safe mode, disabling settings-sourced permission rules, MCP servers, extensions, skills, hooks, memory features, custom subagents, and sandbox settings while still honoring explicit CLI approval flags."
+    effect_category: customization_lockdown
   - name: QWEN_SANDBOX
     effect: "Enables or disables sandboxing and can force docker, podman, or sandbox-exec. For sandbox enablement, docs state this overrides the CLI flag and settings."
+    effect_category: sandbox_control
   - name: QWEN_SANDBOX_IMAGE
     effect: "Sets the sandbox image unless --sandbox-image is supplied; overrides tools.sandboxImage."
+    effect_category: sandbox_control
   - name: SEATBELT_PROFILE
     effect: "macOS-only Seatbelt profile selector, including permissive-open, permissive-closed, permissive-proxied, restrictive-open, restrictive-closed, restrictive-proxied, and project custom profiles."
+    effect_category: sandbox_control
   - name: SANDBOX_FLAGS
     effect: "Additional Docker/Podman flags for container sandboxing."
+    effect_category: sandbox_control
   - name: QWEN_SANDBOX_PROXY_COMMAND
     effect: "Starts a local proxy for proxied sandbox profiles; used for network allowlist-style control."
+    effect_category: sandbox_control
   - name: SANDBOX_SET_UID_GID
     effect: "Linux container sandbox UID/GID mapping control."
+    effect_category: sandbox_control
   - name: QWEN_DISABLED_SLASH_COMMANDS
     effect: "Comma-separated slash-command denylist unioned with slashCommands.disabled and --disabled-slash-commands."
+    effect_category: tool_surface
   - name: QWEN_CODE_SYSTEM_SETTINGS_PATH
     effect: "Overrides the system settings file path, which is the highest settings-file layer."
+    effect_category: config_path_override
   - name: QWEN_CODE_SYSTEM_DEFAULTS_PATH
     effect: "Overrides the system defaults file path, which is the lowest settings-file layer above hardcoded defaults."
+    effect_category: config_path_override
   - name: QWEN_CODE_TRUSTED_FOLDERS_PATH
     effect: "Overrides the trustedFolders.json path used when folder trust is enabled."
+    effect_category: config_path_override
   - name: QWEN_CODE_SUPPRESS_YOLO_WARNING
     effect: "Suppresses the warning printed for headless YOLO runs without sandboxing; it does not change permissions."
+    effect_category: none
   - name: QWEN_CODE_LEGACY_MCP_BLOCKING
     effect: "Restores older blocking MCP discovery behavior; this affects when tools become available, not approval decisions."
+    effect_category: none
   - name: QWEN_CODE_FORCE_ENCRYPTED_FILE_STORAGE
     effect: "Forces encrypted/keychain-backed storage for MCP OAuth tokens where available instead of plaintext token files."
+    effect_category: security_hardening
   - name: QWEN_TLS_INSECURE
     effect: "Disables TLS verification for API connections when truthy; this is a security-control escape hatch, not a tool permission."
+    effect_category: security_hardening
 
 config_files:
   - os: macos
@@ -154,23 +171,23 @@ config_files:
 
 precedence:
   - source: "cli"
-    scope: ["approval_mode", "allowed_tools", "exclude_tools", "mcp", "slash_command_visibility", "extensions", "budgets", "tool_visibility"]
+    scope: ["approval_mode", "rules", "tool_visibility", "mcp", "slash_commands", "extensions", "other"]
     merge_strategy: "none"
     notes: "CLI flags are session-scoped and generally override settings. --yolo and --approval-mode are mutually exclusive; use --approval-mode=yolo when the explicit mode flag is needed."
   - source: "env"
-    scope: ["sandbox", "slash_command_visibility", "safe_mode", "system_settings_paths", "trusted_folder_path", "mcp_discovery", "token_storage"]
+    scope: ["sandbox", "slash_commands", "config_loading", "mcp", "security_controls"]
     merge_strategy: "none"
     notes: "Environment variables override settings for their specific surfaces. QWEN_SANDBOX overrides both --sandbox and tools.sandbox, while sandbox image precedence is --sandbox-image, then QWEN_SANDBOX_IMAGE, then tools.sandboxImage."
   - source: "system_settings"
-    scope: ["approval_mode", "rules", "mcp", "tool_visibility", "trust", "sandbox", "slash_command_visibility"]
+    scope: ["approval_mode", "rules", "mcp", "tool_visibility", "trust", "sandbox", "slash_commands"]
     merge_strategy: "deep"
     notes: "System settings override user and project settings. Admins can redirect the path with QWEN_CODE_SYSTEM_SETTINGS_PATH."
   - source: "project_config"
-    scope: ["approval_mode", "rules", "mcp", "sandbox", "extensions", "hooks", "skills", "subagents", "slash_command_visibility"]
+    scope: ["approval_mode", "rules", "mcp", "sandbox", "extensions", "hooks", "skills", "agents", "slash_commands"]
     merge_strategy: "deep"
     notes: "Project .qwen/settings.json overrides user settings when loaded. If folder trust is enabled and the folder is untrusted, project-local surfaces are ignored and privileged approval modes are forced down to default."
   - source: "user_config"
-    scope: ["approval_mode", "rules", "mcp", "sandbox", "extensions", "hooks", "skills", "subagents", "slash_command_visibility"]
+    scope: ["approval_mode", "rules", "mcp", "sandbox", "extensions", "hooks", "skills", "agents", "slash_commands"]
     merge_strategy: "deep"
     notes: "User settings apply globally and are overridden by project and system settings. Permission arrays merge by decision type rather than replacing wholesale."
   - source: "system_defaults"

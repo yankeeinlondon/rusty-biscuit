@@ -60,36 +60,52 @@ cli_params:
 env_vars:
   - name: GOOSE_MODE
     effect: "Controls the session mode: auto, approve, smart_approve, or chat. It overrides config.yaml for the effective mode."
+    effect_category: approval_mode
   - name: GOOSE_ALLOWLIST
     effect: "URL to a YAML allowlist of extension installation commands. When set, Goose allows only extension install commands that exactly match allowlist entries."
+    effect_category: policy_overlay
   - name: GOOSE_SANDBOX
     effect: "Enables the optional Goose Desktop macOS sandbox when set to true or 1. This is documented for Desktop, not ordinary CLI launch."
+    effect_category: sandbox_control
   - name: GOOSE_PATH_ROOT
     effect: "Overrides the base directory for Goose config, data, state, plugin, and agent paths. Useful for isolated tests or wrappers."
+    effect_category: state_home_relocation
   - name: GOOSE_ADDITIONAL_CONFIG_FILES
     effect: "Colon-separated additional YAML config files loaded after system config and before user config; can inject organization or wrapper defaults."
+    effect_category: config_injection
   - name: GOOSE_DISABLE_KEYRING
     effect: "Disables native keyring secret storage; secrets fall back to plaintext secrets.yaml, changing the security posture of extension credentials."
+    effect_category: security_hardening
   - name: GOOSE_DEBUG
     effect: "Enables debug output with full tool parameters and responses; similar to the --debug CLI switch."
+    effect_category: none
   - name: SECURITY_PROMPT_ENABLED
     effect: "Enables prompt-injection detection that can identify harmful tool requests."
+    effect_category: threat_detection
   - name: SECURITY_PROMPT_THRESHOLD
     effect: "Sets the prompt-injection detection threshold from 0.01 to 1.0."
+    effect_category: threat_detection
   - name: SECURITY_PROMPT_CLASSIFIER_ENABLED
     effect: "Enables an external classifier for prompt-injection detection."
+    effect_category: threat_detection
   - name: SECURITY_PROMPT_CLASSIFIER_ENDPOINT
     effect: "Sets the endpoint URL for the prompt-injection classifier."
+    effect_category: threat_detection
   - name: SECURITY_PROMPT_CLASSIFIER_TOKEN
     effect: "Sets the authentication token for the prompt-injection classifier endpoint."
+    effect_category: threat_detection
   - name: GOOSE_SANDBOX_PROTECT_FILES
     effect: "Controls the protected-file list used by the optional Desktop macOS sandbox."
+    effect_category: sandbox_control
   - name: GOOSE_SANDBOX_ALLOW_IP
     effect: "Adds IP exceptions to the optional Desktop macOS sandbox network controls."
+    effect_category: sandbox_control
   - name: GOOSE_SANDBOX_ALLOW_SSH
     effect: "Allows SSH exceptions in the optional Desktop macOS sandbox network controls."
+    effect_category: sandbox_control
   - name: GOOSE_SANDBOX_GIT_HOSTS
     effect: "Configures git host SSH exceptions for the optional Desktop macOS sandbox."
+    effect_category: sandbox_control
 
 config_files:
   - os: macos
@@ -107,23 +123,23 @@ config_files:
 
 precedence:
   - source: environment variables
-    scope: [approval_mode, sandbox, mcp, tool_visibility, security]
+    scope: [approval_mode, sandbox, mcp, tool_visibility, security_controls]
     merge_strategy: none
     notes: "GOOSE_MODE overrides config mode. GOOSE_PATH_ROOT can move all config/state paths for a run. GOOSE_ALLOWLIST and sandbox/security env vars are runtime controls."
   - source: cli
-    scope: [tool_visibility, sandbox, headless_behavior]
+    scope: [tool_visibility, sandbox, other]
     merge_strategy: none
     notes: "Goose has no CLI approval-mode flag. CLI switches can skip profile extensions, add explicit extensions, run extensions in Docker, control headless/session behavior, and cap repetition/turns."
   - source: user_config
-    scope: [approval_mode, mcp, tool_visibility, security]
+    scope: [approval_mode, mcp, tool_visibility, security_controls]
     merge_strategy: none
     notes: "User config values are loaded after system and additional config files and replace earlier values by key."
   - source: additional_config_files
-    scope: [approval_mode, mcp, tool_visibility, security]
+    scope: [approval_mode, mcp, tool_visibility, security_controls]
     merge_strategy: none
     notes: "GOOSE_ADDITIONAL_CONFIG_FILES injects extra YAML files after system config and before user config; user config can still override those keys."
   - source: system_config
-    scope: [approval_mode, mcp, tool_visibility, security]
+    scope: [approval_mode, mcp, tool_visibility, security_controls]
     merge_strategy: none
     notes: "System config provides a low-precedence baseline, not a managed lock."
   - source: permission.yaml

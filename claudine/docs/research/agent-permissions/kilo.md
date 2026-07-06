@@ -55,26 +55,37 @@ cli_params:
 env_vars:
   - name: KILO_PERMISSION
     effect: "Runtime JSON overlay merged into the effective `permission` object near the end of config loading."
+    effect_category: policy_overlay
   - name: KILO_CONFIG_CONTENT
     effect: "Inline JSON/JSONC config content; can include permissions, agents, MCP, plugins, and sandbox settings."
+    effect_category: config_injection
   - name: KILO_CONFIG
     effect: "Path to an extra config file loaded after global config and before project/config-directory sources."
+    effect_category: config_path_override
   - name: KILO_CONFIG_DIR
     effect: "Adds or replaces an extra config directory in the load chain; it may contain `kilo.jsonc`, agents, commands, plugins, and tools."
+    effect_category: config_path_override
   - name: KILO_DISABLE_PROJECT_CONFIG
     effect: "Disables project root config files and project `.kilo`/`.kilocode` config directories for this process."
+    effect_category: config_source_toggle
   - name: KILO_DISABLE_DEFAULT_PLUGINS
     effect: "Disables Kilo default plugins, reducing plugin-provided behavior."
+    effect_category: customization_lockdown
   - name: KILO_PURE
     effect: "Environment equivalent used by runtime flag handling for pure mode, disabling external plugins."
+    effect_category: customization_lockdown
   - name: KILO_ENABLE_QUESTION_TOOL
     effect: "Enables the question tool for clients that would not normally expose it."
+    effect_category: tool_surface
   - name: KILO_EXPERIMENTAL_LSP_TOOL
     effect: "Enables the LSP tool, adding another permission-targetable tool."
+    effect_category: tool_surface
   - name: KILO_EXPERIMENTAL_SCOUT
     effect: "Enables scout/repository tools such as repo clone and repo overview in current source."
+    effect_category: tool_surface
   - name: KILO_BWRAP_PATH
     effect: "Overrides the Linux bubblewrap executable used by the sandbox backend."
+    effect_category: sandbox_control
 
 config_files:
   - os: macos
@@ -104,7 +115,7 @@ config_files:
 
 precedence:
   - source: cli
-    scope: [approval_mode, agent_selection, tool_visibility]
+    scope: [approval_mode, agents, tool_visibility]
     merge_strategy: none
     notes: "`kilo run --auto`, `--dangerously-skip-permissions`, and `--agent` are session controls; `--pure` affects plugin loading."
   - source: runtime_api
@@ -112,39 +123,39 @@ precedence:
     merge_strategy: none
     notes: "The local permission API can enable allow-everything globally or for one session and can persist selected always-rules."
   - source: managed_preferences
-    scope: [config, rules, mcp, sandbox, tool_visibility]
+    scope: [general_config, rules, mcp, sandbox, tool_visibility]
     merge_strategy: deep
     notes: "macOS managed preferences are loaded last and act as admin-controlled overrides."
   - source: managed_config
-    scope: [config, rules, mcp, sandbox, tool_visibility]
+    scope: [general_config, rules, mcp, sandbox, tool_visibility]
     merge_strategy: deep
     notes: "System config under `/Library/Application Support/kilo`, `/etc/kilo`, or `%ProgramData%\\kilo` is loaded after ordinary user/project config."
   - source: cloud_org_config
-    scope: [config, providers, rules, mcp, tool_visibility]
+    scope: [general_config, provider_model, rules, mcp, tool_visibility]
     merge_strategy: deep
     notes: "Active Kilo Cloud organization config is loaded after env content and before managed local config."
   - source: env
-    scope: [rules, config_content, config_path, project_config_loading, plugin_loading]
+    scope: [rules, config_loading, extensions]
     merge_strategy: deep
     notes: "`KILO_PERMISSION` is applied near the end as a permission overlay; `KILO_CONFIG_CONTENT` and `KILO_CONFIG` participate in the ordinary deep-merge chain."
   - source: config_directories
-    scope: [agents, commands, plugins, tools, rules, mcp]
+    scope: [agents, slash_commands, extensions, customization_resources, rules, mcp]
     merge_strategy: deep
     notes: "Config directories load from global, primary-worktree fallback, project `.kilocode`/`.kilo`, home `.kilocode`/`.kilo`, and `KILO_CONFIG_DIR`; later merges override or append depending on field."
   - source: repo_config
-    scope: [config, rules, agents, mcp, sandbox]
+    scope: [general_config, rules, agents, mcp, sandbox]
     merge_strategy: deep
     notes: "Project `kilo.jsonc`/`kilo.json` and legacy `opencode` files load after `KILO_CONFIG` and before config directories unless project config is disabled."
   - source: custom_config_path
-    scope: [config, rules, agents, mcp]
+    scope: [general_config, rules, agents, mcp]
     merge_strategy: deep
     notes: "`KILO_CONFIG` loads after global config and before project config."
   - source: user_config
-    scope: [config, rules, agents, mcp]
+    scope: [general_config, rules, agents, mcp]
     merge_strategy: deep
     notes: "Global files load in order: `config.json`, `kilo.json`, `kilo.jsonc`, `opencode.json`, `opencode.jsonc`."
   - source: remote_well_known_config
-    scope: [config, rules, providers]
+    scope: [general_config, rules, provider_model]
     merge_strategy: deep
     notes: "Remote `.well-known/opencode` config is loaded before local global config."
 

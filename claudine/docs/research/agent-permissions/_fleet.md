@@ -197,7 +197,18 @@ Follow these steps exactly:
           lacks a direct `--mode`/`--yolo` flag; return `[]` only after checking
           `--help`, subcommand help, and docs for these adjacent surfaces, and explain
           that absence in the body.
-    - `env_vars` - one record per environment variable that influences permissions: `name` and its `effect`
+    - `env_vars` - one record per environment variable that influences permissions:
+        - `name` - the environment variable name
+        - `effect` - prose description; this stays authoritative for specifics such
+          as value sets, version gates, precedence quirks, and hardening direction
+        - `effect_category` - exactly one label per variable, chosen from:
+          `sandbox_control`, `none`, `state_home_relocation`, `config_path_override`,
+          `tool_surface`, `security_hardening`, `customization_lockdown`,
+          `credential`, `threat_detection`, `policy_overlay`, `config_injection`,
+          `config_source_toggle`, `approval_mode`, `network_control`,
+          `workspace_trust`, `other`. `none` is a first-class answer for verified
+          non-permission variables — keep those records rather than pruning them;
+          use `other` only when nothing else fits
     - `config_files` - an array of dictionaries describing where permission
       configuration can live. File paths must be recorded separately for macOS, Linux,
       and Windows; do not use `os: all` for path fields.
@@ -210,10 +221,13 @@ Follow these steps exactly:
       source has different behavior for different scopes:
         - `source` - provider-native source name such as `cli`, `env`, `repo_config`,
           `user_config`, `managed_policy`, or the provider's exact term
-        - `scope` - string array of affected policy surfaces, such as
-          `approval_mode`, `sandbox`, `rules`, `mcp`, `tool_visibility`,
-          `agent_permissions`, or provider-native names. This is intentionally
-          free-form for the first pass; we will enum it after the fleet lands.
+        - `scope` - string array of affected policy surfaces, using only this
+          vocabulary: `rules`, `mcp`, `approval_mode`, `sandbox`,
+          `tool_visibility`, `general_config`, `config_loading`, `agents`,
+          `extensions`, `hooks`, `skills`, `slash_commands`,
+          `customization_resources`, `security_controls`, `trust`, `workspace`,
+          `provider_model`, `other`. Do not invent new scope tokens; put
+          anything the vocabulary cannot express in `notes`.
         - `merge_strategy` - `none` for replacement/override, `shallow` for
           top-level merge, `deep` for nested merge, or `nearest` when closest or
           most-specific scope wins inside that source family

@@ -100,8 +100,10 @@ cli_params:
 env_vars:
   - name: CODEX_HOME
     effect: "Sets the root for Codex state, including config.toml, profile files, auth, logs, sessions, skills, rules, agents, plugins, and package metadata. This changes which permission config and rules are loaded."
+    effect_category: state_home_relocation
   - name: CODEX_SQLITE_HOME
     effect: "Sets where SQLite-backed state is stored; sqlite_home config takes precedence. It does not directly set permissions but can affect persisted trust/session state location."
+    effect_category: state_home_relocation
 
 config_files:
   - os: macos
@@ -119,35 +121,35 @@ config_files:
 
 precedence:
   - source: managed_requirements
-    scope: ["approval_policy", "sandbox", "permission_profiles", "rules", "mcp", "feature_flags", "hooks", "marketplaces"]
+    scope: ["approval_mode", "sandbox", "rules", "mcp", "other", "hooks", "extensions"]
     merge_strategy: shallow
     notes: "Cloud-managed requirements, macOS MDM requirements, and system requirements.toml constrain lower sources. First requirement source wins for a setting; some tables combine entry-by-entry."
   - source: managed_defaults
-    scope: ["approval_policy", "sandbox", "permissions", "mcp", "features", "hooks"]
+    scope: ["approval_mode", "sandbox", "rules", "mcp", "other", "hooks"]
     merge_strategy: none
     notes: "Managed defaults apply at launch and are reapplied on next start; users can still change settings during a session unless a requirement constrains them."
   - source: cli
-    scope: ["approval_policy", "sandbox", "permissions", "tool_visibility", "rules_loading", "profile", "workspace"]
+    scope: ["approval_mode", "sandbox", "rules", "tool_visibility", "config_loading", "workspace"]
     merge_strategy: none
     notes: "CLI flags and -c overrides apply to one invocation and override ordinary config. They cannot override managed requirements."
   - source: project_config
-    scope: ["approval_policy", "sandbox", "permissions", "mcp", "agents", "hooks", "skills"]
+    scope: ["approval_mode", "sandbox", "rules", "mcp", "agents", "hooks", "skills"]
     merge_strategy: nearest
     notes: "Project .codex/config.toml and .codex/rules/ load only for trusted projects. Project config cannot override machine-local provider/auth/profile/telemetry/notification keys."
   - source: profile
-    scope: ["approval_policy", "sandbox", "permissions", "mcp", "features"]
+    scope: ["approval_mode", "sandbox", "rules", "mcp", "other"]
     merge_strategy: shallow
     notes: "$CODEX_HOME/<name>.config.toml is selected with --profile and layers on top of base user config."
   - source: user_config
-    scope: ["approval_policy", "sandbox", "permissions", "mcp", "agents", "hooks", "skills", "rules"]
+    scope: ["approval_mode", "sandbox", "rules", "mcp", "agents", "hooks", "skills"]
     merge_strategy: shallow
     notes: "$CODEX_HOME/config.toml, $CODEX_HOME/rules/, and $CODEX_HOME/agents/ define the user baseline. In this session CODEX_HOME resolved to /Users/ken/.claudine/.codex and no TOML/rules config files were present there."
   - source: system_config
-    scope: ["defaults"]
+    scope: ["general_config"]
     merge_strategy: none
     notes: "Unix system config can provide lower-precedence machine defaults."
   - source: built_in_defaults
-    scope: ["approval_policy", "sandbox", "web_search", "mcp", "rules"]
+    scope: ["approval_mode", "sandbox", "tool_visibility", "mcp", "rules"]
     merge_strategy: none
     notes: "Defaults depend on surface and trust: interactive Codex recommends Auto for version-controlled folders and read-only for non-version-controlled or untrusted folders; codex exec defaults to read-only."
 
