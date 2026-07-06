@@ -178,7 +178,6 @@ resource_support:
       source_doc: claudine/docs/cross-referencing/kimi-code.md
     repo_path: .kimi/skills
     user_path: .config/agents/skills
-session_locations: []
 memory_files:
 - raw: AGENTS.md
   segments: []
@@ -230,7 +229,6 @@ acp:
   client_supported: true
   events_via_acp:
   - approval_request
-  server_mode: available_via_wire_proxy
 prompt_arg_conventions:
   entrypoint: null
   prompt_flags:
@@ -258,3 +256,4 @@ suppress_structured_stderr_on_success: false
 supports_interactive_inline_closure: false
 model_required_in_non_tty: false
 platform_kind: vendor_platform
+unmapped_native_events: []

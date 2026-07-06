@@ -18,10 +18,10 @@
     "reference": "code merely names a provider (fixtures, constructor arguments); nothing to migrate"
   },
   "totals": {
-    "sites": 433,
-    "provider_refs": 473,
+    "sites": 435,
+    "provider_refs": 475,
     "by_form": {
-      "direct-ref": 413,
+      "direct-ref": 415,
       "eq-comparison": 9,
       "matches-macro": 4,
       "ne-comparison": 5,
@@ -29,7 +29,7 @@
     },
     "by_dispatch_class": {
       "conditional": 20,
-      "reference": 413
+      "reference": 415
     }
   },
   "sites": [
@@ -261,6 +261,26 @@
       "dispatch_class": "reference",
       "providers": [
         "Gemini"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/cli/src/commands/hooks/mod.rs",
+      "line": 226,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Gemini"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/cli/src/commands/hooks/mod.rs",
+      "line": 227,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "OpenCode"
       ],
       "exempt_candidate": false
     },

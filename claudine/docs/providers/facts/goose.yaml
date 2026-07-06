@@ -153,13 +153,6 @@ resource_support:
       source_doc: claudine/docs/cross-referencing/goose.md
     repo_path: .goose/skills
     user_path: .config/goose/skills
-session_locations:
-- raw: ~/.local/state/goose/logs/cli/
-  segments: []
-- raw: ~/.local/state/goose/logs/server/
-  segments: []
-- raw: ~/.local/state/goose/logs/llm_request.*.jsonl
-  segments: []
 memory_files:
 - raw: .goosehints
   segments: []
@@ -213,7 +206,6 @@ acp:
   client_supported: true
   events_via_acp:
   - request_permission
-  server_mode: native
 prompt_arg_conventions:
   entrypoint: run
   prompt_flags:
@@ -240,3 +232,4 @@ suppress_structured_stderr_on_success: false
 supports_interactive_inline_closure: false
 model_required_in_non_tty: false
 platform_kind: agent_aggregator
+unmapped_native_events: []

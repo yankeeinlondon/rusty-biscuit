@@ -197,7 +197,6 @@ resource_support:
       source_doc: claudine/docs/cross-referencing/opencode.md
     repo_path: .opencode/skills
     user_path: .config/opencode/skills
-session_locations: []
 memory_files:
 - raw: AGENTS.md
   segments: []
@@ -235,7 +234,6 @@ known_gaps:
 acp:
   client_supported: false
   events_via_acp: []
-  server_mode: not_supported
 prompt_arg_conventions:
   entrypoint: run
   prompt_flags: []
@@ -265,3 +263,7 @@ suppress_structured_stderr_on_success: false
 supports_interactive_inline_closure: false
 model_required_in_non_tty: true
 platform_kind: agent_aggregator
+unmapped_native_events:
+- native_event: tool.definition
+  description: Mutates a tool's description and parameter schema before the tool list is sent to the model.
+  remediation: Author an OpenCode plugin exporting a tool.definition hook; Claudine cannot dispatch this phase.

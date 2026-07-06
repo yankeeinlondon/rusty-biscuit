@@ -197,9 +197,6 @@ resource_support:
       source_doc: claudine/docs/cross-referencing/claude-code.md
     repo_path: .claude/skills
     user_path: .claude/skills
-session_locations:
-- raw: ~/.claude/projects/
-  segments: []
 memory_files:
 - raw: ~/.claude/CLAUDE.md
   segments: []
@@ -292,7 +289,6 @@ known_gaps:
 acp:
   client_supported: false
   events_via_acp: []
-  server_mode: not_supported
 prompt_arg_conventions:
   entrypoint: null
   prompt_flags: []
@@ -319,3 +315,4 @@ suppress_structured_stderr_on_success: false
 supports_interactive_inline_closure: false
 model_required_in_non_tty: false
 platform_kind: vendor_platform
+unmapped_native_events: []

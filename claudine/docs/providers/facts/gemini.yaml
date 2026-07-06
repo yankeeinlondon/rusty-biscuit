@@ -169,7 +169,6 @@ resource_support:
       source_doc: claudine/docs/cross-referencing/gemini-cli.md
     repo_path: .gemini/skills
     user_path: .gemini/skills
-session_locations: []
 memory_files:
 - raw: ~/.gemini/GEMINI.md
   segments: []
@@ -241,7 +240,6 @@ known_gaps: []
 acp:
   client_supported: false
   events_via_acp: []
-  server_mode: not_supported
 prompt_arg_conventions:
   entrypoint: null
   prompt_flags:
@@ -278,3 +276,7 @@ suppress_structured_stderr_on_success: true
 supports_interactive_inline_closure: false
 model_required_in_non_tty: false
 platform_kind: vendor_platform
+unmapped_native_events:
+- native_event: BeforeToolSelection
+  description: Filters which tools the model may choose before any concrete tool call exists; returns toolConfig {mode, allowedFunctionNames}.
+  remediation: Register a command hook for BeforeToolSelection directly in Gemini settings (hooksConfig); Claudine cannot dispatch this phase.
