@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
-use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, NaiveDateTime, SecondsFormat, TimeZone, Utc};
 use regex::{Captures, Regex};
 
 /// Log severity, matching the levels OpenCode emits in the header.
@@ -160,6 +160,190 @@ pub enum LogClassification {
         level: LogLevel,
     },
     Unclassified,
+}
+
+impl ProviderLimitKind {
+    /// Wire name in the serialized signal payload's `kind` field. Must stay
+    /// in lockstep with the `match_value` terms of the opencode
+    /// `stderr_promoted` detection records in the signals research corpus.
+    fn payload_name(self) -> &'static str {
+        match self {
+            Self::Overloaded => "Overloaded",
+            Self::RateLimited => "RateLimited",
+            Self::UsageCap => "UsageCap",
+            Self::RetriesExhausted => "RetriesExhausted",
+        }
+    }
+}
+
+impl LogClassification {
+    /// The glue-mode signal payload (ratified 2026-07-06): the JSON object
+    /// the `stderr_promoted` signal-detection tables match against.
+    ///
+    /// `ProviderLimit` is discriminated by `kind` (the four
+    /// [`ProviderLimitKind`] names); every other variant by `classification`
+    /// (the variant name). Struct fields keep their snake_case names;
+    /// absent optional fields are omitted, not serialized as `null`, so an
+    /// `exists` match never fires on a missing value. `reset_at` serializes
+    /// as RFC 3339 UTC because the corpus extraction declares
+    /// `unit: iso8601 / zone: utc`.
+    ///
+    /// `claudine signals check` replays `.txt` fixtures through this
+    /// serialization, and the E5 runtime shim feeds the identical payload
+    /// from live promoted stderr — this method IS that shim's core.
+    pub fn to_signal_payload(&self) -> serde_json::Value {
+        use serde_json::{Map, Value, json};
+        fn payload(
+            classification: &str,
+            fields: Vec<(&str, Option<Value>)>,
+        ) -> Value {
+            let mut map = Map::new();
+            map.insert("classification".into(), json!(classification));
+            for (key, value) in fields {
+                if let Some(value) = value {
+                    map.insert(key.into(), value);
+                }
+            }
+            Value::Object(map)
+        }
+        match self {
+            Self::ProviderLimit {
+                status_code,
+                kind,
+                reset_at,
+                provider_id,
+                model_id,
+                provider_error,
+            } => payload(
+                "ProviderLimit",
+                vec![
+                    ("kind", Some(json!(kind.payload_name()))),
+                    ("status_code", status_code.map(|code| json!(code))),
+                    (
+                        "reset_at",
+                        reset_at.map(|at| {
+                            json!(at.to_rfc3339_opts(SecondsFormat::Secs, true))
+                        }),
+                    ),
+                    ("provider_id", provider_id.as_ref().map(|id| json!(id))),
+                    ("model_id", model_id.as_ref().map(|id| json!(id))),
+                    ("provider_error", Some(json!(provider_error))),
+                ],
+            ),
+            Self::MalformedAsset {
+                asset_type,
+                path,
+                error,
+            } => payload(
+                "MalformedAsset",
+                vec![
+                    (
+                        "asset_type",
+                        Some(json!(super::errors::asset_type_as_str(*asset_type))),
+                    ),
+                    ("path", path.as_ref().map(|p| json!(p))),
+                    ("error", Some(json!(error))),
+                ],
+            ),
+            Self::ApiFailure {
+                status_code,
+                error_name,
+                message,
+                is_fatal,
+            } => payload(
+                "ApiFailure",
+                vec![
+                    ("status_code", status_code.map(|code| json!(code))),
+                    ("error_name", Some(json!(error_name))),
+                    ("message", Some(json!(message))),
+                    ("is_fatal", Some(json!(is_fatal))),
+                ],
+            ),
+            Self::AuthFailure { message } => {
+                payload("AuthFailure", vec![("message", Some(json!(message)))])
+            }
+            Self::UncaughtError { raw_text } => {
+                payload("UncaughtError", vec![("raw_text", Some(json!(raw_text)))])
+            }
+            Self::BootBanner { version } => {
+                payload("BootBanner", vec![("version", Some(json!(version)))])
+            }
+            Self::SessionCreated { id, parent_id } => payload(
+                "SessionCreated",
+                vec![
+                    ("id", Some(json!(id))),
+                    ("parent_id", parent_id.as_ref().map(|id| json!(id))),
+                ],
+            ),
+            Self::LlmCall {
+                provider_id,
+                model_id,
+                mode,
+                is_stream,
+            } => payload(
+                "LlmCall",
+                vec![
+                    ("provider_id", Some(json!(provider_id))),
+                    ("model_id", Some(json!(model_id))),
+                    ("mode", Some(json!(mode))),
+                    ("is_stream", Some(json!(is_stream))),
+                ],
+            ),
+            Self::StepLoop { session_id, step } => payload(
+                "StepLoop",
+                vec![
+                    ("session_id", Some(json!(session_id))),
+                    ("step", Some(json!(step))),
+                ],
+            ),
+            Self::StepExit { session_id } => payload(
+                "StepExit",
+                vec![("session_id", Some(json!(session_id)))],
+            ),
+            Self::PermissionEvaluated {
+                permission,
+                pattern,
+                action,
+            } => payload(
+                "PermissionEvaluated",
+                vec![
+                    ("permission", Some(json!(permission))),
+                    ("pattern", Some(json!(pattern))),
+                    ("action", Some(json!(action))),
+                ],
+            ),
+            Self::HttpResponse {
+                method,
+                url,
+                status,
+                duration_ms,
+            } => payload(
+                "HttpResponse",
+                vec![
+                    ("method", Some(json!(method))),
+                    ("url", Some(json!(url))),
+                    ("status", Some(json!(status))),
+                    ("duration_ms", Some(json!(duration_ms))),
+                ],
+            ),
+            Self::Snapshot { message, level } => payload(
+                "Snapshot",
+                vec![
+                    ("message", Some(json!(message))),
+                    (
+                        "level",
+                        Some(json!(match level {
+                            LogLevel::Debug => "debug",
+                            LogLevel::Info => "info",
+                            LogLevel::Warn => "warn",
+                            LogLevel::Error => "error",
+                        })),
+                    ),
+                ],
+            ),
+            Self::Unclassified => payload("Unclassified", Vec::new()),
+        }
+    }
 }
 
 static HEADER_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -644,6 +828,101 @@ mod tests {
             "2026-06-10T16:11:27Z",
         );
         assert_eq!(record.timestamp.timestamp_subsec_millis(), 0);
+    }
+
+    #[test]
+    fn provider_limit_signal_payload_carries_kind_and_optional_fields() {
+        let classification = LogClassification::ProviderLimit {
+            status_code: Some(429),
+            kind: ProviderLimitKind::UsageCap,
+            reset_at: Some(
+                Utc.with_ymd_and_hms(2026, 4, 16, 4, 18, 56)
+                    .single()
+                    .expect("valid timestamp"),
+            ),
+            provider_id: Some("zai-coding-plan".to_string()),
+            model_id: None,
+            provider_error: "Usage limit reached".to_string(),
+        };
+        assert_eq!(
+            classification.to_signal_payload(),
+            serde_json::json!({
+                "classification": "ProviderLimit",
+                "kind": "UsageCap",
+                "status_code": 429,
+                "reset_at": "2026-04-16T04:18:56Z",
+                "provider_id": "zai-coding-plan",
+                "provider_error": "Usage limit reached",
+            }),
+        );
+    }
+
+    // Absent optional fields must be OMITTED (not null): the engine's
+    // `exists` operator fires on any non-null value, so a `null` slot would
+    // change detection semantics.
+    #[test]
+    fn signal_payload_omits_absent_optionals() {
+        let classification = LogClassification::ProviderLimit {
+            status_code: None,
+            kind: ProviderLimitKind::RateLimited,
+            reset_at: None,
+            provider_id: None,
+            model_id: None,
+            provider_error: "429".to_string(),
+        };
+        let payload = classification.to_signal_payload();
+        let object = payload.as_object().expect("payload is an object");
+        assert_eq!(object.get("kind"), Some(&serde_json::json!("RateLimited")));
+        for absent in ["status_code", "reset_at", "provider_id", "model_id"] {
+            assert!(!object.contains_key(absent), "{absent} must be omitted");
+        }
+    }
+
+    #[test]
+    fn classification_keyed_signal_payloads_use_variant_names() {
+        let auth = LogClassification::AuthFailure {
+            message: "AuthenticationError: Invalid API key".to_string(),
+        };
+        assert_eq!(
+            auth.to_signal_payload(),
+            serde_json::json!({
+                "classification": "AuthFailure",
+                "message": "AuthenticationError: Invalid API key",
+            }),
+        );
+
+        let boot = LogClassification::BootBanner {
+            version: "1.14.48".to_string(),
+        };
+        assert_eq!(
+            boot.to_signal_payload(),
+            serde_json::json!({
+                "classification": "BootBanner",
+                "version": "1.14.48",
+            }),
+        );
+
+        let call = LogClassification::LlmCall {
+            provider_id: "kimi-for-coding".to_string(),
+            model_id: "k2p6".to_string(),
+            mode: "primary".to_string(),
+            is_stream: true,
+        };
+        assert_eq!(
+            call.to_signal_payload(),
+            serde_json::json!({
+                "classification": "LlmCall",
+                "provider_id": "kimi-for-coding",
+                "model_id": "k2p6",
+                "mode": "primary",
+                "is_stream": true,
+            }),
+        );
+
+        assert_eq!(
+            LogClassification::Unclassified.to_signal_payload(),
+            serde_json::json!({ "classification": "Unclassified" }),
+        );
     }
 
     #[test]
