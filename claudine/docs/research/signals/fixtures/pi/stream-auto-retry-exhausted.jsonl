@@ -1,0 +1,4 @@
+{"type":"auto_retry_start","attempt":3,"maxAttempts":3,"delayMs":4000,"errorMessage":"Provider returned error: 503 service unavailable"}
+{"type":"message_end","message":{"role":"assistant","content":[],"api":"openai-responses","provider":"openai","model":"gpt-5.5","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","errorMessage":"Provider returned error: 503 service unavailable","timestamp":1783296001000}}
+{"type":"agent_end","messages":[],"willRetry":false}
+{"type":"auto_retry_end","success":false,"attempt":3,"finalError":"Provider returned error: 503 service unavailable"}

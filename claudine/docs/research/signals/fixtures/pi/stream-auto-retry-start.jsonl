@@ -1,0 +1,1 @@
+{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":1000,"errorMessage":"Provider returned error: 503 service unavailable"}

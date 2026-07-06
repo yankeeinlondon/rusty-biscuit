@@ -1,0 +1,22 @@
+{
+  "directory": "/workspace/project",
+  "payload": {
+    "id": "evt_scrubbed_step_end",
+    "type": "session.next.step.ended",
+    "properties": {
+      "timestamp": "2026-07-05T12:00:00.000Z",
+      "sessionID": "ses_scrubbed",
+      "finish": "stop",
+      "cost": 0.0042,
+      "tokens": {
+        "input": 1200,
+        "output": 300,
+        "reasoning": 42,
+        "cache": {
+          "read": 128,
+          "write": 64
+        }
+      }
+    }
+  }
+}

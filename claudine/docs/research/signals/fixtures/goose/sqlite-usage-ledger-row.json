@@ -1,0 +1,1 @@
+{"id":1,"session_id":"session-redacted","created_timestamp":1793740800,"model":"anthropic/claude-sonnet-4","input_tokens":123,"output_tokens":198,"total_tokens":321,"cache_read_tokens":10,"cache_write_tokens":5,"cost":0.0123,"cost_source":"provider_reported","is_compaction":0}

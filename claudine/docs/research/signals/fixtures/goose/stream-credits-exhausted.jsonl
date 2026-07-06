@@ -1,0 +1,1 @@
+{"type":"message","message":{"role":"assistant","created":1793740800000,"content":[{"type":"systemNotification","notificationType":"creditsExhausted","msg":"Please add credits to your account, then resend your message to continue.","data":{"top_up_url":"https://provider.example/top-up"}}]}}
