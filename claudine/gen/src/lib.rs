@@ -16,6 +16,7 @@ pub mod artifact;
 pub mod catalog;
 pub mod emit;
 pub mod errors;
+pub mod families;
 pub mod generate;
 pub mod inputs;
 pub mod offerings;
@@ -27,6 +28,7 @@ pub use apply::{ApplyOutcome, DeclinedDrift, Decision, apply_generations, overri
 pub use artifact::{ArtifactIndex, artifact_path};
 pub use catalog::{build_catalog, catalog_path, check_catalog};
 pub use errors::GenError;
+pub use families::{build_families, check_families, compiled_family_keys, families_path};
 pub use offerings::OfferingJoinReport;
 pub use generate::{
     CheckOutcome, CoercionSkip, Generation, PROVIDER_SLUGS, Provenance, ResolvedField,

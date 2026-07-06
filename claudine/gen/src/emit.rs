@@ -345,6 +345,21 @@ pub fn expected_offerings(
         };
         let class = offering_class_variant(field, get(field, record, "class")?)?;
         let catalog_id = optional_string_literal(field, get(field, record, "catalog_id")?)?;
+        let resolves = match get(field, record, "resolves")? {
+            Value::Null => "None".to_string(),
+            member => {
+                ctx.import("crate::provider::offering::ResolvesVia");
+                match expect_str(field, member, "`resolves`")? {
+                    "family_latest" => "Some(ResolvesVia::FamilyLatest)".to_string(),
+                    other => {
+                        return Err(unmappable(
+                            field,
+                            format!("`{other}` is not a ResolvesVia wire form"),
+                        ));
+                    }
+                }
+            }
+        };
         let inner = indent(level + 2);
         elements.push(format!(
             "ExpectedOffering {{\n\
@@ -354,6 +369,7 @@ pub fn expected_offerings(
              {inner}context_window: {context_window},\n\
              {inner}class: OfferingClass::{class},\n\
              {inner}catalog_id: {catalog_id},\n\
+             {inner}resolves: {resolves},\n\
              {}}}",
             indent(level + 1)
         ));

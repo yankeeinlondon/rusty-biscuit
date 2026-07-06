@@ -172,6 +172,28 @@ fn run(area: Option<PathBuf>, command: Command) -> Result<ExitCode, GenError> {
                     );
                 }
             }
+            let family_count = claudine_gen::compiled_family_keys(&generations).len();
+            match claudine_gen::check_families(&area, &generations)? {
+                CheckOutcome::Clean => {
+                    println!(
+                        "families generated.rs: clean ({family_count} family keys compiled)"
+                    );
+                }
+                CheckOutcome::Drift { details } => {
+                    drifted = true;
+                    println!(
+                        "families generated.rs: DRIFT — regenerate with `claudine-gen generate`:"
+                    );
+                    print_capped_diff(&details, "  ");
+                }
+                CheckOutcome::MissingCommitted { path } => {
+                    drifted = true;
+                    println!(
+                        "families generated.rs missing at {} — run `claudine-gen generate`",
+                        path.display()
+                    );
+                }
+            }
             Ok(if drifted {
                 ExitCode::FAILURE
             } else {
@@ -192,9 +214,14 @@ fn run_generate(
     let scope = slug_scope(slug);
     let generations = claudine_gen::generate_all(area)?;
     report_artifact_warning(&generations);
-    // The signals artifact is full-scope like catalog.json: always rebuilt,
-    // written through the same per-file confirmation flow.
+    // The signals and families artifacts are full-scope like catalog.json:
+    // always rebuilt, written through the same per-file confirmation flow.
     let signals = claudine_gen::build_signals(area)?;
+    let families = claudine_gen::build_families(area, &generations)?;
+    println!(
+        "families: {} family keys compiled from expected-offering joins",
+        claudine_gen::compiled_family_keys(&generations).len()
+    );
 
     let interactive = !yes && !dry_run && std::io::stdin().is_terminal();
     let report_only = dry_run || (!yes && !interactive);
@@ -219,8 +246,14 @@ fn run_generate(
         }
         prompt_decision(path)
     };
-    let outcome =
-        claudine_gen::apply_generations(area, &scope, &generations, &signals, &mut decide)?;
+    let outcome = claudine_gen::apply_generations(
+        area,
+        &scope,
+        &generations,
+        &signals,
+        &families,
+        &mut decide,
+    )?;
 
     for path in &outcome.written {
         println!("wrote {}", path.display());
@@ -330,6 +363,11 @@ fn report_provenance(generation: &claudine_gen::Generation) {
     );
     for id in &join.unjoined {
         println!("    unjoined: {id}");
+    }
+    for alias in &join.ambiguous_aliases {
+        println!(
+            "    ambiguous alias: `{alias}` spans multiple families — resolves mark dropped"
+        );
     }
     for skip in &generation.skips {
         println!(

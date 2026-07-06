@@ -138,6 +138,14 @@ pub enum GenError {
     #[error("unchained-ai models-catalog artifact `{path}`: {message}")]
     ArtifactInvalid { path: PathBuf, message: String },
 
+    #[error(
+        "family key `{key}` (derived from expected-offering catalog_id `{catalog_id}`) is \
+         absent from the models-catalog artifact's families index — the identity-key \
+         grammar and the family index disagree; regenerate the artifact (`just artifact` \
+         in unchained-ai) or fix the producing curation tables"
+    )]
+    FamilyKeyMissing { key: String, catalog_id: String },
+
     #[error("signals doc `{path}`: {message}")]
     SignalDocInvalid { path: PathBuf, message: String },
 

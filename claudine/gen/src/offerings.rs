@@ -9,7 +9,7 @@
 //! the identity grammar is unchained-ai's parser, never reimplemented
 //! here (design/model-catalog-boundary.md).
 
-use claudine_catalog_types::{LocalRunnerIntegration, OfferingClass};
+use claudine_catalog_types::{LocalRunnerIntegration, OfferingClass, family_key};
 use serde_json::{Map, Value};
 use strum::VariantNames;
 
@@ -46,6 +46,13 @@ pub fn classify(slug: &str, id: &str) -> OfferingClass {
     }
     OfferingClass::VendorApi
 }
+
+/// Curated escape hatch from the `resolves: family_latest` marking rule
+/// (`(slug, id)` pairs). Empty in v1: today alias+join always means a
+/// rolling pointer. A future joined router id (an alias that dispatches
+/// across families rather than tracking one) would be pinned here so it
+/// never claims a single family's `latest`.
+pub const RESOLVES_EXCEPTIONS: &[(&str, &str)] = &[];
 
 /// The exact-only join ladder:
 ///
@@ -86,11 +93,21 @@ pub struct OfferingJoinReport {
     pub total: usize,
     /// Non-plan-endpoint ids with no confident join.
     pub unjoined: Vec<String>,
+    /// Aliases shared by records whose joins derive DIFFERENT family
+    /// keys — the `resolves` mark was dropped from every carrier.
+    pub ambiguous_aliases: Vec<String>,
 }
 
 /// Source-side half of `DefaultModelsToExpectedOfferings`: agent-models
 /// `default_models[]` records → the catalog-shaped expected-offering
 /// list, sorted by id (matching `static_models`' lexical convention).
+///
+/// `resolves` marking rule: a record is marked `family_latest` iff it
+/// carries BOTH an alias AND a `catalog_id` join (minus the curated
+/// [`RESOLVES_EXCEPTIONS`]). Duplicate aliases within one provider are
+/// fine when their joins derive one family key; same-alias records
+/// deriving DIFFERENT family keys lose the mark on every carrier and the
+/// alias is reported ambiguous.
 pub fn expected_offerings_value(
     entry: &RegistryEntry,
     raw: &Value,
@@ -103,6 +120,10 @@ pub fn expected_offerings_value(
         message: "expected an array of default-model records".into(),
     })?;
     let mut by_id: std::collections::BTreeMap<String, Value> = std::collections::BTreeMap::new();
+    let mut families_by_alias: std::collections::BTreeMap<
+        String,
+        std::collections::BTreeSet<String>,
+    > = std::collections::BTreeMap::new();
     for record in records {
         let id = record
             .get("id")
@@ -113,6 +134,17 @@ pub fn expected_offerings_value(
             })?;
         let class = classify(slug, id);
         let joined = catalog_id(slug, id, class, index);
+        let alias = record.get("alias").and_then(Value::as_str);
+        let resolves = match (alias, joined) {
+            (Some(alias), Some(key)) if !RESOLVES_EXCEPTIONS.contains(&(slug, id)) => {
+                families_by_alias
+                    .entry(alias.to_string())
+                    .or_default()
+                    .insert(family_key(key).to_string());
+                true
+            }
+            _ => false,
+        };
 
         let mut row = Map::new();
         row.insert("id".into(), Value::String(id.to_string()));
@@ -133,6 +165,14 @@ pub fn expected_offerings_value(
             "catalog_id".into(),
             joined.map(|key| Value::String(key.to_string())).unwrap_or(Value::Null),
         );
+        row.insert(
+            "resolves".into(),
+            if resolves {
+                Value::String("family_latest".into())
+            } else {
+                Value::Null
+            },
+        );
         if by_id.insert(id.to_string(), Value::Object(row)).is_some() {
             return Err(GenError::UnmappableValue {
                 field: entry.field,
@@ -145,6 +185,22 @@ pub fn expected_offerings_value(
             report.joined += 1;
         } else if class != OfferingClass::PlanEndpoint {
             report.unjoined.push(id.to_string());
+        }
+    }
+
+    // Ambiguity post-pass: an alias whose marked carriers span more than
+    // one family cannot name a single family's `latest` — drop the mark
+    // from every carrier, loudly.
+    for (alias, keys) in &families_by_alias {
+        if keys.len() <= 1 {
+            continue;
+        }
+        report.ambiguous_aliases.push(alias.clone());
+        for row in by_id.values_mut() {
+            let row = row.as_object_mut().expect("rows are objects");
+            if row.get("alias").and_then(Value::as_str) == Some(alias) {
+                row.insert("resolves".into(), Value::Null);
+            }
         }
     }
     Ok(Value::Array(by_id.into_values().collect()))
@@ -229,8 +285,10 @@ mod tests {
                 "generated_at": "2026-07-01T00:00:00Z",
                 "offerings": [
                     { "id": "moonshotai/kimi-k2.7-code", "identity_key": "moonshotai/kimi-k-code@2.7" },
+                    { "id": "anthropic/claude-opus-4-7", "identity_key": "anthropic/claude-opus@4.7" },
                     { "id": "anthropic/claude-opus-4-8", "identity_key": "anthropic/claude-opus@4.8" },
                     { "id": "zenmux/anthropic/claude-opus-4-8", "identity_key": "anthropic/claude-opus@4.8" },
+                    { "id": "anthropic/claude-sonnet-5", "identity_key": "anthropic/claude-sonnet@5" },
                     { "id": "opencode/kimi-k2.6", "identity_key": "moonshotai/kimi-k@2.6" },
                     { "id": "vendor-a/shared", "identity_key": "vendor-a/shared" },
                     { "id": "vendor-b/shared", "identity_key": "vendor-b/shared" }
@@ -344,6 +402,7 @@ mod tests {
                     "context_window": 262144,
                     "class": "plan_endpoint",
                     "catalog_id": null,
+                    "resolves": null,
                 },
                 {
                     "id": "kimi-k2.7-code",
@@ -352,6 +411,7 @@ mod tests {
                     "context_window": 262144,
                     "class": "vendor_api",
                     "catalog_id": "moonshotai/kimi-k-code@2.7",
+                    "resolves": null,
                 },
                 {
                     "id": "kimi-unheard-of",
@@ -360,12 +420,103 @@ mod tests {
                     "context_window": null,
                     "class": "vendor_api",
                     "catalog_id": null,
+                    "resolves": null,
                 },
             ])
         );
         assert_eq!((report.joined, report.total), (1, 3));
         // The plan endpoint is unjoined by design and stays off the list.
         assert_eq!(report.unjoined, ["kimi-unheard-of"]);
+        assert!(report.ambiguous_aliases.is_empty());
+    }
+
+    /// The `resolves` mark requires BOTH an alias and a join: an
+    /// alias-only record (the gemini `auto` router shape) and a
+    /// join-only record both stay unmarked.
+    #[test]
+    fn resolves_marks_alias_plus_join_records_only() {
+        let index = index();
+        let entry = entry_for("expected_offerings").expect("registered");
+        let raw = json!([
+            { "id": "kimi-k2.7-code", "alias": "kcode" },
+            { "id": "kimi-unheard-of", "alias": "ghost" },
+            { "id": "kimi-k2.6" },
+        ]);
+        let mut report = OfferingJoinReport::default();
+        let value = expected_offerings_value(entry, &raw, "kimi", &index, &mut report).unwrap();
+        let resolves: Vec<(&str, bool)> = value
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| {
+                (
+                    row["id"].as_str().unwrap(),
+                    row["resolves"] == json!("family_latest"),
+                )
+            })
+            .collect();
+        assert_eq!(
+            resolves,
+            [
+                ("kimi-k2.6", false),
+                ("kimi-k2.7-code", true),
+                ("kimi-unheard-of", false),
+            ]
+        );
+        assert!(report.ambiguous_aliases.is_empty());
+    }
+
+    /// Duplicate aliases are fine when every carrier's join derives the
+    /// same family key (the gemini `flash` shape): all stay marked.
+    #[test]
+    fn duplicate_aliases_in_one_family_keep_their_marks() {
+        let index = index();
+        let entry = entry_for("expected_offerings").expect("registered");
+        let raw = json!([
+            { "id": "claude-opus-4-7", "alias": "opus" },
+            { "id": "claude-opus-4-8", "alias": "opus" },
+        ]);
+        let mut report = OfferingJoinReport::default();
+        let value = expected_offerings_value(entry, &raw, "claude", &index, &mut report).unwrap();
+        for row in value.as_array().unwrap() {
+            assert_eq!(row["resolves"], json!("family_latest"), "{row}");
+        }
+        assert!(report.ambiguous_aliases.is_empty());
+    }
+
+    /// Same-alias records deriving DIFFERENT family keys are ambiguous:
+    /// the mark drops from every carrier and the alias is reported.
+    #[test]
+    fn cross_family_duplicate_alias_drops_both_marks_and_reports() {
+        let index = index();
+        let entry = entry_for("expected_offerings").expect("registered");
+        let raw = json!([
+            { "id": "claude-opus-4-8", "alias": "best" },
+            { "id": "claude-sonnet-5", "alias": "best" },
+            { "id": "claude-opus-4-7", "alias": "opus" },
+        ]);
+        let mut report = OfferingJoinReport::default();
+        let value = expected_offerings_value(entry, &raw, "claude", &index, &mut report).unwrap();
+        let resolves: Vec<(&str, bool)> = value
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| {
+                (
+                    row["id"].as_str().unwrap(),
+                    row["resolves"] == json!("family_latest"),
+                )
+            })
+            .collect();
+        assert_eq!(
+            resolves,
+            [
+                ("claude-opus-4-7", true),
+                ("claude-opus-4-8", false),
+                ("claude-sonnet-5", false),
+            ]
+        );
+        assert_eq!(report.ambiguous_aliases, ["best"]);
     }
 
     #[test]

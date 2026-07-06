@@ -27,12 +27,30 @@ pub const MAX_AGE_DAYS: i64 = 30;
 /// Artifact location relative to the workspace root.
 pub const ARTIFACT_WORKSPACE_PATH: &str = "unchained-ai/artifacts/models-catalog.json";
 
-/// Minimal artifact projection — only what the join ladder needs.
+/// Minimal artifact projection — the join ladder's offerings plus the
+/// family index the `family_latest` compilation vendors.
 #[derive(Debug, Deserialize)]
 struct Artifact {
     schema_version: u64,
     generated_at: String,
     offerings: Vec<Offering>,
+    #[serde(default)]
+    families: BTreeMap<String, FamilyEntry>,
+}
+
+/// One `families{}` entry (keyed `vendor/family` in the artifact).
+#[derive(Debug, Deserialize)]
+pub struct FamilyEntry {
+    /// Member offering wire ids, release-ordered ascending.
+    #[serde(default)]
+    pub members: Vec<String>,
+    /// Identity key naming the newest release (Checkpoint F: a release,
+    /// not an offering).
+    #[serde(default)]
+    pub latest: Option<String>,
+    /// Wire ids the vendor re-targets over releases.
+    #[serde(default)]
+    pub rolling_aliases: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -53,6 +71,10 @@ pub struct ArtifactIndex {
     /// Bare model-id part (after the FIRST `/` of the wire id) → every
     /// identity key seen under that spelling.
     bare: BTreeMap<String, BTreeSet<String>>,
+    /// The artifact's family index, keyed `vendor/family`.
+    families: BTreeMap<String, FamilyEntry>,
+    /// The artifact's RFC3339 `generated_at` stamp, verbatim.
+    generated_at: String,
     /// Present when `generated_at` exceeded [`MAX_AGE_DAYS`] at load time.
     pub staleness_warning: Option<String>,
 }
@@ -61,6 +83,16 @@ impl ArtifactIndex {
     /// Identity key for an exact `source/model-id` wire id.
     pub fn exact_key(&self, wire_id: &str) -> Option<&str> {
         self.exact.get(wire_id).map(String::as_str)
+    }
+
+    /// The family entry for a `vendor/family` key.
+    pub fn family(&self, key: &str) -> Option<&FamilyEntry> {
+        self.families.get(key)
+    }
+
+    /// The artifact's RFC3339 `generated_at` stamp, verbatim.
+    pub fn generated_at(&self) -> &str {
+        &self.generated_at
     }
 
     /// Identity key for a bare model id, only when every artifact
@@ -146,6 +178,8 @@ pub fn load_from(path: &Path, now: DateTime<Utc>) -> Result<ArtifactIndex, GenEr
     Ok(ArtifactIndex {
         exact,
         bare,
+        families: artifact.families,
+        generated_at: artifact.generated_at,
         staleness_warning,
     })
 }
@@ -171,7 +205,17 @@ mod tests {
                 { "id": "vendor-a/shared-name", "identity_key": "vendor-a/shared-name" },
                 { "id": "vendor-b/shared-name", "identity_key": "vendor-b/shared-name" },
                 { "id": "openrouter/auto" }
-            ]
+            ],
+            "families": {
+                "anthropic/claude-opus": {
+                    "members": ["anthropic/claude-opus-4-8"],
+                    "latest": "anthropic/claude-opus@4.8",
+                    "rolling_aliases": ["openrouter/anthropic/claude-opus-latest"]
+                },
+                "vendor-a/shared-name": {
+                    "members": ["vendor-a/shared-name"]
+                }
+            }
         })
         .to_string()
     }
@@ -247,5 +291,22 @@ mod tests {
         // The gap offering has no identity key and never enters the index.
         assert_eq!(index.exact_key("openrouter/auto"), None);
         assert_eq!(index.bare_unique_key("auto"), None);
+    }
+
+    /// `latest` and `rolling_aliases` are optional per family entry;
+    /// `generated_at` survives verbatim for the compiled staleness anchor.
+    #[test]
+    fn family_index_and_generated_at_are_projected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_artifact(dir.path(), &fixture_json(2, "2026-07-01T00:00:00Z"));
+        let index = load_from(&path, now()).unwrap();
+        assert_eq!(index.generated_at(), "2026-07-01T00:00:00Z");
+        let opus = index.family("anthropic/claude-opus").expect("family present");
+        assert_eq!(opus.latest.as_deref(), Some("anthropic/claude-opus@4.8"));
+        assert_eq!(opus.rolling_aliases, ["openrouter/anthropic/claude-opus-latest"]);
+        let bare = index.family("vendor-a/shared-name").expect("family present");
+        assert_eq!(bare.latest, None);
+        assert!(bare.rolling_aliases.is_empty());
+        assert!(index.family("nobody/nothing").is_none());
     }
 }
