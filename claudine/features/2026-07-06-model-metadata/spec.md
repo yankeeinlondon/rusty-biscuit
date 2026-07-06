@@ -1,6 +1,6 @@
 # Model Metadata Source Migration: Retire Parsera, Adopt models.dev
 
-> **Status:** DRAFT — for Ken's review. Open decisions are marked `❓ OPEN`.
+> **Status:** DRAFT — for Ken's review.
 > Implementation is entirely `unchained-ai/gen`-side; the spec lives here because
 > it exists to serve the 2026-07-02 provider-metadata artifact boundary
 > (design/model-catalog-boundary.md). It does not block, and is not blocked by,
@@ -48,8 +48,11 @@ Two lessons, both in scope:
    dash/dot, date-pin, and fused-stem spelling drift.
 5. **Fetch sanity guards**: generation fails loudly when a metadata source is
    unavailable, implausibly thin, or missing roster-critical providers.
-6. Refresh `metadata_generated.rs` (live regen) and re-emit the committed
-   model-catalog artifact; all existing drift tests stay green.
+6. Add a first-class serialized `release_date` field for source release dates;
+   leave `created` unchanged and do not alias models.dev `release_date` into it.
+7. Refresh `metadata_generated.rs` (live regen) and re-emit the committed
+   model-catalog artifact from non-degraded source data; all existing drift tests
+   stay green.
 
 ## Non-goals
 
@@ -57,8 +60,9 @@ Two lessons, both in scope:
   limits; Mistral returns context/capabilities). That is the only path to the
   direct-only tail models.dev lacks (Mistral embeddings/OCR, Gemini
   TTS/previews) — worth doing roster-first, but a separate follow-up.
-- **Artifact schema changes.** `Offering.metadata` is already optional; this
-  work changes coverage, not shape. The intrinsic-vs-offering metadata split
+- **Broad artifact schema-v2 redesign.** This migration does add one serialized
+  metadata field, `release_date`, because models.dev exposes it distinctly from
+  OpenRouter's epoch-style `created`. The intrinsic-vs-offering metadata split
   (identity-level `models` section) remains a schema-v2 candidate, deferred.
 - **Local runners.** models.dev has no usable ollama catalog; local-model
   metadata remains model-citizen territory.
@@ -96,9 +100,13 @@ strings (96/141 today) plus the identity join in the artifact.
 | `cost.input` / `cost.output` | `pricing.prompt_per_token` / `completion_per_token` | **per-million → per-token: divide by 1e6.** `ModelPricing` stays per-token USD — it is a shared, serialized type; changing its unit is a breaking artifact change for no gain |
 | `cost.cache_read` | `pricing.input_cache_read_per_token` | ÷ 1e6 |
 | `knowledge` | `knowledge_cutoff` | |
-| `release_date` | `created` | ❓ OPEN — parse `YYYY-MM-DD` to epoch seconds (UTC midnight) to match OpenRouter's `created` semantics, or leave `created` OpenRouter-only? Proposal: map it; a release date is what consumers use `created` for (release-order tiebreak) |
-| `tool_call` / `structured_output` / `reasoning` / `attachment` | `capabilities` entries | ❓ OPEN — canonical vocabulary. Proposal: `function_calling`, `structured_output`, `reasoning`, `file_input` (matching the Parsera-era strings already committed where they exist) |
+| `release_date` | `release_date` | serialized artifact/schema addition; preserve as source date string (`YYYY-MM-DD`) and leave `created` unchanged |
+| `tool_call` / `structured_output` / `reasoning` / `attachment` | `capabilities` entries | map via canonical serialized capability strings backed internally by typed constants or an enum: `tool_call → function_calling`, `structured_output → structured_output`, `reasoning → reasoning`, `attachment → file_input` |
 | `temperature`, `reasoning_options`, `last_updated` | dropped in v1 | revisit if a consumer wants them |
+
+`created` remains whatever the existing OpenRouter-native path provides today.
+Consumers that need release chronology can prefer `release_date` when present
+and fall back to `created` only as an older-source timestamp.
 
 ### Matching ladder
 
@@ -137,18 +145,25 @@ Generation **fails** (no graceful-empty fallback for metadata sources) when:
 
 The gen report additionally prints per-provider match coverage
 (`matched/total`) so gradual erosion is visible at every regen, not just
-total collapse. ❓ OPEN — escape hatch: a `--allow-degraded-metadata` flag for
-deliberately regenerating enums when models.dev is down? Proposal: yes, flag
-present but never used in the documented workflow.
+total collapse.
+
+`--allow-degraded-metadata` exists only as an escape hatch for enum or other
+non-metadata generation when models.dev is unavailable. In degraded mode the
+generator must not write `metadata_generated.rs` or any committed model-catalog
+artifact from degraded source data, and the CLI/report output must state that
+metadata/artifact emission was skipped because the source was degraded.
 
 ### Testing
 
 - **Committed fixture**: a trimmed snapshot of `api.json` (roster providers
   only) under `gen/tests/fixtures/`, driving offline tests of the field
-  mapping, unit conversion, provider-key mapping, and the matching ladder
-  (exact hit, identity hit across dash/dot and date-pin drift, cross-provider
-  refusal, ambiguity refusal).
+  mapping, unit conversion, provider-key mapping, canonical capability mapping,
+  and the matching ladder (exact hit, identity hit across dash/dot and date-pin
+  drift, cross-provider refusal, ambiguity refusal).
 - **Guard tests**: thin/missing-provider responses must error.
+- **Degraded-mode tests**: `--allow-degraded-metadata` permits enum/non-metadata
+  outputs but refuses to update `metadata_generated.rs` or committed artifacts;
+  report text calls out the degraded source and skipped metadata emission.
 - Existing Phase F artifact drift tests are the backstop for the re-emit step:
   they fail until `emit-catalog` is re-run, and the sanity floors
   (offerings > 600, gaps < 5, duplicate groups > 100) hold post-migration.
@@ -161,13 +176,16 @@ present but never used in the documented workflow.
    offline tests. No behavior change to generation yet.
 2. **Matching ladder** — identity-aware matcher in the gen crate (uses
    `unchained_ai::models::identity`), source-neutral merge rework,
-   `parsera.rs` deleted, guards wired, gen report extended.
+   `parsera.rs` deleted, guards wired, degraded-mode metadata write block
+   enforced, gen report extended.
 3. **Live regen** (Ken's shell — needs provider API keys):
    `just generate-models`, review the coverage report, then `just artifact`
-   to re-emit the committed model-catalog artifact.
+   to re-emit the committed model-catalog artifact. Do not use
+   `--allow-degraded-metadata` for this step.
    ► **CHECKPOINT (Ken):** review the regen diff — first regen on a new
    metadata source rewrites most of `metadata_generated.rs`; eyeball pricing
-   spot-checks (anthropic, openai) against provider price pages before commit.
+   spot-checks (anthropic, openai) and the new `release_date` field before
+   commit.
 4. **Docs drift pass** — `.claude/skills/unchained-ai/model-generator.md`
    (Parsera → models.dev), `artifacts/README.md` regeneration section,
    root `docs/dependencies.md` if dependencies changed, this spec stamped.
@@ -188,6 +206,14 @@ should be run expecting Parsera enrichment in the interim.
 
 - `parsera.rs` is gone; `models_dev.rs` is the sole non-native enrichment
   source, with guards that fail generation on source degradation.
+- The serialized metadata/artifact schema includes `release_date`; models.dev
+  dates populate it, and `created` remains unchanged.
+- Capabilities are emitted through canonical typed constants or an enum, with
+  models.dev booleans mapped to `function_calling`, `structured_output`,
+  `reasoning`, and `file_input`.
+- `--allow-degraded-metadata` can unblock enum/non-metadata generation only; it
+  cannot update `metadata_generated.rs` or committed artifacts from degraded
+  source data, and reports that constraint clearly.
 - Offline fixture tests cover mapping, conversion, matching ladder, and
   guards; `just test` / `just lint` green in the unchained-ai area.
 - A live regen has landed: every direct anthropic model has metadata with
