@@ -102,3 +102,38 @@
   graduations (`yolo` typed switch sites, `cli_sensitive_axes` six-axis booleans)
   need a **schema v2** addition beyond this widening — proposals tracked in that
   track's docs.
+
+## 2026-07-05 — `memory` topic authored (Ken's B2 ruling)
+
+Authored the new schema-enforced `memory` research topic
+(`docs/research/memory/{_schema.yaml,_fleet.md}`) per Ken's B2 ruling: a landscape
+survey of what each provider already ships as "memory", as design input for a future
+Claudine-owned memory system — deliberately NOT wired to catalog codegen. The existing
+catalog field `memory_files` (context-file auto-loading — wrapper mechanics) is out of
+scope and unchanged; that surface belongs to the system-prompt topic, and the fleet
+driver instructs researchers to reference rather than duplicate it. Schema follows the
+freeze-risk pattern (free-form strings where vocabulary is uncertain, enums only for
+closed sets: `memory_kinds[].kind`, `storage[].os`/`scope`, `write_model[].writer`)
+with prose fields for load model, user controls, system-prompt interaction, limits,
+portability, and speculative `claudine_notes`. The fleet run is deferred to the
+closeout track, scheduled when the memory design process starts.
+
+## 2026-07-05 — agent-permissions schema-v2 items 1c/1d executed (provider-metadata track)
+
+- Executed the ratified 1c/1d increments (approved by Ken, 2026-07-05) as a docs-only
+  pass over `docs/research/agent-permissions/`. Item 1c: `effect_category` added to the
+  sidecar's `env_vars` shape as an **optional** 16-variant enum beside the kept `effect`
+  prose (prose stays authoritative for specifics; the category is the queryable index)
+  and backfilled across all **106** env_vars records in the 9 provider docs. Item 1d:
+  `precedence[].scope` tightened from free-form strings to the ratified 18-variant enum
+  and every scope token normalized in place across all **74** precedence records
+  (deduped per record, first-occurrence order preserved; the per-record `tools`
+  collision resolved as claude/cli → `tool_visibility` and kilo/config_directories →
+  `customization_resources`).
+- `_schema.yaml` comments updated (the "keep free-form for the first pass" note is
+  retired) and `_fleet.md` capture instructions now teach both vocabularies (`none` is
+  a first-class `effect_category` for verified non-permission vars; `other` only when
+  nothing fits; no invented scope tokens — overflow goes in `notes`).
+- All 9 provider docs validate clean via `md schema validate` against the tightened
+  sidecar. Refresh fleets are unaffected: the 1c addition is optional-until-refresh and
+  the 1d values were normalized in place, so no fleet run is forced by this change.

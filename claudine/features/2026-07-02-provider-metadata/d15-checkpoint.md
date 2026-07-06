@@ -1,13 +1,15 @@
 # D-1.5 Checkpoint Package (2026-07-05)
 
-> **Status:** awaiting Ken's ratification. Nothing in this document changes code or
-> marks `summary-triage.md` — it is the review artifact for the single D-1.5 HITL
-> stop: (A) disposition proposals for every untriaged triage item, (B) the three
-> parked rulings with options + recommendation, (D) the permissions
-> `env_vars.effect` / `precedence.scope` enum derivation (schema-v2 items 1c/1d).
-> After ratification the unblocked graduations execute (memory_files / acp
-> mechanical re-points + regen; session_locations per ruling; optionally the
-> stream_protocol NIS graduation).
+> **Status (2026-07-05):** ratified. Part A was ratified by Ken exactly as proposed
+> (2026-07-05) and every disposition has been applied to `summary-triage.md`.
+> Part B was ruled (Ken, 2026-07-05): **B1** — retire the field; **B2** — ruling
+> superseded by Ken's memory-system context, the recommendation is being reworked;
+> **B3** — adopt the research vocabulary, as a future-facing observational field.
+> B1/B3 + the hooks-report `unmapped_native_events` field were EXECUTED 2026-07-05
+> (registry 42 = 10 roster / 10 research / 22 facts; gen check clean). B2's
+> reworked recommendation (memory research topic, field unchanged) is recorded in
+> its section below. Section D (schema-v2 items 1c/1d) was re-presented in
+> digestible form 2026-07-05; Ken's decision pending.
 
 ## A. Disposition proposals (untriaged `summary-triage.md` items)
 
@@ -193,6 +195,35 @@ Options:
 **Recommendation: (a) now, (b) as the graduation trigger** rolled into schema-v2
 item 4a. Separately: the `CLAUDE.local.md` location conflict needs a human check
 (which path does Claude Code actually read?) — drift finding, not auto-corrected.
+
+> **Reworked recommendation (2026-07-05), after Ken's memory-system context.**
+> Ken's framing: Claudine will add its own memory system; fleet research should
+> capture what each provider already offers, as design input — whether any of it
+> maps into codegen is unknowable until Claudine's memory design is formalized.
+> That framing decouples three things the original question tangled:
+>
+> 1. **The catalog field `memory_files` stays facts-fed and curated, unchanged.**
+>    It answers a narrow *wrapper* question — "which Markdown context files does
+>    the provider auto-load" — and is load-bearing (harness-seed discovery). It is
+>    not a memory model and should never be derived from system-prompt research.
+>    (Optional future rename to `context_files` to stop overloading "memory";
+>    deferred — churn without payoff today.)
+> 2. **Provider memory-system knowledge becomes a dedicated `memory` research
+>    topic** (standard sidecar + `_fleet.md` pattern) — the landscape survey the
+>    memory design process will consume. Schema sketch: memory kinds offered
+>    (model-written auto-memory vs user-curated files vs session-scoped), storage
+>    locations + formats (Claude MEMORY.md dirs, Codex `memories_1.sqlite`, Goose
+>    memory extension, …), write triggers (who writes, when), load timing, scope
+>    (global/project/session), user controls (enable/disable/edit/clear), system-
+>    prompt interaction, portability. Deliberately NOT wired to codegen.
+> 3. **Timing:** authoring the sidecar/prompt is cheap and can happen anytime;
+>    the fleet RUN is scheduled by the topics-closeout track as the named
+>    prerequisite of the memory design process — not before. After the design
+>    formalizes, revisit which keys (if any) graduate into the catalog.
+>
+> The old extraction-rule question (mode==append ∧ format==markdown) dissolves —
+> nothing derives `memory_files` from research. The `CLAUDE.local.md` path
+> conflict remains a one-line human check at the next facts touch.
 
 ### B3. `acp` — vocabulary reconciliation
 

@@ -134,6 +134,28 @@ The widened schema (2026-07-02) already landed and its fleet already ran
 - **Recommendation: approve the derivation pass** (it can run in D-1.5 as an
   analysis task); tighten the sidecar at the next natural permissions refresh.
 
+> **Executed 2026-07-05.** The derivation pass and backfill ran the same day as
+> approval (docs-only task): `effect_category` was added as an **optional** enum
+> beside the kept `effect` prose and backfilled across all 106 env_vars records,
+> and `precedence[].scope` was tightened to the ratified enum with every scope
+> token normalized in place across all 74 precedence records (per-record `tools`
+> collisions resolved: claude/cli → `tool_visibility`, kilo/config_directories →
+> `customization_resources`). Sidecar and `_fleet.md` capture instructions
+> updated; all 9 docs validate clean against the tightened sidecar.
+>
+> Ratified `effect_category` variants (16): `sandbox_control`, `none`,
+> `state_home_relocation`, `config_path_override`, `tool_surface`,
+> `security_hardening`, `customization_lockdown`, `credential`,
+> `threat_detection`, `policy_overlay`, `config_injection`,
+> `config_source_toggle`, `approval_mode`, `network_control`,
+> `workspace_trust`, `other`.
+>
+> Ratified `scope` variants (18): `rules`, `mcp`, `approval_mode`, `sandbox`,
+> `tool_visibility`, `general_config`, `config_loading`, `agents`,
+> `extensions`, `hooks`, `skills`, `slash_commands`,
+> `customization_resources`, `security_controls`, `trust`, `workspace`,
+> `provider_model`, `other`.
+
 ---
 
 ## 2. non-interactive-sessions (NIS) v2
@@ -335,7 +357,7 @@ topic queues for its next closeout refresh.
 | --- | --- | --- | --- |
 | 1a | permissions: typed YOLO switch sites | approve | |
 | 1b | permissions: six-axis → `cli_sensitive_axes` | **reject — keep facts** | |
-| 1c/1d | permissions: effect + scope enum derivation | approve (analysis in D-1.5) | |
+| 1c/1d | permissions: effect + scope enum derivation | approve (analysis in D-1.5) | approved (Ken, 2026-07-05) |
 | 2a | NIS: `conflicting_flags` → `{flag, when, kind}` records | approve | |
 | 2b | NIS: typed noise key (stdout graduates; stderr stays curated) | approve | |
 | 2c | NIS: `output_formats` parity (selector/stdin/companions) | approve — highest value | |
