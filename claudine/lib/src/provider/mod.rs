@@ -29,6 +29,7 @@ mod kimi;
 mod known_gap;
 mod methods;
 mod model_catalog_source;
+mod offering;
 mod opencode;
 mod output_format;
 mod path_template;
@@ -56,6 +57,7 @@ pub use event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
 pub use identity::PROVIDER_COUNT;
 pub use known_gap::{KnownGap, KnownGapArea};
 pub use model_catalog_source::ModelCatalogSource;
+pub use offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource};
 pub use output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 // Temporary shim: Provider, OutputFormatSelector and friends now live in
 // `crate::provider_id`.  These re-exports keep existing importers working
@@ -248,6 +250,18 @@ pub struct ProviderInfo {
     /// Static, compiled-in model catalog for providers with a known model
     /// enum. Empty for providers whose catalog is dynamic or unavailable.
     pub static_models: &'static [&'static str],
+
+    /// Typed expected-offering records from agent-models research,
+    /// classified and joined to the unchained-ai models-catalog artifact
+    /// by identity key. `static_models` stays the runtime listing
+    /// baseline until the staged per-provider flip
+    /// (design/model-catalog-boundary.md, runtime migration step 4).
+    pub expected_offerings: &'static [ExpectedOffering],
+
+    /// Offering-source namespaces (local runners today): id prefixes a
+    /// user can route models through beyond the expected set, from
+    /// model-config research.
+    pub offering_sources: &'static [OfferingSource],
 
     /// Source of this provider's model catalog. See
     /// [`ModelCatalogSource`] for the variants.

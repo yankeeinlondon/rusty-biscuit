@@ -24,6 +24,7 @@ use crate::provider::cli_sensitivity::CliSensitiveAxes;
 use crate::provider::event_mapping::{EventMapping, EventMappingTable, EventSupportLevel, WireProxyMode};
 use crate::provider::identity::Provider;
 use crate::provider::model_catalog_source::ModelCatalogSource;
+use crate::provider::offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource};
 use crate::provider::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 use crate::provider::path_template::PathTemplate;
 use crate::provider::platform_kind::PlatformKind;
@@ -137,6 +138,134 @@ pub(in crate::provider) static KIMI_INFO: ProviderInfo = ProviderInfo {
         "moonshot-v1-32k-vision-preview",
         "moonshot-v1-8k",
         "moonshot-v1-8k-vision-preview",
+    ],
+    expected_offerings: &[
+        ExpectedOffering {
+            id: "kimi-for-coding",
+            alias: Some("kimi-code"),
+            is_default: true,
+            context_window: Some(262144),
+            class: OfferingClass::PlanEndpoint,
+            catalog_id: None,
+        },
+        ExpectedOffering {
+            id: "kimi-k2.5",
+            alias: None,
+            is_default: false,
+            context_window: Some(262144),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("moonshotai/kimi-k@2.5"),
+        },
+        ExpectedOffering {
+            id: "kimi-k2.6",
+            alias: None,
+            is_default: false,
+            context_window: Some(262144),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("moonshotai/kimi-k@2.6"),
+        },
+        ExpectedOffering {
+            id: "kimi-k2.7-code",
+            alias: None,
+            is_default: false,
+            context_window: Some(262144),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("moonshotai/kimi-k-code@2.7"),
+        },
+        ExpectedOffering {
+            id: "kimi-k2.7-code-highspeed",
+            alias: None,
+            is_default: false,
+            context_window: Some(262144),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("moonshotai/kimi-k-code@2.7+highspeed"),
+        },
+        ExpectedOffering {
+            id: "moonshot-v1-128k",
+            alias: None,
+            is_default: false,
+            context_window: Some(131072),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("moonshotai/moonshot-v-128k@1"),
+        },
+        ExpectedOffering {
+            id: "moonshot-v1-128k-vision-preview",
+            alias: None,
+            is_default: false,
+            context_window: Some(131072),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("moonshotai/moonshot-v-128k@1+preview+vision"),
+        },
+        ExpectedOffering {
+            id: "moonshot-v1-32k",
+            alias: None,
+            is_default: false,
+            context_window: Some(32768),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("moonshotai/moonshot-v-32k@1"),
+        },
+        ExpectedOffering {
+            id: "moonshot-v1-32k-vision-preview",
+            alias: None,
+            is_default: false,
+            context_window: Some(32768),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("moonshotai/moonshot-v-32k@1+preview+vision"),
+        },
+        ExpectedOffering {
+            id: "moonshot-v1-8k",
+            alias: None,
+            is_default: false,
+            context_window: Some(8192),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("moonshotai/moonshot-v-8k@1"),
+        },
+        ExpectedOffering {
+            id: "moonshot-v1-8k-vision-preview",
+            alias: None,
+            is_default: false,
+            context_window: Some(8192),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("moonshotai/moonshot-v-8k@1+preview+vision"),
+        },
+    ],
+    offering_sources: &[
+        OfferingSource {
+            prefix: "llamacpp",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("openai_compatible"),
+            integration: Some(LocalRunnerIntegration::BaseUrlOverride),
+        },
+        OfferingSource {
+            prefix: "lmstudio",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("openai_compatible"),
+            integration: Some(LocalRunnerIntegration::BaseUrlOverride),
+        },
+        OfferingSource {
+            prefix: "ollama",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("openai_compatible"),
+            integration: Some(LocalRunnerIntegration::BaseUrlOverride),
+        },
+        OfferingSource {
+            prefix: "omlx",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("openai_compatible"),
+            integration: Some(LocalRunnerIntegration::BaseUrlOverride),
+        },
+        OfferingSource {
+            prefix: "other",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("openai_compatible"),
+            integration: Some(LocalRunnerIntegration::BaseUrlOverride),
+        },
+        OfferingSource {
+            prefix: "vllm",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("openai_compatible"),
+            integration: Some(LocalRunnerIntegration::BaseUrlOverride),
+        },
     ],
     model_catalog_source: ModelCatalogSource::Static,
     model_env_vars: &["KIMI_MODEL"],

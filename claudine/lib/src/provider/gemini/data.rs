@@ -24,6 +24,7 @@ use crate::provider::cli_sensitivity::CliSensitiveAxes;
 use crate::provider::event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
 use crate::provider::identity::Provider;
 use crate::provider::model_catalog_source::ModelCatalogSource;
+use crate::provider::offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource};
 use crate::provider::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 use crate::provider::path_template::PathTemplate;
 use crate::provider::platform_kind::PlatformKind;
@@ -171,6 +172,134 @@ pub(in crate::provider) static GEMINI_INFO: ProviderInfo = ProviderInfo {
         "gemini-3.5-flash",
         "gemma-4-26b-a4b-it",
         "gemma-4-31b-it",
+    ],
+    expected_offerings: &[
+        ExpectedOffering {
+            id: "auto",
+            alias: Some("auto"),
+            is_default: true,
+            context_window: Some(1000000),
+            class: OfferingClass::VendorApi,
+            catalog_id: None,
+        },
+        ExpectedOffering {
+            id: "gemini-2.5-flash",
+            alias: Some("flash"),
+            is_default: false,
+            context_window: Some(1000000),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("google/gemini-flash@2.5"),
+        },
+        ExpectedOffering {
+            id: "gemini-2.5-flash-lite",
+            alias: Some("flash-lite"),
+            is_default: false,
+            context_window: Some(1000000),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("google/gemini-flash-lite@2.5"),
+        },
+        ExpectedOffering {
+            id: "gemini-2.5-pro",
+            alias: None,
+            is_default: false,
+            context_window: Some(1000000),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("google/gemini-pro@2.5"),
+        },
+        ExpectedOffering {
+            id: "gemini-3-flash-preview",
+            alias: Some("flash"),
+            is_default: false,
+            context_window: Some(1000000),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("google/gemini-flash@3+preview"),
+        },
+        ExpectedOffering {
+            id: "gemini-3-pro-preview",
+            alias: Some("pro"),
+            is_default: false,
+            context_window: Some(1000000),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("google/gemini-pro@3+preview"),
+        },
+        ExpectedOffering {
+            id: "gemini-3.1-flash-lite",
+            alias: Some("flash-lite"),
+            is_default: false,
+            context_window: Some(1000000),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("google/gemini-flash-lite@3.1"),
+        },
+        ExpectedOffering {
+            id: "gemini-3.1-pro-preview",
+            alias: None,
+            is_default: false,
+            context_window: Some(1000000),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("google/gemini-pro@3.1+preview"),
+        },
+        ExpectedOffering {
+            id: "gemini-3.5-flash",
+            alias: None,
+            is_default: false,
+            context_window: Some(1000000),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("google/gemini-flash@3.5"),
+        },
+        ExpectedOffering {
+            id: "gemma-4-26b-a4b-it",
+            alias: None,
+            is_default: false,
+            context_window: None,
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("google/gemma@4+it+26b+a4b"),
+        },
+        ExpectedOffering {
+            id: "gemma-4-31b-it",
+            alias: None,
+            is_default: false,
+            context_window: None,
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("google/gemma@4+it+31b"),
+        },
+    ],
+    offering_sources: &[
+        OfferingSource {
+            prefix: "llamacpp",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("bespoke"),
+            integration: Some(LocalRunnerIntegration::ProxyRequired),
+        },
+        OfferingSource {
+            prefix: "lmstudio",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("bespoke"),
+            integration: Some(LocalRunnerIntegration::ProxyRequired),
+        },
+        OfferingSource {
+            prefix: "ollama",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("bespoke"),
+            integration: Some(LocalRunnerIntegration::ProxyRequired),
+        },
+        OfferingSource {
+            prefix: "omlx",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("bespoke"),
+            integration: Some(LocalRunnerIntegration::ProxyRequired),
+        },
+        OfferingSource {
+            prefix: "other",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("bespoke"),
+            integration: Some(LocalRunnerIntegration::FirstClass),
+        },
+        OfferingSource {
+            prefix: "vllm",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("bespoke"),
+            integration: Some(LocalRunnerIntegration::ProxyRequired),
+        },
     ],
     model_catalog_source: ModelCatalogSource::Static,
     model_env_vars: &["GEMINI_MODEL"],

@@ -414,9 +414,14 @@ impl ModelCatalogService {
     ///
     /// Merges cached data (or static source) with user overrides.
     pub fn catalog_for(&self, provider: Provider) -> Vec<String> {
-        let base = match self.cache.read(provider) {
-            Some(entry) => entry.models,
-            None => static_catalog_for_provider(provider),
+        let base = match provider_info(provider).model_catalog_source {
+            ModelCatalogSource::Static => static_catalog_for_provider(provider),
+            ModelCatalogSource::None | ModelCatalogSource::ShellCommand { .. } => {
+                match self.cache.read(provider) {
+                    Some(entry) => entry.models,
+                    None => static_catalog_for_provider(provider),
+                }
+            }
         };
         let override_entry = self.overrides.get(&provider);
         merge_overrides(provider, &base, override_entry)
@@ -461,6 +466,21 @@ mod tests {
         let service = ModelCatalogService::new();
         assert!(service.is_valid(Provider::Codex, "gpt-5.5"));
         assert!(service.is_valid(Provider::Claude, "claude-opus-4-8"));
+    }
+
+    #[test]
+    fn static_source_ignores_stale_cache() {
+        let tmp = tempfile::tempdir().unwrap();
+        let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
+        let stale = ModelCacheEntry {
+            provider: Provider::Codex,
+            models: vec!["old-codex-model".into()],
+            fetched_at: chrono::Utc::now(),
+        };
+        service.cache.write(&stale).unwrap();
+
+        assert!(service.is_valid(Provider::Codex, "gpt-5.5"));
+        assert!(!service.is_valid(Provider::Codex, "old-codex-model"));
     }
 
     #[test]

@@ -24,6 +24,7 @@ use crate::provider::cli_sensitivity::CliSensitiveAxes;
 use crate::provider::event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
 use crate::provider::identity::Provider;
 use crate::provider::model_catalog_source::ModelCatalogSource;
+use crate::provider::offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource};
 use crate::provider::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 use crate::provider::path_template::PathTemplate;
 use crate::provider::platform_kind::PlatformKind;
@@ -136,6 +137,94 @@ pub(in crate::provider) static GOOSE_INFO: ProviderInfo = ProviderInfo {
         entrypoint: Some("run"),
     },
     static_models: &[],
+    expected_offerings: &[
+        ExpectedOffering {
+            id: "claude-4.5-sonnet",
+            alias: None,
+            is_default: false,
+            context_window: None,
+            class: OfferingClass::VendorApi,
+            catalog_id: None,
+        },
+        ExpectedOffering {
+            id: "claude-sonnet-4-5",
+            alias: None,
+            is_default: true,
+            context_window: Some(200000),
+            class: OfferingClass::VendorApi,
+            catalog_id: None,
+        },
+        ExpectedOffering {
+            id: "gemini-2.0-flash",
+            alias: None,
+            is_default: false,
+            context_window: None,
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("google/gemini-flash@2.0"),
+        },
+        ExpectedOffering {
+            id: "gemini-2.5-pro",
+            alias: None,
+            is_default: false,
+            context_window: Some(1000000),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("google/gemini-pro@2.5"),
+        },
+        ExpectedOffering {
+            id: "gpt-5",
+            alias: None,
+            is_default: false,
+            context_window: None,
+            class: OfferingClass::VendorApi,
+            catalog_id: None,
+        },
+        ExpectedOffering {
+            id: "qwen2.5",
+            alias: None,
+            is_default: false,
+            context_window: None,
+            class: OfferingClass::VendorApi,
+            catalog_id: None,
+        },
+    ],
+    offering_sources: &[
+        OfferingSource {
+            prefix: "llamacpp",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("openai_compatible"),
+            integration: Some(LocalRunnerIntegration::BaseUrlOverride),
+        },
+        OfferingSource {
+            prefix: "lmstudio",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("openai_compatible"),
+            integration: Some(LocalRunnerIntegration::FirstClass),
+        },
+        OfferingSource {
+            prefix: "ollama",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("bespoke"),
+            integration: Some(LocalRunnerIntegration::FirstClass),
+        },
+        OfferingSource {
+            prefix: "omlx",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("openai_compatible"),
+            integration: Some(LocalRunnerIntegration::BaseUrlOverride),
+        },
+        OfferingSource {
+            prefix: "other",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("openai_compatible"),
+            integration: Some(LocalRunnerIntegration::BaseUrlOverride),
+        },
+        OfferingSource {
+            prefix: "vllm",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("openai_compatible"),
+            integration: Some(LocalRunnerIntegration::BaseUrlOverride),
+        },
+    ],
     model_catalog_source: ModelCatalogSource::Static,
     model_env_vars: &["GOOSE_MODEL"],
     cli_sensitive_axes: CliSensitiveAxes {

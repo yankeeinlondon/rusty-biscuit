@@ -24,6 +24,7 @@ use crate::provider::cli_sensitivity::CliSensitiveAxes;
 use crate::provider::event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
 use crate::provider::identity::Provider;
 use crate::provider::model_catalog_source::ModelCatalogSource;
+use crate::provider::offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource};
 use crate::provider::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 use crate::provider::path_template::PathTemplate;
 use crate::provider::platform_kind::PlatformKind;
@@ -173,6 +174,78 @@ pub(in crate::provider) static CODEX_INFO: ProviderInfo = ProviderInfo {
         entrypoint: Some("exec"),
     },
     static_models: &["gpt-5.3-codex-spark", "gpt-5.4", "gpt-5.4-mini", "gpt-5.5"],
+    expected_offerings: &[
+        ExpectedOffering {
+            id: "gpt-5.3-codex-spark",
+            alias: None,
+            is_default: false,
+            context_window: None,
+            class: OfferingClass::VendorApi,
+            catalog_id: None,
+        },
+        ExpectedOffering {
+            id: "gpt-5.4",
+            alias: None,
+            is_default: false,
+            context_window: None,
+            class: OfferingClass::VendorApi,
+            catalog_id: None,
+        },
+        ExpectedOffering {
+            id: "gpt-5.4-mini",
+            alias: None,
+            is_default: false,
+            context_window: None,
+            class: OfferingClass::VendorApi,
+            catalog_id: None,
+        },
+        ExpectedOffering {
+            id: "gpt-5.5",
+            alias: None,
+            is_default: true,
+            context_window: None,
+            class: OfferingClass::VendorApi,
+            catalog_id: None,
+        },
+    ],
+    offering_sources: &[
+        OfferingSource {
+            prefix: "llamacpp",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("openai_compatible"),
+            integration: Some(LocalRunnerIntegration::BaseUrlOverride),
+        },
+        OfferingSource {
+            prefix: "lmstudio",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("openai_compatible"),
+            integration: Some(LocalRunnerIntegration::FirstClass),
+        },
+        OfferingSource {
+            prefix: "ollama",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("openai_compatible"),
+            integration: Some(LocalRunnerIntegration::FirstClass),
+        },
+        OfferingSource {
+            prefix: "omlx",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("openai_compatible"),
+            integration: Some(LocalRunnerIntegration::BaseUrlOverride),
+        },
+        OfferingSource {
+            prefix: "other",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("openai_compatible"),
+            integration: Some(LocalRunnerIntegration::BaseUrlOverride),
+        },
+        OfferingSource {
+            prefix: "vllm",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("openai_compatible"),
+            integration: Some(LocalRunnerIntegration::BaseUrlOverride),
+        },
+    ],
     model_catalog_source: ModelCatalogSource::Static,
     model_env_vars: &["CODEX_MODEL", "OPENAI_MODEL"],
     cli_sensitive_axes: CliSensitiveAxes {

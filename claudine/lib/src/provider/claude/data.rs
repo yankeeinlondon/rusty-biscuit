@@ -25,6 +25,7 @@ use crate::provider::event_mapping::{EventMapping, EventMappingTable, EventSuppo
 use crate::provider::identity::Provider;
 use crate::provider::known_gap::{KnownGap, KnownGapArea};
 use crate::provider::model_catalog_source::ModelCatalogSource;
+use crate::provider::offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource};
 use crate::provider::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 use crate::provider::path_template::PathTemplate;
 use crate::provider::platform_kind::PlatformKind;
@@ -172,6 +173,110 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
         "claude-sonnet-4-5",
         "claude-sonnet-4-6",
         "claude-sonnet-5",
+    ],
+    expected_offerings: &[
+        ExpectedOffering {
+            id: "claude-fable-5",
+            alias: Some("fable"),
+            is_default: false,
+            context_window: Some(1000000),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("anthropic/claude-fable@5"),
+        },
+        ExpectedOffering {
+            id: "claude-haiku-4-5",
+            alias: Some("haiku"),
+            is_default: false,
+            context_window: Some(200000),
+            class: OfferingClass::VendorApi,
+            catalog_id: None,
+        },
+        ExpectedOffering {
+            id: "claude-opus-4-6",
+            alias: None,
+            is_default: false,
+            context_window: Some(1000000),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("anthropic/claude-opus@4.6"),
+        },
+        ExpectedOffering {
+            id: "claude-opus-4-7",
+            alias: None,
+            is_default: false,
+            context_window: Some(1000000),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("anthropic/claude-opus@4.7"),
+        },
+        ExpectedOffering {
+            id: "claude-opus-4-8",
+            alias: Some("opus"),
+            is_default: true,
+            context_window: Some(1000000),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("anthropic/claude-opus@4.8"),
+        },
+        ExpectedOffering {
+            id: "claude-sonnet-4-5",
+            alias: None,
+            is_default: false,
+            context_window: Some(200000),
+            class: OfferingClass::VendorApi,
+            catalog_id: None,
+        },
+        ExpectedOffering {
+            id: "claude-sonnet-4-6",
+            alias: None,
+            is_default: false,
+            context_window: Some(1000000),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("anthropic/claude-sonnet@4.6"),
+        },
+        ExpectedOffering {
+            id: "claude-sonnet-5",
+            alias: Some("sonnet"),
+            is_default: false,
+            context_window: Some(1000000),
+            class: OfferingClass::VendorApi,
+            catalog_id: Some("anthropic/claude-sonnet@5"),
+        },
+    ],
+    offering_sources: &[
+        OfferingSource {
+            prefix: "llamacpp",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("anthropic_compatible"),
+            integration: Some(LocalRunnerIntegration::BaseUrlOverride),
+        },
+        OfferingSource {
+            prefix: "lmstudio",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("anthropic_compatible"),
+            integration: Some(LocalRunnerIntegration::BaseUrlOverride),
+        },
+        OfferingSource {
+            prefix: "ollama",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("anthropic_compatible"),
+            integration: Some(LocalRunnerIntegration::FirstClass),
+        },
+        OfferingSource {
+            prefix: "omlx",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("anthropic_compatible"),
+            integration: Some(LocalRunnerIntegration::FirstClass),
+        },
+        OfferingSource {
+            prefix: "other",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("anthropic_compatible"),
+            integration: Some(LocalRunnerIntegration::BaseUrlOverride),
+        },
+        OfferingSource {
+            prefix: "vllm",
+            class: OfferingClass::LocalRunner,
+            api_standard: Some("anthropic_compatible"),
+            integration: Some(LocalRunnerIntegration::BaseUrlOverride),
+        },
     ],
     model_catalog_source: ModelCatalogSource::Static,
     model_env_vars: &["CLAUDE_MODEL", "ANTHROPIC_MODEL"],

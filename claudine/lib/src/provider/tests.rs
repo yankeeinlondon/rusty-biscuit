@@ -214,6 +214,8 @@ fn serialized_field_list_matches_catalog() {
         "acp",
         "prompt_arg_conventions",
         "static_models",
+        "expected_offerings",
+        "offering_sources",
         "model_catalog_source",
         "model_env_vars",
         "cli_sensitive_axes",
@@ -311,6 +313,33 @@ fn provider_info_json_round_trips_well_known_keys() {
         claude_json["system_prompt"].is_object(),
         "Claude system_prompt should serialize as an object"
     );
+}
+
+/// Pins the generated expected-offering shape on kimi, the provider with
+/// both offering classes: `kimi-for-coding` is the plan endpoint (absent
+/// from the unchained-ai artifact by design, so never joined) and
+/// `kimi-k2.7-code` joins the artifact's identity key exactly.
+#[test]
+fn kimi_expected_offerings_carry_classification_and_artifact_join() {
+    use super::offering::OfferingClass;
+
+    let kimi = provider_info(Provider::KimiCode);
+    let plan = kimi
+        .expected_offerings
+        .iter()
+        .find(|offering| offering.id == "kimi-for-coding")
+        .expect("kimi-for-coding is an expected offering");
+    assert_eq!(plan.class, OfferingClass::PlanEndpoint);
+    assert_eq!(plan.alias, Some("kimi-code"));
+    assert_eq!(plan.catalog_id, None);
+
+    let joined = kimi
+        .expected_offerings
+        .iter()
+        .find(|offering| offering.id == "kimi-k2.7-code")
+        .expect("kimi-k2.7-code is an expected offering");
+    assert_eq!(joined.class, OfferingClass::VendorApi);
+    assert_eq!(joined.catalog_id, Some("moonshotai/kimi-k-code@2.7"));
 }
 
 #[test]
