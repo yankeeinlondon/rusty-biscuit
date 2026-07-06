@@ -82,3 +82,5 @@ pub mod style;
 pub mod terminal;
 
 pub mod testing;
+
+pub use markdown::schemas::{darkmatter_base_json_schema, darkmatter_base_schema};

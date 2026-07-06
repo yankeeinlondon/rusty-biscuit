@@ -87,6 +87,68 @@ pub use simplified::{
 };
 pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
 
+static BASE_SCHEMA: std::sync::OnceLock<SimplifiedSchema> = std::sync::OnceLock::new();
+static BASE_JSON_SCHEMA: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+
+/// Returns the Darkmatter baseline frontmatter schema as a [`SimplifiedSchema`].
+///
+/// Loads the authored schema from `darkmatter/docs/schemas/darkmatter.yaml` via
+/// `include_str!` and parses it at first call. The result is cached so repeated
+/// calls are cheap.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::schemas::darkmatter_base_schema;
+///
+/// let schema = darkmatter_base_schema();
+/// ```
+///
+/// ## Panics
+///
+/// Panics if the checked-in `darkmatter.yaml` cannot be parsed. This is a
+/// library bug or repository corruption, not an author error.
+pub fn darkmatter_base_schema() -> SimplifiedSchema {
+    BASE_SCHEMA
+        .get_or_init(|| {
+            let raw = include_str!("../../../../docs/schemas/darkmatter.yaml");
+            let frontmatter: serde_yaml_ng::Value =
+                serde_yaml_ng::from_str(raw).expect("baseline yaml must parse");
+            let schema_value = frontmatter
+                .get("$schema")
+                .expect("baseline file must have a `$schema` key");
+            parse_yaml_schema(schema_value).expect("baseline schema must parse")
+        })
+        .clone()
+}
+
+/// Returns the Darkmatter baseline frontmatter schema as a compiled Draft
+/// 2020-12 JSON Schema value.
+///
+/// The result is derived from [`darkmatter_base_schema`] and cached so repeated
+/// calls do not re-pay the conversion cost.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::schemas::darkmatter_base_json_schema;
+///
+/// let json = darkmatter_base_json_schema();
+/// assert_eq!(json.get("type").and_then(|v| v.as_str()), Some("object"));
+/// ```
+///
+/// ## Panics
+///
+/// Panics if the checked-in `darkmatter.yaml` cannot be converted to JSON
+/// Schema. This is a library bug or repository corruption, not an author error.
+pub fn darkmatter_base_json_schema() -> Value {
+    BASE_JSON_SCHEMA
+        .get_or_init(|| {
+            to_json_schema(&darkmatter_base_schema()).expect("baseline schema must convert")
+        })
+        .clone()
+}
+
 /// Top-level entry point for the schemas subsystem.
 ///
 /// Holds optional baseline schema configuration and the process-wide
@@ -1398,6 +1460,106 @@ mod tests {
             report.valid,
             "correctly-typed ctx.today must validate: {:?}",
             report.problems,
+        );
+    }
+
+    // ── Phase 4: library base-schema accessors ───────────────────────────
+
+    /// `darkmatter_base_schema()` returns a non-empty baseline schema with the
+    /// expected top-level properties present (spec testing requirement 1).
+    #[test]
+    fn darkmatter_base_schema_returns_expected_properties() {
+        let schema = super::darkmatter_base_schema();
+        let shape = match schema {
+            super::SimplifiedSchema::Single(s) => s,
+            other => panic!("expected Single, got {other:?}"),
+        };
+        assert!(
+            !shape.properties.is_empty(),
+            "baseline schema must declare properties"
+        );
+        for key in ["$schema", "title", "ctx"] {
+            assert!(
+                shape.properties.contains_key(key),
+                "baseline schema missing property `{key}`"
+            );
+        }
+    }
+
+    /// `darkmatter_base_json_schema()` returns a compiled JSON Schema that
+    /// validates known-good frontmatter and rejects a wrongly-typed `title`
+    /// (spec testing requirements 3 and 4).
+    #[test]
+    fn darkmatter_base_json_schema_validates_known_samples() {
+        let json = super::darkmatter_base_json_schema();
+        let validator = jsonschema::options()
+            .with_draft(jsonschema::Draft::Draft202012)
+            .build(&json)
+            .expect("compiled baseline must build a validator");
+
+        let valid = serde_json::json!({
+            "title": "Hello",
+            "draft": false,
+            "tags": ["a", "b"],
+        });
+        assert!(
+            validator.is_valid(&valid),
+            "known-good frontmatter must validate"
+        );
+
+        let invalid_title = serde_json::json!({ "title": 42 });
+        assert!(
+            !validator.is_valid(&invalid_title),
+            "wrongly-typed title must be rejected"
+        );
+    }
+
+    /// `darkmatter_base_json_schema()` caches the converted value so repeated
+    /// calls return an equivalent schema without re-parsing the YAML.
+    #[test]
+    fn darkmatter_base_json_schema_is_cached() {
+        let a = super::darkmatter_base_json_schema();
+        let b = super::darkmatter_base_json_schema();
+        assert_eq!(a, b, "cached JSON schemas must be equal");
+    }
+
+    /// The compiled baseline allows unknown user-defined frontmatter keys
+    /// (Non-Goal 1; spec testing requirement 5).
+    #[test]
+    fn darkmatter_base_json_schema_allows_unknown_keys() {
+        let json = super::darkmatter_base_json_schema();
+        let validator = jsonschema::options()
+            .with_draft(jsonschema::Draft::Draft202012)
+            .build(&json)
+            .expect("compiled baseline must build a validator");
+
+        let with_unknown = serde_json::json!({
+            "custom_key": 42,
+            "my_custom_namespace": { "nested": true },
+        });
+        assert!(
+            validator.is_valid(&with_unknown),
+            "unknown user keys must remain accepted"
+        );
+    }
+
+    /// Document-level `$schema` definitions override baseline properties on
+    /// conflict (Non-Goal 5; spec testing requirement 6).
+    #[test]
+    fn document_schema_overrides_baseline_title() {
+        let api = DarkmatterSchemas::new()
+            .with_baseline(super::darkmatter_base_schema())
+            .expect("baseline converts");
+
+        // Baseline says `title` is a string. The document redeclares it as a
+        // number and supplies a number; validation must follow the document
+        // schema, so this is valid.
+        let md = md_with_schema("$schema:\n  title: number\ntitle: 42\n");
+        let report = api.validate(&md).expect("validate");
+        assert!(
+            report.valid,
+            "document schema should override baseline title type: {:?}",
+            report.problems
         );
     }
 }

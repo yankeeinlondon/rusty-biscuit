@@ -603,8 +603,9 @@ mod tests {
 
     /// The frozen baseline schema must convert to a baseline-compatible
     /// Draft 2020-12 JSON Schema without errors (spec testing requirement 2;
-    /// Phase 3 validation checkpoint). The converter exercises every property
-    /// atom including the `generated` constraint and the nested `ctx` object.
+    /// Phase 3 validation checkpoint). The converter exercises every baseline
+    /// property atom and keeps broad object surfaces open where runtime parsers
+    /// remain authoritative.
     #[test]
     fn darkmatter_baseline_schema_converts_to_json_schema() {
         let raw = include_str!("../../../../../docs/schemas/darkmatter.yaml");
@@ -648,15 +649,53 @@ mod tests {
             !properties.contains_key("hr"),
             "deprecated root-level `hr` must not appear in the converted baseline"
         );
-        // The root `required` array (when present) must not name any property
-        // whose atom carries `generated` (Phase 2 semantics). `ctx` is the
-        // motivating generated surface; its leaves are generated+required, so
-        // the property itself is never statically required.
+        // `ctx` is host/user merged at compose time and must not become a
+        // statically required authored-frontmatter property.
         if let Some(required) = obj.get("required").and_then(|v| v.as_array()) {
             assert!(
                 !required.iter().any(|v| v.as_str() == Some("ctx")),
-                "generated `ctx` must not appear in the root required array"
+                "`ctx` must not appear in the root required array"
             );
         }
+    }
+
+    /// The baseline schema keeps `ctx` open so custom user context keys can
+    /// reach the compose runtime merge policy.
+    #[test]
+    fn darkmatter_baseline_schema_ctx_reflects_runtime_semantics() {
+        use serde_json::{Value, json};
+
+        let raw = include_str!("../../../../../docs/schemas/darkmatter.yaml");
+        let frontmatter: YamlValue = serde_yaml_ng::from_str(raw).expect("baseline yaml must parse");
+        let schema_value = frontmatter
+            .get("$schema")
+            .expect("baseline file must have a `$schema` key");
+        let schema = parse_yaml_schema(schema_value).expect("baseline schema must parse");
+        let json = to_json_schema(&schema).expect("baseline must convert to JSON Schema");
+
+        let validator = jsonschema::options()
+            .with_draft(jsonschema::Draft::Draft202012)
+            .build(&json)
+            .expect("converted schema must build a validator");
+
+        fn assert_valid(validator: &jsonschema::Validator, doc: Value, message: &str) {
+            assert!(validator.is_valid(&doc), "{message}");
+        }
+
+        fn assert_invalid(validator: &jsonschema::Validator, doc: Value, message: &str) {
+            assert!(!validator.is_valid(&doc), "{message}");
+        }
+
+        assert_valid(
+            &validator,
+            json!({ "ctx": { "project_slug": "biscuit" } }),
+            "custom user ctx keys must be accepted",
+        );
+        assert_valid(
+            &validator,
+            json!({ "ctx": { "packages": ["foo", "bar"] } }),
+            "ctx leaves are intentionally not closed by the baseline schema",
+        );
+        assert_invalid(&validator, json!({ "ctx": "hello" }), "ctx must remain an object");
     }
 }
