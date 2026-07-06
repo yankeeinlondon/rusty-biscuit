@@ -9,6 +9,7 @@ description = "Shared leaf types for the generated Claudine provider catalog"
 name = "claudine_catalog_types"
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 strum = { version = "0.28", features = ["derive"] }
 

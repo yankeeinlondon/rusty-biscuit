@@ -4,7 +4,7 @@
 //! (whose generated `data.rs` references these types directly) and the
 //! `claudine-gen` generator (which introspects them for
 //! schema↔catalog compatibility checks without linking the library).
-//! It must stay a leaf: serde + strum only.
+//! It must stay a leaf: serde + strum + chrono (types only, no clock).
 //!
 //! Design authority: `claudine/features/2026-07-02-provider-metadata/`
 //! (`design/catalog-generation.md` F1, `design/signal-detection.md` shared
@@ -16,6 +16,7 @@ mod display_policy;
 mod model_catalog_source;
 mod platform_kind;
 mod resume_support;
+mod signal;
 mod vocab;
 
 pub use acp_server_mode::AcpServerMode;
@@ -24,4 +25,7 @@ pub use display_policy::{DisplayPolicy, EventClass, ToolResultSummary};
 pub use model_catalog_source::ModelCatalogSource;
 pub use platform_kind::PlatformKind;
 pub use resume_support::ResumeSupport;
+pub use signal::{
+    DetectionMode, MatchOp, Quantity, SignalEvent, SignalKind, SignalSource, UsageWindow,
+};
 pub use vocab::{Confidence, Unit, Zone};
