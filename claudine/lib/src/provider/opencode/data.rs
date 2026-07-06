@@ -32,6 +32,7 @@ use crate::provider::prompt_args::PromptArgConventions;
 use crate::provider::reasoning::ReasoningSupport;
 use crate::provider::resume_support::ResumeSupport;
 use crate::provider::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
+use crate::provider::unmapped_native_event::UnmappedNativeEvent;
 use crate::provider::yolo::YoloSupport;
 use crate::stream::StreamProtocol;
 
@@ -64,7 +65,6 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
     configurator: &OPENCODE_PROVIDER,
     resource_support_fn: resource_support,
     session_log_paths: &[],
-    session_locations: &[],
     config_paths: &[
         PathTemplate::Static("~/.config/opencode/opencode.json"),
         PathTemplate::Static("~/.config/opencode/opencode.jsonc"),
@@ -120,7 +120,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
         },
     ],
     acp: AcpSupport {
-        server_mode: AcpServerMode::NotSupported,
+        server_mode: AcpServerMode::Native,
         client_supported: false,
         events_via_acp: &[],
     },
@@ -209,6 +209,13 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
     supports_interactive_inline_closure: false,
     model_required_in_non_tty: true,
     platform_kind: PlatformKind::AgentAggregator,
+    unmapped_native_events: &[
+        UnmappedNativeEvent {
+            native_event: "tool.definition",
+            description: "Mutates a tool's description and parameter schema before the tool list is sent to the model.",
+            remediation: "Author an OpenCode plugin exporting a tool.definition hook; Claudine cannot dispatch this phase.",
+        },
+    ],
 };
 
 /// Event-mapping table (also referenced directly by behavior modules).

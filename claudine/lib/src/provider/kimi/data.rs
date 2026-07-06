@@ -63,7 +63,6 @@ pub(in crate::provider) static KIMI_INFO: ProviderInfo = ProviderInfo {
     configurator: &KIMI_PROVIDER,
     resource_support_fn: resource_support,
     session_log_paths: &[PathTemplate::Static("~/.kimi/sessions/{md5_cwd}/{session_id}/wire.jsonl")],
-    session_locations: &[],
     config_paths: &[
         PathTemplate::Static("~/.kimi/config.json"),
         PathTemplate::Static("~/.kimi/config.toml"),
@@ -118,7 +117,7 @@ pub(in crate::provider) static KIMI_INFO: ProviderInfo = ProviderInfo {
     },
     known_gaps: &[],
     acp: AcpSupport {
-        server_mode: AcpServerMode::AvailableViaWireProxy,
+        server_mode: AcpServerMode::Native,
         client_supported: true,
         events_via_acp: &[AcpEvent::ApprovalRequest],
     },
@@ -165,6 +164,7 @@ pub(in crate::provider) static KIMI_INFO: ProviderInfo = ProviderInfo {
     supports_interactive_inline_closure: false,
     model_required_in_non_tty: false,
     platform_kind: PlatformKind::VendorPlatform,
+    unmapped_native_events: &[],
 };
 
 /// Event-mapping table (also referenced directly by behavior modules).

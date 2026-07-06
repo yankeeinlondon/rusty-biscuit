@@ -39,6 +39,7 @@ mod reasoning;
 mod registry;
 mod resume_support;
 mod system_prompt;
+mod unmapped_native_event;
 mod yolo;
 
 #[cfg(test)]
@@ -69,6 +70,7 @@ pub use resume_support::ResumeSupport;
 pub use system_prompt::{
     SystemPromptCustomTag, SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
 };
+pub use unmapped_native_event::UnmappedNativeEvent;
 pub use yolo::YoloSupport;
 
 use serde::{Serialize, Serializer};
@@ -195,9 +197,6 @@ pub struct ProviderInfo {
     /// Templates for per-session log files (e.g. JSONL transcripts).
     pub session_log_paths: &'static [PathTemplate],
 
-    /// Templates for ancillary session-state directories.
-    pub session_locations: &'static [PathTemplate],
-
     /// Templates for user / project / local config files.
     ///
     /// ## Notes
@@ -234,9 +233,10 @@ pub struct ProviderInfo {
 
     /// Typed ACP capability descriptor.
     ///
-    /// Consumed by hook reporting (`claudine hooks --capture-method`) and
-    /// by the invariant test that pairs `EventSupportLevel::Acp` rows with
-    /// a non-`NotSupported` [`AcpSupport::server_mode`].
+    /// `server_mode` records the provider's own ACP posture (research-fed,
+    /// acp topic); `events_via_acp` records which events Claudine captures
+    /// through ACP. The two are decoupled: a provider can speak ACP without
+    /// Claudine wiring any `EventSupportLevel::Acp` rows to it.
     pub acp: AcpSupport,
 
     /// Argv conventions describing how this provider's native CLI
@@ -315,6 +315,11 @@ pub struct ProviderInfo {
     /// provider/model pair selection is the central UX. Human-owned facts
     /// (spec 2026-07-02 classification; values ratified at Checkpoint D).
     pub platform_kind: PlatformKind,
+
+    /// Provider-native hook events that fire at phases the 16-event model
+    /// cannot represent. Claudine cannot dispatch these; each entry carries
+    /// how to configure the event directly in the provider.
+    pub unmapped_native_events: &'static [UnmappedNativeEvent],
 }
 
 impl ProviderInfo {

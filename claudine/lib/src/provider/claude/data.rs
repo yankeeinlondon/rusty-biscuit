@@ -64,7 +64,6 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
     configurator: &CLAUDE_PROVIDER,
     resource_support_fn: resource_support,
     session_log_paths: &[PathTemplate::Static("~/.claude/projects/{sanitized_cwd}/{session_id}.jsonl")],
-    session_locations: &[PathTemplate::Static("~/.claude/projects/")],
     config_paths: &[
         PathTemplate::Static("~/.claude/settings.json"),
         PathTemplate::Static("~/.claude.json"),
@@ -156,7 +155,7 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
         },
     ],
     acp: AcpSupport {
-        server_mode: AcpServerMode::NotSupported,
+        server_mode: AcpServerMode::Adapter,
         client_supported: false,
         events_via_acp: &[],
     },
@@ -200,6 +199,7 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
     supports_interactive_inline_closure: false,
     model_required_in_non_tty: false,
     platform_kind: PlatformKind::VendorPlatform,
+    unmapped_native_events: &[],
 };
 
 /// Event-mapping table (also referenced directly by behavior modules).

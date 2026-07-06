@@ -31,6 +31,7 @@ use crate::provider::prompt_args::PromptArgConventions;
 use crate::provider::reasoning::ReasoningSupport;
 use crate::provider::resume_support::ResumeSupport;
 use crate::provider::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
+use crate::provider::unmapped_native_event::UnmappedNativeEvent;
 use crate::provider::yolo::YoloSupport;
 use crate::stream::StreamProtocol;
 
@@ -65,7 +66,6 @@ pub(in crate::provider) static GEMINI_INFO: ProviderInfo = ProviderInfo {
     session_log_paths: &[
         PathTemplate::Static("~/.gemini/tmp/{project_id}/chats/session-{utc_iso_ts}-{short_id}.jsonl"),
     ],
-    session_locations: &[],
     config_paths: &[
         PathTemplate::Static("~/.gemini/settings.json"),
         PathTemplate::Static(".gemini/settings.json"),
@@ -151,7 +151,7 @@ pub(in crate::provider) static GEMINI_INFO: ProviderInfo = ProviderInfo {
     },
     known_gaps: &[],
     acp: AcpSupport {
-        server_mode: AcpServerMode::NotSupported,
+        server_mode: AcpServerMode::Native,
         client_supported: false,
         events_via_acp: &[],
     },
@@ -204,6 +204,13 @@ pub(in crate::provider) static GEMINI_INFO: ProviderInfo = ProviderInfo {
     supports_interactive_inline_closure: false,
     model_required_in_non_tty: false,
     platform_kind: PlatformKind::VendorPlatform,
+    unmapped_native_events: &[
+        UnmappedNativeEvent {
+            native_event: "BeforeToolSelection",
+            description: "Filters which tools the model may choose before any concrete tool call exists; returns toolConfig {mode, allowedFunctionNames}.",
+            remediation: "Register a command hook for BeforeToolSelection directly in Gemini settings (hooksConfig); Claudine cannot dispatch this phase.",
+        },
+    ],
 };
 
 /// Event-mapping table (also referenced directly by behavior modules).

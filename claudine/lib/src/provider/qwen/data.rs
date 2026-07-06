@@ -63,7 +63,6 @@ pub(in crate::provider) static QWEN_INFO: ProviderInfo = ProviderInfo {
     configurator: &QWEN_PROVIDER,
     resource_support_fn: resource_support,
     session_log_paths: &[PathTemplate::Static("~/.qwen/projects/{sanitized_cwd}/chats/{session_id}.jsonl")],
-    session_locations: &[PathTemplate::Static("logs/openai")],
     config_paths: &[
         PathTemplate::Static("~/.qwen/settings.json"),
         PathTemplate::Static(".qwen/settings.json"),
@@ -140,7 +139,7 @@ pub(in crate::provider) static QWEN_INFO: ProviderInfo = ProviderInfo {
     },
     known_gaps: &[],
     acp: AcpSupport {
-        server_mode: AcpServerMode::NotSupported,
+        server_mode: AcpServerMode::Native,
         client_supported: false,
         events_via_acp: &[],
     },
@@ -186,6 +185,7 @@ pub(in crate::provider) static QWEN_INFO: ProviderInfo = ProviderInfo {
     supports_interactive_inline_closure: false,
     model_required_in_non_tty: false,
     platform_kind: PlatformKind::VendorPlatform,
+    unmapped_native_events: &[],
 };
 
 /// Event-mapping table (also referenced directly by behavior modules).

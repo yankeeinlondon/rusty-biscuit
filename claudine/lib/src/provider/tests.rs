@@ -152,7 +152,6 @@ fn provider_info_serializes_round_trip() {
             "acp",
             "prompt_arg_conventions",
             "session_log_paths",
-            "session_locations",
             "config_paths",
             "memory_files",
             "stream_protocol",
@@ -204,7 +203,6 @@ fn serialized_field_list_matches_catalog() {
         "event_mapping",
         "resource_support",
         "session_log_paths",
-        "session_locations",
         "config_paths",
         "memory_files",
         "output_formats",
@@ -231,6 +229,7 @@ fn serialized_field_list_matches_catalog() {
         "supports_interactive_inline_closure",
         "model_required_in_non_tty",
         "platform_kind",
+        "unmapped_native_events",
     ];
     // serde_json without `preserve_order` sorts map keys, so membership
     // (not order) is asserted here; the gen-side twin pins the order
@@ -630,10 +629,10 @@ fn stream_providers_expose_at_least_one_event() {
 // ---------------------------------------------------------------------------
 
 /// Any provider with at least one [`EventSupportLevel::Acp`] mapping row
-/// must report a non-`NotSupported` ACP server mode.
+/// must report a provider that actually speaks ACP, plus the events it
+/// captures through it.
 #[test]
 fn acp_events_imply_acp_support() {
-    use super::acp::AcpServerMode;
     use crate::events::AgenticEvent;
     use crate::provider::EventSupportLevel;
     for provider in PROVIDERS_DISPLAY_ORDER {
@@ -646,8 +645,9 @@ fn acp_events_imply_acp_support() {
         });
         if has_acp_event {
             assert!(
-                !matches!(info.acp.server_mode, AcpServerMode::NotSupported),
-                "{provider:?}: declares EventSupportLevel::Acp rows but acp.server_mode is NotSupported"
+                info.acp.is_supported(),
+                "{provider:?}: declares EventSupportLevel::Acp rows but acp.server_mode is {:?}",
+                info.acp.server_mode
             );
             assert!(
                 !info.acp.events_via_acp.is_empty(),
@@ -696,17 +696,15 @@ fn kimi_approval_request_is_acp() {
             .native_name(AgenticEvent::PermissionRequest),
         Some("ApprovalRequest")
     );
-    assert!(matches!(
-        info.acp.server_mode,
-        AcpServerMode::AvailableViaWireProxy
-    ));
+    assert!(matches!(info.acp.server_mode, AcpServerMode::Native));
     assert!(info.acp.events_via_acp.contains(&AcpEvent::ApprovalRequest));
 }
 
-/// Providers without any ACP rows report `AcpSupport::NOT_SUPPORTED`.
+/// Providers without any ACP rows capture no events via ACP. `server_mode`
+/// is deliberately NOT constrained here: it records the provider's own ACP
+/// posture (research-fed), independent of Claudine's event wiring.
 #[test]
-fn non_acp_providers_have_not_supported_acp() {
-    use super::acp::AcpServerMode;
+fn non_acp_providers_capture_no_acp_events() {
     use crate::events::AgenticEvent;
     for provider in PROVIDERS_DISPLAY_ORDER {
         let info = provider_info(provider);
@@ -714,11 +712,6 @@ fn non_acp_providers_have_not_supported_acp() {
             .iter()
             .any(|event| info.event_mapping.support_level(*event).is_acp());
         if !has_acp_event {
-            assert!(
-                matches!(info.acp.server_mode, AcpServerMode::NotSupported),
-                "{provider:?}: has no EventSupportLevel::Acp rows but acp.server_mode is {:?}",
-                info.acp.server_mode
-            );
             assert!(
                 info.acp.events_via_acp.is_empty(),
                 "{provider:?}: has no EventSupportLevel::Acp rows but acp.events_via_acp is non-empty"
@@ -734,7 +727,6 @@ fn typed_path_templates_have_non_empty_raw() {
         let info = provider_info(provider);
         let bundles: &[(&str, &[crate::provider::PathTemplate])] = &[
             ("session_log_paths", info.session_log_paths),
-            ("session_locations", info.session_locations),
             ("config_paths", info.config_paths),
             ("memory_files", info.memory_files),
             (

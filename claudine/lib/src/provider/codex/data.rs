@@ -65,10 +65,6 @@ pub(in crate::provider) static CODEX_INFO: ProviderInfo = ProviderInfo {
     session_log_paths: &[
         PathTemplate::Static("~/.codex/sessions/{YYYY}/{MM}/{DD}/rollout-{local_iso_ts}-{session_id}.jsonl"),
     ],
-    session_locations: &[
-        PathTemplate::Static("~/.codex/log/codex-tui.log"),
-        PathTemplate::Static("~/.codex/shell_snapshots/"),
-    ],
     config_paths: &[
         PathTemplate::Static("~/.codex/config.toml"),
         PathTemplate::Static(".codex/config.toml"),
@@ -168,7 +164,7 @@ pub(in crate::provider) static CODEX_INFO: ProviderInfo = ProviderInfo {
     },
     known_gaps: &[],
     acp: AcpSupport {
-        server_mode: AcpServerMode::NotSupported,
+        server_mode: AcpServerMode::Adapter,
         client_supported: false,
         events_via_acp: &[],
     },
@@ -203,6 +199,7 @@ pub(in crate::provider) static CODEX_INFO: ProviderInfo = ProviderInfo {
     supports_interactive_inline_closure: true,
     model_required_in_non_tty: false,
     platform_kind: PlatformKind::VendorPlatform,
+    unmapped_native_events: &[],
 };
 
 /// Event-mapping table (also referenced directly by behavior modules).

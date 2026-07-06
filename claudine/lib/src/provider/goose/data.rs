@@ -62,11 +62,6 @@ pub(in crate::provider) static GOOSE_INFO: ProviderInfo = ProviderInfo {
     configurator: &GOOSE_PROVIDER,
     resource_support_fn: resource_support,
     session_log_paths: &[],
-    session_locations: &[
-        PathTemplate::Static("~/.local/state/goose/logs/cli/"),
-        PathTemplate::Static("~/.local/state/goose/logs/server/"),
-        PathTemplate::Static("~/.local/state/goose/logs/llm_request.*.jsonl"),
-    ],
     config_paths: &[
         PathTemplate::Static("~/.config/goose/config.yaml"),
         PathTemplate::Static("~/.config/goose/permission.yaml"),
@@ -167,6 +162,7 @@ pub(in crate::provider) static GOOSE_INFO: ProviderInfo = ProviderInfo {
     supports_interactive_inline_closure: false,
     model_required_in_non_tty: false,
     platform_kind: PlatformKind::AgentAggregator,
+    unmapped_native_events: &[],
 };
 
 /// Event-mapping table (also referenced directly by behavior modules).
