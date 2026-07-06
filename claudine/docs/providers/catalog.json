@@ -316,6 +316,79 @@
             ]
           }
         },
+        "expected_offerings": {
+          "source": {
+            "kind": "research",
+            "path": "default_models",
+            "topic": "agent-models"
+          },
+          "value": [
+            {
+              "alias": "fable",
+              "catalog_id": "anthropic/claude-fable@5",
+              "class": "vendor_api",
+              "context_window": 1000000,
+              "id": "claude-fable-5",
+              "is_default": false
+            },
+            {
+              "alias": "haiku",
+              "catalog_id": null,
+              "class": "vendor_api",
+              "context_window": 200000,
+              "id": "claude-haiku-4-5",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "anthropic/claude-opus@4.6",
+              "class": "vendor_api",
+              "context_window": 1000000,
+              "id": "claude-opus-4-6",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "anthropic/claude-opus@4.7",
+              "class": "vendor_api",
+              "context_window": 1000000,
+              "id": "claude-opus-4-7",
+              "is_default": false
+            },
+            {
+              "alias": "opus",
+              "catalog_id": "anthropic/claude-opus@4.8",
+              "class": "vendor_api",
+              "context_window": 1000000,
+              "id": "claude-opus-4-8",
+              "is_default": true
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "vendor_api",
+              "context_window": 200000,
+              "id": "claude-sonnet-4-5",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "anthropic/claude-sonnet@4.6",
+              "class": "vendor_api",
+              "context_window": 1000000,
+              "id": "claude-sonnet-4-6",
+              "is_default": false
+            },
+            {
+              "alias": "sonnet",
+              "catalog_id": "anthropic/claude-sonnet@5",
+              "class": "vendor_api",
+              "context_window": 1000000,
+              "id": "claude-sonnet-5",
+              "is_default": false
+            }
+          ]
+        },
         "known_gaps": {
           "source": {
             "key": "known_gaps",
@@ -404,6 +477,51 @@
             "topic": "non-interactive-sessions"
           },
           "value": []
+        },
+        "offering_sources": {
+          "source": {
+            "kind": "research",
+            "path": "local_runners",
+            "topic": "model-config"
+          },
+          "value": [
+            {
+              "api_standard": "anthropic_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "llamacpp"
+            },
+            {
+              "api_standard": "anthropic_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "lmstudio"
+            },
+            {
+              "api_standard": "anthropic_compatible",
+              "class": "local_runner",
+              "integration": "first_class",
+              "prefix": "ollama"
+            },
+            {
+              "api_standard": "anthropic_compatible",
+              "class": "local_runner",
+              "integration": "first_class",
+              "prefix": "omlx"
+            },
+            {
+              "api_standard": "anthropic_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "other"
+            },
+            {
+              "api_standard": "anthropic_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "vllm"
+            }
+          ]
         },
         "output_formats": {
           "source": {
@@ -3383,6 +3501,251 @@
           "requires_claudine_update": true,
           "schema_url": "https://code.claude.com/docs/en/model-config"
         },
+        "model-config": {
+          "$schema": "./_schema.yaml",
+          "agent": "open_code",
+          "api_standards": [
+            {
+              "adapter": null,
+              "auth_site": "ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or apiKeyHelper",
+              "base_url_site": "ANTHROPIC_BASE_URL",
+              "notes": "Primary path for user-added arbitrary models. Claude Code emits the Anthropic Messages API to this base URL. Cloud-provider deployments (Bedrock, Vertex/Agent Platform, Foundry, Claude Platform on AWS) use their own base-url variables and CLAUDE_CODE_USE_* toggles but are intended for Claude-family models, not generic user models.",
+              "standard": "anthropic_compatible"
+            }
+          ],
+          "changes": [
+            "Local runners (Ollama, oMLX, LM Studio, llama.cpp, vLLM) are now supported paths via ANTHROPIC_BASE_URL because they expose Anthropic-compatible /v1/messages endpoints; the previous revision incorrectly classified them as unsupported/gateway-required.",
+            "Ollama and oMLX ship first-class `launch claude` integration hooks in addition to the base-URL override path.",
+            "Claude Code settings precedence clarified as managed > CLI arguments > local > project > user.",
+            "Added CLAUDE_CODE_SUBAGENT_MODEL and ANTHROPIC_DEFAULT_*_MODEL_{NAME,DESCRIPTION,SUPPORTED_CAPABILITIES} variables, which were not present in the prior revision.",
+            "Confirmed that gateway model discovery only adds IDs prefixed with `claude` or `anthropic`, and that discovered explicit IDs fold into built-in alias rows when they resolve to the same model."
+          ],
+          "cloud_bridge": {
+            "example": "export ANTHROPIC_BASE_URL=\"https://openai-gateway.example.com/anthropic\"\nexport ANTHROPIC_AUTH_TOKEN=\"gateway-token\"\nclaude --model \"gpt-4.1\"\n",
+            "mechanism": "ANTHROPIC_BASE_URL pointing at an Anthropic-Messages-compatible gateway or proxy",
+            "supported": true
+          },
+          "created": "2026-07-02",
+          "default_model_site": "Top-level `model` key in ~/.claude/settings.json (or project/local/managed settings.json); session-scope override via ANTHROPIC_MODEL env var or --model flag; precedence is --model > ANTHROPIC_MODEL > settings.json `model`.",
+          "env_vars": [
+            {
+              "effect": "Redirects the Anthropic Messages API endpoint to a gateway, proxy, or local runner. Changes where requests go, not which model answers.",
+              "name": "ANTHROPIC_BASE_URL"
+            },
+            {
+              "effect": "Sets the active model for the launched session. Lower precedence than --model, higher than the settings.json `model` key.",
+              "name": "ANTHROPIC_MODEL"
+            },
+            {
+              "effect": "API key sent as `x-api-key`. Overrides a saved claude.ai login when set.",
+              "name": "ANTHROPIC_API_KEY"
+            },
+            {
+              "effect": "Bearer token sent in the `Authorization` header. Preferred for gateway and local-runner authentication.",
+              "name": "ANTHROPIC_AUTH_TOKEN"
+            },
+            {
+              "effect": "Pins what the `fable` alias resolves to and identifies Fable 5 for automatic fallback on third-party providers.",
+              "name": "ANTHROPIC_DEFAULT_FABLE_MODEL"
+            },
+            {
+              "effect": "Pins what the `opus` alias and opusplan plan-phase resolve to.",
+              "name": "ANTHROPIC_DEFAULT_OPUS_MODEL"
+            },
+            {
+              "effect": "Pins what the `sonnet` alias and opusplan execution-phase resolve to.",
+              "name": "ANTHROPIC_DEFAULT_SONNET_MODEL"
+            },
+            {
+              "effect": "Pins what the `haiku` alias resolves to and the background/small-fast model.",
+              "name": "ANTHROPIC_DEFAULT_HAIKU_MODEL"
+            },
+            {
+              "effect": "Display name for the pinned `fable` alias in the model picker.",
+              "name": "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME"
+            },
+            {
+              "effect": "Display name for the pinned `opus` alias in the model picker.",
+              "name": "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME"
+            },
+            {
+              "effect": "Display name for the pinned `sonnet` alias in the model picker.",
+              "name": "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME"
+            },
+            {
+              "effect": "Display name for the pinned `haiku` alias in the model picker.",
+              "name": "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME"
+            },
+            {
+              "effect": "Display description for the pinned `fable` alias in the model picker.",
+              "name": "ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION"
+            },
+            {
+              "effect": "Display description for the pinned `opus` alias in the model picker.",
+              "name": "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION"
+            },
+            {
+              "effect": "Display description for the pinned `sonnet` alias in the model picker.",
+              "name": "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION"
+            },
+            {
+              "effect": "Display description for the pinned `haiku` alias in the model picker.",
+              "name": "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION"
+            },
+            {
+              "effect": "JSON capability flags for the pinned `fable` alias.",
+              "name": "ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES"
+            },
+            {
+              "effect": "JSON capability flags for the pinned `opus` alias.",
+              "name": "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES"
+            },
+            {
+              "effect": "JSON capability flags for the pinned `sonnet` alias.",
+              "name": "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES"
+            },
+            {
+              "effect": "JSON capability flags for the pinned `haiku` alias.",
+              "name": "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES"
+            },
+            {
+              "effect": "Adds one custom model ID to the /model picker without replacing built-in aliases.",
+              "name": "ANTHROPIC_CUSTOM_MODEL_OPTION"
+            },
+            {
+              "effect": "Display name for the custom picker entry.",
+              "name": "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME"
+            },
+            {
+              "effect": "Display description for the custom picker entry.",
+              "name": "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION"
+            },
+            {
+              "effect": "Declares capability hints for the custom picker entry as a JSON object.",
+              "name": "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES"
+            },
+            {
+              "effect": "When 1, queries the gateway GET /v1/models endpoint at startup and populates the /model picker with discovered Claude/Anthropic-prefixed IDs.",
+              "name": "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"
+            },
+            {
+              "effect": "Overrides the model used for all subagents and agent teams. Set to `inherit` to use normal model resolution instead.",
+              "name": "CLAUDE_CODE_SUBAGENT_MODEL"
+            },
+            {
+              "effect": "Switches wire format to Bedrock InvokeModel; aliases resolve to Bedrock inference-profile ARNs.",
+              "name": "CLAUDE_CODE_USE_BEDROCK"
+            },
+            {
+              "effect": "Switches wire format to Agent Platform rawPredict; aliases resolve to Vertex version names.",
+              "name": "CLAUDE_CODE_USE_VERTEX"
+            },
+            {
+              "effect": "Routes through Microsoft Foundry in Anthropic Messages format; aliases resolve to Foundry deployment names.",
+              "name": "CLAUDE_CODE_USE_FOUNDRY"
+            },
+            {
+              "effect": "Override the Bedrock endpoint URL.",
+              "name": "ANTHROPIC_BEDROCK_BASE_URL"
+            },
+            {
+              "effect": "Override the Vertex AI endpoint URL.",
+              "name": "ANTHROPIC_VERTEX_BASE_URL"
+            },
+            {
+              "effect": "Override the Microsoft Foundry endpoint URL.",
+              "name": "ANTHROPIC_FOUNDRY_BASE_URL"
+            },
+            {
+              "effect": "Override the Claude Platform on AWS endpoint URL.",
+              "name": "ANTHROPIC_AWS_BASE_URL"
+            }
+          ],
+          "has_official_schema": "formal",
+          "last_updated": "2026-07-02",
+          "local_runners": [
+            {
+              "example": "ollama launch claude  # or manually: ANTHROPIC_BASE_URL=http://localhost:11434 ANTHROPIC_AUTH_TOKEN=ollama claude --model qwen3:1.7b",
+              "integration": "first_class",
+              "notes": "Ollama serves an Anthropic-compatible `/v1/messages` endpoint and ships a native `ollama launch claude` hook. Size/quantization tags such as `:1.7b` are part of the model identifier.",
+              "runner": "ollama",
+              "standard": "anthropic_compatible"
+            },
+            {
+              "example": "omlx launch claude  # or manually: ANTHROPIC_BASE_URL=http://localhost:8000 ANTHROPIC_AUTH_TOKEN=<key> claude --model Qwen3.6-35B-A3B-oQ6",
+              "integration": "first_class",
+              "notes": "oMLX serves an Anthropic-compatible `/v1/messages` endpoint and ships a native `omlx launch claude` hook. Default port is 8000.",
+              "runner": "omlx",
+              "standard": "anthropic_compatible"
+            },
+            {
+              "example": "ANTHROPIC_BASE_URL=http://localhost:1234 ANTHROPIC_AUTH_TOKEN=lmstudio claude --model openai/gpt-oss-20b",
+              "integration": "base_url_override",
+              "notes": "LM Studio serves an Anthropic-compatible `/v1/messages` endpoint. Set auth token to `lmstudio` when authentication is disabled, or to the configured API token when required.",
+              "runner": "lmstudio",
+              "standard": "anthropic_compatible"
+            },
+            {
+              "example": "ANTHROPIC_BASE_URL=http://localhost:8080 ANTHROPIC_AUTH_TOKEN=<LLAMA_API_KEY-if-set> claude --model gemma-3-1b-it.Q4_K_M.gguf",
+              "integration": "base_url_override",
+              "notes": "llama-server serves an Anthropic-compatible `/v1/messages` endpoint (added in build b7187). The model ID is the `--alias` value or the GGUF filename.",
+              "runner": "llamacpp",
+              "standard": "anthropic_compatible"
+            },
+            {
+              "example": "ANTHROPIC_BASE_URL=http://localhost:8000 ANTHROPIC_AUTH_TOKEN=EMPTY claude --model Qwen/Qwen2.5-1.5B-Instruct",
+              "integration": "base_url_override",
+              "notes": "vLLM serves an Anthropic-compatible `/v1/messages` endpoint (v0.11.1+). Each vLLM process hosts one model; use `--served-model-name` aliases if needed.",
+              "runner": "vllm",
+              "standard": "anthropic_compatible"
+            },
+            {
+              "example": "ANTHROPIC_BASE_URL=http://localhost:<port> ANTHROPIC_AUTH_TOKEN=<token> claude --model <runner-model-id>",
+              "integration": "base_url_override",
+              "notes": "Any local runner that exposes an Anthropic Messages API-compatible `/v1/messages` endpoint can be pointed at directly. Runners that speak only the OpenAI Chat Completions API require a translating gateway.",
+              "runner": "other",
+              "standard": "anthropic_compatible"
+            }
+          ],
+          "merge_semantics": "merge",
+          "metadata_overrides": [
+            "model_id",
+            "display_name",
+            "name",
+            "description",
+            "supported_capabilities"
+          ],
+          "model": "kimi-for-coding/k2p7",
+          "model_config_paths": [
+            {
+              "format": "json",
+              "notes": "Global user settings. Top-level `model` key pins the default model; `env` block persists model-related environment variables. Observed on this host with `\"model\": \"claude-fable-5[1m]\"`.",
+              "path": "~/.claude/settings.json",
+              "scope": "user"
+            },
+            {
+              "format": "json",
+              "notes": "Project-shared settings committed to source control. Lower precedence than local settings.",
+              "path": ".claude/settings.json",
+              "scope": "repo"
+            },
+            {
+              "format": "json",
+              "notes": "Personal project-only overrides. Gitignored by default when created by Claude Code.",
+              "path": ".claude/settings.local.json",
+              "scope": "repo"
+            },
+            {
+              "format": "json",
+              "notes": "Organization-managed policy that cannot be overridden by user, project, or local settings. Delivery paths vary by OS and admin mechanism.",
+              "path": "managed-settings.json / MDM plist / Windows registry / server-managed",
+              "scope": "env"
+            }
+          ],
+          "reason": "Claudine should treat Ollama and oMLX as first-class Claude Code integrations (detecting `ollama launch claude` / `omlx launch claude` hooks) and LM Studio, llama.cpp, and vLLM as valid base-URL-override targets for Claude Code via their Anthropic-compatible endpoints, rather than requiring a translating gateway.",
+          "requires_claudine_update": true,
+          "schema_url": "https://json.schemastore.org/claude-code-settings.json"
+        },
         "non-interactive-sessions": {
           "$schema": "./_schema.yaml",
           "agent": "codex",
@@ -5593,6 +5956,47 @@
             ]
           }
         },
+        "expected_offerings": {
+          "source": {
+            "kind": "research",
+            "path": "default_models",
+            "topic": "agent-models"
+          },
+          "value": [
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "vendor_api",
+              "context_window": null,
+              "id": "gpt-5.3-codex-spark",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "vendor_api",
+              "context_window": null,
+              "id": "gpt-5.4",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "vendor_api",
+              "context_window": null,
+              "id": "gpt-5.4-mini",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "vendor_api",
+              "context_window": null,
+              "id": "gpt-5.5",
+              "is_default": true
+            }
+          ]
+        },
         "known_gaps": {
           "source": {
             "key": "known_gaps",
@@ -5676,6 +6080,51 @@
             "topic": "non-interactive-sessions"
           },
           "value": []
+        },
+        "offering_sources": {
+          "source": {
+            "kind": "research",
+            "path": "local_runners",
+            "topic": "model-config"
+          },
+          "value": [
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "llamacpp"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "first_class",
+              "prefix": "lmstudio"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "first_class",
+              "prefix": "ollama"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "omlx"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "other"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "vllm"
+            }
+          ]
         },
         "output_formats": {
           "source": {
@@ -8687,6 +9136,185 @@
           "requires_claudine_update": true,
           "schema_url": "https://developers.openai.com/codex/config-reference"
         },
+        "model-config": {
+          "$schema": "./_schema.yaml",
+          "agent": "open_code",
+          "api_standards": [
+            {
+              "adapter": "none",
+              "auth_site": "OPENAI_API_KEY (built-in) or [model_providers.<id>.env_key]",
+              "base_url_site": "openai_base_url (built-in) or [model_providers.<id>.base_url]",
+              "notes": "Codex speaks the OpenAI Responses API only. wire_api = \"chat\" was removed; wire_api = \"responses\" is the only supported value. Custom providers and all local runners must expose an OpenAI-compatible /v1/responses endpoint.",
+              "standard": "openai_compatible"
+            }
+          ],
+          "changes": [
+            "Confirmed that Codex CLI speaks only the OpenAI Responses API; wire_api = \"chat\" was removed and the legacy ollama-chat provider ID is no longer supported.",
+            "LM Studio is now a first-class built-in OSS provider alongside Ollama, surfaced via --oss --local-provider lmstudio or model_provider = \"lmstudio\" / oss_provider = \"lmstudio\".",
+            "Custom providers merge with built-in providers via entry-or-insert, but the reserved IDs openai, ollama, and lmstudio cannot be overridden. Amazon Bedrock only allows aws.profile and aws.region overrides.",
+            "Documented the experimental CODEX_OSS_BASE_URL and CODEX_OSS_PORT env vars that redirect built-in OSS provider endpoints.",
+            "Reclassified oMLX, llama.cpp, and vLLM as base-URL-override paths on Codex's OpenAI-compatible client, consistent with local-runner ground truth; they are not unsupported.",
+            "Updated config scope notes to reflect that project config cannot override provider/auth/telemetry/profile/notification keys and that system config lives at /etc/codex/config.toml on Unix.",
+            "Corrected the cross-cloud bridging example to route through a Responses-translating proxy (e.g. LiteLLM) — Mistral's native API serves no /v1/responses, so a direct base_url cannot work."
+          ],
+          "cloud_bridge": {
+            "example": "# ~/.codex/config.toml — Mistral's native API is Chat-Completions-shaped and\n# serves no /v1/responses, so a Responses-translating proxy (e.g. LiteLLM)\n# fronts it; base_url points at the proxy, never at api.mistral.ai directly.\nmodel = \"mistral-large-latest\"\nmodel_provider = \"mistral\"\n\n[model_providers.mistral]\nname = \"Mistral (via LiteLLM proxy)\"\nbase_url = \"http://localhost:4000/v1\"\nenv_key = \"LITELLM_API_KEY\"\n",
+            "mechanism": "openai_base_url or [model_providers.<id>.base_url] pointing at a Responses-API-compatible gateway/proxy",
+            "supported": true
+          },
+          "created": "2026-07-02",
+          "default_model_site": "Top-level model key in ~/.codex/config.toml (or .codex/config.toml); session override via --model/-m or /model in the TUI; CLI flags take precedence over files and env vars.",
+          "env_vars": [
+            {
+              "effect": "API key used by the built-in openai provider when authenticating with API-key mode.",
+              "name": "OPENAI_API_KEY"
+            },
+            {
+              "effect": "Provides an API key for a single non-interactive codex exec run.",
+              "name": "CODEX_API_KEY"
+            },
+            {
+              "effect": "ChatGPT or Codex access token for trusted automation; can be piped to codex login --with-access-token.",
+              "name": "CODEX_ACCESS_TOKEN"
+            },
+            {
+              "effect": "PEM CA bundle for HTTPS/WebSocket clients; takes precedence over SSL_CERT_FILE for TLS-intercepted networks.",
+              "name": "CODEX_CA_CERTIFICATE"
+            },
+            {
+              "effect": "Fallback PEM CA bundle path when CODEX_CA_CERTIFICATE is unset.",
+              "name": "SSL_CERT_FILE"
+            },
+            {
+              "effect": "Root directory for Codex state, including config.toml, auth, logs, and caches. The directory must already exist.",
+              "name": "CODEX_HOME"
+            },
+            {
+              "effect": "Experimental override for the base URL of built-in OSS providers (ollama/lmstudio). Takes precedence over the default localhost port.",
+              "name": "CODEX_OSS_BASE_URL"
+            },
+            {
+              "effect": "Experimental override for the localhost port used by built-in OSS providers when CODEX_OSS_BASE_URL is unset.",
+              "name": "CODEX_OSS_PORT"
+            }
+          ],
+          "has_official_schema": "formal",
+          "last_updated": "2026-07-02",
+          "local_runners": [
+            {
+              "example": "# ~/.codex/config.toml\nmodel = \"qwen3:1.7b\"\nmodel_provider = \"ollama\"\noss_provider = \"ollama\"\n\n# Or interactively\ncodex --oss -m qwen3:1.7b\n\n# Or via Ollama's native hook (v0.15+)\nollama launch codex\n",
+              "integration": "first_class",
+              "notes": "Built-in ollama provider uses http://localhost:11434/v1 by default. Port is overridable via the experimental CODEX_OSS_PORT or CODEX_OSS_BASE_URL env vars. Model tags (e.g., :1.7b) are passed through unchanged.",
+              "runner": "ollama",
+              "standard": "openai_compatible"
+            },
+            {
+              "example": "# ~/.codex/config.toml\nmodel = \"openai/gpt-oss-20b\"\nmodel_provider = \"lmstudio\"\noss_provider = \"lmstudio\"\n\n# Or interactively\ncodex --oss --local-provider lmstudio -m openai/gpt-oss-20b\n",
+              "integration": "first_class",
+              "notes": "Built-in lmstudio provider uses http://localhost:1234/v1 by default. The lms CLI must be installed and LM Studio must have been run at least once.",
+              "runner": "lmstudio",
+              "standard": "openai_compatible"
+            },
+            {
+              "example": "# ~/.codex/config.toml\nmodel = \"Qwen3.6-35B-A3B-oQ6\"\nmodel_provider = \"local_omlx\"\n\n[model_providers.local_omlx]\nname = \"oMLX\"\nbase_url = \"http://localhost:8000/v1\"\n# oMLX auth is optional; set env_key if you configured an API key.\n",
+              "integration": "base_url_override",
+              "notes": "No native Codex provider. oMLX exposes an OpenAI-compatible endpoint at /v1/* on port 8000. oMLX also ships omlx launch codex, which sets OPENAI_BASE_URL/OPENAI_API_KEY and execs Codex.",
+              "runner": "omlx",
+              "standard": "openai_compatible"
+            },
+            {
+              "example": "# ~/.codex/config.toml\nmodel = \"gemma-3-1b-it.Q4_K_M.gguf\"\nmodel_provider = \"local_llamacpp\"\n\n[model_providers.local_llamacpp]\nname = \"llama.cpp\"\nbase_url = \"http://localhost:8080/v1\"\n",
+              "integration": "base_url_override",
+              "notes": "llama-server exposes an OpenAI-compatible endpoint at /v1/* on port 8080 (build b7187+). The request model field is ignored in single-model mode; the server uses whatever model it was started with.",
+              "runner": "llamacpp",
+              "standard": "openai_compatible"
+            },
+            {
+              "example": "# ~/.codex/config.toml\nmodel = \"Qwen/Qwen2.5-1.5B-Instruct\"\nmodel_provider = \"local_vllm\"\n\n[model_providers.local_vllm]\nname = \"vLLM\"\nbase_url = \"http://localhost:8000/v1\"\n",
+              "integration": "base_url_override",
+              "notes": "vLLM exposes an OpenAI-compatible endpoint at /v1/* on port 8000. Each vLLM process hosts exactly one model; use --served-model-name aliases if needed.",
+              "runner": "vllm",
+              "standard": "openai_compatible"
+            },
+            {
+              "integration": "base_url_override",
+              "notes": "Any local runner that exposes an OpenAI Responses API-compatible /v1/responses endpoint can be wired in as a custom provider. Runners that speak only the Anthropic Messages API require a translating gateway.",
+              "runner": "other",
+              "standard": "openai_compatible"
+            }
+          ],
+          "merge_semantics": "replace",
+          "metadata_overrides": [
+            "slug",
+            "display_name",
+            "description",
+            "default_reasoning_level",
+            "supported_reasoning_levels",
+            "shell_type",
+            "visibility",
+            "supported_in_api",
+            "priority",
+            "additional_speed_tiers",
+            "service_tiers",
+            "default_service_tier",
+            "availability_nux",
+            "upgrade",
+            "base_instructions",
+            "model_messages",
+            "include_skills_usage_instructions",
+            "supports_reasoning_summaries",
+            "default_reasoning_summary",
+            "support_verbosity",
+            "default_verbosity",
+            "apply_patch_tool_type",
+            "web_search_tool_type",
+            "truncation_policy",
+            "supports_parallel_tool_calls",
+            "supports_image_detail_original",
+            "context_window",
+            "max_context_window",
+            "auto_compact_token_limit",
+            "comp_hash",
+            "effective_context_window_percent",
+            "experimental_supported_tools",
+            "input_modalities",
+            "supports_search_tool",
+            "use_responses_lite",
+            "auto_review_model_override",
+            "tool_mode",
+            "multi_agent_version"
+          ],
+          "model": "kimi-for-coding/k2p7",
+          "model_config_paths": [
+            {
+              "format": "toml",
+              "notes": "Global user defaults. Shared by the CLI and IDE extension. Observed on this host with model = \"gpt-5.5\", model_reasoning_effort = \"medium\", personality = \"pragmatic\", and per-project trust tables.",
+              "path": "~/.codex/config.toml",
+              "scope": "user"
+            },
+            {
+              "format": "toml",
+              "notes": "Project-scoped overrides. Loaded only when the project is trusted. Cannot override provider, auth, telemetry, profile, notification, or host-owned app request metadata keys.",
+              "path": ".codex/config.toml",
+              "scope": "repo"
+            },
+            {
+              "format": "toml",
+              "notes": "Profile files selected with --profile profile-name. Overlay between user config and project/CLI overrides. Can also set model_catalog_json per profile.",
+              "path": "$CODEX_HOME/profile-name.config.toml",
+              "scope": "env"
+            },
+            {
+              "format": "toml",
+              "notes": "System-wide defaults on Unix. Lowest precedence after built-in defaults.",
+              "path": "/etc/codex/config.toml",
+              "scope": "env"
+            }
+          ],
+          "reason": "Claudine's Codex wrapper and model catalog logic should account for first-class Ollama/LM Studio OSS providers, the experimental CODEX_OSS_BASE_URL/CODEX_OSS_PORT redirect env vars, and the fact that Codex's only user-extension API standard is OpenAI-compatible /v1/responses (not Anthropic). Local runners that speak only Anthropic Messages require a gateway when used with Codex.",
+          "requires_claudine_update": true,
+          "schema_url": "https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/config.schema.json"
+        },
         "non-interactive-sessions": {
           "$schema": "./_schema.yaml",
           "agent": "codex",
@@ -10786,6 +11414,103 @@
             ]
           }
         },
+        "expected_offerings": {
+          "source": {
+            "kind": "research",
+            "path": "default_models",
+            "topic": "agent-models"
+          },
+          "value": [
+            {
+              "alias": "auto",
+              "catalog_id": null,
+              "class": "vendor_api",
+              "context_window": 1000000,
+              "id": "auto",
+              "is_default": true
+            },
+            {
+              "alias": "flash",
+              "catalog_id": "google/gemini-flash@2.5",
+              "class": "vendor_api",
+              "context_window": 1000000,
+              "id": "gemini-2.5-flash",
+              "is_default": false
+            },
+            {
+              "alias": "flash-lite",
+              "catalog_id": "google/gemini-flash-lite@2.5",
+              "class": "vendor_api",
+              "context_window": 1000000,
+              "id": "gemini-2.5-flash-lite",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "google/gemini-pro@2.5",
+              "class": "vendor_api",
+              "context_window": 1000000,
+              "id": "gemini-2.5-pro",
+              "is_default": false
+            },
+            {
+              "alias": "flash",
+              "catalog_id": "google/gemini-flash@3+preview",
+              "class": "vendor_api",
+              "context_window": 1000000,
+              "id": "gemini-3-flash-preview",
+              "is_default": false
+            },
+            {
+              "alias": "pro",
+              "catalog_id": "google/gemini-pro@3+preview",
+              "class": "vendor_api",
+              "context_window": 1000000,
+              "id": "gemini-3-pro-preview",
+              "is_default": false
+            },
+            {
+              "alias": "flash-lite",
+              "catalog_id": "google/gemini-flash-lite@3.1",
+              "class": "vendor_api",
+              "context_window": 1000000,
+              "id": "gemini-3.1-flash-lite",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "google/gemini-pro@3.1+preview",
+              "class": "vendor_api",
+              "context_window": 1000000,
+              "id": "gemini-3.1-pro-preview",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "google/gemini-flash@3.5",
+              "class": "vendor_api",
+              "context_window": 1000000,
+              "id": "gemini-3.5-flash",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "google/gemma@4+it+26b+a4b",
+              "class": "vendor_api",
+              "context_window": null,
+              "id": "gemma-4-26b-a4b-it",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "google/gemma@4+it+31b",
+              "class": "vendor_api",
+              "context_window": null,
+              "id": "gemma-4-31b-it",
+              "is_default": false
+            }
+          ]
+        },
         "known_gaps": {
           "source": {
             "key": "known_gaps",
@@ -10860,6 +11585,51 @@
           "value": [
             "--prompt-interactive",
             "--experimental-acp"
+          ]
+        },
+        "offering_sources": {
+          "source": {
+            "kind": "research",
+            "path": "local_runners",
+            "topic": "model-config"
+          },
+          "value": [
+            {
+              "api_standard": "bespoke",
+              "class": "local_runner",
+              "integration": "proxy_required",
+              "prefix": "llamacpp"
+            },
+            {
+              "api_standard": "bespoke",
+              "class": "local_runner",
+              "integration": "proxy_required",
+              "prefix": "lmstudio"
+            },
+            {
+              "api_standard": "bespoke",
+              "class": "local_runner",
+              "integration": "proxy_required",
+              "prefix": "ollama"
+            },
+            {
+              "api_standard": "bespoke",
+              "class": "local_runner",
+              "integration": "proxy_required",
+              "prefix": "omlx"
+            },
+            {
+              "api_standard": "bespoke",
+              "class": "local_runner",
+              "integration": "first_class",
+              "prefix": "other"
+            },
+            {
+              "api_standard": "bespoke",
+              "class": "local_runner",
+              "integration": "proxy_required",
+              "prefix": "vllm"
+            }
           ]
         },
         "output_formats": {
@@ -13447,6 +14217,183 @@
           "requires_claudine_update": true,
           "schema_url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/schemas/settings.schema.json"
         },
+        "model-config": {
+          "$schema": "./_schema.yaml",
+          "agent": "open_code",
+          "api_standards": [
+            {
+              "auth_site": "GEMINI_API_KEY, GOOGLE_API_KEY, GOOGLE_APPLICATION_CREDENTIALS, or OAuth",
+              "base_url_site": "GOOGLE_GEMINI_BASE_URL / GOOGLE_VERTEX_BASE_URL env vars (no settings.json key)",
+              "notes": "The CLI uses the Google GenAI SDK and speaks the Gemini API (or Vertex AI). A \"gateway\" auth mode lets users redirect to a custom Gemini API-compatible base URL via `GOOGLE_GEMINI_BASE_URL`. There is no OpenAI-compatible or Anthropic-compatible adapter in the shipping CLI.",
+              "standard": "bespoke"
+            }
+          ],
+          "changes": [
+            "Discovered a gateway auth mode in Gemini CLI 0.46.0 driven by GOOGLE_GEMINI_BASE_URL (and GOOGLE_VERTEX_BASE_URL). This enables custom Gemini API-compatible endpoints, but it is not an OpenAI/Anthropic base-URL override.",
+            "Confirmed that the interactive CLI auth picker does not expose gateway; it is env/ACP-driven. Persistent selection can be recorded via security.auth.selectedType: \"gateway\" when an ACP/IDE client initializes the session.",
+            "Reclassified local runners (Ollama, oMLX, LM Studio, llama.cpp, vLLM) as proxy_required via a Gemini API-compatible translating proxy, not unsupported. A direct base-URL override onto their OpenAI/Anthropic endpoints does not work because Gemini CLI has no such client.",
+            "Added GEMINI_API_KEY_AUTH_MECHANISM and GOOGLE_GENAI_API_VERSION to the environment-override list; both affect how the SDK sends credentials and which API version is requested.",
+            "Updated modelConfigs coverage: the schema now also documents aliases, customAliases, overrides, customOverrides, modelDefinitions, modelIdResolutions, classifierIdResolutions, and modelChains."
+          ],
+          "cloud_bridge": {
+            "example": "# Route Gemini CLI through a Gemini API-compatible gateway that proxies to a non-Google API\nexport GOOGLE_GEMINI_BASE_URL=\"https://my-gateway.example.com/gemini\"\nexport GEMINI_API_KEY=\"gateway-key\"\ngemini --model \"openai/gpt-4.1\"\n\n# If the target vendor's API is not Gemini-compatible (e.g. native OpenAI),\n# the gateway must translate the Gemini API to that vendor's protocol.\n# A direct base URL such as https://api.openai.com will not work.\n",
+            "mechanism": "GOOGLE_GEMINI_BASE_URL env var (or GOOGLE_VERTEX_BASE_URL for Vertex-compatible gateways); optionally set security.auth.selectedType to \"gateway\" for ACP/IDE mode",
+            "supported": true
+          },
+          "created": "2026-07-02",
+          "default_model_site": "model.name key in ~/.gemini/settings.json (or .gemini/settings.json); session override via GEMINI_MODEL env var or --model flag; precedence is --model > GEMINI_MODEL > model.name",
+          "env_vars": [
+            {
+              "effect": "Sets the active model for the launched session.",
+              "name": "GEMINI_MODEL"
+            },
+            {
+              "effect": "Authenticates to the Gemini API (Google AI Studio key).",
+              "name": "GEMINI_API_KEY"
+            },
+            {
+              "effect": "Authenticates to Google Cloud/Vertex AI requests.",
+              "name": "GOOGLE_API_KEY"
+            },
+            {
+              "effect": "Specifies the Google Cloud project for Vertex AI or OAuth.",
+              "name": "GOOGLE_CLOUD_PROJECT"
+            },
+            {
+              "effect": "Fallback project ID when GOOGLE_CLOUD_PROJECT is not set.",
+              "name": "GOOGLE_CLOUD_PROJECT_ID"
+            },
+            {
+              "effect": "Specifies the Vertex AI region/location.",
+              "name": "GOOGLE_CLOUD_LOCATION"
+            },
+            {
+              "effect": "Path to a service account JSON key for ADC-based Vertex auth.",
+              "name": "GOOGLE_APPLICATION_CREDENTIALS"
+            },
+            {
+              "effect": "Switches the SDK to the Vertex AI endpoint.",
+              "name": "GOOGLE_GENAI_USE_VERTEXAI"
+            },
+            {
+              "effect": "Redirects the Gemini API endpoint to a custom gateway. Triggers the \"gateway\" auth mode.",
+              "name": "GOOGLE_GEMINI_BASE_URL"
+            },
+            {
+              "effect": "Redirects the Vertex AI endpoint to a custom gateway.",
+              "name": "GOOGLE_VERTEX_BASE_URL"
+            },
+            {
+              "effect": "Controls API-key header style: `x-goog-api-key` (default) or `bearer`.",
+              "name": "GEMINI_API_KEY_AUTH_MECHANISM"
+            },
+            {
+              "effect": "Overrides the Google GenAI SDK API version string.",
+              "name": "GOOGLE_GENAI_API_VERSION"
+            },
+            {
+              "effect": "Overrides the path to the system defaults settings file.",
+              "name": "GEMINI_CLI_SYSTEM_DEFAULTS_PATH"
+            },
+            {
+              "effect": "Overrides the path to the system override settings file.",
+              "name": "GEMINI_CLI_SYSTEM_SETTINGS_PATH"
+            }
+          ],
+          "has_official_schema": "formal",
+          "last_updated": "2026-07-02",
+          "local_runners": [
+            {
+              "example": "A Gemini API-compatible translating proxy must sit between Gemini CLI and Ollama. `export GOOGLE_GEMINI_BASE_URL=http://localhost:8080` and `export GEMINI_API_KEY=ollama`, then `gemini --model qwen3:1.7b`. The proxy translates Gemini API requests to Ollama's OpenAI-compatible `/v1/chat/completions` endpoint.",
+              "integration": "proxy_required",
+              "notes": "Ollama serves OpenAI- and Anthropic-compatible endpoints, but Gemini CLI does not speak those standards. A direct base URL to Ollama will not work.",
+              "runner": "ollama",
+              "standard": "bespoke"
+            },
+            {
+              "example": "`export GOOGLE_GEMINI_BASE_URL=http://localhost:8080` and `export GEMINI_API_KEY=<omlx-key-or-ignored>`, then `gemini --model Qwen3.6-35B-A3B-oQ6`. A Gemini-to-OpenAI/Anthropic translating proxy is required.",
+              "integration": "proxy_required",
+              "notes": "oMLX serves OpenAI- and Anthropic-compatible endpoints, but Gemini CLI only emits the Gemini API. A direct base URL to oMLX will not work.",
+              "runner": "omlx",
+              "standard": "bespoke"
+            },
+            {
+              "example": "`export GOOGLE_GEMINI_BASE_URL=http://localhost:8080` and `export GEMINI_API_KEY=lmstudio`, then `gemini --model openai/gpt-oss-20b`. A Gemini-to-OpenAI/Anthropic translating proxy is required.",
+              "integration": "proxy_required",
+              "notes": "LM Studio serves OpenAI- and Anthropic-compatible endpoints, but Gemini CLI does not speak those standards. A direct base URL to LM Studio will not work.",
+              "runner": "lmstudio",
+              "standard": "bespoke"
+            },
+            {
+              "example": "`export GOOGLE_GEMINI_BASE_URL=http://localhost:8080` and `export GEMINI_API_KEY=<key-if-set>`, then `gemini --model gemma-3-1b-it.Q4_K_M.gguf`. A Gemini-to-OpenAI/Anthropic translating proxy is required.",
+              "integration": "proxy_required",
+              "notes": "llama-server serves OpenAI- and Anthropic-compatible endpoints, but Gemini CLI only emits the Gemini API. A direct base URL to llama-server will not work.",
+              "runner": "llamacpp",
+              "standard": "bespoke"
+            },
+            {
+              "example": "`export GOOGLE_GEMINI_BASE_URL=http://localhost:8080` and `export GEMINI_API_KEY=EMPTY`, then `gemini --model Qwen/Qwen2.5-1.5B-Instruct`. A Gemini-to-OpenAI/Anthropic translating proxy is required.",
+              "integration": "proxy_required",
+              "notes": "vLLM serves OpenAI- and Anthropic-compatible endpoints, but Gemini CLI does not speak those standards. A direct base URL to vLLM will not work.",
+              "runner": "vllm",
+              "standard": "bespoke"
+            },
+            {
+              "example": "{ \"experimental\": { \"gemmaModelRouter\": { \"enabled\": true, \"classifier\": { \"host\": \"http://localhost:9379\", \"model\": \"gemma3-1b-gpu-custom\" } } } }",
+              "integration": "first_class",
+              "notes": "Local Gemma via LiteRT-LM is supported only as an experimental routing classifier, not as a general chat model. Setup is normally done with `gemini gemma setup`.",
+              "runner": "other",
+              "standard": "bespoke"
+            }
+          ],
+          "merge_semantics": "merge",
+          "metadata_overrides": [
+            "displayName",
+            "tier",
+            "family",
+            "isPreview",
+            "isVisible",
+            "dialogDescription",
+            "features.thinking",
+            "features.multimodalToolUse",
+            "modelConfig.model",
+            "modelConfig.generateContentConfig.temperature",
+            "modelConfig.generateContentConfig.topP",
+            "modelConfig.generateContentConfig.topK",
+            "modelConfig.generateContentConfig.maxOutputTokens",
+            "modelConfig.generateContentConfig.thinkingConfig"
+          ],
+          "model": "kimi-for-coding/k2p7",
+          "model_config_paths": [
+            {
+              "format": "json",
+              "notes": "Global user settings. `model.name` pins the default model and `modelConfigs` declares custom aliases, overrides, and model definitions. Observed on this host with no `model.name` or `modelConfigs` block, so the CLI is using the default `auto` model selection.",
+              "path": "~/.gemini/settings.json",
+              "scope": "user"
+            },
+            {
+              "format": "json",
+              "notes": "Project-specific settings that override the user settings file.",
+              "path": ".gemini/settings.json",
+              "scope": "repo"
+            },
+            {
+              "format": "other",
+              "notes": "Auto-loaded env file (project first, then ~/.gemini/.env). Used for `GEMINI_MODEL`, `GEMINI_API_KEY`, `GOOGLE_GEMINI_BASE_URL`, `GOOGLE_VERTEX_BASE_URL`, etc. The first file found wins; values are not merged.",
+              "path": ".gemini/.env or ~/.gemini/.env",
+              "scope": "env"
+            },
+            {
+              "format": "other",
+              "notes": "Session-scoped overrides such as `GEMINI_MODEL`, API credentials, and gateway base URLs.",
+              "path": "Shell environment variables",
+              "scope": "env"
+            }
+          ],
+          "reason": "Claudine should recognize GOOGLE_GEMINI_BASE_URL / GOOGLE_VERTEX_BASE_URL as Gemini CLI endpoint overrides, model the gateway auth type in provider metadata, and classify local runners as proxy_required through a Gemini-compatible translating proxy rather than unsupported.",
+          "requires_claudine_update": true,
+          "schema_url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/schemas/settings.schema.json"
+        },
         "non-interactive-sessions": {
           "$schema": "./_schema.yaml",
           "agent": "codex",
@@ -15276,6 +16223,63 @@
             ]
           }
         },
+        "expected_offerings": {
+          "source": {
+            "kind": "research",
+            "path": "default_models",
+            "topic": "agent-models"
+          },
+          "value": [
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "vendor_api",
+              "context_window": null,
+              "id": "claude-4.5-sonnet",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "vendor_api",
+              "context_window": 200000,
+              "id": "claude-sonnet-4-5",
+              "is_default": true
+            },
+            {
+              "alias": null,
+              "catalog_id": "google/gemini-flash@2.0",
+              "class": "vendor_api",
+              "context_window": null,
+              "id": "gemini-2.0-flash",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "google/gemini-pro@2.5",
+              "class": "vendor_api",
+              "context_window": 1000000,
+              "id": "gemini-2.5-pro",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "vendor_api",
+              "context_window": null,
+              "id": "gpt-5",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "vendor_api",
+              "context_window": null,
+              "id": "qwen2.5",
+              "is_default": false
+            }
+          ]
+        },
         "known_gaps": {
           "source": {
             "key": "known_gaps",
@@ -15350,6 +16354,51 @@
           },
           "value": [
             "--interactive"
+          ]
+        },
+        "offering_sources": {
+          "source": {
+            "kind": "research",
+            "path": "local_runners",
+            "topic": "model-config"
+          },
+          "value": [
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "llamacpp"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "first_class",
+              "prefix": "lmstudio"
+            },
+            {
+              "api_standard": "bespoke",
+              "class": "local_runner",
+              "integration": "first_class",
+              "prefix": "ollama"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "omlx"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "other"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "vllm"
+            }
           ]
         },
         "output_formats": {
@@ -18083,6 +19132,215 @@
           "requires_claudine_update": true,
           "schema_url": "https://goose-docs.ai/docs/guides/config-files"
         },
+        "model-config": {
+          "$schema": "./_schema.yaml",
+          "agent": "open_code",
+          "api_standards": [
+            {
+              "adapter": "none",
+              "auth_site": "api_key_env in custom provider JSON (or OPENAI_API_KEY for the built-in openai provider)",
+              "base_url_site": "base_url in custom provider JSON (or OPENAI_HOST for the built-in openai provider)",
+              "notes": "Custom providers with engine openai/openai_compatible speak the OpenAI Chat Completions API. The built-in OpenAI provider can also be pointed at any OpenAI-compatible endpoint.",
+              "standard": "openai_compatible"
+            },
+            {
+              "adapter": "none",
+              "auth_site": "api_key_env in custom provider JSON (or ANTHROPIC_API_KEY for the built-in anthropic provider)",
+              "base_url_site": "base_url in custom provider JSON (or ANTHROPIC_HOST for the built-in anthropic provider)",
+              "notes": "Custom providers with engine anthropic/anthropic_compatible speak the Anthropic Messages API.",
+              "standard": "anthropic_compatible"
+            },
+            {
+              "adapter": "none",
+              "auth_site": "none (Ollama local servers typically require no key)",
+              "base_url_site": "base_url in custom provider JSON (or OLLAMA_HOST for the built-in ollama provider)",
+              "notes": "Custom providers with engine ollama/ollama_compatible use the Ollama native API, which is neither OpenAI nor Anthropic compatible.",
+              "standard": "bespoke"
+            }
+          ],
+          "changes": [
+            "Goose has moved to the Agentic AI Foundation (AAIF). The repository is now https://github.com/aaif-goose/goose and the documentation site is https://goose-docs.ai (block.github.io/goose redirects).",
+            "The built-in provider roster has expanded significantly to include Ollama Cloud, Ramalama, Atomic Chat, Docker Model Runner, ChatGPT Codex, GitHub Copilot, and numerous cloud providers (Avian, EmpirioLabs, FuturMix, Novita AI, Routstr, etc.).",
+            "LM Studio is now a first-class built-in provider using its OpenAI-compatible endpoint, not only a custom-provider path.",
+            "The custom provider JSON schema gained new optional fields: dynamic_models, skip_canonical_filtering, base_path, env_vars, timeout_seconds, catalog_provider_id, model_doc_link, setup_steps, fast_model, preserves_thinking, and resolved_model on ModelInfo.",
+            "New environment variables were documented: GOOSE_CONTEXT_LIMIT, GOOSE_INPUT_LIMIT, GOOSE_PLANNER_CONTEXT_LIMIT, GOOSE_FAST_MODEL, CLAUDE_THINKING_TYPE, and GEMINI3_THINKING_LEVEL.",
+            "The custom provider engine field accepts openai/openai_compatible, anthropic/anthropic_compatible, and ollama/ollama_compatible (case-insensitive)."
+          ],
+          "cloud_bridge": {
+            "example": "{\n  \"name\": \"litellm_bridge\",\n  \"engine\": \"openai\",\n  \"display_name\": \"LiteLLM Bridge\",\n  \"base_url\": \"http://localhost:4000/v1\",\n  \"api_key_env\": \"LITELLM_API_KEY\",\n  \"requires_auth\": true,\n  \"models\": [{\"name\": \"bedrock-claude-sonnet-4\", \"context_limit\": 200000}]\n}\n",
+            "mechanism": "custom provider JSON with engine openai/anthropic and base_url pointing at a gateway, or OPENAI_HOST/ANTHROPIC_HOST on built-in providers",
+            "supported": true
+          },
+          "created": "2026-07-02",
+          "default_model_site": "GOOSE_MODEL key in ~/.config/goose/config.yaml; session-scope override via GOOSE_MODEL env var or --model flag.",
+          "env_vars": [
+            {
+              "effect": "Selects the active provider (e.g. anthropic, openai, ollama, lmstudio, or a custom provider id).",
+              "name": "GOOSE_PROVIDER"
+            },
+            {
+              "effect": "Selects the active model for the session. Overrides the config.yaml GOOSE_MODEL value.",
+              "name": "GOOSE_MODEL"
+            },
+            {
+              "effect": "Overrides the providers default fast/auxiliary model.",
+              "name": "GOOSE_FAST_MODEL"
+            },
+            {
+              "effect": "Overrides the provider implementation type.",
+              "name": "GOOSE_PROVIDER__TYPE"
+            },
+            {
+              "effect": "Overrides the API endpoint host for the current provider.",
+              "name": "GOOSE_PROVIDER__HOST"
+            },
+            {
+              "effect": "Overrides the API key for the current provider.",
+              "name": "GOOSE_PROVIDER__API_KEY"
+            },
+            {
+              "effect": "Provider used for planning mode.",
+              "name": "GOOSE_PLANNER_PROVIDER"
+            },
+            {
+              "effect": "Model used for planning mode.",
+              "name": "GOOSE_PLANNER_MODEL"
+            },
+            {
+              "effect": "Overrides the context limit for the main model.",
+              "name": "GOOSE_CONTEXT_LIMIT"
+            },
+            {
+              "effect": "Overrides the Ollama input prompt limit (maps to num_ctx).",
+              "name": "GOOSE_INPUT_LIMIT"
+            },
+            {
+              "effect": "Overrides the context limit for the planner model.",
+              "name": "GOOSE_PLANNER_CONTEXT_LIMIT"
+            },
+            {
+              "effect": "Overrides model temperature.",
+              "name": "GOOSE_TEMPERATURE"
+            },
+            {
+              "effect": "Overrides maximum tokens per response.",
+              "name": "GOOSE_MAX_TOKENS"
+            },
+            {
+              "effect": "Overrides the Ollama server endpoint.",
+              "name": "OLLAMA_HOST"
+            },
+            {
+              "effect": "Overrides the OpenAI-compatible endpoint used by the built-in openai provider.",
+              "name": "OPENAI_HOST"
+            },
+            {
+              "effect": "API key for the built-in openai provider.",
+              "name": "OPENAI_API_KEY"
+            },
+            {
+              "effect": "Overrides the Anthropic endpoint used by the built-in anthropic provider.",
+              "name": "ANTHROPIC_HOST"
+            },
+            {
+              "effect": "API key for the built-in anthropic provider.",
+              "name": "ANTHROPIC_API_KEY"
+            },
+            {
+              "effect": "Controls Claude reasoning mode (adaptive/enabled/disabled) on Anthropic and Databricks providers.",
+              "name": "CLAUDE_THINKING_TYPE"
+            },
+            {
+              "effect": "Sets the thinking level for Gemini 3 models (low or high).",
+              "name": "GEMINI3_THINKING_LEVEL"
+            }
+          ],
+          "has_official_schema": "none",
+          "last_updated": "2026-07-02",
+          "local_runners": [
+            {
+              "example": "GOOSE_PROVIDER: ollama\nGOOSE_MODEL: qwen2.5\nOLLAMA_HOST: http://localhost:11434\n",
+              "integration": "first_class",
+              "notes": "First-class built-in provider using the native Ollama API. Model IDs include the Ollama tag, e.g. qwen2.5 or michaelneale/deepseek-r1-goose. Can also be added as a custom OpenAI- or Anthropic-compatible provider.",
+              "runner": "ollama",
+              "standard": "bespoke"
+            },
+            {
+              "example": "GOOSE_PROVIDER: lmstudio\nGOOSE_MODEL: qwen2.5-coder-14b-instruct\n",
+              "integration": "first_class",
+              "notes": "First-class built-in provider. Connects to localhost:1234 by default over LM Studios OpenAI-compatible endpoint. Use the model id reported by LM Studio.",
+              "runner": "lmstudio",
+              "standard": "openai_compatible"
+            },
+            {
+              "example": "{\n  \"name\": \"local_omlx\",\n  \"engine\": \"openai\",\n  \"display_name\": \"oMLX\",\n  \"base_url\": \"http://localhost:8000/v1\",\n  \"requires_auth\": false,\n  \"models\": [{\"name\": \"qwen2.5-7b\", \"context_limit\": 32768}]\n}\n",
+              "integration": "base_url_override",
+              "notes": "No native provider; add via custom OpenAI-compatible provider. oMLX also exposes an Anthropic-compatible endpoint, so engine anthropic with base_url http://localhost:8000 works as well.",
+              "runner": "omlx",
+              "standard": "openai_compatible"
+            },
+            {
+              "example": "{\n  \"name\": \"local_llamacpp\",\n  \"engine\": \"openai\",\n  \"display_name\": \"llama.cpp\",\n  \"base_url\": \"http://localhost:8080/v1\",\n  \"requires_auth\": false,\n  \"models\": [{\"name\": \"qwen2.5-coder-14b\", \"context_limit\": 32768}]\n}\n",
+              "integration": "base_url_override",
+              "notes": "llama.cpp server exposes an OpenAI-compatible Chat Completions API and, since build b7187, an Anthropic-compatible /v1/messages endpoint. Add it as a custom provider on either standard.",
+              "runner": "llamacpp",
+              "standard": "openai_compatible"
+            },
+            {
+              "example": "{\n  \"name\": \"local_vllm\",\n  \"engine\": \"openai\",\n  \"display_name\": \"vLLM\",\n  \"base_url\": \"http://localhost:8000/v1\",\n  \"requires_auth\": false,\n  \"models\": [{\"name\": \"qwen2.5-coder-32b-instruct\", \"context_limit\": 32768}]\n}\n",
+              "integration": "base_url_override",
+              "notes": "vLLM serves both OpenAI-compatible and Anthropic-compatible APIs (anthropic since v0.11.1). Add it as a custom provider on either standard, or point the built-in openai provider at it with OPENAI_HOST.",
+              "runner": "vllm",
+              "standard": "openai_compatible"
+            },
+            {
+              "integration": "base_url_override",
+              "notes": "Any local runner that exposes an OpenAI-compatible, Anthropic-compatible, or Ollama-compatible endpoint can be added as a custom provider.",
+              "runner": "other",
+              "standard": "openai_compatible"
+            }
+          ],
+          "merge_semantics": "merge",
+          "metadata_overrides": [
+            "name",
+            "resolved_model",
+            "context_limit",
+            "input_token_cost",
+            "output_token_cost",
+            "currency",
+            "supports_cache_control",
+            "reasoning"
+          ],
+          "model": "kimi-for-coding/k2p7",
+          "model_config_paths": [
+            {
+              "format": "yaml",
+              "notes": "Global user settings. Top-level GOOSE_PROVIDER and GOOSE_MODEL keys pin the default provider and model. This host does not have Goose CLI installed, so no local file was observed.",
+              "path": "~/.config/goose/config.yaml",
+              "scope": "user"
+            },
+            {
+              "format": "json",
+              "notes": "One JSON file per custom provider. Each file adds a user-defined provider with its own model list and endpoint configuration.",
+              "path": "~/.config/goose/custom_providers/*.json",
+              "scope": "user"
+            },
+            {
+              "format": "yaml",
+              "notes": "Fallback file-based secret store used when the system keyring is unavailable or disabled; holds API keys referenced by custom providers.",
+              "path": "~/.config/goose/secrets.yaml",
+              "scope": "user"
+            },
+            {
+              "format": "other",
+              "notes": "Session-scoped overrides such as GOOSE_PROVIDER, GOOSE_MODEL, GOOSE_PROVIDER__HOST, and provider-specific HOST variables.",
+              "path": "Shell environment variables",
+              "scope": "env"
+            }
+          ],
+          "reason": "Claudines Goose provider adapter and model-catalog metadata should be updated for the AAIF repository move, the expanded built-in provider roster, and the new custom-provider schema fields (dynamic_models, env_vars, base_path, preserves_thinking, etc.) so that config parsing and provider detection remain accurate.",
+          "requires_claudine_update": true
+        },
         "non-interactive-sessions": {
           "$schema": "./_schema.yaml",
           "agent": "codex",
@@ -19936,6 +21194,103 @@
             ]
           }
         },
+        "expected_offerings": {
+          "source": {
+            "kind": "research",
+            "path": "default_models",
+            "topic": "agent-models"
+          },
+          "value": [
+            {
+              "alias": "kimi-code",
+              "catalog_id": null,
+              "class": "plan_endpoint",
+              "context_window": 262144,
+              "id": "kimi-for-coding",
+              "is_default": true
+            },
+            {
+              "alias": null,
+              "catalog_id": "moonshotai/kimi-k@2.5",
+              "class": "vendor_api",
+              "context_window": 262144,
+              "id": "kimi-k2.5",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "moonshotai/kimi-k@2.6",
+              "class": "vendor_api",
+              "context_window": 262144,
+              "id": "kimi-k2.6",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "moonshotai/kimi-k-code@2.7",
+              "class": "vendor_api",
+              "context_window": 262144,
+              "id": "kimi-k2.7-code",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "moonshotai/kimi-k-code@2.7+highspeed",
+              "class": "vendor_api",
+              "context_window": 262144,
+              "id": "kimi-k2.7-code-highspeed",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "moonshotai/moonshot-v-128k@1",
+              "class": "vendor_api",
+              "context_window": 131072,
+              "id": "moonshot-v1-128k",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "moonshotai/moonshot-v-128k@1+preview+vision",
+              "class": "vendor_api",
+              "context_window": 131072,
+              "id": "moonshot-v1-128k-vision-preview",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "moonshotai/moonshot-v-32k@1",
+              "class": "vendor_api",
+              "context_window": 32768,
+              "id": "moonshot-v1-32k",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "moonshotai/moonshot-v-32k@1+preview+vision",
+              "class": "vendor_api",
+              "context_window": 32768,
+              "id": "moonshot-v1-32k-vision-preview",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "moonshotai/moonshot-v-8k@1",
+              "class": "vendor_api",
+              "context_window": 8192,
+              "id": "moonshot-v1-8k",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "moonshotai/moonshot-v-8k@1+preview+vision",
+              "class": "vendor_api",
+              "context_window": 8192,
+              "id": "moonshot-v1-8k-vision-preview",
+              "is_default": false
+            }
+          ]
+        },
         "known_gaps": {
           "source": {
             "key": "known_gaps",
@@ -20012,6 +21367,51 @@
             "--final-message-only",
             "--output-format",
             "--input-format"
+          ]
+        },
+        "offering_sources": {
+          "source": {
+            "kind": "research",
+            "path": "local_runners",
+            "topic": "model-config"
+          },
+          "value": [
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "llamacpp"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "lmstudio"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "ollama"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "omlx"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "other"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "vllm"
+            }
           ]
         },
         "output_formats": {
@@ -22049,6 +23449,170 @@
           "reason": "Claudine's model_catalog module currently expects a static provider model list. Kimi Code CLI ships with no built-in models and populates its catalog dynamically from the provider's /models endpoint at /login, using managed provider keys (e.g., `managed:kimi-code`) and platform-prefixed model keys (e.g., `kimi-code/kimi-for-coding`). It also supports six provider back-ends (kimi, openai_legacy, openai_responses, anthropic, gemini, vertexai) and env-var-based model override (KIMI_MODEL_NAME). Claudine needs to handle dynamic model discovery, managed key prefixes, and per-provider backend typing for Kimi.",
           "requires_claudine_update": true,
           "schema_url": "https://moonshotai.github.io/kimi-cli/en/configuration/config-files.md"
+        },
+        "model-config": {
+          "$schema": "./_schema.yaml",
+          "agent": "open_code",
+          "api_standards": [
+            {
+              "adapter": "none",
+              "auth_site": "providers.<name>.api_key (or OPENAI_API_KEY env var)",
+              "base_url_site": "providers.<name>.base_url (or OPENAI_BASE_URL env var for openai_legacy/openai_responses providers)",
+              "notes": "Use provider type `openai_legacy` for Chat Completions-compatible services or `openai_responses` for the newer Responses API. Custom headers can be added with `custom_headers`.\n",
+              "standard": "openai_compatible"
+            },
+            {
+              "adapter": "none",
+              "auth_site": "providers.<name>.api_key",
+              "base_url_site": "providers.<name>.base_url",
+              "notes": "Use provider type `anthropic` for Anthropic Claude API-compatible endpoints. The base URL should omit `/v1`; the client appends `/v1/messages`.\n",
+              "standard": "anthropic_compatible"
+            },
+            {
+              "adapter": "none",
+              "auth_site": "providers.<name>.api_key (or KIMI_API_KEY env var for kimi providers)",
+              "base_url_site": "providers.<name>.base_url (or KIMI_BASE_URL env var for kimi providers)",
+              "notes": "Use provider type `kimi` for the native Kimi/Moonshot API, `gemini` for Google Gemini, or `vertexai` for Google Vertex AI. OAuth-backed managed providers (e.g. `managed:kimi-code`) store tokens separately under `~/.kimi/credentials`.\n",
+              "standard": "bespoke"
+            }
+          ],
+          "changes": [
+            "Corrected config override precedence to env vars > CLI flags > config file (previously listed CLI flags above env vars).",
+            "Added `tool_use` to the observed capability set alongside `thinking`, `always_thinking`, `image_in`, and `video_in`.",
+            "Documented `gemini` and `vertexai` as additional bespoke provider types for user-added cloud models.",
+            "Clarified that local runners work by base-URL override on either `openai_legacy` or `anthropic` provider types; none have first-class Kimi integration hooks.",
+            "Updated managed-provider notes: `/login` creates `managed:kimi-code` and `managed:moonshot-ai` entries and stores OAuth tokens under `~/.kimi/credentials`."
+          ],
+          "cloud_bridge": {
+            "example": "# Route Kimi Code CLI through a LiteLLM gateway that translates to a non-OpenAI cloud API\n[providers.litellm]\ntype = \"openai_legacy\"\nbase_url = \"https://litellm.example.com/v1\"\napi_key = \"sk-litellm\"\n\n[models.\"gateway/claude-sonnet\"]\nprovider = \"litellm\"\nmodel = \"claude-3-7-sonnet-20250219\"\nmax_context_size = 200000\ncapabilities = [\"thinking\", \"image_in\"]\n",
+            "mechanism": "providers.<name>.base_url (or the OPENAI_BASE_URL env var for OpenAI-type providers) pointing at a compatible gateway or proxy",
+            "supported": true
+          },
+          "created": "2026-07-02",
+          "default_model_site": "Top-level `default_model` key in `~/.kimi/config.toml`. Must reference a key declared in the `[models]` table. Session override via `--model <name>`; for kimi providers `KIMI_MODEL_NAME` overrides the API model identifier of the active model.\n",
+          "env_vars": [
+            {
+              "effect": "Overrides the `base_url` of a `kimi` type provider.",
+              "name": "KIMI_BASE_URL"
+            },
+            {
+              "effect": "Overrides the `api_key` of a `kimi` type provider.",
+              "name": "KIMI_API_KEY"
+            },
+            {
+              "effect": "Overrides the API `model` identifier for the active kimi provider model.",
+              "name": "KIMI_MODEL_NAME"
+            },
+            {
+              "effect": "Overrides `max_context_size` for the active kimi provider model.",
+              "name": "KIMI_MODEL_MAX_CONTEXT_SIZE"
+            },
+            {
+              "effect": "Comma-separated override of `capabilities` for the active kimi provider model (e.g. `thinking,image_in,tool_use`).",
+              "name": "KIMI_MODEL_CAPABILITIES"
+            },
+            {
+              "effect": "Sets the generation `temperature` parameter for kimi providers.",
+              "name": "KIMI_MODEL_TEMPERATURE"
+            },
+            {
+              "effect": "Sets the generation `top_p` parameter for kimi providers.",
+              "name": "KIMI_MODEL_TOP_P"
+            },
+            {
+              "effect": "Sets the generation `max_tokens` parameter for kimi providers.",
+              "name": "KIMI_MODEL_MAX_TOKENS"
+            },
+            {
+              "effect": "Forwards `thinking.keep` verbatim to Moonshot thinking models when thinking mode is active.",
+              "name": "KIMI_MODEL_THINKING_KEEP"
+            },
+            {
+              "effect": "Overrides the `base_url` of `openai_legacy`/`openai_responses` type providers.",
+              "name": "OPENAI_BASE_URL"
+            },
+            {
+              "effect": "Overrides the `api_key` of `openai_legacy`/`openai_responses` type providers.",
+              "name": "OPENAI_API_KEY"
+            },
+            {
+              "effect": "Changes the share directory from `~/.kimi` to the specified path, moving config, sessions, logs, and credentials.",
+              "name": "KIMI_SHARE_DIR"
+            }
+          ],
+          "has_official_schema": "informal",
+          "last_updated": "2026-07-02",
+          "local_runners": [
+            {
+              "example": "[providers.ollama-local]\ntype = \"openai_legacy\"\nbase_url = \"http://localhost:11434/v1\"\napi_key = \"ollama\"\n\n[models.\"ollama/qwen3:1.7b\"]\nprovider = \"ollama-local\"\nmodel = \"qwen3:1.7b\"\nmax_context_size = 131072\ncapabilities = [\"thinking\", \"image_in\", \"tool_use\"]\ndisplay_name = \"Qwen3 1.7B (Ollama)\"\n",
+              "integration": "base_url_override",
+              "notes": "Ollama exposes an OpenAI-compatible Chat Completions endpoint at `/v1/chat/completions`. Pass the Ollama model tag (including size/quantization suffix) as the API `model` value. The same runner also serves an Anthropic-compatible endpoint, so `type = \"anthropic\"` with `base_url = \"http://localhost:11434\"` works as well.\n",
+              "runner": "ollama",
+              "standard": "openai_compatible"
+            },
+            {
+              "example": "[providers.lmstudio-local]\ntype = \"openai_legacy\"\nbase_url = \"http://localhost:1234/v1\"\napi_key = \"lmstudio\"\n\n[models.\"lmstudio/openai/gpt-oss-20b\"]\nprovider = \"lmstudio-local\"\nmodel = \"openai/gpt-oss-20b\"\nmax_context_size = 128000\ncapabilities = [\"thinking\", \"image_in\", \"tool_use\"]\ndisplay_name = \"GPT-OSS 20B (LM Studio)\"\n",
+              "integration": "base_url_override",
+              "notes": "LM Studio's local server is OpenAI-compatible. Use the model id reported by LM Studio's `/v1/models` endpoint. LM Studio also supports the Anthropic Messages API, so `type = \"anthropic\"` with `base_url = \"http://localhost:1234\"` is an alternative.\n",
+              "runner": "lmstudio",
+              "standard": "openai_compatible"
+            },
+            {
+              "integration": "base_url_override",
+              "notes": "vLLM serves an OpenAI-compatible API by default. The `model` value is the served model name or a `--served-model-name` alias.\n",
+              "runner": "vllm",
+              "standard": "openai_compatible"
+            },
+            {
+              "integration": "base_url_override",
+              "notes": "llama-server exposes an OpenAI-compatible `/v1/chat/completions` endpoint. The client-visible model id is the `--alias` value or the GGUF filename.\n",
+              "runner": "llamacpp",
+              "standard": "openai_compatible"
+            },
+            {
+              "integration": "base_url_override",
+              "notes": "oMLX serves an OpenAI-compatible API at `/v1/chat/completions`. Use the model directory name or alias as the API `model` value.\n",
+              "runner": "omlx",
+              "standard": "openai_compatible"
+            },
+            {
+              "integration": "base_url_override",
+              "notes": "Any runner that implements the OpenAI Chat Completions API can be added via `openai_legacy`. Runners exposing the Anthropic Messages API can use `anthropic`.\n",
+              "runner": "other",
+              "standard": "openai_compatible"
+            }
+          ],
+          "merge_semantics": "shadow",
+          "metadata_overrides": [
+            "provider",
+            "model",
+            "max_context_size",
+            "capabilities",
+            "display_name"
+          ],
+          "model": "kimi-for-coding/k2p7",
+          "model_config_paths": [
+            {
+              "format": "toml",
+              "notes": "Primary user configuration. Also accepts JSON (`~/.kimi/config.json`), which is auto-migrated to TOML on first run if `config.toml` is absent. Observed on this host with `default_model = \"kimi-code/kimi-for-coding\"` and managed provider/model entries.\n",
+              "path": "~/.kimi/config.toml",
+              "scope": "user"
+            },
+            {
+              "format": "toml",
+              "notes": "`KIMI_SHARE_DIR` relocates the entire share directory (default `~/.kimi`), which moves the config file with it.\n",
+              "path": "$KIMI_SHARE_DIR/config.toml",
+              "scope": "env"
+            },
+            {
+              "format": "toml",
+              "notes": "CLI flag that replaces the default config file for the launched session. `--config '<json/toml>'` can also supply raw config content inline for one session.\n",
+              "path": "--config-file /path/to/config.toml",
+              "scope": "env"
+            }
+          ],
+          "reason": "Claudine's Kimi provider wrapper and model_catalog should reflect the corrected env/CLI/config precedence, the full KIMI_* and OPENAI_* override variable set, the gemini/vertexai provider types, and the base-URL-override local-runner integration paths for Ollama, oMLX, LM Studio, llama.cpp, and vLLM.",
+          "requires_claudine_update": true
         },
         "non-interactive-sessions": {
           "$schema": "./_schema.yaml",
@@ -24221,6 +25785,415 @@
             ]
           }
         },
+        "expected_offerings": {
+          "source": {
+            "kind": "research",
+            "path": "default_models",
+            "topic": "agent-models"
+          },
+          "value": [
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 200000,
+              "id": "opencode/big-pickle",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "anthropic/claude-fable@5",
+              "class": "aggregator",
+              "context_window": 1000000,
+              "id": "opencode/claude-fable-5",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 200000,
+              "id": "opencode/claude-haiku-4-5",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 200000,
+              "id": "opencode/claude-opus-4-1",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 200000,
+              "id": "opencode/claude-opus-4-5",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "anthropic/claude-opus@4.6",
+              "class": "aggregator",
+              "context_window": 1000000,
+              "id": "opencode/claude-opus-4-6",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "anthropic/claude-opus@4.7",
+              "class": "aggregator",
+              "context_window": 1000000,
+              "id": "opencode/claude-opus-4-7",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "anthropic/claude-opus@4.8",
+              "class": "aggregator",
+              "context_window": 1000000,
+              "id": "opencode/claude-opus-4-8",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 1000000,
+              "id": "opencode/claude-sonnet-4",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 1000000,
+              "id": "opencode/claude-sonnet-4-5",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "anthropic/claude-sonnet@4.6",
+              "class": "aggregator",
+              "context_window": 1000000,
+              "id": "opencode/claude-sonnet-4-6",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "anthropic/claude-sonnet@5",
+              "class": "aggregator",
+              "context_window": 1000000,
+              "id": "opencode/claude-sonnet-5",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "deepseek/deepseek-v-flash@4",
+              "class": "aggregator",
+              "context_window": 1000000,
+              "id": "opencode/deepseek-v4-flash",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 200000,
+              "id": "opencode/deepseek-v4-flash-free",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "deepseek/deepseek-v-pro@4",
+              "class": "aggregator",
+              "context_window": 1000000,
+              "id": "opencode/deepseek-v4-pro",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 1048576,
+              "id": "opencode/gemini-3-flash",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 1048576,
+              "id": "opencode/gemini-3.1-pro",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "google/gemini-flash@3.5",
+              "class": "aggregator",
+              "context_window": 1048576,
+              "id": "opencode/gemini-3.5-flash",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "zai/glm@5",
+              "class": "aggregator",
+              "context_window": 204800,
+              "id": "opencode/glm-5",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "zai/glm@5.1",
+              "class": "aggregator",
+              "context_window": 204800,
+              "id": "opencode/glm-5.1",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "zai/glm@5.2",
+              "class": "aggregator",
+              "context_window": 1000000,
+              "id": "opencode/glm-5.2",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 400000,
+              "id": "opencode/gpt-5",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 400000,
+              "id": "opencode/gpt-5-codex",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 400000,
+              "id": "opencode/gpt-5-nano",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 400000,
+              "id": "opencode/gpt-5.1",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "openai/gpt-codex@5.1",
+              "class": "aggregator",
+              "context_window": 400000,
+              "id": "opencode/gpt-5.1-codex",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 400000,
+              "id": "opencode/gpt-5.1-codex-max",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 400000,
+              "id": "opencode/gpt-5.1-codex-mini",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "openai/gpt@5.2",
+              "class": "aggregator",
+              "context_window": 400000,
+              "id": "opencode/gpt-5.2",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 400000,
+              "id": "opencode/gpt-5.2-codex",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 400000,
+              "id": "opencode/gpt-5.3-codex",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 128000,
+              "id": "opencode/gpt-5.3-codex-spark",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 1050000,
+              "id": "opencode/gpt-5.4",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 400000,
+              "id": "opencode/gpt-5.4-mini",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 400000,
+              "id": "opencode/gpt-5.4-nano",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 1050000,
+              "id": "opencode/gpt-5.4-pro",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 1050000,
+              "id": "opencode/gpt-5.5",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 1050000,
+              "id": "opencode/gpt-5.5-pro",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "xai/grok-build@0.1",
+              "class": "aggregator",
+              "context_window": 256000,
+              "id": "opencode/grok-build-0.1",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "moonshotai/kimi-k@2.5",
+              "class": "aggregator",
+              "context_window": 262144,
+              "id": "opencode/kimi-k2.5",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "moonshotai/kimi-k@2.6",
+              "class": "aggregator",
+              "context_window": 262144,
+              "id": "opencode/kimi-k2.6",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "moonshotai/kimi-k-code@2.7",
+              "class": "aggregator",
+              "context_window": 262144,
+              "id": "opencode/kimi-k2.7-code",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 200000,
+              "id": "opencode/mimo-v2.5-free",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 204800,
+              "id": "opencode/minimax-m2.5",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 204800,
+              "id": "opencode/minimax-m2.7",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 512000,
+              "id": "opencode/minimax-m3",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 1000000,
+              "id": "opencode/nemotron-3-ultra-free",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 256000,
+              "id": "opencode/north-mini-code-free",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 262144,
+              "id": "opencode/qwen3.5-plus",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "aggregator",
+              "context_window": 262144,
+              "id": "opencode/qwen3.6-plus",
+              "is_default": false
+            }
+          ]
+        },
         "known_gaps": {
           "source": {
             "key": "known_gaps",
@@ -24312,6 +26285,51 @@
           "value": [
             "--mini",
             "--interactive"
+          ]
+        },
+        "offering_sources": {
+          "source": {
+            "kind": "research",
+            "path": "local_runners",
+            "topic": "model-config"
+          },
+          "value": [
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "llamacpp"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "lmstudio"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "first_class",
+              "prefix": "ollama"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "first_class",
+              "prefix": "omlx"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "other"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "vllm"
+            }
           ]
         },
         "output_formats": {
@@ -27384,6 +29402,187 @@
           "requires_claudine_update": true,
           "schema_url": "https://opencode.ai/config.json"
         },
+        "model-config": {
+          "$schema": "./_schema.yaml",
+          "agent": "open_code",
+          "api_standards": [
+            {
+              "adapter": "@ai-sdk/openai-compatible",
+              "auth_site": "provider.<id>.options.apiKey or {env:VARIABLE_NAME}",
+              "base_url_site": "provider.<id>.options.baseURL",
+              "notes": "Officially documented path for user-added cloud/local models. Use @ai-sdk/openai-compatible for /v1/chat/completions endpoints and @ai-sdk/openai for /v1/responses endpoints.",
+              "standard": "openai_compatible"
+            },
+            {
+              "adapter": "npm key naming any AI SDK provider package (e.g. @ai-sdk/google, @ai-sdk/anthropic if installed)",
+              "auth_site": "provider.<id>.options.apiKey or {env:VARIABLE_NAME}",
+              "base_url_site": "provider.<id>.options.baseURL",
+              "notes": "OpenCode can load arbitrary AI SDK packages via npm, but custom providers are officially documented only as OpenAI-compatible.",
+              "standard": "bespoke"
+            }
+          ],
+          "changes": [
+            "Removed the documented `anthropic_compatible` custom-provider standard; OpenCode official docs only document OpenAI-compatible adapters (@ai-sdk/openai-compatible for /v1/chat/completions, @ai-sdk/openai for /v1/responses) for user-added providers.",
+            "Reclassified oMLX from unsupported to first_class (via `omlx launch opencode`), with manual OpenAI-compatible base-URL setup on http://localhost:8000/v1, consistent with local-runner ground truth.",
+            "Confirmed Ollama first-class integration via `ollama launch opencode` and `ollama launch opencode --config`.",
+            "Updated cloud-bridge guidance: OpenCode can be routed at any OpenAI-compatible cloud endpoint directly; non-OpenAI-compatible vendor APIs require a translation proxy such as LiteLLM.",
+            "Added managed macOS MDM preferences (ai.opencode.managed) to model_config_paths; dropped OPENCODE_CONFIG_DIR because it does not accept model configuration directly."
+          ],
+          "cloud_bridge": {
+            "example": "// Direct: target cloud exposes an OpenAI-compatible API\n{\n  \"provider\": {\n    \"openrouter\": {\n      \"npm\": \"@ai-sdk/openai-compatible\",\n      \"name\": \"OpenRouter\",\n      \"options\": { \"baseURL\": \"https://openrouter.ai/api/v1\", \"apiKey\": \"{env:OPENROUTER_API_KEY}\" },\n      \"models\": { \"anthropic/claude-sonnet-4\": { \"name\": \"Claude Sonnet 4 (via OpenRouter)\" } }\n    }\n  },\n  \"model\": \"openrouter/anthropic/claude-sonnet-4\"\n}\n\n// Proxy required: target cloud speaks only a non-OpenAI API (e.g. Anthropic Messages)\n// Run a LiteLLM proxy that translates Anthropic Messages <-> OpenAI /v1/chat/completions,\n// then point OpenCode at the proxy baseURL with @ai-sdk/openai-compatible.\n",
+            "mechanism": "provider.<id>.options.baseURL with npm adapter @ai-sdk/openai-compatible (or @ai-sdk/openai for /v1/responses)",
+            "supported": true
+          },
+          "created": "2026-07-02",
+          "default_model_site": "Top-level model key in opencode.json/opencode.jsonc (user/project/managed); session override via --model / -m CLI flag.",
+          "env_vars": [
+            {
+              "effect": "Load an additional config file between global and project configs.",
+              "name": "OPENCODE_CONFIG"
+            },
+            {
+              "effect": "Inject inline JSON as a final local-scope config override.",
+              "name": "OPENCODE_CONFIG_CONTENT"
+            },
+            {
+              "effect": "Custom URL for fetching remote model configuration/catalog.",
+              "name": "OPENCODE_MODELS_URL"
+            },
+            {
+              "effect": "Surface experimental models in the model picker.",
+              "name": "OPENCODE_ENABLE_EXPERIMENTAL_MODELS"
+            },
+            {
+              "effect": "Prevent fetching models from remote sources.",
+              "name": "OPENCODE_DISABLE_MODELS_FETCH"
+            },
+            {
+              "effect": "Enable the corresponding built-in provider and its models. Can also be referenced via {env:VAR} in provider.<id>.options.apiKey.",
+              "name": "Provider API keys (e.g. OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)"
+            }
+          ],
+          "has_official_schema": "formal",
+          "last_updated": "2026-07-02",
+          "local_runners": [
+            {
+              "example": "{ \"provider\": { \"ollama\": { \"npm\": \"@ai-sdk/openai-compatible\", \"name\": \"Ollama (local)\", \"options\": { \"baseURL\": \"http://localhost:11434/v1\" }, \"models\": { \"gemma3:27b\": { \"name\": \"Gemma 3 27B\", \"limit\": { \"context\": 128000, \"output\": 8192 } } } } }, \"model\": \"ollama/gemma3:27b\" }",
+              "integration": "first_class",
+              "notes": "First-class `ollama launch opencode` integration. Manual setup uses the OpenAI-compatible server endpoint. Size/quantization tags are part of the model ID.",
+              "runner": "ollama",
+              "standard": "openai_compatible"
+            },
+            {
+              "example": "{ \"provider\": { \"omlx\": { \"npm\": \"@ai-sdk/openai-compatible\", \"name\": \"oMLX (local)\", \"options\": { \"baseURL\": \"http://localhost:8000/v1\" }, \"models\": { \"Qwen3.6-35B-A3B-oQ6\": { \"name\": \"Qwen3.6 35B A3B oQ6 (local)\" } } } }, \"model\": \"omlx/Qwen3.6-35B-A3B-oQ6\" }",
+              "integration": "first_class",
+              "notes": "First-class `omlx launch opencode` integration configures and launches OpenCode against the running oMLX server. Manual setup uses the OpenAI-compatible endpoint served by `omlx serve`; auth is optional — pass the key in options.apiKey or {env:VAR} if enabled.",
+              "runner": "omlx",
+              "standard": "openai_compatible"
+            },
+            {
+              "example": "{ \"provider\": { \"lmstudio\": { \"npm\": \"@ai-sdk/openai-compatible\", \"name\": \"LM Studio (local)\", \"options\": { \"baseURL\": \"http://127.0.0.1:1234/v1\" }, \"models\": { \"google/gemma-3n-e4b\": { \"name\": \"Gemma 3n-e4b (local)\" } } } }, \"model\": \"lmstudio/google/gemma-3n-e4b\" }",
+              "integration": "base_url_override",
+              "notes": "Uses the OpenAI-compatible server endpoint loaded by LM Studio. Set options.apiKey to the configured token when authentication is enabled.",
+              "runner": "lmstudio",
+              "standard": "openai_compatible"
+            },
+            {
+              "example": "{ \"provider\": { \"llamacpp\": { \"npm\": \"@ai-sdk/openai-compatible\", \"name\": \"llama-server (local)\", \"options\": { \"baseURL\": \"http://127.0.0.1:8080/v1\" }, \"models\": { \"qwen3-coder:a3b\": { \"name\": \"Qwen3-Coder a3b (local)\", \"limit\": { \"context\": 128000, \"output\": 65536 } } } } }, \"model\": \"llamacpp/qwen3-coder:a3b\" }",
+              "integration": "base_url_override",
+              "notes": "Uses llama.cpp llama-server OpenAI-compatible endpoint. Pass options.apiKey or {env:LLAMA_API_KEY} when --api-key is set.",
+              "runner": "llamacpp",
+              "standard": "openai_compatible"
+            },
+            {
+              "example": "{ \"provider\": { \"vllm\": { \"npm\": \"@ai-sdk/openai-compatible\", \"name\": \"vLLM (local)\", \"options\": { \"baseURL\": \"http://localhost:8000/v1\" }, \"models\": { \"qwen2.5-coder-32b-instruct\": { \"name\": \"Qwen2.5 Coder 32B Instruct (local)\" } } } }, \"model\": \"vllm/qwen2.5-coder-32b-instruct\" }",
+              "integration": "base_url_override",
+              "notes": "vLLM exposes an OpenAI-compatible API by default. Each vLLM process hosts one model; use --served-model-name aliases if needed.",
+              "runner": "vllm",
+              "standard": "openai_compatible"
+            },
+            {
+              "example": "{ \"provider\": { \"my-local\": { \"npm\": \"@ai-sdk/openai-compatible\", \"name\": \"My local runner\", \"options\": { \"baseURL\": \"http://localhost:<port>/v1\" }, \"models\": { \"<runner-model-id>\": { \"name\": \"My local model\" } } } }, \"model\": \"my-local/<runner-model-id>\" }",
+              "integration": "base_url_override",
+              "notes": "Any local server that exposes an OpenAI-compatible /v1 chat endpoint works with @ai-sdk/openai-compatible.",
+              "runner": "other",
+              "standard": "openai_compatible"
+            }
+          ],
+          "merge_semantics": "merge",
+          "metadata_overrides": [
+            "id",
+            "name",
+            "family",
+            "release_date",
+            "attachment",
+            "reasoning",
+            "temperature",
+            "tool_call",
+            "interleaved",
+            "cost",
+            "limit",
+            "modalities",
+            "experimental",
+            "status",
+            "provider",
+            "options",
+            "headers",
+            "variants"
+          ],
+          "model": "kimi-for-coding/k2p7",
+          "model_config_paths": [
+            {
+              "format": "jsonc",
+              "notes": "Global user config. Also accepts opencode.jsonc. Observed on this host with a built-in Z.AI provider block and model metadata.",
+              "path": "~/.config/opencode/opencode.json",
+              "scope": "user"
+            },
+            {
+              "format": "jsonc",
+              "notes": "JSON-with-comments variant of the global config.",
+              "path": "~/.config/opencode/opencode.jsonc",
+              "scope": "user"
+            },
+            {
+              "format": "jsonc",
+              "notes": "Project config in repository root. Also accepts opencode.jsonc. OpenCode walks up from cwd to the nearest Git root.",
+              "path": "opencode.json",
+              "scope": "repo"
+            },
+            {
+              "format": "jsonc",
+              "notes": "JSON-with-comments variant of the project config.",
+              "path": "opencode.jsonc",
+              "scope": "repo"
+            },
+            {
+              "format": "jsonc",
+              "notes": "Custom config file path loaded between global and project configs.",
+              "path": "OPENCODE_CONFIG",
+              "scope": "env"
+            },
+            {
+              "format": "json",
+              "notes": "Inline JSON config merged as a final local-scope override.",
+              "path": "OPENCODE_CONFIG_CONTENT",
+              "scope": "env"
+            },
+            {
+              "format": "jsonc",
+              "notes": "Managed/organizational settings loaded at highest priority and not user-overridable.",
+              "path": "/Library/Application Support/opencode/opencode.json (macOS), /etc/opencode/opencode.json (Linux), %ProgramData%\\opencode\\opencode.json (Windows)",
+              "scope": "env"
+            },
+            {
+              "format": "jsonc",
+              "notes": "macOS managed preferences deployed via MDM; highest priority, not user-overridable.",
+              "path": "ai.opencode.managed plist / .mobileconfig (macOS MDM)",
+              "scope": "env"
+            }
+          ],
+          "reason": "Claudine should treat Ollama and oMLX as first-class OpenCode integrations (`ollama launch opencode`, `omlx launch opencode`) and LM Studio, llama.cpp, and vLLM as valid OpenAI-compatible base-URL-override targets for OpenCode, rather than unsupported or Anthropic-compatible paths.",
+          "requires_claudine_update": true,
+          "schema_url": "https://opencode.ai/config.json"
+        },
         "non-interactive-sessions": {
           "$schema": "./_schema.yaml",
           "agent": "codex",
@@ -29715,6 +31914,95 @@
             ]
           }
         },
+        "expected_offerings": {
+          "source": {
+            "kind": "research",
+            "path": "default_models",
+            "topic": "agent-models"
+          },
+          "value": [
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "vendor_api",
+              "context_window": null,
+              "id": "MiniMax-M2.5",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "zai/glm@4.7",
+              "class": "vendor_api",
+              "context_window": null,
+              "id": "glm-4.7",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "zai/glm@5",
+              "class": "vendor_api",
+              "context_window": null,
+              "id": "glm-5",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": "moonshotai/kimi-k@2.5",
+              "class": "vendor_api",
+              "context_window": null,
+              "id": "kimi-k2.5",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "vendor_api",
+              "context_window": null,
+              "id": "qwen3-coder-next",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "vendor_api",
+              "context_window": null,
+              "id": "qwen3-coder-plus",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "vendor_api",
+              "context_window": null,
+              "id": "qwen3-max-2026-01-23",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "vendor_api",
+              "context_window": null,
+              "id": "qwen3.5-plus",
+              "is_default": true
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "vendor_api",
+              "context_window": null,
+              "id": "qwen3.6-plus",
+              "is_default": false
+            },
+            {
+              "alias": null,
+              "catalog_id": null,
+              "class": "vendor_api",
+              "context_window": null,
+              "id": "qwen3.7-plus",
+              "is_default": false
+            }
+          ]
+        },
         "known_gaps": {
           "source": {
             "key": "known_gaps",
@@ -29787,6 +32075,51 @@
           },
           "value": [
             "--prompt-interactive"
+          ]
+        },
+        "offering_sources": {
+          "source": {
+            "kind": "research",
+            "path": "local_runners",
+            "topic": "model-config"
+          },
+          "value": [
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "llamacpp"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "lmstudio"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "ollama"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "omlx"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "other"
+            },
+            {
+              "api_standard": "openai_compatible",
+              "class": "local_runner",
+              "integration": "base_url_override",
+              "prefix": "vllm"
+            }
           ]
         },
         "output_formats": {
@@ -32562,6 +34895,212 @@
           "reason": "Claudine's Qwen provider wrapper currently reports Unsupported. Qwen Code's model surface is materially different from Claude/Codex: it is multi-protocol (openai/anthropic/gemini/vertex-ai), uses a modelProviders catalog with sealed generationConfig, supports runtime /model selection with --fast/--vision/--voice variants, and relies on provider-specific env vars (OPENAI_MODEL, ANTHROPIC_MODEL, GEMINI_MODEL) and CLI flags (--auth-type, --model). Claudine needs a Qwen adapter, model catalog ingestion for modelProviders, auth-type/protocol passthrough, and environment-variable wiring before it can wrap Qwen accurately.",
           "requires_claudine_update": true,
           "schema_url": "https://qwenlm.github.io/qwen-code-docs/en/users/configuration/model-providers/"
+        },
+        "model-config": {
+          "$schema": "./_schema.yaml",
+          "agent": "open_code",
+          "api_standards": [
+            {
+              "auth_site": "per-model `envKey` (defaults to `OPENAI_API_KEY`)",
+              "base_url_site": "per-model `baseUrl` in `modelProviders.openai`; env var `OPENAI_BASE_URL`",
+              "notes": "Uses the official `openai` Node.js SDK. Supports OpenAI, Azure OpenAI, OpenRouter, Requesty, ModelScope, DeepSeek, Alibaba Cloud/DashScope, Coding Plan, and any local OpenAI-compatible server. `extra_body` is supported only for OpenAI-compatible providers.",
+              "standard": "openai_compatible"
+            },
+            {
+              "auth_site": "per-model `envKey` (defaults to `ANTHROPIC_API_KEY`)",
+              "base_url_site": "per-model `baseUrl` in `modelProviders.anthropic`; env var `ANTHROPIC_BASE_URL`",
+              "notes": "Uses the official `@anthropic-ai/sdk`. Supports Anthropic Claude and any Anthropic-compatible endpoint.",
+              "standard": "anthropic_compatible"
+            },
+            {
+              "auth_site": "per-model `envKey` (defaults to `GEMINI_API_KEY`)",
+              "base_url_site": "per-model `baseUrl` in `modelProviders.gemini`; default Gemini endpoint if omitted",
+              "notes": "Google Gemini protocol via the `@google/genai` SDK. Model selection env var is `GEMINI_MODEL`.",
+              "standard": "bespoke"
+            },
+            {
+              "auth_site": "per-model `envKey` (defaults to `GOOGLE_API_KEY`)",
+              "base_url_site": "per-model `baseUrl` in `modelProviders.vertex-ai`; default Vertex endpoint if omitted",
+              "notes": "Google Vertex AI. Selecting this auth type sets `GOOGLE_GENAI_USE_VERTEXAI=true` internally and routes through the Gemini protocol in Vertex mode. Model selection env var is `GOOGLE_MODEL`.",
+              "standard": "bespoke"
+            }
+          ],
+          "changes": [
+            "Qwen OAuth free tier was discontinued on 2026-04-15 and is no longer a selectable /auth entry; the standalone `qwen auth` CLI command has been removed.",
+            "Current documentation describes a newer `modelProviders` object shape (`{ \"protocol\": \"...\", \"models\": [...] }`); the legacy array shape is still observed on this host and should still be parsed.",
+            "`modelProviders` is replaced across settings-file scopes (project overrides user, system override overrides project), not merged.",
+            "Alibaba Cloud Coding Plan auto-updates preserve manually added entries but can overwrite entries sharing the same `envKey` and `baseUrl`.",
+            "All major local runners (Ollama, oMLX, LM Studio, llama.cpp, vLLM) are supported via OpenAI-compatible base-URL override; the previous revision incorrectly classified oMLX and llama.cpp as unsupported.",
+            "`QWEN_MODEL` is no longer documented as an alias; model selection uses provider-specific env vars."
+          ],
+          "cloud_bridge": {
+            "example": "{\n  \"modelProviders\": {\n    \"openai\": {\n      \"protocol\": \"openai\",\n      \"models\": [\n        {\n          \"id\": \"gpt-4o\",\n          \"name\": \"GPT-4o (via OpenAI-compatible gateway)\",\n          \"envKey\": \"OPENAI_API_KEY\",\n          \"baseUrl\": \"https://gateway.example.com/v1\"\n        }\n      ]\n    }\n  }\n}\n",
+            "mechanism": "per-model `baseUrl` under the matching auth type (`openai`, `anthropic`, `gemini`, or `vertex-ai`)",
+            "supported": true
+          },
+          "created": "2026-07-02",
+          "default_model_site": "`model.name` (and disambiguating `model.baseUrl`) in `~/.qwen/settings.json` (or project/system settings). Session overrides via `--model` / `-m` and provider-specific env vars (`OPENAI_MODEL`, `ANTHROPIC_MODEL`, `GEMINI_MODEL`, `GOOGLE_MODEL`).",
+          "env_vars": [
+            {
+              "effect": "API key for the `openai` auth type and any OpenAI-compatible endpoint.",
+              "name": "OPENAI_API_KEY"
+            },
+            {
+              "effect": "Base URL override for the `openai` auth type.",
+              "name": "OPENAI_BASE_URL"
+            },
+            {
+              "effect": "Model ID for the `openai` auth type.",
+              "name": "OPENAI_MODEL"
+            },
+            {
+              "effect": "API key for the `anthropic` auth type.",
+              "name": "ANTHROPIC_API_KEY"
+            },
+            {
+              "effect": "Base URL override for the `anthropic` auth type.",
+              "name": "ANTHROPIC_BASE_URL"
+            },
+            {
+              "effect": "Model ID for the `anthropic` auth type.",
+              "name": "ANTHROPIC_MODEL"
+            },
+            {
+              "effect": "API key for the `gemini` auth type.",
+              "name": "GEMINI_API_KEY"
+            },
+            {
+              "effect": "Model ID for the `gemini` auth type.",
+              "name": "GEMINI_MODEL"
+            },
+            {
+              "effect": "API key for the `vertex-ai` auth type.",
+              "name": "GOOGLE_API_KEY"
+            },
+            {
+              "effect": "Model ID for the `vertex-ai` auth type.",
+              "name": "GOOGLE_MODEL"
+            },
+            {
+              "effect": "API key for Alibaba Cloud Coding Plan; paired with the Coding Plan baseUrl.",
+              "name": "BAILIAN_CODING_PLAN_API_KEY"
+            },
+            {
+              "effect": "API key placeholder for local Ollama endpoints.",
+              "name": "OLLAMA_API_KEY"
+            },
+            {
+              "effect": "API key for local vLLM endpoints when authentication is enabled.",
+              "name": "VLLM_API_KEY"
+            },
+            {
+              "effect": "API key for local LM Studio endpoints when authentication is enabled.",
+              "name": "LMSTUDIO_API_KEY"
+            }
+          ],
+          "has_official_schema": "informal",
+          "last_updated": "2026-07-02",
+          "local_runners": [
+            {
+              "example": "`{ \"id\": \"gemma3:27b\", \"name\": \"Gemma 3 27B (Ollama)\", \"envKey\": \"OLLAMA_API_KEY\", \"baseUrl\": \"http://localhost:11434/v1\" }` under `modelProviders.openai.models`.",
+              "integration": "base_url_override",
+              "notes": "Ollama serves an OpenAI-compatible API at `/v1`. Use any placeholder for the API key if Ollama requires none.",
+              "runner": "ollama",
+              "standard": "openai_compatible"
+            },
+            {
+              "example": "`{ \"id\": \"Qwen3.6-35B-A3B-oQ6\", \"name\": \"Qwen3.6 35B (oMLX)\", \"envKey\": \"OMLX_API_KEY\", \"baseUrl\": \"http://localhost:8000/v1\" }` under `modelProviders.openai.models`.",
+              "integration": "base_url_override",
+              "notes": "oMLX serves an OpenAI-compatible API at `/v1`. Auth is optional unless configured; use a placeholder if none is required.",
+              "runner": "omlx",
+              "standard": "openai_compatible"
+            },
+            {
+              "example": "`{ \"id\": \"local-model\", \"name\": \"Local Model (LM Studio)\", \"envKey\": \"LMSTUDIO_API_KEY\", \"baseUrl\": \"http://localhost:1234/v1\" }` under `modelProviders.openai.models`.",
+              "integration": "base_url_override",
+              "notes": "LM Studio's local server is OpenAI-compatible. Auth is optional; set `LMSTUDIO_API_KEY` to the configured token when required.",
+              "runner": "lmstudio",
+              "standard": "openai_compatible"
+            },
+            {
+              "example": "`{ \"id\": \"my-alias\", \"name\": \"Local Model (llama.cpp)\", \"envKey\": \"LLAMA_API_KEY\", \"baseUrl\": \"http://localhost:8080/v1\" }` under `modelProviders.openai.models`.",
+              "integration": "base_url_override",
+              "notes": "llama-server exposes an OpenAI-compatible `/v1/chat/completions` endpoint. Model ID is the `--alias` value or the GGUF filename.",
+              "runner": "llamacpp",
+              "standard": "openai_compatible"
+            },
+            {
+              "example": "`{ \"id\": \"llama-3.1-8b\", \"name\": \"Llama 3.1 8B (vLLM)\", \"envKey\": \"VLLM_API_KEY\", \"baseUrl\": \"http://localhost:8000/v1\" }` under `modelProviders.openai.models`.",
+              "integration": "base_url_override",
+              "notes": "vLLM exposes an OpenAI-compatible server by default. Each vLLM process hosts one model.",
+              "runner": "vllm",
+              "standard": "openai_compatible"
+            },
+            {
+              "example": "`{ \"id\": \"<runner-model-id>\", \"name\": \"Local Model\", \"envKey\": \"LOCAL_API_KEY\", \"baseUrl\": \"http://localhost:<port>/v1\" }` under `modelProviders.openai.models`.",
+              "integration": "base_url_override",
+              "notes": "Any self-hosted server with an OpenAI-compatible API can be added under `modelProviders.openai`.",
+              "runner": "other",
+              "standard": "openai_compatible"
+            }
+          ],
+          "merge_semantics": "merge",
+          "metadata_overrides": [
+            "id",
+            "name",
+            "description",
+            "envKey",
+            "baseUrl",
+            "capabilities",
+            "generationConfig",
+            "generationConfig.timeout",
+            "generationConfig.maxRetries",
+            "generationConfig.enableCacheControl",
+            "generationConfig.contextWindowSize",
+            "generationConfig.modalities",
+            "generationConfig.customHeaders",
+            "generationConfig.extra_body",
+            "generationConfig.samplingParams",
+            "generationConfig.reasoning",
+            "generationConfig.reasoning.effort",
+            "generationConfig.reasoning.budget_tokens",
+            "generationConfig.schemaCompliance"
+          ],
+          "model": "kimi-for-coding/k2p7",
+          "model_config_paths": [
+            {
+              "format": "json",
+              "notes": "User-global settings. Holds `model.name`, `model.baseUrl`, `modelProviders`, `security.auth.selectedType`, and an `env` block for API keys. On this host observed as `$version: 3` with `modelProviders.openai` stored as a legacy array of model objects; current docs describe a newer object shape `{ \"protocol\": \"openai\", \"models\": [...] }`.",
+              "path": "~/.qwen/settings.json",
+              "scope": "user"
+            },
+            {
+              "format": "json",
+              "notes": "Project-specific settings. The entire `modelProviders` object from project settings replaces the corresponding section in user settings, rather than merging.",
+              "path": ".qwen/settings.json",
+              "scope": "repo"
+            },
+            {
+              "format": "other",
+              "notes": "Dotenv files loaded into the Qwen Code process. Search order is `.qwen/.env` (walked upward from the current directory), `.env`, `~/.qwen/.env`, then `~/.env`. Only the first file found is loaded, and only variables not already present in the environment are set.",
+              "path": ".qwen/.env / .env / ~/.qwen/.env / ~/.env",
+              "scope": "env"
+            },
+            {
+              "format": "json",
+              "notes": "System-wide defaults. Lowest-precedence settings file; path overridable via `QWEN_CODE_SYSTEM_DEFAULTS_PATH`.",
+              "path": "/etc/qwen-code/system-defaults.json (Linux), C:\\ProgramData\\qwen-code\\system-defaults.json (Windows), /Library/Application Support/QwenCode/system-defaults.json (macOS)",
+              "scope": "env"
+            },
+            {
+              "format": "json",
+              "notes": "System-wide override settings. Highest-precedence settings file; path overridable via `QWEN_CODE_SYSTEM_SETTINGS_PATH`.",
+              "path": "/etc/qwen-code/settings.json (Linux), C:\\ProgramData\\qwen-code\\settings.json (Windows), /Library/Application Support/QwenCode/settings.json (macOS)",
+              "scope": "env"
+            }
+          ],
+          "reason": "Claudine's Qwen provider wrapper must adapt to the documented config shape: honor provider-specific env vars (`OPENAI_MODEL`, `ANTHROPIC_MODEL`, `GEMINI_MODEL`, `GOOGLE_MODEL`), parse and merge `modelProviders` entries from both the documented object shape and the legacy array shape observed on this host, and pass `--auth-type`, `--model`, and provider-specific `--*-api-key` / `--*-base-url` flags correctly. The removal of the `qwen auth` CLI command also affects auth setup assumptions.",
+          "requires_claudine_update": true
         },
         "non-interactive-sessions": {
           "$schema": "./_schema.yaml",
