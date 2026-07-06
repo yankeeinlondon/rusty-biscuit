@@ -458,6 +458,29 @@ event and never emits requested/resolved provider/model** — Goose resolution i
 config/wrapper-side only, so its drift channel needs a different source.
 ► **CHECKPOINT F (Ken):** artifact schema review before claudine consumes it.
 
+> **Phase F steps 1–2 DONE, Checkpoint F RULED (2026-07-06; uncommitted pending
+> Ken's diff review).** Landed: lib target in `unchained-ai/gen` (`catalog`
+> module — schema types, identity-key derivation, family-index builder,
+> canonical emission), offline `emit-catalog` bin + `just artifact`, committed
+> `unchained-ai/artifacts/models-catalog.json` + JSON Schema + README
+> (662 offerings / 261 families / 131 duplicate groups / 1 gap:
+> `zenmux/openai/chat-latest`), byte-equality drift tests + sanity floors in
+> `gen/tests/catalog_drift.rs`. Rulings: (1) identity-key grammar ratified —
+> `vendor/family[@version|@date_pin](+variant)*(+size)*(:tag)*`, sizes join,
+> only `thinking` among serving tags is identity-bearing (delivery tiers
+> `free`/`nitro`/… stay out); (2) `FamilyEntry.latest` is an **identity key**
+> (names the release, not an offering — no canonical offering elected);
+> (3) the identity parser stays in `unchained_ai::models::identity`, gen's lib
+> target hosts only artifact schema + builder — design doc amended in place;
+> (4) `generated_at` derives from the max `//! Generated:` header of the
+> committed provider enum files (tracks data age; offline-deterministic).
+> Root-caused during review: the Parsera LLM Specs API is sunsetted (silent
+> graceful degradation) — direct-provider metadata coverage collapse spun off
+> to `features/2026-07-06-model-metadata/spec.md` (Parsera → models.dev,
+> separate track, does NOT block this spec: the Phase F identity path is
+> metadata-independent, and duplicate-group joins recover roster-critical
+> metadata meanwhile). Claudine-gen consumption is now unblocked.
+
 ## Phase G — rendering buildout (interleaves after C)
 
 Migrations 2–4 of design/render-components.md: `AgentPrompt`/`SystemPrompt` absorb

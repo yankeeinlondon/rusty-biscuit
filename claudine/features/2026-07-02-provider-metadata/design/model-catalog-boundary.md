@@ -1,9 +1,10 @@
 # Supplemental Design: Model Catalog Boundary Contract (unchained-ai ↔ claudine)
 
-> **Status:** draft for Ken's review. Refines spec.md "Model Ground Truth" (division
-> of domains, integration shape, identity grammar, refinements 1–4) and hl-approach
-> tracks B/C. Ratified input: F4 (plan endpoints get first-class offering records in
-> Claudine's mapping layer).
+> **Status:** ratified at Checkpoint F (2026-07-06). Refines spec.md "Model Ground
+> Truth" (division of domains, integration shape, identity grammar, refinements 1–4)
+> and hl-approach tracks B/C. Ratified input: F4 (plan endpoints get first-class
+> offering records in Claudine's mapping layer). Checkpoint F rulings are amended
+> inline below, marked *(Checkpoint F)*.
 
 ## Canonical identity (refinement 1 — the representation, not just the mechanism)
 
@@ -24,10 +25,13 @@
 
 ## The JSON artifact (the entire cross-crate boundary)
 
-- **Producer:** `unchained-ai/gen`. Ruling on the bin-vs-lib tension: the identity
-  parser + family index become a **lib target inside the gen crate** (lib+bin, no new
-  workspace member); the artifact remains the only cross-area interface. Claudine
-  never links unchained-ai code (rig-core weight stays out, as decided).
+- **Producer:** `unchained-ai/gen`. Ruling on the bin-vs-lib tension, as amended
+  *(Checkpoint F)*: the identity parser lives in `unchained_ai::models::identity`
+  (it landed there pre-Phase-F and also serves runtime family fallback); the
+  **lib target inside the gen crate** hosts the artifact schema types, family-index
+  builder, and emission (lib+bin, no new workspace member). The artifact remains
+  the only cross-area interface. Claudine never links unchained-ai code (rig-core
+  weight stays out, as decided).
 - **Artifact:** `unchained-ai/artifacts/models-catalog.json`, committed, with
   `schema_version`, `generated_at`, the offering list (parsed identity + metadata +
   duplicate groups + family index), and a published JSON Schema next to it.
@@ -50,6 +54,10 @@ cross-vendor-substitution even for plan offerings.
 
 - **Resolver:** Claudine, at selection/compose time, against the vendored artifact
   snapshot (the family index ships in the artifact; no cross-crate call).
+- **`latest` names a release, not an offering** *(Checkpoint F)*: the family
+  index's `latest` field is an **identity key** (`anthropic/claude-opus@4.8`);
+  consumers pick a concrete offering from the duplicate group by their own policy,
+  consistent with the no-canonical-offering rule above.
 - **Rolling aliases** (`sonnet`, `kimi-latest`, `kimi-k2`) resolve via mapping records
   marked `resolves: family_latest` (as decided); the concrete answer is stamped into
   session logs so reporting sees which model an alias meant *that session*.
