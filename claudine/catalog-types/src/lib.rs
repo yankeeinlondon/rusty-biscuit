@@ -13,6 +13,7 @@
 mod acp_server_mode;
 mod billing_model;
 mod display_policy;
+mod family;
 mod model_catalog_source;
 mod offering;
 mod platform_kind;
@@ -24,8 +25,11 @@ mod vocab;
 pub use acp_server_mode::AcpServerMode;
 pub use billing_model::BillingModel;
 pub use display_policy::{DisplayPolicy, EventClass, ToolResultSummary};
+pub use family::{FamilyRow, family_key};
 pub use model_catalog_source::ModelCatalogSource;
-pub use offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource};
+pub use offering::{
+    ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource, ResolvesVia,
+};
 pub use platform_kind::PlatformKind;
 pub use resume_support::ResumeSupport;
 pub use signal::{

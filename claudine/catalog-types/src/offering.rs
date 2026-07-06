@@ -49,6 +49,17 @@ pub enum LocalRunnerIntegration {
     Unsupported,
 }
 
+/// How a record's id/alias resolves to a concrete model at answer time
+/// (schema-compat gate pattern: snake_case member strings are the serde
+/// wire form).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, EnumIter, IntoStaticStr, VariantNames)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum ResolvesVia {
+    /// Resolve through the vendored family index's `latest` entry.
+    FamilyLatest,
+}
+
 /// One expected offering — a model id the provider is known to serve out
 /// of the box (agent-models research, generated).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -68,6 +79,11 @@ pub struct ExpectedOffering {
     /// means no confident join: plan endpoints by design, drifted
     /// spellings or artifact coverage gaps otherwise.
     pub catalog_id: Option<&'static str>,
+    /// Marks a record whose id/alias is a rolling pointer the provider
+    /// re-targets over releases; consumers answer "what does it mean
+    /// right now" through the vendored family index instead of trusting
+    /// the researched pin.
+    pub resolves: Option<ResolvesVia>,
 }
 
 /// One offering-source namespace — an id prefix under which a user can
@@ -109,6 +125,7 @@ mod tests {
                 "unsupported"
             ]
         );
+        assert_eq!(ResolvesVia::VARIANTS, &["family_latest"]);
     }
 
     /// The serde wire form IS the catalog shape (`catalog.json` value /
@@ -122,6 +139,7 @@ mod tests {
             context_window: Some(262144),
             class: OfferingClass::PlanEndpoint,
             catalog_id: None,
+            resolves: None,
         };
         assert_eq!(
             serde_json::to_value(offering).unwrap(),
@@ -132,7 +150,12 @@ mod tests {
                 "context_window": 262144,
                 "class": "plan_endpoint",
                 "catalog_id": null,
+                "resolves": null,
             })
+        );
+        assert_eq!(
+            serde_json::to_value(ResolvesVia::FamilyLatest).unwrap(),
+            serde_json::json!("family_latest")
         );
 
         let source = OfferingSource {
