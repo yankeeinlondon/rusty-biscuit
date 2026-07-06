@@ -2424,8 +2424,7 @@
           "top_p"
         ],
         "knowledge_cutoff": "2025-03-31",
-        "created": 1745875945,
-        "release_date": "2025-04"
+        "created": 1745875945
       }
     },
     {
@@ -3773,8 +3772,7 @@
           "completion_per_token": 3e-6,
           "input_cache_read_per_token": 1.0000000000000001e-7
         },
-        "knowledge_cutoff": "2025-01",
-        "release_date": "2026-01"
+        "knowledge_cutoff": "2025-01"
       }
     },
     {
@@ -14684,8 +14682,7 @@
           "top_p"
         ],
         "knowledge_cutoff": "2025-03-31",
-        "created": 1745875757,
-        "release_date": "2025-04"
+        "created": 1745875757
       }
     },
     {
@@ -14977,8 +14974,7 @@
           "top_p"
         ],
         "knowledge_cutoff": "2025-03-31",
-        "created": 1745875945,
-        "release_date": "2025-04"
+        "created": 1745875945
       }
     },
     {
@@ -15112,8 +15108,7 @@
           "top_p"
         ],
         "knowledge_cutoff": "2025-06-30",
-        "created": 1753972379,
-        "release_date": "2025-04"
+        "created": 1753972379
       }
     },
     {
@@ -15385,8 +15380,7 @@
           "top_p"
         ],
         "knowledge_cutoff": "2025-09-30",
-        "created": 1757612213,
-        "release_date": "2025-09"
+        "created": 1757612213
       }
     },
     {
@@ -15471,8 +15465,7 @@
           "top_p"
         ],
         "knowledge_cutoff": "2025-09-30",
-        "created": 1757612284,
-        "release_date": "2025-09"
+        "created": 1757612284
       }
     },
     {

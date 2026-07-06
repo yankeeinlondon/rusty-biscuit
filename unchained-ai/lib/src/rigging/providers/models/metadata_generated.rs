@@ -4068,7 +4068,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         default_parameters: None,
         knowledge_cutoff: Some("2025-01".to_string()),
         created: None,
-        release_date: Some("2026-01".to_string()),
+        release_date: None,
     });
     m.insert("kimi-k2.6", ModelMetadata {
         display_name: Some("Kimi K2.6".to_string()),
@@ -9634,7 +9634,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         default_parameters: None,
         knowledge_cutoff: Some("2025-03-31".to_string()),
         created: Some(1745875757),
-        release_date: Some("2025-04".to_string()),
+        release_date: None,
     });
     m.insert("qwen/qwen3-30b-a3b", ModelMetadata {
         display_name: Some("Qwen: Qwen3 30B A3B".to_string()),
@@ -9809,7 +9809,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         default_parameters: None,
         knowledge_cutoff: Some("2025-03-31".to_string()),
         created: Some(1745875945),
-        release_date: Some("2025-04".to_string()),
+        release_date: None,
     });
     m.insert("qwen/qwen3-8b", ModelMetadata {
         display_name: Some("Qwen: Qwen3 8B".to_string()),
@@ -9894,7 +9894,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         default_parameters: None,
         knowledge_cutoff: Some("2025-06-30".to_string()),
         created: Some(1753972379),
-        release_date: Some("2025-04".to_string()),
+        release_date: None,
     });
     m.insert("qwen/qwen3-coder-flash", ModelMetadata {
         display_name: Some("Qwen: Qwen3 Coder Flash".to_string()),
@@ -10099,7 +10099,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         default_parameters: None,
         knowledge_cutoff: Some("2025-09-30".to_string()),
         created: Some(1757612213),
-        release_date: Some("2025-09".to_string()),
+        release_date: None,
     });
     m.insert("qwen/qwen3-next-80b-a3b-instruct:free", ModelMetadata {
         display_name: Some("Qwen: Qwen3 Next 80B A3B Instruct (free)".to_string()),
@@ -10137,7 +10137,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         default_parameters: None,
         knowledge_cutoff: Some("2025-09-30".to_string()),
         created: Some(1757612213),
-        release_date: Some("2025-09".to_string()),
+        release_date: None,
     });
     m.insert("qwen/qwen3-next-80b-a3b-thinking", ModelMetadata {
         display_name: Some("Qwen: Qwen3 Next 80B A3B Thinking".to_string()),
@@ -10182,7 +10182,7 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         default_parameters: None,
         knowledge_cutoff: Some("2025-09-30".to_string()),
         created: Some(1757612284),
-        release_date: Some("2025-09".to_string()),
+        release_date: None,
     });
     m.insert("qwen/qwen3-vl-235b-a22b-instruct", ModelMetadata {
         display_name: Some("Qwen: Qwen3 VL 235B A22B Instruct".to_string()),
