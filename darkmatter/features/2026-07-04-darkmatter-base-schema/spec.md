@@ -2,6 +2,7 @@
 status: draft
 created: 2026-07-04
 schema: ../../docs/schemas/darkmatter.yaml
+review_iterations: 4
 ---
 
 # Darkmatter Base Frontmatter Schema
@@ -344,7 +345,47 @@ Tests should verify:
 1. Should `md compose` inject the base schema by default, or should the default
    be limited to library callers until after a compatibility pass?
 2. Should `style` remain `object` in the baseline, or should stable top-level
-   style buckets be modeled with object literals?
+   style buckets be modeled with inline-object modeling?
 3. What is the correct v1 validation shape for `change`?
 4. Should the schema docs include generated property tables in addition to the
    transcluded YAML?
+
+### Resolutions (Phase 3)
+
+1. **`md compose` baseline injection** — `md compose` injects the Darkmatter
+   base schema by default so the CLI matches the library convenience default.
+   Use `--no-baseline-schema` or `DARKMATTER_NO_BASELINE_SCHEMA=1` for raw
+   compose behavior, or `--baseline-schema PATH` to replace the default with a
+   custom SimplifiedSchema YAML baseline. The `md schema validate` baseline
+   contract remains unchanged.
+2. **`style` shape** — `style` remains a broad `object` in the v1 baseline. The
+   `darkmatter::style` runtime parser and `style::descriptor::SCHEMA` are the
+   authoritative validators; the shape is still moving and is explicitly out of
+   scope for full modeling per Non-Goal 2.
+3. **`change` shape** — `change` stays `any` in v1. The delta/change surface does
+   not yet expose a stable contract worth narrowing in the baseline, matching
+   Non-Goal 2.
+4. **Generated property tables in docs** — Transclusion only for v1. The docs
+   page will include the schema YAML verbatim via `::code ./darkmatter.yaml` and
+   explanatory prose. Generated tables are future work once the schema language
+   supports stable generated-artifact generation.
+
+### Audit Findings (Phase 3)
+
+The baseline property list was compared against the compose pipeline, render
+ tree, `style::parse`, the hash subsystem, delta/change, and documentation
+ surfaces. No missing Darkmatter-owned frontmatter properties were found. The
+ following corrections were applied to `darkmatter/docs/schemas/darkmatter.yaml`
+ to align the schema with runtime behavior:
+
+- `ctx` is intentionally modeled as a broad `object` for v1 so user-authored
+  context keys remain valid under default `md compose` baseline injection.
+  Runtime context merge behavior remains authoritative: authored `ctx` objects
+  deep-merge with captured runtime context, and runtime keys win on collision.
+- The deprecated root-level `hr` property is absent from the baseline, and
+  `style.hr.*` remains the only horizontal-rule surface.
+
+The earlier inline `ctx` shape was removed because SimplifiedSchema does not yet
+have an open typed-object form. Reintroducing generated `ctx.*` annotations
+should wait until the schema language can express known generated fields without
+rejecting custom user context.
