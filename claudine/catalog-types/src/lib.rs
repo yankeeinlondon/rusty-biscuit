@@ -17,6 +17,7 @@ mod model_catalog_source;
 mod platform_kind;
 mod resume_support;
 mod signal;
+mod signal_table;
 mod vocab;
 
 pub use acp_server_mode::AcpServerMode;
@@ -28,4 +29,5 @@ pub use resume_support::ResumeSupport;
 pub use signal::{
     DetectionMode, MatchOp, Quantity, SignalEvent, SignalKind, SignalSource, UsageWindow,
 };
+pub use signal_table::{DetectionRecord, ExtractionSpec, ProviderSignalTable};
 pub use vocab::{Confidence, Unit, Zone};

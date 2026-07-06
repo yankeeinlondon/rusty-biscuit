@@ -91,7 +91,7 @@ pub enum SignalSource {
     Exit,
 }
 
-/// The four ratified detection-record match operators (design doc "Record
+/// The five ratified detection-record match operators (design doc "Record
 /// grammar").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, EnumIter, IntoStaticStr, VariantNames)]
 #[serde(rename_all = "snake_case")]
@@ -105,6 +105,8 @@ pub enum MatchOp {
     SubstringCi,
     /// Anchored regular expression, compiled at generate time.
     Regex,
+    /// The addressed field is present and non-null; carries no match value.
+    Exists,
 }
 
 /// How a taxonomy signal is detected: single-payload matching is

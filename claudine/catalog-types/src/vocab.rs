@@ -17,6 +17,7 @@ pub enum Unit {
     UnixNanos,
     Iso8601,
     DurationSecs,
+    DurationMillis,
     Percent,
     Tokens,
     Requests,
