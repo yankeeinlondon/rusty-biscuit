@@ -52,7 +52,6 @@ The `ProviderInfo` struct (`lib/src/provider/mod.rs`) carries 36 fields organize
 | `stream_protocol` | `Option<StreamProtocol>` | Structured stream format (`StreamJson`, `Ndjson`, `Jsonl`, `WireJsonRpc`, `None`) |
 | `event_mapping` | `&'static EventMappingTable` | Per-event support level, native names, parse aliases, registration targets |
 | `session_log_paths` | `&'static [PathTemplate]` | Templates for per-session JSONL transcript files |
-| `session_locations` | `&'static [PathTemplate]` | Templates for ancillary session-state directories |
 | `config_paths` | `&'static [PathTemplate]` | User/project/local config file templates (first = primary user config) |
 | `memory_files` | `&'static [PathTemplate]` | Memory/instruction files contributing to system prompt hierarchy |
 | `output_formats` | `&'static [OutputFormatSupport]` | Supported non-interactive output formats with native names, CLI flags, selectors |
@@ -68,6 +67,7 @@ The `ProviderInfo` struct (`lib/src/provider/mod.rs`) carries 36 fields organize
 | `model_env_vars` | `&'static [&'static str]` | Provider-specific MODEL env var chain (e.g. `["CLAUDE_MODEL", "ANTHROPIC_MODEL"]`) |
 | `cli_sensitive_axes` | `CliSensitiveAxes` | Which permission-policy axes CLI flags can override at runtime (10 boolean axes) |
 | `repo_home_root_files` | `&'static [&'static str]` | Root-level files preserved during shadow-HOME isolation |
+| `unmapped_native_events` | `&'static [UnmappedNativeEvent]` | Provider-native hook events with no 16-event mapping (configure directly in the provider) |
 
 #### Supporting Type Modules
 

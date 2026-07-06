@@ -125,7 +125,7 @@ MCP capability is split between three surfaces:
 
 Claudine's own logs are provider-agnostic and live under `~/.claudine/logs/` — daily-rotated JSONL files (`YYYY-MM-DD.jsonl`) and a SQLite metrics index at `metrics.db`. Path resolution is centralized in [`claudine/lib/src/reporting/paths.rs`](../../lib/src/reporting/paths.rs).
 
-The provider's *own* logs are documented (not consumed) through `LoggingCapabilities` in the agent catalog — `session_locations`, `log_locations`, `debug_controls`, `telemetry_controls` are all `Vec<&'static str>` description fields. Examples encoded today:
+The provider's *own* logs are documented (not consumed) through the agent catalog — `session_log_paths` carries typed per-session transcript templates. Examples encoded today:
 
 | Provider | Sessions | Logs |
 |----------|----------|------|
@@ -171,7 +171,7 @@ The centralized-providers refactor (`features/2026-04-26-centralized-providers/`
 
 Open items that remain advisory rather than typed:
 
-- Native session/log locations are typed path templates (`session_log_paths`, `session_locations`), but resolution helpers for native session paths are still TBD.
+- Native session/log locations are typed path templates (`session_log_paths`), but resolution helpers for native session paths are still TBD.
 
 ## Checklist
 
@@ -191,7 +191,7 @@ After the centralized-providers refactor, adding a ninth provider has a much sma
     - `event_mapping: &EventMappingTable` describing every supported `AgenticEvent` row (support level, native name, parse aliases, registration target).
     - The four behavior fields (`behavior`, `mcp`, `adapter`, `configurator`). Implement only what the provider supports; defaults return typed `NotSupported`.
     - The `resource_support_fn` accessor backed by a per-provider `LazyLock<ProviderCapabilities>`.
-    - Phase 5 typed catalog data: `session_log_paths`, `session_locations`, `config_paths`, `memory_files`, `output_formats`, `entrypoints`, `system_prompt`, `yolo`, `reasoning`, `known_gaps`, `acp`, `prompt_arg_conventions`.
+    - Phase 5 typed catalog data: `session_log_paths`, `config_paths`, `memory_files`, `output_formats`, `entrypoints`, `system_prompt`, `yolo`, `reasoning`, `known_gaps`, `acp`, `prompt_arg_conventions`.
 
 - [ ] Register `&<NAME>_INFO` in [`provider/registry.rs`](../../lib/src/provider/registry.rs).
 - [ ] The exhaustiveness tests in [`provider/tests.rs`](../../lib/src/provider/tests.rs) auto-detect the new variant; rerun them.

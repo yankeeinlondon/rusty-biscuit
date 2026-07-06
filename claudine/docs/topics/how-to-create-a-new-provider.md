@@ -138,7 +138,6 @@ Four trait objects on `ProviderInfo` carry dynamic behavior. Most providers only
 | `stream_protocol` | `Option<StreamProtocol>` | `Some(StreamProtocol::Jsonl)`, `Ndjson`, `StreamJson`, `WireJsonRpc`, or `None` |
 | `event_mapping` | `&'static EventMappingTable` | Per-event support level, native names, parse aliases |
 | `session_log_paths` | `&'static [PathTemplate]` | JSONL transcript file templates |
-| `session_locations` | `&'static [PathTemplate]` | Ancillary session-state directories |
 | `config_paths` | `&'static [PathTemplate]` | Config file templates (first = primary user config) |
 | `memory_files` | `&'static [PathTemplate]` | Files contributing to system prompt hierarchy |
 | `output_formats` | `&'static [OutputFormatSupport]` | Non-interactive output formats with native flags |
@@ -154,6 +153,7 @@ Four trait objects on `ProviderInfo` carry dynamic behavior. Most providers only
 | `model_env_vars` | `&'static [&'static str]` | Provider-specific MODEL env var chain |
 | `cli_sensitive_axes` | `CliSensitiveAxes` | Which permission axes CLI flags can override |
 | `repo_home_root_files` | `&'static [&'static str]` | Root files preserved during shadow-HOME isolation |
+| `unmapped_native_events` | `&'static [UnmappedNativeEvent]` | Native hook events with no 16-event mapping |
 
 ### Linking Facade
 
