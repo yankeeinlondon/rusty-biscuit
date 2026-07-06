@@ -263,18 +263,18 @@ fn default_graph_width(commit_count: usize, terminal_width: u32) -> ImageWidth {
         if terminal_width > 100 {
             ImageWidth::Characters(100)
         } else {
-            ImageWidth::Percent(100.0)
+            ImageWidth::Percent(1.0)
         }
     } else if commit_count <= 15 {
         if terminal_width > 120 {
             ImageWidth::Characters(120)
         } else {
-            ImageWidth::Percent(100.0)
+            ImageWidth::Percent(1.0)
         }
     } else if terminal_width >= 160 {
         ImageWidth::Characters(160)
     } else {
-        ImageWidth::Percent(100.0)
+        ImageWidth::Percent(1.0)
     }
 }
 
@@ -689,6 +689,19 @@ mod tests {
         // width must not gather graph data only to discard it later.
         assert!(!super::graph_eligible(ImageSupport::Kitty, &None, narrow));
         assert!(super::graph_eligible(ImageSupport::Kitty, &None, wide));
+    }
+
+    #[test]
+    fn default_graph_width_uses_fractional_percent_for_full_width() {
+        assert_eq!(super::default_graph_width(9, 100), ImageWidth::Percent(1.0));
+        assert_eq!(
+            super::default_graph_width(12, 120),
+            ImageWidth::Percent(1.0)
+        );
+        assert_eq!(
+            super::default_graph_width(16, 159),
+            ImageWidth::Percent(1.0)
+        );
     }
 
     /// Recorder-backed regression for the narrow image-terminal case: on an
