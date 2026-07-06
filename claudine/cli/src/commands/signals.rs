@@ -347,8 +347,8 @@ fn check_provider(
             continue;
         }
         if record.mode == DetectionMode::Bespoke {
-            // Bespoke registry seam: no emitters exist yet (they land in
-            // E5), so every bespoke record reports as an explicit SKIP.
+            // A bespoke record without a registered replayer reports as an
+            // explicit SKIP instead of being silently ignored.
             match bespoke_replayer(record.id) {
                 Some(replay) => {
                     let Some(payloads) = payloads_for(evidence, &mut report.failures) else {
@@ -409,6 +409,40 @@ fn check_provider(
         // owner records replays twice (their version narrowing differs)
         // but each foreign record is one finding.
         let mut unexpected: BTreeSet<&str> = BTreeSet::new();
+        // Bespoke negative overlap: a bespoke detector firing on another
+        // record's evidence fixture within the same provider × source
+        // group is an overlap finding too. Runs outside the owner loop so
+        // it never perturbs the `negatives_passed` per-owner tally.
+        for record in table.records {
+            if record.mode != DetectionMode::Bespoke || owner_ids.contains(record.id) {
+                continue;
+            }
+            if !owner_records.iter().any(|owner| owner.source == record.source) {
+                continue;
+            }
+            let Some(replay) = bespoke_replayer(record.id) else {
+                continue;
+            };
+            if !replay(&payloads) {
+                continue;
+            }
+            match exclusions
+                .iter()
+                .position(|exclusion| exclusion.fixture == *fixture && exclusion.record == record.id)
+            {
+                Some(index) => {
+                    if used_exclusions.insert(index) {
+                        report.exclusions_applied.push(format!(
+                            "`{}` fires on {fixture} — {}",
+                            record.id, exclusions[index].reason
+                        ));
+                    }
+                }
+                None => {
+                    unexpected.insert(record.id);
+                }
+            }
+        }
         for owner in owner_records {
             let engine = replay_engine(table, owner);
             let mut owner_clean = true;
@@ -512,12 +546,12 @@ fn replay_engine(
     engine
 }
 
-/// Bespoke fixture replayers keyed by record id — the registry the E5
-/// bespoke emitters will populate (a replayer returns true when the
-/// evidence payload sequence triggers its detector). Empty today, so every
-/// bespoke record reports as SKIP instead of being silently ignored.
-fn bespoke_replayer(_record_id: &str) -> Option<fn(&[Value]) -> bool> {
-    None
+/// Bespoke fixture replayers keyed by record id (a replayer returns true
+/// when the evidence payload sequence triggers its detector). Delegates to
+/// the lib registry so replay runs the SAME detector code the runtime
+/// [`claudine::signals::SignalHub`] chain executes.
+fn bespoke_replayer(record_id: &str) -> Option<fn(&[Value]) -> bool> {
+    claudine::signals::bespoke_replayer(record_id)
 }
 
 // ---------------------------------------------------------------------------

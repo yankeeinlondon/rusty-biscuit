@@ -276,6 +276,7 @@ fn build_config(
             error: Some("error-1".to_string()),
         },
         prompt_for_missing: true,
+        harvest_unmatched: false,
         exit_expressions: None,
         guard_settings: Default::default(),
     }
