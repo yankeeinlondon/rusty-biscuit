@@ -39,7 +39,7 @@ fn compose_generated_ctx_reference_succeeds_without_authored_ctx() {
 }
 
 #[test]
-fn compose_default_baseline_accepts_custom_ctx_keys() {
+fn compose_default_baseline_rejects_custom_ctx_keys() {
     let dir = tempfile::TempDir::new().unwrap();
     let doc = write_file(
         &dir,
@@ -52,8 +52,8 @@ fn compose_default_baseline_accepts_custom_ctx_keys() {
         .arg(&doc)
         .env_remove("DARKMATTER_NO_BASELINE_SCHEMA")
         .assert()
-        .success()
-        .stdout(predicate::str::contains("biscuit"));
+        .failure()
+        .stderr(predicate::str::contains("ctx"));
 }
 
 #[test]
