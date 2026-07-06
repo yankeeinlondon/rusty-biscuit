@@ -40,7 +40,9 @@
   the generator's schema↔catalog enum-subset gate.
 - `claudine-gen` (`claudine/gen`) depends on `darkmatter` (frontmatter parsing
   plus SimplifiedSchema sidecar validation), `serde`/`serde_json`/
-  `serde_yaml_ng`, `clap`, and `thiserror` — and deliberately NOT on the
-  `claudine` library or CLI (bootstrap rule: a broken generated catalog must
-  never block building the tool that regenerates it). `claudine-cli` shells
-  out to the `claudine-gen` binary for `claudine providers generate`.
+  `serde_yaml_ng`, `clap`, `thiserror`, and `regex` (generate-time
+  compilation check for `match_op: regex` signal-detection records) — and
+  deliberately NOT on the `claudine` library or CLI (bootstrap rule: a broken
+  generated catalog must never block building the tool that regenerates it).
+  `claudine-cli` shells out to the `claudine-gen` binary for
+  `claudine providers generate`.

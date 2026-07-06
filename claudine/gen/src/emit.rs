@@ -78,7 +78,7 @@ fn unmappable(field: &'static str, message: String) -> GenError {
 }
 
 /// `snake_case` → `PascalCase` (serde wire form → Rust variant name).
-fn pascal(member: &str) -> String {
+pub(crate) fn pascal(member: &str) -> String {
     member
         .split('_')
         .map(|part| {
@@ -135,7 +135,7 @@ fn enum_shape(field: &'static str, value: &Value) -> Result<(String, Value), Gen
     }
 }
 
-fn indent(level: usize) -> String {
+pub(crate) fn indent(level: usize) -> String {
     "    ".repeat(level)
 }
 
@@ -173,7 +173,7 @@ pub fn str_slice(field: &'static str, value: &Value, level: usize) -> Result<Str
 }
 
 /// Renders `&[...]` from prerendered single-line element expressions.
-fn render_slice(elements: &[String], level: usize) -> String {
+pub(crate) fn render_slice(elements: &[String], level: usize) -> String {
     if elements.is_empty() {
         return "&[]".to_string();
     }

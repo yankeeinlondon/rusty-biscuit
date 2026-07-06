@@ -7,7 +7,9 @@
 
 use std::path::Path;
 
-use claudine_gen::{CheckOutcome, PROVIDER_SLUGS, check_area, check_catalog, generate_all};
+use claudine_gen::{
+    CheckOutcome, PROVIDER_SLUGS, check_area, check_catalog, check_signals, generate_all,
+};
 
 /// The claudine package-area root (parent of this crate's manifest dir).
 fn area() -> &'static Path {
@@ -35,6 +37,25 @@ fn committed_data_matches_regenerated_inputs() {
                 path.display()
             ),
         }
+    }
+}
+
+/// build_signals(committed signals corpus) == committed
+/// lib/src/signals/generated.rs (full scope, all nine docs — including the
+/// dormant kilo/pi tables).
+#[test]
+fn committed_signals_match_regenerated_inputs() {
+    match check_signals(area()).expect("signals generation must succeed") {
+        CheckOutcome::Clean => {}
+        CheckOutcome::Drift { details } => panic!(
+            "drift between committed inputs and lib/src/signals/generated.rs — \
+             run `claudine-gen generate`:\n{}",
+            details.join("\n")
+        ),
+        CheckOutcome::MissingCommitted { path } => panic!(
+            "committed signals generated.rs missing at {} — run `claudine-gen generate`",
+            path.display()
+        ),
     }
 }
 

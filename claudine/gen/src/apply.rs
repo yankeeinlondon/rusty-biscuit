@@ -58,8 +58,9 @@ pub struct ApplyOutcome {
 }
 
 /// Applies regenerated artifacts under `area`: one `data.rs` per scoped
-/// slug, then `catalog.json` (always full scope — `generations` must cover
-/// every provider).
+/// slug, then `catalog.json`, then the signals `generated.rs` (both always
+/// full scope — `generations` must cover every provider, and `signals` is
+/// the prebuilt [`crate::signals::build_signals`] text).
 ///
 /// `decide` receives each drifted file's path and line-diff and owns the
 /// interaction; after a [`Decision::Quit`] every remaining drifted file is
@@ -68,6 +69,7 @@ pub fn apply_generations(
     area: &Path,
     scope: &[&str],
     generations: &[Generation],
+    signals: &str,
     decide: &mut dyn FnMut(&Path, &[String]) -> Decision,
 ) -> Result<ApplyOutcome, GenError> {
     let committed_catalog = load_committed_catalog(area)?;
@@ -103,6 +105,16 @@ pub fn apply_generations(
     apply_one(
         &catalog_path(area),
         &catalog,
+        &mut outcome,
+        &mut quit,
+        decide,
+        None,
+        || None,
+    )?;
+
+    apply_one(
+        &crate::signals::signals_path(area),
+        signals,
         &mut outcome,
         &mut quit,
         decide,
@@ -283,7 +295,7 @@ mod tests {
         std::fs::write(committed_data_path(area, "claude"), "old\n").unwrap();
 
         let mut asked = Vec::new();
-        let outcome = apply_generations(area, &["claude"], std::slice::from_ref(&generation), &mut |path,
+        let outcome = apply_generations(area, &["claude"], std::slice::from_ref(&generation), "signals\n", &mut |path,
                 diff| {
             asked.push(path.to_path_buf());
             assert!(!diff.is_empty());
@@ -291,21 +303,22 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(outcome.written.len(), 2, "data.rs and catalog.json");
+        assert_eq!(outcome.written.len(), 3, "data.rs, catalog.json, signals");
         assert!(outcome.declined.is_empty());
         assert_eq!(
             std::fs::read_to_string(committed_data_path(area, "claude")).unwrap(),
             "new\n"
         );
         assert!(catalog_path(area).is_file());
+        assert!(crate::signals::signals_path(area).is_file());
 
         // Second run: everything clean, callback never invoked.
-        let outcome = apply_generations(area, &["claude"], std::slice::from_ref(&generation), &mut |_,
+        let outcome = apply_generations(area, &["claude"], std::slice::from_ref(&generation), "signals\n", &mut |_,
                 _| {
             panic!("clean files must not prompt")
         })
         .unwrap();
-        assert_eq!(outcome.clean.len(), 2);
+        assert_eq!(outcome.clean.len(), 3);
         assert!(outcome.written.is_empty() && outcome.declined.is_empty());
     }
 
@@ -324,13 +337,13 @@ mod tests {
         .unwrap();
 
         let outcome =
-            apply_generations(area, &["claude"], std::slice::from_ref(&generation), &mut |_, _| {
+            apply_generations(area, &["claude"], std::slice::from_ref(&generation), "signals\n", &mut |_, _| {
                 Decision::Decline
             })
             .unwrap();
 
         assert!(outcome.written.is_empty());
-        assert_eq!(outcome.declined.len(), 2, "data.rs and catalog.json");
+        assert_eq!(outcome.declined.len(), 3, "data.rs, catalog.json, signals");
         assert_eq!(
             std::fs::read_to_string(committed_data_path(area, "claude")).unwrap(),
             "old\n",
@@ -343,8 +356,9 @@ mod tests {
         assert!(snippet.contains("model_env_vars:"), "{snippet}");
         assert!(snippet.contains("OLD_VAR"), "{snippet}");
         assert!(snippet.contains("reason: TODO"), "{snippet}");
-        // The catalog file itself has no field-keyed pin.
+        // Neither the catalog file nor the signals file has a field-keyed pin.
         assert!(outcome.declined[1].override_snippet.is_none());
+        assert!(outcome.declined[2].override_snippet.is_none());
     }
 
     #[test]
@@ -359,14 +373,18 @@ mod tests {
 
         let mut calls = 0;
         let outcome =
-            apply_generations(area, &["claude", "codex"], &generations, &mut |_, _| {
+            apply_generations(area, &["claude", "codex"], &generations, "signals\n", &mut |_, _| {
                 calls += 1;
                 Decision::Quit
             })
             .unwrap();
 
         assert_eq!(calls, 1, "quit stops further prompting");
-        assert_eq!(outcome.declined.len(), 3, "both data.rs plus catalog.json");
+        assert_eq!(
+            outcome.declined.len(),
+            4,
+            "both data.rs plus catalog.json plus signals"
+        );
         assert!(outcome.written.is_empty());
     }
 

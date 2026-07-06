@@ -19,6 +19,7 @@ pub mod generate;
 pub mod inputs;
 pub mod registry;
 pub mod schema_compat;
+pub mod signals;
 
 pub use apply::{ApplyOutcome, DeclinedDrift, Decision, apply_generations, override_snippet};
 pub use catalog::{build_catalog, catalog_path, check_catalog};
@@ -31,3 +32,4 @@ pub use registry::{
     Coercion, DeclaredSource, EXCLUDED_SERIALIZED_FIELDS, REGISTRY, RegistryEntry,
     SchemaExpectation, mapping_json,
 };
+pub use signals::{SIGNAL_SLUGS, build_signals, check_signals, signals_path};

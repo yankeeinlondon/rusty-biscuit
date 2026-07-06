@@ -91,6 +91,15 @@ test *args="":
 test-contract *args="":
     @just _test claudine-contract {{ args }}
 
+# Replay signal evidence fixtures through the production detection engine (requires this checkout)
+signals-check:
+    @cargo run -q -p claudine-cli -- signals check
+
+# Generator suite + signal fixture replay (the corpus ↔ generated-tables CI gate)
+test-gen *args="":
+    @just _test claudine-gen {{ args }}
+    @just signals-check
+
 # Level-2 PTY tests. Gated by `require_level!(Level::L2, pty_available(), ...)`;
 # skip cleanly when /dev/ptmx is unavailable, hard-fail when
 # BISCUIT_TEST_LEVEL_REQUIRED=2 is set.
@@ -196,12 +205,13 @@ doctest *args="":
 fuzz:
     @echo "fuzz: not applicable for claudine (planned Phase 5)"
 
-# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+# Canonical PR-gate runner: sanity → lint → doctest → test → signals-check → test-l2 → test-browser.
 all:
     @just sanity
     @just lint
     @just doctest
     @just test
+    @just signals-check
     @just test-l2
     @just test-browser
 

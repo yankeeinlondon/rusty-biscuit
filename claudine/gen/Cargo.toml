@@ -32,6 +32,9 @@ clap = { version = "4.5", features = ["derive"] }
 # Error handling
 thiserror = "2.0"
 
+# Generate-time compilation check for `match_op: regex` detection records
+regex = "1.11"
+
 # Variant-name introspection for the schema<->catalog compatibility gate
 strum = "0.28"
 

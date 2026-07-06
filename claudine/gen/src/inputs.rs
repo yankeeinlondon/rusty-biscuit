@@ -160,7 +160,7 @@ fn load_overrides(path: &Path) -> Result<BTreeMap<String, OverrideEntry>, GenErr
 /// document's `$schema` sidecar, and returns the schema-coerced
 /// frontmatter object (so `boolish`/`numberlike` quirks never reach the
 /// mapping layer).
-fn load_validated_frontmatter(path: &Path) -> Result<Value, GenError> {
+pub(crate) fn load_validated_frontmatter(path: &Path) -> Result<Value, GenError> {
     let md = Markdown::try_from(path).map_err(|err| GenError::Markdown {
         path: path.to_path_buf(),
         message: err.to_string(),

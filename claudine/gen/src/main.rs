@@ -150,6 +150,27 @@ fn run(area: Option<PathBuf>, command: Command) -> Result<ExitCode, GenError> {
                     );
                 }
             }
+            match claudine_gen::check_signals(&area)? {
+                CheckOutcome::Clean => {
+                    println!(
+                        "signals generated.rs: clean (inputs match the committed tables)"
+                    );
+                }
+                CheckOutcome::Drift { details } => {
+                    drifted = true;
+                    println!(
+                        "signals generated.rs: DRIFT — regenerate with `claudine-gen generate`:"
+                    );
+                    print_capped_diff(&details, "  ");
+                }
+                CheckOutcome::MissingCommitted { path } => {
+                    drifted = true;
+                    println!(
+                        "signals generated.rs missing at {} — run `claudine-gen generate`",
+                        path.display()
+                    );
+                }
+            }
             Ok(if drifted {
                 ExitCode::FAILURE
             } else {
@@ -169,6 +190,9 @@ fn run_generate(
 ) -> Result<ExitCode, GenError> {
     let scope = slug_scope(slug);
     let generations = claudine_gen::generate_all(area)?;
+    // The signals artifact is full-scope like catalog.json: always rebuilt,
+    // written through the same per-file confirmation flow.
+    let signals = claudine_gen::build_signals(area)?;
 
     let interactive = !yes && !dry_run && std::io::stdin().is_terminal();
     let report_only = dry_run || (!yes && !interactive);
@@ -193,7 +217,8 @@ fn run_generate(
         }
         prompt_decision(path)
     };
-    let outcome = claudine_gen::apply_generations(area, &scope, &generations, &mut decide)?;
+    let outcome =
+        claudine_gen::apply_generations(area, &scope, &generations, &signals, &mut decide)?;
 
     for path in &outcome.written {
         println!("wrote {}", path.display());

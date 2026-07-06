@@ -116,4 +116,14 @@ pub enum GenError {
 
     #[error("could not locate a claudine package area (looked for `docs/providers.yaml` upward from `{from}`); pass --area")]
     AreaNotFound { from: PathBuf },
+
+    #[error("signals doc `{path}`: {message}")]
+    SignalDocInvalid { path: PathBuf, message: String },
+
+    #[error("signals doc `{path}`, record `{record}`: {message}")]
+    SignalRecordInvalid {
+        path: PathBuf,
+        record: String,
+        message: String,
+    },
 }
