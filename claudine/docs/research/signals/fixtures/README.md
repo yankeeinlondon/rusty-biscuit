@@ -39,7 +39,10 @@ Signal-kind names below follow the canonical `SignalKind` taxonomy in
    of four provenance classes, recorded in [`provenance.yaml`](provenance.yaml) (the
    CI-enforced machine record; `gen/tests/fixtures_provenance.rs` asserts the
    file↔entry bijection, the class vocabulary, and a non-empty source per entry):
-   - `capture` — real wire/live-run bytes from an actual provider session.
+   - `capture` — real wire/live-run bytes from an actual provider session. New
+     capture-class candidates arrive via the opt-in unmatched-event harvest
+     (`harvest_unmatched` config flag / `CLAUDINE_HARVEST` env), which files
+     scrubbed candidates under `~/.claudine/harvest/`.
    - `test_vector` — originates from claudine's committed parser test data (inline
      Rust test payloads unescaped to the real wire line, committed fixture files, or
      curated lines from committed session captures — the seed pass).
