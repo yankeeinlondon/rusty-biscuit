@@ -316,10 +316,26 @@ topic's behavior gaps carry a disposition (no surfaced-only flags remain).
 > tokens-vs-billing, goose complete-vs-taint). **Parser-lag findings (code items):**
 > kimi `KimiPromptResult` lacks `steps`, `KimiQuestionRequest` shape predates
 > source's `questions[]`; qwen parser ignores upstream `system/subtype=init`;
-> claude older status vocab `limited`/`blocked` documented. **Open (Ken):** goose
-> corpus ruled fabricated by evaluation (wire-impossible shapes) — disposition
-> pending, alongside the fixture-provenance policy (live-capture-only vs labeled
-> source-shape fixtures; pi/kilo corpora are honest source-shape synthesis).
+> claude older status vocab `limited`/`blocked` documented.
+>
+> **Rulings executed (Ken, 2026-07-06):** (1) **Fixture provenance is
+> first-class** — four classes (`capture` / `test_vector` / `source_shape` /
+> `docs_example`) in `docs/research/signals/fixtures/provenance.yaml`,
+> bijection-enforced by `gen/tests/fixtures_provenance.rs`; `source_shape` is
+> legitimate only when verbatim-verified against pinned source AND labeled;
+> the fleet prompt now carries the 4-rung evidence ladder + "never author
+> payload bytes yourself." Goose's 8 fabricated fixtures were re-derived by
+> round-tripping goose's actual serde types at commit 65eed515 (7 rewritten;
+> the 8th — retries_exhausted — was PROVEN wire-invisible at that commit, so
+> its record+fixture were deleted and the invisibility recorded as a gap).
+> (2) **OpenCode classification-as-payload ratified** as the design's glue
+> mode: for `stderr_promoted` sources the matched payload is defined as the
+> serialized promoted-stderr classifier output (`LogClassification`); records
+> stay declarative with the payload definition stated in the sidecar and
+> per-record notes; the five-branch vocabulary logic stays bespoke in
+> errors.rs. Known darkmatter quirk surfaced: `md schema validate` resolves
+> frontmatter `file()` references against the CWD, not the document — signals
+> docs only validate from their own directory.
 
 ## Phase F — model-catalog boundary (parallel track, unchained-ai side)
 
