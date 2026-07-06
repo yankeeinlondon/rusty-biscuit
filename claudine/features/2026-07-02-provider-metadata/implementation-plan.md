@@ -385,6 +385,59 @@ topic's behavior gaps carry a disposition (no surfaced-only flags remain).
 > overlap exclusions beyond the 2 ratified seeds (all structural cross-kind
 > co-fires); (d) opencode 429 fixtures enriched with providerID/modelID tags
 > real service=llm lines carry (provenance notes updated).
+>
+> **E5 complete (2026-07-06, three waves).** Wave 1 parser-lag: kimi
+> `KimiPromptResult.steps`, `KimiQuestionRequest` current nested shape w/
+> legacy tolerance (auto-response correctly keyed on the JSON-RPC envelope id,
+> pinned in tests — the payload id/tool_call_id are extraction-only), qwen
+> `system/subtype=init` accepted as session start. Wave 2 sink fan-in:
+> `SignalHub` (Arc-shared engine+sink, one lock, poison-recovering, drain via
+> mem::take) created per run and threaded to stdout loop + OpenCode stderr
+> bridge (`with_signal_hub`; glue shim live at reasoning.rs classification
+> points via `to_signal_payload`) + temporal guards
+> (`EarlyTermination::to_signal_event()` exhaustive; emitted at the bridge
+> fire point AND the wrapper's post-wait error_kind synthesis for all
+> providers; EarlyTermination::RateLimit → UsageCapped w/ window Unknown);
+> claude rate-limit projection `signals::project::rate_limit_info` with
+> parser↔projection equivalence tests over the claude fixtures; CLI post-exit
+> consumer (`IterationSummarySignals`) migrated field-wise projected-wins/
+> parser-fills-gaps (output-invariant bridge; mid-stream consumers stay
+> parser-fed, full retirement deferred until the engine path soaks). Wave 3
+> bespoke chain (`signals/bespoke.rs`, slug-keyed — no new Provider dispatch,
+> lib guard untripped): goose error-then-complete taint, claude
+> result-success-with-prior-error taint, pi auto_retry_end exhaustion
+> (replay-only, dormant), qwen native LoopType → RunawayRepetition (counts
+> unknown → 0s, documented), kimi protocol-version negative match referencing
+> `SUPPORTED_WIRE_PROTOCOL_VERSIONS` (runtime limited to stdout-fed payloads;
+> the wire_io path keeps its own semantic guard), qwen exits 53/55/130 as an
+> Exit-source chain detector; generic exit-source payload
+> `{exit_code, stderr_tail}` (tail = 10 lines, `EXIT_STDERR_TAIL_LINES`)
+> synthesized once per run on both spawn paths; qwen.md gaps updated
+> (detection landed bespoke, evidence still awaits harvest). `signals check`:
+> **positives 78/78, negatives 78/78, bespoke skipped 0, exclusions 17
+> (none added), failures 0.** Suites 5258 pass / 3 known host L2; clippy/gen
+> check/inventory (435/20, line-shifts only) clean.
+>
+> **E6 complete (2026-07-06) — Phase E closed.** Harvest v1:
+> `lib/src/signals/harvest.rs` (minimal v1 error/warning predicate — top-level
+> type/subtype/level/severity/status contains error|warn|fatal, `is_error`,
+> top-level `error` key, Exit `exit_code != 0`; evaluated only on
+> zero-record-fired payloads, opt-in only, disabled path is one Option check)
+> + `lib/src/protect/scrub.rs` (capture-time redaction co-located with the
+> protect catalog: 7 static rules — sk-/AKIA/gh*/xox/Bearer/JWT/email — plus
+> key-named value redaction and home→`~` rewrite; `<redacted>` token per the
+> messaging convention). Persistence `~/.claudine/harvest/<slug>/<date>.jsonl`
+> via `harvest::flush_hub` at both spawn drain sites; retention by filename
+> date then size oldest-first (30 days / 50 MiB / 100-entry run cap, all
+> doc-commented consts; failures warn-only). Opt-in: user-scope
+> `harvest_unmatched` (default false; repo scope rejects it) with
+> `CLAUDINE_HARVEST` env override resolved in `policy.rs::harvest_enabled()`.
+> Promotion process documented (fixtures README + module doc: human-reviewed →
+> provenance class `capture`). Known gap carried: the kimi `wire_io` path never
+> drains its hub (signals or harvest) — pre-existing, noted for the Kimi Wire
+> [S] item. Follow-up spec parked at
+> `features/2026-07-06-more-struture/spec.md` (unmapped-research graduation;
+> implement only after this spec fully closes).
 
 ## Phase F — model-catalog boundary (parallel track, unchained-ai side)
 
