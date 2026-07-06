@@ -154,6 +154,10 @@ generate-models *args="":
     @echo ""
     @cargo run -p unchained-ai-gen -- -v {{ args }}
 
+# Re-emit the committed model-catalog artifact (offline; see artifacts/README.md)
+artifact:
+    @cargo run -p unchained-ai-gen --bin emit-catalog
+
 # Outdated packages
 outdated:
     @cargo outdated --root-deps-only
