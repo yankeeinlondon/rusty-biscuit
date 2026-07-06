@@ -329,7 +329,8 @@
               "class": "vendor_api",
               "context_window": 1000000,
               "id": "claude-fable-5",
-              "is_default": false
+              "is_default": false,
+              "resolves": "family_latest"
             },
             {
               "alias": "haiku",
@@ -337,7 +338,8 @@
               "class": "vendor_api",
               "context_window": 200000,
               "id": "claude-haiku-4-5",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -345,7 +347,8 @@
               "class": "vendor_api",
               "context_window": 1000000,
               "id": "claude-opus-4-6",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -353,7 +356,8 @@
               "class": "vendor_api",
               "context_window": 1000000,
               "id": "claude-opus-4-7",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": "opus",
@@ -361,7 +365,8 @@
               "class": "vendor_api",
               "context_window": 1000000,
               "id": "claude-opus-4-8",
-              "is_default": true
+              "is_default": true,
+              "resolves": "family_latest"
             },
             {
               "alias": null,
@@ -369,7 +374,8 @@
               "class": "vendor_api",
               "context_window": 200000,
               "id": "claude-sonnet-4-5",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -377,7 +383,8 @@
               "class": "vendor_api",
               "context_window": 1000000,
               "id": "claude-sonnet-4-6",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": "sonnet",
@@ -385,7 +392,8 @@
               "class": "vendor_api",
               "context_window": 1000000,
               "id": "claude-sonnet-5",
-              "is_default": false
+              "is_default": false,
+              "resolves": "family_latest"
             }
           ]
         },
@@ -5969,7 +5977,8 @@
               "class": "vendor_api",
               "context_window": null,
               "id": "gpt-5.3-codex-spark",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -5977,7 +5986,8 @@
               "class": "vendor_api",
               "context_window": null,
               "id": "gpt-5.4",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -5985,7 +5995,8 @@
               "class": "vendor_api",
               "context_window": null,
               "id": "gpt-5.4-mini",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -5993,7 +6004,8 @@
               "class": "vendor_api",
               "context_window": null,
               "id": "gpt-5.5",
-              "is_default": true
+              "is_default": true,
+              "resolves": null
             }
           ]
         },
@@ -11427,7 +11439,8 @@
               "class": "vendor_api",
               "context_window": 1000000,
               "id": "auto",
-              "is_default": true
+              "is_default": true,
+              "resolves": null
             },
             {
               "alias": "flash",
@@ -11435,7 +11448,8 @@
               "class": "vendor_api",
               "context_window": 1000000,
               "id": "gemini-2.5-flash",
-              "is_default": false
+              "is_default": false,
+              "resolves": "family_latest"
             },
             {
               "alias": "flash-lite",
@@ -11443,7 +11457,8 @@
               "class": "vendor_api",
               "context_window": 1000000,
               "id": "gemini-2.5-flash-lite",
-              "is_default": false
+              "is_default": false,
+              "resolves": "family_latest"
             },
             {
               "alias": null,
@@ -11451,7 +11466,8 @@
               "class": "vendor_api",
               "context_window": 1000000,
               "id": "gemini-2.5-pro",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": "flash",
@@ -11459,7 +11475,8 @@
               "class": "vendor_api",
               "context_window": 1000000,
               "id": "gemini-3-flash-preview",
-              "is_default": false
+              "is_default": false,
+              "resolves": "family_latest"
             },
             {
               "alias": "pro",
@@ -11467,7 +11484,8 @@
               "class": "vendor_api",
               "context_window": 1000000,
               "id": "gemini-3-pro-preview",
-              "is_default": false
+              "is_default": false,
+              "resolves": "family_latest"
             },
             {
               "alias": "flash-lite",
@@ -11475,7 +11493,8 @@
               "class": "vendor_api",
               "context_window": 1000000,
               "id": "gemini-3.1-flash-lite",
-              "is_default": false
+              "is_default": false,
+              "resolves": "family_latest"
             },
             {
               "alias": null,
@@ -11483,7 +11502,8 @@
               "class": "vendor_api",
               "context_window": 1000000,
               "id": "gemini-3.1-pro-preview",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -11491,7 +11511,8 @@
               "class": "vendor_api",
               "context_window": 1000000,
               "id": "gemini-3.5-flash",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -11499,7 +11520,8 @@
               "class": "vendor_api",
               "context_window": null,
               "id": "gemma-4-26b-a4b-it",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -11507,7 +11529,8 @@
               "class": "vendor_api",
               "context_window": null,
               "id": "gemma-4-31b-it",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             }
           ]
         },
@@ -16236,7 +16259,8 @@
               "class": "vendor_api",
               "context_window": null,
               "id": "claude-4.5-sonnet",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -16244,7 +16268,8 @@
               "class": "vendor_api",
               "context_window": 200000,
               "id": "claude-sonnet-4-5",
-              "is_default": true
+              "is_default": true,
+              "resolves": null
             },
             {
               "alias": null,
@@ -16252,7 +16277,8 @@
               "class": "vendor_api",
               "context_window": null,
               "id": "gemini-2.0-flash",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -16260,7 +16286,8 @@
               "class": "vendor_api",
               "context_window": 1000000,
               "id": "gemini-2.5-pro",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -16268,7 +16295,8 @@
               "class": "vendor_api",
               "context_window": null,
               "id": "gpt-5",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -16276,7 +16304,8 @@
               "class": "vendor_api",
               "context_window": null,
               "id": "qwen2.5",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             }
           ]
         },
@@ -21207,7 +21236,8 @@
               "class": "plan_endpoint",
               "context_window": 262144,
               "id": "kimi-for-coding",
-              "is_default": true
+              "is_default": true,
+              "resolves": null
             },
             {
               "alias": null,
@@ -21215,7 +21245,8 @@
               "class": "vendor_api",
               "context_window": 262144,
               "id": "kimi-k2.5",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -21223,7 +21254,8 @@
               "class": "vendor_api",
               "context_window": 262144,
               "id": "kimi-k2.6",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -21231,7 +21263,8 @@
               "class": "vendor_api",
               "context_window": 262144,
               "id": "kimi-k2.7-code",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -21239,7 +21272,8 @@
               "class": "vendor_api",
               "context_window": 262144,
               "id": "kimi-k2.7-code-highspeed",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -21247,7 +21281,8 @@
               "class": "vendor_api",
               "context_window": 131072,
               "id": "moonshot-v1-128k",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -21255,7 +21290,8 @@
               "class": "vendor_api",
               "context_window": 131072,
               "id": "moonshot-v1-128k-vision-preview",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -21263,7 +21299,8 @@
               "class": "vendor_api",
               "context_window": 32768,
               "id": "moonshot-v1-32k",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -21271,7 +21308,8 @@
               "class": "vendor_api",
               "context_window": 32768,
               "id": "moonshot-v1-32k-vision-preview",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -21279,7 +21317,8 @@
               "class": "vendor_api",
               "context_window": 8192,
               "id": "moonshot-v1-8k",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -21287,7 +21326,8 @@
               "class": "vendor_api",
               "context_window": 8192,
               "id": "moonshot-v1-8k-vision-preview",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             }
           ]
         },
@@ -25798,7 +25838,8 @@
               "class": "aggregator",
               "context_window": 200000,
               "id": "opencode/big-pickle",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25806,7 +25847,8 @@
               "class": "aggregator",
               "context_window": 1000000,
               "id": "opencode/claude-fable-5",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25814,7 +25856,8 @@
               "class": "aggregator",
               "context_window": 200000,
               "id": "opencode/claude-haiku-4-5",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25822,7 +25865,8 @@
               "class": "aggregator",
               "context_window": 200000,
               "id": "opencode/claude-opus-4-1",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25830,7 +25874,8 @@
               "class": "aggregator",
               "context_window": 200000,
               "id": "opencode/claude-opus-4-5",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25838,7 +25883,8 @@
               "class": "aggregator",
               "context_window": 1000000,
               "id": "opencode/claude-opus-4-6",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25846,7 +25892,8 @@
               "class": "aggregator",
               "context_window": 1000000,
               "id": "opencode/claude-opus-4-7",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25854,7 +25901,8 @@
               "class": "aggregator",
               "context_window": 1000000,
               "id": "opencode/claude-opus-4-8",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25862,7 +25910,8 @@
               "class": "aggregator",
               "context_window": 1000000,
               "id": "opencode/claude-sonnet-4",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25870,7 +25919,8 @@
               "class": "aggregator",
               "context_window": 1000000,
               "id": "opencode/claude-sonnet-4-5",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25878,7 +25928,8 @@
               "class": "aggregator",
               "context_window": 1000000,
               "id": "opencode/claude-sonnet-4-6",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25886,7 +25937,8 @@
               "class": "aggregator",
               "context_window": 1000000,
               "id": "opencode/claude-sonnet-5",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25894,7 +25946,8 @@
               "class": "aggregator",
               "context_window": 1000000,
               "id": "opencode/deepseek-v4-flash",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25902,7 +25955,8 @@
               "class": "aggregator",
               "context_window": 200000,
               "id": "opencode/deepseek-v4-flash-free",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25910,7 +25964,8 @@
               "class": "aggregator",
               "context_window": 1000000,
               "id": "opencode/deepseek-v4-pro",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25918,7 +25973,8 @@
               "class": "aggregator",
               "context_window": 1048576,
               "id": "opencode/gemini-3-flash",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25926,7 +25982,8 @@
               "class": "aggregator",
               "context_window": 1048576,
               "id": "opencode/gemini-3.1-pro",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25934,7 +25991,8 @@
               "class": "aggregator",
               "context_window": 1048576,
               "id": "opencode/gemini-3.5-flash",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25942,7 +26000,8 @@
               "class": "aggregator",
               "context_window": 204800,
               "id": "opencode/glm-5",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25950,7 +26009,8 @@
               "class": "aggregator",
               "context_window": 204800,
               "id": "opencode/glm-5.1",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25958,7 +26018,8 @@
               "class": "aggregator",
               "context_window": 1000000,
               "id": "opencode/glm-5.2",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25966,7 +26027,8 @@
               "class": "aggregator",
               "context_window": 400000,
               "id": "opencode/gpt-5",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25974,7 +26036,8 @@
               "class": "aggregator",
               "context_window": 400000,
               "id": "opencode/gpt-5-codex",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25982,7 +26045,8 @@
               "class": "aggregator",
               "context_window": 400000,
               "id": "opencode/gpt-5-nano",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25990,7 +26054,8 @@
               "class": "aggregator",
               "context_window": 400000,
               "id": "opencode/gpt-5.1",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -25998,7 +26063,8 @@
               "class": "aggregator",
               "context_window": 400000,
               "id": "opencode/gpt-5.1-codex",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26006,7 +26072,8 @@
               "class": "aggregator",
               "context_window": 400000,
               "id": "opencode/gpt-5.1-codex-max",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26014,7 +26081,8 @@
               "class": "aggregator",
               "context_window": 400000,
               "id": "opencode/gpt-5.1-codex-mini",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26022,7 +26090,8 @@
               "class": "aggregator",
               "context_window": 400000,
               "id": "opencode/gpt-5.2",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26030,7 +26099,8 @@
               "class": "aggregator",
               "context_window": 400000,
               "id": "opencode/gpt-5.2-codex",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26038,7 +26108,8 @@
               "class": "aggregator",
               "context_window": 400000,
               "id": "opencode/gpt-5.3-codex",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26046,7 +26117,8 @@
               "class": "aggregator",
               "context_window": 128000,
               "id": "opencode/gpt-5.3-codex-spark",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26054,7 +26126,8 @@
               "class": "aggregator",
               "context_window": 1050000,
               "id": "opencode/gpt-5.4",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26062,7 +26135,8 @@
               "class": "aggregator",
               "context_window": 400000,
               "id": "opencode/gpt-5.4-mini",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26070,7 +26144,8 @@
               "class": "aggregator",
               "context_window": 400000,
               "id": "opencode/gpt-5.4-nano",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26078,7 +26153,8 @@
               "class": "aggregator",
               "context_window": 1050000,
               "id": "opencode/gpt-5.4-pro",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26086,7 +26162,8 @@
               "class": "aggregator",
               "context_window": 1050000,
               "id": "opencode/gpt-5.5",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26094,7 +26171,8 @@
               "class": "aggregator",
               "context_window": 1050000,
               "id": "opencode/gpt-5.5-pro",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26102,7 +26180,8 @@
               "class": "aggregator",
               "context_window": 256000,
               "id": "opencode/grok-build-0.1",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26110,7 +26189,8 @@
               "class": "aggregator",
               "context_window": 262144,
               "id": "opencode/kimi-k2.5",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26118,7 +26198,8 @@
               "class": "aggregator",
               "context_window": 262144,
               "id": "opencode/kimi-k2.6",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26126,7 +26207,8 @@
               "class": "aggregator",
               "context_window": 262144,
               "id": "opencode/kimi-k2.7-code",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26134,7 +26216,8 @@
               "class": "aggregator",
               "context_window": 200000,
               "id": "opencode/mimo-v2.5-free",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26142,7 +26225,8 @@
               "class": "aggregator",
               "context_window": 204800,
               "id": "opencode/minimax-m2.5",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26150,7 +26234,8 @@
               "class": "aggregator",
               "context_window": 204800,
               "id": "opencode/minimax-m2.7",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26158,7 +26243,8 @@
               "class": "aggregator",
               "context_window": 512000,
               "id": "opencode/minimax-m3",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26166,7 +26252,8 @@
               "class": "aggregator",
               "context_window": 1000000,
               "id": "opencode/nemotron-3-ultra-free",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26174,7 +26261,8 @@
               "class": "aggregator",
               "context_window": 256000,
               "id": "opencode/north-mini-code-free",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26182,7 +26270,8 @@
               "class": "aggregator",
               "context_window": 262144,
               "id": "opencode/qwen3.5-plus",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -26190,7 +26279,8 @@
               "class": "aggregator",
               "context_window": 262144,
               "id": "opencode/qwen3.6-plus",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             }
           ]
         },
@@ -31927,7 +32017,8 @@
               "class": "vendor_api",
               "context_window": null,
               "id": "MiniMax-M2.5",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -31935,7 +32026,8 @@
               "class": "vendor_api",
               "context_window": null,
               "id": "glm-4.7",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -31943,7 +32035,8 @@
               "class": "vendor_api",
               "context_window": null,
               "id": "glm-5",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -31951,7 +32044,8 @@
               "class": "vendor_api",
               "context_window": null,
               "id": "kimi-k2.5",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -31959,7 +32053,8 @@
               "class": "vendor_api",
               "context_window": null,
               "id": "qwen3-coder-next",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -31967,7 +32062,8 @@
               "class": "vendor_api",
               "context_window": null,
               "id": "qwen3-coder-plus",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -31975,7 +32071,8 @@
               "class": "vendor_api",
               "context_window": null,
               "id": "qwen3-max-2026-01-23",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -31983,7 +32080,8 @@
               "class": "vendor_api",
               "context_window": null,
               "id": "qwen3.5-plus",
-              "is_default": true
+              "is_default": true,
+              "resolves": null
             },
             {
               "alias": null,
@@ -31991,7 +32089,8 @@
               "class": "vendor_api",
               "context_window": null,
               "id": "qwen3.6-plus",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             },
             {
               "alias": null,
@@ -31999,7 +32098,8 @@
               "class": "vendor_api",
               "context_window": null,
               "id": "qwen3.7-plus",
-              "is_default": false
+              "is_default": false,
+              "resolves": null
             }
           ]
         },

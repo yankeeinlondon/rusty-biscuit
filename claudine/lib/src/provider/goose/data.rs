@@ -145,6 +145,7 @@ pub(in crate::provider) static GOOSE_INFO: ProviderInfo = ProviderInfo {
             context_window: None,
             class: OfferingClass::VendorApi,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "claude-sonnet-4-5",
@@ -153,6 +154,7 @@ pub(in crate::provider) static GOOSE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(200000),
             class: OfferingClass::VendorApi,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "gemini-2.0-flash",
@@ -161,6 +163,7 @@ pub(in crate::provider) static GOOSE_INFO: ProviderInfo = ProviderInfo {
             context_window: None,
             class: OfferingClass::VendorApi,
             catalog_id: Some("google/gemini-flash@2.0"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "gemini-2.5-pro",
@@ -169,6 +172,7 @@ pub(in crate::provider) static GOOSE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::VendorApi,
             catalog_id: Some("google/gemini-pro@2.5"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "gpt-5",
@@ -177,6 +181,7 @@ pub(in crate::provider) static GOOSE_INFO: ProviderInfo = ProviderInfo {
             context_window: None,
             class: OfferingClass::VendorApi,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "qwen2.5",
@@ -185,6 +190,7 @@ pub(in crate::provider) static GOOSE_INFO: ProviderInfo = ProviderInfo {
             context_window: None,
             class: OfferingClass::VendorApi,
             catalog_id: None,
+            resolves: None,
         },
     ],
     offering_sources: &[

@@ -8,5 +8,5 @@
 //! [`ProviderInfo`]: super::ProviderInfo
 
 pub use claudine_catalog_types::{
-    ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource,
+    ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource, ResolvesVia,
 };

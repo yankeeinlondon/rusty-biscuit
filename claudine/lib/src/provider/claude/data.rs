@@ -25,7 +25,7 @@ use crate::provider::event_mapping::{EventMapping, EventMappingTable, EventSuppo
 use crate::provider::identity::Provider;
 use crate::provider::known_gap::{KnownGap, KnownGapArea};
 use crate::provider::model_catalog_source::ModelCatalogSource;
-use crate::provider::offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource};
+use crate::provider::offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource, ResolvesVia};
 use crate::provider::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 use crate::provider::path_template::PathTemplate;
 use crate::provider::platform_kind::PlatformKind;
@@ -182,6 +182,7 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::VendorApi,
             catalog_id: Some("anthropic/claude-fable@5"),
+            resolves: Some(ResolvesVia::FamilyLatest),
         },
         ExpectedOffering {
             id: "claude-haiku-4-5",
@@ -190,6 +191,7 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(200000),
             class: OfferingClass::VendorApi,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "claude-opus-4-6",
@@ -198,6 +200,7 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::VendorApi,
             catalog_id: Some("anthropic/claude-opus@4.6"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "claude-opus-4-7",
@@ -206,6 +209,7 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::VendorApi,
             catalog_id: Some("anthropic/claude-opus@4.7"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "claude-opus-4-8",
@@ -214,6 +218,7 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::VendorApi,
             catalog_id: Some("anthropic/claude-opus@4.8"),
+            resolves: Some(ResolvesVia::FamilyLatest),
         },
         ExpectedOffering {
             id: "claude-sonnet-4-5",
@@ -222,6 +227,7 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(200000),
             class: OfferingClass::VendorApi,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "claude-sonnet-4-6",
@@ -230,6 +236,7 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::VendorApi,
             catalog_id: Some("anthropic/claude-sonnet@4.6"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "claude-sonnet-5",
@@ -238,6 +245,7 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::VendorApi,
             catalog_id: Some("anthropic/claude-sonnet@5"),
+            resolves: Some(ResolvesVia::FamilyLatest),
         },
     ],
     offering_sources: &[

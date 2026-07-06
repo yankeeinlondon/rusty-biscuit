@@ -182,6 +182,7 @@ pub(in crate::provider) static CODEX_INFO: ProviderInfo = ProviderInfo {
             context_window: None,
             class: OfferingClass::VendorApi,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "gpt-5.4",
@@ -190,6 +191,7 @@ pub(in crate::provider) static CODEX_INFO: ProviderInfo = ProviderInfo {
             context_window: None,
             class: OfferingClass::VendorApi,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "gpt-5.4-mini",
@@ -198,6 +200,7 @@ pub(in crate::provider) static CODEX_INFO: ProviderInfo = ProviderInfo {
             context_window: None,
             class: OfferingClass::VendorApi,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "gpt-5.5",
@@ -206,6 +209,7 @@ pub(in crate::provider) static CODEX_INFO: ProviderInfo = ProviderInfo {
             context_window: None,
             class: OfferingClass::VendorApi,
             catalog_id: None,
+            resolves: None,
         },
     ],
     offering_sources: &[

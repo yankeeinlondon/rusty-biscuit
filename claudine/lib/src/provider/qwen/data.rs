@@ -168,6 +168,7 @@ pub(in crate::provider) static QWEN_INFO: ProviderInfo = ProviderInfo {
             context_window: None,
             class: OfferingClass::VendorApi,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "glm-4.7",
@@ -176,6 +177,7 @@ pub(in crate::provider) static QWEN_INFO: ProviderInfo = ProviderInfo {
             context_window: None,
             class: OfferingClass::VendorApi,
             catalog_id: Some("zai/glm@4.7"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "glm-5",
@@ -184,6 +186,7 @@ pub(in crate::provider) static QWEN_INFO: ProviderInfo = ProviderInfo {
             context_window: None,
             class: OfferingClass::VendorApi,
             catalog_id: Some("zai/glm@5"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "kimi-k2.5",
@@ -192,6 +195,7 @@ pub(in crate::provider) static QWEN_INFO: ProviderInfo = ProviderInfo {
             context_window: None,
             class: OfferingClass::VendorApi,
             catalog_id: Some("moonshotai/kimi-k@2.5"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "qwen3-coder-next",
@@ -200,6 +204,7 @@ pub(in crate::provider) static QWEN_INFO: ProviderInfo = ProviderInfo {
             context_window: None,
             class: OfferingClass::VendorApi,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "qwen3-coder-plus",
@@ -208,6 +213,7 @@ pub(in crate::provider) static QWEN_INFO: ProviderInfo = ProviderInfo {
             context_window: None,
             class: OfferingClass::VendorApi,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "qwen3-max-2026-01-23",
@@ -216,6 +222,7 @@ pub(in crate::provider) static QWEN_INFO: ProviderInfo = ProviderInfo {
             context_window: None,
             class: OfferingClass::VendorApi,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "qwen3.5-plus",
@@ -224,6 +231,7 @@ pub(in crate::provider) static QWEN_INFO: ProviderInfo = ProviderInfo {
             context_window: None,
             class: OfferingClass::VendorApi,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "qwen3.6-plus",
@@ -232,6 +240,7 @@ pub(in crate::provider) static QWEN_INFO: ProviderInfo = ProviderInfo {
             context_window: None,
             class: OfferingClass::VendorApi,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "qwen3.7-plus",
@@ -240,6 +249,7 @@ pub(in crate::provider) static QWEN_INFO: ProviderInfo = ProviderInfo {
             context_window: None,
             class: OfferingClass::VendorApi,
             catalog_id: None,
+            resolves: None,
         },
     ],
     offering_sources: &[

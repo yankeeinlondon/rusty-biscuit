@@ -189,6 +189,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(200000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/claude-fable-5",
@@ -197,6 +198,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::Aggregator,
             catalog_id: Some("anthropic/claude-fable@5"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/claude-haiku-4-5",
@@ -205,6 +207,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(200000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/claude-opus-4-1",
@@ -213,6 +216,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(200000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/claude-opus-4-5",
@@ -221,6 +225,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(200000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/claude-opus-4-6",
@@ -229,6 +234,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::Aggregator,
             catalog_id: Some("anthropic/claude-opus@4.6"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/claude-opus-4-7",
@@ -237,6 +243,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::Aggregator,
             catalog_id: Some("anthropic/claude-opus@4.7"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/claude-opus-4-8",
@@ -245,6 +252,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::Aggregator,
             catalog_id: Some("anthropic/claude-opus@4.8"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/claude-sonnet-4",
@@ -253,6 +261,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/claude-sonnet-4-5",
@@ -261,6 +270,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/claude-sonnet-4-6",
@@ -269,6 +279,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::Aggregator,
             catalog_id: Some("anthropic/claude-sonnet@4.6"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/claude-sonnet-5",
@@ -277,6 +288,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::Aggregator,
             catalog_id: Some("anthropic/claude-sonnet@5"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/deepseek-v4-flash",
@@ -285,6 +297,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::Aggregator,
             catalog_id: Some("deepseek/deepseek-v-flash@4"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/deepseek-v4-flash-free",
@@ -293,6 +306,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(200000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/deepseek-v4-pro",
@@ -301,6 +315,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::Aggregator,
             catalog_id: Some("deepseek/deepseek-v-pro@4"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/gemini-3-flash",
@@ -309,6 +324,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1048576),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/gemini-3.1-pro",
@@ -317,6 +333,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1048576),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/gemini-3.5-flash",
@@ -325,6 +342,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1048576),
             class: OfferingClass::Aggregator,
             catalog_id: Some("google/gemini-flash@3.5"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/glm-5",
@@ -333,6 +351,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(204800),
             class: OfferingClass::Aggregator,
             catalog_id: Some("zai/glm@5"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/glm-5.1",
@@ -341,6 +360,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(204800),
             class: OfferingClass::Aggregator,
             catalog_id: Some("zai/glm@5.1"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/glm-5.2",
@@ -349,6 +369,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::Aggregator,
             catalog_id: Some("zai/glm@5.2"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/gpt-5",
@@ -357,6 +378,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(400000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/gpt-5-codex",
@@ -365,6 +387,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(400000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/gpt-5-nano",
@@ -373,6 +396,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(400000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/gpt-5.1",
@@ -381,6 +405,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(400000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/gpt-5.1-codex",
@@ -389,6 +414,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(400000),
             class: OfferingClass::Aggregator,
             catalog_id: Some("openai/gpt-codex@5.1"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/gpt-5.1-codex-max",
@@ -397,6 +423,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(400000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/gpt-5.1-codex-mini",
@@ -405,6 +432,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(400000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/gpt-5.2",
@@ -413,6 +441,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(400000),
             class: OfferingClass::Aggregator,
             catalog_id: Some("openai/gpt@5.2"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/gpt-5.2-codex",
@@ -421,6 +450,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(400000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/gpt-5.3-codex",
@@ -429,6 +459,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(400000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/gpt-5.3-codex-spark",
@@ -437,6 +468,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(128000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/gpt-5.4",
@@ -445,6 +477,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1050000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/gpt-5.4-mini",
@@ -453,6 +486,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(400000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/gpt-5.4-nano",
@@ -461,6 +495,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(400000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/gpt-5.4-pro",
@@ -469,6 +504,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1050000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/gpt-5.5",
@@ -477,6 +513,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1050000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/gpt-5.5-pro",
@@ -485,6 +522,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1050000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/grok-build-0.1",
@@ -493,6 +531,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(256000),
             class: OfferingClass::Aggregator,
             catalog_id: Some("xai/grok-build@0.1"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/kimi-k2.5",
@@ -501,6 +540,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(262144),
             class: OfferingClass::Aggregator,
             catalog_id: Some("moonshotai/kimi-k@2.5"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/kimi-k2.6",
@@ -509,6 +549,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(262144),
             class: OfferingClass::Aggregator,
             catalog_id: Some("moonshotai/kimi-k@2.6"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/kimi-k2.7-code",
@@ -517,6 +558,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(262144),
             class: OfferingClass::Aggregator,
             catalog_id: Some("moonshotai/kimi-k-code@2.7"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/mimo-v2.5-free",
@@ -525,6 +567,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(200000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/minimax-m2.5",
@@ -533,6 +576,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(204800),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/minimax-m2.7",
@@ -541,6 +585,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(204800),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/minimax-m3",
@@ -549,6 +594,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(512000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/nemotron-3-ultra-free",
@@ -557,6 +603,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/north-mini-code-free",
@@ -565,6 +612,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(256000),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/qwen3.5-plus",
@@ -573,6 +621,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(262144),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "opencode/qwen3.6-plus",
@@ -581,6 +630,7 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(262144),
             class: OfferingClass::Aggregator,
             catalog_id: None,
+            resolves: None,
         },
     ],
     offering_sources: &[

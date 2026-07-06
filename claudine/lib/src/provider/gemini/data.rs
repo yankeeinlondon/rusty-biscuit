@@ -24,7 +24,7 @@ use crate::provider::cli_sensitivity::CliSensitiveAxes;
 use crate::provider::event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
 use crate::provider::identity::Provider;
 use crate::provider::model_catalog_source::ModelCatalogSource;
-use crate::provider::offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource};
+use crate::provider::offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource, ResolvesVia};
 use crate::provider::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 use crate::provider::path_template::PathTemplate;
 use crate::provider::platform_kind::PlatformKind;
@@ -181,6 +181,7 @@ pub(in crate::provider) static GEMINI_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::VendorApi,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "gemini-2.5-flash",
@@ -189,6 +190,7 @@ pub(in crate::provider) static GEMINI_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::VendorApi,
             catalog_id: Some("google/gemini-flash@2.5"),
+            resolves: Some(ResolvesVia::FamilyLatest),
         },
         ExpectedOffering {
             id: "gemini-2.5-flash-lite",
@@ -197,6 +199,7 @@ pub(in crate::provider) static GEMINI_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::VendorApi,
             catalog_id: Some("google/gemini-flash-lite@2.5"),
+            resolves: Some(ResolvesVia::FamilyLatest),
         },
         ExpectedOffering {
             id: "gemini-2.5-pro",
@@ -205,6 +208,7 @@ pub(in crate::provider) static GEMINI_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::VendorApi,
             catalog_id: Some("google/gemini-pro@2.5"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "gemini-3-flash-preview",
@@ -213,6 +217,7 @@ pub(in crate::provider) static GEMINI_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::VendorApi,
             catalog_id: Some("google/gemini-flash@3+preview"),
+            resolves: Some(ResolvesVia::FamilyLatest),
         },
         ExpectedOffering {
             id: "gemini-3-pro-preview",
@@ -221,6 +226,7 @@ pub(in crate::provider) static GEMINI_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::VendorApi,
             catalog_id: Some("google/gemini-pro@3+preview"),
+            resolves: Some(ResolvesVia::FamilyLatest),
         },
         ExpectedOffering {
             id: "gemini-3.1-flash-lite",
@@ -229,6 +235,7 @@ pub(in crate::provider) static GEMINI_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::VendorApi,
             catalog_id: Some("google/gemini-flash-lite@3.1"),
+            resolves: Some(ResolvesVia::FamilyLatest),
         },
         ExpectedOffering {
             id: "gemini-3.1-pro-preview",
@@ -237,6 +244,7 @@ pub(in crate::provider) static GEMINI_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::VendorApi,
             catalog_id: Some("google/gemini-pro@3.1+preview"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "gemini-3.5-flash",
@@ -245,6 +253,7 @@ pub(in crate::provider) static GEMINI_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(1000000),
             class: OfferingClass::VendorApi,
             catalog_id: Some("google/gemini-flash@3.5"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "gemma-4-26b-a4b-it",
@@ -253,6 +262,7 @@ pub(in crate::provider) static GEMINI_INFO: ProviderInfo = ProviderInfo {
             context_window: None,
             class: OfferingClass::VendorApi,
             catalog_id: Some("google/gemma@4+it+26b+a4b"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "gemma-4-31b-it",
@@ -261,6 +271,7 @@ pub(in crate::provider) static GEMINI_INFO: ProviderInfo = ProviderInfo {
             context_window: None,
             class: OfferingClass::VendorApi,
             catalog_id: Some("google/gemma@4+it+31b"),
+            resolves: None,
         },
     ],
     offering_sources: &[

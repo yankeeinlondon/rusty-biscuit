@@ -147,6 +147,7 @@ pub(in crate::provider) static KIMI_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(262144),
             class: OfferingClass::PlanEndpoint,
             catalog_id: None,
+            resolves: None,
         },
         ExpectedOffering {
             id: "kimi-k2.5",
@@ -155,6 +156,7 @@ pub(in crate::provider) static KIMI_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(262144),
             class: OfferingClass::VendorApi,
             catalog_id: Some("moonshotai/kimi-k@2.5"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "kimi-k2.6",
@@ -163,6 +165,7 @@ pub(in crate::provider) static KIMI_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(262144),
             class: OfferingClass::VendorApi,
             catalog_id: Some("moonshotai/kimi-k@2.6"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "kimi-k2.7-code",
@@ -171,6 +174,7 @@ pub(in crate::provider) static KIMI_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(262144),
             class: OfferingClass::VendorApi,
             catalog_id: Some("moonshotai/kimi-k-code@2.7"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "kimi-k2.7-code-highspeed",
@@ -179,6 +183,7 @@ pub(in crate::provider) static KIMI_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(262144),
             class: OfferingClass::VendorApi,
             catalog_id: Some("moonshotai/kimi-k-code@2.7+highspeed"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "moonshot-v1-128k",
@@ -187,6 +192,7 @@ pub(in crate::provider) static KIMI_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(131072),
             class: OfferingClass::VendorApi,
             catalog_id: Some("moonshotai/moonshot-v-128k@1"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "moonshot-v1-128k-vision-preview",
@@ -195,6 +201,7 @@ pub(in crate::provider) static KIMI_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(131072),
             class: OfferingClass::VendorApi,
             catalog_id: Some("moonshotai/moonshot-v-128k@1+preview+vision"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "moonshot-v1-32k",
@@ -203,6 +210,7 @@ pub(in crate::provider) static KIMI_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(32768),
             class: OfferingClass::VendorApi,
             catalog_id: Some("moonshotai/moonshot-v-32k@1"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "moonshot-v1-32k-vision-preview",
@@ -211,6 +219,7 @@ pub(in crate::provider) static KIMI_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(32768),
             class: OfferingClass::VendorApi,
             catalog_id: Some("moonshotai/moonshot-v-32k@1+preview+vision"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "moonshot-v1-8k",
@@ -219,6 +228,7 @@ pub(in crate::provider) static KIMI_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(8192),
             class: OfferingClass::VendorApi,
             catalog_id: Some("moonshotai/moonshot-v-8k@1"),
+            resolves: None,
         },
         ExpectedOffering {
             id: "moonshot-v1-8k-vision-preview",
@@ -227,6 +237,7 @@ pub(in crate::provider) static KIMI_INFO: ProviderInfo = ProviderInfo {
             context_window: Some(8192),
             class: OfferingClass::VendorApi,
             catalog_id: Some("moonshotai/moonshot-v-8k@1+preview+vision"),
+            resolves: None,
         },
     ],
     offering_sources: &[
