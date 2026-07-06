@@ -157,6 +157,14 @@ pub enum Command {
         #[arg(long)]
         allow_reassigned_frontmatter_property: bool,
 
+        /// Baseline SimplifiedSchema YAML file for compose-time frontmatter validation
+        #[arg(long, value_name = "PATH", conflicts_with = "no_baseline_schema")]
+        baseline_schema: Option<PathBuf>,
+
+        /// Disable the default Darkmatter baseline frontmatter schema
+        #[arg(long)]
+        no_baseline_schema: bool,
+
         /// Global shell command timeout in seconds (default: 10)
         #[arg(long, value_name = "SECONDS")]
         timeout: Option<u64>,

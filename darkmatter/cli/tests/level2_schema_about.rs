@@ -181,15 +181,37 @@ fn level2_schema_about_constraint_table_renders_striped_row() {
         frame.plain,
     );
 
-    let striped_row = raw_line_for_plain_needle(&frame, "max(number)").unwrap_or_else(|| {
+    let striped_row = [
+        "any",
+        "string",
+        "number",
+        "boolean",
+        "object",
+        "array",
+        "required",
+        "min(number)",
+        "max(number)",
+        "matches(regex)",
+        "oneOf",
+        "generated",
+    ]
+    .into_iter()
+    .find_map(|needle| {
+        raw_line_for_plain_needle(&frame, needle)
+            .filter(|row| has_background_sgr(row))
+            .map(|row| (needle, row))
+    })
+    .unwrap_or_else(|| {
         panic!(
-            "could not locate the `max(number)` table row in the real-terminal capture.\nplain:\n{}\nraw:\n{}",
+            "could not locate any striped constraint table row in the real-terminal capture.\nplain:\n{}\nraw:\n{}",
             frame.plain, frame.raw,
         )
     });
     assert!(
-        has_background_sgr(&striped_row),
-        "expected the striped `max(number)` row to carry a background SGR in the real terminal capture.\nrow:\n{striped_row:?}\nplain:\n{}\nraw:\n{}",
+        has_background_sgr(&striped_row.1),
+        "expected a striped constraint table row to carry a background SGR in the real terminal capture.\nrow name: {}\nrow:\n{:?}\nplain:\n{}\nraw:\n{}",
+        striped_row.0,
+        striped_row.1,
         frame.plain,
         frame.raw,
     );

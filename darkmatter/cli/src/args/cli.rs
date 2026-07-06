@@ -375,6 +375,48 @@ mod tests {
     }
 
     #[test]
+    fn compose_baseline_schema_flag_parses() {
+        let cli =
+            Cli::try_parse_from(["md", "compose", "doc.md", "--baseline-schema", "schema.yaml"])
+                .unwrap();
+        match cli.command {
+            Some(crate::args::Command::Compose {
+                baseline_schema, ..
+            }) => assert_eq!(baseline_schema, Some(PathBuf::from("schema.yaml"))),
+            _ => panic!("Expected Compose command"),
+        }
+    }
+
+    #[test]
+    fn compose_no_baseline_schema_flag_parses() {
+        let cli = Cli::try_parse_from(["md", "compose", "doc.md", "--no-baseline-schema"])
+            .unwrap();
+        match cli.command {
+            Some(crate::args::Command::Compose {
+                no_baseline_schema,
+                ..
+            }) => assert!(no_baseline_schema),
+            _ => panic!("Expected Compose command"),
+        }
+    }
+
+    #[test]
+    fn compose_baseline_schema_flags_conflict() {
+        let result = Cli::try_parse_from([
+            "md",
+            "compose",
+            "doc.md",
+            "--baseline-schema",
+            "schema.yaml",
+            "--no-baseline-schema",
+        ]);
+        let Err(err) = result else {
+            panic!("expected conflicting compose baseline flags to fail");
+        };
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
     fn compose_args_captures_positional_tokens() {
         let cli = Cli::try_parse_from(["md", "compose", "doc.md", "key=value"]).unwrap();
         match cli.command {
