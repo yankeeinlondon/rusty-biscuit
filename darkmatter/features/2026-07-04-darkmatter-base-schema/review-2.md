@@ -9,7 +9,9 @@ implemented: true
 
 ## Findings
 
-### High: Default compose baseline now rejects custom `ctx.*` frontmatter before the existing ctx merge policy can handle it
+### Retracted: Default compose baseline rejects custom `ctx.*` frontmatter before the existing ctx merge policy can handle it
+
+This finding was later determined to be based on an incorrect interpretation of the `ctx` contract. `ctx` is a Darkmatter-owned generated runtime namespace. Runtime merging of authored `ctx` objects is a compatibility behavior for documents that define `ctx`, not a requirement that the base schema accept arbitrary custom `ctx.*` keys.
 
 The v1 base schema models `ctx` as a nested inline object in `darkmatter/docs/schemas/darkmatter.yaml:29`. Inline objects compile with `additionalProperties: false` in `darkmatter/lib/src/markdown/schemas/simplified/convert.rs:443`, so an authored document with a non-conflicting custom context key such as:
 
@@ -23,9 +25,9 @@ ctx:
 
 fails schema validation when `md compose` injects the baseline by default. That default injection happens in `darkmatter/cli/src/commands/compose.rs:645` through `darkmatter/cli/src/commands/compose.rs:649`.
 
-This is a regression against the existing compose ctx merge contract in `darkmatter/lib/src/markdown/compose/context/merge.rs:50`, where user `ctx` objects are explicitly deep-merged with runtime context and runtime keys win only on collision. It also conflicts with the spec's extensibility goal in `darkmatter/features/2026-07-04-darkmatter-base-schema/spec.md:38` and the Phase 3 resolution that default compose baseline injection is now enabled in `spec.md:355`.
+This is not a schema regression. The existing compose ctx merge contract in `darkmatter/lib/src/markdown/compose/context/merge.rs:50` tolerates authored `ctx` objects and lets runtime keys win on collision, but the public context documentation recommends that document authors avoid defining `ctx` because it collides with Darkmatter's runtime namespace. The spec's extensibility goal applies to the top-level frontmatter namespace outside Darkmatter-owned properties.
 
-The spec itself calls the closed `ctx` shape a known limitation, but says it is acceptable because "baseline injection is not yet the default" in `spec.md:392` through `spec.md:397`. That premise is no longer true in this implementation. Either the base schema needs an open nested-object form for `ctx`, `ctx` should remain broad `object` until SimplifiedSchema can express typed known fields plus extra keys, or compose should not inject this closed `ctx` baseline by default.
+The correct behavior is for the base schema to model known generated `ctx.*` leaves and reject arbitrary custom `ctx.*` leaves under default baseline validation. Documents that intentionally rely on legacy/custom authored `ctx` can opt out of the baseline or provide an explicit document schema.
 
 Verification level: Level 1 CLI integration is sufficient. There is coverage for unknown top-level keys remaining accepted (`darkmatter/cli/tests/compose_base_schema.rs:60`), but no corresponding default-baseline test for custom user `ctx.*` keys even though compose already has ctx override/merge behavior tests with `--no-baseline-schema` in `darkmatter/cli/tests/compose_refs_and_missing.rs:29`.
 
@@ -53,11 +55,11 @@ Verification level: docs/API contract issue. Level 1 behavior tests are enough t
 - `md compose` default baseline injection, opt-out flag/env, custom baseline replacement, and explicit-baseline-over-env precedence: Level 1 CLI integration tests are present and appropriate.
 - `md schema about` rendering: existing Level 2 coverage is appropriate for real-terminal report rendering.
 - No Level 3 requirements apply; this feature has no OS keyboard/mouse input behavior.
-- Missing coverage: default `md compose` with custom user `ctx.*` frontmatter. That is a Level 1 CLI/API regression case, not a terminal-level case.
+- Missing coverage identified here was invalid; default `md compose` should reject custom user `ctx.*` frontmatter under the base schema.
 
 ## Summary
 
-The previous review's HR documentation and explicit-baseline precedence issues were mostly addressed, and the Level 1 suite passes. The feature is still not production-ready because default baseline injection closes `ctx.*` in a way that contradicts both existing compose behavior and the spec's author-extensibility goal.
+The previous review's HR documentation and explicit-baseline precedence issues were mostly addressed, and the Level 1 suite passes. The `ctx.*` finding in this review is retracted because it treated compatibility merging as author-extensibility.
 
 ## Verification
 

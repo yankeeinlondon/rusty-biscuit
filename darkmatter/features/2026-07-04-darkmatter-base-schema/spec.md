@@ -2,7 +2,7 @@
 status: draft
 created: 2026-07-04
 schema: ../../docs/schemas/darkmatter.yaml
-review_iterations: 4
+review_iterations: 5
 ---
 
 # Darkmatter Base Frontmatter Schema
@@ -35,8 +35,9 @@ future editor tooling.
    validation source cannot drift.
 7. Expose the base schema from the Darkmatter library for compose callers,
    schema validation callers, and downstream packages such as Claudine.
-8. Preserve author extensibility: the base schema validates known Darkmatter
-   properties but must not close the frontmatter namespace to user properties.
+8. Preserve author extensibility outside Darkmatter-owned namespaces: the base
+   schema validates known Darkmatter properties but must not close the
+   top-level frontmatter namespace to user properties.
 
 ## Non-Goals
 
@@ -378,14 +379,14 @@ The baseline property list was compared against the compose pipeline, render
  following corrections were applied to `darkmatter/docs/schemas/darkmatter.yaml`
  to align the schema with runtime behavior:
 
-- `ctx` is intentionally modeled as a broad `object` for v1 so user-authored
-  context keys remain valid under default `md compose` baseline injection.
-  Runtime context merge behavior remains authoritative: authored `ctx` objects
-  deep-merge with captured runtime context, and runtime keys win on collision.
+- `ctx` is modeled as a closed generated object because it is a
+  Darkmatter-owned runtime namespace. Runtime context merge behavior remains a
+  compatibility path for documents that already define `ctx`, but authored
+  custom `ctx.*` keys are discouraged and are not part of the base-schema
+  extensibility contract.
 - The deprecated root-level `hr` property is absent from the baseline, and
   `style.hr.*` remains the only horizontal-rule surface.
 
-The earlier inline `ctx` shape was removed because SimplifiedSchema does not yet
-have an open typed-object form. Reintroducing generated `ctx.*` annotations
-should wait until the schema language can express known generated fields without
-rejecting custom user context.
+Generated `ctx.*` annotations are part of the v1 base schema. Static authored
+documents may omit `ctx` entirely; effective runtime validation can still type
+check host-supplied context values when they are present.

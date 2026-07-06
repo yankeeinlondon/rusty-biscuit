@@ -21,11 +21,11 @@ Verification level: Level 1 is the appropriate level. This is in-process schema 
 
 ## Test-Level Assessment
 
-- Base schema parsing, conversion, known valid/invalid values, unknown top-level keys, document `$schema` precedence, and open `ctx` behavior have appropriate Level 1 coverage.
+- Base schema parsing, conversion, known valid/invalid values, unknown top-level keys, document `$schema` precedence, and closed generated `ctx` behavior have appropriate Level 1 coverage.
 - Nested YAML mapping object syntax and property-level sequence unions with mapping arms have appropriate Level 1 parser/conversion/validation coverage.
 - `generated` parsing, static-required suppression, JSON Schema annotation emission, and present-value type/nullability checks have appropriate Level 1 coverage.
 - `generated` completion metadata does not have the required Level 1 coverage, and the API currently cannot expose the required metadata.
-- `md compose` default baseline injection, `--no-baseline-schema`, `DARKMATTER_NO_BASELINE_SCHEMA`, explicit baseline replacement, and custom `ctx.*` acceptance have appropriate Level 1 CLI coverage.
+- `md compose` default baseline injection, `--no-baseline-schema`, `DARKMATTER_NO_BASELINE_SCHEMA`, explicit baseline replacement, and custom `ctx.*` rejection have appropriate Level 1 CLI coverage.
 - Existing `md schema about` real-terminal rendering coverage remains Level 2, which is appropriate for terminal report rendering.
 - No Level 3 requirements apply; this feature has no OS keyboard or mouse input behavior.
 
