@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use claudine::signals::{ObservedSignal, SignalEngine, SignalEvent, SignalSink, SignalSource};
 use claudine::stream::logs::{EarlyTermination, StderrBridgeHandle, StderrIngestOutcome};
 use claudine::stream::parser::{SemanticStreamParser, StreamParseError};
 use claudine::stream::progress::LiveMetrics;
@@ -332,6 +333,7 @@ pub(crate) fn run_child(
         // The direct path has no content guards (F3); a content trip can
         // never originate here.
         guard_context: None,
+        signals: Vec::new(),
     })
 }
 
@@ -625,6 +627,7 @@ pub(crate) fn run_child_capture(
         },
         agent_pid: Some(captured_pid),
         guard_context,
+        signals: Vec::new(),
     })
 }
 
@@ -828,6 +831,15 @@ pub(crate) fn run_child_stream_semantic(
     // Opt-in raw NDJSON capture for post-mortem analysis. Activated by
     // `CLAUDINE_RAW_STREAM_DIR`; `None` (and zero overhead) otherwise.
     let stream_capture_owned = StreamCapture::open(timeout_config.provider, child.id(), started_at);
+    // Signal detection (Phase E4): declarative engine + dedup sink observing
+    // every stdout JSON line, independent of the semantic parser. Every
+    // wired provider has a compiled table; `None` provider disables it.
+    let signal_state_owned = timeout_config.provider.map(|provider| {
+        (
+            SignalEngine::new(claudine::signals::for_provider(provider)),
+            SignalSink::new(),
+        )
+    });
     let stdout_handle = thread::spawn(move || {
         let _stream_guard = stream_span.enter();
         let _parse_span = info_span!("stream_parse").entered();
@@ -858,6 +870,7 @@ pub(crate) fn run_child_stream_semantic(
             build_parser(output_cb, reasoning_cb, Some(captured_pid));
         let mut fallback_mode = false;
         let mut stream_capture = stream_capture_owned;
+        let mut signal_state = signal_state_owned;
 
         for line in reader.lines() {
             let Ok(line) = line else { break };
@@ -883,6 +896,27 @@ pub(crate) fn run_child_stream_semantic(
             // `CLAUDINE_RAW_STREAM_DIR` is set. No-op otherwise.
             if let Some(capture) = stream_capture.as_mut() {
                 capture.record_line(&line, line_at);
+            }
+
+            // Offer the line to the signal engine independently of the
+            // semantic parser (and of fallback mode). A malformed JSON line
+            // is silently skipped here — the parser path already reports
+            // malformed lines.
+            if let Some((engine, sink)) = signal_state.as_mut() {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with('{')
+                    && let Ok(payload) = serde_json::from_str::<serde_json::Value>(trimmed)
+                {
+                    for event in engine.observe(SignalSource::Stream, &payload) {
+                        // Auto-narrowing: an observed provider version
+                        // restricts version-scoped record selection for the
+                        // rest of the run.
+                        if let SignalEvent::ProviderVersion { version } = &event {
+                            engine.observe_provider_version(version);
+                        }
+                        sink.emit(event, SignalSource::Stream);
+                    }
+                }
             }
 
             if fallback_mode {
@@ -911,7 +945,10 @@ pub(crate) fn run_child_stream_semantic(
         if let Ok(mut r) = text_renderer.lock() {
             r.flush_remaining(&mut out);
         }
-        parser
+        let signals = signal_state
+            .map(|(_, sink)| sink.into_signals())
+            .unwrap_or_default();
+        (parser, signals)
     });
 
     let pipe = child
@@ -1090,11 +1127,12 @@ pub(crate) fn run_child_stream_semantic(
     stop_timing_ticker(watchdog_ticker);
 
     let thread_join_timeout = Duration::from_secs(5);
-    let parser: Box<dyn SemanticStreamParser> = join_with_timeout_or(
-        stdout_handle,
-        thread_join_timeout,
-        Box::new(ErrorParser { exit_code }),
-    );
+    let (parser, signals): (Box<dyn SemanticStreamParser>, Vec<ObservedSignal>) =
+        join_with_timeout_or(
+            stdout_handle,
+            thread_join_timeout,
+            (Box::new(ErrorParser { exit_code }), Vec::new()),
+        );
 
     let captured = join_with_timeout_or(stderr_handle, thread_join_timeout, String::new());
     if suppress_stderr_on_success && exit_code != 0 && !captured.is_empty() {
@@ -1144,7 +1182,7 @@ pub(crate) fn run_child_stream_semantic(
         .as_ref()
         .and_then(early_termination_guard_context);
 
-    Ok(ProcessResult {
+    let result = ProcessResult {
         data: summary,
         termination,
         telemetry: ProcessTelemetry {
@@ -1153,7 +1191,23 @@ pub(crate) fn run_child_stream_semantic(
         },
         agent_pid: Some(captured_pid),
         guard_context,
-    })
+        signals,
+    };
+    if !result.signals.is_empty() {
+        let per_kind: Vec<String> = result
+            .signals
+            .iter()
+            .map(|signal| {
+                format!(
+                    "{}x{}",
+                    <&'static str>::from(signal.event.kind()),
+                    signal.occurrences
+                )
+            })
+            .collect();
+        tracing::debug!(signals = ?per_kind, "signal collection summary");
+    }
+    Ok(result)
 }
 
 #[cfg(test)]

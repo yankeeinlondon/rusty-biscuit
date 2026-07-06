@@ -104,6 +104,11 @@ pub(crate) struct ProcessResult<T> {
     /// Carried so the attempt outcome can thread `error_kind` + guard detail
     /// into the failure-handler payload (C3a).
     pub(crate) guard_context: Option<claudine::harness::GuardContext>,
+    /// Signals the declarative detection engine collected from the stdout
+    /// stream (Phase E4). Populated only by the semantic spawn path
+    /// (`run_child_stream_semantic`); the other spawn paths always carry an
+    /// empty vector. Consumers land in Phase E5.
+    pub(crate) signals: Vec<claudine::signals::ObservedSignal>,
 }
 
 /// Renders streamed assistant text as Markdown, flushing at block boundaries.
