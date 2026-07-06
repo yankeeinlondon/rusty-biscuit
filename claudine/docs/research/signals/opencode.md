@@ -19,8 +19,8 @@ records:
     vocabulary: ["UsageCap", "RetriesExhausted", "Overloaded", "RateLimited"]
     until: "v1.17.7"
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/opencode/usage-cap-legacy-retry-wrapped.txt
-    notes: "Legacy log lines use `LEVEL <timestamp> +<delta>ms service=llm ... error=<JSON>`."
+    evidence: ./fixtures/opencode/usage-cap-legacy-retry-wrapped.txt
+    notes: "Legacy log lines use `LEVEL <timestamp> +<delta>ms service=llm ... error=<JSON>`. Priority evidence: ./fixtures/opencode/usage-cap-wins-over-retries.txt (cap+retry markers on one line → cap wins); negative twin for the advisory branch: ./fixtures/opencode/usage-cap-advisory-no-error-tag.txt."
   - id: stderr_promoted-usage_capped-1178
     signal: usage_capped
     source: stderr_promoted
@@ -34,7 +34,7 @@ records:
     vocabulary: ["UsageCap", "RetriesExhausted", "Overloaded", "RateLimited"]
     since: "v1.17.8"
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/opencode/stream-error-1178-usage-cap.txt
+    evidence: ./fixtures/opencode/stream-error-1178-usage-cap.txt
   - id: stderr_promoted-retries_exhausted-429
     signal: retries_exhausted
     source: stderr_promoted
@@ -47,7 +47,7 @@ records:
     distinguish: "A 429 with `AI_RetryError` or `maxRetriesExceeded` but without usage-cap vocabulary is retry exhaustion, not an account cap."
     vocabulary: ["UsageCap", "RetriesExhausted", "Overloaded", "RateLimited"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/opencode/429-retry-exhausted.txt
+    evidence: ./fixtures/opencode/429-retry-exhausted.txt
   - id: stderr_promoted-provider_overloaded-429
     signal: provider_overloaded
     source: stderr_promoted
@@ -60,7 +60,7 @@ records:
     distinguish: "A plain 429 with overload vocabulary (`overload`, `engine_overloaded_error`) is provider capacity pressure, not an account rate limit."
     vocabulary: ["UsageCap", "RetriesExhausted", "Overloaded", "RateLimited"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/opencode/429-overload.txt
+    evidence: ./fixtures/opencode/429-overload.txt
   - id: stderr_promoted-rate_limited-429
     signal: rate_limited
     source: stderr_promoted
@@ -73,20 +73,20 @@ records:
     distinguish: "Generic 429 records are only rate limits after usage-cap, retry-exhaustion, and overload classifiers have failed."
     vocabulary: ["UsageCap", "RetriesExhausted", "Overloaded", "RateLimited"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/opencode/429-plain-rate-limited.txt
+    evidence: ./fixtures/opencode/429-plain-rate-limited.txt
   - id: stderr_promoted-auth_invalid-invalid-key
     signal: auth_invalid
     source: stderr_promoted
     locator: "LogClassification::AuthFailure"
     detection: declarative
-    priority: 50
+    priority: 5
     match_path: classification
     match_op: eq
     match_value: AuthFailure
-    distinguish: "AuthenticationError/unauthorized/fetch-failed LLM records are auth failures rather than transient API failures."
+    distinguish: "AuthenticationError/unauthorized/fetch-failed LLM records are auth failures rather than transient API failures; the classifier evaluates the auth branch before all five limit branches (errors.rs:326-334)."
     vocabulary: ["AuthFailure"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/opencode/auth-failure-invalid-key.txt
+    evidence: ./fixtures/opencode/auth-failure-invalid-key.txt
   - id: stderr_promoted-provider_version-boot
     signal: provider_version
     source: stderr_promoted
@@ -99,7 +99,7 @@ records:
     distinguish: "Boot banners are default-service lifecycle records with a `version` tag and trailing `opencode` keyword; they are not LLM-call starts."
     vocabulary: ["BootBanner"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/opencode/version-announcement.txt
+    evidence: ./fixtures/opencode/version-announcement.txt
   - id: stderr_promoted-model_resolved-llm-call
     signal: model_resolved
     source: stderr_promoted
@@ -112,7 +112,7 @@ records:
     distinguish: "`message=stream` with providerID/modelID is a call start and model-resolution observation; `message=\"stream error\"` is a failure path handled by the limit classifiers."
     vocabulary: ["LlmCall"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/opencode/stream-start-1178.txt
+    evidence: ./fixtures/opencode/stream-start-1178.txt
 extractions:
   - record: stderr_promoted-usage_capped-legacy
     field: message
@@ -192,6 +192,7 @@ gaps:
   - "OpenCode session creation and session IDs are visible in events/logs, but no fixture proves resume semantics in a provider stream. `session_resumable` is therefore not recorded."
   - "Provider reset timestamps inside usage-cap prose do not include an explicit timezone. Claudine's current promoted record parses them as UTC; a provider-local-zone confirmation is still needed."
   - "The Git remote tags visible for `anomalyco/opencode` and `sst/opencode` stop at `v1.4.14`, while the official site changelog documents `v1.17.x`. Version drift records use the observed fixture/source terms `pre-1.17.8` and `v1.17.8` but should be rechecked when release tags are available."
+  - "No 1.17.8-format fixture exists for retries_exhausted / provider_overloaded / rate_limited / auth_invalid — only usage_capped has the legacy+1.17.8 pair; ./fixtures/opencode/error-new-format-inline-json.txt is uncited."
 changes: []
 requires_claudine_update: true
 reason: "OpenCode signal detection is codegen-wired and this research adds fixture-backed promoted-stderr records for usage caps, retry exhaustion, rate limits, overloads, auth failure, provider version, and model resolution, plus gaps for stream JSON signals Claudine should capture next."

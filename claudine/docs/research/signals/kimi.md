@@ -18,7 +18,7 @@ records:
     distinguish: "The initialize response is metadata from the wire server, not a turn event. It carries both the Kimi server version and wire protocol version."
     vocabulary: ["Kimi Code CLI"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/kimi/wire-protocol-110.jsonl
+    evidence: ./fixtures/kimi/wire-protocol-110.jsonl
   - id: stream-auth_invalid-auth_expired
     signal: auth_invalid
     source: stream
@@ -31,7 +31,7 @@ records:
     distinguish: "`-32004` is Kimi wire mode's `AUTH_EXPIRED` code. It is narrower than generic chat-provider errors and should be treated as an OAuth re-login requirement."
     vocabulary: ["-32004"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/kimi/wire-auth-expired.jsonl
+    evidence: ./fixtures/kimi/wire-auth-expired.jsonl
   - id: stream-rate_limited-step_retry-429
     signal: rate_limited
     source: stream
@@ -45,7 +45,8 @@ records:
     vocabulary: ["APIStatusError", "429"]
     since: "1.10"
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/kimi/step-retry-rate-limit.jsonl
+    evidence: ./fixtures/kimi/step-retry-rate-limit.jsonl
+    notes: "since is a wire-protocol version, not a kimi-cli package version."
   - id: stream-generation_retried-step_retry
     signal: generation_retried
     source: stream
@@ -59,7 +60,8 @@ records:
     vocabulary: ["StepRetry", "APIEmptyResponseError", "APIStatusError"]
     since: "1.10"
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/kimi/wire-protocol-110.jsonl
+    evidence: ./fixtures/kimi/wire-protocol-110.jsonl
+    notes: "since is a wire-protocol version, not a kimi-cli package version."
   - id: stream-tokens_consumed-status_update
     signal: tokens_consumed
     source: stream
@@ -72,7 +74,7 @@ records:
     distinguish: "`StatusUpdate.token_usage` is the step usage envelope. Other `StatusUpdate` messages may only update plan mode or MCP state and should not be counted as token-metering events."
     vocabulary: ["StatusUpdate"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/kimi/status-update-token-usage.jsonl
+    evidence: ./fixtures/kimi/status-update-token-usage.jsonl
   - id: stream-interrupted-cancelled-result
     signal: interrupted
     source: stream
@@ -85,7 +87,7 @@ records:
     distinguish: "`cancelled` is the terminal prompt result returned after `RunCancelled`; it differs from an ordinary `TurnEnd`, which can still be emitted during orderly cancellation cleanup."
     vocabulary: ["cancelled"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/kimi/wire-cancelled-interrupt.jsonl
+    evidence: ./fixtures/kimi/wire-cancelled-interrupt.jsonl
   - id: stream-turn_limit_reached-max_steps
     signal: turn_limit_reached
     source: stream
@@ -98,7 +100,7 @@ records:
     distinguish: "Kimi names this terminal status `max_steps_reached`; it is the provider-native loop limit outcome and maps to Claudine's turn-limit family rather than a token or wall-clock timeout."
     vocabulary: ["max_steps_reached"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/kimi/wire-max-steps-reached.jsonl
+    evidence: ./fixtures/kimi/wire-max-steps-reached.jsonl
   - id: stream-human_input_requested-question_request
     signal: human_input_requested
     source: stream
@@ -112,7 +114,8 @@ records:
     vocabulary: ["QuestionRequest"]
     since: "1.4"
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/kimi/wire-question-request.jsonl
+    evidence: ./fixtures/kimi/wire-question-request.jsonl
+    notes: "since is a wire-protocol version, not a kimi-cli package version."
 extractions:
   - record: stream-provider_version-init
     field: version
@@ -210,6 +213,8 @@ gaps:
   - "No model resolution or model fallback wire event was found. The selected model lives in runtime/config state; the initialize result exposes server identity and protocol version, not the active model id."
   - "Kimi ACP consumes `StatusUpdate` and `StepRetry` internally rather than forwarding them as ACP session updates in the current adapter. Wire mode remains the better signal surface for tokens and retries."
   - "The wire docs are first-class, but some source events are ahead of the rendered docs: current source includes `Notification` and `MCPLoadingBegin`/`MCPLoadingEnd` in the event union while the inspected English wire-mode page's event list omits MCP loading events."
+  - "unsupported_protocol_version is synthesized wrapper-side by claudine when initialize's result.protocol_version falls outside {1.9, 1.10} — a negative match the declarative grammar cannot express; record as wrapper-bespoke when the engine lands."
+  - "auth_kind_detected is unrecorded — no wire surface announcing the auth mechanism was identified."
 changes: []
 requires_claudine_update: true
 reason: "Kimi signal detection is codegen-wired and this research adds wire-stream records for provider version, auth expiry, rate limiting, retry, token metering, interruption, max-step limits, and reserved human-input requests."

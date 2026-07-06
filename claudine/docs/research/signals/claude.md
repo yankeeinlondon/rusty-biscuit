@@ -16,9 +16,9 @@ records:
     match_op: eq
     match_value: approaching_limit
     distinguish: "This is an observed warning state: the account can still continue, but the current usage window is close to its cap. It differs from throttling because `is_throttled` is absent or false and no retry delay is required."
-    vocabulary: ["approaching_limit", "allowed_warning", "allowed", "rejected"]
+    vocabulary: ["approaching_limit", "allowed_warning", "allowed", "rejected", "limited", "blocked"]
     confidence: observed
-    evidence: claudine/docs/research/signals/fixtures/claude/rate-limit-info-approaching.jsonl
+    evidence: ./fixtures/claude/rate-limit-info-approaching.jsonl
     notes: "The current SDK type no longer lists `approaching_limit`, but seeded live/test fixtures prove Claude Code has emitted it."
   - id: stream-usage_cap_approaching-allowed_warning
     signal: usage_cap_approaching
@@ -30,9 +30,9 @@ records:
     match_op: eq
     match_value: allowed_warning
     distinguish: "This is a soft warning or notice state. It should not be treated as capped because requests are still allowed and `overageStatus` remains `allowed` in the fixture."
-    vocabulary: ["approaching_limit", "allowed_warning", "allowed", "rejected"]
+    vocabulary: ["approaching_limit", "allowed_warning", "allowed", "rejected", "limited", "blocked"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/claude/rate-limit-info-allowed-warning-seven-day.jsonl
+    evidence: ./fixtures/claude/rate-limit-info-allowed-warning-seven-day.jsonl
     notes: "SDK `0.3.201` includes `allowed_warning` in `SDKRateLimitInfo.status`."
   - id: stream-rate_limited-throttled
     signal: rate_limited
@@ -46,7 +46,7 @@ records:
     distinguish: "This is active throttling and may include `retry_after_ms`; it differs from usage-cap warnings because the provider is rejecting or delaying work now."
     vocabulary: ["true", "false"]
     confidence: observed
-    evidence: claudine/docs/research/signals/fixtures/claude/rate-limit-throttled-message.jsonl
+    evidence: ./fixtures/claude/rate-limit-throttled-message.jsonl
     notes: "Legacy/observed stream shape; the current SDK's typed `SDKRateLimitEvent` uses nested `rate_limit_info` instead."
   - id: stream-rate_limited-assistant-error
     signal: rate_limited
@@ -60,7 +60,7 @@ records:
     distinguish: "This is a terminal assistant error with a rate-limit discriminator, not a nonterminal `rate_limit_event` warning."
     vocabulary: ["authentication_failed", "oauth_org_not_allowed", "billing_error", "rate_limit", "overloaded", "invalid_request", "model_not_found", "server_error", "unknown", "max_output_tokens"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/claude/assistant-error-rate-limit.jsonl
+    evidence: ./fixtures/claude/assistant-error-rate-limit.jsonl
   - id: stream-no_funds-error-billing
     signal: no_funds
     source: stream
@@ -72,8 +72,8 @@ records:
     match_value: billing_error
     distinguish: "A top-level `error` with `billing_error` is an account-credit/billing failure. It should not be collapsed into generic rate limiting even though both are provider-side account limits."
     vocabulary: ["authentication_failed", "oauth_org_not_allowed", "billing_error", "rate_limit", "overloaded", "invalid_request", "model_not_found", "server_error", "unknown", "max_output_tokens"]
-    confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/claude/error-billing.jsonl
+    confidence: observed
+    evidence: ./fixtures/claude/error-billing.jsonl
   - id: stream-no_funds-assistant-billing
     signal: no_funds
     source: stream
@@ -86,7 +86,7 @@ records:
     distinguish: "Newer Claude Code can emit a synthetic assistant message carrying `error: billing_error` and human text, followed by a `result` with `is_error: true`."
     vocabulary: ["authentication_failed", "oauth_org_not_allowed", "billing_error", "rate_limit", "overloaded", "invalid_request", "model_not_found", "server_error", "unknown", "max_output_tokens"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/claude/billing-error-synthetic-result.jsonl
+    evidence: ./fixtures/claude/billing-error-synthetic-result.jsonl
   - id: stream-model_resolved-init
     signal: model_resolved
     source: stream
@@ -98,8 +98,8 @@ records:
     match_value: init
     distinguish: "`init` starts the structured stream and carries the resolved model for the session. A later `system`/`init` SDK frame can also carry metadata, but no scrubbed provider-version fixture exists yet."
     vocabulary: ["init", "system"]
-    confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/claude/init-model.jsonl
+    confidence: observed
+    evidence: ./fixtures/claude/init-model.jsonl
   - id: stream-auth_kind_detected-init
     signal: auth_kind_detected
     source: stream
@@ -111,8 +111,8 @@ records:
     match_value: "^.+$"
     distinguish: "`apiKeySource` is authentication metadata on the same init frame as the resolved model. It identifies the credential source, not whether authentication succeeded."
     vocabulary: ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "none", "unknown"]
-    confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/claude/init-model.jsonl
+    confidence: observed
+    evidence: ./fixtures/claude/init-model.jsonl
   - id: stream-tokens_consumed-total_cost_usd
     signal: tokens_consumed
     source: stream
@@ -125,7 +125,7 @@ records:
     distinguish: "Current result envelopes use `total_cost_usd`; this record should win over legacy `cost_usd` when both are present."
     vocabulary: ["success", "error_during_execution", "error_max_turns", "error_max_budget_usd", "error_max_structured_output_retries"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/claude/result-usage-cost-fields.jsonl
+    evidence: ./fixtures/claude/result-usage-cost-fields.jsonl
   - id: stream-tokens_consumed-cost_usd-legacy
     signal: tokens_consumed
     source: stream
@@ -138,7 +138,7 @@ records:
     distinguish: "Legacy result envelopes used `cost_usd`; keep it lower priority than `total_cost_usd` because Claudine's parser prefers the newer field."
     vocabulary: ["success", "error_during_execution", "error_max_turns", "error_max_budget_usd", "error_max_structured_output_retries"]
     confidence: observed
-    evidence: claudine/docs/research/signals/fixtures/claude/result-usage-cost-fields.jsonl
+    evidence: ./fixtures/claude/result-usage-cost-fields.jsonl
   - id: stream-session_tainted-result-error
     signal: session_tainted
     source: stream
@@ -151,7 +151,7 @@ records:
     distinguish: "`result.is_error=true` marks a failed terminal envelope even when `subtype` is `success` or prior assistant text looked normal. Correct classification depends on whether an earlier error was already emitted."
     vocabulary: ["true", "false"]
     confidence: observed
-    evidence: claudine/docs/research/signals/fixtures/claude/billing-error-synthetic-result.jsonl
+    evidence: ./fixtures/claude/billing-error-synthetic-result.jsonl
 extractions:
   - record: stream-usage_cap_approaching-approaching_limit
     field: lifts_at
@@ -161,10 +161,6 @@ extractions:
   - record: stream-usage_cap_approaching-approaching_limit
     field: window
     path: rate_limit_info.rateLimitType
-  - record: stream-usage_cap_approaching-approaching_limit
-    field: message
-    path: rate_limit_info.status
-    notes: "The observed fixture has no text message; consumers can synthesize warning prose from status and reset time."
   - record: stream-usage_cap_approaching-allowed_warning
     field: lifts_at
     path: rate_limit_info.resetsAt
@@ -173,9 +169,6 @@ extractions:
   - record: stream-usage_cap_approaching-allowed_warning
     field: window
     path: rate_limit_info.rateLimitType
-  - record: stream-usage_cap_approaching-allowed_warning
-    field: message
-    path: rate_limit_info.status
   - record: stream-rate_limited-throttled
     field: retry_after
     path: retry_after_ms
@@ -242,6 +235,8 @@ gaps:
   - "No scrubbed fixture yet for `SDKControlElicitationRequest`, `SDKElicitationCompleteMessage`, or `request_user_dialog`; human_input_requested is documented/source-confirmed but omitted from records until an emitted stream/control fixture exists."
   - "The schema enum has `unix_millis` but no duration-millis unit. `retry_after_ms` is a duration in milliseconds; the extraction records it as `unix_millis` only because the sidecar cannot express duration milliseconds."
   - "Current SDK `0.3.201` types list `SDKRateLimitInfo.status` as `allowed | allowed_warning | rejected`, while seeded fixtures include observed `approaching_limit` and legacy `is_throttled`; Claudine must keep compatibility with both shapes."
+  - "Older rate_limit_info.status vocabulary: claudine's parser (protocol/claude.rs resolved_is_throttled) treats status in {limited, blocked} and overageStatus == blocked as throttled; these members were absent from the observed vocabulary and need fixture evidence."
+  - "Top-level resetsAt / reset_at (seconds) spellings are supported by claudine's parser (protocol/claude.rs:338-341, resolved_reset_at) but no fixture exercises either; the usage_capped record consequently has no lifts_at extraction."
 changes: []
 requires_claudine_update: true
 reason: "Claude Code signal detection is codegen-wired and this research adds declarative records for usage-cap warnings, throttling, billing/no-funds, model/auth metadata, token usage cost spellings, and a bespoke session-taint rule."

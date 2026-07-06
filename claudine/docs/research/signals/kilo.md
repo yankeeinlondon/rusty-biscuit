@@ -17,7 +17,7 @@ records:
     distinguish: "Kilo-specific promotion limits are non-retryable APIError payloads and must be classified before generic authentication or retry records."
     vocabulary: ["PROMOTION_MODEL_LIMIT_REACHED", "PAID_MODEL_AUTH_REQUIRED"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/kilo/stream-session-error-promotion-limit.json
+    evidence: ./fixtures/kilo/stream-session-error-promotion-limit.json
   - id: stream-no_funds-gateway-402
     signal: no_funds
     source: stream
@@ -30,7 +30,7 @@ records:
     distinguish: "Gateway balance failures are billing failures, not rate limits; the documented HTTP 402 body is preserved inside the assistant APIError responseBody."
     vocabulary: ["402", "Insufficient balance"]
     confidence: documented
-    evidence: claudine/docs/research/signals/fixtures/kilo/stream-session-error-insufficient-balance.json
+    evidence: ./fixtures/kilo/stream-session-error-insufficient-balance.json
   - id: stream-auth_invalid-paid-model-auth-required
     signal: auth_invalid
     source: stream
@@ -43,7 +43,7 @@ records:
     distinguish: "Paid-model sign-in failures are Kilo APIError response bodies; they are different from usage caps because the code asks the user to authenticate rather than wait or add credits."
     vocabulary: ["PAID_MODEL_AUTH_REQUIRED", "PROMOTION_MODEL_LIMIT_REACHED"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/kilo/stream-session-error-paid-auth-required.json
+    evidence: ./fixtures/kilo/stream-session-error-paid-auth-required.json
   - id: stream-rate_limited-status-retry
     signal: rate_limited
     source: stream
@@ -56,7 +56,7 @@ records:
     distinguish: "The status channel is a generic retry surface; classify it as rate-limited only when the provider-supplied retry message names a rate limit."
     vocabulary: ["idle", "retry", "busy", "offline"]
     confidence: observed
-    evidence: claudine/docs/research/signals/fixtures/kilo/stream-session-status-rate-limit.json
+    evidence: ./fixtures/kilo/stream-session-status-rate-limit.json
   - id: stream-provider_overloaded-status-retry
     signal: provider_overloaded
     source: stream
@@ -69,7 +69,7 @@ records:
     distinguish: "The status channel is a generic retry surface; overload classification depends on overload wording in the retry message."
     vocabulary: ["idle", "retry", "busy", "offline"]
     confidence: observed
-    evidence: claudine/docs/research/signals/fixtures/kilo/stream-session-status-overloaded.json
+    evidence: ./fixtures/kilo/stream-session-status-overloaded.json
   - id: stream-generation_retried
     signal: generation_retried
     source: stream
@@ -82,7 +82,7 @@ records:
     distinguish: "This is the structural retry event emitted by the experimental event system; status.retry is the UI status side-channel for the same retry period."
     vocabulary: ["session.next.retried"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/kilo/stream-session-retried.json
+    evidence: ./fixtures/kilo/stream-session-retried.json
   - id: stream-human_input_requested-offline
     signal: human_input_requested
     source: stream
@@ -95,7 +95,7 @@ records:
     distinguish: "Kilo added the `offline` status variant with a question request id; this is a reserved Claudine signal because it means progress is blocked on a user answer."
     vocabulary: ["idle", "retry", "busy", "offline"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/kilo/stream-session-status-offline-question.json
+    evidence: ./fixtures/kilo/stream-session-status-offline-question.json
   - id: stream-interrupted-aborted
     signal: interrupted
     source: stream
@@ -108,7 +108,7 @@ records:
     distinguish: "Manual aborts are represented as MessageAbortedError and are intentionally suppressed by Kilo notification code; classify them as interruptions, not provider failures."
     vocabulary: ["MessageAbortedError", "APIError", "AuthError", "OutputLengthError", "ContextOverflowError", "StructuredOutputError"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/kilo/stream-session-error-aborted.json
+    evidence: ./fixtures/kilo/stream-session-error-aborted.json
   - id: stream-model_resolved-model-switched
     signal: model_resolved
     source: stream
@@ -121,7 +121,7 @@ records:
     distinguish: "Model-switched events carry the selected provider/model/variant for the session. They do not prove a fallback unless compared with an earlier requested model."
     vocabulary: ["session.next.model.switched"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/kilo/stream-model-switched.json
+    evidence: ./fixtures/kilo/stream-model-switched.json
   - id: stream-tokens_consumed-step-ended
     signal: tokens_consumed
     source: stream
@@ -134,7 +134,7 @@ records:
     distinguish: "Step-ended events are the streaming metering surface; stored step-finish parts are the persisted equivalent."
     vocabulary: ["session.next.step.ended"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/kilo/stream-session-step-ended.json
+    evidence: ./fixtures/kilo/stream-session-step-ended.json
   - id: sqlite-tokens_consumed-step-finish
     signal: tokens_consumed
     source: sqlite
@@ -147,7 +147,7 @@ records:
     distinguish: "Stored step-finish parts are persisted token/cost metering rows; session.next.step.ended is the live event equivalent."
     vocabulary: ["step-finish"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/kilo/sqlite-part-step-finish.json
+    evidence: ./fixtures/kilo/sqlite-part-step-finish.json
   - id: sqlite-model_resolved-step-finish-routed
     signal: model_resolved
     source: sqlite
@@ -160,7 +160,7 @@ records:
     distinguish: "Kilo writes routed auto-model resolution onto step-finish parts when provider metadata reveals the concrete model; this is not a fallback signal by itself."
     vocabulary: ["step-finish"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/kilo/sqlite-part-step-finish.json
+    evidence: ./fixtures/kilo/sqlite-part-step-finish.json
   - id: sqlite-interrupted-aborted
     signal: interrupted
     source: sqlite
@@ -173,7 +173,7 @@ records:
     distinguish: "Persisted assistant messages with MessageAbortedError are interrupted sessions, not failed provider responses."
     vocabulary: ["MessageAbortedError", "APIError", "AuthError", "OutputLengthError", "ContextOverflowError", "StructuredOutputError"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/kilo/sqlite-message-aborted.json
+    evidence: ./fixtures/kilo/sqlite-message-aborted.json
 extractions:
   - record: stream-usage_capped-promotion-limit
     field: message
@@ -306,6 +306,9 @@ gaps:
   - "PermissionDeniedError carries ruleset data and the originating request carries permission keys such as `read` and `edit`; mapping that to `permission_denied_read` versus `permission_denied_write` needs cross-record/tool context, so no declarative record is emitted here."
   - "Kilo auto models can resolve to concrete routed models, and documentation says Efficient can fall back to Balanced, but no shipped first-class model_fallback event was found in the inspected source."
   - "Session resumption is supported operationally through stored sessions, children/forks, and editor-owned server recovery, but no explicit `session_resumable` signal payload was found."
+  - "session.next.* records (generation_retried, tokens_consumed step-ended, model_resolved model-switched) are gated behind flags.experimentalEventSystem (processor.ts dual-write) — default installs may never emit them."
+  - "Base.timestamp is V2Schema.DateTimeUtcFromMillis (encoded epoch-millis) while the runtime publishes a DateTime — whether the SSE wire carries ISO or millis is unpinned; the occurred_at extraction's unit: iso8601 is plausible but unverified."
+  - "step-finish rows carry both tokens_consumed and model_resolved payloads; under group-level first-match-wins the sqlite-model_resolved-step-finish-routed record (priority 20) is unreachable behind sqlite-tokens_consumed-step-finish (priority 10) — needs the per-signal evaluation ruling."
 changes: []
 requires_claudine_update: true
 reason: "Kilo exposes new source-code-backed stream and SQLite signal records that Claudine's generated detection catalog does not currently include."

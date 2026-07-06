@@ -19,14 +19,14 @@ records:
     vocabulary: ["init"]
     since: "0.1.20"
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/gemini/init-model-resolved.jsonl
+    evidence: ./fixtures/gemini/init-model-resolved.jsonl
     notes: "The model can be an alias/router such as `auto-gemini-3`; per-model usage in the terminal result is needed to learn which concrete models served the run."
   - id: stream-tokens_consumed-result-stats
     signal: tokens_consumed
     source: stream
     locator: "type=result"
     detection: declarative
-    priority: 20
+    priority: 30
     match_path: stats.total_tokens
     match_op: regex
     match_value: "^[0-9]+$"
@@ -34,20 +34,20 @@ records:
     vocabulary: ["result"]
     since: "0.1.20"
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/gemini/result-usage-stats.jsonl
+    evidence: ./fixtures/gemini/result-usage-stats.jsonl
   - id: stream-turn_limit_reached-result-error-type
     signal: turn_limit_reached
     source: stream
     locator: "type=result,status=error"
     detection: declarative
-    priority: 30
+    priority: 20
     match_path: error.type
     match_op: in
     match_values: ["FatalTurnLimitedError", "FatalTurnLimited"]
     distinguish: "This is Gemini CLI's configured max-session-turns failure on the terminal `result` event. It is distinct from nonfatal `error` events such as loop warnings because the result status is `error` and the nested error type names a fatal turn-limit condition."
     vocabulary: ["FatalTurnLimitedError", "FatalTurnLimited"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/gemini/result-turn-limit.jsonl
+    evidence: ./fixtures/gemini/result-turn-limit.jsonl
 extractions:
   - record: stream-model_resolved-init
     field: model

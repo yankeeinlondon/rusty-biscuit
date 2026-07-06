@@ -19,7 +19,7 @@ records:
     vocabulary: ["init"]
     since: "0.19.6"
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/qwen/system-init-model-version.jsonl
+    evidence: ./fixtures/qwen/system-init-model-version.jsonl
   - id: stream-model_resolved-system-session_start
     signal: model_resolved
     source: stream
@@ -32,7 +32,7 @@ records:
     distinguish: "This covers documented/observed session-start system records that carry `model` at top level. It is distinct from current headless `subtype=init` and from dual-output capability handshakes where session metadata is nested under `data`."
     vocabulary: ["session_start"]
     confidence: observed
-    evidence: claudine/docs/research/signals/fixtures/qwen/system-session-start-model.jsonl
+    evidence: ./fixtures/qwen/system-session-start-model.jsonl
   - id: stream-model_resolved-init-legacy
     signal: model_resolved
     source: stream
@@ -45,7 +45,7 @@ records:
     distinguish: "This compatibility spelling appears in the seeded Qwen corpus and Claudine's existing Qwen parser. Current upstream `v0.19.6` headless output uses `system/subtype=init` instead."
     vocabulary: ["init"]
     confidence: observed
-    evidence: claudine/docs/research/signals/fixtures/qwen/init-model.jsonl
+    evidence: ./fixtures/qwen/init-model.jsonl
   - id: stream-rate_limited-error-type
     signal: rate_limited
     source: stream
@@ -58,7 +58,7 @@ records:
     distinguish: "This is the observed Qwen error envelope with a structured `rate_limit` discriminator. Current source has rate-limit classifiers, but ordinary headless failures more often surface as terminal `result` errors or stderr diagnostics."
     vocabulary: ["rate_limit"]
     confidence: observed
-    evidence: claudine/docs/research/signals/fixtures/qwen/error-rate-limit.jsonl
+    evidence: ./fixtures/qwen/error-rate-limit.jsonl
   - id: stream-auth_invalid-result-missing-api-key
     signal: auth_invalid
     source: stream
@@ -72,7 +72,7 @@ records:
     vocabulary: ["error_during_execution"]
     since: "0.19.6"
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/qwen/result-auth-missing-api-key.jsonl
+    evidence: ./fixtures/qwen/result-auth-missing-api-key.jsonl
   - id: stream-tokens_consumed-result-usage
     signal: tokens_consumed
     source: stream
@@ -86,7 +86,7 @@ records:
     vocabulary: ["result", "success", "error_during_execution"]
     since: "0.19.6"
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/qwen/result-usage.jsonl
+    evidence: ./fixtures/qwen/result-usage.jsonl
   - id: stream-tokens_consumed-summary-token_usage
     signal: tokens_consumed
     source: stream
@@ -99,18 +99,18 @@ records:
     distinguish: "This compatibility spelling uses `summary.token_usage` rather than current `result.usage`. It should not shadow the current result record."
     vocabulary: ["summary"]
     confidence: observed
-    evidence: claudine/docs/research/signals/fixtures/qwen/summary-token-usage.jsonl
+    evidence: ./fixtures/qwen/summary-token-usage.jsonl
   - id: stream-runaway_repetition-result-loop
     signal: runaway_repetition
     source: stream
     locator: "type=result,is_error=true"
     detection: bespoke
-    priority: 80
+    priority: 55
     distinguish: "Qwen has native loop detectors for repeated tool calls, chanting text, repetitive thoughts, read loops, stagnation, and tool-call caps. The terminal stream only carries a human message; classification should parse the loop type and treat this as provider-native guard output, not as Claudine's own guard firing."
     vocabulary: ["CONSECUTIVE_IDENTICAL_TOOL_CALLS", "CHANTING_IDENTICAL_SENTENCES", "REPETITIVE_THOUGHTS", "READ_FILE_LOOP", "ACTION_STAGNATION", "SHELL_COMMAND_STAGNATION", "GLOBAL_TOOL_CALL_DUPLICATE", "ALTERNATING_TOOL_CALL_PATTERN", "TURN_TOOL_CALL_CAP", "INVALID_TOOL_PARAMS_STAGNATION"]
     since: "0.19.6"
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/qwen/result-loop-detected.jsonl
+    evidence: ./fixtures/qwen/result-loop-detected.jsonl
 extractions:
   - record: stream-model_resolved-system-init
     field: model
@@ -144,14 +144,6 @@ extractions:
     field: output
     path: usage.output_tokens
     unit: tokens
-  - record: stream-tokens_consumed-result-usage
-    field: cache_read
-    path: usage.cache_read_input_tokens
-    unit: tokens
-  - record: stream-tokens_consumed-result-usage
-    field: total
-    path: usage.total_tokens
-    unit: tokens
   - record: stream-tokens_consumed-summary-token_usage
     field: input
     path: token_usage.input_tokens
@@ -159,14 +151,6 @@ extractions:
   - record: stream-tokens_consumed-summary-token_usage
     field: output
     path: token_usage.output_tokens
-    unit: tokens
-  - record: stream-tokens_consumed-summary-token_usage
-    field: cache_read
-    path: token_usage.cache_read_input_tokens
-    unit: tokens
-  - record: stream-tokens_consumed-summary-token_usage
-    field: total
-    path: token_usage.total_tokens
     unit: tokens
 bespoke_rationale:
   - "stream-runaway_repetition-result-loop: this maps Qwen's provider-native loop detector to Claudine's guard taxonomy. The stream carries a formatted prose message, and reliable extraction of which native loop detector fired requires parsing text and correlating it with Qwen's `LoopType` vocabulary rather than a single stable discriminator path."
@@ -180,6 +164,8 @@ gaps:
   - "Qwen's `control_request` stream messages can request `can_use_tool` decisions in SDK/stream-json control mode, but this is a permission mediation channel rather than Claudine's reserved `human_input_requested` signal. No human-input prompt record is emitted."
   - "Qwen native cancellation, max-session-turns, max-wall-time, and max-tool-calls use process exit paths and stderr/JSON-mode error handling. `stream-json` does not consistently emit terminal result envelopes for all of these paths, so `interrupted`, `turn_limit_reached`, `timeout`, and `runaway_volume` remain wrapper/exit-layer gaps."
   - "The compatibility `init` and `summary` fixtures are proven by the local seeded corpus and Claudine parser support, but current upstream `v0.19.6` headless source favors `system/subtype=init` and `result.usage`. Maintainers should treat the compatibility records as drift tolerance rather than current upstream contract."
+  - "usage.cache_read_input_tokens and usage.total_tokens (and the summary.token_usage equivalents) are source-confirmed optional fields with no fixture evidence; extractions deferred until a fixture carries them."
+  - "claudine's parser (protocol/qwen.rs:66-80) accepts system/subtype=session_start and legacy init but ignores the current upstream system/subtype=init — the priority-10 record requires a parser change to be consumable."
 changes: []
 requires_claudine_update: true
 reason: "Qwen signal detection is codegen-wired and this research adds Qwen stream records for model resolution, rate limits, auth preflight failures, token metering, and a native loop-guard catalog entry while documenting first-match-wins and stream-projection gaps that generated detection must respect."

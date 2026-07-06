@@ -18,7 +18,7 @@ records:
     distinguish: "This is Goose's explicit credits-exhausted system notification, produced from `ProviderError::CreditsExhausted`. It is stronger than matching provider prose for billing or quota text."
     vocabulary: ["thinkingMessage", "inlineMessage", "creditsExhausted"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/goose/stream-credits-exhausted.jsonl
+    evidence: ./fixtures/goose/stream-credits-exhausted.jsonl
   - id: stream-auth_invalid-provider-error-text
     signal: auth_invalid
     source: stream
@@ -31,7 +31,7 @@ records:
     distinguish: "Goose catches most provider errors inside the agent loop and emits assistant text. This record keys on Goose's `ProviderError::Authentication` display prefix inside Goose's fixed catch-all wrapper, not provider-specific wording."
     vocabulary: ["Authentication error", "Context length exceeded", "Rate limit exceeded", "Server error", "Network error", "Request failed", "Execution error", "Usage data error", "Unsupported operation", "Endpoint not found (404)", "Credits exhausted", "Provider refused request"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/goose/stream-authentication-error-message.jsonl
+    evidence: ./fixtures/goose/stream-authentication-error-message.jsonl
   - id: stream-rate_limited-provider-error-text
     signal: rate_limited
     source: stream
@@ -44,7 +44,7 @@ records:
     distinguish: "This is the typed `ProviderError::RateLimitExceeded` display string after Goose wraps it in assistant text. It differs from usage caps and no-funds because Goose has no usage-cap warning event and credits exhaustion has a dedicated system notification."
     vocabulary: ["Authentication error", "Context length exceeded", "Rate limit exceeded", "Server error", "Network error", "Request failed", "Execution error", "Usage data error", "Unsupported operation", "Endpoint not found (404)", "Credits exhausted", "Provider refused request"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/goose/stream-rate-limit-error-message.jsonl
+    evidence: ./fixtures/goose/stream-rate-limit-error-message.jsonl
   - id: stream-provider_overloaded-server-error-text
     signal: provider_overloaded
     source: stream
@@ -57,7 +57,7 @@ records:
     distinguish: "Goose normalizes provider 5xx-style failures to `ProviderError::ServerError`. It does not expose an overload-specific enum, so this is a coarse transient provider-infrastructure signal."
     vocabulary: ["Authentication error", "Context length exceeded", "Rate limit exceeded", "Server error", "Network error", "Request failed", "Execution error", "Usage data error", "Unsupported operation", "Endpoint not found (404)", "Credits exhausted", "Provider refused request"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/goose/stream-server-error-message.jsonl
+    evidence: ./fixtures/goose/stream-server-error-message.jsonl
   - id: stream-retries_exhausted-recipe
     signal: retries_exhausted
     source: stream
@@ -70,7 +70,7 @@ records:
     distinguish: "This is Goose recipe retry exhaustion from `RetryManager`, not an HTTP/provider retry budget. It appears as assistant text after success checks fail too many times."
     vocabulary: ["Skipped", "MaxAttemptsReached", "SuccessChecksPassed", "Retried"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/goose/stream-retries-exhausted-message.jsonl
+    evidence: ./fixtures/goose/stream-retries-exhausted-message.jsonl
   - id: stream-tokens_consumed-complete
     signal: tokens_consumed
     source: stream
@@ -83,7 +83,7 @@ records:
     distinguish: "`complete` is the terminal `stream-json` event and carries accumulated token totals when Goose can read the session. It is not an error or provider status frame."
     vocabulary: ["message", "notification", "error", "complete"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/goose/stream-complete-usage.jsonl
+    evidence: ./fixtures/goose/stream-complete-usage.jsonl
   - id: stream-session_tainted-error-then-complete
     signal: session_tainted
     source: stream
@@ -96,7 +96,7 @@ records:
     distinguish: "In `stream-json`, `handle_agent_error` can emit an `error` frame, break the loop, and the outer code still emits `complete`. Correct outcome classification requires remembering the earlier error."
     vocabulary: ["message", "notification", "error", "complete"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/goose/stream-error-then-complete.jsonl
+    evidence: ./fixtures/goose/stream-error-then-complete.jsonl
   - id: sqlite-tokens_consumed-usage_ledger
     signal: tokens_consumed
     source: sqlite
@@ -109,7 +109,7 @@ records:
     distinguish: "The `usage_ledger` table is Goose's durable per-message usage ledger. It differs from the stream `complete` event because it can include model, cache-token, cost, and compaction fields for historical rows."
     vocabulary: ["provider_reported", "estimated", "carried_forward"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/goose/sqlite-usage-ledger-row.json
+    evidence: ./fixtures/goose/sqlite-usage-ledger-row.json
 extractions:
   - record: stream-no_funds-credits_exhausted
     field: message

@@ -18,7 +18,7 @@ records:
     distinguish: "This is Codex's account/session usage-cap copy on a failed turn. It must win over generic `rate_limit` records because Codex also classifies the same payload as a rate-limit-shaped error."
     vocabulary: ["rate_limit"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/codex/turn-failed-usage-limit.jsonl
+    evidence: ./fixtures/codex/turn-failed-usage-limit.jsonl
     notes: "The current Codex source formats `UsageLimitReachedError` as usage-limit prose; the seeded fixture preserves the nested compatibility shape Claudine already parses."
   - id: stream-usage_capped-error-message
     signal: usage_capped
@@ -32,7 +32,7 @@ records:
     distinguish: "This catches the duplicate top-level terminal error emitted after the `turn.failed` usage-cap payload. It is more specific than generic `error_type=rate_limit`."
     vocabulary: ["rate_limit"]
     confidence: observed
-    evidence: claudine/docs/research/signals/fixtures/codex/turn-failed-usage-limit.jsonl
+    evidence: ./fixtures/codex/turn-failed-usage-limit.jsonl
   - id: stream-rate_limited-error_type
     signal: rate_limited
     source: stream
@@ -45,7 +45,7 @@ records:
     distinguish: "This is a generic rate-limit stream error such as `Too many requests`; usage-cap wording is handled by the lower-priority-number usage-capped records first."
     vocabulary: ["rate_limit"]
     confidence: observed
-    evidence: claudine/docs/research/signals/fixtures/codex/error-rate-limit.jsonl
+    evidence: ./fixtures/codex/error-rate-limit.jsonl
   - id: stream-tokens_consumed-turn_completed
     signal: tokens_consumed
     source: stream
@@ -59,7 +59,8 @@ records:
     vocabulary: ["turn.completed"]
     since: rust-v0.142.5
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/codex/turn-completed-usage-reasoning-docs.jsonl
+    evidence: ./fixtures/codex/turn-completed-usage-reasoning-docs.jsonl
+    notes: "Usage shape source-confirmed against exec_events.rs at rust-v0.142.5; the evidence fixture line is docs-sourced (developers.openai.com), so the fixture proves the documented example, the source citation proves the shape."
   - id: stream-session_resumable-thread_started
     signal: session_resumable
     source: stream
@@ -72,7 +73,7 @@ records:
     distinguish: "`thread.started.thread_id` is the identifier accepted by `codex exec resume <SESSION_ID>`; it is a resumability affordance, not a success or usage signal."
     vocabulary: ["thread.started"]
     confidence: documented
-    evidence: claudine/docs/research/signals/fixtures/codex/thread-started-docs.jsonl
+    evidence: ./fixtures/codex/thread-started-docs.jsonl
 extractions:
   - record: stream-usage_capped-turn_failed-message
     field: message

@@ -18,7 +18,7 @@ records:
     distinguish: "Pi's stock JSONL stream has no quota enum. This record catches quota/account-limit provider failures only after higher-priority non-retryable usage-cap text has been checked and before generic rate-limit retry text."
     vocabulary: ["stop", "length", "toolUse", "error", "aborted"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/pi/stream-usage-capped-quota.jsonl
+    evidence: ./fixtures/pi/stream-usage-capped-quota.jsonl
   - id: stream-no_funds-billing
     signal: no_funds
     source: stream
@@ -31,7 +31,7 @@ records:
     distinguish: "Pi's retry classifier treats billing text as non-retryable provider-limit exhaustion. Keep this before generic retry/rate-limit records because billing failures are account funding problems, not transient throttles."
     vocabulary: ["stop", "length", "toolUse", "error", "aborted"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/pi/stream-no-funds-billing.jsonl
+    evidence: ./fixtures/pi/stream-no-funds-billing.jsonl
   - id: stream-auth_invalid-no-api-key
     signal: auth_invalid
     source: stream
@@ -44,7 +44,7 @@ records:
     distinguish: "This is Pi's pre-request auth guidance for API-key providers. It is emitted as an assistant error message in JSON mode, not as a typed auth event."
     vocabulary: ["stop", "length", "toolUse", "error", "aborted"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/pi/stream-auth-invalid-no-api-key.jsonl
+    evidence: ./fixtures/pi/stream-auth-invalid-no-api-key.jsonl
   - id: stream-auth_invalid-oauth
     signal: auth_invalid
     source: stream
@@ -57,7 +57,7 @@ records:
     distinguish: "This is Pi's OAuth/stored-credential failure text. It is distinct from missing API-key guidance and asks the user to re-run `/login`."
     vocabulary: ["stop", "length", "toolUse", "error", "aborted"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/pi/stream-auth-invalid-oauth.jsonl
+    evidence: ./fixtures/pi/stream-auth-invalid-oauth.jsonl
   - id: stream-rate_limited-message
     signal: rate_limited
     source: stream
@@ -70,7 +70,7 @@ records:
     distinguish: "Pi classifies `rate.?limit`, `too many requests`, and HTTP 429 text as retryable provider errors. This record intentionally comes after quota/billing records because Pi's own retry classifier excludes account-limit strings from retry."
     vocabulary: ["stop", "length", "toolUse", "error", "aborted"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/pi/stream-rate-limited-message.jsonl
+    evidence: ./fixtures/pi/stream-rate-limited-message.jsonl
   - id: stream-provider_overloaded-message
     signal: provider_overloaded
     source: stream
@@ -83,7 +83,7 @@ records:
     distinguish: "Provider overload is one member of Pi's retryable provider-error text classifier. It is separated from rate-limit text so Claudine can surface provider capacity failures distinctly."
     vocabulary: ["stop", "length", "toolUse", "error", "aborted"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/pi/stream-provider-overloaded-message.jsonl
+    evidence: ./fixtures/pi/stream-provider-overloaded-message.jsonl
   - id: stream-interrupted-aborted
     signal: interrupted
     source: stream
@@ -96,7 +96,7 @@ records:
     distinguish: "Assistant `stopReason=aborted` is Pi's stream-level cancellation result. Process-level SIGTERM/SIGHUP in print mode can exit before a JSON event is emitted, so wrappers still need exit handling."
     vocabulary: ["stop", "length", "toolUse", "error", "aborted"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/pi/stream-interrupted-aborted.jsonl
+    evidence: ./fixtures/pi/stream-interrupted-aborted.jsonl
   - id: stream-tokens_consumed-message_end
     signal: tokens_consumed
     source: stream
@@ -109,7 +109,7 @@ records:
     distinguish: "Assistant `message_end` carries the finalized per-response `Usage` object. It should run after error-class records so zero-usage provider failures are not reduced to token metering."
     vocabulary: ["message_end"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/pi/stream-message-end-usage.jsonl
+    evidence: ./fixtures/pi/stream-message-end-usage.jsonl
   - id: stream-generation_retried-auto_retry_start
     signal: generation_retried
     source: stream
@@ -122,7 +122,7 @@ records:
     distinguish: "Pi emits this before sleeping and restarting a retryable assistant failure. It is wrapper-level retry, not a provider-internal retry hidden inside an SDK."
     vocabulary: ["auto_retry_start"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/pi/stream-auto-retry-start.jsonl
+    evidence: ./fixtures/pi/stream-auto-retry-start.jsonl
   - id: stream-retries_exhausted-auto_retry_end
     signal: retries_exhausted
     source: stream
@@ -132,7 +132,7 @@ records:
     distinguish: "A failed `auto_retry_end` only means the retry sequence ended unsuccessfully. Correctly classifying exhausted budget requires correlating the prior `auto_retry_start.attempt`, `maxAttempts`, and whether the final error is not `Retry cancelled`."
     vocabulary: ["auto_retry_end"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/pi/stream-auto-retry-exhausted.jsonl
+    evidence: ./fixtures/pi/stream-auto-retry-exhausted.jsonl
   - id: session_log-model_resolved-model_change
     signal: model_resolved
     source: session_log
@@ -145,7 +145,7 @@ records:
     distinguish: "Session `model_change` entries persist explicit model selection. They are durable log records, not live stream events; assistant messages can also imply the active model but overlap with token usage."
     vocabulary: ["model_change"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/pi/session-log-model-change.jsonl
+    evidence: ./fixtures/pi/session-log-model-change.jsonl
   - id: session_log-tokens_consumed-message
     signal: tokens_consumed
     source: session_log
@@ -158,7 +158,7 @@ records:
     distinguish: "Pi persists assistant messages to session JSONL on `message_end`. This is retrospective token metering and should not replace the live stream record when Claudine is supervising a running process."
     vocabulary: ["message"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/pi/session-log-message-usage.jsonl
+    evidence: ./fixtures/pi/session-log-message-usage.jsonl
   - id: session_log-session_resumable-header
     signal: session_resumable
     source: session_log
@@ -171,20 +171,20 @@ records:
     distinguish: "A Pi session file begins with a session header carrying an id, timestamp, and cwd. The header proves a persisted session exists; actual resume eligibility can still depend on CLI mode and file availability."
     vocabulary: ["session"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/pi/session-log-header-resumable.jsonl
+    evidence: ./fixtures/pi/session-log-header-resumable.jsonl
   - id: stream-human_input_requested-extension-ui
     signal: human_input_requested
     source: stream
     locator: "RPC stdout type=extension_ui_request"
     detection: declarative
     priority: 110
-    match_path: type
-    match_op: eq
-    match_value: "extension_ui_request"
+    match_path: method
+    match_op: in
+    match_values: [select, confirm, input, editor]
     distinguish: "Only RPC mode exposes extension UI requests as JSONL stdout records. Stock `--mode json` print mode streams AgentSessionEvent records and does not include this RPC-only envelope."
     vocabulary: ["select", "confirm", "input", "editor", "notify", "setStatus", "setWidget"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/pi/rpc-extension-ui-request.jsonl
+    evidence: ./fixtures/pi/rpc-extension-ui-request.jsonl
   - id: exit-auth_invalid-no-models
     signal: auth_invalid
     source: exit
@@ -197,7 +197,7 @@ records:
     distinguish: "Non-interactive startup exits before a session stream is available when no authenticated/configured model can be selected. The wrapper must classify the exit payload rather than wait for JSONL."
     vocabulary: ["1"]
     confidence: source_code
-    evidence: claudine/docs/research/signals/fixtures/pi/exit-no-models-available.json
+    evidence: ./fixtures/pi/exit-no-models-available.json
 extractions:
   - record: stream-usage_capped-quota
     field: message
@@ -319,6 +319,7 @@ gaps:
   - "Pi has no built-in permission prompt or deny stream. Tool errors can appear in `tool_execution_end` with `isError:true`, but there is no stable read-versus-write permission-denied discriminator."
   - "Pi's internal provider request timeout and subprocess signal handlers can end a run without a JSONL timeout signal. Claudine should keep its own `timeout` and `step_timeout` guards."
   - "RPC `extension_ui_request` is recorded as `human_input_requested`, but this is RPC-mode stdout rather than ordinary `--mode json` print-mode output. Claudine must decide whether a Pi integration uses RPC mode before enabling this record."
+  - "Fixture provenance: the two auth fixtures and exit-no-models-available.json carry verbatim Pi source message templates; stream-usage-capped-quota / stream-no-funds-billing / stream-rate-limited-message / stream-provider-overloaded-message / rpc-extension-ui-request use envelope shapes faithful to the cited source types but exemplar provider text — shape-synthesized, not live captures."
 changes: []
 requires_claudine_update: true
 reason: "Pi signal detection is codegen-wired and this research adds Pi records for JSONL stream message errors, retry lifecycle events, token usage, session-log model and resume metadata, RPC extension input requests, and startup exit auth failures."
