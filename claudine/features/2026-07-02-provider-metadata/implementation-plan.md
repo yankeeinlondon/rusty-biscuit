@@ -291,6 +291,36 @@ topic's behavior gaps carry a disposition (no surfaced-only flags remain).
    (OpenCode `--print-logs`) from diagnostic stderr.
 5. Harvest v1 (unmatched error/warning events only, scrubbed, capped) ships last.
 
+> **Phase E items 1–3 complete (2026-07-05).** Taxonomy: `SignalKind` (29, frozen;
+> `human_input_requested`/`session_resumable` reserved per ruling) + `SignalEvent` +
+> `SignalSource` (9, incl. `stderr_promoted`/`stderr_diagnostic` split, `acp`, `exit`)
+> in catalog-types (dep floor + chrono, no-clock). Sidecar uses joined flat lists
+> (`records[]` ↔ `extractions[].record`) — SimplifiedSchema rejects nested lists AND
+> `eager` inside inline-object rows, so `evidence: file(required)` with existence
+> deferred to `signals check`. Gen-side mirror test closes three-copy drift. Fleet ran
+> 2026-07-05 (Ken-launched): 9/9 docs schema-valid, 79 records / 179 extractions;
+> per-doc adversarial evaluation + surgical edits applied; evidence paths normalized
+> to document-relative. **Engine-design findings for item-4/5 (E4):** (a) records
+> match JSON scalars via stringified `eq`/`regex` — the compile step must pin a
+> scalar→string coercion rule, and an `exists` operator would retire the `^[0-9]+$`
+> idiom; (b) same-frame multi-signal payloads (claude `init`, kilo `step-finish`,
+> qwen loop-result) starve under group-level first-match-wins — engine should
+> evaluate first-match-wins **per signal kind** within the group, else co-resident
+> signals are unreachable; (c) OpenCode's 8 records match Claudine's own
+> `LogClassification` output ("classification-as-payload") — the five-branch
+> vocabulary logic stays bespoke in errors.rs and the records are enum→signal
+> mappings; needs ratification as the promoted-stderr convention (raw-text matching
+> would need AND/negation the grammar lacks); (d) `Unit` needs `duration_millis`
+> (claude `retry_after_ms`, pi `delayMs` are currently unit-lied/unit-less);
+> (e) cross-fixture overlap assertions must tolerate declared exclusions (claude
+> tokens-vs-billing, goose complete-vs-taint). **Parser-lag findings (code items):**
+> kimi `KimiPromptResult` lacks `steps`, `KimiQuestionRequest` shape predates
+> source's `questions[]`; qwen parser ignores upstream `system/subtype=init`;
+> claude older status vocab `limited`/`blocked` documented. **Open (Ken):** goose
+> corpus ruled fabricated by evaluation (wire-impossible shapes) — disposition
+> pending, alongside the fixture-provenance policy (live-capture-only vs labeled
+> source-shape fixtures; pi/kilo corpora are honest source-shape synthesis).
+
 ## Phase F — model-catalog boundary (parallel track, unchained-ai side)
 
 Per design/model-catalog-boundary.md: identity parser as a lib target in
