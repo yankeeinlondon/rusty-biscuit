@@ -336,6 +336,55 @@ topic's behavior gaps carry a disposition (no surfaced-only flags remain).
 > errors.rs. Known darkmatter quirk surfaced: `md schema validate` resolves
 > frontmatter `file()` references against the CWD, not the document — signals
 > docs only validate from their own directory.
+>
+> **E4 checkpoint rulings (2026-07-06, Ken):** (1) **Compiled tables live in a
+> single generated lib module** — `lib/src/signals/generated.rs`, slug-keyed
+> tables for all 9 roster providers; a hand-written `lib/src/signals/mod.rs`
+> exposes `detection_table(slug)` / `for_provider(Provider)`. Table row types
+> live in catalog-types (gen must not depend on the claudine lib). No
+> ProviderInfo shape change, so the registry+emit+regen-all-7 coupling is not
+> triggered and record churn stays out of data.rs. (2) **kilo/pi records are
+> compiled-but-dormant** — generation-validated (malformed path/regex = error)
+> and replayed by `signals check`, unreachable at wrapper runtime until
+> Phase H adds their enum variants. (3) **`exists` MatchOp added now**
+> (semantics: field present and non-null) — variant + sidecar enum + mirror
+> test + rewrite of the 11 presence-proxy records (10× `^[0-9]+$`-style
+> tokens/cost matches, 1× `^.+$` apiKeySource) in one change. (4) **CI:**
+> claudine-tests.yml gains a claudine-gen matrix row (drift/mirror/provenance
+> tests were previously local-only — hole closed) with `claudine signals
+> check` wired alongside.
+>
+> **E4 complete (2026-07-06, four waves, uncommitted pending review):**
+> T1 `Unit::DurationMillis` + `MatchOp::Exists` + `signal_table` row types in
+> catalog-types; sidecar enums extended; 11 presence-proxy records → `exists`;
+> claude `retry_after` / pi `delay_ms` unit fixes. T2 gen signals stage
+> (`gen/src/signals.rs`): sidecar-validated load, path-grammar/regex/op-value/
+> priority/duplicate gates, byte-stable emission of `lib/src/signals/generated.rs`
+> (9 tables, 78 records / 172 extractions, kilo+pi dormant), catalog.json-style
+> wiring + drift test. T3 engine (`lib/src/signals/`): restricted-JSONPath
+> walker, per-KIND first-match-wins, pinned scalar→string coercion, inclusive
+> since/until with union-until-narrowed version selection, canonical
+> kind→SignalEvent builder (corpus field renames: `lifts_at`→`resets_at`,
+> `model`→`resolved` fleet-wide, kimi `wait`→`retry_after`/`steps`→`limit`,
+> pi `delay_ms`→`wait`/`message`→`prompt`), `SignalSink` dedup
+> (CORRELATION_WINDOW 5s, occurrence fold), stream wiring in
+> `run_child_stream_semantic` (one guarded serde_json parse per line;
+> `ProcessResult.signals` carries `Vec<ObservedSignal>` for E5). T4
+> `claudine signals check` (evidence existence, positive replay via the
+> production engine incl. glue-mode `LogClassification::to_signal_payload()`
+> — the E5 shim core; extraction resolution; negative overlap w/
+> `_overlap-exclusions.yaml`, 17 entries; bespoke seam reporting 4 SKIPs) +
+> `signals-check`/`test-gen` recipes + CI matrix row + README. Fleet: 78
+> records, positives 74 / negatives 78 pass, 0 failures; suites 5291/5294
+> (3 known host L2); dispatch inventory unchanged 435/20. **Review items for
+> Ken:** (a) duplicate-gate identity includes the since/until window (else
+> the ratified opencode 1.17.8 twins false-collide); (b) 36 extraction rows
+> carry supplementary fields with no SignalEvent slot (cache_read/cost/
+> provider/session_id/…) — kept as research evidence, builder resolves +
+> debug-logs them; purge would be a new ruling; (c) 15 replay-surfaced
+> overlap exclusions beyond the 2 ratified seeds (all structural cross-kind
+> co-fires); (d) opencode 429 fixtures enriched with providerID/modelID tags
+> real service=llm lines carry (provenance notes updated).
 
 ## Phase F — model-catalog boundary (parallel track, unchained-ai side)
 
