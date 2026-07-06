@@ -117,6 +117,27 @@ pub enum GenError {
     #[error("could not locate a claudine package area (looked for `docs/providers.yaml` upward from `{from}`); pass --area")]
     AreaNotFound { from: PathBuf },
 
+    #[error(
+        "unchained-ai models-catalog artifact missing at `{path}` — the expected-offering \
+         join cannot run without it; produce it with `cargo run -p unchained-ai-gen --bin \
+         emit-catalog` (or `just artifact` in unchained-ai)"
+    )]
+    ArtifactMissing { path: PathBuf },
+
+    #[error(
+        "unchained-ai models-catalog artifact `{path}` declares schema_version {found}, \
+         but this generator consumes schema_version {expected} — update the consumer and \
+         the artifact together (breaking artifact changes bump the version by contract)"
+    )]
+    ArtifactSchemaVersion {
+        path: PathBuf,
+        found: u64,
+        expected: u64,
+    },
+
+    #[error("unchained-ai models-catalog artifact `{path}`: {message}")]
+    ArtifactInvalid { path: PathBuf, message: String },
+
     #[error("signals doc `{path}`: {message}")]
     SignalDocInvalid { path: PathBuf, message: String },
 

@@ -200,6 +200,8 @@ mod tests {
                 "skills".to_string(),
                 json!({ "zeta": 1, "alpha": { "b": 2, "a": 1 } }),
             )]),
+            offering_join: Default::default(),
+            artifact_warning: None,
         }
     }
 

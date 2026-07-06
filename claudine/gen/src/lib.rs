@@ -12,18 +12,22 @@
 //! (spec.md + design/catalog-generation.md).
 
 pub mod apply;
+pub mod artifact;
 pub mod catalog;
 pub mod emit;
 pub mod errors;
 pub mod generate;
 pub mod inputs;
+pub mod offerings;
 pub mod registry;
 pub mod schema_compat;
 pub mod signals;
 
 pub use apply::{ApplyOutcome, DeclinedDrift, Decision, apply_generations, override_snippet};
+pub use artifact::{ArtifactIndex, artifact_path};
 pub use catalog::{build_catalog, catalog_path, check_catalog};
 pub use errors::GenError;
+pub use offerings::OfferingJoinReport;
 pub use generate::{
     CheckOutcome, CoercionSkip, Generation, PROVIDER_SLUGS, Provenance, ResolvedField,
     check_area, committed_data_path, diff_lines, find_area, generate_all, generate_for_area,

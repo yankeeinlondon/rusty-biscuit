@@ -126,6 +126,15 @@ pub enum Coercion {
     /// agent-models `default_models[]` records → the deduplicated,
     /// lexically sorted list of `id` strings.
     DefaultModelsToStaticModels,
+    /// agent-models `default_models[]` records → typed expected-offering
+    /// records sorted by id: classified via the curated table in
+    /// `offerings::classify`, then joined to the unchained-ai
+    /// models-catalog artifact by identity key (`catalog_id`; exact
+    /// lookup only, plan endpoints skip by design).
+    DefaultModelsToExpectedOfferings,
+    /// model-config `local_runners[]` records → offering-source namespace
+    /// records sorted by prefix; a missing key emits an empty list.
+    LocalRunnersToOfferingSources,
     /// agent-models `dynamic_listing.available` → [`ModelCatalogSource`]
     /// expression. `false` maps to `static`; `true` cannot select a
     /// mechanism (the boolean carries no program/args information) and
@@ -211,6 +220,10 @@ impl Coercion {
             Coercion::SkillSupportToBool => "skill_support_to_bool",
             Coercion::StreamProtocolWire => "stream_protocol_wire",
             Coercion::DefaultModelsToStaticModels => "default_models_to_static_models",
+            Coercion::DefaultModelsToExpectedOfferings => {
+                "default_models_to_expected_offerings"
+            }
+            Coercion::LocalRunnersToOfferingSources => "local_runners_to_offering_sources",
             Coercion::DynamicListingToModelCatalogSource => {
                 "dynamic_listing_to_model_catalog_source"
             }
@@ -280,7 +293,7 @@ pub const SKILL_SUPPORT_MEMBERS: &[&str] =
     &["first_class", "partial", "convention_only", "none", "unknown"];
 
 /// The generator-v1 mapping registry, in `ProviderInfo` serialization
-/// order (10 roster + 10 research + 22 facts = 42 fields).
+/// order (10 roster + 12 research + 22 facts = 44 fields).
 pub const REGISTRY: &[RegistryEntry] = &[
     entry(
         "provider",
@@ -538,6 +551,33 @@ pub const REGISTRY: &[RegistryEntry] = &[
         "Compiled-in model id list (deduplicated, lexically sorted research ids)",
     ),
     entry(
+        "expected_offerings",
+        DeclaredSource::Research {
+            topic: "agent-models",
+            path: "default_models",
+        },
+        &[SchemaExpectation::RecordArray {
+            required_fields: &["id"],
+        }],
+        Coercion::DefaultModelsToExpectedOfferings,
+        "Typed expected-offering records, classified and joined to the unchained-ai \
+         models-catalog artifact by identity key",
+    ),
+    RegistryEntry {
+        field: "offering_sources",
+        source: DeclaredSource::Research {
+            topic: "model-config",
+            path: "local_runners",
+        },
+        expected: &[SchemaExpectation::RecordArray {
+            required_fields: &["runner", "integration"],
+        }],
+        coercion: Coercion::LocalRunnersToOfferingSources,
+        optional: true,
+        description: "Offering-source namespaces (local runners) a user can route models \
+                      through beyond the expected set",
+    },
+    entry(
         "model_catalog_source",
         DeclaredSource::Research {
             topic: "agent-models",
@@ -787,9 +827,9 @@ mod tests {
                 .count()
         };
         assert_eq!(count("roster"), 10, "roster rows");
-        assert_eq!(count("research"), 10, "research rows");
+        assert_eq!(count("research"), 12, "research rows");
         assert_eq!(count("facts"), 22, "facts rows");
-        assert_eq!(REGISTRY.len(), 42, "total serialized fields");
+        assert_eq!(REGISTRY.len(), 44, "total serialized fields");
     }
 
     #[test]

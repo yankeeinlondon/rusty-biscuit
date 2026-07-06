@@ -274,6 +274,8 @@ mod tests {
             data_rs: data_rs.to_string(),
             skips: Vec::new(),
             research: BTreeMap::new(),
+            offering_join: Default::default(),
+            artifact_warning: None,
         }
     }
 

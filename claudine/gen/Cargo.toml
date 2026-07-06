@@ -32,6 +32,9 @@ clap = { version = "4.5", features = ["derive"] }
 # Error handling
 thiserror = "2.0"
 
+# Artifact `generated_at` staleness check (RFC3339 parse + now)
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
 # Generate-time compilation check for `match_op: regex` detection records
 regex = "1.11"
 

@@ -309,6 +309,107 @@ pub fn billing_models(
     Ok(render_slice(&elements, level))
 }
 
+/// Offering-class member → the `OfferingClass` variant name.
+fn offering_class_variant(field: &'static str, value: &Value) -> Result<String, GenError> {
+    let member = expect_str(field, value, "an offering-class member")?;
+    match member {
+        known @ ("vendor_api" | "plan_endpoint" | "aggregator" | "local_runner") => {
+            Ok(pascal(known))
+        }
+        other => Err(unmappable(
+            field,
+            format!("`{other}` is not an OfferingClass wire form"),
+        )),
+    }
+}
+
+/// `&[ExpectedOffering { ... }, ...]` from the catalog-shaped
+/// expected-offering records.
+pub fn expected_offerings(
+    field: &'static str,
+    value: &Value,
+    level: usize,
+    ctx: &mut EmitCtx,
+) -> Result<String, GenError> {
+    let records = expect_array(field, value, "the expected-offering list")?;
+    let mut elements = Vec::with_capacity(records.len());
+    for record in records {
+        ctx.import("crate::provider::offering::ExpectedOffering");
+        ctx.import("crate::provider::offering::OfferingClass");
+        let id = expect_str(field, get(field, record, "id")?, "`id`")?;
+        let alias = optional_string_literal(field, get(field, record, "alias")?)?;
+        let is_default = expect_bool(field, get(field, record, "is_default")?, "`is_default`")?;
+        let context_window = match get(field, record, "context_window")? {
+            Value::Null => "None".to_string(),
+            number => format!("Some({})", number_u32(field, number)?),
+        };
+        let class = offering_class_variant(field, get(field, record, "class")?)?;
+        let catalog_id = optional_string_literal(field, get(field, record, "catalog_id")?)?;
+        let inner = indent(level + 2);
+        elements.push(format!(
+            "ExpectedOffering {{\n\
+             {inner}id: {id:?},\n\
+             {inner}alias: {alias},\n\
+             {inner}is_default: {is_default},\n\
+             {inner}context_window: {context_window},\n\
+             {inner}class: OfferingClass::{class},\n\
+             {inner}catalog_id: {catalog_id},\n\
+             {}}}",
+            indent(level + 1)
+        ));
+    }
+    Ok(render_struct_slice(&elements, level))
+}
+
+/// `&[OfferingSource { ... }, ...]` from the catalog-shaped
+/// offering-source records.
+pub fn offering_sources(
+    field: &'static str,
+    value: &Value,
+    level: usize,
+    ctx: &mut EmitCtx,
+) -> Result<String, GenError> {
+    let records = expect_array(field, value, "the offering-source list")?;
+    let mut elements = Vec::with_capacity(records.len());
+    for record in records {
+        ctx.import("crate::provider::offering::OfferingSource");
+        ctx.import("crate::provider::offering::OfferingClass");
+        let prefix = expect_str(field, get(field, record, "prefix")?, "`prefix`")?;
+        let class = offering_class_variant(field, get(field, record, "class")?)?;
+        let api_standard = optional_string_literal(field, get(field, record, "api_standard")?)?;
+        let integration = match get(field, record, "integration")? {
+            Value::Null => "None".to_string(),
+            member => {
+                ctx.import("crate::provider::offering::LocalRunnerIntegration");
+                let member = expect_str(field, member, "`integration`")?;
+                match member {
+                    known @ ("first_class" | "base_url_override" | "proxy_required"
+                    | "unsupported") => {
+                        format!("Some(LocalRunnerIntegration::{})", pascal(known))
+                    }
+                    other => {
+                        return Err(unmappable(
+                            field,
+                            format!("`{other}` is not a LocalRunnerIntegration wire form"),
+                        ));
+                    }
+                }
+            }
+        };
+        let inner = indent(level + 2);
+        elements.push(format!(
+            "OfferingSource {{\n\
+             {inner}prefix: {prefix:?},\n\
+             {inner}class: OfferingClass::{class},\n\
+             {inner}api_standard: {api_standard},\n\
+             {inner}integration: {integration},\n\
+             {}}}",
+            indent(level + 1)
+        ));
+    }
+    Ok(render_struct_slice(&elements, level))
+}
+
 /// Platform-kind member → `PlatformKind::<Variant>` path expression.
 pub fn platform_kind(
     field: &'static str,
@@ -1245,6 +1346,14 @@ pub fn emit_data_file(
     push(
         "static_models",
         str_slice("static_models", lookup("static_models")?, 1)?,
+    );
+    push(
+        "expected_offerings",
+        expected_offerings("expected_offerings", lookup("expected_offerings")?, 1, &mut ctx)?,
+    );
+    push(
+        "offering_sources",
+        offering_sources("offering_sources", lookup("offering_sources")?, 1, &mut ctx)?,
     );
     push(
         "model_catalog_source",

@@ -133,6 +133,7 @@ fn run(area: Option<PathBuf>, command: Command) -> Result<ExitCode, GenError> {
                 }
                 generations.push(generation);
             }
+            report_artifact_warning(&generations);
             match claudine_gen::check_catalog(&area, &generations)? {
                 CheckOutcome::Clean => {
                     println!("catalog.json: clean (inputs match the committed catalog)");
@@ -190,6 +191,7 @@ fn run_generate(
 ) -> Result<ExitCode, GenError> {
     let scope = slug_scope(slug);
     let generations = claudine_gen::generate_all(area)?;
+    report_artifact_warning(&generations);
     // The signals artifact is full-scope like catalog.json: always rebuilt,
     // written through the same per-file confirmation flow.
     let signals = claudine_gen::build_signals(area)?;
@@ -305,11 +307,30 @@ fn resolve_area(area: Option<PathBuf>) -> Result<PathBuf, GenError> {
     }
 }
 
-/// Lists active overrides (with the value they suppress), staleness, and
+/// Prints the models-catalog staleness warning once per run (the warning
+/// is artifact-global, so every generation carries the same one).
+fn report_artifact_warning(generations: &[claudine_gen::Generation]) {
+    if let Some(warning) = generations
+        .iter()
+        .find_map(|generation| generation.artifact_warning.as_deref())
+    {
+        println!("WARNING: {warning}");
+    }
+}
+
+/// Lists active overrides (with the value they suppress), staleness,
 /// coercion skips (input records a coercion was pointed at but dropped —
 /// silent drops would otherwise surface only after the field graduates off
-/// its override).
+/// its override), and expected-offering artifact-join coverage.
 fn report_provenance(generation: &claudine_gen::Generation) {
+    let join = &generation.offering_join;
+    println!(
+        "  expected offerings: {}/{} joined to the models-catalog artifact",
+        join.joined, join.total
+    );
+    for id in &join.unjoined {
+        println!("    unjoined: {id}");
+    }
     for skip in &generation.skips {
         println!(
             "  coercion skipped {} record{} for {} ({}):",

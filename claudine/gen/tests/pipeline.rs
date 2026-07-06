@@ -17,10 +17,14 @@ const TOPICS: &[&str] = &[
     "agent-cli",
     "agent-logging",
     "agent-models",
+    "model-config",
     "non-interactive-sessions",
     "resume",
     "skills",
 ];
+
+/// The unchained-ai artifact's workspace-relative location.
+const ARTIFACT_REL: &str = "unchained-ai/artifacts/models-catalog.json";
 
 /// The real claudine package-area root.
 fn real_area() -> &'static Path {
@@ -34,14 +38,16 @@ struct Fixture {
 }
 
 impl Fixture {
-    /// Copies the real claude inputs into a fresh tempdir area
+    /// Copies the real claude inputs into a fresh workspace-shaped tempdir
     /// (deliberately WITHOUT the overrides file — override behavior is
-    /// exercised explicitly per test).
+    /// exercised explicitly per test). The area lives at `<tmp>/claudine`
+    /// so the workspace-relative unchained-ai artifact resolves at
+    /// `<tmp>/unchained-ai/artifacts/models-catalog.json`.
     fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
         let real = real_area();
         let copy = |rel: &str| {
-            let to = dir.path().join(rel);
+            let to = dir.path().join("claudine").join(rel);
             fs::create_dir_all(to.parent().unwrap()).unwrap();
             fs::copy(real.join(rel), to)
                 .unwrap_or_else(|err| panic!("fixture copy of `{rel}` failed: {err}"));
@@ -52,11 +58,24 @@ impl Fixture {
             copy(&format!("docs/research/{topic}/_schema.yaml"));
             copy(&format!("docs/research/{topic}/claude.md"));
         }
+        let artifact_to = dir.path().join(ARTIFACT_REL);
+        fs::create_dir_all(artifact_to.parent().unwrap()).unwrap();
+        fs::copy(
+            real.parent()
+                .expect("area lives under the workspace root")
+                .join(ARTIFACT_REL),
+            artifact_to,
+        )
+        .unwrap_or_else(|err| panic!("fixture copy of `{ARTIFACT_REL}` failed: {err}"));
         Self { dir }
     }
 
+    fn area(&self) -> PathBuf {
+        self.dir.path().join("claudine")
+    }
+
     fn path(&self, rel: &str) -> PathBuf {
-        self.dir.path().join(rel)
+        self.area().join(rel)
     }
 
     fn append(&self, rel: &str, extra: &str) {
@@ -83,7 +102,7 @@ impl Fixture {
     }
 
     fn generate(&self) -> Result<claudine_gen::Generation, GenError> {
-        generate_for_area(self.dir.path(), "claude")
+        generate_for_area(&self.area(), "claude")
     }
 }
 
@@ -117,6 +136,13 @@ fn pipeline_generates_from_all_declared_sources() {
     assert!(data_rs.contains("    supports_skills: true,\n"));
     assert!(data_rs.contains("    model_catalog_source: ModelCatalogSource::Static,\n"));
     assert!(data_rs.contains("\"ANTHROPIC_MODEL\""));
+    // Research + artifact join: expected offerings carry classification
+    // and identity-key joins; local runners become offering sources.
+    assert!(data_rs.contains("id: \"claude-opus-4-8\","));
+    assert!(data_rs.contains("catalog_id: Some(\"anthropic/claude-opus@4.8\"),"));
+    assert!(data_rs.contains("class: OfferingClass::VendorApi,"));
+    assert!(data_rs.contains("prefix: \"ollama\","));
+    assert!(data_rs.contains("integration: Some(LocalRunnerIntegration::FirstClass),"));
     // Facts-fed values.
     assert!(data_rs.contains("    stream_protocol: Some(StreamProtocol::StreamJson),\n"));
     assert!(data_rs.contains("pub(in crate::provider) static CLAUDE_EVENT_MAPPING"));
@@ -124,6 +150,45 @@ fn pipeline_generates_from_all_declared_sources() {
     // `support`) joined with the facts client/events halves.
     assert!(data_rs.contains("        server_mode: AcpServerMode::Adapter,\n"));
     assert!(data_rs.contains("        client_supported: false,\n"));
+}
+
+/// The unchained-ai artifact is a hard generation input: absence and a
+/// schema_version bump both fail loudly at the pipeline level.
+#[test]
+fn missing_or_mismatched_artifact_fails_loudly() {
+    let fixture = Fixture::new();
+    let artifact_path = fixture.dir.path().join(ARTIFACT_REL);
+
+    let current = format!(
+        "\"schema_version\": {}",
+        claudine_gen::artifact::EXPECTED_SCHEMA_VERSION
+    );
+    let original = fs::read_to_string(&artifact_path).unwrap();
+    let doctored = original.replace(&current, "\"schema_version\": 99");
+    assert_ne!(
+        original, doctored,
+        "fixture artifact does not carry the expected schema_version marker"
+    );
+    fs::write(&artifact_path, doctored).unwrap();
+    let err = fixture.generate().unwrap_err();
+    assert!(
+        matches!(
+            err,
+            GenError::ArtifactSchemaVersion {
+                found: 99,
+                expected: claudine_gen::artifact::EXPECTED_SCHEMA_VERSION,
+                ..
+            }
+        ),
+        "expected ArtifactSchemaVersion, got: {err}"
+    );
+
+    fs::remove_file(&artifact_path).unwrap();
+    let err = fixture.generate().unwrap_err();
+    assert!(
+        matches!(err, GenError::ArtifactMissing { .. }),
+        "expected ArtifactMissing, got: {err}"
+    );
 }
 
 /// Compound `site` records ("A / B") fail the bare-identifier rule; the

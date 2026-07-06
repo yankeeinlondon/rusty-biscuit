@@ -13,14 +13,28 @@ fn real_area() -> &'static Path {
         .expect("gen crate lives under the claudine package area")
 }
 
+/// A workspace-shaped fixture: the copied area lives at `<tmp>/claudine`
+/// so the workspace-relative unchained-ai artifact resolves next to it.
+struct Fixture {
+    _dir: tempfile::TempDir,
+    area: PathBuf,
+}
+
+impl Fixture {
+    fn path(&self) -> &Path {
+        &self.area
+    }
+}
+
 /// Copies every generator input AND committed output for all providers
 /// into a tempdir area (full scope — catalog.json spans every provider).
-fn full_fixture() -> tempfile::TempDir {
+fn full_fixture() -> Fixture {
     let dir = tempfile::tempdir().unwrap();
+    let area = dir.path().join("claudine");
     let real = real_area();
     let copy_dir = |rel: &str| {
         let from = real.join(rel);
-        let to = dir.path().join(rel);
+        let to = area.join(rel);
         fs::create_dir_all(&to).unwrap();
         for entry in fs::read_dir(&from).unwrap() {
             let entry = entry.unwrap();
@@ -30,7 +44,7 @@ fn full_fixture() -> tempfile::TempDir {
         }
     };
     let copy_file = |rel: &str| {
-        let to = dir.path().join(rel);
+        let to = area.join(rel);
         fs::create_dir_all(to.parent().unwrap()).unwrap();
         fs::copy(real.join(rel), to).unwrap();
     };
@@ -43,6 +57,7 @@ fn full_fixture() -> tempfile::TempDir {
         "agent-cli",
         "agent-logging",
         "agent-models",
+        "model-config",
         "non-interactive-sessions",
         "resume",
         "skills",
@@ -56,7 +71,17 @@ fn full_fixture() -> tempfile::TempDir {
     for slug in claudine_gen::PROVIDER_SLUGS {
         copy_file(&format!("lib/src/provider/{slug}/data.rs"));
     }
-    dir
+    let artifact_rel = "unchained-ai/artifacts/models-catalog.json";
+    let artifact_to = dir.path().join(artifact_rel);
+    fs::create_dir_all(artifact_to.parent().unwrap()).unwrap();
+    fs::copy(
+        real.parent()
+            .expect("area lives under the workspace root")
+            .join(artifact_rel),
+        artifact_to,
+    )
+    .unwrap();
+    Fixture { _dir: dir, area }
 }
 
 /// Runs the built binary against `area` with a closed (non-TTY) stdin.

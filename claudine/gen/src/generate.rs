@@ -12,9 +12,11 @@ use claudine_catalog_types::{AcpServerMode, ModelCatalogSource, PlatformKind, Re
 use serde_json::Value;
 use strum::{IntoEnumIterator, VariantNames};
 
+use crate::artifact::{self, ArtifactIndex};
 use crate::emit::{self, FieldValue};
 use crate::errors::GenError;
 use crate::inputs::{self, ProviderInputs};
+use crate::offerings::{self, OfferingJoinReport};
 use crate::registry::{Coercion, DeclaredSource, REGISTRY, RegistryEntry, entry_for};
 use crate::schema_compat;
 
@@ -74,6 +76,12 @@ pub struct Generation {
     /// Topic → schema-validated, coerced frontmatter — the superset the
     /// committed `catalog.json` projects (mapped and unmapped fields).
     pub research: std::collections::BTreeMap<String, Value>,
+    /// Expected-offering artifact-join coverage for the report.
+    pub offering_join: OfferingJoinReport,
+    /// The artifact's staleness warning, when its `generated_at` exceeds
+    /// the ContentPolicy max age (identical across providers — the
+    /// report prints it once).
+    pub artifact_warning: Option<String>,
 }
 
 /// Every generated provider slug, `PROVIDERS_DISPLAY_ORDER` order. The
@@ -138,6 +146,9 @@ pub fn generate_for_area(area: &Path, slug: &str) -> Result<Generation, GenError
         .collect();
     let topics: Vec<&str> = topics.into_iter().collect();
     let inputs = inputs::load(area, slug, &topics)?;
+    // The expected-offering join needs the committed unchained-ai
+    // artifact; its absence or schema mismatch fails generation loudly.
+    let artifact = artifact::load(area)?;
 
     // Gate 1: schema<->catalog enum-subset / shape compatibility.
     let mut sidecars = std::collections::BTreeMap::new();
@@ -153,7 +164,7 @@ pub fn generate_for_area(area: &Path, slug: &str) -> Result<Generation, GenError
     check_collisions(&inputs)?;
 
     // Value mapping + override application, then whole-file emission.
-    let (fields, skips) = resolve_fields(&inputs)?;
+    let (fields, skips, offering_join) = resolve_fields(&inputs, &artifact)?;
     let values: Vec<FieldValue<'_>> = fields
         .iter()
         .map(|f| FieldValue {
@@ -178,6 +189,8 @@ pub fn generate_for_area(area: &Path, slug: &str) -> Result<Generation, GenError
         data_rs,
         skips,
         research: inputs.research,
+        offering_join,
+        artifact_warning: artifact.staleness_warning,
     })
 }
 
@@ -275,11 +288,14 @@ fn check_collisions(inputs: &ProviderInputs) -> Result<(), GenError> {
 /// then override application (whole-value replacement, staleness lint).
 fn resolve_fields(
     inputs: &ProviderInputs,
-) -> Result<(Vec<ResolvedField>, Vec<CoercionSkip>), GenError> {
+    artifact: &ArtifactIndex,
+) -> Result<(Vec<ResolvedField>, Vec<CoercionSkip>, OfferingJoinReport), GenError> {
     let mut fields = Vec::with_capacity(REGISTRY.len());
     let mut skips = Vec::new();
+    let mut offering_join = OfferingJoinReport::default();
     for entry in REGISTRY {
-        let source_value = extract_catalog_value(entry, inputs, &mut skips);
+        let source_value =
+            extract_catalog_value(entry, inputs, artifact, &mut skips, &mut offering_join);
         let (value, provenance) = match inputs.overrides.get(entry.field) {
             Some(over) => {
                 let suppressed = source_value.ok();
@@ -306,7 +322,7 @@ fn resolve_fields(
             provenance,
         });
     }
-    Ok((fields, skips))
+    Ok((fields, skips, offering_join))
 }
 
 /// Extracts the declared source's raw value and coerces it to catalog
@@ -314,7 +330,9 @@ fn resolve_fields(
 fn extract_catalog_value(
     entry: &RegistryEntry,
     inputs: &ProviderInputs,
+    artifact: &ArtifactIndex,
     skips: &mut Vec<CoercionSkip>,
+    offering_join: &mut OfferingJoinReport,
 ) -> Result<Value, GenError> {
     let raw = match entry.source {
         DeclaredSource::Roster { key } => match inputs.roster.get(key) {
@@ -362,6 +380,17 @@ fn extract_catalog_value(
     };
     if entry.coercion == Coercion::AcpRecord {
         return acp_catalog_record(entry, &raw, inputs);
+    }
+    // Like AcpRecord, the offering join needs context the single-source
+    // coercion table cannot carry (the provider slug + artifact index).
+    if entry.coercion == Coercion::DefaultModelsToExpectedOfferings {
+        return offerings::expected_offerings_value(
+            entry,
+            &raw,
+            &inputs.slug,
+            artifact,
+            offering_join,
+        );
     }
     coerce_to_catalog_shape(entry, &raw, skips)
 }
@@ -730,10 +759,16 @@ fn coerce_to_catalog_shape(
             }
             Ok(raw.clone())
         }
-        // The mixed-source acp record is assembled upstream in
-        // `extract_catalog_value` (research + facts) and never reaches this
-        // single-source coercion table.
+        Coercion::LocalRunnersToOfferingSources => {
+            offerings::offering_sources_value(entry, raw)
+        }
+        // The mixed-source acp record and the artifact-joined offering
+        // records are assembled upstream in `extract_catalog_value` and
+        // never reach this single-source coercion table.
         Coercion::AcpRecord => unreachable!("AcpRecord is handled in extract_catalog_value"),
+        Coercion::DefaultModelsToExpectedOfferings => {
+            unreachable!("DefaultModelsToExpectedOfferings is handled in extract_catalog_value")
+        }
         // Facts-shaped records pass through; emit.rs validates loudly.
         Coercion::PathTemplateList
         | Coercion::EventMappingRecords
