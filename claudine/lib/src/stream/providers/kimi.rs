@@ -271,6 +271,9 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
             } else {
                 let mut extra = self.info_extra_with_kind("prompt_response", "prompt_status");
                 extra.insert("status".into(), Value::from(status.as_str()));
+                if let Some(steps) = parsed.steps {
+                    extra.insert("steps".into(), Value::from(steps));
+                }
                 self.sink.on_semantic_event(SemanticEvent::Info {
                     message: format!("Prompt status: {status}"),
                     extra: Value::Object(extra),
@@ -711,11 +714,14 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
             KimiWireRequest::Question(question) => {
                 let mut extra = self.info_extra_with_kind(raw_kind, "unexpected_question");
                 extra.insert("request_id".into(), id);
-                if let Some(prompt) = &question.question {
-                    extra.insert("question".into(), Value::from(prompt.as_str()));
+                if let Some(tool_call_id) = &question.tool_call_id {
+                    extra.insert("tool_call_id".into(), Value::from(tool_call_id.as_str()));
+                }
+                if let Some(prompt) = question.primary_question() {
+                    extra.insert("question".into(), Value::from(prompt));
                 }
                 self.sink.on_semantic_event(SemanticEvent::Warning {
-                    message: match question.question {
+                    message: match question.primary_question() {
                         Some(prompt) => format!("Unexpected question from agent: {prompt}"),
                         None => "Unexpected question from agent".into(),
                     },
@@ -1685,7 +1691,8 @@ mod tests {
     }
 
     #[test]
-    fn unexpected_question_emits_warning() {
+    fn unexpected_question_legacy_flat_shape_emits_warning() {
+        // Pre-Wire-1.4 flat payload; kept as the legacy-tolerance test.
         let (events, mut parser) = new_parser();
         feed_initialize(&mut parser);
         parser
@@ -1696,7 +1703,37 @@ mod tests {
         let collected = events.lock().unwrap().clone();
         assert!(
             collected.iter().any(|e| matches!(e,
-                SemanticEvent::Warning { message, .. } if message.contains("Unexpected question")))
+                SemanticEvent::Warning { message, .. }
+                    if message.contains("Unexpected question from agent: What now?")))
+        );
+    }
+
+    #[test]
+    fn unexpected_question_current_nested_shape_emits_warning() {
+        // Wire >= 1.4 sample from the signals corpus (kimi.md record
+        // `stream-human_input_requested-question_request`).
+        const QUESTION_LINE: &str = include_str!(
+            "../../../../docs/research/signals/fixtures/kimi/wire-question-request.jsonl"
+        );
+        let (events, mut parser) = new_parser();
+        feed_initialize(&mut parser);
+        parser.feed_line(QUESTION_LINE.trim()).unwrap();
+        let collected = events.lock().unwrap().clone();
+        let warning = collected
+            .iter()
+            .find_map(|e| match e {
+                SemanticEvent::Warning { message, extra } => Some((message.clone(), extra.clone())),
+                _ => None,
+            })
+            .expect("warning");
+        assert!(warning.0.contains("Choose an implementation direction."));
+        assert_eq!(
+            warning.1.get("tool_call_id").and_then(Value::as_str),
+            Some("toolu-question")
+        );
+        assert_eq!(
+            warning.1.get("request_id").and_then(Value::as_str),
+            Some("question-1")
         );
     }
 
@@ -1751,6 +1788,37 @@ mod tests {
         let summary = parser.finish(0);
         assert_eq!(summary.provider_status.as_deref(), Some("finished"));
         assert!(!summary.is_error);
+    }
+
+    #[test]
+    fn prompt_max_steps_response_surfaces_steps() {
+        // Wire sample from the signals corpus (kimi.md record
+        // `stream-turn_limit_reached-max_steps`).
+        const MAX_STEPS_LINE: &str = include_str!(
+            "../../../../docs/research/signals/fixtures/kimi/wire-max-steps-reached.jsonl"
+        );
+        let (events, mut parser) = new_parser();
+        feed_initialize(&mut parser);
+        parser.feed_line(MAX_STEPS_LINE.trim()).unwrap();
+        let collected = events.lock().unwrap().clone();
+        let info = collected
+            .iter()
+            .find_map(|e| match e {
+                SemanticEvent::Info { extra, .. }
+                    if extra.get("kind").and_then(Value::as_str) == Some("prompt_status") =>
+                {
+                    Some(extra.clone())
+                }
+                _ => None,
+            })
+            .expect("prompt_status info");
+        assert_eq!(
+            info.get("status").and_then(Value::as_str),
+            Some("max_steps_reached")
+        );
+        assert_eq!(info.get("steps").and_then(Value::as_u64), Some(100));
+        let summary = parser.finish(0);
+        assert_eq!(summary.provider_status.as_deref(), Some("max_steps_reached"));
     }
 
     #[test]

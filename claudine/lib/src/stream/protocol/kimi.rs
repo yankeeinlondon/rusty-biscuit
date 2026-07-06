@@ -891,15 +891,55 @@ impl KimiApprovalRequest {
 /// `QuestionRequest` request payload — server-initiated user-input prompt.
 /// Should not arrive in v1 (Claudine declares `supports_question: false` on
 /// initialize). If it does, the parser surfaces a `Warning` and the IO loop
-/// auto-responds with a synthetic empty answer.
+/// auto-responds with a synthetic empty answer keyed on the JSON-RPC
+/// envelope `id` (not the payload `id` or `tool_call_id`).
+///
+/// Two wire shapes coexist: since Wire 1.4 the payload is
+/// `{id, tool_call_id, questions: [...]}`; older wires sent a flat
+/// `{id, question, options}`. Both field sets are kept so either shape
+/// deserializes; use [`Self::primary_question`] instead of reading the
+/// fields directly.
 #[derive(Debug, Default, Deserialize)]
 pub struct KimiQuestionRequest {
     #[serde(default)]
     pub id: Option<String>,
     #[serde(default)]
+    pub tool_call_id: Option<String>,
+    /// Current wire (>= 1.4): list of question items.
+    #[serde(default)]
+    pub questions: Option<Vec<KimiQuestionItem>>,
+    /// Legacy flat shape: single question text.
+    #[serde(default)]
     pub question: Option<String>,
+    /// Legacy flat shape: option list.
     #[serde(default)]
     pub options: Option<Value>,
+}
+
+impl KimiQuestionRequest {
+    /// First question text across both wire shapes: the first non-empty
+    /// `questions[].question` when present, else the legacy flat `question`.
+    pub fn primary_question(&self) -> Option<&str> {
+        self.questions
+            .as_ref()
+            .and_then(|items| items.iter().find_map(|item| item.question.as_deref()))
+            .or(self.question.as_deref())
+    }
+}
+
+/// One entry of `QuestionRequest.questions` (Wire >= 1.4).
+#[derive(Debug, Default, Deserialize)]
+pub struct KimiQuestionItem {
+    #[serde(default)]
+    pub question: Option<String>,
+    #[serde(default)]
+    pub header: Option<String>,
+    /// `[{label, description}]` per the wire schema; kept open-shaped since
+    /// Claudine never renders options (it auto-answers empty).
+    #[serde(default)]
+    pub options: Option<Value>,
+    #[serde(default)]
+    pub multi_select: Option<bool>,
 }
 
 /// `ToolCallRequest` request payload — server asks the client to execute a
@@ -937,6 +977,10 @@ pub struct KimiHookRequest {
 pub struct KimiPromptResult {
     #[serde(default)]
     pub status: Option<String>,
+    /// Step count accompanying the terminal status; observed alongside
+    /// `max_steps_reached`, where it carries the configured loop limit.
+    #[serde(default)]
+    pub steps: Option<u64>,
 }
 
 impl KimiPromptResult {
@@ -1613,7 +1657,72 @@ mod tests {
             let v = serde_json::json!({"status": status});
             let parsed: KimiPromptResult = serde_json::from_value(v).unwrap();
             assert_eq!(parsed.status.as_deref(), Some(status));
+            assert_eq!(parsed.steps, None);
         }
+    }
+
+    #[test]
+    fn prompt_result_decodes_steps_from_max_steps_fixture() {
+        // Wire sample from the signals corpus (kimi.md record
+        // `stream-turn_limit_reached-max_steps`).
+        const MAX_STEPS_LINE: &str = include_str!(
+            "../../../../docs/research/signals/fixtures/kimi/wire-max-steps-reached.jsonl"
+        );
+        let value: Value = serde_json::from_str(MAX_STEPS_LINE.trim()).unwrap();
+        let env = KimiEnvelope::classify(value).expect("classified");
+        let KimiEnvelope::SuccessResponse { id, result } = env else {
+            panic!("expected SuccessResponse");
+        };
+        assert_eq!(id.as_str(), Some("prompt-2"));
+        let parsed: KimiPromptResult = serde_json::from_value(result).unwrap();
+        assert_eq!(
+            parsed.status.as_deref(),
+            Some(KimiPromptResult::STATUS_MAX_STEPS_REACHED)
+        );
+        assert_eq!(parsed.steps, Some(100));
+    }
+
+    #[test]
+    fn question_request_decodes_current_nested_shape() {
+        // Wire sample from the signals corpus (kimi.md record
+        // `stream-human_input_requested-question_request`, Wire >= 1.4).
+        const QUESTION_LINE: &str = include_str!(
+            "../../../../docs/research/signals/fixtures/kimi/wire-question-request.jsonl"
+        );
+        let value: Value = serde_json::from_str(QUESTION_LINE.trim()).unwrap();
+        let env = KimiEnvelope::classify(value).expect("classified");
+        let KimiEnvelope::Request { id, params } = env else {
+            panic!("expected Request");
+        };
+        // The synthetic empty-answer response must be keyed on the JSON-RPC
+        // envelope id, not the payload's `id` or `tool_call_id`.
+        assert_eq!(id.as_str(), Some("question-1"));
+        let Some(KimiWireRequest::Question(question)) = params.into_request() else {
+            panic!("expected QuestionRequest");
+        };
+        assert_eq!(question.id.as_deref(), Some("q-1"));
+        assert_eq!(question.tool_call_id.as_deref(), Some("toolu-question"));
+        let items = question.questions.as_ref().expect("questions");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].header.as_deref(), Some("Direction"));
+        assert_eq!(items[0].multi_select, Some(false));
+        assert_eq!(
+            question.primary_question(),
+            Some("Choose an implementation direction.")
+        );
+    }
+
+    #[test]
+    fn question_request_tolerates_legacy_flat_shape() {
+        let payload = serde_json::json!({
+            "id": "q-9",
+            "question": "Pick one",
+            "options": ["a", "b"],
+        });
+        let parsed: KimiQuestionRequest = serde_json::from_value(payload).unwrap();
+        assert_eq!(parsed.primary_question(), Some("Pick one"));
+        assert!(parsed.questions.is_none());
+        assert!(parsed.tool_call_id.is_none());
     }
 
     // ------------------------------------------------------------------
