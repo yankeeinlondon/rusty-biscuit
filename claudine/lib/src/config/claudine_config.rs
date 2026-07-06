@@ -193,6 +193,19 @@ pub struct ClaudineConfig {
     #[serde(default = "default_prompt_for_missing", skip_serializing_if = "is_true")]
     pub prompt_for_missing: bool,
 
+    /// Opt-in harvest of unmatched error/warning-class signal payloads.
+    ///
+    /// When `true`, wrapped runs append scrubbed payloads that fired no
+    /// detection record to `~/.claudine/harvest/<provider>/<date>.jsonl`
+    /// as candidate detection-record evidence (see
+    /// `claudine::signals::harvest`). The `CLAUDINE_HARVEST` env var
+    /// (`1`/`true`/`0`/`false`) overrides this value. Config-file + env
+    /// only for v1 — deliberately not surfaced in the config TUI.
+    ///
+    /// User-scope only; repo configs may not declare this field.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub harvest_unmatched: bool,
+
     /// Exit-expression rules for the runaway-output guard (Cluster E).
     ///
     /// Accepts either a bare array (uses the user layer's semantics — it
@@ -226,6 +239,10 @@ fn default_prompt_for_missing() -> bool {
 
 fn is_true(value: &bool) -> bool {
     *value
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 fn default_protect() -> ProtectConfig {
@@ -331,6 +348,7 @@ impl Default for ClaudineConfig {
             models: HashMap::new(),
             default_sounds: DefaultSounds::default(),
             prompt_for_missing: true,
+            harvest_unmatched: false,
             exit_expressions: None,
             guard_settings: GuardSettings::default(),
         }
@@ -1002,6 +1020,7 @@ mod tests {
                 error: Some("space-alarm".to_string()),
             },
             prompt_for_missing: true,
+            harvest_unmatched: false,
             exit_expressions: None,
             guard_settings: GuardSettings::default(),
         };
@@ -1286,6 +1305,44 @@ mod tests {
         let json = serde_json::to_value(&config).unwrap();
         let back: ClaudineConfig = serde_json::from_value(json).unwrap();
         assert!(!back.prompt_for_missing);
+    }
+
+    // -------------------------------------------------------------------------
+    // harvest_unmatched
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn harvest_unmatched_defaults_to_false_and_is_omitted() {
+        let config: ClaudineConfig = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert!(!config.harvest_unmatched);
+        let json = serde_json::to_value(ClaudineConfig::default()).unwrap();
+        assert!(
+            json.get("harvest_unmatched").is_none(),
+            "harvest_unmatched should be omitted when false (the default)"
+        );
+    }
+
+    #[test]
+    fn harvest_unmatched_round_trips_when_true() {
+        let config: ClaudineConfig =
+            serde_json::from_value(serde_json::json!({ "harvest_unmatched": true })).unwrap();
+        assert!(config.harvest_unmatched);
+        let json = serde_json::to_value(&config).unwrap();
+        let back: ClaudineConfig = serde_json::from_value(json).unwrap();
+        assert!(back.harvest_unmatched);
+    }
+
+    #[test]
+    fn repo_override_rejects_harvest_unmatched_field() {
+        let result = serde_json::from_value::<RepoOverrideConfig>(serde_json::json!({
+            "harvest_unmatched": true
+        }));
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("harvest_unmatched"),
+            "error should mention the unknown field: {msg}"
+        );
     }
 
     #[test]

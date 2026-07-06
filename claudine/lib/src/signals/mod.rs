@@ -2,16 +2,22 @@
 //! research corpus (`docs/research/signals/`).
 //!
 //! Alongside the compiled tables this module hosts the generic detection
-//! engine ([`SignalEngine`]), the typed-event builder, and the dedup sink
-//! ([`SignalSink`]). Roster-only providers (kilo, pi) compile "dormant":
+//! engine ([`SignalEngine`]), the typed-event builder, the dedup sink
+//! ([`SignalSink`]), the per-run multi-producer fan-in ([`SignalHub`]),
+//! consumer-side projections ([`project`]), and the opt-in unmatched-event
+//! harvest ([`harvest`]). Roster-only providers (kilo, pi) compile "dormant":
 //! their tables are reachable via [`detection_table`] by slug only — no
 //! [`Provider`] variant exists for them — which is the path the
 //! fixture-replay `signals check` uses.
 
+mod bespoke;
 mod engine;
 mod event_builder;
 mod generated;
+pub mod harvest;
+mod hub;
 mod path;
+pub mod project;
 mod sink;
 mod version;
 
@@ -19,7 +25,9 @@ pub use claudine_catalog_types::{
     DetectionMode, DetectionRecord, ExtractionSpec, ProviderSignalTable, Quantity, SignalEvent,
     SignalKind, SignalSource, UsageWindow,
 };
+pub use bespoke::{EXIT_STDERR_TAIL_LINES, bespoke_replayer, exit_source_payload};
 pub use engine::{ReplayObservation, SignalEngine};
+pub use hub::SignalHub;
 pub use sink::{CORRELATION_WINDOW, ObservedSignal, SignalSink};
 
 use crate::provider_id::Provider;
@@ -52,6 +60,8 @@ pub fn for_provider(provider: Provider) -> &'static ProviderSignalTable {
     })
 }
 
+#[cfg(test)]
+mod projection_equivalence_tests;
 #[cfg(test)]
 mod semantics_tests;
 

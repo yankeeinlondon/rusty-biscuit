@@ -18,6 +18,7 @@ pub mod matcher;
 pub mod observe;
 pub mod path;
 pub mod report;
+pub mod scrub;
 pub mod service;
 
 // Re-exports for public API surface
