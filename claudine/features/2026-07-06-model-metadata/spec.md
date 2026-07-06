@@ -1,10 +1,18 @@
+---
+clarified: "implemented/codex/gpt-5"
+---
+
 # Model Metadata Source Migration: Retire Parsera, Adopt models.dev
 
-> **Status:** DRAFT — for Ken's review.
-> Implementation is entirely `unchained-ai/gen`-side; the spec lives here because
-> it exists to serve the 2026-07-02 provider-metadata artifact boundary
-> (design/model-catalog-boundary.md). It does not block, and is not blocked by,
-> that spec's Phase F — see [Relationship to provider-metadata](#relationship-to-the-provider-metadata-spec).
+> **Status:** IMPLEMENTED — phases 1–5 landed.
+> Implementation spans `unchained-ai/gen`, required `unchained-ai/lib`
+> metadata types, generated metadata, model-catalog artifact schema v2
+> emission, docs, and any Claudine-side artifact consumer/version checks needed
+> to accept v2. Claudine runtime wrapper behavior remains out of scope. The
+> spec lives here because it serves the 2026-07-02 provider-metadata artifact
+> boundary (design/model-catalog-boundary.md). It does not block, and is not
+> blocked by, that spec's Phase F — see
+> [Relationship to provider-metadata](#relationship-to-the-provider-metadata-spec).
 
 ## Why
 
@@ -50,8 +58,11 @@ Two lessons, both in scope:
    unavailable, implausibly thin, or missing roster-critical providers.
 6. Add a first-class serialized `release_date` field for source release dates;
    leave `created` unchanged and do not alias models.dev `release_date` into it.
-7. Refresh `metadata_generated.rs` (live regen) and re-emit the committed
-   model-catalog artifact from non-degraded source data; all existing drift tests
+7. Bump the committed model-catalog artifact `schema_version` to `2`, update
+   schemas/docs/consumer checks for v2, and make artifact readers reject v1
+   after the migration lands.
+8. Refresh `metadata_generated.rs` (live regen) and re-emit the committed
+   model-catalog artifact from validated source data; all existing drift tests
    stay green.
 
 ## Non-goals
@@ -60,13 +71,14 @@ Two lessons, both in scope:
   limits; Mistral returns context/capabilities). That is the only path to the
   direct-only tail models.dev lacks (Mistral embeddings/OCR, Gemini
   TTS/previews) — worth doing roster-first, but a separate follow-up.
-- **Broad artifact schema-v2 redesign.** This migration does add one serialized
-  metadata field, `release_date`, because models.dev exposes it distinctly from
-  OpenRouter's epoch-style `created`. The intrinsic-vs-offering metadata split
-  (identity-level `models` section) remains a schema-v2 candidate, deferred.
+- **Broad artifact redesign beyond schema v2.** This migration bumps the
+  artifact schema only for the serialized metadata addition (`release_date`).
+  The intrinsic-vs-offering metadata split (identity-level `models` section)
+  remains deferred.
 - **Local runners.** models.dev has no usable ollama catalog; local-model
   metadata remains model-citizen territory.
-- **Runtime (claudine-side) changes.** Claudine consumes the artifact only.
+- **Claudine runtime wrapper behavior.** Claudine-side work is limited to
+  artifact consumer/version-check updates needed to accept schema v2.
 
 ## Design
 
@@ -108,6 +120,24 @@ strings (96/141 today) plus the identity join in the artifact.
 Consumers that need release chronology can prefer `release_date` when present
 and fall back to `created` only as an older-source timestamp.
 
+### Artifact schema v2
+
+Adding serialized metadata is an artifact schema change. The model-catalog
+artifact emitted by `unchained-ai/gen` must set `schema_version: 2` when
+`release_date` is present. The implementation must update:
+
+- the artifact schema/docs that define valid model-catalog fields,
+- generated artifact emission and drift checks,
+- Claudine-side artifact consumer/version checks so v2 is accepted and v1 is
+  rejected, and
+- tests that fail if v2 artifacts are emitted but docs or consumers still
+  recognize only v1 or continue accepting v1.
+
+Phase 3 found an actual Claudine-side artifact reader in `claudine-gen`
+(`claudine/gen/src/artifact.rs`), rather than the originally expected vacuous
+consumer boundary. The reader now accepts schema v2 and rejects v1 with tests;
+the artifact README records this contract.
+
 ### Matching ladder
 
 For each generated model id, within its mapped models.dev provider:
@@ -147,11 +177,9 @@ The gen report additionally prints per-provider match coverage
 (`matched/total`) so gradual erosion is visible at every regen, not just
 total collapse.
 
-`--allow-degraded-metadata` exists only as an escape hatch for enum or other
-non-metadata generation when models.dev is unavailable. In degraded mode the
-generator must not write `metadata_generated.rs` or any committed model-catalog
-artifact from degraded source data, and the CLI/report output must state that
-metadata/artifact emission was skipped because the source was degraded.
+There is no degraded-mode escape hatch in v1. Any degraded metadata-source
+condition fails generation loudly; enum-only generation is not allowed to bypass
+metadata-source failures in this spec.
 
 ### Testing
 
@@ -161,9 +189,11 @@ metadata/artifact emission was skipped because the source was degraded.
   and the matching ladder (exact hit, identity hit across dash/dot and date-pin
   drift, cross-provider refusal, ambiguity refusal).
 - **Guard tests**: thin/missing-provider responses must error.
-- **Degraded-mode tests**: `--allow-degraded-metadata` permits enum/non-metadata
-  outputs but refuses to update `metadata_generated.rs` or committed artifacts;
-  report text calls out the degraded source and skipped metadata emission.
+- **No-degraded-mode tests**: degraded metadata-source conditions must fail
+  generation loudly; no enum-only bypass is accepted.
+- **Artifact schema tests**: emitted model-catalog artifacts use
+  `schema_version: 2`, include serialized `release_date` as `YYYY-MM-DD`, and
+  schema/docs/consumer version checks accept v2 and reject v1.
 - Existing Phase F artifact drift tests are the backstop for the re-emit step:
   they fail until `emit-catalog` is re-run, and the sanity floors
   (offerings > 600, gaps < 5, duplicate groups > 100) hold post-migration.
@@ -172,23 +202,27 @@ metadata/artifact emission was skipped because the source was degraded.
 
 ## Sequence
 
-1. **Client + mapping + fixtures** — `models_dev.rs`, field/provider mapping,
-   offline tests. No behavior change to generation yet.
+1. **Client + metadata types + mapping + fixtures** — `models_dev.rs`,
+   `unchained-ai/lib` metadata type updates for `release_date` and canonical
+   capabilities, field/provider mapping, offline tests. No behavior change to
+   generation yet.
 2. **Matching ladder** — identity-aware matcher in the gen crate (uses
    `unchained_ai::models::identity`), source-neutral merge rework,
-   `parsera.rs` deleted, guards wired, degraded-mode metadata write block
-   enforced, gen report extended.
-3. **Live regen** (Ken's shell — needs provider API keys):
+   `parsera.rs` deleted, guards wired, gen report extended.
+3. **Artifact schema v2 wiring** — emit `schema_version: 2`, serialize
+   `release_date`, update schemas/docs, drift checks, and Claudine-side artifact
+   consumer/version checks to accept v2 and reject v1.
+4. **Live regen** (Ken's shell — needs provider API keys):
    `just generate-models`, review the coverage report, then `just artifact`
-   to re-emit the committed model-catalog artifact. Do not use
-   `--allow-degraded-metadata` for this step.
+   to re-emit the committed schema-v2 model-catalog artifact.
    ► **CHECKPOINT (Ken):** review the regen diff — first regen on a new
    metadata source rewrites most of `metadata_generated.rs`; eyeball pricing
    spot-checks (anthropic, openai) and the new `release_date` field before
    commit.
-4. **Docs drift pass** — `.claude/skills/unchained-ai/model-generator.md`
-   (Parsera → models.dev), `artifacts/README.md` regeneration section,
-   root `docs/dependencies.md` if dependencies changed, this spec stamped.
+5. **Docs drift pass** — `.claude/skills/unchained-ai/model-generator.md`
+   (Parsera → models.dev), artifact schema/version docs, `artifacts/README.md`
+   regeneration section, root `docs/dependencies.md` if dependencies changed,
+   this spec stamped.
 
 ## Relationship to the provider-metadata spec
 
@@ -208,14 +242,17 @@ should be run expecting Parsera enrichment in the interim.
   source, with guards that fail generation on source degradation.
 - The serialized metadata/artifact schema includes `release_date`; models.dev
   dates populate it, and `created` remains unchanged.
+- The model-catalog artifact emits `schema_version: 2`; schema docs, drift
+  checks, and Claudine-side artifact consumers/version checks accept v2 and
+  reject v1.
 - Capabilities are emitted through canonical typed constants or an enum, with
   models.dev booleans mapped to `function_calling`, `structured_output`,
   `reasoning`, and `file_input`.
-- `--allow-degraded-metadata` can unblock enum/non-metadata generation only; it
-  cannot update `metadata_generated.rs` or committed artifacts from degraded
-  source data, and reports that constraint clearly.
+- Degraded metadata-source conditions fail generation loudly; no
+  enum-only bypass exists in v1.
 - Offline fixture tests cover mapping, conversion, matching ladder, and
-  guards; `just test` / `just lint` green in the unchained-ai area.
+  guards, including canonical capability mapping and artifact schema v2;
+  `just test` / `just lint` green in the unchained-ai area.
 - A live regen has landed: every direct anthropic model has metadata with
   per-token pricing; per-provider coverage report committed in the regen PR
   description; `metadata_generated.rs` and both artifact files re-emitted and

@@ -481,6 +481,34 @@ config/wrapper-side only, so its drift channel needs a different source.
 > metadata-independent, and duplicate-group joins recover roster-critical
 > metadata meanwhile). Claudine-gen consumption is now unblocked.
 
+> **Phase F consumption round 1 DONE (2026-07-06, uncommitted).** The artifact
+> is now a **hard generation input** to claudine-gen: absence /
+> schema_version mismatch fail generation loudly (`gen/src/artifact.rs`;
+> expected version tracks the artifact — currently **2** after the parallel
+> models.dev track's `release_date` bump); `generated_at` >30 days emits a
+> staleness warning in `generate` and `check`. Two new generated ProviderInfo
+> fields (one-change discipline held: registry + emit + regen all 7 +
+> catalog.json): `expected_offerings: &[ExpectedOffering]` (agent-models
+> `default_models[]` → id/alias/is_default/context_window + `class` +
+> optional `catalog_id` identity-key join) and `offering_sources:
+> &[OfferingSource]` (model-config `local_runners[]` → prefix/class/
+> api_standard/integration; 6 runners × 7 providers). New shared vocab in
+> catalog-types: `OfferingClass` (vendor_api/plan_endpoint/aggregator/
+> local_runner), `LocalRunnerIntegration`, both row types. Rulings: the join
+> ladder is **exact-only lookup** (exact `mapped_source/id`, then unique
+> bare-id match; ambiguity → None) — claudine deliberately does NOT
+> reimplement the identity grammar; classification is a curated table in gen
+> source (kimi-for-coding/kimi-code → plan_endpoint; `opencode/` prefix →
+> aggregator; default vendor_api); plan-endpoint ids skip the ladder
+> (model-API-only artifact, F4). `static_models` untouched — the runtime
+> validation-baseline flip stays staged per provider (next). Join coverage at
+> generation: claude 6/8, codex 0/4 (real — Parsera-sunset-collapsed openai
+> slice), gemini 10/11, goose 2/6, kimi 10/11 (11th is the plan endpoint),
+> opencode 18/50, qwen 3/10; unjoined ids listed in the gen report. Fixture
+> rule learned mid-round: gen tests must reference
+> `artifact::EXPECTED_SCHEMA_VERSION`, never a literal version, or a parallel
+> artifact bump breaks them (bit once, fixed).
+
 ## Phase G — rendering buildout (interleaves after C)
 
 Migrations 2–4 of design/render-components.md: `AgentPrompt`/`SystemPrompt` absorb
