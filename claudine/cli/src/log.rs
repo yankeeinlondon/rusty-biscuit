@@ -46,7 +46,13 @@ fn compute_terminal() -> Terminal {
     if colors_disabled() {
         plain_terminal(forced_width(80))
     } else if force_color_enabled() {
-        Terminal::new_optimistic(forced_width(80))
+        // FORCE_COLOR forces styling, not geometry. Shells that export it
+        // globally still run in real terminals, so default to the detected
+        // width (which itself falls back to 80 when stdout is not a tty)
+        // rather than pinning wide terminals to 80 columns.
+        Terminal::new_optimistic(forced_width(
+            biscuit_terminal::discovery::detection::terminal_width(),
+        ))
     } else {
         Terminal::new()
     }

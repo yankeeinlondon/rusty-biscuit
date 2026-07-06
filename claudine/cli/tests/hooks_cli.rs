@@ -53,24 +53,61 @@ fn assert_no_atomic_tokens(output: &str) {
     }
 }
 
-/// Regression test for finding F1: the support legend must interpolate
-/// the `NO_SUPPORT` constant via `format!` and render the `❌` glyph,
-/// never the literal placeholder text `{{NO_SUPPORT}}` (or `{NO_SUPPORT}`).
+/// The support matrix uses a single glyph vocabulary; every glyph a cell
+/// can show must also appear in the legend, and the retired glyphs
+/// (⛔️ non-hook, ❌ none) must not resurface.
 #[test]
-fn hooks_support_legend_renders_no_support_glyph() {
+fn hooks_support_legend_documents_glyph_vocabulary() {
     let workspace = TestWorkspace::named("claudine-hooks-it");
     let home = workspace.path().join("home");
     fs::create_dir_all(&home).unwrap();
 
     let output = run_hooks(&home, &["hooks", "--support"]);
 
+    for glyph in ["✅", "🔶", "🅐", "–"] {
+        assert!(
+            output.contains(glyph),
+            "support view should render the {glyph} glyph:\n{output}"
+        );
+    }
+    for retired in ["⛔", "❌"] {
+        assert!(
+            !output.contains(retired),
+            "support view resurrected retired glyph {retired}:\n{output}"
+        );
+    }
     assert!(
-        output.contains('❌'),
-        "support legend should render the ❌ glyph:\n{output}"
+        !output.contains("Table could not be rendered"),
+        "support view refused to render instead of chunking:\n{output}"
     );
     assert!(
-        !output.contains("{{NO_SUPPORT}}") && !output.contains("{NO_SUPPORT}"),
-        "support legend leaked the literal NO_SUPPORT placeholder:\n{output}"
+        output.contains("Not mappable — configure natively"),
+        "support view is missing the unmapped native events note:\n{output}"
+    );
+    assert!(
+        output.contains("BeforeToolSelection"),
+        "unmapped note is missing Gemini BeforeToolSelection:\n{output}"
+    );
+    assert_no_atomic_tokens(&output);
+}
+
+/// `--mapping` closes with the same unmapped-events list: these phases
+/// exist natively but have no canonical row in the tables above.
+#[test]
+fn hooks_mapping_lists_unmapped_native_events() {
+    let workspace = TestWorkspace::named("claudine-hooks-it");
+    let home = workspace.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    let output = run_hooks(&home, &["hooks", "--mapping"]);
+
+    assert!(
+        output.contains("Not mappable — configure natively"),
+        "mapping view is missing the unmapped native events note:\n{output}"
+    );
+    assert!(
+        output.contains("tool.definition"),
+        "unmapped note is missing OpenCode tool.definition:\n{output}"
     );
     assert_no_atomic_tokens(&output);
 }
@@ -215,11 +252,13 @@ fn hooks_support_view_emits_ansi_styling() {
     let output = run_hooks_colored(&home, &["hooks", "--support"]);
     assert_styled(&output);
     assert!(
-        output.contains('❌'),
+        output.contains('✅'),
         "support legend missing glyph:\n{output:?}"
     );
 }
 
+/// `--capture-method` is a hidden alias of `--support`; it must keep
+/// rendering the styled support matrix so existing invocations don't break.
 #[test]
 fn hooks_capture_method_view_emits_ansi_styling() {
     let workspace = TestWorkspace::named("claudine-hooks-it");
@@ -228,6 +267,10 @@ fn hooks_capture_method_view_emits_ansi_styling() {
 
     let output = run_hooks_colored(&home, &["hooks", "--capture-method"]);
     assert_styled(&output);
+    assert!(
+        output.contains("✅"),
+        "alias output should be the support matrix:\n{output:?}"
+    );
 }
 
 #[test]

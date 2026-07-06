@@ -5,7 +5,7 @@ use color_eyre::eyre::Result;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
-use biscuit_terminal::utils::layout::{Length, Edges, TargetValue};
+use biscuit_terminal::utils::layout::{Edges, Length, TargetValue, WordWrap};
 use claudine::actions::{HookAction, ReportFormat};
 use claudine::config::AgentConfigurator;
 use claudine::config::claudine_config::ClaudineConfig;
@@ -394,7 +394,7 @@ pub(super) fn run_provider_detail(
 
     let columns = vec![
         TableColumn::new(bold("Event")),
-        TableColumn::new(bold("Support")),
+        TableColumn::new(bold("Capture")),
         TableColumn::new(bold("Actions")),
     ];
     let mut table = Table::new()
@@ -407,11 +407,11 @@ pub(super) fn run_provider_detail(
         let support_level = provider.event_support_level(event);
         let support_cell: TableCellContent = match support_level {
             EventSupportLevel::Hook { .. } => "hook".into(),
-            EventSupportLevel::StreamParse { .. }
-            | EventSupportLevel::WireProxy { .. }
-            | EventSupportLevel::Wrapper { .. } => {
-                Prose::new("<dim>non-hook</dim>").render(&term).into()
+            EventSupportLevel::StreamParse { protocol, .. } => {
+                format!("stream-parse ({protocol:?})").into()
             }
+            EventSupportLevel::WireProxy { mode, .. } => format!("wire-proxy ({mode:?})").into(),
+            EventSupportLevel::Wrapper { .. } => "wrapper".into(),
             EventSupportLevel::Acp { .. } => Prose::new("<cyan>acp</cyan>").render(&term).into(),
             EventSupportLevel::NotSupported => Prose::new("<dim>-</dim>").render(&term).into(),
         };
@@ -507,6 +507,26 @@ pub(super) fn run_provider_detail(
         log::data(&desc_rendered);
     }
 
+    let unmapped = claudine::provider::provider_info(provider).unmapped_native_events;
+    if !unmapped.is_empty() {
+        log::data("");
+        let header = Prose::new("<bold>Not mappable — configure natively:</bold>");
+        log::data(&format!(" {}", header.render(&term)));
+        for event in unmapped {
+            let line = Prose::new(format!(
+                "  <dim>-</dim> {}",
+                super::unmapped_event_markup(event)
+            ))
+            .with_word_wrap(WordWrap::WrapProse(Some(8), Some(4)));
+            log::data(&format!(" {}", line.render(&term)));
+        }
+    }
+
+    super::render_protect_visibility(config);
+    if let Some(cfg) = config {
+        validate_sound_effects(cfg);
+    }
+
     Ok(())
 }
 
@@ -595,23 +615,28 @@ pub(super) fn run_simple(
     let rendered = table.render(&term);
     log::data(&format!("\n{}", rendered));
 
+    // Unconditional legend: the color coding must be documented even when
+    // nothing in the current table is colored.
+    log::data("");
+    let legend = Prose::new(
+        "<dim>- Legend: <yellow>yellow</yellow> = missing (not yet registered), <red>red</red> = stale (registered but no longer configured), <red><strikethrough>strikethrough</strikethrough></red> = unsupported (won't fire)</dim>",
+    )
+    .with_word_wrap(WordWrap::WrapProse(Some(8), Some(4)));
+    log::data(&format!(" {}", legend.render(&term)));
+
+    super::render_protect_visibility(config);
+
+    if let Some(cfg) = config {
+        validate_sound_effects(cfg);
+    }
+
     if has_sync_issues || has_unsupported_issues {
         log::data("");
-        let mut legend_parts = Vec::new();
-        if has_unsupported_issues {
-            legend_parts.push(
-                "<red><strikethrough>strikethrough</strikethrough></red> = unsupported (won't fire)",
-            );
-        }
-        if has_sync_issues {
-            legend_parts.push("<red>red</red> = stale (remove with sync)");
-            legend_parts.push("<yellow>orange</yellow> = missing (add with sync)");
-        }
-        let legend = Prose::new(format!("<dim>- Legend: {}</dim>", legend_parts.join(", ")));
-        log::data(&format!(
-            " {}",
-            legend.render(&crate::log::optimistic_terminal(Some(120)))
-        ));
+        let hint = Prose::new(
+            "<dim>Registration drift detected — run </dim><blue><bold>claudine sync --fix</bold></blue><dim> to reconcile</dim>",
+        )
+        .with_word_wrap(WordWrap::WrapProse(Some(8), Some(4)));
+        log::data(&format!(" {}", hint.render(&term)));
     }
 
     log::data("");
@@ -621,7 +646,6 @@ pub(super) fn run_simple(
         "<dim>- Use <blue><bold>--mapping</bold></blue> to see native event name mappings</dim>",
         "<dim>- Use <blue><bold>--describe</bold></blue> to see event descriptions and schemas</dim>",
         "<dim>- Use <blue><bold>--variables</bold></blue> to see template variables for speak/report</dim>",
-        "<dim>- Use <blue><bold>--capture-method</bold></blue> to see how each event is captured (hook / non-hook / acp)</dim>",
     ];
     for hint in hints {
         log::data(&format!(
@@ -696,8 +720,15 @@ pub(super) fn run_verbose(
     let legend = Prose::new(
         "<dim>Legend: </dim>⚠️<dim> = not supported, </dim>-<dim> = not configured, </dim>⓪<dim> = 0 actions, </dim>❶<dim> = 1 action, etc.</dim>",
     ).with_left_margin(TargetValue::universal(Length::ch(8)));
-    log::data(&format!(" {}\n", legend.render(&term)));
+    log::data(&format!(" {}", legend.render(&term)));
 
+    super::render_protect_visibility(config);
+
+    if let Some(cfg) = config {
+        validate_sound_effects(cfg);
+    }
+
+    log::data("");
     let hints = [
         "<dim>- Use <blue><bold>--support</bold></blue> to see which events each provider supports</dim>",
         "<dim>- Use <blue><bold>--mapping</bold></blue> to see native event name mappings</dim>",
