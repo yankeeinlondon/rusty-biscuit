@@ -19,6 +19,7 @@ pub mod mcp;
 pub mod providers;
 pub mod schema_interactive;
 pub mod sequence;
+pub mod signals;
 pub mod skills;
 pub mod slash_commands;
 pub mod sync;

@@ -136,6 +136,7 @@ fn command_name(command: &Commands) -> &'static str {
         Commands::Agents(_) => "agents",
         Commands::SlashCommands(_) => "commands",
         Commands::Providers(_) => "providers",
+        Commands::Signals(_) => "signals",
         Commands::Logs(_) => "logs",
         Commands::Uninstall(_) => "uninstall",
         Commands::Mcp(_) => "mcp",

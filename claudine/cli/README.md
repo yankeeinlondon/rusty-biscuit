@@ -43,6 +43,17 @@ Show a compact provider capability matrix with:
 - `Agent` support (custom agent/subagent definitions)
 - `Hooks` count (how many native hook events Claudine can attach to)
 
+### `claudine signals [check]`
+
+Inspect the compiled signal-detection tables. Bare `claudine signals` prints a per-provider summary (record/extraction counts, bespoke count, per-source breakdown) for all nine corpora, including the dormant kilo/pi tables.
+
+`claudine signals check` is dev/CI-facing and requires a rusty-biscuit checkout: it replays every detection record's evidence fixture from `docs/research/signals/` through the production engine, verifying evidence existence, positive firing, extraction resolution, and per-source-group overlap (benign overlaps are declared in `docs/research/signals/_overlap-exclusions.yaml` and reported as INFO lines). Bespoke records report as skipped until their E5 emitters land.
+
+| Flag | Description |
+|------|-------------|
+| `--provider <slug>` | Check a single provider corpus |
+| `--json` | Emit the machine-readable check report |
+
 ### `claudine sync [flags]`
 
 Re-apply hook registrations to match the current config.

@@ -80,6 +80,9 @@ pub(crate) enum Commands {
     SlashCommands(commands::slash_commands::SlashCommandsArgs),
     /// Show provider capability matrix (skill/slash/agent/hooks).
     Providers(commands::providers::ProvidersArgs),
+    /// Inspect the compiled signal-detection tables and replay their
+    /// evidence fixtures (dev/CI).
+    Signals(commands::signals::SignalsArgs),
     /// Query and sync Claudine JSONL logs through the reporting index.
     Logs(commands::logs::LogsArgs),
     /// Remove Claudine hooks from all agents.
