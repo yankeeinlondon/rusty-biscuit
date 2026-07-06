@@ -17,8 +17,7 @@ For each option, Darkmatter resolves the effective value in this order:
 
 1. Per-rule attribute block
 2. Page frontmatter `style.hr.*` configuration
-3. Top-level `hr:` alias (deprecated; fills only values not set by `style.hr`)
-4. `HorizontalRule` component default
+3. `HorizontalRule` component default
 
 ## Markdown Syntax
 
@@ -117,25 +116,12 @@ style:
 ---
 ```
 
-The legacy top-level `hr:` block is still accepted as a deprecated alias for one release cycle:
-
-```yaml
----
-hr:
-  style: waves
-  width: "50%"
----
-```
-
-If both `style.hr` and top-level `hr` are present, `style.hr` wins **field-by-field**; the legacy `hr:` block only fills values not set in `style.hr`.
-
-Non-string scalars (numbers, booleans) are coerced to strings in the legacy top-level `hr:` path so `width: 50` works the same as `width: "50"`. Unknown keys emit a `tracing::warn!` and are dropped.
+Top-level `hr:` frontmatter is no longer an HR styling surface. Put page-wide horizontal-rule defaults under `style.hr`; a root `hr:` block is not merged into the active style tree.
 
 ## `--strict-style`
 
 `md --strict-style` treats deprecated HR syntax as an error:
 
-- Documents with a top-level `hr:` block fail validation.
 - Documents with inline `--- { style: waves }` fail validation.
 - Documents with `style.hr.alignment: centered` fail validation.
 
@@ -189,5 +175,5 @@ The `HtmlOptions.hr_css_variables` map is lowered to a page-level `:root` declar
 | `darkmatter/lib/src/markdown/block/hr_parser.rs` | HR attribute-block parser (`try_parse_hr_attrs`, `parse_hr_attribute_block`, `scan_inline_hr_warnings`) — single source of truth for `--- { … }` directives |
 | `darkmatter/lib/src/markdown/block/hr_builder.rs` | Maps the `style.hr` schema enums to the canonical strings the render-tree `darkmatter.hr.*` hints carry |
 | `darkmatter/lib/src/markdown/render_tree/block_extension.rs` | Span-aware fold of `---` / attribute rules into `ThematicBreak` nodes carrying `darkmatter.hr.*` hints |
-| `darkmatter/lib/src/markdown/render_tree/entrypoints.rs` | Applies page (`style.hr.*`) and deprecated top-level `hr:` defaults to bare rules (`apply_hr_defaults`, `apply_hr_frontmatter_fallback`) before tree rendering |
+| `darkmatter/lib/src/markdown/render_tree/entrypoints.rs` | Applies page (`style.hr.*`) defaults to bare rules (`apply_hr_defaults`) before tree rendering |
 | `biscuit-terminal` | `HorizontalRule` component; the render-tree terminal / browser renderers fold the `ThematicBreak` hints into output |

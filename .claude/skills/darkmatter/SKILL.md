@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-13cb5bd473770411
-last_updated: 2026-06-30
+hash: 87f17662fa397abe-ad728b14df86e4cd
+last_updated: 2026-07-05
 ---
 
 # darkmatter
@@ -97,9 +97,9 @@ Implemented:
 - page and component `color` / `bg-color` wiring
 - `md --strict-style`, which fails on unknown/deprecated schema keys but not
   on valid future-phase keys
-- sub-spec #6 HR migration: top-level `hr:` merges into `style.hr.*` with
-  `Deprecated` warnings; inline `{ style: ... }` is parsed as a deprecated alias
-  for `{ kind: ... }`; `apply_hr_style` wires `style.hr.*` onto `DarkmatterPage`
+- sub-spec #6 HR migration: inline `{ style: ... }` is parsed as a deprecated
+  alias for `{ kind: ... }`; `apply_hr_style` wires `style.hr.*` onto
+  `DarkmatterPage`
 - sub-spec #7 bespoke knobs: `page.stylesheet`, `page.meta`, `page.code.theme`,
   hyperlink/image local-style behavior; `apply_bespoke_style` wired into the
   CLI render pipeline
@@ -258,6 +258,8 @@ Darkmatter defines, detects, and evaluates schemas for Markdown frontmatter via 
 - `$schema` frontmatter property (inline, file reference, or root-level union).
 - `md schema validate`, `md schema detect`, and `md schema about` CLI subcommands.
 - `DarkmatterSchemas` library API with baseline merging and LRU validator cache.
+- Base frontmatter schema authored in `darkmatter/docs/schemas/darkmatter.yaml` — the source of truth for Darkmatter-owned frontmatter properties such as `ctx`, `hash`, `style`, and `replace`. The schema is exposed as a first-class library surface via `darkmatter_base_schema()` (returns `SimplifiedSchema`), `darkmatter_base_json_schema()` (returns the compiled Draft 2020-12 JSON Schema), and `ComposeOptions::with_darkmatter_baseline_schema()` (injects it into compose). Both accessors are also re-exported from the crate root.
+- `md compose` injects the Darkmatter base schema by default. Use `--no-baseline-schema` or `DARKMATTER_NO_BASELINE_SCHEMA=1` for raw compose behavior, or `--baseline-schema PATH` to replace the default with a custom SimplifiedSchema YAML baseline. `md schema validate` keeps its explicit `--schema` / `BASELINE_SCHEMA` baseline contract.
 - Always-on compose pipeline stage (after `--set`/`--state` and interpolation, before shell expansion) that also **coerces** schema-recognized scalars to their declared types and writes them back (default-on; `$(...)`-pending values are skipped and coerced at post-shell re-validation). On validation success, the same stage **rewrites eager `file(eager)` values** to their resolved repo-relative path via `EffectiveSchema::normalize_frontmatter` (bare/lazy `file`, `string`, remote URLs, and pending values are left verbatim; validation-only APIs stay read-only).
 - `ComposeOptions::with_baseline_schema(...)` for programmatic baseline injection.
 - Typed schema-language descriptor catalog (`schema_type_descriptors()`, `schema_constraint_descriptors()`, `schema_shape_descriptors()`, `inline_object_rule_descriptors()`, `coercion_rule_descriptors()`, `validation_behavior_descriptors()`) — the authoritative source for `md schema about` and the same surface library callers render their own reports from.
@@ -385,7 +387,7 @@ the `biscuit-terminal` skill for terminal tree rendering.
   `md code-block --theme` override wins over the page/context theme on both
   surfaces. See `darkmatter/docs/rendering/code-highlighting.md`.
 - Horizontal rules: canonical styling is `style.hr.*` with `apply_hr_style`;
-  top-level `hr:` and inline `{ style: ... }` remain deprecated aliases.
+  inline `{ style: ... }` is parsed as a deprecated alias for `{ kind: ... }`.
 - The darkmatter cutover is complete: deprecated `PageMargin`, `PagePadding`,
   `PageAlignment`, `PageFill`, `WidthUnit`, and `PageComponent::Lists` have
   been deleted. `style:` frontmatter lowers **directly** into a per-component

@@ -1,19 +1,20 @@
 # Horizontal Rules
 
-Horizontal rules in darkmatter use standard Markdown markers (`---`, `___`, or `***`) and can be styled from page frontmatter or per-rule attributes.
+Horizontal rules in darkmatter use standard Markdown markers (`---`, `___`, or `***`) and can be styled from `style.hr` page frontmatter or per-rule attributes.
 
 ## Markdown Syntax
 
-Bare rules are valid CommonMark and inherit any page-level `hr` defaults:
+Bare rules are valid CommonMark and inherit any page-level `style.hr` defaults:
 
 ```markdown
 ---
-hr:
-  style: waves
-  alignment: centered
-  weight: thick
-  width: "50%"
-  color: red
+style:
+  hr:
+    kind: waves
+    alignment: center
+    weight: thick
+    width: "50%"
+    color: red
 ---
 
 ---
@@ -24,21 +25,21 @@ ___
 Per-rule overrides use a YAML flow-mapping attribute block:
 
 ```markdown
---- { style: waves, width: "50%" }
-___ { style: dots, alignment: centered, weight: thick }
-*** { style: line-star, color: "#ff0000" }
+--- { kind: waves, width: "50%" }
+___ { kind: dots, alignment: center, weight: thick }
+*** { kind: line-star, color: "#ff0000" }
 ```
 
 Per-rule attributes override only the keys they specify. The resolution order is:
 
 1. Per-rule attribute block
-2. Page frontmatter `hr`
+2. Page frontmatter `style.hr`
 3. `HorizontalRule` component defaults
 
 ## Available Options
 
-- `style`: `dashes` (default), `dots`, `waves`, `line-star`, `line-circle`, `inset-line`, `curtain-rod`
-- `alignment`: `full` (default), `centered`, `left`, `right`
+- `kind`: `dashes` (default), `dots`, `waves`, `line-star`, `line-circle`, `inset-line`, `curtain-rod`
+- `alignment`: `full` (default), `center`, `left`, `right`
 - `weight`: `thin`, `medium` (default), `thick`
 - `width`: CSS-like string such as `"75%"`, `"200px"`, or `"20"`
 - `color`: CSS color name or `#rrggbb`
@@ -47,17 +48,18 @@ Per-rule attributes override only the keys they specify. The resolution order is
 
 ```markdown
 ---
-hr:
-  style: waves
-  alignment: centered
-  width: "60%"
+style:
+  hr:
+    kind: waves
+    alignment: center
+    width: "60%"
 ---
 
 ---
 
 --- { color: "#007acc" }
 
-*** { style: line-star, alignment: centered }
+*** { kind: line-star, alignment: center }
 ```
 
 The first bare rule uses all frontmatter defaults. The second rule inherits style, alignment, and width, then overrides only color.

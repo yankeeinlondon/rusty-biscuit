@@ -360,7 +360,7 @@ pub fn apply_page_style(
 - `Deprecated` → error
 - `KnownButInactive` → **still informational** (never fails strict mode)
 
-Use it in CI to catch typos, snake-case aliases, and deprecated HR syntax (top-level `hr:` block, inline `style:` on `---` rules).
+Use it in CI to catch typos, snake-case aliases, and deprecated HR syntax such as inline `style:` on `---` rules.
 
 ### Errors
 
@@ -834,19 +834,18 @@ In this example, tables render with red foreground and semi-transparent red back
 
 ## HR Style (Sub-Spec #6)
 
-Sub-spec #6 migrates horizontal rule styling from the legacy top-level `hr:` frontmatter block and inline `--- { style: waves }` attribute syntax into the canonical `style.hr.*` schema. `HrStyle` uses a **specialized schema** rather than flattening `CommonStyle` because HR `alignment` supports an extra `full` value that `renderable::layout::Alignment` cannot represent.
+Sub-spec #6 makes `style.hr.*` the canonical and only supported page-frontmatter surface for horizontal rule styling. `HrStyle` uses a **specialized schema** rather than flattening `CommonStyle` because HR `alignment` supports an extra `full` value that `renderable::layout::Alignment` cannot represent.
 
 ### Migration: Deprecated Aliases
 
-Two legacy paths are retained for one release cycle as deprecated aliases:
+Two legacy spellings are retained for one release cycle as deprecated aliases:
 
 | Legacy path | Canonical replacement | Warning |
 |---|---|---|
-| Top-level `hr:` block (e.g. `hr: { style: waves }`) | `style.hr.*` | `Deprecated { replacement: "style.hr" }` |
 | Inline `--- { style: waves }` attribute | `--- { kind: waves }` | `Deprecated { replacement: "kind" }` |
 | `style.hr.alignment: centered` | `style.hr.alignment: center` | `Deprecated { replacement: "center" }` |
 
-If both `style.hr` and top-level `hr` are present, `style.hr` wins **field-by-field**; the legacy `hr:` block only fills values not set in `style.hr`. If both inline `kind` and `style` are present, `kind` wins and `style` still emits a deprecation warning because the document contains deprecated syntax.
+Top-level `hr:` frontmatter is not merged into `style.hr` and does not provide horizontal-rule defaults. If both inline `kind` and `style` are present, `kind` wins and `style` still emits a deprecation warning because the document contains deprecated syntax.
 
 ### Precedence
 
@@ -854,8 +853,7 @@ From most specific to least:
 
 1. **Inline attribute** (`--- { kind: waves }`) — per-rule override.
 2. **`style.hr.*`** — canonical page-wide default.
-3. **Top-level `hr:` alias** — legacy compatibility, fills only values not set by `style.hr`.
-4. **Component default** — `HorizontalRule::new()` defaults.
+3. **Component default** — `HorizontalRule::new()` defaults.
 
 ### Typed Enums
 
@@ -962,7 +960,6 @@ The integration order in `darkmatter-cli` extends sub-spec #5's pipeline:
 
 `md --strict-style` rejects deprecated HR syntax by promoting `Deprecated` warnings to errors:
 
-- Top-level `hr:` block → error
 - Inline `--- { style: waves }` → error
 - `style.hr.alignment: centered` → error
 
@@ -1339,7 +1336,7 @@ Each of the component buckets embeds a `CommonStyle` providing the shared layout
 While every component provides the common mutations, several components offer additional bespoke properties:
 
 - **`page`** — `stylesheet` (CSS file path or URL for HTML output), `meta` (HTML `<meta>` tags), `code.theme` (code-block theme override), `background` (`transparent` \| `subtle` \| `pronounced`). Wired in sub-spec #7.
-- **`hr`** — `kind` (HrKind), `weight` (HrWeight), `alignment` (HrAlignment, includes `full`). Wired in sub-spec #6. Inline `kind` replaces the legacy per-block `style:` attribute; top-level `hr:` is a deprecated alias for `style.hr`.
+- **`hr`** — `kind` (HrKind), `weight` (HrWeight), `alignment` (HrAlignment, includes `full`). Wired in sub-spec #6. Inline `kind` replaces the legacy per-block `style:` attribute; page-wide defaults are only read from `style.hr`.
 - **`hyperlinks`** — `local-style` provides a `CommonStyle` override for local hyperlinks. Wired in sub-spec #7.
 - **`images`** — `local-style` provides a `CommonStyle` override for local image references. Wired in sub-spec #7.
 - **`ul`** — `left-margin` controls list indent (e.g. `style.ul.left-margin: 4ch`). Wired in sub-spec #4.

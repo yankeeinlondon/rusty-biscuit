@@ -430,18 +430,26 @@ let api = DarkmatterSchemas::new()
     .with_baseline_from_file("./schemas/baseline.yaml")?;
 ```
 
-The CLI accepts the baseline per invocation:
+`md schema validate` accepts the baseline per invocation:
 
 ```bash
 md schema validate post.md --schema ./schemas/baseline.yaml
 md schema validate post.md     # falls back to $BASELINE_SCHEMA env var
 ```
 
-**Resolution order for the CLI baseline:**
+**Resolution order for the `md schema validate` baseline:**
 
 1. `--schema <path>` flag.
 2. `BASELINE_SCHEMA` environment variable.
 3. No baseline.
+
+`md compose` has a different CLI default: it injects the Darkmatter base
+frontmatter schema as its baseline unless told otherwise. Use
+`--no-baseline-schema` or `DARKMATTER_NO_BASELINE_SCHEMA=1` for raw compose
+behavior with no default baseline, or `--baseline-schema <path>` to replace the
+default with a custom SimplifiedSchema YAML baseline. See
+[`docs/schemas/darkmatter-schema.md`](../schemas/darkmatter-schema.md) for the
+base schema contract.
 
 ### JSON Schema Baseline Restrictions
 
@@ -882,8 +890,10 @@ The stage is **not** part of the `ComposeOperation` enum — it cannot be exclud
 ### Behavior
 
 - When the document declares `$schema` **and** validation fails, compose aborts with `MarkdownError::SchemaValidationFailed`.
+- `md compose` injects the Darkmatter base schema by default, so a document with no `$schema` is still validated against Darkmatter-owned frontmatter properties.
+- `--no-baseline-schema` or `DARKMATTER_NO_BASELINE_SCHEMA=1` opts out of that default; when neither `$schema` nor a baseline is present, the stage is a **no-op** and compose proceeds unchanged.
+- `--baseline-schema <path>` replaces the default Darkmatter base schema with a custom SimplifiedSchema YAML baseline.
 - When a baseline schema is set via `ComposeOptions::with_baseline_schema(...)` and the document lacks `$schema`, the baseline alone is validated.
-- When neither `$schema` nor a baseline is present, the stage is a **no-op** — compose proceeds unchanged.
 - `--set` and `--state` overrides are applied **before** validation, so they can fulfill required properties. A document with `spec: ""` plus `--set spec=design.md` validates successfully.
 - The stage **mutates** the document: it coerces schema-recognized top-level scalars to their declared types (see [Type Coercion](#type-coercion)) and **writes the coerced values back** into the frontmatter, so the real types flow to every later stage (shell expansion, page blocks, body interpolation, init-stack conditions) and into the composed output. For example, a `has_spec: "{{spec ? true : false}}"` ternary resolves to the string `"true"` during interpolation and is stored as a real JSON boolean `true` after this stage.
 - A top-level value still holding a `$(...)` shell expression is **skipped** by the write-back — its literal form must survive into shell expansion. Its real type is resolved later at the post-shell re-validation point, which coerces via the same helper, so compose and the downstream consumer agree.
@@ -907,7 +917,10 @@ let (composed, report) = md.compose_with(options)?;
 
 `with_baseline_schema` accepts a pre-built `SimplifiedSchema` (not a file path). When both baseline and document `$schema` declare the same property, the **document wins** — matching the existing `schemas::resolve::merge` rule.
 
-There is no CLI flag for baseline injection in this version; `md compose` honors document-level `$schema` only. Library callers (e.g. claudine) inject baselines programmatically.
+Library callers that want the Darkmatter-owned default baseline can use
+`ComposeOptions::with_darkmatter_baseline_schema()`. The CLI applies that default
+for `md compose`; `--baseline-schema <path>` replaces it, and
+`--no-baseline-schema` or `DARKMATTER_NO_BASELINE_SCHEMA=1` disables it.
 
 ### Error Rendering
 
@@ -927,9 +940,16 @@ The same `->` description now surfaces at the point of failure across all three 
 
 Schema-preparation errors (unparseable `$schema`, missing referenced file, etc.) produce a block with `schema could not be prepared: <detail>` and an empty problems list, distinguishing them from validation failures (`frontmatter did not satisfy the schema`).
 
-### Compose Report Parity
+### Compose and Validate Defaults
 
-`md compose` and `md schema validate` share the same `DarkmatterSchemas::validate` call, so their outcomes agree by construction. A document that fails `md schema validate` will also fail `md compose`, and vice versa.
+`md compose` and `md schema validate` share the same `DarkmatterSchemas::validate`
+implementation once their effective schemas are resolved, but their CLI defaults
+intentionally differ. `md compose` injects the Darkmatter base schema by default;
+`md schema validate` keeps the explicit `--schema` / `BASELINE_SCHEMA` contract.
+
+As a result, when a document has no `$schema`, `md compose` may reject an invalid
+Darkmatter-owned frontmatter value that `md schema validate` accepts vacuously
+unless the same baseline is supplied explicitly.
 
 ## Limitations (v1)
 
