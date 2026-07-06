@@ -82,6 +82,32 @@ impl StructuredSummaryDetails {
     }
 }
 
+/// Build the per-run provider-attributed [`SignalHub`], with unmatched-event
+/// harvesting enabled when opted in (E6): `CLAUDINE_HARVEST` env override
+/// wins over the user config's `harvest_unmatched`, default off.
+///
+/// [`SignalHub`]: claudine::signals::SignalHub
+pub(crate) fn provider_signal_hub(provider: Provider) -> Arc<claudine::signals::SignalHub> {
+    let hub = Arc::new(claudine::signals::SignalHub::new(
+        claudine::signals::for_provider(provider),
+    ));
+    if harvest_enabled() {
+        hub.enable_harvest();
+    }
+    hub
+}
+
+fn harvest_enabled() -> bool {
+    if let Some(enabled) = claudine::signals::harvest::env_override() {
+        return enabled;
+    }
+    match claudine::dispatch::loader::load_claudine_config(None, None) {
+        Ok(config) => config.harvest_unmatched,
+        // A missing or broken config never blocks a run; harvest stays off.
+        Err(_) => false,
+    }
+}
+
 /// Build the structured-stream parser builder plus an optional stderr bridge.
 ///
 /// All providers share the same stdout parser construction pattern, but
@@ -108,6 +134,7 @@ pub(crate) fn build_structured_plumbing(
     sink: super::live_semantic_sink::LiveSemanticSink,
     parser_config: claudine::stream::ParserConfig,
     stall_timeout: Option<std::time::Duration>,
+    signal_hub: &Arc<claudine::signals::SignalHub>,
 ) -> (
     super::exec::SemanticParserBuilder,
     Option<claudine::stream::logs::StderrBridgeHandle>,
@@ -155,12 +182,16 @@ pub(crate) fn build_structured_plumbing(
         }
         // The resolved stalled-generation backstop budget (CLI > frontmatter
         // > env > built-in `10m`). `None` disables the guard.
+        // The signal hub is shared with the stdout reader thread (spawn.rs)
+        // so classified stderr records and stdout NDJSON feed one dedup sink
+        // — this is the glue-mode runtime shim's wiring point (E5).
         let bridge = OpenCodeLogBridge::new(
             shared.clone(),
             Arc::clone(&stdout_seen),
             Some(early_tx),
             stall_timeout,
-        );
+        )
+        .with_signal_hub(Arc::clone(signal_hub));
         let bridge_state = bridge.shared_state();
         // Share the bridge's stalled-generation progress clocks with the stdout
         // path so stdout-origin progress (OutputText/ToolCall/…) resets the same

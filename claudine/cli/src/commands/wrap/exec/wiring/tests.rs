@@ -207,6 +207,28 @@ fn dispatch_for_request_classifies_each_kimi_variant() {
 }
 
 #[test]
+fn question_request_current_shape_auto_response_keys_on_envelope_id() {
+    // Wire >= 1.4 nested-questions sample from the signals corpus. The
+    // synthetic empty answer must reply to the JSON-RPC envelope id
+    // ("question-1"), not the payload `id` ("q-1") or `tool_call_id`.
+    const QUESTION_LINE: &str = include_str!(
+        "../../../../../../docs/research/signals/fixtures/kimi/wire-question-request.jsonl"
+    );
+    let value: Value = serde_json::from_str(QUESTION_LINE.trim()).unwrap();
+    let Some(KimiEnvelope::Request { id, params }) = KimiEnvelope::classify(value) else {
+        panic!("expected Request envelope");
+    };
+    let request = params.into_request().expect("typed QuestionRequest");
+    assert!(matches!(
+        dispatch_for_request(&request),
+        WireRequestDispatch::EmptyQuestionAnswer
+    ));
+    let response = build_question_response(id);
+    assert_eq!(response["id"], "question-1");
+    assert_eq!(response["result"]["answer"], "");
+}
+
+#[test]
 fn map_kimi_hook_event_covers_canonical_aliases() {
     assert_eq!(
         map_kimi_hook_event("PreToolUse"),

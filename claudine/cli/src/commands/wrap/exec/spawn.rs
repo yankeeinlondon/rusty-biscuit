@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use claudine::signals::{ObservedSignal, SignalEngine, SignalEvent, SignalSink, SignalSource};
+use claudine::signals::{SignalHub, SignalSource};
 use claudine::stream::logs::{EarlyTermination, StderrBridgeHandle, StderrIngestOutcome};
 use claudine::stream::parser::{SemanticStreamParser, StreamParseError};
 use claudine::stream::progress::LiveMetrics;
@@ -434,6 +434,11 @@ pub(crate) struct CapturedChildOutput {
 /// Behaves like `run_child()` but pipes stdout and stderr into strings
 /// instead of forwarding to the terminal. Noise filtering still applies
 /// to the captured output. No output is printed live.
+///
+/// `signal_hub` is the run's signal fan-in when the caller has provider
+/// attribution (exit-source records and bespoke exit mappings need the
+/// provider table); `None` falls back to a bespoke-only hub that records
+/// just the termination mirror.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_child_capture(
     binary: &Path,
@@ -445,6 +450,7 @@ pub(crate) fn run_child_capture(
     io: ChildIoOptions<'_>,
     child_spawned: &mut bool,
     volume_cap: Option<claudine::runaway::CaptureVolumeCap>,
+    signal_hub: Option<Arc<SignalHub>>,
 ) -> Result<ProcessResult<CapturedChildOutput>> {
     debug_assert!(
         env.contains_key(&OsString::from("PATH")),
@@ -572,7 +578,8 @@ pub(crate) fn run_child_capture(
     // reach descendants. The reader threads above feed `early_rx` when the
     // per-run volume cap trips (F3); the wall-clock `timeout` is enforced by a
     // minimal ticker on the same loop.
-    let (exit_code, termination, guard_context) = {
+    let signal_hub = signal_hub.unwrap_or_else(|| Arc::new(SignalHub::without_table()));
+    let (exit_code, termination, guard_context, early_termination) = {
         let kill_grace = TimeoutConfig::resolve(None, None).kill_grace;
         // Drop the main-thread sender so the channel disconnects once both
         // reader threads finish — the reader-thread clones are the only
@@ -597,7 +604,7 @@ pub(crate) fn run_child_capture(
         )?;
         stop_timing_ticker(timeout_ticker);
         let guard_context = early.as_ref().and_then(early_termination_guard_context);
-        (code, termination, guard_context)
+        (code, termination, guard_context, early)
     };
 
     kill_process_group(&mut child);
@@ -605,6 +612,24 @@ pub(crate) fn run_child_capture(
     let thread_join_timeout = Duration::from_secs(5);
     let stdout = join_with_timeout_or(stdout_handle, thread_join_timeout, String::new());
     let stderr = join_with_timeout_or(stderr_handle, thread_join_timeout, String::new());
+
+    // Bespoke signal mirror (E5) for the capture path's terminations
+    // (per-run volume cap, wall-clock timeout).
+    if let Some(termination) = early_termination.as_ref() {
+        signal_hub.emit_bespoke(termination.to_signal_event(), SignalSource::Stream);
+    }
+    // Exit source (E5): the same once-per-run `{exit_code, stderr_tail}`
+    // synthesis as the structured-stream path (inert on the hub-less
+    // fallback, which compiles no detection table).
+    signal_hub.observe_json(
+        SignalSource::Exit,
+        &claudine::signals::exit_source_payload(exit_code, &stderr),
+    );
+    // End-of-run harvest flush (E6): persist unmatched error/warning-class
+    // candidates when opted in; a no-op otherwise (and always on the
+    // hub-less fallback, which cannot enable harvesting).
+    claudine::signals::harvest::flush_hub(&signal_hub);
+    let signals = signal_hub.drain();
 
     let total_elapsed = spawned_at.elapsed();
     let first_response = super::resolve_first_response(
@@ -627,7 +652,7 @@ pub(crate) fn run_child_capture(
         },
         agent_pid: Some(captured_pid),
         guard_context,
-        signals: Vec::new(),
+        signals,
     })
 }
 
@@ -703,6 +728,12 @@ fn capture_stream_with_volume_cap<R: BufRead>(
 /// through the builder callback so it can run inside the parser thread.
 /// Reasoning rendering is owned entirely by `LiveSemanticSink`.
 ///
+/// `signal_hub` is the run's shared signal fan-in: the caller creates it
+/// (and typically also hands a clone to the OpenCode stderr bridge via
+/// `build_structured_plumbing`); this function feeds it stdout JSON lines
+/// plus the post-wait termination mirror, then drains it into
+/// `ProcessResult.signals`.
+///
 /// [`SemanticEventSink`]: claudine::stream::semantic::SemanticEventSink
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_child_stream_semantic(
@@ -724,6 +755,7 @@ pub(crate) fn run_child_stream_semantic(
     watchdog_state: Option<Arc<std::sync::Mutex<WatchdogState>>>,
     section_tracker: Option<Arc<Mutex<SectionTracker>>>,
     content_early_rx: Option<std::sync::mpsc::Receiver<EarlyTermination>>,
+    signal_hub: Arc<SignalHub>,
 ) -> Result<ProcessResult<StreamExecutionSummary>> {
     debug_assert!(env.contains_key(&OsString::from("PATH")));
     debug_assert!(env.contains_key(&OsString::from("HOME")));
@@ -831,15 +863,11 @@ pub(crate) fn run_child_stream_semantic(
     // Opt-in raw NDJSON capture for post-mortem analysis. Activated by
     // `CLAUDINE_RAW_STREAM_DIR`; `None` (and zero overhead) otherwise.
     let stream_capture_owned = StreamCapture::open(timeout_config.provider, child.id(), started_at);
-    // Signal detection (Phase E4): declarative engine + dedup sink observing
-    // every stdout JSON line, independent of the semantic parser. Every
-    // wired provider has a compiled table; `None` provider disables it.
-    let signal_state_owned = timeout_config.provider.map(|provider| {
-        (
-            SignalEngine::new(claudine::signals::for_provider(provider)),
-            SignalSink::new(),
-        )
-    });
+    // Signal detection (Phase E4/E5): the run's shared hub observes every
+    // stdout JSON line, independent of the semantic parser. Other producers
+    // (the OpenCode stderr bridge, the post-wait termination synthesis
+    // below) feed the same hub, so cross-source dedup is automatic.
+    let stdout_signal_hub = Arc::clone(&signal_hub);
     let stdout_handle = thread::spawn(move || {
         let _stream_guard = stream_span.enter();
         let _parse_span = info_span!("stream_parse").entered();
@@ -870,7 +898,6 @@ pub(crate) fn run_child_stream_semantic(
             build_parser(output_cb, reasoning_cb, Some(captured_pid));
         let mut fallback_mode = false;
         let mut stream_capture = stream_capture_owned;
-        let mut signal_state = signal_state_owned;
 
         for line in reader.lines() {
             let Ok(line) = line else { break };
@@ -898,24 +925,16 @@ pub(crate) fn run_child_stream_semantic(
                 capture.record_line(&line, line_at);
             }
 
-            // Offer the line to the signal engine independently of the
+            // Offer the line to the signal hub independently of the
             // semantic parser (and of fallback mode). A malformed JSON line
             // is silently skipped here — the parser path already reports
-            // malformed lines.
-            if let Some((engine, sink)) = signal_state.as_mut() {
+            // malformed lines. Version auto-narrowing lives inside the hub.
+            {
                 let trimmed = line.trim_start();
                 if trimmed.starts_with('{')
                     && let Ok(payload) = serde_json::from_str::<serde_json::Value>(trimmed)
                 {
-                    for event in engine.observe(SignalSource::Stream, &payload) {
-                        // Auto-narrowing: an observed provider version
-                        // restricts version-scoped record selection for the
-                        // rest of the run.
-                        if let SignalEvent::ProviderVersion { version } = &event {
-                            engine.observe_provider_version(version);
-                        }
-                        sink.emit(event, SignalSource::Stream);
-                    }
+                    stdout_signal_hub.observe_json(SignalSource::Stream, &payload);
                 }
             }
 
@@ -945,10 +964,7 @@ pub(crate) fn run_child_stream_semantic(
         if let Ok(mut r) = text_renderer.lock() {
             r.flush_remaining(&mut out);
         }
-        let signals = signal_state
-            .map(|(_, sink)| sink.into_signals())
-            .unwrap_or_default();
-        (parser, signals)
+        parser
     });
 
     let pipe = child
@@ -1127,17 +1143,27 @@ pub(crate) fn run_child_stream_semantic(
     stop_timing_ticker(watchdog_ticker);
 
     let thread_join_timeout = Duration::from_secs(5);
-    let (parser, signals): (Box<dyn SemanticStreamParser>, Vec<ObservedSignal>) =
-        join_with_timeout_or(
-            stdout_handle,
-            thread_join_timeout,
-            (Box::new(ErrorParser { exit_code }), Vec::new()),
-        );
+    let parser: Box<dyn SemanticStreamParser> = join_with_timeout_or(
+        stdout_handle,
+        thread_join_timeout,
+        Box::new(ErrorParser { exit_code }),
+    );
 
     let captured = join_with_timeout_or(stderr_handle, thread_join_timeout, String::new());
     if suppress_stderr_on_success && exit_code != 0 && !captured.is_empty() {
         eprintln!("{captured}");
     }
+
+    // Exit source (E5): synthesize the ratified `{exit_code, stderr_tail}`
+    // payload once per run. This is what makes `source: exit` detection
+    // records (and the qwen 53/55/130 bespoke exit mapping) live — those
+    // terminations bypass any terminal `result` event, so only the wrapper
+    // can observe them. `captured` is the same stderr the error-report path
+    // consumes via `summary.stderr_text`.
+    signal_hub.observe_json(
+        SignalSource::Exit,
+        &claudine::signals::exit_source_payload(exit_code, &captured),
+    );
 
     let mut summary = parser.finish(exit_code);
     if summary.duration_ms.is_none() {
@@ -1152,6 +1178,13 @@ pub(crate) fn run_child_stream_semantic(
     // exit code reflects SIGTERM rather than a meaningful provider status.
     if let Some(termination) = early_termination.as_ref() {
         apply_early_termination_to_summary(&mut summary, termination);
+        // Bespoke signal mirror (E5): every termination synthesized into the
+        // summary is also a taxonomy signal. `Stream` because the temporal
+        // guards judge stream content/liveness; for OpenCode bridge-origin
+        // trips the bridge already emitted the same kind from
+        // `fire_early_termination` and the sink's correlation window folds
+        // this second emission into it.
+        signal_hub.emit_bespoke(termination.to_signal_event(), SignalSource::Stream);
     }
 
     // Merge stderr-derived diagnostics after both reader threads have
@@ -1182,6 +1215,10 @@ pub(crate) fn run_child_stream_semantic(
         .as_ref()
         .and_then(early_termination_guard_context);
 
+    // End-of-run harvest flush (E6): persist unmatched error/warning-class
+    // candidates when opted in; a no-op otherwise.
+    claudine::signals::harvest::flush_hub(&signal_hub);
+
     let result = ProcessResult {
         data: summary,
         termination,
@@ -1191,7 +1228,7 @@ pub(crate) fn run_child_stream_semantic(
         },
         agent_pid: Some(captured_pid),
         guard_context,
-        signals,
+        signals: signal_hub.drain(),
     };
     if !result.signals.is_empty() {
         let per_kind: Vec<String> = result
@@ -1351,6 +1388,7 @@ mod tests {
             },
             &mut child_spawned,
             None,
+            None,
         )
         .expect("spawning /bin/echo must succeed on the test host");
 
@@ -1384,6 +1422,7 @@ mod tests {
                 stdin_seed: None,
             },
             &mut child_spawned,
+            None,
             None,
         );
 
@@ -1426,6 +1465,7 @@ mod tests {
             },
             &mut child_spawned,
             None,
+            None,
         )
         .expect("spawning /usr/bin/env must succeed on the test host");
 
@@ -1466,6 +1506,7 @@ mod tests {
             },
             &mut child_spawned_a,
             None,
+            None,
         )
         .expect("first spawn must succeed");
 
@@ -1483,6 +1524,7 @@ mod tests {
                 stdin_seed: None,
             },
             &mut child_spawned_b,
+            None,
             None,
         )
         .expect("second spawn must succeed");
@@ -1540,6 +1582,7 @@ mod tests {
                 stdin_seed: None,
             },
             &mut child_spawned,
+            None,
             None,
         )
         .expect("spawning sleep must succeed on the test host");

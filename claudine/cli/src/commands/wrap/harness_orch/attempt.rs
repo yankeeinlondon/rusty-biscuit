@@ -157,12 +157,17 @@ pub(crate) fn execute_harness_attempt(
         let stream_output = sink.stream_output();
         let watchdog_state = Some(sink.watchdog_state());
         let section_stream = sink.section_stream();
+        // One signal hub per attempt: shared by the stdout reader thread,
+        // the OpenCode stderr bridge, and the post-wait termination
+        // synthesis. Harvest opt-in (E6) is resolved inside the builder.
+        let signal_hub = super::super::policy::provider_signal_hub(provider);
         let (build_parser, stderr_bridge, content_early_rx) =
             super::super::policy::build_structured_plumbing(
                 provider,
                 sink,
                 parser_config,
                 launch.stall_timeout,
+                &signal_hub,
             );
         let stream_result = if let Some(wire_prompt) = launch.wire_prompt.clone() {
             let runtime_context =
@@ -217,6 +222,7 @@ pub(crate) fn execute_harness_attempt(
                 watchdog_state,
                 Some(section_stream.tracker()),
                 content_early_rx,
+                signal_hub,
             )?
         };
         let api_duration_ms = stream_result.data.duration_ms;
@@ -271,7 +277,11 @@ pub(crate) fn execute_harness_attempt(
             }
         };
 
-        let iteration_signals = Some(IterationSummarySignals::from_summary(&summary));
+        let mut iteration_summary_signals = IterationSummarySignals::from_summary(&summary);
+        iteration_summary_signals.apply_projected_rate_limit(
+            claudine::signals::project::rate_limit_info(&stream_result.signals),
+        );
+        let iteration_signals = Some(iteration_summary_signals);
 
         // Thread the honest per-guard `error_kind` (C3a) and structured
         // guard context from the synthesized summary / process result into
@@ -305,6 +315,10 @@ pub(crate) fn execute_harness_attempt(
             child_spawned,
             // Capture path gets the per-run volume cap only (F3).
             Some(runaway_guards.capture_volume_cap.clone()),
+            // Provider-attributed hub so exit-source records and bespoke
+            // exit mappings (qwen 53/55/130) fire on the capture path too;
+            // harvest opt-in (E6) is resolved inside the builder.
+            Some(super::super::policy::provider_signal_hub(provider)),
         )?;
         let perf = Some(capture.telemetry.into_agent_perf(None));
         let termination = capture.termination;

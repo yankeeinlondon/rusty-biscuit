@@ -441,6 +441,29 @@ impl IterationSummarySignals {
             model_id: summary.model.clone(),
         }
     }
+
+    /// Migration bridge (E5): prefer the signal-engine projection of the
+    /// run's rate-limit posture over the parser-computed value, field by
+    /// field. Projected fields win when present; parser fields fill the
+    /// gaps — notably the parser's rendered `message`, which the
+    /// projection deliberately does not synthesize. The parser computation
+    /// stays authoritative for lib/mid-stream consumers this wave; full
+    /// retirement waits until the engine path has soaked.
+    pub fn apply_projected_rate_limit(
+        &mut self,
+        projected: Option<claudine::stream::summary::RateLimitInfo>,
+    ) {
+        let Some(projected) = projected else {
+            return;
+        };
+        let parser = self.rate_limit.take().unwrap_or_default();
+        self.rate_limit = Some(claudine::stream::summary::RateLimitInfo {
+            is_throttled: projected.is_throttled.or(parser.is_throttled),
+            retry_after_ms: projected.retry_after_ms.or(parser.retry_after_ms),
+            message: projected.message.or(parser.message),
+            reset_at: projected.reset_at.or(parser.reset_at),
+        });
+    }
 }
 
 /// Render the one-line execution header for a composition run.

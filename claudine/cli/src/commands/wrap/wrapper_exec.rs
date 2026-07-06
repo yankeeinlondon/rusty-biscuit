@@ -82,8 +82,17 @@ pub(crate) fn run_structured_stream_session(
     // path (CLI > env > built-in `10m`; no frontmatter layer here). Only the
     // OpenCode branch of `build_structured_plumbing` consumes it.
     let stall_timeout = composition::resolve_stall_timeout(args.stall_timeout.clone(), None);
-    let (build_parser, stderr_bridge, content_early_rx) =
-        policy::build_structured_plumbing(provider, sink, parser_config, stall_timeout);
+    // One signal hub per run: shared by the stdout reader thread, the
+    // OpenCode stderr bridge, and the post-wait termination synthesis.
+    // Harvest opt-in (E6) is resolved inside the builder.
+    let signal_hub = policy::provider_signal_hub(provider);
+    let (build_parser, stderr_bridge, content_early_rx) = policy::build_structured_plumbing(
+        provider,
+        sink,
+        parser_config,
+        stall_timeout,
+        &signal_hub,
+    );
     let mut _spawned = false;
     let stream_result = if let Some(wire_prompt) = wire_prompt.clone() {
         let runtime_context =
@@ -146,6 +155,7 @@ pub(crate) fn run_structured_stream_session(
             watchdog_state,
             Some(section_stream.tracker()),
             content_early_rx,
+            signal_hub,
         )?
     };
     let mut summary = stream_result.data;

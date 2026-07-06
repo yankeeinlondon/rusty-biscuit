@@ -1723,3 +1723,66 @@ mod opencode_yolo_assembly {
         assert_eq!(config["permission"]["*"], "allow");
     }
 }
+
+mod projected_rate_limit_bridge {
+    use claudine::stream::summary::RateLimitInfo;
+
+    use super::IterationSummarySignals;
+
+    fn parser_signals() -> IterationSummarySignals {
+        IterationSummarySignals {
+            rate_limit: Some(RateLimitInfo {
+                is_throttled: Some(true),
+                retry_after_ms: None,
+                message: Some("rendered by parser".into()),
+                reset_at: None,
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// No projection → the parser value survives untouched (the migration
+    /// bridge's fallback).
+    #[test]
+    fn none_projection_keeps_parser_value() {
+        let mut signals = parser_signals();
+        signals.apply_projected_rate_limit(None);
+        assert_eq!(
+            signals.rate_limit.unwrap().message.as_deref(),
+            Some("rendered by parser")
+        );
+    }
+
+    /// Projected fields win where present; parser fields fill the gaps —
+    /// notably the parser's rendered message when the projection carries
+    /// no raw provider message.
+    #[test]
+    fn projected_fields_win_and_parser_fills_gaps() {
+        let mut signals = parser_signals();
+        signals.apply_projected_rate_limit(Some(RateLimitInfo {
+            is_throttled: Some(true),
+            retry_after_ms: Some(5_000),
+            message: None,
+            reset_at: None,
+        }));
+        let merged = signals.rate_limit.unwrap();
+        assert_eq!(merged.is_throttled, Some(true));
+        assert_eq!(merged.retry_after_ms, Some(5_000));
+        assert_eq!(merged.message.as_deref(), Some("rendered by parser"));
+    }
+
+    /// A projection with no parser counterpart installs itself wholesale.
+    #[test]
+    fn projection_without_parser_value_installs_itself() {
+        let mut signals = IterationSummarySignals::default();
+        signals.apply_projected_rate_limit(Some(RateLimitInfo {
+            is_throttled: Some(true),
+            retry_after_ms: None,
+            message: Some("raw provider message".into()),
+            reset_at: None,
+        }));
+        let merged = signals.rate_limit.unwrap();
+        assert_eq!(merged.is_throttled, Some(true));
+        assert_eq!(merged.message.as_deref(), Some("raw provider message"));
+    }
+}
