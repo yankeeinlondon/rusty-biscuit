@@ -1,596 +1,353 @@
 ---
 status: draft
-source: ./design-strategy.md
+inputs:
+  - ../../dmls/design/design-strategy.md
+  - ../../dmls/design/markdown-lsp.md
+  - ../../dmls/design/wiki-style-links.md
+  - ../../dmls/design/zed-lsp.md
+  - ../../dmls/design/extending-iwes-lsp.md
+related:
+  - ./design.md
+  - ./research-areas.md
 ---
 
-# Darkmatter Language Server Specification
-
-**Status:** Draft. This specification turns the IWES-based direction in `./design-strategy.md` into an implementation-oriented DMLS contract.
-
-## Context
-
-Darkmatter Language Server, `dmls`, is the editor-facing language server for
-Markdown documents that use Darkmatter composition, schema, style, rendering,
-and Claudine extensions. It must be useful as a strong Markdown language server
-for ordinary Markdown, while adding Darkmatter-specific intelligence where
-generic Markdown servers cannot help.
-
-The selected architecture is IWES-derived rather than a greenfield LSP rewrite.
-IWES already treats Markdown workspaces as graphs, which matches Darkmatter's
-transclusion, schema, file-reference, interpolation, and render metadata model.
-DMLS should preserve that graph-centered base and add a Darkmatter semantic
-overlay driven by the existing Darkmatter library.
-
-## Goals
-
-1. Provide editor diagnostics, navigation, completion, hover, symbols, document
-   links, references, rename, code actions, folding, inlay hints, and formatting
-   for Markdown plus Darkmatter syntax.
-2. Reuse IWES graph concepts and the `lsp-server` plus `lsp-types` protocol
-   stack to reduce language-server risk.
-3. Use Darkmatter library APIs as the semantic authority for Markdown parsing,
-   frontmatter, schemas, composition, style frontmatter, language grammar,
-   cleanup, and Markdown-aware hashing.
-4. Maintain one shared workspace view for generic Markdown links, wiki-links,
-   inclusion links, Darkmatter transclusions, frontmatter file references,
-   schemas, interpolation references, and style assets.
-5. Keep unsafe or expensive compose behavior out of automatic analysis. Shell
-   execution, remote fetches, and full compose previews must be explicit,
-   policy-controlled commands.
-6. Support LSP 3.17 first, with capability-gated behavior for client-specific
-   support in VS Code, Neovim, Helix, Zed, and other standard LSP clients.
-
-## Non-Goals
-
-1. DMLS is not a full runtime replacement for `md compose`.
-2. DMLS must not execute shell directives or fetch remote content during ordinary
-   diagnostics, completion, hover, definition, references, symbols, or document
-   link requests.
-3. DMLS should not duplicate Darkmatter schema, compose, style, cleanup, or
-   `LanguageGrammar` rules in server-local code.
-4. DMLS should not start with incremental text synchronization unless source-map
-   and invalidation performance measurements prove full sync is insufficient.
-5. DMLS should not depend on `iwes` as an opaque sidecar server. Darkmatter
-   semantics need direct access to the shared graph, source maps, diagnostics,
-   and provider registry.
-
-## Architecture
-
-The initial server should be a single `dmls` crate under `darkmatter/dmls`.
-It can split into library and CLI crates later if another package needs to
-consume a reusable DMLS library surface.
-
-```text
-darkmatter/dmls/
-  Cargo.toml
-  src/
-    main.rs
-    lib.rs
-    router.rs
-    capabilities.rs
-    workspace/
-    graph/
-    semantic/
-    providers/
-    diagnostics/
-    source_map/
-    config/
-```
-
-The server is organized around five layers:
-
-1. **Protocol router**: owns the `lsp-server` stdio loop, request dispatch,
-   notification handling, cancellation, progress reporting, and capability
-   gates.
-2. **Workspace state**: owns open documents, file snapshots, configuration,
-   source maps, client profile, graph index, semantic index, and diagnostics.
-3. **IWES graph substrate**: provides the base Markdown graph for documents,
-   headings, links, wiki-links, inclusion links, backlinks, symbols, folding,
-   and generic Markdown refactors.
-4. **Darkmatter semantic overlay**: indexes frontmatter, schema declarations,
-   schema validation data, directives, interpolation expressions, transclusion
-   targets, style declarations, render metadata, shell policy verdicts, and
-   Claudine extensions.
-5. **Provider registry**: merges IWES-derived providers and Darkmatter providers
-   for each LSP capability.
-
-Provider ordering should be deterministic: the IWES-derived provider supplies
-generic Markdown answers first, then Darkmatter providers augment or override
-when they can provide a more precise semantic result.
-
-## Protocol Contract
-
-DMLS targets LSP 3.17 and should use `lsp-server` and `lsp-types` initially.
-The server should advertise only capabilities that are implemented and should
-gate optional features on client capabilities.
-
-Initial synchronization policy:
-
-- Use full document sync.
-- Treat the client buffer as authoritative for open files.
-- Re-index a changed document after `textDocument/didChange`.
-- Reconcile with disk on `textDocument/didSave`.
-- Update graph and diagnostics on create, delete, and rename file-operation
-  notifications when the client supports them.
-
-The source-map module is mandatory. All providers must convert through it rather
-than slicing strings directly. It must support byte offsets, LSP positions,
-LSP ranges, frontmatter-relative ranges, document versions, URI identity, and
-future virtual-document range projection.
-
-## Workspace State
-
-`WorkspaceState` must own:
-
-- workspace folders and resolved base path
-- active `DmlsConfig`
-- normalized URI-to-path mappings
-- open document text and versions
-- disk snapshot for indexed Markdown and Darkmatter files
-- IWES-compatible graph index
-- Darkmatter semantic index
-- source maps by URI and document version
-- diagnostics by URI
-- client capability profile
-
-Workspace membership must come from LSP workspace folders and DMLS
-configuration. It must not infer package identity from directory names.
-
-## Graph Model
-
-DMLS maintains one merged graph with typed nodes and typed edges.
-
-Core Markdown/IWES-compatible nodes:
-
-- document
-- heading or section
-- paragraph
-- list and list item
-- table
-- code block
-- quote
-- link or reference
-
-Darkmatter overlay nodes:
-
-- frontmatter document
-- frontmatter key path
-- schema declaration
-- style declaration
-- interpolation expression
-- condition expression
-- directive
-- directive argument
-- transclusion target
-- shell directive
-- page block
-- disclosure block
-- horizontal-rule attribute block
-- code fence info string
-
-Required edge kinds:
-
-- `includes`: IWES structural inclusion edge
-- `references`: Markdown link, wiki-link, reference-style link, or inline anchor
-- `transcludes`: `::file`, `::code`, `::toc-linking`, `::file-links`,
-  prologue, epilogue, and related Darkmatter content edges
-- `uses_schema`: `$schema` or configured baseline schema
-- `uses_file`: frontmatter `file(...)`, image, stylesheet, local asset, or
-  directive path
-- `uses_variable`: interpolation or condition reference to frontmatter, `ctx`,
-  `env`, or directive-set state
-- `defines_anchor`: heading or explicit custom anchor
-- `defines_symbol`: heading, frontmatter key, directive, schema-defined key, or
-  named block where supported
-
-The same graph should power definition, references, backlinks, rename,
-diagnostics, document links, workspace symbols, inlay hints, and code actions.
-
-## Darkmatter Semantic Overlay
-
-The overlay parser must understand the author-written Darkmatter surface without
-executing the compose pipeline.
-
-Required frontmatter surfaces:
-
-- YAML delimiter range
-- `$schema`
-- `replace`
-- `prologue`
-- `epilogue`
-- `interpolate_code_blocks`
-- `style.*`
-- schema-defined arbitrary author keys
-- Claudine lifecycle-event schemas
-- `file`, `file(eager)`, remote URL, and path-projection values where exposed by
-  schema semantics
-
-Required body surfaces:
-
-- `::file`
-- `::code`
-- `::toc-linking`
-- `::file-links`
-- `::shell`
-- `::shell-block`
-- `::block` / `::end-block`
-- `::disclosure`, `::details`, `::end-disclosure`
-- interpolation expressions
-- condition expressions
-- directive option keys and values
-- horizontal-rule attribute blocks
-- code fence info strings
-
-Darkmatter semantics must call existing library APIs or add new library APIs
-when needed. Server-local parsing is acceptable only for source geometry that
-the library does not yet expose, and it should be hidden behind stable DMLS
-abstractions.
-
-## Frontmatter Requirements
-
-Frontmatter is a first-class language surface. DMLS needs a position-aware
-`FrontmatterAst` abstraction independent of the chosen YAML parser.
-
-The abstraction must provide:
-
-- delimiter range
-- key path ranges
-- scalar value ranges
-- sequence item ranges
-- mapping/object ranges
-- comments when the selected parser preserves them
-- JSON Pointer or dotted-path lookup to source range
-- original text slices for hover and code actions
-- conversion from frontmatter-relative ranges to host-document LSP ranges
-
-Darkmatter library behavior remains the semantic authority for schema detection,
-schema validation, coercion, `file(eager)`, and strict-style behavior.
-
-Initial frontmatter support should be YAML only. TOML and JSON frontmatter can
-be considered after YAML frontmatter delivers diagnostics, completion, hover,
-definition, document links, and code actions with precise source ranges.
-
-## Diagnostics
-
-DMLS should publish push diagnostics after indexing each affected document.
-Pull diagnostics can be researched later.
-
-Diagnostic sources:
-
-- `darkmatter.markdown`
-- `darkmatter.links`
-- `darkmatter.frontmatter`
-- `darkmatter.schema`
-- `darkmatter.compose`
-- `darkmatter.style`
-- `darkmatter.security`
-- `darkmatter.embedded`
-
-Initial diagnostics:
-
-- broken Markdown links and anchors
-- unresolved wiki-links
-- duplicate heading slugs
-- YAML frontmatter parse failures
-- invalid `$schema` value
-- schema preparation and validation errors
-- missing required schema keys
-- unknown keys when strict schema mode is active
-- deprecated style keys
-- invalid style values
-- invalid `file(eager)` and file-reference values
-- unknown or malformed Darkmatter directives
-- malformed directive options
-- broken transclusion paths
-- transclusion cycles
-- unknown interpolation variables
-- malformed interpolation or condition expressions
-- shell directives disallowed by policy
-- unknown code fence language tokens according to `LanguageGrammar`
-
-Diagnostics must include stable diagnostic codes and related information where a
-second location explains the issue, such as a duplicate heading, cycle ancestry,
-or schema source.
-
-## Completion
-
-Completion should be context-sensitive and should advertise trigger characters
-for `[`, `#`, `/`, `{`, `.`, `:`, `=`, `@`, `$`, and space after directive
-introducers.
-
-Completion categories:
-
-- Markdown link targets
-- wiki-link targets
-- heading anchors
-- file paths
-- directive names
-- directive option keys
-- directive enum values
-- interpolation identifiers
-- `ctx.*` variables
-- frontmatter key paths
-- schema keys and values
-- style keys and values
-- code fence language tokens from `LanguageGrammar`
-- Claudine lifecycle-event keys and values
-
-Completion items should use snippets only when the client supports snippets.
-Expensive documentation should be deferred through `completionItem/resolve` when
-client support is available.
-
-## Hover
-
-Hover content should be concise Markdown. It should cover:
-
-- linked document preview inherited from the IWES graph provider
-- resolved path, existence, and link kind
-- heading slug and duplicate status
-- frontmatter schema type, description, default, and enum values
-- interpolation parsed form and static resolution when safe
-- directive semantics and resolved target
-- shell policy verdict without command execution
-- code fence grammar and renderer language
-- style value interpretation for supported style keys
-
-## Definition, Document Links, And References
-
-Definition must route:
-
-- Markdown links to file or heading
-- wiki-links to resolved graph key
-- frontmatter file paths to files
-- `$schema` to schema file or schema definition
-- interpolation variables to frontmatter keys when statically resolvable
-- directive paths to files
-- directive heading references, including `exclude="Heading"` where supported
-
-`textDocument/documentLink` should be implemented early for Markdown links,
-frontmatter file references, schema references, style assets, and Darkmatter
-directive paths.
-
-References must include:
-
-- inclusion links
-- inline Markdown links
-- reference-style links
-- wiki-links
-- transclusion directives
-- frontmatter file references
-- interpolation uses of a frontmatter key
-- schema uses
-
-Backlinks and reference counts should be derived from the same reverse index.
-
-## Rename
-
-Initial rename targets:
-
-- file or document key, including Markdown links, wiki-links, and transclusions
-- heading anchor, including `#anchor`, wiki heading links, and directive-heading
-  references
-- frontmatter key path, including interpolation and `set.NAME` references
-- link reference labels when the graph preserves enough source fidelity
-
-Rename must refuse or require confirmation for:
-
-- ambiguous wiki-link targets
-- generated anchors with duplicates
-- reserved roots such as `ctx` and `env`
-- filesystem conflicts
-- edits requiring file resource operations when the client does not support them
-
-When supported, file renames should use `WorkspaceEdit.documentChanges` with
-resource operations.
-
-## Code Actions And Commands
-
-Code actions should avoid side effects during discovery. Expensive edits should
-be built through `codeAction/resolve` when the client supports it.
-
-Initial quick fixes and refactors:
-
-- create missing linked file
-- create missing transclusion target
-- convert Markdown link to wiki-link or back
-- add missing schema-required key
-- remove deprecated style key
-- migrate top-level `hr` to `style.hr`
-- close an unclosed directive block
-- add or open a shell approval entry
-- format table
-- normalize headings
-- run Darkmatter cleanup
-- preview composed document through an explicit command
-- extract section to `::file`
-- inline `::file` content
-
-Commands that can execute shell, fetch network content, or write files must be
-explicit and must follow Darkmatter approval and policy semantics.
-
-## Formatting
-
-Formatting should use Darkmatter cleanup and normalization paths, not IWES graph
-writing. It must not execute shell commands, fetch remote content, or perform
-unsafe compose expansion.
-
-Initial formatting surface:
-
-- whole-document cleanup
-- range cleanup where source maps can preserve context
-- list and table cleanup
-- heading normalization as an explicit source action or command
-
-## Folding, Symbols, And Inlay Hints
-
-Folding should combine IWES folding with Darkmatter constructs:
-
-- headings
-- lists
-- tables
-- quotes
-- code fences
-- frontmatter block
-- directive blocks
-- disclosure blocks
-- shell blocks
-
-Document symbols should expose headings as the main spine and may include
-frontmatter, directives, code fences, and schema-defined symbols where useful.
-
-Workspace symbols should include document titles, headings, schema-visible
-frontmatter symbols, and important Darkmatter directives.
-
-Inlay hints should be opt-in by category and may show:
-
-- backlink/reference counts
-- resolved transclusion target paths
-- interpolation static value previews
-- condition evaluation previews when safe
-- shell policy verdicts
-- code fence grammar names
-
-## Security And Side-Effect Policy
-
-DMLS must distinguish static analysis from execution.
-
-Automatic analysis may:
-
-- parse shell directive syntax
-- resolve command tokens enough to explain policy
-- report whether a command is approved, denied, or unknown
-- show cached metadata if already present and valid
-
-Automatic analysis must not:
-
-- execute shell commands
-- fetch remote URLs
-- mutate files
-- compose a document with unsafe operations
-
-Explicit commands may perform side-effecting work only after the user invokes
-the command and the relevant Darkmatter policy allows it.
+# DMLS — Darkmatter Language Server Specification
+
+**Status:** Draft for review. This document defines *what* DMLS is and what v1
+must deliver. The *how* (architecture, component design, caching, indexing)
+lives in [design.md](./design.md).
+
+## Purpose
+
+DMLS (`dmls`) is the editor-facing language server for Markdown documents,
+with first-class intelligence for the Darkmatter DSL, SimplifiedSchema-driven
+frontmatter, and wiki-style links. It serves two audiences at once:
+
+1. **Ordinary Markdown authors.** DMLS must be a credible, standalone Markdown
+   language server — good enough that choosing it costs nothing even for
+   documents that use no Darkmatter features ("lose nothing" principle).
+2. **Darkmatter and Claudine authors.** Humans (and agents) writing composed
+   documents and agent prompts get guard rails no generic Markdown server can
+   provide: schema-validated frontmatter, directive and interpolation
+   intelligence, transclusion navigation, and safety-aware handling of shell
+   and remote content.
+
+The architecture is IWES-derived rather than greenfield: DMLS adopts IWES's
+graph-centered Markdown language-server model (documents, headings, links, and
+inclusions as one workspace graph) and layers a Darkmatter semantic overlay on
+top. Darkmatter's existing library remains the semantic authority for parsing,
+frontmatter, schemas, compose semantics, style, `LanguageGrammar`, cleanup,
+and Markdown-aware hashing — DMLS never re-implements those rules.
+
+## Naming and Placement
+
+- Package: `darkmatter/dmls`, binary name `dmls`.
+- Single crate initially; split into `dmls` (lib) + `dmls-cli` only if another
+  crate needs a reusable library surface.
+- A separate, thin Zed extension (`zed-dmls`, compiled to WASM) launches the
+  native binary; it contains no language logic (see Editor Targets).
+- Must build and run on macOS, Windows, and Linux.
+
+## Editor Targets
+
+Primary targets, in support order:
+
+| Editor | Integration path | Notes |
+|--------|-----------------|-------|
+| VS Code | Standard LSP client (extension or generic LSP config) | Richest client capability surface; reference client for feature testing. |
+| Zed | Thin `zed_extension_api` WASM extension launching native `dmls` | The server itself stays native. Extension resolves the binary via PATH, settings override, or GitHub release download — the proven IWE pattern. |
+| Neovim | `nvim-lspconfig`-style registration | Broad LSP support; images/inlay rendering differ from GUI editors. |
+| Helix | `languages.toml` registration | Conservative capability set; IWES already carries a Helix selection-range quirk — keep client-quirk handling isolated. |
+
+DMLS speaks standard LSP 3.17 over stdio, so any conforming client (including
+agents) is a secondary target for free. Capability-gated behavior handles
+client differences; no feature may hard-require a bespoke client extension.
+
+## Feature Model
+
+DMLS features are organized in four layers. Lower layers must not depend on
+higher ones; a plain-Markdown workspace exercises only Layers 0–1.
+
+### Layer 0 — Markdown Baseline (CommonMark + GFM)
+
+Everything a modern Markdown LSP is expected to do, powered by the IWES-style
+workspace graph:
+
+- **Navigation:** go-to-definition for links and anchors, find references,
+  document symbols (heading outline), workspace symbols, backlinks (via
+  references), document highlights.
+- **Diagnostics:** broken local links and anchors, duplicate heading slugs,
+  malformed structures the renderer would silently reinterpret (unclosed
+  fences, table column mismatches).
+- **Completion:** link path completion, heading/anchor completion, code fence
+  language tokens (authority: `LanguageGrammar`).
+- **Hover:** linked-document preview (title/first paragraph), resolved path
+  and existence, heading slug.
+- **Structure:** folding ranges (sections, fences, lists, tables, quotes,
+  frontmatter block), document links (clickable paths/URLs), selection ranges.
+- **Editing:** rename for files and heading anchors with workspace-wide
+  reference updates; create-missing-file code action; document formatting via
+  Darkmatter cleanup (never IWES graph rewriting).
+
+GFM extensions in scope: tables, task lists, strikethrough, autolinks,
+footnotes. Anchor slug algorithm defaults to GitHub-style; Darkmatter render
+behavior is the authority where they differ.
+
+### Layer 1 — Wiki-Style Links
+
+First-class `[[target]]` support, aligned with the MediaWiki/Obsidian
+convention family:
+
+- **Forms:** `[[target]]`, `[[target|alias]]` (target-first, MediaWiki order),
+  `[[target#heading]]`, `[[target#heading|alias]]`.
+- **Resolution:** targets may be workspace-relative paths or bare basenames.
+  The resolution universe is the LSP workspace folder(s); an optional
+  `wiki_root` config value narrows or redirects it (a future Darkmatter
+  vault concept can plug in as another override source). Basename resolution
+  ranks: same directory → unique basename match across the workspace →
+  ambiguity. Ambiguous targets produce multiple definition locations plus a
+  diagnostic; rename refuses ambiguous targets.
+- **Features:** completion (filenames, then headings after `#`), definition,
+  references/backlinks, broken/unresolved-link diagnostics, hover preview,
+  rename participation, "create missing note" code action.
+- **Interop stance:** wiki-links are an authoring convenience and a knowledge-
+  graph feature; Darkmatter compose/render behavior for wiki-links is defined
+  separately and DMLS follows the library once that lands. Obsidian vault
+  compatibility (aliases from frontmatter, `![[embed]]`, block refs `^id`) is
+  explicitly post-v1.
+
+### Layer 2 — Frontmatter Intelligence (SimplifiedSchema)
+
+Frontmatter is a first-class language surface, not an opaque header. All
+schema semantics come from `darkmatter::markdown::schemas`; DMLS adds source
+positions and editor projections.
+
+- **Schema sources**, in effective order (mirroring `md compose`):
+  1. The Darkmatter base schema (`darkmatter/docs/schemas/darkmatter.yaml`,
+     exposed as `darkmatter_base_schema()`) — injected as the default baseline.
+  2. Configured baseline extensions (e.g. the Claudine schema) activated per
+     workspace/glob via DMLS config.
+  3. The document's own `$schema` (inline, file reference, or root union),
+     which overrides baseline properties on conflict.
+- **Diagnostics:** YAML parse failures; invalid `$schema` shape; schema
+  preparation and validation errors mapped to precise key/value ranges;
+  missing required keys (ranged on the frontmatter block or nearest parent);
+  unknown keys under strict mode; deprecated style keys; invalid
+  `file(...)` / `file(eager)` references; values that cannot be statically
+  validated (pending `$(...)`) reported as informational, never executed.
+- **Completion:** schema property keys (with required-marking), enum values,
+  boolish scaffolds, file paths for `file(...)`-typed properties, `style.*`
+  keys/values, nested object keys.
+- **Hover:** the SimplifiedSchema type, constraints, default, and the `->`
+  description text for the key under the cursor; generated-key annotation for
+  `ctx.*` (Darkmatter-owned, read-only).
+- **Navigation:** `$schema` file references → schema source; `file(...)`
+  values → resolved file; document links on all file-valued entries.
+- **Structure:** frontmatter block folding; frontmatter keys in document
+  symbols (configurable).
+
+YAML frontmatter only in v1. TOML/JSON frontmatter is out of scope until the
+Darkmatter library itself supports them.
+
+### Layer 3 — Darkmatter DSL
+
+Static intelligence for the compose-pipeline surface, **without ever executing
+it**. Sub-areas, roughly in low-hanging-fruit order:
+
+1. **Directive syntax** — recognize the directive families (`::file`,
+   `::code`, `::toc-linking`, `::file-links`, `::shell`, `::shell-block`,
+   `::block`/`::end-block`, `::disclosure`/`::details`/`::end-disclosure`):
+   directive-name completion, unknown-directive and unclosed-block
+   diagnostics, folding for block directives, hover describing directive
+   semantics.
+2. **Transclusion navigation** — `::file`/`::code` targets plus frontmatter
+   `prologue`/`epilogue`: document links, go-to-definition, broken-path
+   diagnostics, transclusion-cycle diagnostics, references (which documents
+   transclude this file).
+3. **Interpolation and expressions** — `{{ ... }}` in body and frontmatter:
+   parse via Darkmatter expression APIs; completion for frontmatter keys,
+   `ctx.*` (catalog enumerated by the base schema), and `env.*`; hover showing
+   the parsed form and the statically-resolved value when safe;
+   unknown-variable and malformed-expression diagnostics; definition from an
+   interpolation site to the frontmatter key.
+4. **Shell awareness** — parse `::shell` / `::shell-block` / frontmatter
+   `$(...)` syntax; hover shows the command and its policy verdict
+   (approved/denied/unknown) without executing; diagnostics for
+   policy-disallowed commands.
+5. **Compose refactors and preview** — extract-section-to-`::file`, inline a
+   transclusion, compose/render preview commands with explicit safety gates.
+
+Items 1–3 (and the read-only part of 4) are v1 candidates; item 5 is post-v1.
+
+## v1 Scope
+
+v1 delivers: **all of Layer 0, Layer 1 basics, all of Layer 2, and the
+low-hanging subset of Layer 3.**
+
+| Capability | v1 | Notes |
+|---|---|---|
+| Markdown navigation, symbols, folding, document links | ✅ | Layer 0 |
+| Broken link / anchor / heading diagnostics | ✅ | Layer 0 |
+| Path, anchor, fence-language completion | ✅ | Layer 0 |
+| File + heading rename | ✅ | refusal rules for unsafe cases |
+| Formatting via Darkmatter cleanup | ✅ | whole-document; range formatting later |
+| Wiki-link completion/definition/diagnostics/references | ✅ | Layer 1 basics |
+| Obsidian aliases, embeds, block refs | ❌ | post-v1 |
+| Frontmatter schema diagnostics/completion/hover/links | ✅ | Layer 2, YAML only |
+| Claudine baseline schema activation | ✅ | via generic extension config |
+| Directive syntax intelligence | ✅ | Layer 3.1 |
+| Transclusion links/diagnostics/cycles | ✅ | Layer 3.2 |
+| Interpolation completion/hover/diagnostics | ✅ | Layer 3.3, static only |
+| Shell policy hover/diagnostics (read-only) | ✅ | no execution ever |
+| Compose/render preview commands | ❌ | post-v1 |
+| Extract/inline transclusion refactors | ❌ | post-v1 |
+| Embedded-language delegation (fences → other LSPs) | ❌ | research frontier; post-v1 |
+| Remote URL validation | ❌ | post-v1, opt-in, cache-backed |
+| Semantic tokens | ❌ | evaluate after v1 (TextMate/Tree-sitter grammars may suffice) |
+| Incremental text sync | ❌ | full sync first; revisit with measurements |
+
+## Architecture Summary
+
+Detail lives in [design.md](./design.md). The contract-level commitments:
+
+1. **Protocol stack:** `lsp-server` + `lsp-types`, LSP 3.17, stdio, full
+   document sync, push diagnostics initially. UTF-16 position encoding unless
+   the client negotiates otherwise.
+2. **One workspace graph:** documents, headings, Markdown links, wiki-links,
+   transclusions, frontmatter file references, schema uses, and interpolation
+   references are typed edges in a single graph. Every navigation, diagnostic,
+   and refactor feature is a projection of that graph.
+3. **Source-map discipline:** all providers convert positions through one
+   source-map API (byte offsets ↔ UTF-16 LSP positions, frontmatter-relative →
+   document ranges). No ad-hoc string slicing.
+4. **Semantic authority:** Darkmatter library for Markdown/compose/schema/
+   style/grammar semantics; `biscuit-file` for file-reference resolution.
+   DMLS-local parsing exists only where the library lacks source geometry, and
+   is hidden behind DMLS abstractions until it can move into the library.
+5. **Provider registry:** each LSP capability is served by an ordered provider
+   chain (generic Markdown first, Darkmatter overlay augmenting or overriding
+   with more precise answers) with deterministic merge rules.
+
+## Safety and Side-Effect Policy
+
+DMLS runs inside editors and agents; accidental execution is a design failure.
+
+Passive requests (diagnostics, completion, hover, definition, references,
+symbols, folding, document links, formatting) MAY parse anything and resolve
+local files. They MUST NOT:
+
+- execute shell commands (including `$(...)` and `::shell` evaluation),
+- fetch remote URLs,
+- mutate files,
+- run compose phases with side effects.
+
+Shell and remote surfaces are *explained* statically: hover and diagnostics
+report what compose *would* do and whether policy allows it. Side-effecting
+behavior is reserved for explicit, post-v1 `workspace/executeCommand` commands
+gated by Darkmatter policy.
+
+## Extension Model (Claudine)
+
+Claudine is the first consumer of a **generic** baseline-extension mechanism —
+no Claudine special cases in DMLS core:
+
+- An extension contributes: a SimplifiedSchema baseline
+  (`darkmatter/docs/schemas/claudine.yaml` for Claudine), activation rules,
+  and optionally extra hover documentation. Activation in v1 is **config +
+  globs only** (e.g. `.claude/**`, `prompts/**` → Claudine schema): explicit
+  and deterministic. Frontmatter-based auto-detection may be layered on
+  post-v1.
+- DMLS merges extension baselines with the Darkmatter base schema using the
+  same precedence semantics as compose (document `$schema` wins on conflict).
+- Claudine's lifecycle-event keys (`initialize`, `start`, `success`,
+  `failure`, …), `prompt`, `sequence`, `loop`, timeouts, and guard settings
+  then get diagnostics, completion, and hover with zero Claudine-specific
+  server code.
+- Behavior that cannot be expressed as a schema (e.g. deep lifecycle `stack`
+  action validation) stays owned by Claudine and is out of DMLS v1 scope.
 
 ## Configuration
 
-`DmlsConfig` should support:
+`DmlsConfig`, sourced from LSP `workspace/configuration` plus an optional repo
+config file (exact file name/location decided in design.md):
 
-- workspace root and library root overrides
-- file include and exclude globs
-- Markdown dialect and wiki-link behavior
-- schema defaults by glob
-- strict schema and strict style modes
-- shell policy path
-- remote URL validation policy
-- inlay hint categories
-- code action categories
-- formatting behavior
-- embedded language support tiers
-- Claudine extension enablement and schema locations
+- workspace/library root overrides; include/exclude globs
+- wiki-link behavior (enable, path style, ambiguity policy)
+- baseline schema extensions (name → schema path, activation globs)
+- strict schema mode, strict style mode
+- shell policy discovery path
+- inlay hint and code-action category toggles
+- formatting behavior (cleanup variant, fixed width)
+- diagnostics debounce tuning
 
-Configuration must be reloadable and should invalidate only affected indexes
-where possible.
+Config changes must be reloadable without server restart, invalidating only
+affected indexes where possible.
 
-## Dependency Strategy
+## Packaging and Distribution
 
-Preferred LSP stack:
+- Cross-platform release artifacts for macOS (universal), Linux (x86_64 +
+  aarch64), and Windows (x86_64) so the Zed extension (and any installer) can
+  download by platform.
+- Logging goes to stderr / log file, never stdout (stdio is reserved for LSP
+  framing). `RUST_LOG`-style filtering plus a `--log-file` flag.
+- CLI flags: `--version`, `--log-level`, `--config <path>`, and a `--stdio`
+  no-op flag for clients that pass it by convention.
+- Editor setup documentation for all four target editors ships with v1.
 
-- `lsp-server`
-- `lsp-types`
-- `crossbeam-channel`
-- `serde`
-- `serde_json`
-- `toml`
-- `tracing`
-- repo-preferred error handling
+## Acceptance Criteria (v1)
 
-Preferred semantic authorities:
+1. `dmls` completes the LSP initialize/shutdown lifecycle over stdio on macOS,
+   Windows, and Linux.
+2. Open documents are indexed from client buffer text, not stale disk state;
+   watched-file changes update the graph for unopened files.
+3. Source-map tests cover ASCII, multibyte, astral-plane characters, CRLF,
+   frontmatter-relative ranges, and round trips.
+4. Layer 0: navigation, symbols, document links, folding, and broken-link
+   diagnostics work on a plain CommonMark+GFM workspace with zero Darkmatter
+   config.
+5. Layer 1: `[[target]]` completion, definition, references, and unresolved
+   diagnostics work, including basename resolution and ambiguity handling.
+6. Layer 2: frontmatter schema diagnostics point at precise key/value ranges;
+   completion and hover reflect the effective schema (base + extensions +
+   document `$schema`); the Claudine schema activates via config with no
+   Claudine-specific code paths.
+7. Layer 3: directive, transclusion, and interpolation features produce
+   correct static results; a test proves passive requests spawn no processes
+   and open no sockets.
+8. Formatting is byte-equivalent to `Markdown::cleanup` output for the same
+   options.
+9. Rename refuses ambiguous/unsafe edits rather than applying partial changes.
+10. `just test` and `just lint` pass in the package area; L2 integration tests
+    cover an in-memory LSP session end to end.
 
-- `darkmatter`
-- `biscuit-file`
-- `biscuit-hash` only for non-Markdown hashing needs
+## Out of Scope for v1
 
-IWES integration:
+- Compose/render preview and any side-effecting commands
+- Embedded-language server delegation and fence virtual documents
+- Remote URL validation
+- Obsidian vault parity (aliases, embeds, block references, daily notes)
+- TOML/JSON frontmatter
+- Semantic tokens, incremental sync, persistent on-disk index
+- Extract/inline transclusion refactors, link-definition organizing
+- Prose/style linting (markdownlint-class rules)
 
-- Depend on published `liwe` where its public API is sufficient.
-- Locally adapt minimal graph/index concepts when published APIs are too
-  concrete.
-- Avoid relying on the upstream `iwes` server as an opaque process.
+Each of these has a natural home in the layered model and none is precluded by
+v1 architecture decisions; see design.md for the seams that keep them open.
 
-Potential dependencies that require prototype research:
+## Resolved Decisions
 
-- a position-aware YAML parser
-- `ropey` or equivalent only if incremental sync becomes necessary
+Decided with Ken on 2026-07-06:
 
-Any new dependency must update `darkmatter/docs/dependencies.md`.
+1. **Layer 3 v1 cut:** all four low-hanging sub-areas ship in v1 — directive
+   syntax, transclusion navigation, interpolation, and read-only shell policy
+   awareness. Compose refactors/preview remain post-v1.
+2. **Wiki-link root:** LSP workspace folder(s), with an optional `wiki_root`
+   config override. No new Darkmatter vault concept in v1.
+3. **Claudine activation:** workspace config + glob patterns only in v1.
+4. **Formatting:** ships in v1 as whole-document formatting backed by
+   `Markdown::cleanup`; range formatting is post-v1.
 
-## Implementation Phases
+## Open Questions
 
-### Phase 1: Protocol And Workspace Skeleton
-
-- Start `dmls` over stdio.
-- Implement initialize, shutdown, full sync, workspace folder handling, logging,
-  and baseline configuration.
-- Add source-map module with UTF-16 conversion tests.
-- Publish no-op or minimal diagnostics for open Markdown documents.
-
-### Phase 2: IWES Graph Substrate
-
-- Port or adapt the IWES-compatible graph and router shape.
-- Index documents, headings, Markdown links, wiki-links, inclusion links, and
-  symbols.
-- Implement generic Markdown document symbols, workspace symbols, definition,
-  references, document links, folding, and broken-link diagnostics.
-
-### Phase 3: Frontmatter And Schema Intelligence
-
-- Add `FrontmatterAst`.
-- Connect Darkmatter schema detection and validation.
-- Map schema diagnostics to precise frontmatter ranges.
-- Add schema-aware completion, hover, document links, and code actions.
-
-### Phase 4: Darkmatter DSL Overlay
-
-- Parse directives, interpolation, conditions, transclusion targets, shell
-  directives, disclosure blocks, horizontal-rule attributes, and code fence info
-  strings.
-- Add diagnostics, completion, hover, definition, references, document links,
-  symbols, folding, and inlay hints for static Darkmatter semantics.
-
-### Phase 5: Refactors, Formatting, And Commands
-
-- Implement rename for files, headings, frontmatter key paths, and link labels.
-- Implement code actions and command resolution.
-- Wire Darkmatter cleanup into formatting.
-- Add explicit compose preview and shell-approval workflows.
-
-### Phase 6: Performance And Editor Hardening
-
-- Measure full-sync indexing on realistic workspaces.
-- Add dependency-edge invalidation where it materially improves latency.
-- Add client-specific capability profiles and integration tests for VS Code,
-  Neovim, Helix, and Zed where feasible.
-- Revisit incremental text sync only with source-map tests and measured need.
-
-## Acceptance Criteria
-
-1. DMLS starts over stdio, completes the LSP initialize lifecycle, and shuts down
-   cleanly on macOS, Windows, and Linux.
-2. Open Markdown documents are indexed from client text, not stale disk state.
-3. Source-map tests cover ASCII, multibyte Unicode, astral-plane characters, CRLF
-   line endings, frontmatter-relative ranges, and range round trips.
-4. Generic Markdown navigation, document links, symbols, folding, and broken-link
-   diagnostics work for local Markdown links and wiki-links.
-5. YAML frontmatter parse and schema diagnostics point to precise key or value
-   ranges.
-6. Darkmatter directives and interpolation expressions produce static
-   diagnostics, completion, hover, and document links without executing compose
-   operations.
-7. Shell and remote URL features never run during automatic LSP requests.
-8. Formatting uses Darkmatter cleanup behavior and does not run unsafe compose
-   phases.
-9. Rename refuses ambiguous or unsupported edits rather than applying partial or
-   unsafe changes.
-10. The implementation has focused unit tests for source maps, frontmatter range
-    mapping, graph edge extraction, diagnostic mapping, and provider merging.
-11. `just test` in the `darkmatter` package area passes.
+1. Binary/config naming details (`dmls` config file name and location) —
+   settled in design.md alongside the configuration model.

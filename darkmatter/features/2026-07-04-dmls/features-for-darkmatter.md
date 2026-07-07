@@ -32,6 +32,10 @@ Darkmatter introduces the `SimplifiedSchema` enum (darkmatter/lib/src/markdown/s
 
 Markdown authors simply define a `$schema` frontmatter property using a grammar that is both ergonomic (especially in contrast to something like JSON Schema) and yet remains surprising powerful in what it can represent. 
 
+We now have a `SimplifiedSchema` for Darkmatter and Claudine:
+
+- Darkmatter: @claudine/docs/schemas/
+
 `SimplifiedSchema` provides a core set of native types while using a concept of "constraints" (which mimics the utility of JSON Schema constraints) to allow a base type to be further constrained or ornamented with metadata.
 
 In most (all?) Markdown LSP's the focus is on the Markdown document's body. DMLS focuses on _both_ the prose content in the body _and_ the YAML frontmatter. That means we'll likely get no "out of the box" support for the Frontmatter portion but because Darkmatter embues special meaning to certain Frontmatter (in Darkmatter but even more in the Claudine library who uses Darkmatter).
@@ -39,9 +43,18 @@ In most (all?) Markdown LSP's the focus is on the Markdown document's body. DMLS
 
 ## Interpolation
 
-Interpolation 
+- Interpolation directives in a document should highlight the template tagging by default and when hovered over it should show the current value of the interpolated result (shell commands should not be executed but instead the hover dialog will just show the command which will be )
 
 ## Transclusion
 
+- `file` directive
+- `code` directive
+- conditional `block`s
+- 
+
 
 ## Render Pipeline
+
+- YouTube Previews
+- Disclosures
+-
