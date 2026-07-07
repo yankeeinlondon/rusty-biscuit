@@ -49,7 +49,9 @@ fn qwen_reject_direct_yolo_catches_approval_mode_yolo() {
 
 #[test]
 fn opencode_noise_prefixes_cover_captured_symptoms() {
-    let noise = provider_info(Provider::OpenCode).stderr_noise_prefixes;
+    let noise = provider_info(Provider::OpenCode)
+        .display_policy
+        .stderr_noise_prefixes;
 
     // Representative lines taken verbatim from
     // claudine/claudine-output/opencode.err (2026-04-14 capture).

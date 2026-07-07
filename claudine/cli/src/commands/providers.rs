@@ -530,6 +530,7 @@ mod tests {
                 "entrypoints",
                 "prompt_arg_conventions",
                 "resource_support",
+                "display_policy",
             ] {
                 assert!(
                     entry.get(key).is_some(),

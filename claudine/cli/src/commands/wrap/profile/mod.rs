@@ -436,7 +436,7 @@ pub(crate) trait WrapperProfile: Send + Sync {
     ///
     /// Default: the central catalog's curated suppression list.
     fn stdout_noise_prefixes(&self) -> &'static [&'static str] {
-        provider_info(self.provider()).stdout_noise_prefixes
+        provider_info(self.provider()).display_policy.stdout_noise_prefixes
     }
 
     // -- Captured output (compose mode) ----------------------------------------
@@ -473,7 +473,7 @@ pub(crate) trait WrapperProfile: Send + Sync {
     ///
     /// Default: the central catalog's curated suppression list.
     fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
-        provider_info(self.provider()).stderr_noise_prefixes
+        provider_info(self.provider()).display_policy.stderr_noise_prefixes
     }
 
     /// When true, structured non-interactive runs buffer filtered stderr and

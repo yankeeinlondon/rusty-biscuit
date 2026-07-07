@@ -168,15 +168,15 @@ pub(crate) fn log_compose_prompt(
     _quiet: bool,
     term: &Terminal,
 ) {
-    use claudine::prompt_reporting::{AgentPromptReport, resolve_agent_prompt_report_mode};
+    use claudine::render::{AgentPrompt, resolve_agent_prompt_report_mode};
 
     if silent {
         return;
     }
 
     let mode = resolve_agent_prompt_report_mode(silent, verbose, prompt.lines().count());
-    if let Some(output) = AgentPromptReport::new(prompt, mode).render(term) {
-        log::message(&output);
+    if let Some(report) = AgentPrompt::from_mode(prompt, mode) {
+        log::message(&report.render(term));
     }
 }
 
@@ -199,8 +199,8 @@ pub(crate) fn log_system_prompt_with_scope(
     scope: Option<&Path>,
     term: &Terminal,
 ) {
-    use claudine::prompt_reporting::{
-        ReportMode, SystemPromptReport, parse_frontmatter_verbosity,
+    use claudine::render::{
+        ReportMode, SystemPrompt, parse_frontmatter_verbosity,
         resolve_system_prompt_report_mode,
     };
     use claudine::system_prompt::check_and_record;
@@ -248,8 +248,8 @@ pub(crate) fn log_system_prompt_with_scope(
         unchanged,
     );
 
-    if let Some(output) = SystemPromptReport::new(effective_sp, mode, scope).render(term) {
-        log::message(&output);
+    if let Some(report) = SystemPrompt::from_mode(effective_sp, mode, scope) {
+        log::message(&report.render(term));
     }
 }
 

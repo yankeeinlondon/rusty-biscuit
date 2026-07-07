@@ -1,6 +1,6 @@
 //! Level 2 real-terminal capture tests for prompt reporting.
 //!
-//! The L1 unit tests in `prompt_reporting/*` and the `prompt_reporting.rs`
+//! The L1 unit tests in `render/prompt/*` and the `prompt_reporting.rs`
 //! CLI integration tests assert the report's *semantics* after stripping ANSI
 //! (and they force `NO_COLOR=1`), so they cannot catch broken SGR styling,
 //! OSC8 hyperlink emission, block-quote chrome, or width/truncation geometry in
@@ -25,7 +25,7 @@
 //! hardcodes `is_nerd_font: None` — it never consults `detect_nerd_font()`, so
 //! the `NERD_FONT` env declaration cannot reach the glyph branch. The no-space
 //! label is therefore guarded at L1 by
-//! `prompt_reporting::system_prompt::display_label_nerd_font_in_base_uses_glyph_with_path`,
+//! `render::prompt::system::display_label_nerd_font_in_base_uses_glyph_with_path`,
 //! which asserts the exact `<glyph>/.claude/system-prompt.md` string.
 //!
 //! ## Backend split
@@ -34,7 +34,7 @@
 //! through `capture-pane -e`, so it carries the color, wrapping, and truncation
 //! contracts on every host that has `tmux`. OSC8 hyperlink fidelity is verified
 //! on WezTerm per the review; the link-emission *logic* is already covered at
-//! L1 (`prompt_reporting::system_prompt::summary_emits_osc8_for_file_link`).
+//! L1 (`render::prompt::system::summary_emits_osc8_for_file_link`).
 //!
 //! `FORCE_COLOR=1` routes claudine through an optimistic terminal so the styling
 //! is the emulator's capture, not claudine's raw stream; `COLUMNS` fixes the
@@ -77,7 +77,7 @@ const ORANGE_500_FG: &str = "38;2;255;105;0";
 const GREEN_500_FG: &str = "38;2;0;201;80";
 
 /// Visible cells consumed by the block-quote chrome (`┃ ` border + space).
-/// Mirrors `prompt_reporting::formatting::PROMPT_CHROME_WIDTH`.
+/// Mirrors `render::prompt::formatting::PROMPT_CHROME_WIDTH`.
 const PROMPT_CHROME_WIDTH: usize = 2;
 
 const SYSTEM_PROMPT_SHORT: &str =
