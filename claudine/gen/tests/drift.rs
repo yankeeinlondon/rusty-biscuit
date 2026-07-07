@@ -8,7 +8,8 @@
 use std::path::Path;
 
 use claudine_gen::{
-    CheckOutcome, PROVIDER_SLUGS, check_area, check_catalog, check_signals, generate_all,
+    CheckOutcome, PROVIDER_SLUGS, check_area, check_catalog, check_families, check_signals,
+    generate_all,
 };
 
 /// The claudine package-area root (parent of this crate's manifest dir).
@@ -73,6 +74,26 @@ fn committed_catalog_matches_regenerated_inputs() {
         ),
         CheckOutcome::MissingCommitted { path } => panic!(
             "committed catalog.json missing at {} — run `claudine-gen generate`",
+            path.display()
+        ),
+    }
+}
+
+/// build_families(committed artifact + inputs) == committed
+/// lib/src/model_catalog/families_generated.rs (the vendored family
+/// slice tracks the expected-offering joins AND the artifact).
+#[test]
+fn committed_families_match_regenerated_inputs() {
+    let generations = generate_all(area()).expect("full-scope generation must succeed");
+    match check_families(area(), &generations).expect("families generation must succeed") {
+        CheckOutcome::Clean => {}
+        CheckOutcome::Drift { details } => panic!(
+            "drift between committed inputs and lib/src/model_catalog/families_generated.rs — \
+             run `claudine-gen generate`:\n{}",
+            details.join("\n")
+        ),
+        CheckOutcome::MissingCommitted { path } => panic!(
+            "committed families_generated.rs missing at {} — run `claudine-gen generate`",
             path.display()
         ),
     }

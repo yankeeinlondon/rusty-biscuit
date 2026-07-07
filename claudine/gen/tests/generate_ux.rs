@@ -68,6 +68,7 @@ fn full_fixture() -> Fixture {
     // not checked at generate time, so fixtures/ stays uncopied).
     copy_dir("docs/research/signals");
     copy_file("lib/src/signals/generated.rs");
+    copy_file("lib/src/model_catalog/families_generated.rs");
     for slug in claudine_gen::PROVIDER_SLUGS {
         copy_file(&format!("lib/src/provider/{slug}/data.rs"));
     }
