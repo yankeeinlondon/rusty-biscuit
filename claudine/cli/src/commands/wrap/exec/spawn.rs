@@ -37,9 +37,10 @@ use super::watchdog::{
 };
 use super::{
     ChildIoOptions, ErrorParser, OutputTextCallback, ProcessResult, ProcessTelemetry,
-    ReasoningCallback, SemanticParserBuilder, StreamTextRenderer, join_with_timeout,
-    join_with_timeout_or, kill_process_group, stop_timing_ticker,
+    ReasoningCallback, SemanticParserBuilder, join_with_timeout, join_with_timeout_or,
+    kill_process_group, new_assistant_stream, stop_timing_ticker,
 };
+use claudine::render::{AssistantStream, StreamRenderable};
 
 /// Windows process-creation flag that puts the child in a new process group
 /// (the Win32 `CREATE_NEW_PROCESS_GROUP`). A new group is the prerequisite for
@@ -728,7 +729,7 @@ fn capture_stream_with_volume_cap<R: BufRead>(
 /// [`SemanticEvent`]s, the parser drives a [`SemanticEventSink`] that the
 /// caller has already wired up for status rendering, dispatch, metrics,
 /// and JSONL logging. This function's only rendering responsibility is
-/// wiring the terminal-local `StreamTextRenderer` instance to the sink
+/// wiring the terminal-local `AssistantStream` instance to the sink
 /// through the builder callback so it can run inside the parser thread.
 /// Reasoning rendering is owned entirely by `LiveSemanticSink`.
 ///
@@ -812,8 +813,8 @@ pub(crate) fn run_child_stream_semantic(
     // which emits BlockQuote-formatted thinking text through the
     // section-aware stderr emitter. The reasoning_cb passed to the
     // parser builder is a no-op.
-    let text_renderer: Arc<std::sync::Mutex<StreamTextRenderer>> =
-        Arc::new(std::sync::Mutex::new(StreamTextRenderer::new()));
+    let text_renderer: Arc<std::sync::Mutex<AssistantStream>> =
+        Arc::new(std::sync::Mutex::new(new_assistant_stream()));
 
     let stdout_output = stream_output.clone();
 
@@ -892,7 +893,10 @@ pub(crate) fn run_child_stream_semantic(
                     }
                 }
                 if let Ok(mut r) = text.lock() {
-                    r.push(&mut writer, chunk);
+                    for frame in r.append(chunk) {
+                        let _ = writer.write_all(frame.as_bytes());
+                    }
+                    let _ = writer.flush();
                 }
             })
         };
@@ -957,7 +961,10 @@ pub(crate) fn run_child_stream_semantic(
                 }
                 Err(StreamParseError::Fatal(_)) => {
                     if let Ok(mut r) = text_renderer.lock() {
-                        r.flush_remaining(&mut out);
+                        for frame in r.close() {
+                            let _ = out.write_all(frame.as_bytes());
+                        }
+                        let _ = out.flush();
                     }
                     fallback_mode = true;
                     let _ = writeln!(out, "{}", crate::log::maybe_strip(&line));
@@ -966,7 +973,10 @@ pub(crate) fn run_child_stream_semantic(
         }
 
         if let Ok(mut r) = text_renderer.lock() {
-            r.flush_remaining(&mut out);
+            for frame in r.close() {
+                let _ = out.write_all(frame.as_bytes());
+            }
+            let _ = out.flush();
         }
         parser
     });

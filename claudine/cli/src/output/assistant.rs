@@ -6,27 +6,6 @@ use claudine::render::FinalMessage;
 
 use crate::commands::wrap::section::SectionStream;
 
-/// Render assistant text as Markdown with pre-built [`TerminalOptions`].
-///
-/// Thin forwarder over the [`FinalMessage`] component for streaming call
-/// sites that render chunk-by-chunk. When `options` is `None`, a fresh
-/// default is created (incurs theme detection). Pass a cached instance for
-/// hot paths like streaming.
-///
-/// [`TerminalOptions`]: darkmatter::markdown::output::terminal::TerminalOptions
-pub(crate) fn render_assistant_markdown_with_options(
-    text: &str,
-    term: &Terminal,
-    options: Option<&darkmatter::markdown::output::terminal::TerminalOptions>,
-) -> String {
-    let component = FinalMessage::new(text);
-    let component = match options {
-        Some(opts) => component.with_options(opts.clone()),
-        None => component,
-    };
-    component.render(term)
-}
-
 /// Write the agent's final message to stdout: rendered through
 /// [`FinalMessage`] when stdout is a TTY, raw bytes otherwise. Guarantees a
 /// trailing newline and flushes.
