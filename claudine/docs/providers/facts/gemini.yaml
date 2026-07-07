@@ -263,15 +263,21 @@ billing_models:
 allowed_env_keys:
 - GEMINI_API_KEY
 - GOOGLE_API_KEY
-stdout_noise_prefixes:
-- "Created execution plan for "
-- "Expanding hook command: "
-- "Hook execution for "
-- "Skill conflict detected: "
-- "[LocalAgentExecutor]"
-stderr_noise_prefixes:
-- "Skill conflict detected: "
-- "[LocalAgentExecutor]"
+display_policy:
+  tool_result_summary: show
+  info_event_suppression: []
+  collapse_task_progress: false
+  suppress_subscription_rate_limit: false
+  silent_extension_kinds: []
+  stdout_noise_prefixes:
+  - "Created execution plan for "
+  - "Expanding hook command: "
+  - "Hook execution for "
+  - "Skill conflict detected: "
+  - "[LocalAgentExecutor]"
+  stderr_noise_prefixes:
+  - "Skill conflict detected: "
+  - "[LocalAgentExecutor]"
 suppress_structured_stderr_on_success: true
 supports_interactive_inline_closure: false
 model_required_in_non_tty: false

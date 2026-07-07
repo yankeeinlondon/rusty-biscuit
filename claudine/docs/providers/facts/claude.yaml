@@ -309,8 +309,37 @@ billing_models:
 - subscription
 - per_token
 allowed_env_keys: []
-stdout_noise_prefixes: []
-stderr_noise_prefixes: []
+display_policy:
+  tool_result_summary: show
+  info_event_suppression: []
+  # Claude's `task_progress` Info lines arrive immediately before the
+  # matching tool call ("Reading <path>" → `→ Read(<path>)`); the sink
+  # holds them one tick and collapses the pair to the canonical tool line.
+  collapse_task_progress: true
+  # Suppress only the legacy generic `rate limit` Warning when session
+  # metadata shows subscription auth. Explicit Claude metadata text must
+  # still render because it can include cap-window timing.
+  suppress_subscription_rate_limit: true
+  # Kinds known to be high-volume or entirely redundant on stderr. Listed
+  # explicitly so the suppression is visible, reviewable, and reversible;
+  # suppressed events still flow through dispatch and the JSONL log.
+  silent_extension_kinds:
+  # Partial assistant token deltas — redundant with OutputText.
+  - stream_event
+  # Hook lifecycle events: the Claude parser (Task 2a.2) emits these as
+  # ProviderExtension with kind `system/<subtype>` after buffering them to
+  # trail SessionStart.
+  - system/hook_started
+  - system/hook_response
+  - system/hook_progress
+  # Per-turn thinking-token telemetry. Newer Claude Code builds emit
+  # `{"type":"system","subtype":"thinking_tokens",...}` several times per
+  # assistant turn; Claudine has no typed model for it, so the parser falls
+  # back to a `system/thinking_tokens` ProviderExtension. The running count
+  # is redundant with the thinking deltas already streamed as Reasoning.
+  - system/thinking_tokens
+  stdout_noise_prefixes: []
+  stderr_noise_prefixes: []
 suppress_structured_stderr_on_success: false
 supports_interactive_inline_closure: false
 model_required_in_non_tty: false

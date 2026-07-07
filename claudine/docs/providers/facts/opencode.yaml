@@ -252,13 +252,24 @@ repo_home_root_files: []
 billing_models:
 - provider_only
 allowed_env_keys: []
-stdout_noise_prefixes: []
-stderr_noise_prefixes:
-- "✱ "
-- "$ "
-- "> build "
-- "████ "
-- "⚙ "
+display_policy:
+  tool_result_summary: show
+  # OpenCode's `step_start` / `step_finish` phase markers carry no
+  # user-visible meaning (internal phase boundaries between tool batches)
+  # and produce visual noise around tool lines; the events still flow
+  # through dispatch, JSONL logging, and the LiveMetrics heartbeat.
+  info_event_suppression:
+  - step_progress
+  collapse_task_progress: false
+  suppress_subscription_rate_limit: false
+  silent_extension_kinds: []
+  stdout_noise_prefixes: []
+  stderr_noise_prefixes:
+  - "✱ "
+  - "$ "
+  - "> build "
+  - "████ "
+  - "⚙ "
 suppress_structured_stderr_on_success: false
 supports_interactive_inline_closure: false
 model_required_in_non_tty: true

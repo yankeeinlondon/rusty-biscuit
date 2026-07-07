@@ -1,5 +1,5 @@
 ---
-hash: ef46db3751d8e999-12761fc556d77531
+hash: ef46db3751d8e999-ac0383c8f1e51bac
 last_updated: 2026-06-25
 ---
 # Frontmatter Properties Reference
@@ -119,7 +119,7 @@ These frontmatter properties are used in the cross-provider skill/command/agent 
 
 | Property | Description | Details | Symbols |
 |----------|-------------|---------|---------|
-| `verbosity` | Controls prompt reporting output verbosity on `system-prompt.md` documents. Accepts `silent`, `quiet`, or `verbose`, mapping to `ReportMode` variants. Combined with CLI flags and env vars through a precedence chain. | [system-prompt.md](system-prompt.md) | [`parse_frontmatter_verbosity`](../../lib/src/prompt_reporting/frontmatter.rs) · [`ReportMode`](../../lib/src/prompt_reporting/types.rs) |
+| `verbosity` | Controls prompt reporting output verbosity on `system-prompt.md` documents. Accepts `silent`, `quiet`, or `verbose`, mapping to `ReportMode` variants. Combined with CLI flags and env vars through a precedence chain. | [system-prompt.md](system-prompt.md) | [`parse_frontmatter_verbosity`](../../lib/src/render/prompt/frontmatter.rs) · [`ReportMode`](../../lib/src/render/prompt/types.rs) |
 
 ## System Prompt
 

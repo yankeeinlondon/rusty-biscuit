@@ -18,17 +18,17 @@
     "reference": "code merely names a provider (fixtures, constructor arguments); nothing to migrate"
   },
   "totals": {
-    "sites": 435,
-    "provider_refs": 475,
+    "sites": 429,
+    "provider_refs": 456,
     "by_form": {
       "direct-ref": 415,
-      "eq-comparison": 9,
+      "eq-comparison": 6,
       "matches-macro": 4,
-      "ne-comparison": 5,
-      "tuple-array": 2
+      "ne-comparison": 3,
+      "tuple-array": 1
     },
     "by_dispatch_class": {
-      "conditional": 20,
+      "conditional": 14,
       "reference": 415
     }
   },
@@ -2076,68 +2076,6 @@
       "exempt_candidate": false
     },
     {
-      "path": "claudine/cli/src/commands/wrap/live_semantic_sink/provider_extension.rs",
-      "line": 16,
-      "form": "ne-comparison",
-      "dispatch_class": "conditional",
-      "providers": [
-        "Claude"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/cli/src/commands/wrap/live_semantic_sink/provider_extension.rs",
-      "line": 136,
-      "form": "tuple-array",
-      "dispatch_class": "conditional",
-      "providers": [
-        "Claude",
-        "Codex",
-        "KimiCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/cli/src/commands/wrap/live_semantic_sink/provider_extension.rs",
-      "line": 205,
-      "form": "ne-comparison",
-      "dispatch_class": "conditional",
-      "providers": [
-        "Claude"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/cli/src/commands/wrap/live_semantic_sink/render_event.rs",
-      "line": 59,
-      "form": "eq-comparison",
-      "dispatch_class": "conditional",
-      "providers": [
-        "Codex"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/cli/src/commands/wrap/live_semantic_sink/render_event.rs",
-      "line": 68,
-      "form": "eq-comparison",
-      "dispatch_class": "conditional",
-      "providers": [
-        "Codex"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/cli/src/commands/wrap/live_semantic_sink/render_event.rs",
-      "line": 133,
-      "form": "eq-comparison",
-      "dispatch_class": "conditional",
-      "providers": [
-        "OpenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
       "path": "claudine/cli/src/commands/wrap/live_semantic_sink/tests/content_guard.rs",
       "line": 28,
       "form": "direct-ref",
@@ -2863,7 +2801,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/profile/tests/apply_yolo.rs",
-      "line": 74,
+      "line": 76,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -2873,7 +2811,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/profile/tests/apply_yolo.rs",
-      "line": 86,
+      "line": 88,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -2883,7 +2821,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/profile/tests/apply_yolo.rs",
-      "line": 398,
+      "line": 400,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -2893,7 +2831,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/profile/tests/apply_yolo.rs",
-      "line": 412,
+      "line": 414,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [

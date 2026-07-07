@@ -46,3 +46,15 @@
   generated catalog must never block building the tool that regenerates it).
   `claudine-cli` shells out to the `claudine-gen` binary for
   `claudine providers generate`.
+
+## Multi-Target Render Components
+
+- `claudine` (library) depends on `renderable` (`../../renderable`) directly, in
+  addition to `biscuit-terminal`. The `lib/src/render/` components implement both
+  `TerminalRenderable` (re-exported by `biscuit-terminal`) and, for report-class
+  components, `BrowserRenderable`, whose return types (`BrowserFragment<Ready>`,
+  `HtmlPage`, `PageOptions`) and composition primitives (`BlockTag`,
+  `ComposableNode`) live in `renderable` — so the crate must be a direct
+  dependency rather than reached transitively through `biscuit-terminal`. This
+  mirrors how `biscuit-terminal` and `darkmatter` declare the `renderable`
+  path dependency.
