@@ -40,13 +40,15 @@ pub enum Provider {
     QwenCode = 6,
     /// Kilo Code CLI (Kilo) — an OpenCode-fork agentic coding CLI.
     Kilo = 7,
+    /// Pi (earendil-works) — a bespoke multi-provider agentic coding CLI.
+    Pi = 8,
 }
 
 /// Total number of [`Provider`] variants.
 ///
 /// Anchors compile-time array length checks for the registry and any other
 /// `[T; PROVIDER_COUNT]` table indexed by `Provider as usize`.
-pub const PROVIDER_COUNT: usize = 8;
+pub const PROVIDER_COUNT: usize = 9;
 
 /// Providers in canonical display order for matrix-style reporting.
 pub const PROVIDERS_DISPLAY_ORDER: [Provider; PROVIDER_COUNT] = [
@@ -58,6 +60,7 @@ pub const PROVIDERS_DISPLAY_ORDER: [Provider; PROVIDER_COUNT] = [
     Provider::OpenCode,
     Provider::QwenCode,
     Provider::Kilo,
+    Provider::Pi,
 ];
 
 // Compile-time assertion: every `Provider` discriminant fits in
@@ -76,6 +79,7 @@ const _: () = {
     let _open: usize = Provider::OpenCode as usize;
     let _qwen: usize = Provider::QwenCode as usize;
     let _kilo: usize = Provider::Kilo as usize;
+    let _pi: usize = Provider::Pi as usize;
     assert!(_claude == 0);
     assert!(_codex == 1);
     assert!(_gemini == 2);
