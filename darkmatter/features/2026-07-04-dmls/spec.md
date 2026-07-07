@@ -8,6 +8,7 @@ inputs:
   - ../../dmls/design/extending-iwes-lsp.md
 related:
   - ./design.md
+  - ./plan.md
   - ./research-areas.md
 ---
 
@@ -96,25 +97,51 @@ behavior is the authority where they differ.
 ### Layer 1 — Wiki-Style Links
 
 First-class `[[target]]` support, aligned with the MediaWiki/Obsidian
-convention family:
+convention family. The precise, implementable rule set (matching, ranking,
+completion insertion, rename safety, fixtures) is the R-8 research
+deliverable
+([r8-wiki-link-resolution-rules.md](../../dmls/design/research/r8-wiki-link-resolution-rules.md));
+the contract-level summary:
 
-- **Forms:** `[[target]]`, `[[target|alias]]` (target-first, MediaWiki order),
-  `[[target#heading]]`, `[[target#heading|alias]]`.
-- **Resolution:** targets may be workspace-relative paths or bare basenames.
-  The resolution universe is the LSP workspace folder(s); an optional
-  `wiki_root` config value narrows or redirects it (a future Darkmatter
-  vault concept can plug in as another override source). Basename resolution
-  ranks: same directory → unique basename match across the workspace →
-  ambiguity. Ambiguous targets produce multiple definition locations plus a
-  diagnostic; rename refuses ambiguous targets.
-- **Features:** completion (filenames, then headings after `#`), definition,
-  references/backlinks, broken/unresolved-link diagnostics, hover preview,
-  rename participation, "create missing note" code action.
+- **Forms (v1):** `[[target]]`, `[[target|alias]]` (target-first, MediaWiki
+  order), `[[target#heading]]`, `[[target#heading|alias]]`, and same-document
+  `[[#heading]]` / `[[#heading|alias]]`. Escapes: `\|`, `\#`, `\]`, `\\`.
+  Embeds `![[…]]`, block refs `^id`, frontmatter aliases, and interwiki
+  prefixes are post-v1 (flagged `wiki.unsupported-syntax`, informational).
+- **Resolution universe:** the LSP workspace folder(s); an optional
+  `wiki_root` config value narrows or redirects it. Only `.md`/`.markdown`
+  files are file targets; `/` is the path separator on all platforms.
+- **Matching rules:** case-sensitive on every OS (identical results on
+  case-insensitive filesystems), NFC Unicode normalization before matching
+  (original spelling preserved for edits/display), extension elision on the
+  final segment, percent-escapes decoded once, literal spaces significant,
+  no `.`/`..` segments, no implicit `folder/index.md`. Leading `/` means
+  root-relative; a `/`-containing target is a path-suffix match; a bare
+  target is a basename match.
+- **Ranking:** same directory → unique match across the wiki root(s) →
+  ambiguity (multiple definition locations + `wiki.ambiguous-target`).
+  Workspace-scope diagnostics flag logical paths that collide only by case
+  or Unicode normalization (cross-platform hazards).
+- **Headings:** `[[target#heading]]` matches exact visible heading text
+  first (NFC, case-sensitive), then GitHub-style slug as fallback —
+  Darkmatter's slug generator is the authority. Missing headings produce
+  `wiki.heading-missing-in-target`.
+- **Completion:** `path_style = "shortest"` by default (shortest suffix that
+  resolves uniquely; `relative` and `root-relative` configurable); heading
+  completion inserts visible text by default (`heading_completion_style`).
+  Never inserts `.md`.
+- **Rename safety:** only links that resolved uniquely *before* the rename
+  are rewritten, and only when the replacement spelling resolves uniquely in
+  the simulated *post*-rename index; aliases and surviving heading fragments
+  are preserved; unresolvable cases refuse with
+  `wiki.ambiguous-after-rename`.
+- **Features:** completion, definition, references/backlinks, diagnostics,
+  hover preview, rename participation, "create missing note" code action
+  (which must not generate Windows-invalid filenames).
 - **Interop stance:** wiki-links are an authoring convenience and a knowledge-
   graph feature; Darkmatter compose/render behavior for wiki-links is defined
   separately and DMLS follows the library once that lands. Obsidian vault
-  compatibility (aliases from frontmatter, `![[embed]]`, block refs `^id`) is
-  explicitly post-v1.
+  parity is explicitly post-v1.
 
 ### Layer 2 — Frontmatter Intelligence (SimplifiedSchema)
 
@@ -211,8 +238,10 @@ low-hanging subset of Layer 3.**
 Detail lives in [design.md](./design.md). The contract-level commitments:
 
 1. **Protocol stack:** `lsp-server` + `lsp-types`, LSP 3.17, stdio, full
-   document sync, push diagnostics initially. UTF-16 position encoding unless
-   the client negotiates otherwise.
+   document sync, push diagnostics initially. Position encoding negotiated
+   per client: UTF-16 for VS Code/Zed (they offer nothing else), UTF-8 for
+   Helix and modern Neovim; UTF-16 is the default when negotiation is
+   absent.
 2. **One workspace graph:** documents, headings, Markdown links, wiki-links,
    transclusions, frontmatter file references, schema uses, and interpolation
    references are typed edges in a single graph. Every navigation, diagnostic,
@@ -224,6 +253,12 @@ Detail lives in [design.md](./design.md). The contract-level commitments:
    style/grammar semantics; `biscuit-file` for file-reference resolution.
    DMLS-local parsing exists only where the library lacks source geometry, and
    is hidden behind DMLS abstractions until it can move into the library.
+   v1 therefore includes a `darkmatter` **library workstream**: additive
+   span-aware public APIs (frontmatter block extraction, spanned expression
+   parsing, public directive scanning, nested YAML position mapping, richer
+   validation-problem shapes, slug-generator export) — inventoried in
+   design.md "Required `darkmatter` library additions". All additive; compose
+   behavior is never rewritten for the LSP.
 5. **Provider registry:** each LSP capability is served by an ordered provider
    chain (generic Markdown first, Darkmatter overlay augmenting or overriding
    with more precise answers) with deterministic merge rules.
@@ -268,11 +303,13 @@ no Claudine special cases in DMLS core:
 
 ## Configuration
 
-`DmlsConfig`, sourced from LSP `workspace/configuration` plus an optional repo
-config file (exact file name/location decided in design.md):
+`DmlsConfig`, sourced from LSP `workspace/configuration` plus an optional
+repo config file — **`.dmls.toml`** at the workspace root:
 
 - workspace/library root overrides; include/exclude globs
-- wiki-link behavior (enable, path style, ambiguity policy)
+- wiki-link behavior: enable, `wiki_root`, `wiki.path_style`
+  (`shortest` | `relative` | `root-relative`, default `shortest`),
+  `wiki.heading_completion_style` (`text` | `slug`, default `text`)
 - baseline schema extensions (name → schema path, activation globs)
 - strict schema mode, strict style mode
 - shell policy discovery path
@@ -319,6 +356,10 @@ affected indexes where possible.
 9. Rename refuses ambiguous/unsafe edits rather than applying partial changes.
 10. `just test` and `just lint` pass in the package area; L2 integration tests
     cover an in-memory LSP session end to end.
+11. `dmls --bench-index` exists, reports per-stage timings and peak RSS, and
+    meets the R-6 budgets on the repo corpus and the synthetic 5k vault
+    (cold start p50 ≤ 2 s / ≤ 2.5 s respectively; single-document re-index
+    p95 ≤ 25 ms for average-size files).
 
 ## Out of Scope for v1
 
@@ -349,5 +390,6 @@ Decided with Ken on 2026-07-06:
 
 ## Open Questions
 
-1. Binary/config naming details (`dmls` config file name and location) —
-   settled in design.md alongside the configuration model.
+None. The last open item (config file naming) was settled with the R-7
+research: the repo config file is `.dmls.toml` at the workspace root, which
+also serves as an editor root marker.
