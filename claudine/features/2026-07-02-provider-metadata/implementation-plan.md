@@ -593,6 +593,60 @@ contract for `ThinkingToken`/`ToolUse`; `MetricsReport` with the mandatory brows
 target as the dual-target proof; DisplayPolicy populated as a generated catalog
 section (noise prefixes move here — single owner).
 
+> **G COMPLETE (2026-07-07)** — all committed-clean, byte-identical, full suite
+> green (3 known `level2_tmux_*_chooser_detail` host flakes excepted).
+>
+> - **Migration 2 (done):** `prompt_reporting` deleted; `AgentPrompt`/`SystemPrompt`
+>   live under `lib/src/render/prompt/`. Suppression moved to construction via
+>   `from_mode(...) -> Option<Self>` (was `render() -> Option<String>`). Components
+>   OWN their data (String/PathBuf clones) — `TerminalRenderable: Debug + Any`
+>   forces `Self: 'static`, so the old `<'a>` borrow could not survive; once-per-run
+>   path, clone cost irrelevant. The 12-test `cli/tests/prompt_reporting.rs` byte
+>   contract + 4 L2 captures are the regression lock. Module count 20→19.
+> - **Migration 4-data (done):** `DisplayPolicy` is a GENERATED catalog section of
+>   `ProviderInfo` (Facts-sourced, `Coercion::DisplayPolicyRecord`, strum-validated
+>   enum sub-keys). `CATALOG_SCHEMA_VERSION` 2→3. `stdout/stderr_noise_prefixes`
+>   moved INTO it (single owner; top-level fields deleted). Fields:
+>   `tool_result_summary` (`Show`/`PreferBody` — PreferBody = Codex tool-body
+>   behavior), `info_event_suppression: &[EventClass]`, `collapse_task_progress`,
+>   `suppress_subscription_rate_limit`, `silent_extension_kinds`, + the two noise
+>   slices. All 5 live-sink provider gates (2× Codex, 1× OpenCode step_phase,
+>   Claude task_progress, Claude rate-limit) are now policy reads — ZERO
+>   `provider ==` in sink non-test code. dispatch-inventory conditional 20→14.
+> - **Migration 3 part 1 (done):** `EventRenderer` in `lib/src/render/event_renderer/`
+>   (mod + `tool_use.rs`/`error_block.rs`/`provider_extension.rs`). API
+>   `render(&event, &term, verbosity) -> Vec<RenderUnit{class, text}>` + `flush()`;
+>   one RenderUnit == one of today's `emit_section_line` calls (granularity is the
+>   byte contract). Load-bearing `DISPATCH: &[(&str, Disposition)]` over all 16
+>   `SemanticEvent` variants with a completeness test vs `SemanticEvent::VARIANTS`
+>   (strum). `render_event.rs`/`tool_calls.rs`/`errors.rs`/`provider_extension.rs`
+>   deleted from the sink; sink keeps metrics/watchdog/guard fan-out, SectionTracker
+>   spacing, OutputText/Reasoning streaming paths, dispatch/JSONL, and maps
+>   `EventClass -> Section` via `section_for`. Deviation: `terminal`+`verbosity`
+>   pass per-call (tests mutate them post-construction); interrupt read is now
+>   `claudine::interrupt::interrupted()` (lib flag, set in lockstep by the CLI
+>   SIGINT handler's `mark_user_interrupted`).
+> - **Migration 4-render (done):** dual-target `MetricsReport` (`lib/src/render/`)
+>   fed by `reporting::DailySummary`; `claudine logs today` flows through it.
+>   `TerminalRenderable` keeps byte-identical string-building; `BrowserRenderable`
+>   composes a real HTML fragment from biscuit-terminal/renderable dual-target
+>   primitives (the v1 split-target approach — a render-tree projection risked
+>   drift on OSC8 links / colored cells / table margins with no test lock).
+>   `renderable` added as a direct `lib` dependency (docs/dependencies.md updated).
+>   `providers` output audited: no component bypasses; capability-matrix &
+>   describe tables left off the shared-table contract to preserve byte-identity.
+> - **DEFERRED — `StreamRenderable` span contract (open/append/close):** NOT built.
+>   Nothing accumulates incrementally at the component boundary today — each
+>   `Reasoning` event carries a complete block rendered per-event, `ToolCall`/
+>   `ToolResult` render independently (no stateful id-correlation), and the one
+>   genuinely-incremental case (`OutputText` token deltas) accumulates in
+>   `exec.rs` and flows through the existing `FinalMessage` component (deferred out
+>   of migration 3 part 1). The `Vec<RenderUnit>`-per-event API already realizes
+>   Ruling 3's first bullet; a three-phase trait would be speculative abstraction
+>   with no consumer (design's own hedge: "promote upstream only if darkmatter/
+>   biscuit-terminal grow the same need"). Revisit if/when thinking tokens arrive
+>   as sub-block chunks needing a held-open frame.
+
 ## Phase H — the provider ladder (validation milestones)
 
 Prerequisites: generator v1 (B), enough topics landed for a meaningful graduation
