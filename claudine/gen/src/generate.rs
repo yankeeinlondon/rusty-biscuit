@@ -86,19 +86,59 @@ pub struct Generation {
     pub artifact_warning: Option<String>,
 }
 
-/// Every generated provider slug, `PROVIDERS_DISPLAY_ORDER` order. The
-/// catalog document requires the full scope, so this is the single list
-/// the CLI, the drift test, and [`generate_all`] share.
-pub const PROVIDER_SLUGS: &[&str] = &[
-    "claude", "codex", "gemini", "goose", "kimi", "opencode", "qwen",
-];
-
-/// Generates every provider in [`PROVIDER_SLUGS`] order.
-pub fn generate_all(area: &Path) -> Result<Vec<Generation>, GenError> {
-    PROVIDER_SLUGS
+/// Every wired provider slug, in `Provider` discriminant order — derived
+/// from [`emit::PROVIDER_VARIANTS`], the single authoritative wired-set
+/// (slug → `Provider` variant). The CLI, the drift test, and
+/// [`generate_all`] share this list; a slug appears here only once its enum
+/// variant is hand-wired (onboarding step 3), so the check path never
+/// expects a committed `data.rs` for an unwired provider.
+pub fn provider_slugs() -> Vec<&'static str> {
+    emit::PROVIDER_VARIANTS
         .iter()
+        .map(|(slug, _)| *slug)
+        .collect()
+}
+
+/// Generates every provider in [`provider_slugs`] order.
+pub fn generate_all(area: &Path) -> Result<Vec<Generation>, GenError> {
+    provider_slugs()
+        .into_iter()
         .map(|slug| generate_for_area(area, slug))
         .collect()
+}
+
+/// Roster ↔ wired-set cross-validation surfaced by the `check` report.
+#[derive(Debug, Default)]
+pub struct RosterCrossCheck {
+    /// Active (non-`skip_research`) roster slugs with no wired `Provider`
+    /// variant — researched but not yet code-supported (informational).
+    pub unwired_active: Vec<String>,
+}
+
+/// Cross-validates the wired set ([`provider_slugs`]) against the active
+/// roster.
+///
+/// ## Errors
+///
+/// Every wired slug must have an active (non-`skip_research`) roster entry;
+/// a wired slug that is missing or skipped is a loud error
+/// ([`GenError::WiredSlugUnrostered`]) — the wired enum and the roster must
+/// not disagree about which providers exist.
+pub fn cross_validate_roster(area: &Path) -> Result<RosterCrossCheck, GenError> {
+    let active = inputs::roster_active_slugs(area)?;
+    let wired = provider_slugs();
+    for slug in &wired {
+        if !active.iter().any(|entry| entry == slug) {
+            return Err(GenError::WiredSlugUnrostered {
+                slug: (*slug).to_string(),
+            });
+        }
+    }
+    let unwired_active = active
+        .into_iter()
+        .filter(|slug| !wired.contains(&slug.as_str()))
+        .collect();
+    Ok(RosterCrossCheck { unwired_active })
 }
 
 /// Outcome of comparing a generation against the committed file.
@@ -900,6 +940,17 @@ pub(crate) fn model_catalog_source_variant(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The variant-derived accessor preserves the historical wired set and
+    /// order (== `Provider` discriminant order): the retired `PROVIDER_SLUGS`
+    /// const's original seven, plus kilo (graduated to a wired `Provider`).
+    #[test]
+    fn provider_slugs_match_the_wired_set_in_order() {
+        assert_eq!(
+            provider_slugs(),
+            ["claude", "codex", "gemini", "goose", "kimi", "opencode", "qwen", "kilo"]
+        );
+    }
 
     #[test]
     fn env_var_ident_accepts_bare_identifiers_only() {

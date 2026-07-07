@@ -105,6 +105,16 @@ pub enum GenError {
     #[error("override for `{field}` is missing its required `value:` key")]
     OverrideMissingValue { field: String },
 
+    #[error(
+        "wired provider slug `{slug}` has no active roster entry (missing, or flagged \
+         `skip_research: true`) — every slug in `emit::PROVIDER_VARIANTS` must have a live \
+         `docs/providers.yaml` entry; restore the roster entry or unwire the variant"
+    )]
+    WiredSlugUnrostered { slug: String },
+
+    #[error("--scaffold requires a provider slug (e.g. `claudine-gen generate <slug> --scaffold`)")]
+    ScaffoldRequiresSlug,
+
     #[error("missing value for field `{field}`: {message}")]
     MissingValue { field: &'static str, message: String },
 

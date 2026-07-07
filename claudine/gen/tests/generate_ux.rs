@@ -69,7 +69,7 @@ fn full_fixture() -> Fixture {
     copy_dir("docs/research/signals");
     copy_file("lib/src/signals/generated.rs");
     copy_file("lib/src/model_catalog/families_generated.rs");
-    for slug in claudine_gen::PROVIDER_SLUGS {
+    for slug in claudine_gen::provider_slugs() {
         copy_file(&format!("lib/src/provider/{slug}/data.rs"));
     }
     let artifact_rel = "unchained-ai/artifacts/models-catalog.json";
@@ -178,4 +178,20 @@ fn yes_writes_all_drift_and_check_reconverges() {
     let check_stdout = String::from_utf8_lossy(&check.stdout);
     assert!(check.status.success(), "{check_stdout}");
     assert!(check_stdout.contains("catalog.json: clean"), "{check_stdout}");
+}
+
+/// `--scaffold` on a slug with no wired `Provider` variant (kilo, whose
+/// variant is intentionally unwired) fails at variant resolution — before
+/// any file is written — with the "wire the enum variant first" message.
+#[test]
+fn scaffold_unwired_slug_errors_before_writing() {
+    let fixture = full_fixture();
+    // `nonesuch` is a permanently-fictional slug (kilo graduated to a wired
+    // Provider; pi wires at M-Pi), so it exercises the variant gate stably.
+    let output = run_gen(fixture.path(), &["generate", "nonesuch", "--scaffold"]);
+    assert!(!output.status.success(), "unwired scaffold must fail");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("no Provider variant is wired for slug `nonesuch`"), "{stderr}");
+    // The failure precedes any write: the lib module stays absent.
+    assert!(!fixture.path().join("lib/src/provider/nonesuch").exists());
 }

@@ -8,8 +8,8 @@
 use std::path::Path;
 
 use claudine_gen::{
-    CheckOutcome, PROVIDER_SLUGS, check_area, check_catalog, check_families, check_signals,
-    generate_all,
+    CheckOutcome, check_area, check_catalog, check_families, check_signals, generate_all,
+    provider_slugs,
 };
 
 /// The claudine package-area root (parent of this crate's manifest dir).
@@ -23,7 +23,7 @@ fn area() -> &'static Path {
 /// for all seven providers.
 #[test]
 fn committed_data_matches_regenerated_inputs() {
-    for slug in PROVIDER_SLUGS {
+    for slug in provider_slugs() {
         let (_, outcome) = check_area(area(), slug)
             .unwrap_or_else(|err| panic!("generation for `{slug}` must succeed: {err}"));
         match outcome {

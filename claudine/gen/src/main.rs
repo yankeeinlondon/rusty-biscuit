@@ -11,7 +11,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
-use claudine_gen::{CheckOutcome, Decision, GenError, PROVIDER_SLUGS, Provenance};
+use claudine_gen::{CheckOutcome, Decision, GenError, Provenance};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -51,6 +51,12 @@ enum Command {
         /// Report-only regardless of TTY: print diffs, write nothing.
         #[arg(long, conflicts_with = "yes")]
         dry_run: bool,
+        /// Scaffold a newly wired provider before generating its data.rs:
+        /// write a TODO facts skeleton (first run, then stop) and the
+        /// hand-owned mod.rs/behavior.rs stubs (never overwriting). Requires
+        /// a slug whose `Provider` variant is already wired.
+        #[arg(long)]
+        scaffold: bool,
     },
     /// Report-only drift check: regenerate from committed inputs and
     /// byte-compare against the committed data.rs files and catalog.json.
@@ -62,11 +68,11 @@ enum Command {
     },
 }
 
-/// `Some(slug)` → a one-element list; `None` → every provider.
+/// `Some(slug)` → a one-element list; `None` → every wired provider.
 fn slug_scope(slug: &Option<String>) -> Vec<&str> {
     match slug {
         Some(one) => vec![one.as_str()],
-        None => PROVIDER_SLUGS.to_vec(),
+        None => claudine_gen::provider_slugs(),
     }
 }
 
@@ -96,18 +102,24 @@ fn run(area: Option<PathBuf>, command: Command) -> Result<ExitCode, GenError> {
             );
             Ok(ExitCode::SUCCESS)
         }
-        Command::Generate { slug, yes, dry_run } => {
+        Command::Generate {
+            slug,
+            yes,
+            dry_run,
+            scaffold,
+        } => {
             let area = resolve_area(area)?;
-            run_generate(&area, &slug, yes, dry_run)
+            run_generate(&area, &slug, yes, dry_run, scaffold)
         }
         Command::Check { slug } => {
             let area = resolve_area(area)?;
             let mut drifted = false;
-            let mut generations = Vec::with_capacity(PROVIDER_SLUGS.len());
+            let slugs = claudine_gen::provider_slugs();
+            let mut generations = Vec::with_capacity(slugs.len());
             let scope = slug_scope(&slug);
             // catalog.json spans every provider, so generate the full
             // roster even when only one data.rs is being checked.
-            for slug in PROVIDER_SLUGS {
+            for slug in &slugs {
                 let (generation, outcome) = claudine_gen::check_area(&area, slug)?;
                 if scope.contains(slug) {
                     match outcome {
@@ -194,6 +206,19 @@ fn run(area: Option<PathBuf>, command: Command) -> Result<ExitCode, GenError> {
                     );
                 }
             }
+            // Roster ↔ wired-set cross-validation: a wired slug with no
+            // active roster entry is a loud error (propagates out); active
+            // roster slugs with no wired variant are the "researched but not
+            // yet code-supported" set, reported informationally.
+            let cross = claudine_gen::cross_validate_roster(&area)?;
+            if cross.unwired_active.is_empty() {
+                println!("roster: every active entry has a wired Provider variant");
+            } else {
+                println!(
+                    "roster: {} researched but not wired (no Provider variant) — informational",
+                    cross.unwired_active.join(", ")
+                );
+            }
             Ok(if drifted {
                 ExitCode::FAILURE
             } else {
@@ -203,14 +228,43 @@ fn run(area: Option<PathBuf>, command: Command) -> Result<ExitCode, GenError> {
     }
 }
 
-/// The `generate` UX: per-file diff + confirmation, decline → override
-/// scaffolding, non-zero exit while drift remains unreconciled.
+/// The `generate` UX: optional provider scaffolding, then per-file diff +
+/// confirmation, decline → override scaffolding, non-zero exit while drift
+/// remains unreconciled.
 fn run_generate(
     area: &std::path::Path,
     slug: &Option<String>,
     yes: bool,
     dry_run: bool,
+    scaffold: bool,
 ) -> Result<ExitCode, GenError> {
+    if scaffold {
+        // --scaffold is slug-scoped: it seeds one provider's hand-owned
+        // inputs before generating that provider's data.rs.
+        let Some(slug) = slug.as_deref() else {
+            return Err(GenError::ScaffoldRequiresSlug);
+        };
+        // Resolve the variant first so an unwired slug fails with the "wire
+        // the enum variant + PROVIDER_VARIANTS entry first" message before
+        // any file is written.
+        let variant = claudine_gen::scaffold::provider_variant(slug)?;
+        if claudine_gen::scaffold_facts(area, slug)? {
+            println!(
+                "scaffolded docs/providers/facts/{slug}.yaml — fill the TODO(required) fields, \
+                 then rerun `claudine-gen generate {slug} --scaffold`"
+            );
+            return Ok(ExitCode::SUCCESS);
+        }
+        report_stub(
+            claudine_gen::scaffold_mod(area, slug, variant)?,
+            &format!("lib/src/provider/{slug}/mod.rs"),
+        );
+        report_stub(
+            claudine_gen::scaffold_behavior(area, slug, variant)?,
+            &format!("lib/src/provider/{slug}/behavior.rs"),
+        );
+        // Fall through to the normal data.rs generate/apply for this slug.
+    }
     let scope = slug_scope(slug);
     let generations = claudine_gen::generate_all(area)?;
     report_artifact_warning(&generations);
@@ -313,6 +367,15 @@ fn prompt_decision(path: &std::path::Path) -> Decision {
             "q" | "quit" => return Decision::Quit,
             other => println!("unrecognized `{other}` — expected y, n, or q"),
         }
+    }
+}
+
+/// Reports whether a never-overwrite stub was written or already present.
+fn report_stub(written: bool, rel: &str) {
+    if written {
+        println!("scaffolded {rel}");
+    } else {
+        println!("{rel} already present — left untouched");
     }
 }
 

@@ -114,6 +114,35 @@ fn load_roster_entry(path: &Path, slug: &str) -> Result<Value, GenError> {
     Ok(entry)
 }
 
+/// Lists roster slugs whose entry is NOT flagged `skip_research: true`, in
+/// roster order.
+///
+/// Feeds the `check` roster ↔ wired-set cross-validation
+/// ([`crate::generate::cross_validate_roster`]): an active slug with no
+/// wired `Provider` variant is the "researched but not yet code-supported"
+/// set.
+pub fn roster_active_slugs(area: &Path) -> Result<Vec<String>, GenError> {
+    let path = area.join("docs/providers.yaml");
+    let value = read_yaml(&path)?;
+    let entries = value
+        .get("list")
+        .and_then(Value::as_array)
+        .ok_or_else(|| GenError::Yaml {
+            path: path.clone(),
+            message: "expected a top-level `list:` sequence".into(),
+        })?;
+    let mut slugs = Vec::new();
+    for entry in entries {
+        if entry.get("skip_research").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        if let Some(slug) = entry.get("slug").and_then(Value::as_str) {
+            slugs.push(slug.to_string());
+        }
+    }
+    Ok(slugs)
+}
+
 /// Loads a YAML mapping file into a key → value map; absent file ⇒ empty.
 fn load_optional_yaml_map(path: &Path) -> Result<BTreeMap<String, Value>, GenError> {
     if !path.is_file() {

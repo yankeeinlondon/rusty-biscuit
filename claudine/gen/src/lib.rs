@@ -21,6 +21,7 @@ pub mod generate;
 pub mod inputs;
 pub mod offerings;
 pub mod registry;
+pub mod scaffold;
 pub mod schema_compat;
 pub mod signals;
 
@@ -31,11 +32,13 @@ pub use errors::GenError;
 pub use families::{build_families, check_families, compiled_family_keys, families_path};
 pub use offerings::OfferingJoinReport;
 pub use generate::{
-    CheckOutcome, CoercionSkip, Generation, PROVIDER_SLUGS, Provenance, ResolvedField,
-    check_area, committed_data_path, diff_lines, find_area, generate_all, generate_for_area,
+    CheckOutcome, CoercionSkip, Generation, Provenance, ResolvedField, RosterCrossCheck,
+    check_area, committed_data_path, cross_validate_roster, diff_lines, find_area, generate_all,
+    generate_for_area, provider_slugs,
 };
 pub use registry::{
     Coercion, DeclaredSource, EXCLUDED_SERIALIZED_FIELDS, REGISTRY, RegistryEntry,
     SchemaExpectation, mapping_json,
 };
+pub use scaffold::{scaffold_behavior, scaffold_facts, scaffold_mod};
 pub use signals::{SIGNAL_SLUGS, build_signals, check_signals, signals_path};
