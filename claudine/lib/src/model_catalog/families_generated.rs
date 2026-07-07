@@ -28,6 +28,17 @@ pub(super) static FAMILY_INDEX: &[FamilyRow] = &[
         rolling_aliases: &["openrouter/anthropic/claude-fable-latest"],
     },
     FamilyRow {
+        key: "anthropic/claude-haiku",
+        latest: Some("anthropic/claude-haiku@4.5"),
+        members: &[
+            "openrouter/anthropic/claude-3-haiku",
+            "openrouter/anthropic/claude-haiku-4.5",
+            "zenmux/anthropic/claude-haiku-4.5",
+            "anthropic/claude-haiku-4-5-20251001",
+        ],
+        rolling_aliases: &["openrouter/anthropic/claude-haiku-latest"],
+    },
+    FamilyRow {
         key: "anthropic/claude-opus",
         latest: Some("anthropic/claude-opus@4.8"),
         members: &[
@@ -70,6 +81,19 @@ pub(super) static FAMILY_INDEX: &[FamilyRow] = &[
             "zenmux/anthropic/claude-sonnet-5",
         ],
         rolling_aliases: &["openrouter/anthropic/claude-sonnet-latest"],
+    },
+    FamilyRow {
+        key: "deepseek/deepseek-v",
+        latest: Some("deepseek/deepseek-v@3.2+exp"),
+        members: &[
+            "openrouter/deepseek/deepseek-chat-v3.1",
+            "zenmux/deepseek/deepseek-chat-v3.1",
+            "openrouter/deepseek/deepseek-v3.2",
+            "openrouter/deepseek/deepseek-v3.2-exp",
+            "zenmux/deepseek/deepseek-v3.2",
+            "zenmux/deepseek/deepseek-v3.2-exp",
+        ],
+        rolling_aliases: &[],
     },
     FamilyRow {
         key: "deepseek/deepseek-v-flash",
@@ -179,6 +203,25 @@ pub(super) static FAMILY_INDEX: &[FamilyRow] = &[
         rolling_aliases: &[],
     },
     FamilyRow {
+        key: "minimax/minimax-m",
+        latest: Some("minimax/minimax-m@3"),
+        members: &[
+            "openrouter/minimax/minimax-m1",
+            "openrouter/minimax/minimax-m2",
+            "zenmux/minimax/minimax-m2",
+            "openrouter/minimax/minimax-m2.1",
+            "zenmux/minimax/minimax-m2.1",
+            "openrouter/minimax/minimax-m2.5",
+            "zenmux/minimax/minimax-m2.5",
+            "openrouter/minimax/minimax-m2.7",
+            "zenmux/minimax/minimax-m2.7",
+            "zenmux/minimax/minimax-m2.7-highspeed",
+            "openrouter/minimax/minimax-m3",
+            "zenmux/minimax/minimax-m3",
+        ],
+        rolling_aliases: &[],
+    },
+    FamilyRow {
         key: "moonshotai/kimi-k",
         latest: Some("moonshotai/kimi-k@2.6"),
         members: &[
@@ -281,6 +324,21 @@ pub(super) static FAMILY_INDEX: &[FamilyRow] = &[
             "zenmux/openai/gpt-5.3-codex",
         ],
         rolling_aliases: &[],
+    },
+    FamilyRow {
+        key: "openai/gpt-mini",
+        latest: Some("openai/gpt-mini@5.4"),
+        members: &[
+            "openrouter/openai/gpt-audio-mini",
+            "openrouter/openai/gpt-4.1-mini",
+            "zenmux/openai/gpt-4.1-mini",
+            "openrouter/openai/gpt-5-image-mini",
+            "openrouter/openai/gpt-5-mini",
+            "zenmux/openai/gpt-5-mini",
+            "openrouter/openai/gpt-5.4-mini",
+            "zenmux/openai/gpt-5.4-mini",
+        ],
+        rolling_aliases: &["openrouter/openai/gpt-mini-latest"],
     },
     FamilyRow {
         key: "xai/grok-build",

@@ -18,10 +18,10 @@
     "reference": "code merely names a provider (fixtures, constructor arguments); nothing to migrate"
   },
   "totals": {
-    "sites": 430,
-    "provider_refs": 457,
+    "sites": 432,
+    "provider_refs": 459,
     "by_form": {
-      "direct-ref": 416,
+      "direct-ref": 418,
       "eq-comparison": 6,
       "matches-macro": 4,
       "ne-comparison": 3,
@@ -29,7 +29,7 @@
     },
     "by_dispatch_class": {
       "conditional": 14,
-      "reference": 416
+      "reference": 418
     }
   },
   "sites": [
@@ -426,31 +426,11 @@
     },
     {
       "path": "claudine/cli/src/commands/providers.rs",
-      "line": 397,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Claude"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/cli/src/commands/providers.rs",
-      "line": 401,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Gemini"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/cli/src/commands/providers.rs",
       "line": 405,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
-        "QwenCode"
+        "Claude"
       ],
       "exempt_candidate": false
     },
@@ -460,23 +440,23 @@
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
-        "KimiCode"
+        "Gemini"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/cli/src/commands/providers.rs",
+      "line": 413,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "QwenCode"
       ],
       "exempt_candidate": false
     },
     {
       "path": "claudine/cli/src/commands/providers.rs",
       "line": 417,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Claude"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/cli/src/commands/providers.rs",
-      "line": 421,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -490,63 +470,13 @@
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
-        "Gemini"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/cli/src/commands/providers.rs",
-      "line": 432,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
         "Claude"
       ],
       "exempt_candidate": false
     },
     {
       "path": "claudine/cli/src/commands/providers.rs",
-      "line": 433,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Codex"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/cli/src/commands/providers.rs",
-      "line": 434,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Gemini"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/cli/src/commands/providers.rs",
-      "line": 435,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "OpenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/cli/src/commands/providers.rs",
-      "line": 436,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Goose"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/cli/src/commands/providers.rs",
-      "line": 437,
+      "line": 429,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -556,7 +486,77 @@
     },
     {
       "path": "claudine/cli/src/commands/providers.rs",
-      "line": 438,
+      "line": 433,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Gemini"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/cli/src/commands/providers.rs",
+      "line": 440,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/cli/src/commands/providers.rs",
+      "line": 441,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Codex"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/cli/src/commands/providers.rs",
+      "line": 442,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Gemini"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/cli/src/commands/providers.rs",
+      "line": 443,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "OpenCode"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/cli/src/commands/providers.rs",
+      "line": 444,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Goose"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/cli/src/commands/providers.rs",
+      "line": 445,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "KimiCode"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/cli/src/commands/providers.rs",
+      "line": 446,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -2650,6 +2650,16 @@
       "exempt_candidate": true
     },
     {
+      "path": "claudine/cli/src/commands/wrap/profile/kilo.rs",
+      "line": 20,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Kilo"
+      ],
+      "exempt_candidate": true
+    },
+    {
       "path": "claudine/cli/src/commands/wrap/profile/kimi.rs",
       "line": 13,
       "form": "direct-ref",
@@ -4287,6 +4297,16 @@
       "dispatch_class": "reference",
       "providers": [
         "Goose"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/main.rs",
+      "line": 31,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Kilo"
       ],
       "exempt_candidate": true
     },
