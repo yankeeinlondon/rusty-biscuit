@@ -38,13 +38,15 @@ pub enum Provider {
     OpenCode = 5,
     /// Qwen Code CLI (Alibaba).
     QwenCode = 6,
+    /// Kilo Code CLI (Kilo) — an OpenCode-fork agentic coding CLI.
+    Kilo = 7,
 }
 
 /// Total number of [`Provider`] variants.
 ///
 /// Anchors compile-time array length checks for the registry and any other
 /// `[T; PROVIDER_COUNT]` table indexed by `Provider as usize`.
-pub const PROVIDER_COUNT: usize = 7;
+pub const PROVIDER_COUNT: usize = 8;
 
 /// Providers in canonical display order for matrix-style reporting.
 pub const PROVIDERS_DISPLAY_ORDER: [Provider; PROVIDER_COUNT] = [
@@ -55,6 +57,7 @@ pub const PROVIDERS_DISPLAY_ORDER: [Provider; PROVIDER_COUNT] = [
     Provider::KimiCode,
     Provider::OpenCode,
     Provider::QwenCode,
+    Provider::Kilo,
 ];
 
 // Compile-time assertion: every `Provider` discriminant fits in
@@ -72,6 +75,7 @@ const _: () = {
     let _kimi: usize = Provider::KimiCode as usize;
     let _open: usize = Provider::OpenCode as usize;
     let _qwen: usize = Provider::QwenCode as usize;
+    let _kilo: usize = Provider::Kilo as usize;
     assert!(_claude == 0);
     assert!(_codex == 1);
     assert!(_gemini == 2);
@@ -79,6 +83,7 @@ const _: () = {
     assert!(_kimi == 4);
     assert!(_open == 5);
     assert!(_qwen == 6);
+    assert!(_kilo == 7);
 };
 
 /// Typed selector metadata for provider-native output formats.
