@@ -23,15 +23,26 @@ $schema:
 
     # One record per mechanism for selecting a model at launch/runtime
     # (feeds model_cli_flag / model_env_vars / wire-envelope knowledge).
-    # `site` is the flag, env var, config key, or slash command name.
-    model_selection: "{ method: enum(cli_flag,env_var,config_file,interactive_command,wire_envelope; required), site: string(required), example: string, notes: string }[]"
+    # `site` is exactly ONE canonical token: the long-form flag (`--model`), a
+    # single env var (`UPPER_SNAKE_CASE`), config key, or slash command — NEVER a
+    # compound like `"--model / -m"` (the generator skips compound sites, and a
+    # semantically-wrong alternate can win). Put short/alternate forms (`-m`) in
+    # `aliases` so they are captured without polluting `site`.
+    model_selection: "{ method: enum(cli_flag,env_var,config_file,interactive_command,wire_envelope; required), site: string(required), aliases: string[], example: string, notes: string }[]"
 
     # Highest-wins ordering across the model_selection mechanisms.
     precedence: string
 
     # Can the CLI enumerate its model catalog programmatically?
-    # (feeds model_catalog_source / ModelCatalogSource)
-    dynamic_listing: "{ available: boolean(required), method: string, example: string }"
+    # (feeds model_catalog_source / ModelCatalogSource) — capture the mechanism
+    # STRUCTURALLY, not just as prose, so the generator can build a catalog
+    # source without a hand-authored override:
+    #   `list_program` + `list_args` = the exact shell listing command split into
+    #     the executable and its argument tokens (e.g. program `kilo`, args
+    #     `["models"]`) → ModelCatalogSource::ShellCommand.
+    #   `rest_endpoint` = an HTTP listing endpoint when that is the mechanism.
+    # `method`/`example` stay as the human-readable description.
+    dynamic_listing: "{ available: boolean(required), list_program: string, list_args: string[], rest_endpoint: url, method: string, example: string }"
 
     changes: string[]
     requires_claudine_update: boolean(required)

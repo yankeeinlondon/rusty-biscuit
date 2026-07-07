@@ -158,16 +158,26 @@ Follow these steps exactly:
       abbreviated. Add `alias` when a short form exists, `context_window` when
       documented, and `is_default: true` on the model used when none is specified
     - `model_selection` - one record per mechanism documented in `## Model Selection`,
-      with the `site` and `example` shown there. **One selection site per record**:
-      for `env_var` records, `site` must be a single environment-variable name
-      (`UPPER_SNAKE_CASE`, nothing else) — never pack a family like
-      `"VAR_A / VAR_B"` into one record. Give each variable its own record and
-      describe the family relationship in `notes`. Compound sites cannot feed the
-      generated catalog (`claudine-gen` reports them as skipped records)
+      with the `site` and `example` shown there. **One canonical site per record —
+      this applies to EVERY method, not just env vars.** `site` is a single token:
+      for `cli_flag`, the long-form flag ONLY (`--model`) — never a compound like
+      `"--model / -m"`; for `env_var`, a single name (`UPPER_SNAKE_CASE`) — never
+      `"VAR_A / VAR_B"`; likewise a single config key or slash command. Put every
+      short or alternate form (`-m`, or a second env var in the same family) in the
+      record's `aliases` list, and describe the relationship in `notes`. Compound
+      sites cannot feed the generated catalog — `claudine-gen` skips them, and a
+      semantically-wrong alternate (e.g. a reasoning-effort flag colliding with the
+      model flag) can silently win the field
     - `precedence` - the highest-wins ordering you established in `## Model Selection`
       (e.g. "cli_flag > env_var > config_file")
     - `dynamic_listing` - the facts from `## Dynamic Listing`: `available`, plus
-      `method` and `example` when a mechanism exists
+      `method` and `example` when a mechanism exists. When the mechanism is a
+      shell/subcommand, ALSO capture it structurally so it needs no hand-authored
+      override: `list_program` = the executable invoked (usually the CLI binary)
+      and `list_args` = its argument tokens as a list — e.g. program `kilo`, args
+      `["models"]` for `kilo models`. When the mechanism is an HTTP endpoint, set
+      `rest_endpoint` to that URL. Leave all three unset when no programmatic
+      listing exists (`available: false`)
     ::block when="update"
     - `changes` - add a list of string descriptions which summarize the changes discovered since the last research was done
     ::end-block
