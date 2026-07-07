@@ -1,8 +1,8 @@
 ---
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
-last_updated: 2026-07-06
-hash: 3633bb398108735f-c92c358713e97a18
+last_updated: 2026-07-07
+hash: 3633bb398108735f-007c70503a77bb5e
 ---
 
 ## Overview
@@ -22,7 +22,7 @@ The package follows the monorepo `lib` + `cli` split: library crate `claudine`, 
 
 ## Library Module Map
 
-Twenty modules plus the shared error type and the flat `provider_id` leaf. Full detail in [architecture.md](architecture.md).
+Nineteen modules plus the shared error type and the flat `provider_id` leaf (the former `prompt_reporting` module folded into `render` in Phase G). Full detail in [architecture.md](architecture.md).
 
 | Module | Responsibility |
 |--------|----------------|
@@ -40,8 +40,7 @@ Twenty modules plus the shared error type and the flat `provider_id` leaf. Full 
 | `model_catalog` | Model validation against the generated expected-offerings baseline (+ user overrides), `family_latest` alias resolution, and the dynamic-listing drift channel |
 | `permissions` | Provider-agnostic policy engine (`PolicyEngine`) |
 | `protect` | Standalone regex deny catalog (bash commands, write/edit paths, MCP responses) |
-| `prompt_reporting` | System/user prompt reporting types and rendering |
-| `render` | Functional render components (`FinalMessage`); consume data + policy, never `match provider` |
+| `render` | Functional render components — `FinalMessage`, `AgentPrompt`/`SystemPrompt` (under `render/prompt/`, absorbed the former `prompt_reporting` module), `EventRenderer` + the exhaustive `DISPATCH` table (live-sink stderr status dispatch), and the dual-target `MetricsReport` (`TerminalRenderable` + `BrowserRenderable`); all consume data + policy (`DisplayPolicy`), never `match provider` |
 | `reporting` | JSONL-to-SQLite metrics index |
 | `runaway` | Pure content-guard detector (exit-expressions, group-cycle repetition, volume cap) + per-layer config; trips map to `ProcessTermination::Aborted` |
 | `stream` | Structured stream parsing for 6 providers (typed models in `stream::protocol`) |

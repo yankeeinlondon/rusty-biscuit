@@ -16,7 +16,7 @@ claudine/lib/src/
 ├── linking/      → Cross-provider skill synchronization (4 resource types) with portability classification
 ├── mcp/          → MCP catalog, defaults, import/export, session, and injection
 ├── permissions/  → Provider-agnostic PolicyEngine for permission queries and mutation planning
-├── render/       → Functional render components (FinalMessage); provider variance enters as data, never `match provider`
+├── render/       → Functional render components (FinalMessage, AgentPrompt/SystemPrompt, EventRenderer + DISPATCH table, MetricsReport); consume data + policy (DisplayPolicy), never `match provider`
 ├── reporting/    → JSONL-to-SQLite reporting index, sync, and typed queries
 ├── services/     → Cross-provider runtime policy services (ProtectService)
 ├── stream/       → Structured stream parsing for 6 providers + summary/reporting
@@ -363,7 +363,7 @@ Spacing is enforced at the sink level, with at most one blank line between any t
 
 ### Markdown rendering boundary (triage)
 
-The prose-bearing sections (System Prompt, **Agent Prompt**, Thinking Prose) render Markdown through `prompt_reporting::render_markdown_for_terminal`, which is **pure delegation** to darkmatter's `Markdown::as_terminal` — it only sets `max_width` and collapses blank lines. claudine owns **no** word-wrap, hanging-indent, or inline-style (code/bold/link) logic; all of that lives in darkmatter's fold + biscuit-terminal's render tree (`render_tree/render.rs`).
+The prose-bearing sections (System Prompt, **Agent Prompt**, Thinking Prose) render Markdown through `render::prompt::render_markdown_for_terminal` (the `AgentPrompt`/`SystemPrompt` components under `lib/src/render/prompt/`, which absorbed the former `prompt_reporting` module), which is **pure delegation** to darkmatter's `Markdown::as_terminal` — it only sets `max_width` and collapses blank lines. claudine owns **no** word-wrap, hanging-indent, or inline-style (code/bold/link) logic; all of that lives in darkmatter's fold + biscuit-terminal's render tree (`render_tree/render.rs`).
 
 So when rendered prompt output shows wrong wrapping, spurious newlines, lines bleeding past the width, or mis-styled inline spans, the defect is in **darkmatter / biscuit-terminal**, not claudine. Reproduce at that layer (`md.as_terminal` with a fixed `max_width`) rather than through the claudine CLI. Known gotcha: a CommonMark *tight* list item carries its content as a flat run of inline siblings (`[Text, InlineCode, Text]`) with no wrapping `Paragraph`, and the terminal renderer must coalesce that run before wrapping — the wrap is per-list-item, not per-inline-node.
 
