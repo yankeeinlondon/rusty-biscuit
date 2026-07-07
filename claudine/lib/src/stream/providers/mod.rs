@@ -3,6 +3,7 @@ pub mod codex;
 pub mod gemini;
 pub mod kimi;
 pub mod opencode;
+pub mod pi;
 pub mod qwen;
 
 // Re-exports so the moved parser files can keep their original `super::`
@@ -50,6 +51,8 @@ pub fn for_provider(
             sink,
             config.model,
         )),
+        // Pi is a bespoke provider with its own `--mode json` NDJSON format.
+        Provider::Pi => Box::new(pi::PiSemanticStreamParser::new(sink, config.model)),
         _ => Box::new(claude::ClaudeSemanticStreamParser::new(sink)),
     }
 }

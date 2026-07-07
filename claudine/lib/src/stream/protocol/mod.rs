@@ -11,6 +11,7 @@ pub mod codex;
 pub mod gemini;
 pub mod kimi;
 pub mod opencode;
+pub mod pi;
 pub mod qwen;
 
 /// Errors produced while attempting to deserialize a provider event line.
