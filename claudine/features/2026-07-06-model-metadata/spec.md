@@ -1,6 +1,6 @@
 ---
 clarified: "implemented/codex/gpt-5"
-review_iterations: 1
+review_iterations: 2
 ---
 
 # Model Metadata Source Migration: Retire Parsera, Adopt models.dev
