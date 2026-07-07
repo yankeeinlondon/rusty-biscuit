@@ -44,6 +44,12 @@ pub fn for_provider(
             config.model,
         )),
         Provider::QwenCode => Box::new(qwen::QwenSemanticStreamParser::new(sink)),
+        // Kilo Code is an OpenCode fork; its `--format json` stream is
+        // OpenCode-shaped NDJSON, parsed by the OpenCode parser unchanged.
+        Provider::Kilo => Box::new(opencode::OpenCodeSemanticStreamParser::new(
+            sink,
+            config.model,
+        )),
         _ => Box::new(claude::ClaudeSemanticStreamParser::new(sink)),
     }
 }

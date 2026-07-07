@@ -836,8 +836,10 @@ fn representative_payload_for(provider: Provider) -> Option<serde_json::Value> {
         Provider::Gemini => serde_json::json!({"hook_event_name": "BeforeAgent"}),
         Provider::OpenCode => serde_json::json!({"event_type": "session.idle"}),
         Provider::KimiCode => serde_json::json!({"method": "notification"}),
-        // Goose and Qwen do not detect via raw payload shape today.
-        Provider::Goose | Provider::QwenCode => return None,
+        // Goose and Qwen do not detect via raw payload shape today. Kilo
+        // shares OpenCode's payload shape, so it cannot be uniquely detected
+        // from a raw payload — the wrapper path knows the provider instead.
+        Provider::Goose | Provider::QwenCode | Provider::Kilo => return None,
     })
 }
 

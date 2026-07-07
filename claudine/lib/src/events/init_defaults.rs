@@ -173,6 +173,8 @@ mod tests {
                 Provider::Codex,
                 Provider::Gemini,
                 Provider::OpenCode,
+                // Kilo Code is an OpenCode fork with the same plugin-bus hooks.
+                Provider::Kilo,
             ]
         );
     }

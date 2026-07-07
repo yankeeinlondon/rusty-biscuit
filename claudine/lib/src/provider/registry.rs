@@ -13,6 +13,7 @@ use super::claude::CLAUDE_INFO;
 use super::codex::CODEX_INFO;
 use super::gemini::GEMINI_INFO;
 use super::goose::GOOSE_INFO;
+use super::kilo::KILO_INFO;
 use super::kimi::KIMI_INFO;
 use super::opencode::OPENCODE_INFO;
 use super::qwen::QWEN_INFO;
@@ -35,6 +36,7 @@ pub fn provider_info(provider: Provider) -> &'static ProviderInfo {
             &KIMI_INFO,
             &OPENCODE_INFO,
             &QWEN_INFO,
+            &KILO_INFO,
         ]
     });
     registry[provider as usize]

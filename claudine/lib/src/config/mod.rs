@@ -5,6 +5,7 @@ pub mod claudine_config;
 pub(crate) mod codex;
 pub(crate) mod gemini;
 pub(crate) mod goose;
+pub(crate) mod kilo;
 pub(crate) mod kimicode;
 pub mod merge;
 pub mod messaging_block;
@@ -28,6 +29,7 @@ pub(crate) use claude::ClaudeConfigurator;
 pub(crate) use codex::CodexConfigurator;
 pub(crate) use gemini::GeminiConfigurator;
 pub(crate) use goose::GooseConfigurator;
+pub(crate) use kilo::KiloConfigurator;
 pub(crate) use kimicode::KimiCodeConfigurator;
 pub(crate) use opencode::OpenCodeConfigurator;
 pub(crate) use qwen::QwenConfigurator;
@@ -156,7 +158,7 @@ mod tests {
     #[test]
     fn discover_agents_full_returns_all_providers() {
         let agents = discover_agents_full();
-        assert_eq!(agents.len(), 7);
+        assert_eq!(agents.len(), 8);
 
         // Check all providers are present
         let providers: Vec<_> = agents.iter().map(|a| a.provider).collect();
@@ -167,6 +169,7 @@ mod tests {
         assert!(providers.contains(&Provider::KimiCode));
         assert!(providers.contains(&Provider::OpenCode));
         assert!(providers.contains(&Provider::QwenCode));
+        assert!(providers.contains(&Provider::Kilo));
     }
 
     #[test]

@@ -26,6 +26,7 @@ mod event_mapping;
 mod gemini;
 mod goose;
 mod identity;
+mod kilo;
 mod kimi;
 mod known_gap;
 mod methods;

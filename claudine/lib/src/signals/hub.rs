@@ -298,8 +298,9 @@ mod tests {
         assert_eq!(SignalHub::without_table().provider(), None);
 
         // Dormant roster-only slugs compile a table but have no Provider
-        // variant to recover.
-        let dormant = SignalHub::new(detection_table("kilo").expect("kilo table"));
+        // variant to recover. (Kilo graduated to a wired Provider; pi remains
+        // the researched-but-unwired example.)
+        let dormant = SignalHub::new(detection_table("pi").expect("pi table"));
         assert_eq!(dormant.provider(), None);
     }
 
