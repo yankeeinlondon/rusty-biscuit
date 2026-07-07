@@ -162,6 +162,22 @@ pub(crate) struct LiveSemanticSink {
     /// construction. Drained at the top of `on_semantic_event` before any
     /// non-`Reasoning` event and again in `Drop`. Owns its own `Terminal`
     /// clone; the (test-only) `terminal` mutation does not re-target it.
+    ///
+    /// No idle-flush ticker (deliberate — unlike the exec-layer
+    /// [`AssistantStream`], which has [`super::super::exec::spawn_flush_if_idle_ticker`]).
+    /// The next-event boundary drain covers every real thinking→output/tool
+    /// transition and `Drop` covers stream end / timeout termination, so
+    /// buffered thinking is never lost. What a ticker would add is *mid-stall*
+    /// surfacing of the held buffer, and that buffer is bounded to ~one
+    /// in-progress sentence (this stream flushes per line and early-flushes past
+    /// 200 bytes on a sentence terminator) — versus the whole paragraph
+    /// `AssistantStream` can hold, which is what justifies *its* ticker. Wiring
+    /// one here would mean moving this field behind `Arc<Mutex<_>>`, threading
+    /// the handle out of sink construction (`policy.rs`) down to the ticker, and
+    /// adding a second concurrent stderr writer racing `emit_section_line`
+    /// against the no-double-blank-line contract — disproportionate for a
+    /// sub-sentence cosmetic. Revisit only if long silent mid-thought stalls
+    /// holding large partials become a real complaint.
     thinking_stream: ThinkingStream,
     /// Section-spacing state machine shared with [`super::section::SectionStream`]
     /// and any post-stream trailer emitter obtained via [`Self::section_stream`].

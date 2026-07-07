@@ -682,10 +682,20 @@ section (noise prefixes move here — single owner).
 >   (`consecutive_reasoning_deltas_coalesce_into_one_block`,
 >   `reasoning_flushes_before_following_tool_call`). dispatch-inventory +1 (a
 >   `Provider::Claude` test-helper constructor arg, `exempt_candidate`).
->   Open sub-item: `flush_idle` is implemented + unit-tested on the component
->   but NOT wired to a sink-side heartbeat ticker (staleness is bounded by the
->   next-event boundary flush + Drop); a sink idle ticker is a mechanical
->   follow-up if long silent thinking phases need mid-stall surfacing.
+>   `flush_idle` is implemented + unit-tested on the component but intentionally
+>   NOT wired to a sink-side heartbeat ticker (decided, not deferred — see the
+>   `thinking_stream` field doc in `live_semantic_sink/mod.rs`). Rationale:
+>   buffered thinking is never lost (next-event boundary drain covers every
+>   thinking→output/tool transition; `Drop` covers stream end / timeout
+>   termination), and the held-during-stall buffer is bounded to ~one in-progress
+>   sentence (per-line flush + 200-byte sentence early-flush) versus the whole
+>   paragraph the exec-layer `AssistantStream` holds — which is what justifies
+>   *its* ticker. A thinking ticker would need this field behind `Arc<Mutex<_>>`,
+>   the handle threaded out of `policy.rs` sink construction to the ticker, and a
+>   second concurrent stderr writer racing `emit_section_line` against the
+>   no-double-blank-line contract — disproportionate for mid-stall surfacing of a
+>   sub-sentence. Revisit only if long silent mid-thought stalls with large held
+>   partials become a real complaint.
 > - **`ToolUse` StreamRenderable — assessed, correctly NOT built (not a defer
 >   by omission).** The design lists ToolUse as "spans two events — needs the
 >   span contract," but investigation shows it is not a `StreamRenderable`
