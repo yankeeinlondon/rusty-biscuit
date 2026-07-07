@@ -78,11 +78,17 @@ mod tests {
     }
 
     #[test]
-    fn dormant_tables_are_reachable_by_slug_only() {
-        for slug in ["kilo", "pi"] {
-            let table = detection_table(slug).expect("dormant table compiles");
-            assert_eq!(table.slug, slug);
-            assert!(!table.records.is_empty());
+    fn detection_tables_are_reachable_by_slug() {
+        // `detection_table()` is the slug-keyed replay seam used by
+        // `signals check`. Every compiled table must be reachable by its slug
+        // (including any researched-but-unwired ones, should they exist), and an
+        // unknown slug returns None.
+        for table in all_detection_tables() {
+            let looked_up =
+                detection_table(table.slug).expect("compiled table reachable by slug");
+            assert_eq!(looked_up.slug, table.slug);
+            assert!(!looked_up.records.is_empty());
         }
+        assert!(detection_table("nonesuch").is_none());
     }
 }

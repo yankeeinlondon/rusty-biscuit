@@ -51,10 +51,10 @@ impl BespokeChain {
         }
     }
 
-    /// The detector set for one provider table, keyed by slug so the
-    /// dormant pi table gets a chain too (pi has no `Provider` variant, so
-    /// its detector is unreachable at runtime and exists for the
-    /// `signals check` replay seam only).
+    /// The detector set for one provider table, keyed by slug. Pi's chain
+    /// (`PiRetriesExhausted`) runs at runtime for `Provider::Pi` runs now that
+    /// Pi is wired, and stays reachable by slug for the `signals check` replay
+    /// seam.
     pub(super) fn for_slug(slug: &str) -> Self {
         let detectors: Vec<Box<dyn BespokeDetector>> = match slug {
             "claude" => vec![Box::new(ClaudeResultTaint::default())],

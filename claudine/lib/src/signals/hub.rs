@@ -160,9 +160,9 @@ impl SignalHub {
     /// The run's provider attribution, recovered from the compiled
     /// table's slug.
     ///
-    /// `None` on table-less hubs and on dormant roster-only slugs
-    /// (kilo, pi) that have no [`Provider`] variant. Exists so
-    /// end-of-run wrapper checks (catalog drift) can key baseline
+    /// `None` on table-less hubs and on any compiled slug that has no
+    /// [`Provider`] variant (a researched-but-unwired provider). Exists
+    /// so end-of-run wrapper checks (catalog drift) can key baseline
     /// lookups without threading a `Provider` through the spawn paths.
     pub fn provider(&self) -> Option<Provider> {
         let slug = self.lock().slug?;
@@ -297,10 +297,17 @@ mod tests {
 
         assert_eq!(SignalHub::without_table().provider(), None);
 
-        // Dormant roster-only slugs compile a table but have no Provider
-        // variant to recover. (Kilo graduated to a wired Provider; pi remains
-        // the researched-but-unwired example.)
-        let dormant = SignalHub::new(detection_table("pi").expect("pi table"));
+        // A compiled table whose slug has no `Provider` variant recovers no
+        // attribution. Every researched slug in `SIGNAL_TABLES` is now wired
+        // (pi graduated at M-Pi), so this path is exercised with a synthetic
+        // dormant slug rather than a roster-only one — keeping the test robust
+        // to future graduations instead of chasing the last unwired slug.
+        static SYNTHETIC_DORMANT: claudine_catalog_types::ProviderSignalTable =
+            claudine_catalog_types::ProviderSignalTable {
+                slug: "nonesuch",
+                records: &[],
+            };
+        let dormant = SignalHub::new(&SYNTHETIC_DORMANT);
         assert_eq!(dormant.provider(), None);
     }
 
