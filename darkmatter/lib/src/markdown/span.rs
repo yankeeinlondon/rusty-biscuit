@@ -1,0 +1,136 @@
+//! Shared source-span vocabulary for span-aware parse products.
+//!
+//! Spans are byte-offset ranges into the exact source text handed to the
+//! parser — no line-ending normalization is applied, so offsets remain valid
+//! against the caller's original document (including CRLF content).
+
+use std::ops::Range;
+
+/// Byte-offset range into a source document.
+pub type SourceSpan = Range<usize>;
+
+/// A value paired with the source span it was parsed from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Spanned<T> {
+    /// The parsed value.
+    pub value: T,
+    /// Byte span of the source text the value was parsed from.
+    pub span: SourceSpan,
+}
+
+impl<T> Spanned<T> {
+    /// Creates a spanned value.
+    pub fn new(value: T, span: SourceSpan) -> Self {
+        Self { value, span }
+    }
+
+    /// Maps the inner value, preserving the span.
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Spanned<U> {
+        Spanned {
+            value: f(self.value),
+            span: self.span,
+        }
+    }
+}
+
+/// Returns the 1-indexed line number containing byte `offset` in `source`.
+///
+/// Offsets past the end of `source` are clamped to the final line. Lines are
+/// delimited by `\n`; a `\r\n` sequence therefore counts as a single line
+/// break.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::span::line_of_offset;
+///
+/// let source = "first\nsecond\n";
+/// assert_eq!(line_of_offset(source, 0), 1);
+/// assert_eq!(line_of_offset(source, 6), 2);
+/// ```
+pub fn line_of_offset(source: &str, offset: usize) -> usize {
+    let offset = offset.min(source.len());
+    source[..offset].bytes().filter(|&b| b == b'\n').count() + 1
+}
+
+/// Returns the 1-indexed `(line, column)` for byte `offset` in `source`.
+///
+/// The column is a **byte** column within the line (1-indexed), not a
+/// character or UTF-16 column; encoding-aware projection is the caller's
+/// responsibility. Offsets past the end of `source` are clamped.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::span::line_col_of_offset;
+///
+/// let source = "first\nsecond\n";
+/// assert_eq!(line_col_of_offset(source, 0), (1, 1));
+/// assert_eq!(line_col_of_offset(source, 8), (2, 3));
+/// ```
+pub fn line_col_of_offset(source: &str, offset: usize) -> (usize, usize) {
+    let offset = offset.min(source.len());
+    let before = &source[..offset];
+    let line = before.bytes().filter(|&b| b == b'\n').count() + 1;
+    let line_start = before.rfind('\n').map(|idx| idx + 1).unwrap_or(0);
+    (line, offset - line_start + 1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_line_of_offset_first_line() {
+        assert_eq!(line_of_offset("hello\nworld", 0), 1);
+        assert_eq!(line_of_offset("hello\nworld", 5), 1);
+    }
+
+    #[test]
+    fn test_line_of_offset_after_newline() {
+        assert_eq!(line_of_offset("hello\nworld", 6), 2);
+        assert_eq!(line_of_offset("hello\nworld", 11), 2);
+    }
+
+    #[test]
+    fn test_line_of_offset_clamps_past_end() {
+        assert_eq!(line_of_offset("hello\nworld", 999), 2);
+    }
+
+    #[test]
+    fn test_line_of_offset_crlf_counts_single_break() {
+        let source = "a\r\nb\r\nc";
+        assert_eq!(line_of_offset(source, 0), 1);
+        assert_eq!(line_of_offset(source, 3), 2);
+        assert_eq!(line_of_offset(source, 6), 3);
+    }
+
+    #[test]
+    fn test_line_col_of_offset_basic() {
+        let source = "ab\ncd\n";
+        assert_eq!(line_col_of_offset(source, 0), (1, 1));
+        assert_eq!(line_col_of_offset(source, 1), (1, 2));
+        assert_eq!(line_col_of_offset(source, 3), (2, 1));
+        assert_eq!(line_col_of_offset(source, 4), (2, 2));
+    }
+
+    #[test]
+    fn test_line_col_of_offset_empty_source() {
+        assert_eq!(line_col_of_offset("", 0), (1, 1));
+        assert_eq!(line_col_of_offset("", 5), (1, 1));
+    }
+
+    #[test]
+    fn test_line_col_of_offset_is_byte_column() {
+        // 'é' is two bytes; the byte column after it is 3, not 2.
+        let source = "é!";
+        assert_eq!(line_col_of_offset(source, 2), (1, 3));
+    }
+
+    #[test]
+    fn test_spanned_new_and_map() {
+        let spanned = Spanned::new("42", 3..5);
+        let mapped = spanned.map(|value| value.parse::<u32>().unwrap());
+        assert_eq!(mapped, Spanned::new(42, 3..5));
+    }
+}

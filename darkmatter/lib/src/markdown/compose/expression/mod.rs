@@ -77,7 +77,7 @@ pub mod parser;
 pub mod resolve_ctx;
 pub mod semantics;
 
-pub use ast::{BinaryOp, Expr};
+pub use ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind};
 pub use catalog::{
     expression_function_descriptors, generate_expression_function_table,
     ExpressionFunctionDescriptor, EXPRESSION_FUNCTION_DESCRIPTORS,
@@ -89,8 +89,11 @@ pub(crate) use path_projection::{make_portable_relative, make_relative};
 pub use resolve_ctx::ResolutionContext;
 pub use lexer::{
     ComparisonOp, ExpressionFinder, ExpressionLocation, Lexer, LexerError, ParseMode, Token,
+    lex_spanned,
 };
-pub use parser::{ParseError, Parser, parse, parse_condition};
+pub use parser::{
+    ParseError, Parser, parse, parse_condition, parse_condition_spanned, parse_spanned,
+};
 
 use serde_json::Value;
 

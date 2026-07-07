@@ -10,7 +10,7 @@ use crate::style::error::StyleParseError;
 use crate::style::length::{HorizontalLengthError, parse_horizontal_typed};
 use crate::style::schema::StyleFrontmatter;
 use crate::style::walker;
-use crate::style::warning::{StyleWarning, StyleWarningKind};
+use crate::style::warning::{StyleSpan, StyleWarning, StyleWarningKind};
 
 /// Highest sub-spec number whose wiring is live in the renderer.
 ///
@@ -302,9 +302,100 @@ pub fn from_frontmatter(
     fm: &Frontmatter,
 ) -> Result<(StyleFrontmatter, Vec<StyleWarning>), StyleParseError> {
     match fm.as_map().get("style") {
-        Some(value) => from_json_value(value),
+        Some(value) => {
+            let (style, mut warnings) = from_json_value(value)?;
+            // When the original frontmatter text is available, range each
+            // warning at the key it flags (R-5 Priority 5). Line/column are
+            // relative to the raw YAML block (line 1 = first YAML line), so a
+            // consumer with the block's source offset (DMLS) can project them.
+            if let Some(raw) = fm.raw_source() {
+                let positions = build_yaml_position_map(raw);
+                for warning in &mut warnings {
+                    if let Some(span) = positions.get(&warning.path) {
+                        warning.source_span = Some(span.clone());
+                    }
+                }
+            }
+            Ok((style, warnings))
+        }
         None => Ok((StyleFrontmatter::default(), Vec::new())),
     }
+}
+
+/// Maps each dotted YAML key path to the source span of its key token, over
+/// the raw frontmatter text (R-4 item 6).
+///
+/// Keys are the full dotted path using the spellings the author wrote (e.g.
+/// `style.page.left_margin`), so a [`StyleWarning::path`](StyleWarning) is a
+/// direct lookup. Coordinates are 1-based and relative to `yaml` (line 1 = the
+/// first line of `yaml`); `length` is the key token's length in characters.
+///
+/// ## Notes
+///
+/// The scan understands block mappings only. Keys inside a flow mapping
+/// (`page: { left-margin: 2ch }`) are not indexed, so a warning under one
+/// keeps `source_span = None` — a graceful degradation, never a wrong span.
+pub fn build_yaml_position_map(yaml: &str) -> indexmap::IndexMap<String, StyleSpan> {
+    let mut out = indexmap::IndexMap::new();
+    // Ancestor keys with their indentation, innermost last.
+    let mut stack: Vec<(usize, String)> = Vec::new();
+
+    for (idx, line) in yaml.lines().enumerate() {
+        let indent = line.chars().take_while(|c| *c == ' ').count();
+        let content = &line[line.len() - line.trim_start().len()..];
+        // Blank lines, comments, and sequence items carry no mapping key.
+        if content.is_empty() || content.starts_with('#') || content.starts_with('-') {
+            continue;
+        }
+        let Some(colon) = content.find(':') else {
+            continue;
+        };
+        let raw_key = content[..colon].trim();
+        if raw_key.is_empty() {
+            continue;
+        }
+        let key = strip_yaml_quotes(raw_key);
+
+        // Drop ancestors at the same or deeper indentation before nesting.
+        while matches!(stack.last(), Some((top, _)) if *top >= indent) {
+            stack.pop();
+        }
+
+        let dotted = if stack.is_empty() {
+            key.to_string()
+        } else {
+            let mut path: String = stack
+                .iter()
+                .map(|(_, k)| k.as_str())
+                .collect::<Vec<_>>()
+                .join(".");
+            path.push('.');
+            path.push_str(key);
+            path
+        };
+
+        out.insert(
+            dotted,
+            StyleSpan {
+                line: idx as u32 + 1,
+                column: indent as u32 + 1,
+                length: raw_key.chars().count() as u32,
+            },
+        );
+        stack.push((indent, key.to_string()));
+    }
+
+    out
+}
+
+/// Strips a single pair of matching surrounding `"` or `'` quotes.
+fn strip_yaml_quotes(raw: &str) -> &str {
+    for quote in ['"', '\''] {
+        if raw.len() >= 2 && raw.starts_with(quote) && raw.ends_with(quote) {
+            return &raw[1..raw.len() - 1];
+        }
+    }
+    raw
 }
 
 /// Promote schema-validation warnings (`UnknownKey`, `Deprecated`) to errors.
@@ -979,5 +1070,73 @@ mod tests {
             }
             other => panic!("expected Strict error, got {:?}", other),
         }
+    }
+
+    // ── R-4 item 6 / R-5 Priority 5: nested YAML position map + spans ─────
+
+    #[test]
+    fn position_map_indexes_nested_keys() {
+        let yaml = "title: Post\nstyle:\n  page:\n    left_margin: 2ch\n  table:\n    max-width: 50%\n";
+        let map = build_yaml_position_map(yaml);
+        // Top-level.
+        assert_eq!(
+            map.get("title"),
+            Some(&StyleSpan { line: 1, column: 1, length: 5 })
+        );
+        // Container and deep leaf carry indent-aware columns.
+        assert_eq!(
+            map.get("style.page"),
+            Some(&StyleSpan { line: 3, column: 3, length: 4 })
+        );
+        assert_eq!(
+            map.get("style.page.left_margin"),
+            Some(&StyleSpan { line: 4, column: 5, length: 11 })
+        );
+        assert_eq!(
+            map.get("style.table.max-width"),
+            Some(&StyleSpan { line: 6, column: 5, length: 9 })
+        );
+    }
+
+    #[test]
+    fn position_map_skips_comments_and_sequence_items() {
+        let yaml = "# a comment\nlist:\n  - one\n  - two\nkey: value\n";
+        let map = build_yaml_position_map(yaml);
+        assert!(map.contains_key("list"));
+        assert!(map.contains_key("key"));
+        // Sequence items are not mapping keys.
+        assert!(!map.keys().any(|k| k.contains("one") || k.contains("two")));
+    }
+
+    #[test]
+    fn from_frontmatter_populates_warning_span_from_raw_source() {
+        // A snake-cased leaf under `style.page` is Deprecated; with the raw
+        // frontmatter text available its warning is ranged at the key.
+        let raw = "style:\n  page:\n    left_margin: 2ch\n";
+        let mut map = crate::markdown::FrontmatterMap::new();
+        map.insert(
+            "style".to_string(),
+            json!({ "page": { "left_margin": "2ch" } }),
+        );
+        let fm = crate::markdown::Frontmatter::from_map_with_source(map, raw.to_string());
+        let (_style, warnings) = from_frontmatter(&fm).unwrap();
+        let warning = warnings
+            .iter()
+            .find(|w| w.path == "style.page.left_margin")
+            .expect("deprecated left_margin warning");
+        assert_eq!(
+            warning.source_span,
+            Some(StyleSpan { line: 3, column: 5, length: 11 }),
+        );
+    }
+
+    #[test]
+    fn from_frontmatter_without_raw_source_leaves_span_none() {
+        // Programmatic frontmatter has no raw text — the span stays `None`.
+        let mut fm = Frontmatter::new();
+        fm.insert("style", json!({ "page": { "left_margin": "2ch" } }))
+            .unwrap();
+        let (_style, warnings) = from_frontmatter(&fm).unwrap();
+        assert!(warnings.iter().all(|w| w.source_span.is_none()));
     }
 }

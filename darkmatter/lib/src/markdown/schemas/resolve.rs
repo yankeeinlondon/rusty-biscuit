@@ -28,7 +28,7 @@ use serde_json::{Map, Value};
 use serde_yaml_ng::Value as YamlValue;
 
 use super::{
-    SchemaArm, SchemaShape, SimplifiedSchema,
+    SchemaArm, SchemaOrigin, SchemaShape, SimplifiedSchema,
     errors::SchemaError,
     simplified::{parse_yaml_schema, to_json_schema},
 };
@@ -42,6 +42,11 @@ use super::{
 pub struct ResolvedSchema {
     pub simplified: Option<SimplifiedSchema>,
     pub json_schema: Value,
+    /// Where the schema came from — an inline `$schema` mapping/sequence
+    /// (`Document`) or a referenced schema file (`ReferencedFile`, carrying
+    /// the resolved path). Preserved so diagnostics can point
+    /// `relatedInformation` at the schema source (R-5 Priority 2).
+    pub origin: SchemaOrigin,
 }
 
 /// Resolves a frontmatter `$schema` value into a JSON Schema.
@@ -80,6 +85,7 @@ pub fn resolve_yaml_schema(
             Ok(ResolvedSchema {
                 simplified: Some(schema),
                 json_schema: json,
+                origin: SchemaOrigin::document(),
             })
         }
         YamlValue::Sequence(items) => resolve_root_union(items, base_dir),
@@ -149,6 +155,7 @@ fn resolve_root_union(items: &[YamlValue], base_dir: &Path) -> Result<ResolvedSc
     Ok(ResolvedSchema {
         simplified: all_simplified_arms.map(SimplifiedSchema::Union),
         json_schema: Value::Object(root),
+        origin: SchemaOrigin::document(),
     })
 }
 
@@ -184,7 +191,11 @@ fn resolve_reference(reference: &str, base_dir: &Path) -> Result<ResolvedSchema,
             )),
         })?;
 
-    load_schema_from_path(&path)
+    let mut resolved = load_schema_from_path(&path)?;
+    // The schema was loaded from a file — record the resolved path so
+    // diagnostics can point `relatedInformation` at the referenced source.
+    resolved.origin = SchemaOrigin::referenced_file(path);
+    Ok(resolved)
 }
 
 fn load_schema_from_path(path: &Path) -> Result<ResolvedSchema, SchemaError> {
@@ -224,6 +235,8 @@ fn parse_yaml_referenced_file(path: &Path, bytes: &[u8]) -> Result<ResolvedSchem
         return Ok(ResolvedSchema {
             simplified: Some(parsed),
             json_schema: json,
+            // `resolve_reference` overwrites this with the file path.
+            origin: SchemaOrigin::document(),
         });
     }
 
@@ -240,6 +253,7 @@ fn parse_yaml_referenced_file(path: &Path, bytes: &[u8]) -> Result<ResolvedSchem
     Ok(ResolvedSchema {
         simplified: None,
         json_schema: json,
+        origin: SchemaOrigin::document(),
     })
 }
 
@@ -256,6 +270,7 @@ fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, Sc
     Ok(ResolvedSchema {
         simplified: None,
         json_schema: value,
+        origin: SchemaOrigin::document(),
     })
 }
 

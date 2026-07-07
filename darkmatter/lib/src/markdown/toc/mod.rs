@@ -27,6 +27,7 @@ pub use types::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode, P
 
 use crate::markdown::Markdown;
 use crate::markdown::normalize::HeadingLevel as OurHeadingLevel;
+use crate::markdown::span::SourceSpan;
 use biscuit_file::serde_yaml_ng;
 use biscuit_hash::{HashVariant, xx_hash, xx_hash_variant};
 use pulldown_cmark::{Event, HeadingLevel as PulldownHeadingLevel, Parser, Tag, TagEnd};
@@ -62,13 +63,109 @@ fn heading_level_to_u8(level: PulldownHeadingLevel) -> u8 {
     }
 }
 
+/// Generates the URL-safe slug Darkmatter uses for a heading anchor.
+///
+/// This is the single slug authority: the same function TOC extraction uses
+/// internally, so callers (e.g. language tooling) match Darkmatter's anchors
+/// exactly instead of reimplementing the rules. Returns the unsuffixed base
+/// slug; duplicate-heading disambiguation is applied by [`extract_headings`].
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::generate_heading_slug;
+///
+/// assert_eq!(generate_heading_slug("Getting Started"), "getting-started");
+/// assert_eq!(generate_heading_slug("What's New?"), "whats-new");
+/// ```
+pub fn generate_heading_slug(text: &str) -> String {
+    generate_slug(text)
+}
+
+/// A heading located in Markdown source, with byte spans and a
+/// document-unique slug.
+///
+/// Produced by [`extract_headings`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeadingRecord {
+    /// Heading level (H1-H6).
+    pub level: OurHeadingLevel,
+    /// Rendered inline text of the heading (markup markers stripped).
+    pub title: String,
+    /// Document-unique anchor slug: the [`generate_heading_slug`] base, with
+    /// `-1`, `-2`, … appended to repeated slugs in document order (GitHub
+    /// anchor semantics).
+    pub slug: String,
+    /// Byte span of the heading's inline content. Empty (anchored at
+    /// `heading_span.start`) for headings with no inline text.
+    pub title_span: SourceSpan,
+    /// Byte span of the full heading element as reported by the parser.
+    pub heading_span: SourceSpan,
+    /// 1-indexed source line the heading starts on.
+    pub line: usize,
+}
+
+/// Extracts every heading in `content` with spans and document-unique slugs.
+///
+/// Uses the same parser pass and slug authority as [`MarkdownToc`]; unlike
+/// the TOC (which keeps duplicate slugs identical), repeated slugs are
+/// disambiguated with `-1`/`-2` suffixes in document order.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::extract_headings;
+///
+/// let headings = extract_headings("# Setup\n\n## Setup\n");
+/// assert_eq!(headings[0].slug, "setup");
+/// assert_eq!(headings[1].slug, "setup-1");
+/// ```
+pub fn extract_headings(content: &str) -> Vec<HeadingRecord> {
+    let (headings, _, _) = extract_elements(content);
+    let mut slug_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+    headings
+        .into_iter()
+        .map(|heading| {
+            let count = slug_counts.entry(heading.slug.clone()).or_insert(0);
+            let slug = if *count == 0 {
+                heading.slug
+            } else {
+                format!("{}-{}", heading.slug, count)
+            };
+            *count += 1;
+
+            HeadingRecord {
+                level: OurHeadingLevel::new(heading.level).unwrap_or(OurHeadingLevel::H1),
+                title: heading.title,
+                slug,
+                title_span: heading.title_span,
+                heading_span: heading.span,
+                line: heading.start_line,
+            }
+        })
+        .collect()
+}
+
 /// Information about a heading extracted during parsing.
 struct HeadingInfo {
     level: u8,
     title: String,
     slug: String,
-    start_byte: usize,
+    /// Full heading element span as reported by the parser.
+    span: SourceSpan,
+    /// Span of the heading's inline text; empty (at `span.start`) for
+    /// headings with no inline content.
+    title_span: SourceSpan,
     start_line: usize,
+}
+
+/// In-flight heading state while walking parser events.
+struct HeadingCapture {
+    level: PulldownHeadingLevel,
+    title: String,
+    span: SourceSpan,
+    title_span: Option<SourceSpan>,
 }
 
 /// Information about a code block extracted during parsing.
@@ -103,7 +200,7 @@ fn extract_elements(
     let mut code_blocks = Vec::new();
     let mut internal_links = Vec::new();
 
-    let mut current_heading: Option<(PulldownHeadingLevel, String, usize)> = None;
+    let mut current_heading: Option<HeadingCapture> = None;
     // (language, info_string, content, start_line)
     let mut current_code_block: Option<(Option<String>, String, String, usize)> = None;
     let mut current_link: Option<(String, String, usize)> = None;
@@ -115,23 +212,36 @@ fn extract_elements(
 
         match event {
             Event::Start(Tag::Heading { level, .. }) => {
-                current_heading = Some((level, String::new(), range.start));
+                current_heading = Some(HeadingCapture {
+                    level,
+                    title: String::new(),
+                    span: range.clone(),
+                    title_span: None,
+                });
             }
             Event::End(TagEnd::Heading(_)) => {
-                if let Some((level, title, start_byte)) = current_heading.take() {
-                    let slug = generate_slug(&title);
+                if let Some(capture) = current_heading.take() {
+                    let slug = generate_slug(&capture.title);
+                    let title_span = capture
+                        .title_span
+                        .unwrap_or(capture.span.start..capture.span.start);
                     headings.push(HeadingInfo {
-                        level: heading_level_to_u8(level),
-                        title,
+                        level: heading_level_to_u8(capture.level),
+                        title: capture.title,
                         slug,
-                        start_byte,
-                        start_line: content[..start_byte].lines().count() + 1,
+                        start_line: content[..capture.span.start].lines().count() + 1,
+                        span: capture.span,
+                        title_span,
                     });
                 }
             }
             Event::Text(text) | Event::Code(text) => {
-                if let Some((_, ref mut title, _)) = current_heading {
-                    title.push_str(&text);
+                if let Some(capture) = current_heading.as_mut() {
+                    capture.title.push_str(&text);
+                    capture.title_span = Some(match capture.title_span.take() {
+                        Some(existing) => existing.start..range.end,
+                        None => range.clone(),
+                    });
                 }
                 if let Some((_, _, ref mut code_content, _)) = current_code_block {
                     code_content.push_str(&text);
@@ -202,15 +312,15 @@ fn build_hierarchy(headings: &[HeadingInfo], content: &str) -> (Vec<MarkdownTocN
     }
 
     // Calculate preamble (content before first heading)
-    let preamble = content[..headings[0].start_byte].to_string();
+    let preamble = content[..headings[0].span.start].to_string();
 
     // Build nodes with byte ranges
     let mut nodes_with_ranges: Vec<(MarkdownTocNode, usize, usize)> = Vec::new();
 
     for (i, heading) in headings.iter().enumerate() {
-        let start_byte = heading.start_byte;
+        let start_byte = heading.span.start;
         let end_byte = if i + 1 < headings.len() {
-            headings[i + 1].start_byte
+            headings[i + 1].span.start
         } else {
             content.len()
         };
@@ -635,6 +745,115 @@ See [nonexistent](#nonexistent).
         assert!(toc.title.is_none());
         // The entire content becomes preamble
         assert!(toc.preamble.contains("Just some text"));
+    }
+
+    #[test]
+    fn test_generate_heading_slug_parity_with_toc() {
+        let content = "# Hello World\n\n## What's New?\n\n### Version 2.0\n\n## multi   space\n";
+        let md: Markdown = content.into();
+        let toc = MarkdownToc::from(&md);
+
+        for node in toc.all_headings() {
+            assert_eq!(generate_heading_slug(&node.title), node.slug);
+        }
+    }
+
+    #[test]
+    fn test_extract_headings_basic() {
+        let content = "# Hello\n\nBody text.\n\n## World\n";
+        let headings = extract_headings(content);
+
+        assert_eq!(headings.len(), 2);
+
+        let first = &headings[0];
+        assert_eq!(first.level, OurHeadingLevel::H1);
+        assert_eq!(first.title, "Hello");
+        assert_eq!(first.slug, "hello");
+        assert_eq!(first.line, 1);
+        assert_eq!(&content[first.title_span.clone()], "Hello");
+        assert!(content[first.heading_span.clone()].starts_with("# Hello"));
+
+        let second = &headings[1];
+        assert_eq!(second.level, OurHeadingLevel::H2);
+        assert_eq!(second.line, 5);
+        assert_eq!(&content[second.title_span.clone()], "World");
+        assert!(content[second.heading_span.clone()].starts_with("## World"));
+    }
+
+    #[test]
+    fn test_extract_headings_duplicate_slug_suffixing() {
+        let content = "# Setup\n\n## Setup\n\n### Setup\n\n## Other\n";
+        let slugs: Vec<String> = extract_headings(content)
+            .into_iter()
+            .map(|heading| heading.slug)
+            .collect();
+
+        assert_eq!(slugs, vec!["setup", "setup-1", "setup-2", "other"]);
+    }
+
+    #[test]
+    fn test_extract_headings_duplicates_share_base_slug_with_toc() {
+        let content = "# Setup\n\n## Setup\n";
+        let headings = extract_headings(content);
+        // The unsuffixed base is the TOC slug; only the record slug carries
+        // the disambiguating suffix.
+        for heading in &headings {
+            assert_eq!(generate_heading_slug(&heading.title), "setup");
+        }
+    }
+
+    #[test]
+    fn test_extract_headings_inline_markup_title() {
+        let content = "# Hello *World* `code`\n";
+        let headings = extract_headings(content);
+
+        assert_eq!(headings[0].title, "Hello World code");
+        let title_text = &content[headings[0].title_span.clone()];
+        assert!(title_text.starts_with("Hello"));
+        assert!(title_text.contains("World"));
+        assert!(title_text.contains("code"));
+    }
+
+    #[test]
+    fn test_extract_headings_empty_title() {
+        let content = "#\n\ntext\n";
+        let headings = extract_headings(content);
+
+        assert_eq!(headings.len(), 1);
+        assert_eq!(headings[0].title, "");
+        assert!(headings[0].title_span.is_empty());
+        assert_eq!(headings[0].title_span.start, headings[0].heading_span.start);
+    }
+
+    #[test]
+    fn test_extract_headings_setext() {
+        let content = "Title Line\n==========\n\nBody.\n";
+        let headings = extract_headings(content);
+
+        assert_eq!(headings.len(), 1);
+        assert_eq!(headings[0].level, OurHeadingLevel::H1);
+        assert_eq!(headings[0].title, "Title Line");
+        assert_eq!(headings[0].line, 1);
+        assert_eq!(&content[headings[0].title_span.clone()], "Title Line");
+        assert!(content[headings[0].heading_span.clone()].contains("=========="));
+    }
+
+    #[test]
+    fn test_extract_headings_matches_toc_order_and_lines() {
+        let content = "# A\n\ntext\n\n## B\n\n### C\n\n## D\n";
+        let md: Markdown = content.into();
+        let toc = MarkdownToc::from(&md);
+        let records = extract_headings(content);
+        let toc_headings = toc.all_headings();
+
+        assert_eq!(records.len(), toc_headings.len());
+        for (record, node) in records.iter().zip(toc_headings.iter()) {
+            assert_eq!(record.title, node.title);
+            assert_eq!(record.slug, node.slug);
+            assert_eq!(record.level, node.level);
+            assert_eq!(record.line, node.line_range.0);
+            assert_eq!(record.heading_span.start, node.source_span.0);
+        }
     }
 
     #[test]

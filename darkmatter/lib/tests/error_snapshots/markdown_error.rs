@@ -5,7 +5,10 @@ use std::path::PathBuf;
 
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::TransclusionError;
-use darkmatter::markdown::schemas::{ValidationProblem, ValidationProblemKind};
+use darkmatter::markdown::schemas::{
+    FileReferenceDiagnostic, JsonPointer, ValidationProblem, ValidationProblemCode,
+    ValidationProblemKind,
+};
 
 use crate::helpers::{assert_contains_all, render};
 
@@ -139,6 +142,11 @@ fn schema_validation_missing_required_renders_block() {
             column: Some(1),
             arm_index: None,
             description: None,
+            code: ValidationProblemCode::MissingRequired,
+            instance_path: JsonPointer::parse(""),
+            schema_path: None,
+            offending_property: None,
+            file_reference: None,
         }],
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: Some("Planner prompt".to_string()),
@@ -161,6 +169,11 @@ fn schema_validation_wrong_type_renders_block() {
             column: Some(8),
             arm_index: None,
             description: None,
+            code: ValidationProblemCode::TypeMismatch,
+            instance_path: JsonPointer::parse("/count"),
+            schema_path: None,
+            offending_property: None,
+            file_reference: None,
         }],
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: None,
@@ -190,6 +203,11 @@ fn schema_validation_format_failure_renders_block() {
             column: Some(7),
             arm_index: None,
             description: None,
+            code: ValidationProblemCode::InvalidFileReference,
+            instance_path: JsonPointer::parse("/cover"),
+            schema_path: None,
+            offending_property: None,
+            file_reference: Some(FileReferenceDiagnostic::InvalidSyntax { raw: String::new() }),
         }],
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: Some("Design document".to_string()),
@@ -215,6 +233,14 @@ fn schema_validation_format_failure_escapes_markup() {
             column: Some(7),
             arm_index: None,
             description: None,
+            code: ValidationProblemCode::InvalidFileReference,
+            instance_path: JsonPointer::parse("/cover"),
+            schema_path: None,
+            offending_property: None,
+            file_reference: Some(FileReferenceDiagnostic::NoMatch {
+                raw: "./<red>weird</red>.md".to_string(),
+                resolved_from: Some(PathBuf::from("/tmp/test")),
+            }),
         }],
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: Some("Design document".to_string()),
@@ -279,6 +305,11 @@ fn schema_validation_root_union_arm_index_renders_block() {
             column: Some(7),
             arm_index: Some(2),
             description: None,
+            code: ValidationProblemCode::ConstraintViolation,
+            instance_path: JsonPointer::parse("/kind"),
+            schema_path: None,
+            offending_property: None,
+            file_reference: None,
         }],
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: None,
@@ -302,6 +333,11 @@ fn schema_validation_multiple_problems_renders_block() {
                 column: Some(1),
                 arm_index: None,
                 description: None,
+                code: ValidationProblemCode::MissingRequired,
+                instance_path: JsonPointer::parse(""),
+                schema_path: None,
+                offending_property: None,
+                file_reference: None,
             },
             ValidationProblem {
                 path: "/version".to_string(),
@@ -312,6 +348,11 @@ fn schema_validation_multiple_problems_renders_block() {
                 column: Some(10),
                 arm_index: None,
                 description: None,
+                code: ValidationProblemCode::TypeMismatch,
+                instance_path: JsonPointer::parse("/version"),
+                schema_path: None,
+                offending_property: None,
+                file_reference: None,
             },
         ],
         summary: "frontmatter did not satisfy the schema".to_string(),

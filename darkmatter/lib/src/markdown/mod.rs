@@ -46,6 +46,7 @@ pub mod output;
 pub mod reference;
 pub mod render_tree;
 pub mod schemas;
+pub mod span;
 pub mod toc;
 mod types;
 pub mod yaml_block;
@@ -55,7 +56,9 @@ pub use delta::{
     FrontmatterChange, MarkdownDelta, MovedSection, SectionId, SectionPath,
 };
 pub use code_block::{CodeBlock, CodeBlockError};
-pub use frontmatter::{Frontmatter, MergeStrategy};
+pub use frontmatter::{
+    Frontmatter, FrontmatterExtraction, MergeStrategy, extract_frontmatter_block,
+};
 pub use hash::{
     ComputedHash, DetailedValue, FmHashPair, MdHashKind, MdHashOptions, ParseMdHashKindError,
     SectionTuple,
@@ -68,11 +71,15 @@ pub use normalize::{
 pub use reference::file_tree::{FileTree, FileTreeError};
 pub use reference::{
     ReferenceError, ReferenceGraph, ReferenceGraphOptions, ReferenceKind, ReferenceRecord,
-    ReferenceSet, TransclusionRef,
+    ReferenceSet, TransclusionRef, extract_document_references,
 };
 #[allow(deprecated)]
 pub use render_tree::TerminalCodeRenderer;
-pub use toc::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode};
+pub use span::{SourceSpan, Spanned, line_col_of_offset, line_of_offset};
+pub use toc::{
+    CodeBlockInfo, HeadingRecord, InternalLinkInfo, MarkdownToc, MarkdownTocNode,
+    extract_headings, generate_heading_slug,
+};
 pub use types::{FrontmatterMap, MarkdownError, MarkdownResult, SourceRef};
 #[allow(deprecated)]
 pub use yaml_block::{YamlBlock, YamlBlockError};

@@ -1000,6 +1000,11 @@ mod tests {
             column: Some(1),
             arm_index: None,
             description: description.map(String::from),
+            code: crate::markdown::schemas::ValidationProblemCode::TypeMismatch,
+            instance_path: crate::markdown::schemas::JsonPointer::parse("/title"),
+            schema_path: None,
+            offending_property: None,
+            file_reference: None,
         }
     }
 

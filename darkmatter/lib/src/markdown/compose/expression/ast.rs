@@ -35,6 +35,7 @@
 //! ```
 
 use super::ComparisonOp;
+use crate::markdown::span::SourceSpan;
 use std::fmt;
 
 /// Arithmetic binary operators supported by the expression evaluator.
@@ -211,6 +212,160 @@ impl fmt::Display for Expr {
                 }
                 write!(f, ")")
             }
+        }
+    }
+}
+
+/// A span-carrying expression node — the primary product of the recursive
+/// descent parser.
+///
+/// [`SpannedExpr`] mirrors [`Expr`] node-for-node, adding a [`SourceSpan`]
+/// (byte-offset range into the expression source) at every level so DMLS can
+/// map a cursor position or a sub-expression back to its exact source text.
+/// The compose engine consumes the span-erased [`Expr`] via [`SpannedExpr::erase`];
+/// the two are produced by one grammar, so any [`Expr`] the compose pipeline
+/// sees is exactly `parse_spanned(src).erase()`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpannedExpr {
+    /// The node payload.
+    pub kind: SpannedExprKind,
+    /// Byte span of the source text this node was parsed from.
+    pub span: SourceSpan,
+}
+
+/// The payload of a [`SpannedExpr`], mirroring [`Expr`] with spanned children.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SpannedExprKind {
+    /// Variable reference: `foo`, `user.name`, `ctx.today`, `env.HOME`.
+    Variable(String),
+    /// String literal: `"hello"` or `'hello'`.
+    StringLiteral(String),
+    /// Number literal: `42`, `3.14` (always non-negative; see [`SpannedExprKind::UnaryMinus`]).
+    NumberLiteral(f64),
+    /// Boolean literal: `true` or `false`.
+    BoolLiteral(bool),
+    /// Unary not expression: `!expr`.
+    UnaryNot(Box<SpannedExpr>),
+    /// Unary minus expression: `-expr`.
+    UnaryMinus(Box<SpannedExpr>),
+    /// Parenthesized expression: `(expr)`.
+    Paren(Box<SpannedExpr>),
+    /// Arithmetic binary expression: `left op right`.
+    Binary {
+        /// Arithmetic operator.
+        op: BinaryOp,
+        /// Left operand.
+        left: Box<SpannedExpr>,
+        /// Right operand.
+        right: Box<SpannedExpr>,
+    },
+    /// Bracket access: `base[index]`.
+    Index {
+        /// The collection to index into.
+        base: Box<SpannedExpr>,
+        /// The index expression.
+        index: Box<SpannedExpr>,
+    },
+    /// Postfix member access: `base.name`.
+    MemberAccess {
+        /// The base expression to read from.
+        base: Box<SpannedExpr>,
+        /// The member name (may contain `.` for nested access).
+        name: String,
+    },
+    /// Fallback expression: `expr || fallback`.
+    Fallback {
+        /// The expression to evaluate first.
+        primary: Box<SpannedExpr>,
+        /// The fallback if primary is falsy.
+        fallback: Box<SpannedExpr>,
+    },
+    /// Ternary expression: `condition ? then_branch : else_branch`.
+    Ternary {
+        /// The condition to test.
+        condition: Box<SpannedExpr>,
+        /// Expression if condition is truthy.
+        then_branch: Box<SpannedExpr>,
+        /// Expression if condition is falsy.
+        else_branch: Box<SpannedExpr>,
+    },
+    /// Comparison expression: `left op right`.
+    Comparison {
+        /// Left operand.
+        left: Box<SpannedExpr>,
+        /// Comparison operator.
+        op: ComparisonOp,
+        /// Right operand.
+        right: Box<SpannedExpr>,
+    },
+    /// Function call: `name(args...)`.
+    ///
+    /// Condition-mode infix `&&` / `||` lower into `and(...)` / `or(...)`
+    /// function calls here, identically to [`Expr`], so span erasure is exact.
+    FunctionCall {
+        /// Function name (e.g., `length`, `number`, `and`, `or`).
+        name: String,
+        /// Arguments to the function.
+        args: Vec<SpannedExpr>,
+    },
+}
+
+impl SpannedExpr {
+    /// Creates a spanned expression node.
+    pub fn new(kind: SpannedExprKind, span: SourceSpan) -> Self {
+        Self { kind, span }
+    }
+
+    /// Lowers this spanned node into the span-erased [`Expr`] the compose
+    /// evaluator consumes.
+    ///
+    /// This is the span-erasure half of the single-grammar contract: the
+    /// compose pipeline is provably unchanged because every [`Expr`] it
+    /// evaluates is `parse_spanned(src).erase()`.
+    pub fn erase(&self) -> Expr {
+        match &self.kind {
+            SpannedExprKind::Variable(name) => Expr::Variable(name.clone()),
+            SpannedExprKind::StringLiteral(s) => Expr::StringLiteral(s.clone()),
+            SpannedExprKind::NumberLiteral(n) => Expr::NumberLiteral(*n),
+            SpannedExprKind::BoolLiteral(b) => Expr::BoolLiteral(*b),
+            SpannedExprKind::UnaryNot(inner) => Expr::UnaryNot(Box::new(inner.erase())),
+            SpannedExprKind::UnaryMinus(inner) => Expr::UnaryMinus(Box::new(inner.erase())),
+            SpannedExprKind::Paren(inner) => Expr::Paren(Box::new(inner.erase())),
+            SpannedExprKind::Binary { op, left, right } => Expr::Binary {
+                op: *op,
+                left: Box::new(left.erase()),
+                right: Box::new(right.erase()),
+            },
+            SpannedExprKind::Index { base, index } => Expr::Index {
+                base: Box::new(base.erase()),
+                index: Box::new(index.erase()),
+            },
+            SpannedExprKind::MemberAccess { base, name } => Expr::MemberAccess {
+                base: Box::new(base.erase()),
+                name: name.clone(),
+            },
+            SpannedExprKind::Fallback { primary, fallback } => Expr::Fallback {
+                primary: Box::new(primary.erase()),
+                fallback: Box::new(fallback.erase()),
+            },
+            SpannedExprKind::Ternary {
+                condition,
+                then_branch,
+                else_branch,
+            } => Expr::Ternary {
+                condition: Box::new(condition.erase()),
+                then_branch: Box::new(then_branch.erase()),
+                else_branch: Box::new(else_branch.erase()),
+            },
+            SpannedExprKind::Comparison { left, op, right } => Expr::Comparison {
+                left: Box::new(left.erase()),
+                op: *op,
+                right: Box::new(right.erase()),
+            },
+            SpannedExprKind::FunctionCall { name, args } => Expr::FunctionCall {
+                name: name.clone(),
+                args: args.iter().map(SpannedExpr::erase).collect(),
+            },
         }
     }
 }
