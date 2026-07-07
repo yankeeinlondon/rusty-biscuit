@@ -2897,6 +2897,10 @@ pub(crate) static QWEN_CLI_INSTALL: &[InstallationMethod] = &[
     InstallationMethod::Npm("@qwen-code/qwen-code"),
     InstallationMethod::Brew("qwen-code"),
 ];
+pub(crate) static KILO_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Npm("@kilocode/cli"),
+    InstallationMethod::Brew("Kilo-Org/tap/kilo"),
+];
 
 /// Metadata lookup table for AI CLI tools.
 pub(crate) static AI_CLI_INFO: &[ProgramInfo] = &[
@@ -3035,6 +3039,21 @@ pub(crate) static AI_CLI_INFO: &[ProgramInfo] = &[
         installation_methods: QWEN_CLI_INSTALL,
         system_prerequisites: &[],
     },
+    ProgramInfo {
+        binary_name: "kilo",
+        display_name: "Kilo Code",
+        description: "Open-source agentic coding CLI (OpenCode fork)",
+        website: "https://kilo.ai/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &["kilocode"],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/Kilo-Org/kilocode"),
+        installation_methods: KILO_INSTALL,
+        system_prerequisites: &[],
+    },
 ];
 
 impl ProgramMetadata for AiCli {
@@ -3063,6 +3082,7 @@ impl CategoryEnum for AiCli {
             AiCli::Goose => "goose",
             AiCli::KimiCli => "kimi_cli",
             AiCli::QwenCli => "qwen_cli",
+            AiCli::Kilo => "kilo",
         }
     }
 }
