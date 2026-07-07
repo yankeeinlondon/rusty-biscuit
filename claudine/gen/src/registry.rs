@@ -123,9 +123,6 @@ pub enum Coercion {
     /// Kebab-case protocol wire form (or null) →
     /// `Option<StreamProtocol>` path expression.
     StreamProtocolWire,
-    /// agent-models `default_models[]` records → the deduplicated,
-    /// lexically sorted list of `id` strings.
-    DefaultModelsToStaticModels,
     /// agent-models `default_models[]` records → typed expected-offering
     /// records sorted by id: classified via the curated table in
     /// `offerings::classify`, then joined to the unchained-ai
@@ -136,7 +133,7 @@ pub enum Coercion {
     /// records sorted by prefix; a missing key emits an empty list.
     LocalRunnersToOfferingSources,
     /// agent-models `dynamic_listing.available` → [`ModelCatalogSource`]
-    /// expression. `false` maps to `static`; `true` cannot select a
+    /// expression. `false` maps to `none`; `true` cannot select a
     /// mechanism (the boolean carries no program/args information) and
     /// demands a field-keyed override pinning today's value — a bare
     /// member string for the unit variants, or the externally tagged
@@ -219,7 +216,6 @@ impl Coercion {
             Coercion::SniffBindingVariant => "sniff_binding_variant",
             Coercion::SkillSupportToBool => "skill_support_to_bool",
             Coercion::StreamProtocolWire => "stream_protocol_wire",
-            Coercion::DefaultModelsToStaticModels => "default_models_to_static_models",
             Coercion::DefaultModelsToExpectedOfferings => {
                 "default_models_to_expected_offerings"
             }
@@ -539,18 +535,6 @@ pub const REGISTRY: &[RegistryEntry] = &[
         "Native-CLI prompt argv conventions (prompt flags + entrypoint; OQ7a shape)",
     ),
     entry(
-        "static_models",
-        DeclaredSource::Research {
-            topic: "agent-models",
-            path: "default_models",
-        },
-        &[SchemaExpectation::RecordArray {
-            required_fields: &["id"],
-        }],
-        Coercion::DefaultModelsToStaticModels,
-        "Compiled-in model id list (deduplicated, lexically sorted research ids)",
-    ),
-    entry(
         "expected_offerings",
         DeclaredSource::Research {
             topic: "agent-models",
@@ -827,9 +811,9 @@ mod tests {
                 .count()
         };
         assert_eq!(count("roster"), 10, "roster rows");
-        assert_eq!(count("research"), 12, "research rows");
+        assert_eq!(count("research"), 11, "research rows");
         assert_eq!(count("facts"), 22, "facts rows");
-        assert_eq!(REGISTRY.len(), 44, "total serialized fields");
+        assert_eq!(REGISTRY.len(), 43, "total serialized fields");
     }
 
     #[test]

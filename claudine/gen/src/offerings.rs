@@ -100,7 +100,7 @@ pub struct OfferingJoinReport {
 
 /// Source-side half of `DefaultModelsToExpectedOfferings`: agent-models
 /// `default_models[]` records → the catalog-shaped expected-offering
-/// list, sorted by id (matching `static_models`' lexical convention).
+/// list, lexically sorted by id.
 ///
 /// `resolves` marking rule: a record is marked `family_latest` iff it
 /// carries BOTH an alias AND a `catalog_id` join (minus the curated

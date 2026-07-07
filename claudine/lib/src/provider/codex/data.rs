@@ -173,7 +173,6 @@ pub(in crate::provider) static CODEX_INFO: ProviderInfo = ProviderInfo {
         prompt_flags: &[],
         entrypoint: Some("exec"),
     },
-    static_models: &["gpt-5.3-codex-spark", "gpt-5.4", "gpt-5.4-mini", "gpt-5.5"],
     expected_offerings: &[
         ExpectedOffering {
             id: "gpt-5.3-codex-spark",
@@ -250,7 +249,7 @@ pub(in crate::provider) static CODEX_INFO: ProviderInfo = ProviderInfo {
             integration: Some(LocalRunnerIntegration::BaseUrlOverride),
         },
     ],
-    model_catalog_source: ModelCatalogSource::Static,
+    model_catalog_source: ModelCatalogSource::None,
     model_env_vars: &["CODEX_MODEL", "OPENAI_MODEL"],
     cli_sensitive_axes: CliSensitiveAxes {
         read_path: true,

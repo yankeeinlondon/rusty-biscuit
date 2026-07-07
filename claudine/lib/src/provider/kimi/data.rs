@@ -126,19 +126,6 @@ pub(in crate::provider) static KIMI_INFO: ProviderInfo = ProviderInfo {
         prompt_flags: &["--prompt"],
         entrypoint: None,
     },
-    static_models: &[
-        "kimi-for-coding",
-        "kimi-k2.5",
-        "kimi-k2.6",
-        "kimi-k2.7-code",
-        "kimi-k2.7-code-highspeed",
-        "moonshot-v1-128k",
-        "moonshot-v1-128k-vision-preview",
-        "moonshot-v1-32k",
-        "moonshot-v1-32k-vision-preview",
-        "moonshot-v1-8k",
-        "moonshot-v1-8k-vision-preview",
-    ],
     expected_offerings: &[
         ExpectedOffering {
             id: "kimi-for-coding",
@@ -278,7 +265,7 @@ pub(in crate::provider) static KIMI_INFO: ProviderInfo = ProviderInfo {
             integration: Some(LocalRunnerIntegration::BaseUrlOverride),
         },
     ],
-    model_catalog_source: ModelCatalogSource::Static,
+    model_catalog_source: ModelCatalogSource::None,
     model_env_vars: &["KIMI_MODEL"],
     cli_sensitive_axes: CliSensitiveAxes {
         read_path: false,

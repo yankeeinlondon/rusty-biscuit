@@ -148,18 +148,6 @@ pub(in crate::provider) static QWEN_INFO: ProviderInfo = ProviderInfo {
         prompt_flags: &["-p", "--prompt"],
         entrypoint: None,
     },
-    static_models: &[
-        "MiniMax-M2.5",
-        "glm-4.7",
-        "glm-5",
-        "kimi-k2.5",
-        "qwen3-coder-next",
-        "qwen3-coder-plus",
-        "qwen3-max-2026-01-23",
-        "qwen3.5-plus",
-        "qwen3.6-plus",
-        "qwen3.7-plus",
-    ],
     expected_offerings: &[
         ExpectedOffering {
             id: "MiniMax-M2.5",
@@ -290,7 +278,7 @@ pub(in crate::provider) static QWEN_INFO: ProviderInfo = ProviderInfo {
             integration: Some(LocalRunnerIntegration::BaseUrlOverride),
         },
     ],
-    model_catalog_source: ModelCatalogSource::Static,
+    model_catalog_source: ModelCatalogSource::None,
     model_env_vars: &["QWEN_MODEL"],
     cli_sensitive_axes: CliSensitiveAxes {
         read_path: false,

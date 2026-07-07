@@ -160,19 +160,6 @@ pub(in crate::provider) static GEMINI_INFO: ProviderInfo = ProviderInfo {
         prompt_flags: &["-p", "--prompt"],
         entrypoint: None,
     },
-    static_models: &[
-        "auto",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-2.5-pro",
-        "gemini-3-flash-preview",
-        "gemini-3-pro-preview",
-        "gemini-3.1-flash-lite",
-        "gemini-3.1-pro-preview",
-        "gemini-3.5-flash",
-        "gemma-4-26b-a4b-it",
-        "gemma-4-31b-it",
-    ],
     expected_offerings: &[
         ExpectedOffering {
             id: "auto",
@@ -312,7 +299,7 @@ pub(in crate::provider) static GEMINI_INFO: ProviderInfo = ProviderInfo {
             integration: Some(LocalRunnerIntegration::ProxyRequired),
         },
     ],
-    model_catalog_source: ModelCatalogSource::Static,
+    model_catalog_source: ModelCatalogSource::None,
     model_env_vars: &["GEMINI_MODEL"],
     cli_sensitive_axes: CliSensitiveAxes {
         read_path: false,

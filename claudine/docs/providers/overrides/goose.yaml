@@ -2,15 +2,6 @@
 # field's declared source during generation (whole-key replacement) and MUST
 # carry a `reason:`. Keys are catalog field names; an override for a field
 # with no mapping-registry entry is a generation error.
-static_models:
-    value: []
-    reason: >-
-        goose is an agent aggregator with no native model set: agent-models
-        default_models mixes picker examples across Anthropic, OpenAI, Gemini,
-        and local runners (provider-dependent GOOSE_PROVIDER/GOOSE_MODEL
-        pairs), so the coerced list misrepresents goose-owned models. Pin to
-        empty until Phase F catalog_id joins provide per-provider model ground
-        truth. Ruled by Ken, 2026-07-04.
 model_env_vars:
     value: ["GOOSE_MODEL"]
     reason: >-

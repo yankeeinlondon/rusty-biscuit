@@ -247,15 +247,10 @@ pub struct ProviderInfo {
     /// CLI wrapper's prompt-extraction helpers.
     pub prompt_arg_conventions: PromptArgConventions,
 
-    /// Static, compiled-in model catalog for providers with a known model
-    /// enum. Empty for providers whose catalog is dynamic or unavailable.
-    pub static_models: &'static [&'static str],
-
     /// Typed expected-offering records from agent-models research,
     /// classified and joined to the unchained-ai models-catalog artifact
-    /// by identity key. `static_models` stays the runtime listing
-    /// baseline until the staged per-provider flip
-    /// (design/model-catalog-boundary.md, runtime migration step 4).
+    /// by identity key. The runtime validation baseline: ids plus
+    /// aliases feed `model_catalog::expected_baseline`.
     pub expected_offerings: &'static [ExpectedOffering],
 
     /// Offering-source namespaces (local runners today): id prefixes a

@@ -3,14 +3,16 @@
 # carry a `reason:`. Keys are catalog field names; an override for a field
 # with no mapping-registry entry is a generation error.
 model_catalog_source:
-    value: static
+    value: none
     reason: >-
         agent-models research reports dynamic_listing.available: true, but
         the boolean cannot select a catalog mechanism (program/args).
         `codex debug models [--bundled]` is the future ShellCommand
         candidate, pending verification of its output shape. Pin today's
-        `static` until that verification lands or the agent-models schema
-        grows a typed catalog-source key (pending schema addition).
+        `none` (no drift-channel listing; expected_offerings is the
+        validation baseline) until that verification lands or the
+        agent-models schema grows a typed catalog-source key (pending
+        schema addition).
 model_env_vars:
     value: ["CODEX_MODEL", "OPENAI_MODEL"]
     reason: >-

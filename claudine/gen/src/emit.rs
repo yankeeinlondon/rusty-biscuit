@@ -1360,10 +1360,6 @@ pub fn emit_data_file(
         )?,
     );
     push(
-        "static_models",
-        str_slice("static_models", lookup("static_models")?, 1)?,
-    );
-    push(
         "expected_offerings",
         expected_offerings("expected_offerings", lookup("expected_offerings")?, 1, &mut ctx)?,
     );

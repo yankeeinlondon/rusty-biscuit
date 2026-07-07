@@ -547,25 +547,8 @@ fn coerce_to_catalog_shape(
                 }),
             }
         }
-        Coercion::DefaultModelsToStaticModels => {
-            let records = raw.as_array().ok_or_else(|| GenError::UnmappableValue {
-                field: entry.field,
-                message: "expected an array of default-model records".into(),
-            })?;
-            let mut ids = BTreeSet::new();
-            for record in records {
-                let id = record.get("id").and_then(Value::as_str).ok_or_else(|| {
-                    GenError::UnmappableValue {
-                        field: entry.field,
-                        message: format!("default-model record has no string `id`: `{record}`"),
-                    }
-                })?;
-                ids.insert(id.to_string());
-            }
-            Ok(Value::Array(ids.into_iter().map(Value::String).collect()))
-        }
         Coercion::DynamicListingToModelCatalogSource => match raw {
-            Value::Bool(false) => Ok(Value::String("static".into())),
+            Value::Bool(false) => Ok(Value::String("none".into())),
             Value::Bool(true) => Err(GenError::UnmappableValue {
                 field: entry.field,
                 message: "dynamic listing is available but the boolean cannot select a \
@@ -805,7 +788,6 @@ pub(crate) fn model_catalog_source_variant(
         .find(|variant| <&'static str>::from(*variant) == member)
         .map(|variant| match variant {
             ModelCatalogSource::None => "None".to_string(),
-            ModelCatalogSource::Static => "Static".to_string(),
             // Unreachable: the guard above rejected the member string.
             ModelCatalogSource::ShellCommand { .. } => unreachable!(),
         })
@@ -860,13 +842,14 @@ mod tests {
     #[test]
     fn model_catalog_source_variant_maps_snake_members() {
         assert_eq!(
-            model_catalog_source_variant("model_catalog_source", "static").unwrap(),
-            "Static"
-        );
-        assert_eq!(
             model_catalog_source_variant("model_catalog_source", "none").unwrap(),
             "None"
         );
+        // `static` retired with the ModelCatalogSource::Static variant.
+        assert!(matches!(
+            model_catalog_source_variant("model_catalog_source", "static"),
+            Err(GenError::UnmappableValue { .. })
+        ));
         assert!(matches!(
             model_catalog_source_variant("model_catalog_source", "telepathic"),
             Err(GenError::UnmappableValue { .. })

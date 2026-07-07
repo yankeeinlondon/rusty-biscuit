@@ -440,7 +440,7 @@
             "path": "dynamic_listing.available",
             "topic": "agent-models"
           },
-          "value": "static"
+          "value": "none"
         },
         "model_cli_flag": {
           "source": {
@@ -764,23 +764,6 @@
             "kind": "roster"
           },
           "value": "Claude"
-        },
-        "static_models": {
-          "source": {
-            "kind": "research",
-            "path": "default_models",
-            "topic": "agent-models"
-          },
-          "value": [
-            "claude-fable-5",
-            "claude-haiku-4-5",
-            "claude-opus-4-6",
-            "claude-opus-4-7",
-            "claude-opus-4-8",
-            "claude-sonnet-4-5",
-            "claude-sonnet-4-6",
-            "claude-sonnet-5"
-          ]
         },
         "stderr_noise_prefixes": {
           "source": {
@@ -6038,7 +6021,7 @@
         },
         "model_catalog_source": {
           "override": {
-            "reason": "agent-models research reports dynamic_listing.available: true, but the boolean cannot select a catalog mechanism (program/args). `codex debug models [--bundled]` is the future ShellCommand candidate, pending verification of its output shape. Pin today's `static` until that verification lands or the agent-models schema grows a typed catalog-source key (pending schema addition).",
+            "reason": "agent-models research reports dynamic_listing.available: true, but the boolean cannot select a catalog mechanism (program/args). `codex debug models [--bundled]` is the future ShellCommand candidate, pending verification of its output shape. Pin today's `none` (no drift-channel listing; expected_offerings is the validation baseline) until that verification lands or the agent-models schema grows a typed catalog-source key (pending schema addition).",
             "stale": false,
             "suppressed": null
           },
@@ -6047,7 +6030,7 @@
             "path": "dynamic_listing.available",
             "topic": "agent-models"
           },
-          "value": "static"
+          "value": "none"
         },
         "model_cli_flag": {
           "override": {
@@ -6352,19 +6335,6 @@
             "kind": "roster"
           },
           "value": "Codex"
-        },
-        "static_models": {
-          "source": {
-            "kind": "research",
-            "path": "default_models",
-            "topic": "agent-models"
-          },
-          "value": [
-            "gpt-5.3-codex-spark",
-            "gpt-5.4",
-            "gpt-5.4-mini",
-            "gpt-5.5"
-          ]
         },
         "stderr_noise_prefixes": {
           "source": {
@@ -11567,7 +11537,7 @@
             "path": "dynamic_listing.available",
             "topic": "agent-models"
           },
-          "value": "static"
+          "value": "none"
         },
         "model_cli_flag": {
           "override": {
@@ -11866,26 +11836,6 @@
             "kind": "roster"
           },
           "value": "GeminiCli"
-        },
-        "static_models": {
-          "source": {
-            "kind": "research",
-            "path": "default_models",
-            "topic": "agent-models"
-          },
-          "value": [
-            "auto",
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
-            "gemini-2.5-pro",
-            "gemini-3-flash-preview",
-            "gemini-3-pro-preview",
-            "gemini-3.1-flash-lite",
-            "gemini-3.1-pro-preview",
-            "gemini-3.5-flash",
-            "gemma-4-26b-a4b-it",
-            "gemma-4-31b-it"
-          ]
         },
         "stderr_noise_prefixes": {
           "source": {
@@ -16334,7 +16284,7 @@
             "path": "dynamic_listing.available",
             "topic": "agent-models"
           },
-          "value": "static"
+          "value": "none"
         },
         "model_cli_flag": {
           "override": {
@@ -16630,26 +16580,6 @@
             "kind": "roster"
           },
           "value": "Goose"
-        },
-        "static_models": {
-          "override": {
-            "reason": "goose is an agent aggregator with no native model set: agent-models default_models mixes picker examples across Anthropic, OpenAI, Gemini, and local runners (provider-dependent GOOSE_PROVIDER/GOOSE_MODEL pairs), so the coerced list misrepresents goose-owned models. Pin to empty until Phase F catalog_id joins provide per-provider model ground truth. Ruled by Ken, 2026-07-04.",
-            "stale": false,
-            "suppressed": [
-              "claude-4.5-sonnet",
-              "claude-sonnet-4-5",
-              "gemini-2.0-flash",
-              "gemini-2.5-pro",
-              "gpt-5",
-              "qwen2.5"
-            ]
-          },
-          "source": {
-            "kind": "research",
-            "path": "default_models",
-            "topic": "agent-models"
-          },
-          "value": []
         },
         "stderr_noise_prefixes": {
           "source": {
@@ -21352,7 +21282,7 @@
         },
         "model_catalog_source": {
           "override": {
-            "reason": "agent-models research reports dynamic_listing.available: true, but the boolean cannot select a catalog mechanism and Kimi's listing surfaces (provider GET /v1/models; ACP available_models) are not shell commands, so no ShellCommand candidate exists. `static` is correct today (2026-07-05 ruling): static_models are research-fed. Pin until the agent-models schema grows a typed catalog-source key (pending schema addition).",
+            "reason": "agent-models research reports dynamic_listing.available: true, but the boolean cannot select a catalog mechanism and Kimi's listing surfaces (provider GET /v1/models; ACP available_models) are not shell commands, so no ShellCommand candidate exists. `none` is correct today: no drift-channel listing, and expected_offerings is the research-fed validation baseline. Pin until the agent-models schema grows a typed catalog-source key (pending schema addition).",
             "stale": false,
             "suppressed": null
           },
@@ -21361,7 +21291,7 @@
             "path": "dynamic_listing.available",
             "topic": "agent-models"
           },
-          "value": "static"
+          "value": "none"
         },
         "model_cli_flag": {
           "source": {
@@ -21650,26 +21580,6 @@
             "kind": "roster"
           },
           "value": "KimiCli"
-        },
-        "static_models": {
-          "source": {
-            "kind": "research",
-            "path": "default_models",
-            "topic": "agent-models"
-          },
-          "value": [
-            "kimi-for-coding",
-            "kimi-k2.5",
-            "kimi-k2.6",
-            "kimi-k2.7-code",
-            "kimi-k2.7-code-highspeed",
-            "moonshot-v1-128k",
-            "moonshot-v1-128k-vision-preview",
-            "moonshot-v1-32k",
-            "moonshot-v1-32k-vision-preview",
-            "moonshot-v1-8k",
-            "moonshot-v1-8k-vision-preview"
-          ]
         },
         "stderr_noise_prefixes": {
           "source": {
@@ -26612,65 +26522,6 @@
             "kind": "roster"
           },
           "value": "Opencode"
-        },
-        "static_models": {
-          "source": {
-            "kind": "research",
-            "path": "default_models",
-            "topic": "agent-models"
-          },
-          "value": [
-            "opencode/big-pickle",
-            "opencode/claude-fable-5",
-            "opencode/claude-haiku-4-5",
-            "opencode/claude-opus-4-1",
-            "opencode/claude-opus-4-5",
-            "opencode/claude-opus-4-6",
-            "opencode/claude-opus-4-7",
-            "opencode/claude-opus-4-8",
-            "opencode/claude-sonnet-4",
-            "opencode/claude-sonnet-4-5",
-            "opencode/claude-sonnet-4-6",
-            "opencode/claude-sonnet-5",
-            "opencode/deepseek-v4-flash",
-            "opencode/deepseek-v4-flash-free",
-            "opencode/deepseek-v4-pro",
-            "opencode/gemini-3-flash",
-            "opencode/gemini-3.1-pro",
-            "opencode/gemini-3.5-flash",
-            "opencode/glm-5",
-            "opencode/glm-5.1",
-            "opencode/glm-5.2",
-            "opencode/gpt-5",
-            "opencode/gpt-5-codex",
-            "opencode/gpt-5-nano",
-            "opencode/gpt-5.1",
-            "opencode/gpt-5.1-codex",
-            "opencode/gpt-5.1-codex-max",
-            "opencode/gpt-5.1-codex-mini",
-            "opencode/gpt-5.2",
-            "opencode/gpt-5.2-codex",
-            "opencode/gpt-5.3-codex",
-            "opencode/gpt-5.3-codex-spark",
-            "opencode/gpt-5.4",
-            "opencode/gpt-5.4-mini",
-            "opencode/gpt-5.4-nano",
-            "opencode/gpt-5.4-pro",
-            "opencode/gpt-5.5",
-            "opencode/gpt-5.5-pro",
-            "opencode/grok-build-0.1",
-            "opencode/kimi-k2.5",
-            "opencode/kimi-k2.6",
-            "opencode/kimi-k2.7-code",
-            "opencode/mimo-v2.5-free",
-            "opencode/minimax-m2.5",
-            "opencode/minimax-m2.7",
-            "opencode/minimax-m3",
-            "opencode/nemotron-3-ultra-free",
-            "opencode/north-mini-code-free",
-            "opencode/qwen3.5-plus",
-            "opencode/qwen3.6-plus"
-          ]
         },
         "stderr_noise_prefixes": {
           "source": {
@@ -32132,7 +31983,7 @@
             "path": "dynamic_listing.available",
             "topic": "agent-models"
           },
-          "value": "static"
+          "value": "none"
         },
         "model_cli_flag": {
           "source": {
@@ -32426,25 +32277,6 @@
             "kind": "roster"
           },
           "value": "QwenCli"
-        },
-        "static_models": {
-          "source": {
-            "kind": "research",
-            "path": "default_models",
-            "topic": "agent-models"
-          },
-          "value": [
-            "MiniMax-M2.5",
-            "glm-4.7",
-            "glm-5",
-            "kimi-k2.5",
-            "qwen3-coder-next",
-            "qwen3-coder-plus",
-            "qwen3-max-2026-01-23",
-            "qwen3.5-plus",
-            "qwen3.6-plus",
-            "qwen3.7-plus"
-          ]
         },
         "stderr_noise_prefixes": {
           "source": {
@@ -36995,5 +36827,5 @@
       }
     }
   },
-  "schema_version": 1
+  "schema_version": 2
 }

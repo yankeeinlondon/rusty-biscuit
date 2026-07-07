@@ -3,15 +3,15 @@
 # carry a `reason:`. Keys are catalog field names; an override for a field
 # with no mapping-registry entry is a generation error.
 model_catalog_source:
-    value: static
+    value: none
     reason: >-
         agent-models research reports dynamic_listing.available: true, but
         the boolean cannot select a catalog mechanism and Kimi's listing
         surfaces (provider GET /v1/models; ACP available_models) are not
-        shell commands, so no ShellCommand candidate exists. `static` is
-        correct today (2026-07-05 ruling): static_models are research-fed.
-        Pin until the agent-models schema grows a typed catalog-source key
-        (pending schema addition).
+        shell commands, so no ShellCommand candidate exists. `none` is
+        correct today: no drift-channel listing, and expected_offerings is
+        the research-fed validation baseline. Pin until the agent-models
+        schema grows a typed catalog-source key (pending schema addition).
 model_env_vars:
     value: ["KIMI_MODEL"]
     reason: >-

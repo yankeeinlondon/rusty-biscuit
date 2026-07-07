@@ -213,7 +213,6 @@ fn serialized_field_list_matches_catalog() {
         "known_gaps",
         "acp",
         "prompt_arg_conventions",
-        "static_models",
         "expected_offerings",
         "offering_sources",
         "model_catalog_source",

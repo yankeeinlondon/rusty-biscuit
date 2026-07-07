@@ -136,7 +136,6 @@ pub(in crate::provider) static GOOSE_INFO: ProviderInfo = ProviderInfo {
         prompt_flags: &["-t", "--text"],
         entrypoint: Some("run"),
     },
-    static_models: &[],
     expected_offerings: &[
         ExpectedOffering {
             id: "claude-4.5-sonnet",
@@ -231,7 +230,7 @@ pub(in crate::provider) static GOOSE_INFO: ProviderInfo = ProviderInfo {
             integration: Some(LocalRunnerIntegration::BaseUrlOverride),
         },
     ],
-    model_catalog_source: ModelCatalogSource::Static,
+    model_catalog_source: ModelCatalogSource::None,
     model_env_vars: &["GOOSE_MODEL"],
     cli_sensitive_axes: CliSensitiveAxes {
         read_path: false,

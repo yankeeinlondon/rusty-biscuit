@@ -164,16 +164,6 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
         prompt_flags: &[],
         entrypoint: None,
     },
-    static_models: &[
-        "claude-fable-5",
-        "claude-haiku-4-5",
-        "claude-opus-4-6",
-        "claude-opus-4-7",
-        "claude-opus-4-8",
-        "claude-sonnet-4-5",
-        "claude-sonnet-4-6",
-        "claude-sonnet-5",
-    ],
     expected_offerings: &[
         ExpectedOffering {
             id: "claude-fable-5",
@@ -286,7 +276,7 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
             integration: Some(LocalRunnerIntegration::BaseUrlOverride),
         },
     ],
-    model_catalog_source: ModelCatalogSource::Static,
+    model_catalog_source: ModelCatalogSource::None,
     model_env_vars: &["CLAUDE_MODEL", "ANTHROPIC_MODEL"],
     cli_sensitive_axes: CliSensitiveAxes {
         read_path: true,

@@ -134,7 +134,7 @@ fn pipeline_generates_from_all_declared_sources() {
     // Research-fed values (skills enum→bool, agent-models listing + env
     // vars — no override in the fixture, so the research value shows).
     assert!(data_rs.contains("    supports_skills: true,\n"));
-    assert!(data_rs.contains("    model_catalog_source: ModelCatalogSource::Static,\n"));
+    assert!(data_rs.contains("    model_catalog_source: ModelCatalogSource::None,\n"));
     assert!(data_rs.contains("\"ANTHROPIC_MODEL\""));
     // Research + artifact join: expected offerings carry classification
     // and identity-key joins; local runners become offering sources.
@@ -211,17 +211,17 @@ fn doctored_sidecar_enum_not_subset_fails_before_value_mapping() {
     let fixture = Fixture::new();
     // Doctor the sidecar: `dynamic_listing.available` becomes an enum whose
     // members are NOT a subset of ModelCatalogSource's variants — and keep
-    // the research doc valid against it (`available: static`) so the ONLY
+    // the research doc valid against it (`available: none`) so the ONLY
     // possible failure is the schema-compatibility gate.
     fixture.replace(
         "docs/research/agent-models/_schema.yaml",
         "dynamic_listing: \"{ available: boolean(required)",
-        "dynamic_listing: \"{ available: enum(static, dynamic, telepathic; required)",
+        "dynamic_listing: \"{ available: enum(none, dynamic, telepathic; required)",
     );
     fixture.replace(
         "docs/research/agent-models/claude.md",
         "  available: false",
-        "  available: static",
+        "  available: none",
     );
     let err = fixture.generate().unwrap_err();
     match err {
@@ -233,10 +233,10 @@ fn doctored_sidecar_enum_not_subset_fails_before_value_mapping() {
         } => {
             assert_eq!(field, "model_catalog_source");
             assert_eq!(rust_enum, "ModelCatalogSource");
-            // `static` IS a variant; the two invented members are named.
+            // `none` IS a variant; the two invented members are named.
             assert!(offending.contains("dynamic"));
             assert!(offending.contains("telepathic"));
-            assert!(!offending.contains("static"));
+            assert!(!offending.contains("none"));
         }
         other => panic!("expected EnumNotSubset, got: {other}"),
     }
@@ -245,7 +245,7 @@ fn doctored_sidecar_enum_not_subset_fails_before_value_mapping() {
 #[test]
 fn facts_value_for_research_declared_field_is_a_source_collision() {
     let fixture = Fixture::new();
-    fixture.append("docs/providers/facts/claude.yaml", "model_catalog_source: static\n");
+    fixture.append("docs/providers/facts/claude.yaml", "model_catalog_source: none\n");
     let err = fixture.generate().unwrap_err();
     match err {
         GenError::SourceCollision {
