@@ -26,6 +26,8 @@ LIB_NAME := PACKAGE + " Library"
 CLI_NAME := PACKAGE + " CLI"
 LIBRARY := lowercase(PACKAGE)
 CLI := lowercase(PACKAGE) + "-cli"
+DMLS := "dmls"
+DMLS_NAME := PACKAGE + " Language Server"
 CLI_PATH := "./cli"
 DOCS := ""
 TODAY := `date +%F`
@@ -45,10 +47,11 @@ default:
     just --list | grep -v 'default'
     echo
 
-# Build the library and CLI
+# Build the library, CLI, and language server
 build *args="":
     @just _build darkmatter "{{ LIB_NAME }}" {{ args }}
     @just _build darkmatter-cli "CLI_NAME" {{ args }}
+    @just _build {{ DMLS }} "{{ DMLS_NAME }}" {{ args }}
 
 # --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
 
@@ -56,6 +59,7 @@ build *args="":
 sanity:
     @just _sanity {{ LIBRARY }}
     @just _sanity {{ CLI }}
+    @just _sanity {{ DMLS }}
 
 # Test both library and CLI. Level-1 only: the slow tiers (real-terminal,
 # headless-browser, real-resource) are excluded here and run via their own
@@ -80,6 +84,13 @@ test *args="":
     echo
     echo -e "✅ {{ GREEN }} all tests passing in {{ BOLD }}{{ CLI }}{{ RESET }}{{ GREEN }} package{{ RESET }}"
     echo
+    echo
+    echo -e "Testing {{ BOLD }}{{ DMLS }}{{ RESET }} package"
+    echo
+    cargo nextest run -p {{ DMLS }} -E "$filter" {{ args }}
+    echo
+    echo -e "✅ {{ GREEN }} all tests passing in {{ BOLD }}{{ DMLS }}{{ RESET }}{{ GREEN }} package{{ RESET }}"
+    echo
     echo -e "👀 {{ BOLD }}Note:{{ RESET }} {{ BLUE }}just test{{ RESET }} runs Level-1 only; use {{ BLUE }}just test-l2{{ RESET }} / {{ BLUE }}just test-browser{{ RESET }} for the slow tiers"
     echo
 
@@ -95,6 +106,7 @@ test-l2 *args="":
     @echo
     @just _test_l2 {{ LIBRARY }} {{ args }}
     @just _test_l2 {{ CLI }} {{ args }}
+    @just _test_l2 {{ DMLS }} {{ args }}
 
 # darkmatter Level-3 tests
 test-l3 *args="":
@@ -111,10 +123,11 @@ test-browser *args="":
 test-real:
     @echo "test-real: not applicable for darkmatter"
 
-# Lint both the library and CLI
+# Lint the library, CLI, and language server
 lint:
     @just _lint {{ LIBRARY }}
     @just _lint {{ CLI }}
+    @just _lint {{ DMLS }}
 
 # Report CLI source/test files over the ~500-line review soft cap.
 #
@@ -233,7 +246,7 @@ install *args="":
 
 # Validate the source code without doing a full build
 check:
-    @cargo check -p {{ LIBRARY }} -p {{ CLI }}
+    @cargo check -p {{ LIBRARY }} -p {{ CLI }} -p {{ DMLS }}
 
 # ---------- benchmarking + profiling ----------
 
