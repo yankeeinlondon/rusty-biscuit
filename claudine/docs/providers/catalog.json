@@ -36892,8 +36892,7 @@
             {
               "mode": "non_interactive",
               "required_flags": [
-                "--mode",
-                "json"
+                "-p"
               ],
               "subcommand": null
             }
@@ -37617,12 +37616,12 @@
           "value": {
             "append": {
               "interactive": {
-                "file_flag": {
+                "inline_flag": {
                   "flag": "--append-system-prompt"
                 }
               },
               "non_interactive": {
-                "file_flag": {
+                "inline_flag": {
                   "flag": "--append-system-prompt"
                 }
               }
@@ -37647,12 +37646,12 @@
             ],
             "replace": {
               "interactive": {
-                "file_flag": {
+                "inline_flag": {
                   "flag": "--system-prompt"
                 }
               },
               "non_interactive": {
-                "file_flag": {
+                "inline_flag": {
                   "flag": "--system-prompt"
                 }
               }

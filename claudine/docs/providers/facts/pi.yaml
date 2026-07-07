@@ -209,22 +209,27 @@ output_formats:
     flag: --mode
     kind: flag_value
   stdin_supported: true
+# `-p` (--print) is Pi's non-interactive "process prompt and exit" flag — the
+# entrypoint trigger. The `--mode json` structured stream selector and its
+# determinism companion flags come from output_formats (applied separately), so
+# they are NOT repeated here. Verified against pi 0.80.3: `pi -p --mode json`
+# with the prompt on stdin runs headless; without `-p` it opens the TUI.
 entrypoints:
 - mode: non_interactive
   required_flags:
-  - --mode
-  - json
+  - -p
   subcommand: null
 system_prompt:
-  # Pi's --append-system-prompt / --system-prompt accept inline text OR an
-  # existing file path; Claudine delivers via temp file (file_flag), matching
-  # the research's file-backed delivery strategy. Both work in every mode.
+  # Pi's --append-system-prompt / --system-prompt accept inline text (help:
+  # "Append text or file contents"). Claudine delivers the composed prompt as
+  # inline text (inline_flag) — unambiguous vs the text-or-path heuristic, and
+  # verified against pi 0.80.3. Both modes work interactive and non-interactive.
   append:
     interactive:
-      file_flag:
+      inline_flag:
         flag: --append-system-prompt
     non_interactive:
-      file_flag:
+      inline_flag:
         flag: --append-system-prompt
   memory_files:
   - raw: ~/.pi/agent/AGENTS.md
@@ -237,10 +242,10 @@ system_prompt:
     segments: []
   replace:
     interactive:
-      file_flag:
+      inline_flag:
         flag: --system-prompt
     non_interactive:
-      file_flag:
+      inline_flag:
         flag: --system-prompt
 yolo: none
 reasoning:
