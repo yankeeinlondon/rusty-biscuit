@@ -112,24 +112,24 @@ pub(in crate::provider) static PI_INFO: ProviderInfo = ProviderInfo {
     entrypoints: &[
         EntrypointSpec {
             subcommand: None,
-            required_flags: &["--mode", "json"],
+            required_flags: &["-p"],
             mode: EntrypointMode::NonInteractive,
         },
     ],
     system_prompt: &SystemPromptSpec {
         append: SystemPromptDeliveryByMode {
-            interactive: SystemPromptDelivery::FileFlag {
+            interactive: SystemPromptDelivery::InlineFlag {
                 flag: "--append-system-prompt",
             },
-            non_interactive: SystemPromptDelivery::FileFlag {
+            non_interactive: SystemPromptDelivery::InlineFlag {
                 flag: "--append-system-prompt",
             },
         },
         replace: SystemPromptDeliveryByMode {
-            interactive: SystemPromptDelivery::FileFlag {
+            interactive: SystemPromptDelivery::InlineFlag {
                 flag: "--system-prompt",
             },
-            non_interactive: SystemPromptDelivery::FileFlag {
+            non_interactive: SystemPromptDelivery::InlineFlag {
                 flag: "--system-prompt",
             },
         },
