@@ -24,6 +24,7 @@ mod goose;
 mod kilo;
 mod kimi;
 mod opencode;
+mod pi;
 mod qwen;
 mod resolve;
 
@@ -38,6 +39,7 @@ pub(crate) use self::goose::GooseWrapper;
 pub(crate) use self::kilo::KiloWrapper;
 pub(crate) use self::kimi::KimiWrapper;
 pub(crate) use self::opencode::OpencodeWrapper;
+pub(crate) use self::pi::PiWrapper;
 pub(crate) use self::qwen::QwenWrapper;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -605,6 +607,7 @@ static QWEN: QwenWrapper = QwenWrapper;
 static OPENCODE: OpencodeWrapper = OpencodeWrapper;
 static GOOSE: GooseWrapper = GooseWrapper;
 static KILO: KiloWrapper = KiloWrapper;
+static PI: PiWrapper = PiWrapper;
 
 /// Wrapper registry indexed by `Provider as usize`.
 ///
@@ -630,6 +633,7 @@ static WRAPPER_REGISTRY: [Option<&'static dyn WrapperProfile>; PROVIDER_COUNT] =
     /* 5: OpenCode */ Some(&OPENCODE),
     /* 6: QwenCode */ Some(&QWEN),
     /* 7: Kilo     */ Some(&KILO),
+    /* 8: Pi       */ Some(&PI),
 ];
 
 /// Look up the wrapper profile for a given provider.

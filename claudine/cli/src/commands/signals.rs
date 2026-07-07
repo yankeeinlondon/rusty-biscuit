@@ -750,8 +750,8 @@ mod tests {
 
     #[test]
     fn every_compiled_slug_is_checkable() {
-        // The check loop iterates the compiled tables; dormant kilo/pi must
-        // be present so their corpora stay replayable before wiring.
+        // The check loop iterates the compiled tables; kilo and pi (both now
+        // wired providers) must stay present so their corpora remain replayable.
         let slugs: Vec<&str> = all_detection_tables()
             .iter()
             .map(|table| table.slug)

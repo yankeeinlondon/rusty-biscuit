@@ -147,7 +147,8 @@ fn command_name(command: &Commands) -> &'static str {
         | Commands::Qwen(_)
         | Commands::Opencode(_)
         | Commands::Goose(_)
-        | Commands::Kilo(_) => "wrap",
+        | Commands::Kilo(_)
+        | Commands::Pi(_) => "wrap",
         Commands::Compose(_) => "compose",
         Commands::InlineCompose(_) => "inline-compose",
         Commands::Sequence(_) => "sequence",
@@ -166,6 +167,7 @@ fn provider_subcommand_name(command: Option<&Commands>) -> Option<&'static str> 
         Commands::Opencode(_) => Some("opencode"),
         Commands::Goose(_) => Some("goose"),
         Commands::Kilo(_) => Some("kilo"),
+        Commands::Pi(_) => Some("pi"),
         _ => None,
     }
 }
