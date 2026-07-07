@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-ad728b14df86e4cd
-last_updated: 2026-07-05
+hash: 87f17662fa397abe-f0b4c2c683ed4425
+last_updated: 2026-07-07
 ---
 
 # darkmatter
@@ -183,6 +183,120 @@ The removed god-files (`args.rs`, `commands.rs`, `output.rs`,
 - `darkmatter::style::CliStyleClaims`, `apply_cli_claims`, and the
   `*_style_overrides_from_claims` helpers are the single authority for CLI
   style precedence.
+- `darkmatter::markdown::span` is the shared span vocabulary for span-aware
+  parse products: `SourceSpan` (byte-offset `Range<usize>`), `Spanned<T>`,
+  and the `line_of_offset` / `line_col_of_offset` helpers (all re-exported
+  from the crate root). Added for DMLS (the Darkmatter Language Server).
+- `darkmatter::markdown::extract_frontmatter_block` locates a document's
+  frontmatter block with byte-accurate spans (`yaml_span`, `block_span`,
+  `body_span`, delimiter lines, `yaml_base_line`) and preserved line endings
+  — the span-aware companion to the internal `parse_frontmatter` (which it
+  never changes).
+- `darkmatter::markdown::generate_heading_slug` is the public slug authority
+  (wraps the private TOC slug generator), and
+  `darkmatter::markdown::extract_headings` returns `HeadingRecord`s (level,
+  title, slug, `title_span`, `heading_span`, line) with duplicate slugs
+  disambiguated `-1`/`-2` in document order (GitHub anchor semantics; the
+  TOC itself keeps duplicate slugs identical).
+- `darkmatter::markdown::extract_document_references` extracts one document's
+  links/images/HTML references with byte-span provenance (`ReferenceRecord`s
+  carrying `origin.span`/`origin.line`) **without composing** — no
+  transclusion following, no shell, no network — so it is safe on every
+  keystroke. This is the span-carrying, side-effect-free entry point DMLS's
+  substrate indexer builds `references` edges from; the composing
+  `Markdown::composed_references` is the wrong shape for a passive analyzer.
+
+## DMLS (Darkmatter Language Server)
+
+`darkmatter/dmls` is a third crate in the package area (binary `dmls`): an
+LSP 3.17 server over stdio built on `lsp-server` + `lsp-types`, with the
+`darkmatter` library as its semantic authority. It is wired into the area
+`justfile` (`test`, `test-l2`, `lint`, `sanity`, `build`, `check`).
+
+Phase 2 (skeleton) provides the full LSP lifecycle: position-encoding
+negotiation (UTF-8/UTF-16, UTF-16 default), per-client `ClientProfile`
+gates, a `line-index`-backed source map (CRLF + lone-CR aware, frontmatter
+region projection), a full-sync open-document store with stale-change
+rejection, layered `.dmls.toml` / `workspace/configuration` config, and an
+in-memory L2 LSP-session test fixture.
+
+Phase 3 (workspace graph substrate) adds the single in-memory graph
+(`dmls::graph`): one arena carrying every node kind and all eight edge kinds
+(`references`, `includes`, `transcludes`, `uses_schema`, `uses_file`,
+`uses_variable`, `defines_anchor`, `defines_symbol`) with a single reverse
+index, a wiki basename `KeyIndex`, and a Markdown substrate indexer that
+parses through the `darkmatter` library (headings, slugs, links) into an
+immutable `WorkspaceGraph` snapshot. `WorkspaceIndex` owns invalidation
+(xxHash content-hash compare, generation-stamped snapshot swap — AD-3).
+Workspace support (`dmls::workspace`) adds `ignore`/`globset` discovery
+(symlinks not followed), a crossbeam worker-pool startup indexer with
+`window/workDoneProgress`, dynamic `didChangeWatchedFiles` registration plus
+a server-side rescan fallback and event coalescing, and a `SharedSnapshot`
+handoff. The R-6 bench harness ships with it: `dmls --bench-index <dir>
+[--json]` (per-stage timings, graph counts, peak RSS) and a deterministic
+`dmls --gen-corpus <tier> <dir>` corpus generator.
+
+Phase 4 (Layer-0 Markdown providers) turns the graph into a credible
+plain-Markdown LSP through the AD-5 provider registry (`dmls::providers`): a
+single `Provider` trait with one defaulted method per capability, an ordered
+`ProviderRegistry` (substrate first; overlay providers append in Phases 7/9),
+and a per-provider `catch_unwind` boundary with the design's merge policies
+(union/dedup, first-non-empty hover, capped workspace symbols). The substrate
+provider answers document/workspace symbols (heading hierarchy, subsequence
+match), definition + eagerly-resolved document links, references + same-document
+highlights (from the single reverse index), folding (frontmatter, sections,
+fences, quotes, lists, tables — line-only, Helix-gated), hover (graph-sourced
+link preview, no disk read), and completion (link path, `#`-anchor, and
+fenced-language tokens with eager `textEdit`, Zed-safe). The push-diagnostics
+pipeline (`dmls::diagnostics`) owns the stable code taxonomy
+(`dm.links.broken_path` / `missing_anchor` / `duplicate_heading` under source
+`darkmatter.links`), a `DiagnosticsScheduler`/`DiagnosticsPublisher` publishing
+version-stamped `publishDiagnostics`, and `relatedInformation` linking
+duplicate-heading twins.
+
+Phase 5 (Layer-1 wiki links) adds the `[[wiki]]` rule set (R-8). A pure
+`dmls::wiki` module holds the lexical scanner (six v1 forms, `\|`/`\#`/`\]`/`\\`
+escapes, code-span/fence skipping, embed/`#^block` → `wiki.unsupported-syntax`),
+logical-path canonicalization (NFC, final-segment Markdown-extension elision,
+percent-decode-once-before-NFC), and the matcher/ranker (case-sensitive
+everywhere; leading `/` = root-relative, `/`-containing = path-suffix, bare =
+basename; same-directory → unique → ambiguous). Wiki links become
+`NodeKind::WikiLink` nodes resolved at snapshot assembly (against wiki roots
+from `wiki.wiki_root` / the workspace folders, threaded through
+`WorkspaceGraph::build_with_roots`), emitting `references` edges so backlinks
+surface through the existing reverse index. The `dmls::providers::wiki` provider
+(merged after the substrate) answers definition, references, hover, document
+links, and completion (`wiki.path_style` shortest/relative/root-relative,
+`wiki.heading_completion_style`, never inserts `.md`), plus the full `wiki.*`
+diagnostic taxonomy under source `darkmatter.wiki` (unresolved/ambiguous/
+heading-missing/empty/unsupported, workspace-scope `wiki.portability-collision`,
+and `wiki.invalid-percent-escape`). Rename participation is P10.
+
+Phase 7 (Layer-2 frontmatter intelligence) adds the `dmls::overlay` module: a
+position-aware `FrontmatterAst` (built from the Phase-1 `extract_frontmatter_block`
+plus `rlsp-yaml-parser` in lossless mode — dotted-path / JSON-Pointer / byte-span
+lookups; the parser type never leaves the module) and the effective-schema
+assembler (`overlay::schema`: Darkmatter base baseline + extension baselines whose
+globs match + document `$schema`, compose precedence, cached per document by
+content hash). `OverlayState` keeps a per-document last-good tree so completion/hover
+survive a mid-keystroke YAML error. The `dmls::providers::frontmatter` provider
+(registered after wiki) answers, inside the frontmatter block only: schema-key
+completion (required-marked, enum values, boolish scaffolds, `file(...)` paths,
+`style.*` keys), hover (SimplifiedSchema type/constraints/default/`->` description,
+plus `ctx.*` generated-key annotations), `$schema`/`file(...)` definition +
+document links, nested-mapping folds, and config-gated frontmatter document
+symbols (`symbols.frontmatter`). `dmls::diagnostics::frontmatter` emits the R-5
+`dm.*` taxonomy under source `darkmatter.frontmatter` / `darkmatter.schema`
+(`yaml_parse`, `invalid_schema_shape`, `prepare`, `type_mismatch`, `constraint`,
+`missing_required`, `unknown_key`, `invalid_file_reference`, `pending_shell_value`)
+plus `dm.style.*` for `style:` keys, ranged against the `FrontmatterAst` (missing
+keys → parent mapping; unknown keys → the offending key; values → the value node)
+with `relatedInformation` to a referenced schema file. Claudine activation is pure
+config (a `[schema.extensions.claudine]` entry in `.dmls.toml` + `.claude/**`
+globs) — zero Claudine-specific code. Deviation: `$schema`/`file(...)` navigation
+resolves paths on demand rather than materializing `uses_schema`/`uses_file` graph
+edges (deferred). Feature phases beyond Layer 2 (DSL overlay, rename/formatting)
+land later — see `darkmatter/features/2026-07-04-dmls/plan.md`.
 
 ## Common Entry Points
 
@@ -263,6 +377,7 @@ Darkmatter defines, detects, and evaluates schemas for Markdown frontmatter via 
 - Always-on compose pipeline stage (after `--set`/`--state` and interpolation, before shell expansion) that also **coerces** schema-recognized scalars to their declared types and writes them back (default-on; `$(...)`-pending values are skipped and coerced at post-shell re-validation). On validation success, the same stage **rewrites eager `file(eager)` values** to their resolved repo-relative path via `EffectiveSchema::normalize_frontmatter` (bare/lazy `file`, `string`, remote URLs, and pending values are left verbatim; validation-only APIs stay read-only).
 - `ComposeOptions::with_baseline_schema(...)` for programmatic baseline injection.
 - Typed schema-language descriptor catalog (`schema_type_descriptors()`, `schema_constraint_descriptors()`, `schema_shape_descriptors()`, `inline_object_rule_descriptors()`, `coercion_rule_descriptors()`, `validation_behavior_descriptors()`) — the authoritative source for `md schema about` and the same surface library callers render their own reports from.
+- Span-aware diagnostic shapes (added for DMLS, R-5). `ValidationProblem` carries, alongside the legacy fields, a fine-grained `code: ValidationProblemCode` (missing-required / type-mismatch / constraint-violation / unknown-key / invalid-file-reference), a parsed `instance_path: JsonPointer`, optional `schema_path`, `offending_property` (the undeclared key for `additionalProperties` failures), and `file_reference: Option<FileReferenceDiagnostic>` (invalid-syntax / resolution-failed / no-match, resolved-from context). These are purely additive — `message` and `md schema validate` output are byte-identical. `EffectiveSchema::origins: SchemaOriginMap` records each top-level property's provenance (document vs baseline vs referenced-file path). `EffectiveSchema::validate_with_options(_, _, ValidationOptions { pending_policy, excluded_keys })` mirrors the compose deferral rules as data — populating `ValidationReport.pending: Vec<PendingValue>` (`$(...)` → shell-expression, `{{ }}` → unresolved-template) and dropping deferred/excluded problems — **without executing anything**. The plain `validate` / `validate_with_positions` entry points are unchanged (empty `pending`). On the style side, `darkmatter::style::build_yaml_position_map` maps a dotted YAML key path to a raw-YAML-relative `StyleSpan`, `StyleWarning::source_span` is populated by `from_frontmatter` when `Frontmatter::raw_source()` is available, and `StyleParseError::source_span()` surfaces the first `Strict`-warning span.
 
 See `darkmatter/docs/topics/schema-definition.md` for the full topic documentation.
 
