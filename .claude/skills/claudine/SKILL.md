@@ -1,8 +1,8 @@
 ---
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
-last_updated: 2026-07-04
-hash: 3633bb398108735f-3ed96854591c88ee
+last_updated: 2026-07-06
+hash: 3633bb398108735f-c92c358713e97a18
 ---
 
 ## Overview
@@ -37,7 +37,7 @@ Twenty modules plus the shared error type and the flat `provider_id` leaf. Full 
 | `linking` | Cross-provider resource sync with portability classification |
 | `mcp` | Catalog, defaults, provider-state, import/export, runtime injectors |
 | `messaging` | Outbound routes (Discord/Slack/Signal/WhatsApp); desktop notifications are separate and zero-config |
-| `model_catalog` | Merged provider model catalog with cache and user overrides |
+| `model_catalog` | Model validation against the generated expected-offerings baseline (+ user overrides), `family_latest` alias resolution, and the dynamic-listing drift channel |
 | `permissions` | Provider-agnostic policy engine (`PolicyEngine`) |
 | `protect` | Standalone regex deny catalog (bash commands, write/edit paths, MCP responses) |
 | `prompt_reporting` | System/user prompt reporting types and rendering |
@@ -96,7 +96,7 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 | `claudine sync [--dry-run] [--provider] [--fix]` | Re-apply hook registrations |
 | `claudine uninstall [--keep-config]` | Remove hooks from all agents |
 | `claudine providers` | Provider capability matrix (skill/slash/agent/hooks) |
-| `claudine logs [today\|week\|month\|sessions\|tools\|errors\|repos\|trends\|sync]` | Reporting and sync for Claudine JSONL logs |
+| `claudine logs [today\|week\|month\|sessions\|tools\|errors\|repos\|trends\|drift\|sync]` | Reporting and sync for Claudine JSONL logs |
 | `claudine completions <shell>` | Generate shell completions |
 | `claudine context [--values\|--expressions\|--side-effects]` | Show Darkmatter context variables, expression engine, and side-effect capabilities |
 | `claudine` *(no subcommand)* | Render rich grouped help |

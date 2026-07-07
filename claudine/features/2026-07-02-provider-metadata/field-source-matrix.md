@@ -12,6 +12,15 @@
 > joined against `docs/providers.yaml` and every research `_schema.yaml` sidecar.
 > Research declarations were verified against what the sidecars carry **today** —
 > a topic that exists but lacks a typed key is declared `facts` with a graduation note.
+>
+> **Amendment (2026-07-06, Phase F staged demotion):** the `static_models` row is
+> retired — the field was removed from `ProviderInfo` (registry entry, coercion,
+> and emitter deleted; `expected_offerings` is the validation baseline). The
+> `model_catalog_source` row's vocabulary lost its `Static` member: `false` now
+> coerces to `none`, and the codex/kimi overrides pin `none` (their listing
+> surfaces remain future drift-channel candidates). Live registry state is 43
+> serialized fields / 11 research rows; the counts and rows below are the
+> Checkpoint B snapshot, kept as history.
 
 ## Summary counts
 

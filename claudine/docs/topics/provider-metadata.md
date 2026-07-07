@@ -62,8 +62,7 @@ The `ProviderInfo` struct (`lib/src/provider/mod.rs`) carries 36 fields organize
 | `known_gaps` | `&'static [KnownGap]` | Structured gaps in provider capability data, tagged by area |
 | `acp` | `AcpSupport` | ACP server mode, client capability, and events captured via ACP |
 | `prompt_arg_conventions` | `PromptArgConventions` | How the provider's CLI represents a prompt on argv |
-| `static_models` | `&'static [&'static str]` | Compiled-in model catalog entries |
-| `model_catalog_source` | `ModelCatalogSource` | How the model catalog is sourced (`None`, `Static`, or `ShellCommand { program, args }`) |
+| `model_catalog_source` | `ModelCatalogSource` | How a live model listing is fetched for the drift channel (`None` or `ShellCommand { program, args }`) |
 | `model_env_vars` | `&'static [&'static str]` | Provider-specific MODEL env var chain (e.g. `["CLAUDE_MODEL", "ANTHROPIC_MODEL"]`) |
 | `cli_sensitive_axes` | `CliSensitiveAxes` | Which permission-policy axes CLI flags can override at runtime (10 boolean axes) |
 | `repo_home_root_files` | `&'static [&'static str]` | Root-level files preserved during shadow-HOME isolation |
@@ -165,7 +164,7 @@ pub use yolo::YoloSupport;
 
 #### 3. Model Selection CLI Flags
 
-**Current state**: The legacy `ModelCapabilities` captures `cli_flags`, `session_switch_commands`, `aliases`, `precedence_order`, and `notes` for model selection. The typed catalog captures `model_env_vars` and `static_models` but not the CLI flags used to inject a model at launch time.
+**Current state**: The legacy `ModelCapabilities` captures `cli_flags`, `session_switch_commands`, `aliases`, `precedence_order`, and `notes` for model selection. The typed catalog captures `model_env_vars` and `expected_offerings` but not the CLI flags used to inject a model at launch time.
 
 **Value**: The `WrapperProfile::apply_model` method defaults to `--model <value>`, but several providers use different flags (Codex uses `--model`, Gemini uses `--model`, Kimi uses `--model` inside the wire envelope). Knowing the canonical flag per provider would let the default implementation handle all cases.
 

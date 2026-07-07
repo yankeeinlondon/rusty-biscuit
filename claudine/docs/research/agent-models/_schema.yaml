@@ -17,7 +17,7 @@ $schema:
     has_official_schema: enum(formal,informal,none; required)
     schema_url: url
 
-    # One record per model available out of the box (feeds static_models).
+    # One record per model available out of the box (feeds expected_offerings).
     # `id` is the exact string the CLI/config accepts.
     default_models: "{ id: string(required), alias: string, context_window: number, is_default: boolean, notes: string }[]"
 

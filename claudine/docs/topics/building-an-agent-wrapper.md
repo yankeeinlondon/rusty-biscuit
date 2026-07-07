@@ -137,10 +137,8 @@ The provider's *own* logs are documented (not consumed) through the agent catalo
 
 Per-provider model lists are sourced through [`claudine/lib/src/model_catalog/provider_sources.rs`](../../lib/src/model_catalog/provider_sources.rs):
 
-- `static_catalog_for_provider()` — Claude and Codex use static lists derived from the generated `unchained-ai` enums.
-- `fetch_provider_catalog()` — OpenCode and Qwen shell out to `opencode models`. Other providers return an empty list and rely entirely on user overrides.
-
-The merged catalog is cached at `~/.claudine/cache/models/<provider>.json` and falls back to the stale cache when refresh fails.
+- `expected_baseline()` — the validation baseline: generated expected-offering ids plus their rolling aliases.
+- `fetch_provider_catalog()` — OpenCode shells out to `opencode models`; providers without a listing source return an empty list. The fetched listing feeds only the drift-channel cache at `~/.claudine/cache/models/<provider>.json`, never validation.
 
 ### CLI parameter mapping
 

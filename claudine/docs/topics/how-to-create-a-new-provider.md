@@ -148,8 +148,7 @@ Four trait objects on `ProviderInfo` carry dynamic behavior. Most providers only
 | `known_gaps` | `&'static [KnownGap]` | Catalogued unknowns (can be empty) |
 | `acp` | `AcpSupport` | ACP server mode, client capability, captured events |
 | `prompt_arg_conventions` | `PromptArgConventions` | How the CLI represents a prompt on argv |
-| `static_models` | `&'static [&'static str]` | Compiled-in model catalog (empty if dynamic) |
-| `model_catalog_source` | `ModelCatalogSource` | `None`, `Static`, or `ShellCommand { program, args }` |
+| `model_catalog_source` | `ModelCatalogSource` | `None` or `ShellCommand { program, args }` |
 | `model_env_vars` | `&'static [&'static str]` | Provider-specific MODEL env var chain |
 | `cli_sensitive_axes` | `CliSensitiveAxes` | Which permission axes CLI flags can override |
 | `repo_home_root_files` | `&'static [&'static str]` | Root files preserved during shadow-HOME isolation |

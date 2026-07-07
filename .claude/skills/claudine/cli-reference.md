@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-bf3f5f38c31db6cb
-last_updated: 2026-07-05
+hash: ef46db3751d8e999-7a4665dac765b3c8
+last_updated: 2026-07-06
 ---
 # Claudine CLI Reference
 
@@ -361,6 +361,7 @@ Shared filters: `--provider`, `--repo`, `--package-area`, `--package`. Read comm
 | `errors` | Error log |
 | `repos` | Per-repo summary |
 | `trends` | Usage trends over time |
+| `drift` | Model-catalog drift signals and family-latest alias resolutions |
 | `sync` | Force re-sync of JSONL logs into SQLite |
 
 ---

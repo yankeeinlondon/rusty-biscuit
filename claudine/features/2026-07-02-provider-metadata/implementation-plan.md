@@ -537,6 +537,53 @@ config/wrapper-side only, so its drift channel needs a different source.
 > SignalEvents through the Phase E sink; Goose config-side source; Kimi
 > wire-mode gap stands).
 
+> **Phase F staged demotion DONE — Phase F COMPLETE (2026-07-06;
+> uncommitted pending Ken's diff review).** The design doc's runtime-
+> migration steps 1–4 all landed in one session: the "staged per provider"
+> valve had nothing left to stage (expected_offerings exist for all 7; the
+> id sets were byte-identical to static_models for 5/7, a strict
+> improvement for goose (empty → 6 ids), and the deliberate demotion for
+> opencode — the only ShellCommand provider). Landed: (1) validation
+> baseline = `model_catalog::expected_baseline()` (offering ids + aliases);
+> `is_valid` is two-tier — baseline+overrides membership OR
+> offering-source `prefix + "/"` namespace match; the listing cache no
+> longer feeds validation and the W3 cold-start blocking fallback is gone.
+> (2) Drift channel: new bespoke-only `SignalKind::ModelCatalogDrift` +
+> `SignalSource::Wrapper` (no detection record/fixture/regen — 6-file
+> taxonomy change); pure detectors in `model_catalog::drift`; listing
+> drift emitted at hub creation (`provider_signal_hub`) from the cached
+> listing, resolved-model drift computed from stream-observed
+> `ModelResolved` (`SignalHub::resolved_models()`) just before the
+> end-of-run drain. (3) Overrides gained optional `catalog_id`
+> (`ModelOverrideValue` untagged string|object;
+> `ModelCatalogService::override_catalog_id`). (4) `static_models` +
+> `ModelCatalogSource::Static` retired via the one-change gen discipline
+> (registry + coercion + emit + field lists + CATALOG_SCHEMA_VERSION 1→2 +
+> regen all 7 + catalog.json; codex/kimi overrides re-pinned `static`→
+> `none`, goose's dead `static_models: []` override deleted). Signals now
+> persist: the SessionEnd JSONL row carries `extra["signals"]` +
+> `extra["family_latest"]` (both wrapper paths — compose/harness uses the
+> run model, direct wrap uses `--model`); SQLite gained a
+> `session_signals` table + `sessions.family_latest` (schema v6);
+> `claudine logs drift` surfaces drift signals and alias resolutions.
+> Rulings: (R1, the duplicate-group policy this plan asked to decide)
+> family_latest stamping records the identity key VERBATIM, variant
+> releases included (`google/gemini-pro@3.1+preview`) — no base-model
+> election in v1; a consumer wanting the base offering strips variants at
+> its own duplicate-group step, deferred until such a consumer exists
+> (consistent with Checkpoint F ruling 2: `latest` names a release, not an
+> offering). (R2) listing drift is namespace-scoped: only ids under
+> namespaces the expected set claims (`opencode/`) count as `unexpected`;
+> other namespaces are user-connected sources, not catalog drift —
+> `missing` checks the full listing. (R3) resolved-model drift uses a
+> relaxed prefix ladder (expected id/alias is a case-insensitive prefix of
+> the resolved id, or vice versa) so dated fuller ids don't
+> false-positive. Deferred, recorded: codex `debug models` and kimi
+> `/v1/models` listing wiring as future ShellCommand/HTTP drift sources
+> (codex's artifact slice is Parsera-collapsed; lifts with the models.dev
+> track), goose config/wrapper-side drift source (stream has no init
+> event), Kimi wire_io hub gap stands (Kimi Wire [S]).
+
 ## Phase G — rendering buildout (interleaves after C)
 
 Migrations 2–4 of design/render-components.md: `AgentPrompt`/`SystemPrompt` absorb
