@@ -21,13 +21,10 @@ default_models:
     notes: "Default for Ant Ling provider."
   - id: gpt-5.5
     alias: "openai default"
-    notes: "Default for OpenAI provider."
+    notes: "Default for the OpenAI provider and the OpenAI Codex (ChatGPT Plus/Pro) provider (both resolve to the same model id)."
   - id: gpt-5.4
     alias: "azure-openai default"
-    notes: "Default for Azure OpenAI Responses provider."
-  - id: gpt-5.5
-    alias: "openai-codex default"
-    notes: "Default for OpenAI Codex (ChatGPT Plus/Pro) provider."
+    notes: "Default for the Azure OpenAI Responses provider and the GitHub Copilot provider (both resolve to the same model id)."
   - id: nvidia/nemotron-3-super-120b-a12b
     alias: "nvidia default"
     notes: "Default for NVIDIA NIM provider."
@@ -37,9 +34,6 @@ default_models:
   - id: gemini-3.1-pro-preview
     alias: "google default"
     notes: "Default for Google Gemini and Google Vertex providers."
-  - id: gpt-5.4
-    alias: "github-copilot default"
-    notes: "Default for GitHub Copilot provider."
   - id: moonshotai/kimi-k2.6
     alias: "openrouter default"
     notes: "Default for OpenRouter provider."
@@ -66,19 +60,13 @@ default_models:
     notes: "Default for MiniMax providers."
   - id: kimi-k2.6
     alias: "moonshotai default"
-    notes: "Default for Moonshot AI providers."
+    notes: "Default for the Moonshot AI providers and the OpenCode Zen / OpenCode Go providers (both resolve to the same model id)."
   - id: moonshotai/Kimi-K2.6
     alias: "huggingface default"
-    notes: "Default for Hugging Face provider."
+    notes: "Default for the Hugging Face provider and the Together AI provider (both resolve to the same model id)."
   - id: accounts/fireworks/models/kimi-k2p6
     alias: "fireworks default"
     notes: "Default for Fireworks provider."
-  - id: moonshotai/Kimi-K2.6
-    alias: "together default"
-    notes: "Default for Together AI provider."
-  - id: kimi-k2.6
-    alias: "opencode default"
-    notes: "Default for OpenCode Zen and OpenCode Go providers."
   - id: kimi-for-coding
     alias: "kimi-coding default"
     notes: "Default for Kimi For Coding provider."
