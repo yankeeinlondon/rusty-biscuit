@@ -32,6 +32,7 @@ pub const PROVIDER_VARIANTS: &[(&str, &str)] = &[
     ("opencode", "OpenCode"),
     ("qwen", "QwenCode"),
     ("kilo", "Kilo"),
+    ("pi", "Pi"),
 ];
 
 /// Resolves the `Provider` variant name for a slug, failing loudly for
