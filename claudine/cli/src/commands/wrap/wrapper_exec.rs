@@ -190,6 +190,8 @@ pub(crate) fn run_structured_stream_session(
         &summary_details.lock().unwrap().clone(),
         Some(&section_stream),
         stream_result.agent_pid,
+        &stream_result.signals,
+        args.model.as_deref(),
     );
 
     let stderr_text = summary.stderr_text.clone();

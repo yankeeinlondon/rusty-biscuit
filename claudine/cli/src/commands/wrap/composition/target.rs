@@ -492,14 +492,15 @@ fn build_scoped_picker_plan(
     Ok(plan)
 }
 
-/// Refresh a single provider's catalog only when frontmatter `model`
-/// hints will actually be validated against it.
+/// Refresh a single provider's dynamic listing only when a frontmatter
+/// `model` hint is in play.
 ///
-/// CLI `--model`, provider-specific environment variables, and the generic
-/// `MODEL` env var all win over the frontmatter `model` hint, so when one
-/// of those is supplied the catalog is never consulted and refresh would
-/// be wasted work. Static-source providers (Claude, Codex) refresh in O(1)
-/// with no subprocess, but we still skip when no validation will occur.
+/// Validation itself is baseline-fed (expected offerings) and never
+/// reads the listing; the refresh keeps the on-disk listing cache warm
+/// as drift-channel input, scoped to the runs that exercise model
+/// validation. CLI `--model`, provider-specific environment variables,
+/// and the generic `MODEL` env var all win over the frontmatter hint,
+/// so when one of those is supplied we skip the refresh entirely.
 pub(crate) fn refresh_for_model_validation(
     catalog: &claudine::model_catalog::ModelCatalogService,
     provider: Provider,
@@ -521,9 +522,9 @@ pub(crate) fn refresh_for_model_validation(
     }
     let _span =
         tracing::info_span!("compose_prep.model_catalog", provider = %provider.as_slug()).entered();
-    // W3: prefer non-blocking refresh so the current run never waits on a
-    // dynamic-source subprocess (`opencode models`) when a cache already
-    // exists. The async path falls back to blocking on true cold-cache.
+    // W3: always non-blocking — the current run never needs the
+    // subprocess result (`opencode models` feeds the drift channel, not
+    // validation), so the refresh detaches even on a cold cache.
     catalog.refresh_provider_async(provider);
 }
 

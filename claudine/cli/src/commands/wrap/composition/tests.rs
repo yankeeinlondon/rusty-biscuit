@@ -181,11 +181,11 @@ fn catalog_initialized_with_config_overrides() {
     let catalog =
         claudine::model_catalog::ModelCatalogService::with_overrides(config.model_overrides);
 
-    // Static catalog model should still be valid (additive mode)
+    // Baseline (expected-offering) model should still be valid (additive mode)
     assert!(catalog.is_valid(Provider::Codex, "gpt-5.5"));
     // Override model should also be valid
     assert!(catalog.is_valid(Provider::Codex, "gpt-5"));
-    // Non-overridden provider should use static catalog
+    // Non-overridden provider should use its baseline
     assert!(catalog.is_valid(Provider::Claude, "claude-opus-4-8"));
 }
 
@@ -473,8 +473,19 @@ fn frontmatter_model_without_env_override_refreshes_dynamic_provider() {
 
     refresh_for_model_validation(&catalog, Provider::OpenCode, &hints, Some(&probe_reason));
 
-    // Refresh should have been attempted (will fail gracefully since
-    // opencode is not on PATH, but the attempt counter increments).
+    // The refresh detaches to a background thread even on a cold cache
+    // (validation is baseline-fed and never waits on the subprocess), so
+    // poll for the attempt instead of asserting synchronously. The
+    // attempt itself fails gracefully since opencode is not on PATH, but
+    // the counter still increments.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while catalog.shell_command_fetch_attempts() == 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "background refresh never attempted the shell-command fetch"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     assert_eq!(catalog.shell_command_fetch_attempts(), 1);
 }
 

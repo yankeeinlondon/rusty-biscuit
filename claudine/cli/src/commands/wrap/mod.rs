@@ -17,6 +17,7 @@ pub(crate) mod selection_ui;
 pub(crate) mod sequence;
 
 // New split modules
+pub(crate) mod catalog_drift;
 pub(crate) mod flags;
 pub(crate) mod harness_orch;
 pub(crate) mod inline;

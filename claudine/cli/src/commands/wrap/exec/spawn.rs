@@ -625,6 +625,10 @@ pub(crate) fn run_child_capture(
         SignalSource::Exit,
         &claudine::signals::exit_source_payload(exit_code, &stderr),
     );
+    // Resolved-model drift check against the expected-offerings baseline,
+    // before flush/drain so any drift event rides this run's signals.
+    // No-op on the hub-less fallback (no provider attribution).
+    super::super::catalog_drift::emit_resolved_model_drift(&signal_hub);
     // End-of-run harvest flush (E6): persist unmatched error/warning-class
     // candidates when opted in; a no-op otherwise (and always on the
     // hub-less fallback, which cannot enable harvesting).
@@ -1215,6 +1219,9 @@ pub(crate) fn run_child_stream_semantic(
         .as_ref()
         .and_then(early_termination_guard_context);
 
+    // Resolved-model drift check against the expected-offerings baseline,
+    // before flush/drain so any drift event rides this run's signals.
+    super::super::catalog_drift::emit_resolved_model_drift(&signal_hub);
     // End-of-run harvest flush (E6): persist unmatched error/warning-class
     // candidates when opted in; a no-op otherwise.
     claudine::signals::harvest::flush_hub(&signal_hub);

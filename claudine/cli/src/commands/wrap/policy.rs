@@ -86,6 +86,10 @@ impl StructuredSummaryDetails {
 /// harvesting enabled when opted in (E6): `CLAUDINE_HARVEST` env override
 /// wins over the user config's `harvest_unmatched`, default off.
 ///
+/// Hub creation is also the once-per-run seam for the listing-drift
+/// check: the cached dynamic listing is diffed against the expected
+/// baseline and any drift lands in this hub before the child spawns.
+///
 /// [`SignalHub`]: claudine::signals::SignalHub
 pub(crate) fn provider_signal_hub(provider: Provider) -> Arc<claudine::signals::SignalHub> {
     let hub = Arc::new(claudine::signals::SignalHub::new(
@@ -94,6 +98,7 @@ pub(crate) fn provider_signal_hub(provider: Provider) -> Arc<claudine::signals::
     if harvest_enabled() {
         hub.enable_harvest();
     }
+    super::catalog_drift::emit_listing_drift(provider, &hub);
     hub
 }
 
@@ -299,6 +304,16 @@ pub(crate) struct StreamSummaryContext<'a> {
     /// provider child. Threaded through to the synthetic summary event
     /// so `EventMeta.agent_pid` carries the spawned child PID.
     pub(crate) agent_pid: Option<u32>,
+    /// The run's drained signal observations, destined for
+    /// `extra["signals"]` on the SessionEnd summary row only. Passed as
+    /// an explicit parameter (not via `context_extra`) because the sink
+    /// mirrors `context_extra` onto every live semantic tool row.
+    pub(crate) signals: &'a [claudine::signals::ObservedSignal],
+    /// The model string the user/frontmatter requested (`--model` or the
+    /// `MODEL`/frontmatter value) — NOT the provider-reported model.
+    /// When it names a marked rolling alias, the resolved
+    /// `family_latest` stamp is written to the summary row.
+    pub(crate) requested_model: Option<&'a str>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -311,6 +326,8 @@ pub(crate) fn emit_stream_summary(
     details: &StructuredSummaryDetails,
     section_stream: Option<&super::section::SectionStream>,
     agent_pid: Option<u32>,
+    signals: &[claudine::signals::ObservedSignal],
+    requested_model: Option<&str>,
 ) {
     emit_stream_summary_inner(
         StreamSummaryContext {
@@ -322,6 +339,8 @@ pub(crate) fn emit_stream_summary(
             details,
             section_stream,
             agent_pid,
+            signals,
+            requested_model,
         },
         None,
     );
@@ -340,6 +359,8 @@ fn emit_stream_summary_inner(
         details,
         section_stream,
         agent_pid,
+        signals,
+        requested_model,
     } = ctx;
     let primary_markup = if verbosity == Verbosity::Silent {
         None
@@ -396,12 +417,19 @@ fn emit_stream_summary_inner(
 
     // Write synthetic summary event to JSONL (best-effort)
     if let Some(protocol) = profile.stream_protocol() {
+        // Stamp only when the REQUESTED model is a marked rolling alias;
+        // provider-reported models never match (they are concrete ids).
+        let family_latest = requested_model.and_then(|model| {
+            claudine::model_catalog::family_latest_stamp(summary.provider, model)
+        });
         let meta = claudine::stream::reporting::summary_to_event_meta_with_context(
             summary,
             protocol,
             env_context,
             context_extra,
             agent_pid,
+            signals,
+            family_latest.as_ref(),
         );
         if let Err(e) = claudine::stream::reporting::write_summary_event(&meta) {
             tracing::warn!("Failed to write stream summary event: {e}");

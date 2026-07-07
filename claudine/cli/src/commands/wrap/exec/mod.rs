@@ -107,7 +107,8 @@ pub(crate) struct ProcessResult<T> {
     /// Signals the declarative detection engine collected from the stdout
     /// stream (Phase E4). Populated only by the semantic spawn path
     /// (`run_child_stream_semantic`); the other spawn paths always carry an
-    /// empty vector. Consumers land in Phase E5.
+    /// empty vector. Consumed by the rate-limit projection and persisted
+    /// as `extra["signals"]` on the SessionEnd JSONL summary row.
     pub(crate) signals: Vec<claudine::signals::ObservedSignal>,
 }
 

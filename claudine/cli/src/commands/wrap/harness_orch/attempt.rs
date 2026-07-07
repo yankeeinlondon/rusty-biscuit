@@ -261,6 +261,8 @@ pub(crate) fn execute_harness_attempt(
             &summary_details.lock().unwrap().clone(),
             Some(&section_stream),
             captured_agent_pid,
+            &stream_result.signals,
+            run_model.as_deref(),
         );
 
         let effective_response = {
