@@ -71,21 +71,61 @@ through renderable components. Gen stays render-free (no biscuit-terminal dep).
 ## Onboarding state machine (fixes the chicken-and-egg)
 
 Generated code references `Provider::<New>`, which cannot exist before the enum
-variant. The order is therefore fixed, with compile checkpoints:
+variant. The order is fixed, with compile checkpoints. **Amended against the
+M-Kilo graduation (2026-07-07) — the real step list, not "three edits":**
 
-1. **Roster entry** (identity facts) — no code.
-2. **Research fleets** for the new provider (topics that exist; gaps tracked).
-3. **Hand wiring (small, manual):** add the `Provider` variant + `provider/<slug>/`
-   module declaration + clap arm. Compile checkpoint: exhaustiveness errors enumerate
-   every remaining structural site — this IS the TODO list (no separate artifact).
-4. **`claudine providers generate <slug>`** — scaffolds `data.rs` (always overwritten)
-   and `behavior.rs` stubs (**never** overwrites an existing `behavior.rs`; scaffold is
-   one-shot). Facts file scaffolded with `TODO` markers for topic-less fields.
-5. **Implement behavior** where the provider genuinely differs; graduation report
-   (missing research topics per provider) tracks the rest.
+1. **Roster entry** (identity facts) — no code. Must carry `sniff_binding`,
+   `docs_url`, and the other roster-sourced required fields; a missing one is a
+   generation *error*, not a warning.
+2. **`sniff::AiCli::<New>` variant** — an **external `sniff`-crate** change.
+   `sniff_binding` compiles to `AiCli::<X>`; a genuinely new binary needs the
+   variant (+ its `AI_CLI_INFO` row + `serde_key` arm) first, or the generated
+   `data.rs` will not compile. Reusing another provider's binding mis-detects
+   install status.
+3. **Research fleets** for the new provider (topics that exist; gaps tracked).
+4. **Hand wiring — compiler-walked, but via arrays, not match arms.** `Provider`
+   is `#[non_exhaustive] #[repr(usize)]`, so exhaustiveness is enforced by
+   fixed-length `[T; PROVIDER_COUNT]` tables, not `match` arms (a foreign-crate
+   `match Provider` is forced to carry `_`, so it will **not** light up). The
+   compiler-forced sites: `provider_id.rs` (variant + `PROVIDER_COUNT` +
+   `PROVIDERS_DISPLAY_ORDER` + the discriminant const-assert),
+   `provider/registry.rs` (`&<X>_INFO`), and the CLI `WRAPPER_REGISTRY` slot.
+   Manual (not compiler-forced): `emit::PROVIDER_VARIANTS` (the slug→variant
+   bridge — the one gen-side edit), the `provider/<slug>/` module decl, the clap
+   subcommand (`args.rs` + `main.rs` `wrapper_command` + the `unreachable!` arm +
+   `argv::WRAPPER_SUBCOMMANDS`), `telemetry.rs`'s two `Commands` matches, and any
+   wildcard-bearing `match Provider` a wire-format reuse needs (e.g.
+   `stream::providers::for_provider`).
+5. **`claudine providers generate <slug> --scaffold`** — scaffolds `data.rs`
+   (always overwritten), `mod.rs` + a compiling `behavior.rs` stub (**never**
+   overwrites an existing `behavior.rs`), and a facts `TODO` skeleton for
+   topic-less fields. **Gotcha:** fields whose research lands as freetext or a
+   compound the coercion cannot consume — `model_catalog_source` (from a
+   dynamic-listing boolean) and `model_cli_flag` (from a `"--x / -y"` compound
+   site) — **hard-stop generation** until a field-keyed `overrides/<slug>.yaml`
+   entry pins the value. This is a *required* step for any provider with dynamic
+   listing, not optional, until the `agent-models` sidecar grows typed keys for
+   them (tracked follow-up in the M-Kilo graduation report).
+6. **Implement behavior** where the provider genuinely differs. Consistency the
+   test suite enforces — each is a one-line per-provider edit surfaced as a
+   *failing test*, never a silent gap:
+   - **Hook-support invariant** (`hook_events_imply_configurator_hooks_supported`):
+     if the catalog's `event_mapping` declares any `Hook`-level event, the
+     configurator MUST be real (`hooks_supported() == true` + a working
+     `register`), never a no-op stub. (A `Hook`-level `event_mapping` is common
+     when facts are copied from a parent — so an "easy cousin" still needs a real
+     configurator.)
+   - Catalog-consistency test sites, one line each: `discover_agents_full` count,
+     `representative_payload_for` (payload detection — return `None` when the wire
+     shape is ambiguous with another provider), `quick_start` hook selection,
+     `claudine-contract` `support_matrix` length + the `auth_env_vars` arm, and
+     the signals dormant-example test (swap to a still-unwired slug).
+   - Re-bless `docs/providers/dispatch-inventory.json` (`CLAUDINE_UPDATE_INVENTORY=1`).
 
-The spec's "steps 1–3 are mechanical" is amended: step 3 above is manual but bounded
-(three edits), and the compiler owns the checklist.
+The spec's "steps 1–3 are mechanical" is retired: onboarding spans a roster
+entry + a `sniff` variant + the wiring above + overrides + behavior + a handful
+of per-provider test lines. The **compiler** owns the *structural* checklist; the
+**test suite** owns the *consistency* checklist.
 
 ## Compiled-subset mechanics (rules Open Question 4)
 
