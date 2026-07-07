@@ -94,6 +94,27 @@
           },
           "value": "Claude"
         },
+        "display_policy": {
+          "source": {
+            "key": "display_policy",
+            "kind": "facts"
+          },
+          "value": {
+            "collapse_task_progress": true,
+            "info_event_suppression": [],
+            "silent_extension_kinds": [
+              "stream_event",
+              "system/hook_started",
+              "system/hook_response",
+              "system/hook_progress",
+              "system/thinking_tokens"
+            ],
+            "stderr_noise_prefixes": [],
+            "stdout_noise_prefixes": [],
+            "suppress_subscription_rate_limit": true,
+            "tool_result_summary": "show"
+          }
+        },
         "docs_url": {
           "source": {
             "key": "docs_url",
@@ -764,20 +785,6 @@
             "kind": "roster"
           },
           "value": "Claude"
-        },
-        "stderr_noise_prefixes": {
-          "source": {
-            "key": "stderr_noise_prefixes",
-            "kind": "facts"
-          },
-          "value": []
-        },
-        "stdout_noise_prefixes": {
-          "source": {
-            "key": "stdout_noise_prefixes",
-            "kind": "facts"
-          },
-          "value": []
         },
         "stream_protocol": {
           "source": {
@@ -5757,6 +5764,26 @@
           },
           "value": "Codex"
         },
+        "display_policy": {
+          "source": {
+            "key": "display_policy",
+            "kind": "facts"
+          },
+          "value": {
+            "collapse_task_progress": false,
+            "info_event_suppression": [],
+            "silent_extension_kinds": [
+              "item.started",
+              "item.completed"
+            ],
+            "stderr_noise_prefixes": [
+              "Reading prompt from stdin..."
+            ],
+            "stdout_noise_prefixes": [],
+            "suppress_subscription_rate_limit": false,
+            "tool_result_summary": "prefer_body"
+          }
+        },
         "docs_url": {
           "source": {
             "key": "docs_url",
@@ -6335,22 +6362,6 @@
             "kind": "roster"
           },
           "value": "Codex"
-        },
-        "stderr_noise_prefixes": {
-          "source": {
-            "key": "stderr_noise_prefixes",
-            "kind": "facts"
-          },
-          "value": [
-            "Reading prompt from stdin..."
-          ]
-        },
-        "stdout_noise_prefixes": {
-          "source": {
-            "key": "stdout_noise_prefixes",
-            "kind": "facts"
-          },
-          "value": []
         },
         "stream_protocol": {
           "source": {
@@ -11209,6 +11220,30 @@
           },
           "value": "Gemini"
         },
+        "display_policy": {
+          "source": {
+            "key": "display_policy",
+            "kind": "facts"
+          },
+          "value": {
+            "collapse_task_progress": false,
+            "info_event_suppression": [],
+            "silent_extension_kinds": [],
+            "stderr_noise_prefixes": [
+              "Skill conflict detected: ",
+              "[LocalAgentExecutor]"
+            ],
+            "stdout_noise_prefixes": [
+              "Created execution plan for ",
+              "Expanding hook command: ",
+              "Hook execution for ",
+              "Skill conflict detected: ",
+              "[LocalAgentExecutor]"
+            ],
+            "suppress_subscription_rate_limit": false,
+            "tool_result_summary": "show"
+          }
+        },
         "docs_url": {
           "source": {
             "key": "docs_url",
@@ -11836,29 +11871,6 @@
             "kind": "roster"
           },
           "value": "GeminiCli"
-        },
-        "stderr_noise_prefixes": {
-          "source": {
-            "key": "stderr_noise_prefixes",
-            "kind": "facts"
-          },
-          "value": [
-            "Skill conflict detected: ",
-            "[LocalAgentExecutor]"
-          ]
-        },
-        "stdout_noise_prefixes": {
-          "source": {
-            "key": "stdout_noise_prefixes",
-            "kind": "facts"
-          },
-          "value": [
-            "Created execution plan for ",
-            "Expanding hook command: ",
-            "Hook execution for ",
-            "Skill conflict detected: ",
-            "[LocalAgentExecutor]"
-          ]
         },
         "stream_protocol": {
           "source": {
@@ -16041,6 +16053,21 @@
           },
           "value": "Goose"
         },
+        "display_policy": {
+          "source": {
+            "key": "display_policy",
+            "kind": "facts"
+          },
+          "value": {
+            "collapse_task_progress": false,
+            "info_event_suppression": [],
+            "silent_extension_kinds": [],
+            "stderr_noise_prefixes": [],
+            "stdout_noise_prefixes": [],
+            "suppress_subscription_rate_limit": false,
+            "tool_result_summary": "show"
+          }
+        },
         "docs_url": {
           "source": {
             "key": "docs_url",
@@ -16580,20 +16607,6 @@
             "kind": "roster"
           },
           "value": "Goose"
-        },
-        "stderr_noise_prefixes": {
-          "source": {
-            "key": "stderr_noise_prefixes",
-            "kind": "facts"
-          },
-          "value": []
-        },
-        "stdout_noise_prefixes": {
-          "source": {
-            "key": "stdout_noise_prefixes",
-            "kind": "facts"
-          },
-          "value": []
         },
         "stream_protocol": {
           "source": {
@@ -20960,6 +20973,29 @@
           },
           "value": "Kimi Code"
         },
+        "display_policy": {
+          "source": {
+            "key": "display_policy",
+            "kind": "facts"
+          },
+          "value": {
+            "collapse_task_progress": false,
+            "info_event_suppression": [],
+            "silent_extension_kinds": [
+              "event:ContentPart",
+              "event:ToolCallPart",
+              "event:StatusUpdate",
+              "event:MessageStart",
+              "event:MessageDelta",
+              "event:MessageEnd",
+              "event:Thinking"
+            ],
+            "stderr_noise_prefixes": [],
+            "stdout_noise_prefixes": [],
+            "suppress_subscription_rate_limit": false,
+            "tool_result_summary": "show"
+          }
+        },
         "docs_url": {
           "source": {
             "key": "docs_url",
@@ -21580,20 +21616,6 @@
             "kind": "roster"
           },
           "value": "KimiCli"
-        },
-        "stderr_noise_prefixes": {
-          "source": {
-            "key": "stderr_noise_prefixes",
-            "kind": "facts"
-          },
-          "value": []
-        },
-        "stdout_noise_prefixes": {
-          "source": {
-            "key": "stdout_noise_prefixes",
-            "kind": "facts"
-          },
-          "value": []
         },
         "stream_protocol": {
           "source": {
@@ -25523,6 +25545,29 @@
           },
           "value": "OpenCode"
         },
+        "display_policy": {
+          "source": {
+            "key": "display_policy",
+            "kind": "facts"
+          },
+          "value": {
+            "collapse_task_progress": false,
+            "info_event_suppression": [
+              "step_progress"
+            ],
+            "silent_extension_kinds": [],
+            "stderr_noise_prefixes": [
+              "✱ ",
+              "$ ",
+              "> build ",
+              "████ ",
+              "⚙ "
+            ],
+            "stdout_noise_prefixes": [],
+            "suppress_subscription_rate_limit": false,
+            "tool_result_summary": "show"
+          }
+        },
         "docs_url": {
           "source": {
             "key": "docs_url",
@@ -26522,26 +26567,6 @@
             "kind": "roster"
           },
           "value": "Opencode"
-        },
-        "stderr_noise_prefixes": {
-          "source": {
-            "key": "stderr_noise_prefixes",
-            "kind": "facts"
-          },
-          "value": [
-            "✱ ",
-            "$ ",
-            "> build ",
-            "████ ",
-            "⚙ "
-          ]
-        },
-        "stdout_noise_prefixes": {
-          "source": {
-            "key": "stdout_noise_prefixes",
-            "kind": "facts"
-          },
-          "value": []
         },
         "stream_protocol": {
           "source": {
@@ -31704,6 +31729,21 @@
           },
           "value": "Qwen Code"
         },
+        "display_policy": {
+          "source": {
+            "key": "display_policy",
+            "kind": "facts"
+          },
+          "value": {
+            "collapse_task_progress": false,
+            "info_event_suppression": [],
+            "silent_extension_kinds": [],
+            "stderr_noise_prefixes": [],
+            "stdout_noise_prefixes": [],
+            "suppress_subscription_rate_limit": false,
+            "tool_result_summary": "show"
+          }
+        },
         "docs_url": {
           "source": {
             "key": "docs_url",
@@ -32277,20 +32317,6 @@
             "kind": "roster"
           },
           "value": "QwenCli"
-        },
-        "stderr_noise_prefixes": {
-          "source": {
-            "key": "stderr_noise_prefixes",
-            "kind": "facts"
-          },
-          "value": []
-        },
-        "stdout_noise_prefixes": {
-          "source": {
-            "key": "stdout_noise_prefixes",
-            "kind": "facts"
-          },
-          "value": []
         },
         "stream_protocol": {
           "source": {
@@ -36827,5 +36853,5 @@
       }
     }
   },
-  "schema_version": 2
+  "schema_version": 3
 }
