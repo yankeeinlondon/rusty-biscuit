@@ -64,6 +64,15 @@ pub(crate) fn auth_env_vars(provider: Provider) -> &'static [&'static str] {
         Provider::OpenCode => &["OPENCODE_API_KEY"],
         Provider::QwenCode => &["DASHSCOPE_API_KEY", "QWEN_API_KEY"],
         Provider::Kilo => &["KILO_API_KEY"],
+        // Pi has no dedicated key: it fronts many providers and reads each
+        // provider's own auth var. These are the representative keys; Pi is
+        // Rejected in contract v1, so this is informational.
+        Provider::Pi => &[
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_OAUTH_TOKEN",
+            "OPENAI_API_KEY",
+            "GEMINI_API_KEY",
+        ],
         // `Provider` is non-exhaustive, but every known variant is enumerated
         // above. A new provider must update this match rather than silently
         // receiving no forwarded auth variables.

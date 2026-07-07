@@ -837,8 +837,13 @@ fn support_matrix_enables_only_curated_providers() {
         provider_support(Provider::Kilo),
         ProviderSupport::Rejected(_)
     ));
+    // Pi is wired but not v1-enabled for tool-free inference either.
+    assert!(matches!(
+        provider_support(Provider::Pi),
+        ProviderSupport::Rejected(_)
+    ));
     // Every provider appears exactly once in the matrix.
-    assert_eq!(support_matrix().len(), 8);
+    assert_eq!(support_matrix().len(), 9);
 }
 
 #[test]
@@ -862,6 +867,15 @@ fn auth_env_vars_are_explicit_for_all_providers() {
         &["DASHSCOPE_API_KEY", "QWEN_API_KEY"]
     );
     assert_eq!(auth_env_vars(Provider::Kilo), &["KILO_API_KEY"]);
+    assert_eq!(
+        auth_env_vars(Provider::Pi),
+        &[
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_OAUTH_TOKEN",
+            "OPENAI_API_KEY",
+            "GEMINI_API_KEY"
+        ]
+    );
 }
 
 // -- process runner: concurrent pipe draining --------------------------------
