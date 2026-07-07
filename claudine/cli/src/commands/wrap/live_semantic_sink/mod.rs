@@ -35,7 +35,7 @@ use std::sync::{Arc, Mutex};
 use biscuit_terminal::terminal::Terminal;
 use claudine::events::{AgenticEvent, EnvironmentContext, EventMeta as DispatchEventMeta};
 use claudine::provider::{EventClass, Provider};
-use claudine::render::EventRenderer;
+use claudine::render::{EventRenderer, ThinkingStream};
 use claudine::runaway::ContentDetector;
 use claudine::stream::logs::EarlyTermination;
 use claudine::stream::progress::{self, LiveMetrics};
@@ -103,9 +103,9 @@ pub(crate) type SemanticDispatchFn =
 pub(crate) type StderrEmitFn = Box<dyn Fn(&str) + Send + Sync + 'static>;
 
 /// Function type for forwarding assistant text to an external
-/// [`super::exec::StreamTextRenderer`]-style renderer on stdout. This keeps
-/// the sink decoupled from the rendering machinery that lives inside
-/// `exec.rs` while still letting `OutputText` events flow through the
+/// `AssistantStream`-style renderer on stdout (the lib streaming component
+/// the exec layer drives). This keeps the sink decoupled from the rendering
+/// machinery while still letting `OutputText` events flow through the
 /// standard semantic pipeline.
 pub(crate) type OutputTextFn = Box<dyn FnMut(&str) + Send + 'static>;
 
@@ -156,6 +156,13 @@ pub(crate) struct LiveSemanticSink {
     /// of the per-event render path avoids unnecessary work for long
     /// structured sessions.
     terminal: Terminal,
+    /// Buffers `Reasoning` deltas and flushes coalesced thinking blocks. A
+    /// [`claudine::render::StreamRenderable`]: token-level Claude fragments and
+    /// a single accumulated Kimi thought both render as one clean `▌ ` block by
+    /// construction. Drained at the top of `on_semantic_event` before any
+    /// non-`Reasoning` event and again in `Drop`. Owns its own `Terminal`
+    /// clone; the (test-only) `terminal` mutation does not re-target it.
+    thinking_stream: ThinkingStream,
     /// Section-spacing state machine shared with [`super::section::SectionStream`]
     /// and any post-stream trailer emitter obtained via [`Self::section_stream`].
     /// Encapsulates the dedup and section-transition logic so every writer
@@ -224,6 +231,7 @@ impl LiveSemanticSink {
         dispatch: SemanticDispatchFn,
         emit_stderr: StderrEmitFn,
     ) -> Self {
+        let terminal = wrap_terminal();
         Self {
             provider,
             env,
@@ -242,7 +250,8 @@ impl LiveSemanticSink {
             emit_event_log: None,
             live_metrics: progress::new_live_metrics(),
             stream_output: StreamOutput::new(),
-            terminal: wrap_terminal(),
+            thinking_stream: ThinkingStream::new(terminal.clone()),
+            terminal,
             section_tracker: Arc::new(Mutex::new(SectionTracker::new())),
             at_blank_row: false,
             stdout_trailing_newlines: 0,
@@ -308,6 +317,7 @@ impl LiveSemanticSink {
                 }
             });
 
+        let terminal = wrap_terminal();
         Self {
             provider,
             env,
@@ -326,7 +336,8 @@ impl LiveSemanticSink {
             emit_event_log: Some(event_logger),
             live_metrics: progress::new_live_metrics(),
             stream_output,
-            terminal: wrap_terminal(),
+            thinking_stream: ThinkingStream::new(terminal.clone()),
+            terminal,
             section_tracker: Arc::new(Mutex::new(SectionTracker::new())),
             at_blank_row: false,
             stdout_trailing_newlines: 0,
@@ -360,7 +371,7 @@ impl LiveSemanticSink {
 
     /// Wire a stdout-rendering callback that receives every
     /// [`SemanticEvent::OutputText`]. Typically this forwards into an
-    /// `exec.rs`-owned `StreamTextRenderer` so the markdown-boundary logic
+    /// exec-driven `AssistantStream` so the markdown-boundary logic
     /// stays in one place.
     pub(crate) fn with_output_text_sink(mut self, emit: OutputTextFn) -> Self {
         self.emit_output_text = Some(emit);
@@ -372,7 +383,7 @@ impl LiveSemanticSink {
     /// Used by the structured wrapper path when the sink has been wrapped in
     /// a [`claudine::stream::semantic::SharedSemanticSink`] ahead of thread
     /// spawning — the parser builder closure locks the inner sink and calls
-    /// this setter so the exec-layer `StreamTextRenderer` stays in the stdout
+    /// this setter so the exec-layer `AssistantStream` stays in the stdout
     /// thread while the sink itself is shared with the stderr log bridge.
     pub(crate) fn set_output_text_sink(&mut self, emit: OutputTextFn) {
         self.emit_output_text = Some(emit);
@@ -677,6 +688,10 @@ impl LiveSemanticSink {
 
 impl Drop for LiveSemanticSink {
     fn drop(&mut self) {
+        // Drain any buffered reasoning first so a lone trailing thought (a
+        // `Reasoning` event with no following non-`Reasoning` event to trigger
+        // the boundary flush) still renders at stream end.
+        self.flush_pending_thinking();
         // Any `task_progress` Info still buffered at stream end was never
         // matched against a follow-up tool call. Flush it so the
         // narration is not lost when the sink is dropped mid-turn.

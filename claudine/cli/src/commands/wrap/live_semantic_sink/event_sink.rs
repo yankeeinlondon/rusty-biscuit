@@ -5,12 +5,20 @@
 use super::LiveSemanticSink;
 use super::Section;
 use claudine::events::AgenticEvent;
+use claudine::render::StreamRenderable;
 use claudine::stream::semantic::{SemanticEvent, SemanticEventSink};
-use claudine::stream::thinking::render_thinking_block;
 use serde_json::Value;
 
 impl SemanticEventSink for LiveSemanticSink {
     fn on_semantic_event(&mut self, event: SemanticEvent) {
+        // 0. Boundary flush: a buffered thought coalesces and renders before
+        //    any non-`Reasoning` event, so a tool call / output text / turn
+        //    end never interleaves mid-thought. Mirrors the `task_progress`
+        //    "resolve on the next event" pattern.
+        if !matches!(event, SemanticEvent::Reasoning { .. }) {
+            self.flush_pending_thinking();
+        }
+
         // 1. LiveMetrics observation for the heartbeat.
         if let Ok(mut state) = self.live_metrics.lock() {
             state.observe_event(&event, std::time::Instant::now());
@@ -159,13 +167,16 @@ impl SemanticEventSink for LiveSemanticSink {
                 self.update_stdout_trailing_newlines(text);
             }
             SemanticEvent::Reasoning { text, .. } if !self.content_tripped() => {
-                let block = render_thinking_block(text, &self.terminal);
-                if !block.is_empty() {
-                    // Split the multi-line block render into lines so the
-                    // dedup works per-line; section transitions only
-                    // insert blanks between sections, not between lines of
-                    // a single block.
-                    for line in block.lines() {
+                // Buffer the delta in the ThinkingStream; it returns frames
+                // only when a natural unit completes (a newline-terminated
+                // paragraph or a long sentence). Claude's residual token
+                // fragments coalesce into one block at the next-event boundary
+                // flush (step 0 / Drop). Split each frame per line so the
+                // section dedup works per-line; section transitions only
+                // insert blanks between sections, not between lines of a
+                // single block.
+                for frame in self.thinking_stream.append(text) {
+                    for line in frame.lines() {
                         self.emit_section_line(Section::Thinking, line);
                     }
                 }
