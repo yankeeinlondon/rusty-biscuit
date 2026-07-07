@@ -18,10 +18,10 @@
     "reference": "code merely names a provider (fixtures, constructor arguments); nothing to migrate"
   },
   "totals": {
-    "sites": 429,
-    "provider_refs": 456,
+    "sites": 430,
+    "provider_refs": 457,
     "by_form": {
-      "direct-ref": 415,
+      "direct-ref": 416,
       "eq-comparison": 6,
       "matches-macro": 4,
       "ne-comparison": 3,
@@ -29,7 +29,7 @@
     },
     "by_dispatch_class": {
       "conditional": 14,
-      "reference": 415
+      "reference": 416
     }
   },
   "sites": [
@@ -2299,6 +2299,16 @@
       "exempt_candidate": true
     },
     {
+      "path": "claudine/cli/src/commands/wrap/live_semantic_sink/tests/golden_stderr.rs",
+      "line": 620,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": true
+    },
+    {
       "path": "claudine/cli/src/commands/wrap/live_semantic_sink/tests/provider_extension_and_opencode.rs",
       "line": 11,
       "form": "direct-ref",
@@ -2460,7 +2470,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/live_semantic_sink/tests/provider_extension_and_opencode.rs",
-      "line": 903,
+      "line": 906,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -2470,7 +2480,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/live_semantic_sink/tests/provider_extension_and_opencode.rs",
-      "line": 1051,
+      "line": 1054,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [

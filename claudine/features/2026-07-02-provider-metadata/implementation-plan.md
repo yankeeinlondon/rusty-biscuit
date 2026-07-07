@@ -635,17 +635,75 @@ section (noise prefixes move here — single owner).
 >   `renderable` added as a direct `lib` dependency (docs/dependencies.md updated).
 >   `providers` output audited: no component bypasses; capability-matrix &
 >   describe tables left off the shared-table contract to preserve byte-identity.
-> - **DEFERRED — `StreamRenderable` span contract (open/append/close):** NOT built.
->   Nothing accumulates incrementally at the component boundary today — each
->   `Reasoning` event carries a complete block rendered per-event, `ToolCall`/
->   `ToolResult` render independently (no stateful id-correlation), and the one
->   genuinely-incremental case (`OutputText` token deltas) accumulates in
->   `exec.rs` and flows through the existing `FinalMessage` component (deferred out
->   of migration 3 part 1). The `Vec<RenderUnit>`-per-event API already realizes
->   Ruling 3's first bullet; a three-phase trait would be speculative abstraction
->   with no consumer (design's own hedge: "promote upstream only if darkmatter/
->   biscuit-terminal grow the same need"). Revisit if/when thinking tokens arrive
->   as sub-block chunks needing a held-open frame.
+> - **Migration 3 part 2 / `StreamRenderable` span contract (done):** the
+>   additive `StreamRenderable` trait (`open`/`append`/`flush_idle`/`close`,
+>   returning `Vec<String>` byte-frames the caller writes — claudine-local, not
+>   upstreamed per Ruling 3) lives at `lib/src/render/stream.rs`. The CLI's
+>   bespoke `StreamTextRenderer` markdown state machine (block/line buffering,
+>   code-fence + blank-line + list-item + sentence-terminator boundary
+>   heuristics, heartbeat idle-flush, `partial_line_committed` raw-partial
+>   stall-visibility) migrated into `lib/src/render/assistant_stream.rs` as
+>   `AssistantStream`, rendering blocks via `FinalMessage`. This is the streaming
+>   assistant-text renderer EVERY non-interactive TTY session runs — the genuine
+>   incremental consumer. (An earlier draft of this note wrongly deferred it on
+>   the claim that `OutputText` deltas "flow through `FinalMessage`"; in fact the
+>   buffering lifecycle *around* `FinalMessage` was un-componentized CLI logic —
+>   exactly what this phase exists to lift into a lib component.) Per Ruling 4
+>   the writer stays CLI-side: `exec/spawn.rs` + the idle ticker
+>   (`watchdog/spawn.rs`) hold the `Arc<Mutex<AssistantStream>>` and pump
+>   returned frames to the `StreamOutput`-coordinated stdout writer;
+>   `stdout().is_terminal()` + `Terminal`/`TerminalOptions` resolution stay in
+>   the CLI and pass into `AssistantStream::new`. Byte-identity: each former
+>   `out.write_all` maps 1:1 to a returned frame; the 16 `StreamTextRenderer`
+>   unit tests moved to the lib component (frames-concatenation assertions);
+>   `golden_stderr`/`sections_and_output` (own line-collecting `output_cb`, not
+>   this renderer) unchanged. `render_assistant_markdown_with_options` deleted
+>   (sole caller was the migrated renderer).
+> - **Migration 3 part 3 / `ThinkingStream` (done):** the SECOND
+>   `StreamRenderable` consumer, `lib/src/render/thinking_stream.rs`. Motivation
+>   was a real defect, not architecture-for-its-own-sake: Claude emits one
+>   `Reasoning` event PER `thinking_delta` (token-level — `claude.rs:273`), and
+>   the old inline path rendered EACH delta as its own `▌ ` BlockQuote, so one
+>   thought fragmented into a run of short bordered snippets; Kimi already
+>   coalesces in its parser, Codex/OpenCode emit block-level — i.e. thinking
+>   render quality depended on per-parser buffering luck, the exact
+>   provider-variance Ruling 1 forbids. `ThinkingStream` buffers reasoning
+>   deltas and flushes coalesced blocks (flush completed lines, hold the
+>   trailing partial; sentence-terminator early flush past 200 bytes like
+>   `AssistantStream`; `flush_idle`; `close` drains) through
+>   `render_thinking_block` — Claude and Kimi now render identically by
+>   construction, no `match provider`. Sink wiring: a `flush_pending_thinking`
+>   (drains `thinking_stream.close()` into `Section::Thinking`) runs at the TOP
+>   of `on_semantic_event` for every NON-`Reasoning` event (the no-interleave
+>   boundary — a coalesced thought completes before the next tool/output line),
+>   plus on `Drop` (lone trailing thought). This DELIBERATELY changed output
+>   (coalesced vs fragmented); two lone-Reasoning golden tests gained a
+>   `drop(sink)` to trigger the close-flush, and two new tests pin the win
+>   (`consecutive_reasoning_deltas_coalesce_into_one_block`,
+>   `reasoning_flushes_before_following_tool_call`). dispatch-inventory +1 (a
+>   `Provider::Claude` test-helper constructor arg, `exempt_candidate`).
+>   Open sub-item: `flush_idle` is implemented + unit-tested on the component
+>   but NOT wired to a sink-side heartbeat ticker (staleness is bounded by the
+>   next-event boundary flush + Drop); a sink idle ticker is a mechanical
+>   follow-up if long silent thinking phases need mid-stall surfacing.
+> - **`ToolUse` StreamRenderable — assessed, correctly NOT built (not a defer
+>   by omission).** The design lists ToolUse as "spans two events — needs the
+>   span contract," but investigation shows it is not a `StreamRenderable`
+>   (delta-accumulation) shape: Claude's tool-call input DOES stream as
+>   `input_json_delta` chunks, but the PARSER coalesces them
+>   (`claude.rs:286 try_complete_pending_tool_use`) and emits ONE `ToolCall`
+>   with fully-assembled input — so at the render boundary there are zero tool
+>   deltas to `append`. `ToolCall`/`ToolResult` are already normalized events
+>   rendered by the `EventRenderer` DISPATCH via the `ToolUse` component
+>   (`event_renderer/tool_use.rs`) as two clean independent `→`/`←` lines; there
+>   is NO fragmentation defect like Claude thinking had. Forcing the
+>   `open/append/close` trait onto a two-event PAIRING concern would leave
+>   `append` dead — a poor conceptual fit. The only thing a real "span" would
+>   add is STATEFUL call↔result correlation (in-place `→`-to-`←` transition or
+>   redundant-result suppression), which is a NEW UX feature — and an awkward
+>   one over streaming stderr, where emitted lines can't be rewritten — not a
+>   latent-defect fix. Left unbuilt on merit; revisit only if call/result
+>   correlation is explicitly wanted as a feature.
 
 ## Phase H — the provider ladder (validation milestones)
 

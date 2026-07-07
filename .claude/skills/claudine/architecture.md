@@ -16,7 +16,7 @@ claudine/lib/src/
 ├── linking/      → Cross-provider skill synchronization (4 resource types) with portability classification
 ├── mcp/          → MCP catalog, defaults, import/export, session, and injection
 ├── permissions/  → Provider-agnostic PolicyEngine for permission queries and mutation planning
-├── render/       → Functional render components (FinalMessage, AgentPrompt/SystemPrompt, EventRenderer + DISPATCH table, MetricsReport); consume data + policy (DisplayPolicy), never `match provider`
+├── render/       → Functional render components (FinalMessage, AgentPrompt/SystemPrompt, EventRenderer + DISPATCH table, MetricsReport, StreamRenderable/AssistantStream); consume data + policy (DisplayPolicy), never `match provider`
 ├── reporting/    → JSONL-to-SQLite reporting index, sync, and typed queries
 ├── services/     → Cross-provider runtime policy services (ProtectService)
 ├── stream/       → Structured stream parsing for 6 providers + summary/reporting
