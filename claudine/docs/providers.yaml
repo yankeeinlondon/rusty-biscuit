@@ -130,8 +130,10 @@ list:
       display_name: Pi
       short_name: pi
       cli_aliases: ["pi"]
-      user_dir: ""
-      repo_dir: ""
+      docs_url: https://pi.dev/docs/latest
+      sniff_binding: Pi
+      user_dir: "~/.pi"
+      repo_dir: ".pi"
       vendor: Pi
       site: https://pi.dev/
       repo: https://github.com/earendil-works/pi
