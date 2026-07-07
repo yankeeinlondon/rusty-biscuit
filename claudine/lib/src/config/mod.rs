@@ -18,8 +18,8 @@ pub use trait_def::{AgentConfigurator, ProviderHookPlan, RegistrationResult, Ski
 
 // Re-exports for convenient access and backward compatibility
 pub use claudine_config::{
-    ClaudineConfig, DefaultSounds, DetailedModelOverride, ModelOverrideMode, ProviderModelOverride,
-    RepoOverrideConfig,
+    ClaudineConfig, DefaultSounds, DetailedModelOverride, ModelOverrideEntry, ModelOverrideMode,
+    ModelOverrideValue, ProviderModelOverride, RepoOverrideConfig,
 };
 pub use messaging_block::{ClaudineMessengerConfig, MessengerProviderConfig};
 pub use tts::{Gender, TtsConfigSettings, TtsValue, VoiceSelection};

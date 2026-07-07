@@ -77,7 +77,70 @@ pub struct DetailedModelOverride {
 
     /// Model identifiers to add or replace with.
     #[serde(default)]
-    pub values: Vec<String>,
+    pub values: Vec<ModelOverrideValue>,
+}
+
+/// One entry in a [`DetailedModelOverride`]'s `values` list.
+///
+/// Two on-disk shapes are supported:
+///
+/// 1. A bare string: just the model identifier (the common shorthand).
+/// 2. An object: `{ "id": "...", "catalog_id": "..." }` where `catalog_id`
+///    is optional.
+///
+/// A `catalog_id` is an unchained-ai models-catalog identity key (e.g.
+/// `anthropic/claude-opus@4.8`). Claudine treats it as an opaque join key —
+/// its grammar is not validated here — so a user-added model can still join
+/// catalog identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ModelOverrideValue {
+    /// Bare-string shorthand carrying only the model identifier.
+    Plain(String),
+    /// Object form with an optional catalog identity join key.
+    Entry(ModelOverrideEntry),
+}
+
+/// Object form of a [`ModelOverrideValue`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelOverrideEntry {
+    /// Model identifier as passed to the provider.
+    pub id: String,
+
+    /// Optional models-catalog identity key (opaque join key).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_id: Option<String>,
+}
+
+impl ModelOverrideValue {
+    /// Return the model identifier.
+    pub fn id(&self) -> &str {
+        match self {
+            ModelOverrideValue::Plain(id) => id,
+            ModelOverrideValue::Entry(entry) => &entry.id,
+        }
+    }
+
+    /// Return the models-catalog identity key, if configured.
+    pub fn catalog_id(&self) -> Option<&str> {
+        match self {
+            ModelOverrideValue::Plain(_) => None,
+            ModelOverrideValue::Entry(entry) => entry.catalog_id.as_deref(),
+        }
+    }
+}
+
+impl From<String> for ModelOverrideValue {
+    fn from(id: String) -> Self {
+        ModelOverrideValue::Plain(id)
+    }
+}
+
+impl From<&str> for ModelOverrideValue {
+    fn from(id: &str) -> Self {
+        ModelOverrideValue::Plain(id.to_string())
+    }
 }
 
 /// Whether a [`ProviderModelOverride`] adds to or replaces the fetched
@@ -102,10 +165,14 @@ impl ProviderModelOverride {
     }
 
     /// Return the user-supplied model identifiers.
-    pub fn values(&self) -> &[String] {
+    pub fn values(&self) -> Vec<&str> {
         match self {
-            ProviderModelOverride::AddList(values) => values,
-            ProviderModelOverride::Detailed(detailed) => &detailed.values,
+            ProviderModelOverride::AddList(values) => {
+                values.iter().map(String::as_str).collect()
+            }
+            ProviderModelOverride::Detailed(detailed) => {
+                detailed.values.iter().map(ModelOverrideValue::id).collect()
+            }
         }
     }
 }
@@ -1179,7 +1246,7 @@ mod tests {
             Provider::OpenCode,
             ProviderModelOverride::Detailed(DetailedModelOverride {
                 mode: ModelOverrideMode::Replace,
-                values: vec!["openrouter/auto".to_string()],
+                values: vec!["openrouter/auto".into()],
             }),
         );
         let config = ClaudineConfig {
@@ -1224,6 +1291,84 @@ mod tests {
             result.is_err(),
             "unknown field inside detailed override should be rejected"
         );
+    }
+
+    #[test]
+    fn models_detailed_values_accept_mixed_string_and_object_entries() {
+        let json = serde_json::json!({
+            "models": {
+                "claude": {
+                    "values": [
+                        "claude-x",
+                        { "id": "claude-y", "catalog_id": "anthropic/claude-y@1.0" },
+                        { "id": "claude-z" }
+                    ]
+                }
+            }
+        });
+        let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+        let entry = config
+            .models
+            .get(&Provider::Claude)
+            .expect("claude override should be present");
+        assert_eq!(entry.values(), &["claude-x", "claude-y", "claude-z"]);
+        let ProviderModelOverride::Detailed(detailed) = entry else {
+            panic!("object form should deserialize as Detailed");
+        };
+        assert_eq!(detailed.values[0].catalog_id(), None);
+        assert_eq!(
+            detailed.values[1].catalog_id(),
+            Some("anthropic/claude-y@1.0")
+        );
+        assert_eq!(detailed.values[2].catalog_id(), None);
+    }
+
+    #[test]
+    fn models_value_object_rejects_unknown_field() {
+        let json = serde_json::json!({
+            "models": {
+                "claude": {
+                    "values": [{ "id": "claude-x", "catalogId": "typo" }]
+                }
+            }
+        });
+        let result = serde_json::from_value::<ClaudineConfig>(json);
+        assert!(
+            result.is_err(),
+            "unknown field inside a value object should be rejected"
+        );
+    }
+
+    /// A `Plain` value must serialize back to a bare string so existing
+    /// configs stay byte-compatible on rewrite.
+    #[test]
+    fn models_plain_values_round_trip_as_bare_strings() {
+        let json = serde_json::json!({
+            "models": {
+                "codex": { "mode": "replace", "values": ["a", "b"] }
+            }
+        });
+        let config: ClaudineConfig = serde_json::from_value(json.clone()).unwrap();
+        let back = serde_json::to_value(&config).unwrap();
+        assert_eq!(back["models"], json["models"]);
+    }
+
+    #[test]
+    fn models_object_values_round_trip() {
+        let json = serde_json::json!({
+            "models": {
+                "codex": {
+                    "mode": "add",
+                    "values": [
+                        { "id": "a", "catalog_id": "openai/a@1" },
+                        { "id": "b" }
+                    ]
+                }
+            }
+        });
+        let config: ClaudineConfig = serde_json::from_value(json.clone()).unwrap();
+        let back = serde_json::to_value(&config).unwrap();
+        assert_eq!(back["models"], json["models"]);
     }
 
     // -------------------------------------------------------------------------

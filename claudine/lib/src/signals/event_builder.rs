@@ -8,7 +8,8 @@
 
 use chrono::{DateTime, Utc};
 use claudine_catalog_types::{
-    DetectionRecord, ExtractionSpec, Quantity, SignalEvent, SignalKind, Unit, UsageWindow,
+    DetectionRecord, DriftObservation, ExtractionSpec, Quantity, SignalEvent, SignalKind, Unit,
+    UsageWindow,
 };
 use serde_json::Value;
 use tracing::{debug, warn};
@@ -332,6 +333,17 @@ fn build_from_fields(kind: SignalKind, f: &mut ResolvedFields) -> Option<SignalE
             from: f.take_string("from"),
             to: f.take_string("to")?,
             message: f.take_string("message"),
+        },
+        // Bespoke-only kind (wrapper catalog comparison) — no detection
+        // records exist, so this arm only keeps the match exhaustive. A
+        // single extraction path carries at most one id per list.
+        SignalKind::ModelCatalogDrift => SignalEvent::ModelCatalogDrift {
+            unexpected: f.take_string("unexpected").map(|id| vec![id]).unwrap_or_default(),
+            missing: f.take_string("missing").map(|id| vec![id]).unwrap_or_default(),
+            observed_via: match f.take_string("observed_via").as_deref() {
+                Some("resolved_model") => DriftObservation::ResolvedModel,
+                _ => DriftObservation::Listing,
+            },
         },
         SignalKind::ProviderVersion => SignalEvent::ProviderVersion {
             version: f.take_string("version")?,

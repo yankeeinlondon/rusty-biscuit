@@ -5,9 +5,10 @@
 //! against a dated snapshot — the family index vendored from the
 //! unchained-ai models-catalog artifact
 //! (design/model-catalog-boundary.md "`family_latest` semantics"). The
-//! concrete answer is meant to be stamped into session logs so reporting
-//! sees what an alias meant *that session*; the stamping itself lands
-//! with the drift-channel increment, not here.
+//! concrete answer is stamped into session logs so reporting sees what
+//! an alias meant *that session*: [`family_latest_stamp`] builds the
+//! record here; the wrapper's summary writer attaches it to the
+//! SessionEnd row.
 //!
 //! Staleness contract (ContentPolicy `on_stale: warn`): when the
 //! artifact's `generated_at` is older than
@@ -24,6 +25,7 @@ use std::sync::LazyLock;
 use chrono::{DateTime, Utc};
 pub use claudine_catalog_types::FamilyRow;
 use claudine_catalog_types::{ResolvesVia, family_key};
+use serde::{Deserialize, Serialize};
 
 use super::families_generated::{ARTIFACT_GENERATED_AT, FAMILY_INDEX};
 use crate::provider::provider_info;
@@ -126,6 +128,51 @@ pub fn resolve_alias(provider: Provider, alias: &str) -> Option<FamilyLatest> {
     resolve_alias_at(provider, alias, Utc::now())
 }
 
+/// The session-log record of one `family_latest` alias resolution,
+/// serialized into the SessionEnd summary row as `extra["family_latest"]`
+/// so reporting can see which model an alias meant *that session*.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FamilyLatestStamp {
+    /// The rolling alias the run requested (e.g. `opus`, `flash`).
+    pub alias: String,
+    /// The family's newest release identity key.
+    pub identity_key: String,
+    /// The `vendor/family` key the alias derived.
+    pub family_key: String,
+    /// The vendored artifact's `generated_at`, RFC3339 verbatim.
+    pub artifact_generated_at: String,
+    /// Whether the artifact exceeded [`FAMILY_LATEST_MAX_AGE_DAYS`] at
+    /// stamp time.
+    pub stale: bool,
+    /// Whole days past `generated_at`; only carried when `stale`.
+    pub age_days: Option<u64>,
+}
+
+/// Builds the stamp for a run whose requested model is a marked rolling
+/// alias; `None` when `requested_model` is not such an alias.
+///
+/// Ruling (Checkpoint F): the stamp records the family-latest identity
+/// key VERBATIM — including variant releases like
+/// `google/gemini-pro@3.1+preview`. `latest` names a *release*, not an
+/// offering, so no base-model election happens here; a consumer wanting
+/// a base offering strips variants itself (deferred until such a
+/// consumer exists).
+pub fn family_latest_stamp(provider: Provider, requested_model: &str) -> Option<FamilyLatestStamp> {
+    let hit = resolve_alias(provider, requested_model)?;
+    let (stale, age_days) = match hit.staleness {
+        Staleness::Fresh => (false, None),
+        Staleness::Stale { age_days } => (true, Some(age_days)),
+    };
+    Some(FamilyLatestStamp {
+        alias: requested_model.to_string(),
+        identity_key: hit.identity_key.to_string(),
+        family_key: hit.family.key.to_string(),
+        artifact_generated_at: ARTIFACT_GENERATED_AT.to_string(),
+        stale,
+        age_days,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::Days;
@@ -219,5 +266,40 @@ mod tests {
     #[test]
     fn unknown_alias_is_none() {
         assert!(resolve_alias_at(Provider::Claude, "turbo", generated_at()).is_none());
+    }
+
+    /// The stamp echoes the resolver verbatim: alias, family key, and the
+    /// vendored latest identity key, with the artifact's own timestamp.
+    #[test]
+    fn family_latest_stamp_records_resolution_verbatim() {
+        let stamp = family_latest_stamp(Provider::Claude, "opus")
+            .expect("claude `opus` is a marked rolling alias");
+        let hit = resolve_alias(Provider::Claude, "opus").unwrap();
+        assert_eq!(stamp.alias, "opus");
+        assert_eq!(stamp.identity_key, hit.identity_key);
+        assert_eq!(stamp.family_key, hit.family.key);
+        assert_eq!(stamp.artifact_generated_at, ARTIFACT_GENERATED_AT);
+        assert_eq!(stamp.stale, matches!(hit.staleness, Staleness::Stale { .. }));
+    }
+
+    #[test]
+    fn family_latest_stamp_is_none_for_non_alias_models() {
+        assert!(family_latest_stamp(Provider::Claude, "claude-sonnet-4-20250514").is_none());
+        assert!(family_latest_stamp(Provider::Claude, "turbo").is_none());
+    }
+
+    #[test]
+    fn family_latest_stamp_serde_round_trips() {
+        let stamp = FamilyLatestStamp {
+            alias: "flash".to_string(),
+            identity_key: "google/gemini-flash@3+preview".to_string(),
+            family_key: "google/gemini-flash".to_string(),
+            artifact_generated_at: "2026-07-06T22:44:37.286219+00:00".to_string(),
+            stale: true,
+            age_days: Some(42),
+        };
+        let json = serde_json::to_string(&stamp).unwrap();
+        let back: FamilyLatestStamp = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, stamp);
     }
 }

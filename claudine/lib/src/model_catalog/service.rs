@@ -1,7 +1,11 @@
 //! Model catalog service.
 //!
 //! The service answers: "Is this model valid for this provider right now?"
-//! It combines cached catalogs, user overrides, and dynamic sources.
+//! Validation is baseline-fed: the generated expected-offering records
+//! (ids plus aliases) merged with user overrides, plus offering-source
+//! namespace prefixes for local runners. Dynamic listings are still
+//! fetched and cached, but only as drift-channel input — they never feed
+//! validation.
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -14,8 +18,7 @@ use tokio::sync::OnceCell;
 use super::cache::{ModelCache, ModelCacheEntry};
 use super::config::merge_overrides;
 use super::provider_sources::{
-    CatalogFetchError, fetch_provider_catalog, fetch_shell_command_models,
-    static_catalog_for_provider,
+    CatalogFetchError, expected_baseline, fetch_provider_catalog, fetch_shell_command_models,
 };
 use crate::config::claudine_config::{ClaudineConfig, ProviderModelOverride};
 use crate::provider::{ModelCatalogSource, Provider, provider_info};
@@ -58,8 +61,9 @@ fn default_shell_command_fetcher() -> ShellCommandFetcher {
 /// Unified model catalog service.
 ///
 /// Created from user config overrides and an optional cache directory.
-/// Call [`refresh`](Self::refresh) to populate/update cached catalogs
-/// before validation.
+/// Validation ([`is_valid`](Self::is_valid)) works immediately from the
+/// compiled expected-offering baseline; refreshing only maintains the
+/// on-disk listing cache that feeds the drift channel.
 #[derive(Clone)]
 pub struct ModelCatalogService {
     cache: ModelCache,
@@ -164,9 +168,10 @@ impl ModelCatalogService {
 
     /// Best-effort blocking refresh of all supported providers.
     ///
-    /// Never panics; failures are silently ignored so that stale cache or
-    /// static fallback remains available. Runs in a dedicated thread so this
-    /// works even when called from within an existing Tokio runtime.
+    /// Never panics; failures are silently ignored — validation is
+    /// baseline-fed, so a failed listing refresh only means a staler
+    /// drift-channel cache. Runs in a dedicated thread so this works
+    /// even when called from within an existing Tokio runtime.
     pub fn refresh_blocking(&self) {
         let self_clone = self.clone();
         let _ = std::thread::spawn(move || {
@@ -184,12 +189,12 @@ impl ModelCatalogService {
     ///
     /// Performs at most one subprocess per `ShellCommand` source per
     /// service instance: a repeat refresh of the same command reuses the
-    /// memoized result. Static-source providers write the static list to
-    /// cache without spawning any subprocess; providers without a source
-    /// are no-ops.
+    /// memoized result. No-source providers write an empty listing to
+    /// cache without spawning any subprocess.
     ///
-    /// Never panics; failures are silently ignored so stale cache or
-    /// static fallback remains available.
+    /// Never panics; failures are silently ignored — validation is
+    /// baseline-fed, so a failed refresh only leaves the drift-channel
+    /// listing cache stale.
     ///
     /// Fast-paths a no-op when the process-scoped user-interrupt flag has
     /// already been raised, so SIGINT during the prep window does not
@@ -212,24 +217,19 @@ impl ModelCatalogService {
 
     /// Background refresh for a single provider (W3).
     ///
-    /// Returns immediately, leaving the existing on-disk cache (if any)
-    /// in place for the current invocation. The refresh runs in a
-    /// detached worker thread and updates the on-disk cache for the
-    /// *next* invocation.
+    /// Returns immediately. The refresh runs in a detached worker thread
+    /// and updates the on-disk listing cache for later invocations.
+    /// Validation never reads that cache ([`catalog_for`](Self::catalog_for)
+    /// is baseline-fed), so there is no cold-start reason to block on the
+    /// subprocess: a missing first-run cache just means the drift
+    /// comparison waits one invocation.
     ///
-    /// ## Cold start
+    /// ## No-source providers
     ///
-    /// When no cache exists yet for a dynamic-source provider (true
-    /// first-run), this falls back to [`refresh_provider_blocking`](Self::refresh_provider_blocking) so
-    /// frontmatter `model:` validation has data to work with rather than
-    /// silently flagging a brand-new model as unknown.
-    ///
-    /// ## Static and no-source providers
-    ///
-    /// Static-source providers (e.g. Claude, Codex, Qwen) and no-source
-    /// providers are essentially free to refresh, so
-    /// this delegates to [`refresh_provider_blocking`](Self::refresh_provider_blocking) which writes the
-    /// static list to cache without spawning any subprocess.
+    /// No-source providers are essentially free to refresh, so this
+    /// delegates to [`refresh_provider_blocking`](Self::refresh_provider_blocking),
+    /// which writes the empty listing to cache without spawning any
+    /// subprocess.
     ///
     /// ## Escape hatch
     ///
@@ -246,25 +246,17 @@ impl ModelCatalogService {
 
         let info = provider_info(provider);
         match info.model_catalog_source {
-            ModelCatalogSource::None | ModelCatalogSource::Static => {
-                // Cheap: no subprocess spawn. Run inline so callers
-                // observe the static catalog immediately.
+            ModelCatalogSource::None => {
+                // Cheap: no subprocess spawn. Run inline so the listing
+                // cache is written before we return.
                 self.refresh_provider_blocking(provider);
                 return;
             }
             ModelCatalogSource::ShellCommand { .. } => {}
         }
 
-        // Cold-start fallback: no cache exists yet. We must block so the
-        // current run has data; otherwise frontmatter `model:` validation
-        // would silently flag a brand-new model as unknown.
-        if self.cache.read(provider).is_none() {
-            self.refresh_provider_blocking(provider);
-            return;
-        }
-
-        // Detached background refresh. The next invocation reads the
-        // refreshed cache; the current one keeps using the stale entry.
+        // Detached background refresh. A later invocation reads the
+        // refreshed cache; the current one never needs it.
         // Cache write uses an atomic temp+rename so a process exiting
         // mid-refresh leaves the previous cache intact.
         let self_clone = self.clone();
@@ -278,10 +270,10 @@ impl ModelCatalogService {
         });
     }
 
-    /// Refresh the catalog for a single provider.
+    /// Refresh the listing cache for a single provider.
     ///
-    /// Attempts to fetch the latest catalog. On failure, the existing cache
-    /// is left untouched (stale-cache fallback).
+    /// Attempts to fetch the latest listing. On failure, the existing
+    /// cache entry is left untouched.
     pub async fn refresh(&self, provider: Provider) -> Result<Vec<String>, CatalogFetchError> {
         let fetched = fetch_provider_catalog(provider).await?;
         let entry = ModelCacheEntry {
@@ -294,7 +286,8 @@ impl ModelCatalogService {
         Ok(fetched)
     }
 
-    /// Refresh the catalog for a single provider with in-process dedup.
+    /// Refresh the listing cache for a single provider with in-process
+    /// dedup.
     ///
     /// This is the async counterpart of [`refresh_provider_blocking`](Self::refresh_provider_blocking). A
     /// `ShellCommand` source's subprocess result is memoized per command,
@@ -306,7 +299,6 @@ impl ModelCatalogService {
     ) -> Result<Vec<String>, CatalogFetchError> {
         let fetched = match provider_info(provider).model_catalog_source {
             ModelCatalogSource::None => Vec::new(),
-            ModelCatalogSource::Static => static_catalog_for_provider(provider),
             ModelCatalogSource::ShellCommand { program, args } => {
                 self.fetch_shell_command_with_dedup(program, args).await?
             }
@@ -389,8 +381,8 @@ impl ModelCatalogService {
     ///
     /// Uses [`refresh_provider`](Self::refresh_provider) internally so
     /// `ShellCommand` subprocess results are memoized per command.
-    /// Static-source providers (Claude, Codex, Qwen)
-    /// write their static lists to cache without spawning any subprocess.
+    /// No-source providers write empty listings to cache without
+    /// spawning any subprocess.
     pub async fn refresh_all(
         &self,
     ) -> Vec<(
@@ -412,25 +404,70 @@ impl ModelCatalogService {
 
     /// Return the effective catalog for a provider.
     ///
-    /// Merges cached data (or static source) with user overrides.
+    /// The base is the generated expected-offering baseline
+    /// ([`expected_baseline`]: ids plus rolling aliases); user overrides
+    /// merge on top (additive or replace). The on-disk listing cache
+    /// never feeds this — the dynamic listing is drift-channel input
+    /// only.
     pub fn catalog_for(&self, provider: Provider) -> Vec<String> {
-        let base = match provider_info(provider).model_catalog_source {
-            ModelCatalogSource::Static => static_catalog_for_provider(provider),
-            ModelCatalogSource::None | ModelCatalogSource::ShellCommand { .. } => {
-                match self.cache.read(provider) {
-                    Some(entry) => entry.models,
-                    None => static_catalog_for_provider(provider),
-                }
-            }
-        };
+        let base = expected_baseline(provider);
         let override_entry = self.overrides.get(&provider);
         merge_overrides(provider, &base, override_entry)
     }
 
-    /// Check whether a model ID is present in the effective catalog.
+    /// Check whether a model ID is acceptable for a provider.
+    ///
+    /// Two-tier acceptance:
+    ///
+    /// 1. membership in [`catalog_for`](Self::catalog_for)
+    ///    (case-insensitive) — expected-offering ids, their aliases, and
+    ///    user overrides;
+    /// 2. an offering-source namespace match: ids like `ollama/llama3.3`
+    ///    ride a local-runner namespace whose model population cannot be
+    ///    enumerated statically, so any `prefix/…` id under a declared
+    ///    `offering_sources` prefix is accepted.
     pub fn is_valid(&self, provider: Provider, model_id: &str) -> bool {
         let catalog = self.catalog_for(provider);
         catalog.iter().any(|m| m.eq_ignore_ascii_case(model_id))
+            || matches_offering_source(provider, model_id)
+    }
+
+    /// Catalog identity of a configured user override for `model_id`.
+    ///
+    /// Returns the `catalog_id` join key of an override value whose id
+    /// matches `model_id` case-insensitively, if the user configured one.
+    /// This is the identity-join hook for user-added models
+    /// (model-catalog-boundary design, runtime migration step 3): overrides
+    /// win the local merge, and an optional `catalog_id` lets such a model
+    /// still join models-catalog identity. No other consumer exists yet.
+    ///
+    /// Only the object form of an override value carries a `catalog_id`;
+    /// bare-string values (and the bare-list shorthand) yield `None`.
+    pub fn override_catalog_id(&self, provider: Provider, model_id: &str) -> Option<String> {
+        match self.overrides.get(&provider)? {
+            ProviderModelOverride::AddList(_) => None,
+            ProviderModelOverride::Detailed(detailed) => detailed
+                .values
+                .iter()
+                .find_map(|value| {
+                    if value.id().eq_ignore_ascii_case(model_id) {
+                        value.catalog_id()
+                    } else {
+                        None
+                    }
+                })
+                .map(str::to_string),
+        }
+    }
+
+    /// Models from the on-disk listing cache for a provider, if any.
+    ///
+    /// The cached dynamic listing does not feed validation; it is the
+    /// input the drift channel diffs against
+    /// [`expected_ids`](super::expected_ids). `None` when no cache entry
+    /// exists yet.
+    pub fn cached_listing(&self, provider: Provider) -> Option<Vec<String>> {
+        self.cache.read(provider).map(|entry| entry.models)
     }
 
     /// Return the set of model IDs for a provider.
@@ -443,6 +480,22 @@ impl ModelCatalogService {
         let set = self.model_set(provider);
         candidates.iter().find(|c| set.contains(*c)).cloned()
     }
+}
+
+/// Whether `model_id` rides one of the provider's offering-source
+/// namespaces (`<prefix>/<model>`, e.g. `ollama/llama3.3`).
+///
+/// The `/` separator is required: `offering_sources` prefixes are bare
+/// runner names (`ollama`), and matching without the separator would
+/// accept unrelated ids like `ollamafoo`. Prefix comparison is
+/// case-insensitive, matching catalog membership.
+fn matches_offering_source(provider: Provider, model_id: &str) -> bool {
+    provider_info(provider).offering_sources.iter().any(|source| {
+        model_id
+            .get(..source.prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(source.prefix))
+            && model_id[source.prefix.len()..].starts_with('/')
+    })
 }
 
 #[cfg(test)]
@@ -462,25 +515,58 @@ mod tests {
     }
 
     #[test]
-    fn service_validates_static_model() {
+    fn service_validates_baseline_model() {
         let service = ModelCatalogService::new();
         assert!(service.is_valid(Provider::Codex, "gpt-5.5"));
         assert!(service.is_valid(Provider::Claude, "claude-opus-4-8"));
     }
 
+    /// Aliases from the expected-offering records (`opus`, `flash`) are
+    /// part of the validation baseline: users author them in frontmatter
+    /// `model:` hints.
     #[test]
-    fn static_source_ignores_stale_cache() {
+    fn service_validates_offering_alias() {
+        let service = ModelCatalogService::new();
+        assert!(service.is_valid(Provider::Claude, "opus"));
+        assert!(service.is_valid(Provider::Gemini, "flash"));
+    }
+
+    /// Goose had no compiled model list before the baseline flip; its
+    /// expected offerings made it validatable.
+    #[test]
+    fn service_validates_goose_from_expected_offerings() {
+        let service = ModelCatalogService::new();
+        assert!(service.is_valid(Provider::Goose, "gpt-5"));
+    }
+
+    /// Ids under a declared offering-source namespace (local runners)
+    /// pass validation even though their model population cannot be
+    /// enumerated statically. The `/` separator is mandatory.
+    #[test]
+    fn service_accepts_offering_source_prefix() {
+        let service = ModelCatalogService::new();
+        assert!(service.is_valid(Provider::OpenCode, "ollama/llama3.3"));
+        assert!(service.is_valid(Provider::OpenCode, "OLLAMA/llama3.3"));
+        assert!(!service.is_valid(Provider::OpenCode, "ollamallama3.3"));
+        assert!(!service.is_valid(Provider::OpenCode, "no-such-runner/model"));
+    }
+
+    /// The on-disk listing cache never feeds validation — for any
+    /// provider, no-source or shell-sourced alike.
+    #[test]
+    fn validation_ignores_listing_cache() {
         let tmp = tempfile::tempdir().unwrap();
         let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
-        let stale = ModelCacheEntry {
-            provider: Provider::Codex,
-            models: vec!["old-codex-model".into()],
-            fetched_at: chrono::Utc::now(),
-        };
-        service.cache.write(&stale).unwrap();
-
+        for provider in [Provider::Codex, Provider::OpenCode] {
+            let stale = ModelCacheEntry {
+                provider,
+                models: vec!["cached-only-model".into()],
+                fetched_at: chrono::Utc::now(),
+            };
+            service.cache.write(&stale).unwrap();
+            assert!(!service.is_valid(provider, "cached-only-model"));
+        }
         assert!(service.is_valid(Provider::Codex, "gpt-5.5"));
-        assert!(!service.is_valid(Provider::Codex, "old-codex-model"));
     }
 
     #[test]
@@ -527,6 +613,59 @@ mod tests {
     }
 
     #[test]
+    fn override_catalog_id_hit_miss_and_case_insensitive() {
+        use crate::config::claudine_config::{ModelOverrideEntry, ModelOverrideValue};
+
+        let mut overrides = HashMap::new();
+        overrides.insert(
+            Provider::Codex,
+            ProviderModelOverride::Detailed(DetailedModelOverride {
+                mode: ModelOverrideMode::Add,
+                values: vec![
+                    "plain-model".into(),
+                    ModelOverrideValue::Entry(ModelOverrideEntry {
+                        id: "joined-model".into(),
+                        catalog_id: Some("openai/joined-model@1.0".into()),
+                    }),
+                ],
+            }),
+        );
+        overrides.insert(
+            Provider::Gemini,
+            ProviderModelOverride::AddList(vec!["list-model".into()]),
+        );
+        let service = ModelCatalogService::with_overrides(overrides);
+
+        // Hit, including case-insensitive id match.
+        assert_eq!(
+            service.override_catalog_id(Provider::Codex, "joined-model"),
+            Some("openai/joined-model@1.0".to_string())
+        );
+        assert_eq!(
+            service.override_catalog_id(Provider::Codex, "JOINED-MODEL"),
+            Some("openai/joined-model@1.0".to_string())
+        );
+
+        // Miss: plain value, unknown id, bare-list shorthand, no override.
+        assert_eq!(
+            service.override_catalog_id(Provider::Codex, "plain-model"),
+            None
+        );
+        assert_eq!(
+            service.override_catalog_id(Provider::Codex, "not-configured"),
+            None
+        );
+        assert_eq!(
+            service.override_catalog_id(Provider::Gemini, "list-model"),
+            None
+        );
+        assert_eq!(
+            service.override_catalog_id(Provider::Claude, "anything"),
+            None
+        );
+    }
+
+    #[test]
     fn service_first_valid_finds_match() {
         let service = ModelCatalogService::new();
         let candidates = vec!["not-real".into(), "gpt-5.5".into(), "gpt-5.4".into()];
@@ -544,8 +683,9 @@ mod tests {
     }
 
     #[test]
-    fn gemini_static_catalog_is_research_fed() {
-        // Research-fed as of generator v1 (previously empty/None-sourced).
+    fn gemini_catalog_is_research_fed() {
+        // Expected offerings are research-fed for all providers
+        // (previously Gemini was empty/None-sourced).
         let service = ModelCatalogService::new();
         assert!(!service.catalog_for(Provider::Gemini).is_empty());
         assert!(service.is_valid(Provider::Gemini, "gemini-2.5-pro"));
@@ -569,43 +709,34 @@ mod tests {
     }
 
     #[test]
-    fn refresh_provider_blocking_static_no_subprocess() {
-        // Static-source providers (Claude, Codex) must never spawn a
-        // shell-command subprocess.
-        let tmp = tempfile::tempdir().unwrap();
-        let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
-        service.refresh_provider_blocking(Provider::Claude);
-        service.refresh_provider_blocking(Provider::Codex);
-        assert_eq!(service.shell_command_fetch_attempts(), 0);
-    }
-
-    #[test]
     fn refresh_provider_blocking_no_shell_source_no_subprocess() {
         // Providers without a ShellCommand source must never spawn a
         // subprocess.
         let tmp = tempfile::tempdir().unwrap();
         let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
+        service.refresh_provider_blocking(Provider::Claude);
+        service.refresh_provider_blocking(Provider::Codex);
         service.refresh_provider_blocking(Provider::Gemini);
         service.refresh_provider_blocking(Provider::Goose);
         service.refresh_provider_blocking(Provider::KimiCode);
+        service.refresh_provider_blocking(Provider::QwenCode);
         assert_eq!(service.shell_command_fetch_attempts(), 0);
     }
 
-    /// Qwen left shell sourcing (2026-07-05 ruling): it is Static now,
-    /// so a refresh writes its research-fed list without any subprocess.
+    /// A `None`-sourced refresh writes an empty listing to the
+    /// drift-channel cache — there is no dynamic listing to record, and
+    /// validation is baseline-fed regardless.
     #[test]
-    fn refresh_provider_blocking_qwen_is_static_no_subprocess() {
+    fn refresh_provider_blocking_none_source_writes_empty_listing() {
         let tmp = tempfile::tempdir().unwrap();
         let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
 
         service.refresh_provider_blocking(Provider::QwenCode);
         assert_eq!(service.shell_command_fetch_attempts(), 0);
 
-        let qwen = service.catalog_for(Provider::QwenCode);
-        assert!(
-            qwen.contains(&"qwen3-coder-plus".into()),
-            "expected research-fed static model in {qwen:?}"
-        );
+        let listing = service.cached_listing(Provider::QwenCode).unwrap();
+        assert!(listing.is_empty(), "expected empty listing, got {listing:?}");
+        assert!(service.is_valid(Provider::QwenCode, "qwen3-coder-plus"));
     }
 
     #[test]
@@ -631,10 +762,10 @@ mod tests {
     }
 
     #[test]
-    fn refresh_provider_blocking_failure_falls_back_to_static() {
-        // Even if the dynamic source has been primed with a failure,
-        // catalog_for() must still return the static catalog when one
-        // exists. Refresh failures must not corrupt later validation.
+    fn refresh_provider_blocking_failure_does_not_affect_validation() {
+        // Validation is baseline-fed, so a failed listing fetch must
+        // leave it fully intact — for the failing provider itself and
+        // for every other provider.
         let tmp = tempfile::tempdir().unwrap();
         let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
         let (program, args) = opencode_command();
@@ -645,17 +776,17 @@ mod tests {
         );
         service.refresh_provider_blocking(Provider::OpenCode);
 
-        // OpenCode has no static catalog, but is_valid for Claude (a
-        // static-source provider) must still work because refreshing
-        // OpenCode never touches Claude state.
+        assert!(service.is_valid(Provider::OpenCode, "opencode/claude-opus-4-8"));
         assert!(service.is_valid(Provider::Claude, "claude-opus-4-8"));
+        // The failed fetch wrote nothing to the listing cache.
+        assert!(service.cached_listing(Provider::OpenCode).is_none());
     }
 
     #[test]
-    fn refresh_all_uses_primed_shell_result_and_static_qwen() {
+    fn refresh_all_uses_primed_shell_result() {
         // refresh_all() must not spawn any subprocess when OpenCode's
-        // command result is primed, and Qwen (Static since the
-        // 2026-07-05 ruling) refreshes from its compiled list.
+        // command result is primed; no-source providers refresh for
+        // free.
         let tmp = tempfile::tempdir().unwrap();
         let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
         let (program, args) = opencode_command();
@@ -677,12 +808,17 @@ mod tests {
             "primed dedup must short-circuit subprocess attempts in refresh_all"
         );
 
-        // OpenCode reflects the primed shell result; Qwen reflects its
-        // research-fed static list, not the OpenCode output.
+        // The primed shell result lands in the drift-channel listing
+        // cache only; validation stays on the expected baseline, so the
+        // listing-only ids are NOT valid.
+        let listing = service.cached_listing(Provider::OpenCode).unwrap();
+        assert!(listing.contains(&"qwen-2.5-coder".into()));
+        assert!(listing.contains(&"gpt-5".into()));
         let opencode = service.catalog_for(Provider::OpenCode);
-        assert!(opencode.contains(&"qwen-2.5-coder".into()));
-        assert!(opencode.contains(&"gpt-5".into()));
+        assert!(!opencode.contains(&"qwen-2.5-coder".into()));
+        assert!(opencode.contains(&"opencode/claude-opus-4-8".into()));
 
+        // Qwen's baseline is unaffected by the OpenCode output.
         let qwen = service.catalog_for(Provider::QwenCode);
         assert!(qwen.contains(&"qwen3-coder-plus".into()));
         assert!(!qwen.contains(&"gpt-5".into()));
@@ -818,50 +954,61 @@ mod tests {
         parked.notify_waiters();
     }
 
-    /// W3: a true cold start (no cache) must fall back to blocking
-    /// behaviour so frontmatter `model:` validation has data.
+    /// Cold start (no cache) no longer blocks: validation is
+    /// baseline-fed, so the subprocess result is never needed by the
+    /// current run and the refresh always detaches to the background.
+    /// Proven with a fetcher that parks indefinitely — a blocking
+    /// fallback would exceed the time budget.
     #[test]
     #[serial_test::serial]
-    fn refresh_provider_async_blocks_when_no_cache() {
-        use crate::model_catalog::provider_sources::CatalogFetchError;
+    fn refresh_provider_async_backgrounds_even_without_cache() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        use tokio::sync::Notify;
 
         let tmp = tempfile::tempdir().unwrap();
-        let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
+        let mut service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
 
-        // Seed only the in-memory dedup cell so OpenCode "fetch" returns
-        // immediately without spawning the real subprocess. The disk
-        // cache remains empty, exercising the cold-start fallback.
-        let (program, args) = opencode_command();
-        service.prime_shell_command_dedup(
-            program,
-            args,
-            Err(CatalogFetchError::CliNotFound("opencode".into())),
-        );
-
-        // Pre-condition: no on-disk cache.
+        // Pre-condition: no on-disk cache (the old contract blocked here).
         assert!(service.cache.read(Provider::OpenCode).is_none());
 
-        // Cold-start path is synchronous: the call must block on
-        // `refresh_provider_blocking` even though we asked for async.
-        service.refresh_provider_async(Provider::OpenCode);
-        // The fetcher returned an error so no entry was written, but the
-        // call returned. (If the fallback hadn't been blocking, the test
-        // would still race, but we'd lose the cold-cache contract.)
+        let parked = Arc::new(Notify::new());
+        let parked_for_fetcher = parked.clone();
+        service.set_shell_command_fetcher(Arc::new(move |_program, _args| {
+            let parked = parked_for_fetcher.clone();
+            Box::pin(async move {
+                parked.notified().await;
+                Ok(Vec::new())
+            })
+        }));
+
+        let svc = service.clone();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            svc.refresh_provider_async(Provider::OpenCode);
+            let _ = tx.send(());
+        });
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("refresh_provider_async must not block on a cold cache");
+
+        // Release the parked fetcher so the detached background thread
+        // can wind down without leaking the runtime.
+        parked.notify_waiters();
     }
 
-    /// W3: static-source providers always run inline because the static
-    /// catalog list is in-process and free.
+    /// W3: no-source providers always run inline because writing the
+    /// empty listing is in-process and free.
     #[test]
     #[serial_test::serial]
-    fn refresh_provider_async_static_runs_inline() {
+    fn refresh_provider_async_none_source_runs_inline() {
         let tmp = tempfile::tempdir().unwrap();
         let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
 
         service.refresh_provider_async(Provider::Claude);
-        // Static catalog must have been written to cache by the inline
-        // refresh, so a follow-up read returns the static list.
+        // The inline refresh wrote a (necessarily empty) listing cache
+        // entry before returning.
         let read = service.cache.read(Provider::Claude).unwrap();
-        assert!(!read.models.is_empty());
+        assert!(read.models.is_empty());
         assert_eq!(service.shell_command_fetch_attempts(), 0);
     }
 
@@ -908,10 +1055,10 @@ mod tests {
     }
 
     #[test]
-    fn refresh_all_static_providers_no_subprocess() {
-        // refresh_all() must not spawn any subprocess for static-source
-        // providers (Claude, Codex) and should still write their catalogs
-        // to cache correctly.
+    fn refresh_all_none_source_providers_no_subprocess() {
+        // refresh_all() must not spawn any subprocess for no-source
+        // providers (Claude, Codex) and should still write their (empty)
+        // listing cache entries.
         let tmp = tempfile::tempdir().unwrap();
         let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
         // Prime the dedup cache so the OpenCode refresh does not reach
@@ -927,10 +1074,13 @@ mod tests {
         assert_eq!(
             service.shell_command_fetch_attempts(),
             0,
-            "static providers must not trigger a shell-command subprocess"
+            "no-source providers must not trigger a shell-command subprocess"
         );
 
-        // Static catalogs should still be available via cache
+        // Listing cache entries were written, and baseline validation is
+        // unaffected either way.
+        assert!(service.cached_listing(Provider::Claude).is_some());
+        assert!(service.cached_listing(Provider::Codex).is_some());
         assert!(service.is_valid(Provider::Claude, "claude-opus-4-8"));
         assert!(service.is_valid(Provider::Codex, "gpt-5.5"));
     }

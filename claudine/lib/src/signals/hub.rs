@@ -15,6 +15,7 @@ use super::bespoke::BespokeChain;
 use super::engine::SignalEngine;
 use super::harvest::{HarvestBatch, HarvestBuffer};
 use super::sink::{ObservedSignal, SignalSink};
+use crate::provider_id::{PROVIDERS_DISPLAY_ORDER, Provider};
 
 /// Thread-safe fan-in of declarative and bespoke signal producers for one
 /// wrapped run.
@@ -139,6 +140,37 @@ impl SignalHub {
         self.lock().sink.emit(event, source);
     }
 
+    /// The `resolved` ids of every [`SignalEvent::ModelResolved`]
+    /// currently in the sink, without draining.
+    ///
+    /// Exists so the wrapper can run catalog-drift checks against
+    /// stream-observed resolution before the end-of-run [`Self::drain`].
+    pub fn resolved_models(&self) -> Vec<String> {
+        self.lock()
+            .sink
+            .signals()
+            .iter()
+            .filter_map(|signal| match &signal.event {
+                SignalEvent::ModelResolved { resolved, .. } => Some(resolved.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The run's provider attribution, recovered from the compiled
+    /// table's slug.
+    ///
+    /// `None` on table-less hubs and on dormant roster-only slugs
+    /// (kilo, pi) that have no [`Provider`] variant. Exists so
+    /// end-of-run wrapper checks (catalog drift) can key baseline
+    /// lookups without threading a `Provider` through the spawn paths.
+    pub fn provider(&self) -> Option<Provider> {
+        let slug = self.lock().slug?;
+        PROVIDERS_DISPLAY_ORDER
+            .into_iter()
+            .find(|provider| provider.as_slug() == slug)
+    }
+
     /// Take every signal observed so far, in first-seen order, leaving the
     /// sink empty. The end-of-run handoff into `ProcessResult.signals` —
     /// `&self` (not consuming) because producer threads may still hold
@@ -238,6 +270,37 @@ mod tests {
         assert_eq!(signals.len(), 1);
         assert_eq!(signals[0].event.kind(), SignalKind::RateLimited);
         assert_eq!(signals[0].source, SignalSource::Stream);
+    }
+
+    #[test]
+    fn resolved_models_reads_without_draining() {
+        let hub = SignalHub::without_table();
+        hub.emit_bespoke(
+            SignalEvent::ModelResolved {
+                requested: Some("opus".into()),
+                resolved: "claude-opus-4-8".into(),
+            },
+            SignalSource::Stream,
+        );
+        hub.emit_bespoke(rate_limited("throttle"), SignalSource::Stream);
+
+        assert_eq!(hub.resolved_models(), vec!["claude-opus-4-8".to_string()]);
+        // Non-destructive: the drain that follows still sees both signals.
+        assert_eq!(hub.drain().len(), 2);
+        assert!(hub.resolved_models().is_empty());
+    }
+
+    #[test]
+    fn provider_recovers_wired_attribution_only() {
+        let wired = SignalHub::new(detection_table("claude").expect("claude table"));
+        assert_eq!(wired.provider(), Some(crate::provider_id::Provider::Claude));
+
+        assert_eq!(SignalHub::without_table().provider(), None);
+
+        // Dormant roster-only slugs compile a table but have no Provider
+        // variant to recover.
+        let dormant = SignalHub::new(detection_table("kilo").expect("kilo table"));
+        assert_eq!(dormant.provider(), None);
     }
 
     #[test]

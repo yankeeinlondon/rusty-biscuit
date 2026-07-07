@@ -1,24 +1,54 @@
-//! Provider-specific model catalog sources.
+//! Provider validation baselines and listing sources.
 //!
-//! Most providers have static, research-fed model lists compiled into the
-//! generated catalog. OpenCode sources dynamically by shelling out to its
-//! own CLI (`ShellCommand`). Providers without a source return an empty
-//! list and rely entirely on user overrides.
+//! The validation baseline for every provider is the generated
+//! expected-offering records ([`expected_baseline`]: ids plus rolling
+//! aliases). Listing sources (`ModelCatalogSource`) describe how a
+//! provider's live model listing is fetched — a shell command like
+//! `opencode models`, or nothing at all — but a fetched listing only
+//! feeds the on-disk drift-channel cache, never validation.
 
+use std::collections::HashSet;
 use std::process::Stdio;
 
 use tokio::process::Command;
 
 use crate::provider::{ModelCatalogSource, Provider, provider_info};
-/// Return a static catalog for providers with known model enums.
+
+/// Expected-offering ids for a provider — the drift-comparison baseline.
 ///
-/// These lists are derived from the generated enums in `unchained-ai/lib`.
-pub fn static_catalog_for_provider(provider: Provider) -> Vec<String> {
+/// Exactly the `id` values of the provider's generated
+/// `expected_offerings`, in generated order. The drift channel compares
+/// the cached dynamic listing against this set; validation uses
+/// [`expected_baseline`] (which adds aliases) instead.
+pub fn expected_ids(provider: Provider) -> Vec<String> {
     provider_info(provider)
-        .static_models
+        .expected_offerings
         .iter()
-        .map(|s| s.to_string())
+        .map(|offering| offering.id.to_string())
         .collect()
+}
+
+/// Validation baseline for a provider: expected-offering ids plus their
+/// rolling aliases.
+///
+/// Users author aliases like `opus` in frontmatter `model:` hints, so
+/// validation must accept them alongside exact ids. Deduplicated; all
+/// ids come before any alias.
+pub fn expected_baseline(provider: Provider) -> Vec<String> {
+    let offerings = provider_info(provider).expected_offerings;
+    let mut seen = HashSet::new();
+    let mut baseline = Vec::new();
+    for offering in offerings {
+        if seen.insert(offering.id) {
+            baseline.push(offering.id.to_string());
+        }
+    }
+    for alias in offerings.iter().filter_map(|offering| offering.alias) {
+        if seen.insert(alias) {
+            baseline.push(alias.to_string());
+        }
+    }
+    baseline
 }
 
 /// Fetch a dynamic catalog for the given provider.
@@ -29,7 +59,6 @@ pub fn static_catalog_for_provider(provider: Provider) -> Vec<String> {
 pub async fn fetch_provider_catalog(provider: Provider) -> Result<Vec<String>, CatalogFetchError> {
     match provider_info(provider).model_catalog_source {
         ModelCatalogSource::None => Ok(Vec::new()),
-        ModelCatalogSource::Static => Ok(static_catalog_for_provider(provider)),
         ModelCatalogSource::ShellCommand { program, args } => {
             fetch_shell_command_models(program, args).await
         }
@@ -67,40 +96,6 @@ impl std::fmt::Display for CatalogFetchError {
 }
 
 impl std::error::Error for CatalogFetchError {}
-
-// ============================================================================
-// Static sources
-// ============================================================================
-
-#[allow(dead_code)]
-fn openai_models() -> Vec<String> {
-    vec![
-        "gpt-3.5-turbo".into(),
-        "gpt-5-search-api".into(),
-        "gpt-5.1-codex".into(),
-        "gpt-5.2".into(),
-        "gpt-5.2-chat-latest".into(),
-        "o3".into(),
-        "o3-mini".into(),
-        "o3-mini-2025-01-31".into(),
-        "o4-mini".into(),
-    ]
-}
-
-#[allow(dead_code)]
-fn anthropic_models() -> Vec<String> {
-    vec![
-        "claude-3-5-haiku-20241022".into(),
-        "claude-3-7-sonnet-20250219".into(),
-        "claude-3-haiku-20240307".into(),
-        "claude-haiku-4-5-20251001".into(),
-        "claude-opus-4-1-20250805".into(),
-        "claude-opus-4-20250514".into(),
-        "claude-opus-4-5-20251101".into(),
-        "claude-sonnet-4-20250514".into(),
-        "claude-sonnet-4-5-20250929".into(),
-    ]
-}
 
 // ============================================================================
 // Dynamic sources
@@ -242,43 +237,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn static_catalog_codex_contains_known_models() {
-        let models = static_catalog_for_provider(Provider::Codex);
+    fn expected_ids_are_offering_ids_only() {
+        let ids = expected_ids(Provider::Claude);
         assert!(
-            models.contains(&"gpt-5.5".to_string()),
-            "expected gpt-5.5 in {models:?}"
+            ids.contains(&"claude-opus-4-8".to_string()),
+            "expected claude-opus-4-8 in {ids:?}"
         );
-        assert!(models.contains(&"gpt-5.4-mini".to_string()));
-    }
-
-    #[test]
-    fn static_catalog_claude_contains_known_models() {
-        let models = static_catalog_for_provider(Provider::Claude);
         assert!(
-            models.contains(&"claude-opus-4-8".to_string()),
-            "expected claude-opus-4-8 in {models:?}"
+            !ids.contains(&"opus".to_string()),
+            "aliases must not appear in the drift baseline: {ids:?}"
         );
     }
 
-    /// Gemini's static catalog is research-fed as of generator v1 (the
-    /// agent-models `default_models` list; previously empty).
     #[test]
-    fn static_catalog_gemini_contains_known_models() {
-        let models = static_catalog_for_provider(Provider::Gemini);
-        assert!(
-            models.contains(&"gemini-2.5-pro".to_string()),
-            "expected gemini-2.5-pro in {models:?}"
-        );
+    fn expected_baseline_appends_aliases_after_ids() {
+        let baseline = expected_baseline(Provider::Claude);
+        let id_pos = baseline.iter().position(|m| m == "claude-opus-4-8");
+        let alias_pos = baseline.iter().position(|m| m == "opus");
+        assert!(id_pos.is_some(), "id missing from {baseline:?}");
+        assert!(alias_pos.is_some(), "alias missing from {baseline:?}");
+        assert!(id_pos < alias_pos, "ids must precede aliases");
     }
 
-    /// Qwen left shell sourcing (2026-07-05 ruling): its research-fed
-    /// `static_models` list is the catalog.
+    /// Gemini's `auto` offering carries `auto` as its own alias, and two
+    /// offerings share the `flash` alias — both collapse to one entry.
     #[test]
-    fn static_catalog_qwen_contains_known_models() {
-        let models = static_catalog_for_provider(Provider::QwenCode);
+    fn expected_baseline_deduplicates() {
+        let baseline = expected_baseline(Provider::Gemini);
+        assert_eq!(baseline.iter().filter(|m| *m == "auto").count(), 1);
+        assert_eq!(baseline.iter().filter(|m| *m == "flash").count(), 1);
+    }
+
+    /// Goose had no compiled model list before the baseline flip; its
+    /// generated expected offerings made it validatable for the first
+    /// time.
+    #[test]
+    fn expected_baseline_goose_non_empty() {
+        let baseline = expected_baseline(Provider::Goose);
         assert!(
-            models.contains(&"qwen3-coder-plus".to_string()),
-            "expected qwen3-coder-plus in {models:?}"
+            baseline.contains(&"gpt-5".to_string()),
+            "expected gpt-5 in {baseline:?}"
         );
     }
 

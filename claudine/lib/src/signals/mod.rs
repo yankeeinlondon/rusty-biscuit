@@ -22,8 +22,8 @@ mod sink;
 mod version;
 
 pub use claudine_catalog_types::{
-    DetectionMode, DetectionRecord, ExtractionSpec, ProviderSignalTable, Quantity, SignalEvent,
-    SignalKind, SignalSource, UsageWindow,
+    DetectionMode, DetectionRecord, DriftObservation, ExtractionSpec, ProviderSignalTable,
+    Quantity, SignalEvent, SignalKind, SignalSource, UsageWindow,
 };
 pub use bespoke::{EXIT_STDERR_TAIL_LINES, bespoke_replayer, exit_source_payload};
 pub use engine::{ReplayObservation, SignalEngine};
