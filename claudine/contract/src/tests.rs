@@ -832,8 +832,13 @@ fn support_matrix_enables_only_curated_providers() {
         provider_support(Provider::Goose),
         ProviderSupport::Rejected(_)
     ));
+    // Kilo is a wired provider but not v1-enabled for tool-free inference.
+    assert!(matches!(
+        provider_support(Provider::Kilo),
+        ProviderSupport::Rejected(_)
+    ));
     // Every provider appears exactly once in the matrix.
-    assert_eq!(support_matrix().len(), 7);
+    assert_eq!(support_matrix().len(), 8);
 }
 
 #[test]
@@ -856,6 +861,7 @@ fn auth_env_vars_are_explicit_for_all_providers() {
         auth_env_vars(Provider::QwenCode),
         &["DASHSCOPE_API_KEY", "QWEN_API_KEY"]
     );
+    assert_eq!(auth_env_vars(Provider::Kilo), &["KILO_API_KEY"]);
 }
 
 // -- process runner: concurrent pipe draining --------------------------------
