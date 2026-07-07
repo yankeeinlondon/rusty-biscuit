@@ -2901,6 +2901,8 @@ pub(crate) static KILO_INSTALL: &[InstallationMethod] = &[
     InstallationMethod::Npm("@kilocode/cli"),
     InstallationMethod::Brew("Kilo-Org/tap/kilo"),
 ];
+pub(crate) static PI_INSTALL: &[InstallationMethod] =
+    &[InstallationMethod::Npm("@earendil-works/pi-coding-agent")];
 
 /// Metadata lookup table for AI CLI tools.
 pub(crate) static AI_CLI_INFO: &[ProgramInfo] = &[
@@ -3054,6 +3056,21 @@ pub(crate) static AI_CLI_INFO: &[ProgramInfo] = &[
         installation_methods: KILO_INSTALL,
         system_prerequisites: &[],
     },
+    ProgramInfo {
+        binary_name: "pi",
+        display_name: "Pi",
+        description: "Multi-provider agentic coding CLI (earendil-works)",
+        website: "https://pi.dev/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/earendil-works/pi"),
+        installation_methods: PI_INSTALL,
+        system_prerequisites: &[],
+    },
 ];
 
 impl ProgramMetadata for AiCli {
@@ -3083,6 +3100,7 @@ impl CategoryEnum for AiCli {
             AiCli::KimiCli => "kimi_cli",
             AiCli::QwenCli => "qwen_cli",
             AiCli::Kilo => "kilo",
+            AiCli::Pi => "pi",
         }
     }
 }
