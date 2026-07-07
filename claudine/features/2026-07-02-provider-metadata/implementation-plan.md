@@ -509,6 +509,34 @@ config/wrapper-side only, so its drift channel needs a different source.
 > `artifact::EXPECTED_SCHEMA_VERSION`, never a literal version, or a parallel
 > artifact bump breaks them (bit once, fixed).
 
+> **Phase F family_latest DONE (2026-07-06; committed f9d58b02b/dc7758eb4/
+> d4bd2a5d6 + two follow-up test files).** claudine-gen compiles a vendored
+> family-index slice (signals-module pattern: `gen/src/families.rs` →
+> `lib/src/model_catalog/families_generated.rs`, drift-checked in `check`) —
+> 18 family keys derived from all providers' `catalog_id` joins via the
+> shared `family_key()` prefix rule in catalog-types (the ONE claudine-side
+> grammar touchpoint: identity key up to the first `@`/`+`/`:`; a derived
+> key missing from the artifact families{} is a loud generation error).
+> `ExpectedOffering` gained `resolves: Option<ResolvesVia>` — marked
+> `family_latest` iff alias AND join (curated `RESOLVES_EXCEPTIONS` escape
+> hatch, empty in v1; same-alias records deriving different families lose
+> the mark and report as ambiguous). Marks landed: claude fable/opus/sonnet
+> (haiku's record has no join), gemini pro + both flash + both flash-lite
+> (`auto` unmarked — alias-only router). Runtime resolver
+> `model_catalog::families`: `family_latest[_at]` (binary search) and
+> `resolve_alias[_at]` returning `FamilyLatest { identity_key, family,
+> staleness }`; `Staleness::Stale { age_days }` past
+> `FAMILY_LATEST_MAX_AGE_DAYS = 30` vs the compiled-in
+> `ARTIFACT_GENERATED_AT` — warn-not-fail, per ContentPolicy. Session-log
+> stamping of resolved answers is deliberately deferred to the
+> drift-channel increment (where ModelResolved already flows). Note for
+> operators: any artifact re-emission drifts `families_generated.rs` by
+> design — one `generate --yes` away. Remaining Phase F item: staged
+> per-provider demotion of dynamic listing to a drift channel
+> (expected_offerings becomes the validation baseline per provider;
+> SignalEvents through the Phase E sink; Goose config-side source; Kimi
+> wire-mode gap stands).
+
 ## Phase G — rendering buildout (interleaves after C)
 
 Migrations 2–4 of design/render-components.md: `AgentPrompt`/`SystemPrompt` absorb
