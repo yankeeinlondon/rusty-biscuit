@@ -14,7 +14,9 @@
 
 use std::collections::BTreeSet;
 
+use claudine_catalog_types::{EventClass, ToolResultSummary};
 use serde_json::Value;
+use strum::VariantNames;
 
 use crate::errors::GenError;
 
@@ -1051,6 +1053,76 @@ const AXES: &[&str] = &[
     "modify_provider_config",
 ];
 
+/// `DisplayPolicy { ... }` literal from the facts display-policy record
+/// (fixed field list, declaration order). Enum sub-keys are validated
+/// against the catalog-types variant names — overrides flow through this
+/// expression half only, so the check must live here too.
+pub fn display_policy(
+    field: &'static str,
+    value: &Value,
+    level: usize,
+    ctx: &mut EmitCtx,
+) -> Result<String, GenError> {
+    ctx.import("crate::provider::display_policy::DisplayPolicy");
+    ctx.import("crate::provider::display_policy::ToolResultSummary");
+    let summary = expect_str(
+        field,
+        get(field, value, "tool_result_summary")?,
+        "`tool_result_summary`",
+    )?;
+    if !ToolResultSummary::VARIANTS.contains(&summary) {
+        return Err(unmappable(
+            field,
+            format!("`{summary}` is not a ToolResultSummary wire form"),
+        ));
+    }
+    let suppression = expect_array(
+        field,
+        get(field, value, "info_event_suppression")?,
+        "`info_event_suppression`",
+    )?;
+    let mut classes = Vec::with_capacity(suppression.len());
+    for class in suppression {
+        let member = expect_str(field, class, "an event-class member")?;
+        if !EventClass::VARIANTS.contains(&member) {
+            return Err(unmappable(
+                field,
+                format!("`{member}` is not an EventClass wire form"),
+            ));
+        }
+        ctx.import("crate::provider::display_policy::EventClass");
+        classes.push(format!("EventClass::{}", pascal(member)));
+    }
+    let collapse = expect_bool(
+        field,
+        get(field, value, "collapse_task_progress")?,
+        "`collapse_task_progress`",
+    )?;
+    let rate_limit = expect_bool(
+        field,
+        get(field, value, "suppress_subscription_rate_limit")?,
+        "`suppress_subscription_rate_limit`",
+    )?;
+    let silent_kinds = str_slice(field, get(field, value, "silent_extension_kinds")?, level + 1)?;
+    let stdout_noise = str_slice(field, get(field, value, "stdout_noise_prefixes")?, level + 1)?;
+    let stderr_noise = str_slice(field, get(field, value, "stderr_noise_prefixes")?, level + 1)?;
+    let inner = indent(level + 1);
+    Ok(format!(
+        "DisplayPolicy {{\n\
+         {inner}tool_result_summary: ToolResultSummary::{},\n\
+         {inner}info_event_suppression: {},\n\
+         {inner}collapse_task_progress: {collapse},\n\
+         {inner}suppress_subscription_rate_limit: {rate_limit},\n\
+         {inner}silent_extension_kinds: {silent_kinds},\n\
+         {inner}stdout_noise_prefixes: {stdout_noise},\n\
+         {inner}stderr_noise_prefixes: {stderr_noise},\n\
+         {}}}",
+        pascal(summary),
+        render_slice(&classes, level + 1),
+        indent(level)
+    ))
+}
+
 pub fn cli_sensitive_axes(
     field: &'static str,
     value: &Value,
@@ -1405,12 +1477,8 @@ pub fn emit_data_file(
         str_slice("allowed_env_keys", lookup("allowed_env_keys")?, 1)?,
     );
     push(
-        "stdout_noise_prefixes",
-        str_slice("stdout_noise_prefixes", lookup("stdout_noise_prefixes")?, 1)?,
-    );
-    push(
-        "stderr_noise_prefixes",
-        str_slice("stderr_noise_prefixes", lookup("stderr_noise_prefixes")?, 1)?,
+        "display_policy",
+        display_policy("display_policy", lookup("display_policy")?, 1, &mut ctx)?,
     );
     push(
         "suppress_structured_stderr_on_success",

@@ -188,6 +188,10 @@ pub enum Coercion {
     PromptArgRecord,
     /// Facts axes record → `CliSensitiveAxes` expression.
     AxesRecord,
+    /// Facts display-policy record → `DisplayPolicy` expression. Sub-keys
+    /// are validated strictly (unknown sub-key = generation error; enum
+    /// members checked against the catalog-types variant names).
+    DisplayPolicyRecord,
     /// resume topic `support` enum member → `ResumeSupport` expression.
     ResumeSupportMember,
     /// agent-models `model_selection[]` records → the FIRST
@@ -239,6 +243,7 @@ impl Coercion {
             Coercion::UnmappedNativeEventRecords => "unmapped_native_event_records",
             Coercion::PromptArgRecord => "prompt_arg_record",
             Coercion::AxesRecord => "axes_record",
+            Coercion::DisplayPolicyRecord => "display_policy_record",
             Coercion::ResumeSupportMember => "resume_support_member",
             Coercion::CliFlagSitesToFlag => "cli_flag_sites_to_flag",
             Coercion::FlagListToStringSlice => "flag_list_to_string_slice",
@@ -289,7 +294,7 @@ pub const SKILL_SUPPORT_MEMBERS: &[&str] =
     &["first_class", "partial", "convention_only", "none", "unknown"];
 
 /// The generator-v1 mapping registry, in `ProviderInfo` serialization
-/// order (10 roster + 12 research + 22 facts = 44 fields).
+/// order (10 roster + 11 research + 21 facts = 42 fields).
 pub const REGISTRY: &[RegistryEntry] = &[
     entry(
         "provider",
@@ -669,22 +674,24 @@ pub const REGISTRY: &[RegistryEntry] = &[
         "Hand-ruled allowlist of provider env keys bypassing the sensitive-key sanitizer",
     ),
     entry(
-        "stdout_noise_prefixes",
+        "display_policy",
         DeclaredSource::Facts {
-            key: "stdout_noise_prefixes",
+            key: "display_policy",
         },
-        &[SchemaExpectation::StringArray],
-        Coercion::StringSlice,
-        "Curated stdout line prefixes suppressed as provider noise (non-interactive mode)",
-    ),
-    entry(
-        "stderr_noise_prefixes",
-        DeclaredSource::Facts {
-            key: "stderr_noise_prefixes",
-        },
-        &[SchemaExpectation::StringArray],
-        Coercion::StringSlice,
-        "Curated stderr line prefixes suppressed as provider noise (all modes)",
+        &[SchemaExpectation::Record {
+            required_fields: &[
+                "tool_result_summary",
+                "info_event_suppression",
+                "collapse_task_progress",
+                "suppress_subscription_rate_limit",
+                "silent_extension_kinds",
+                "stdout_noise_prefixes",
+                "stderr_noise_prefixes",
+            ],
+        }],
+        Coercion::DisplayPolicyRecord,
+        "Render policy for shared render components (tool-result summary mode, \
+         info-event suppression, and the curated noise-prefix lists)",
     ),
     entry(
         "suppress_structured_stderr_on_success",
@@ -812,8 +819,8 @@ mod tests {
         };
         assert_eq!(count("roster"), 10, "roster rows");
         assert_eq!(count("research"), 11, "research rows");
-        assert_eq!(count("facts"), 22, "facts rows");
-        assert_eq!(REGISTRY.len(), 43, "total serialized fields");
+        assert_eq!(count("facts"), 21, "facts rows");
+        assert_eq!(REGISTRY.len(), 42, "total serialized fields");
     }
 
     #[test]
