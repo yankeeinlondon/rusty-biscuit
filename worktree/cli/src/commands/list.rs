@@ -257,6 +257,8 @@ fn graph_instructions(
 fn default_graph_width(commit_count: usize, terminal_width: u32) -> ImageWidth {
     if commit_count <= 4 {
         ImageWidth::Characters(40)
+    } else if commit_count <= 6 {
+        ImageWidth::Characters(60)
     } else if commit_count <= 8 {
         ImageWidth::Characters(80)
     } else if commit_count <= 11 {
@@ -693,6 +695,11 @@ mod tests {
 
     #[test]
     fn default_graph_width_uses_fractional_percent_for_full_width() {
+        assert_eq!(super::default_graph_width(4, 120), ImageWidth::Characters(40));
+        assert_eq!(super::default_graph_width(5, 120), ImageWidth::Characters(60));
+        assert_eq!(super::default_graph_width(6, 120), ImageWidth::Characters(60));
+        assert_eq!(super::default_graph_width(7, 120), ImageWidth::Characters(80));
+        assert_eq!(super::default_graph_width(8, 120), ImageWidth::Characters(80));
         assert_eq!(super::default_graph_width(9, 100), ImageWidth::Percent(1.0));
         assert_eq!(
             super::default_graph_width(12, 120),
