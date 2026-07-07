@@ -42,6 +42,9 @@ pub enum SignalKind {
     TokensConsumed,
     ModelResolved,
     ModelFallback,
+    /// Bespoke-only (no detection records); emitted by the wrapper's
+    /// model-catalog comparison via `SignalHub::emit_bespoke`.
+    ModelCatalogDrift,
     ProviderVersion,
     // Progress / retry.
     GenerationRetried,
@@ -89,6 +92,9 @@ pub enum SignalSource {
     /// stderr tail — covers exits that bypass a `result` event (the Qwen
     /// 53/55/130 path).
     Exit,
+    /// Wrapper-computed observations (set differences, catalog
+    /// comparisons) not tied to any child output channel.
+    Wrapper,
 }
 
 /// The five ratified detection-record match operators (design doc "Record
@@ -136,6 +142,17 @@ pub enum UsageWindow {
     SevenDayOpus,
     Monthly,
     Unknown,
+}
+
+/// How a model-catalog drift was observed: a full dynamic model listing
+/// (set comparison against the baseline) or a single resolved model that
+/// the baseline does not contain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, EnumIter, IntoStaticStr, VariantNames)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum DriftObservation {
+    Listing,
+    ResolvedModel,
 }
 
 /// Taxonomy-typed signal payload — one variant per [`SignalKind`] member.
@@ -204,6 +221,18 @@ pub enum SignalEvent {
         from: Option<String>,
         to: String,
         message: Option<String>,
+    },
+    /// The provider's live model surface disagrees with the generated
+    /// expected-offerings baseline. Bespoke-only: emitted by the wrapper's
+    /// catalog comparison, never by detection records.
+    ModelCatalogDrift {
+        /// Model ids observed from the provider but absent from the
+        /// generated expected-offerings baseline.
+        unexpected: Vec<String>,
+        /// Expected ids the provider's dynamic listing no longer returns;
+        /// empty when the observation is a single resolved model.
+        missing: Vec<String>,
+        observed_via: DriftObservation,
     },
     /// Once observed in-session, record selection narrows to
     /// version-admitting records (design §Version-range selection).
@@ -290,6 +319,7 @@ impl SignalEvent {
             Self::TokensConsumed { .. } => SignalKind::TokensConsumed,
             Self::ModelResolved { .. } => SignalKind::ModelResolved,
             Self::ModelFallback { .. } => SignalKind::ModelFallback,
+            Self::ModelCatalogDrift { .. } => SignalKind::ModelCatalogDrift,
             Self::ProviderVersion { .. } => SignalKind::ProviderVersion,
             Self::GenerationRetried { .. } => SignalKind::GenerationRetried,
             Self::StalledGeneration { .. } => SignalKind::StalledGeneration,
@@ -376,7 +406,7 @@ mod tests {
 
     #[test]
     fn signal_kind_member_list_is_frozen() {
-        assert_eq!(SignalKind::VARIANTS.len(), 29);
+        assert_eq!(SignalKind::VARIANTS.len(), 30);
         assert!(SignalKind::VARIANTS.contains(&"human_input_requested"));
         assert!(SignalKind::VARIANTS.contains(&"session_resumable"));
     }

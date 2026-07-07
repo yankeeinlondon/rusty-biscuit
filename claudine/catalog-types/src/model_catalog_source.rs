@@ -25,12 +25,11 @@ use strum::{EnumIter, IntoStaticStr, VariantNames};
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum ModelCatalogSource {
-    /// No catalog source available; rely entirely on user-supplied overrides.
+    /// No dynamic listing; validation relies solely on the generated
+    /// `expected_offerings` baseline.
     None,
-    /// Static, compiled-in list (e.g. derived from generated enums).
-    Static,
-    /// Dynamic: shells out to `program` with `args`; stdout yields the
-    /// model list.
+    /// Programmatic listing: shells out to `program` with `args`; stdout
+    /// yields the model list, consumed as the drift channel.
     ShellCommand {
         /// Executable looked up on `PATH`.
         program: &'static str,
@@ -48,10 +47,7 @@ mod tests {
     /// The sidecar enum-subset gate compares against this snake_case list.
     #[test]
     fn variant_names_are_snake_case_wire_forms() {
-        assert_eq!(
-            ModelCatalogSource::VARIANTS,
-            &["none", "static", "shell_command"]
-        );
+        assert_eq!(ModelCatalogSource::VARIANTS, &["none", "shell_command"]);
     }
 
     /// Unit variants serialize as bare member strings; the struct variant
@@ -60,8 +56,8 @@ mod tests {
     /// form), so this pins the wire contract.
     #[test]
     fn serde_wire_forms_match_catalog_shape() {
-        let unit = serde_json::to_value(ModelCatalogSource::Static).unwrap();
-        assert_eq!(unit, serde_json::json!("static"));
+        let unit = serde_json::to_value(ModelCatalogSource::None).unwrap();
+        assert_eq!(unit, serde_json::json!("none"));
 
         let shell = serde_json::to_value(ModelCatalogSource::ShellCommand {
             program: "opencode",
