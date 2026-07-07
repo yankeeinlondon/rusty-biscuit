@@ -18,10 +18,10 @@
     "reference": "code merely names a provider (fixtures, constructor arguments); nothing to migrate"
   },
   "totals": {
-    "sites": 432,
-    "provider_refs": 459,
+    "sites": 434,
+    "provider_refs": 461,
     "by_form": {
-      "direct-ref": 418,
+      "direct-ref": 420,
       "eq-comparison": 6,
       "matches-macro": 4,
       "ne-comparison": 3,
@@ -29,7 +29,7 @@
     },
     "by_dispatch_class": {
       "conditional": 14,
-      "reference": 418
+      "reference": 420
     }
   },
   "sites": [
@@ -2680,6 +2680,16 @@
       "exempt_candidate": true
     },
     {
+      "path": "claudine/cli/src/commands/wrap/profile/pi.rs",
+      "line": 19,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Pi"
+      ],
+      "exempt_candidate": true
+    },
+    {
       "path": "claudine/cli/src/commands/wrap/profile/qwen.rs",
       "line": 12,
       "form": "direct-ref",
@@ -4307,6 +4317,16 @@
       "dispatch_class": "reference",
       "providers": [
         "Kilo"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/main.rs",
+      "line": 32,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Pi"
       ],
       "exempt_candidate": true
     },

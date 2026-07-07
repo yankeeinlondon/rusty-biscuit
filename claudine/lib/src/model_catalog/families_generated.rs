@@ -222,6 +222,12 @@ pub(super) static FAMILY_INDEX: &[FamilyRow] = &[
         rolling_aliases: &[],
     },
     FamilyRow {
+        key: "mistral/devstral-medium",
+        latest: None,
+        members: &[],
+        rolling_aliases: &["mistral/devstral-medium-latest"],
+    },
+    FamilyRow {
         key: "moonshotai/kimi-k",
         latest: Some("moonshotai/kimi-k@2.6"),
         members: &[
@@ -264,6 +270,12 @@ pub(super) static FAMILY_INDEX: &[FamilyRow] = &[
         key: "moonshotai/moonshot-v-8k",
         latest: Some("moonshotai/moonshot-v-8k@1+preview+vision"),
         members: &["moonshotai/moonshot-v1-8k", "moonshotai/moonshot-v1-8k-vision-preview"],
+        rolling_aliases: &[],
+    },
+    FamilyRow {
+        key: "nvidia/nemotron-super",
+        latest: Some("nvidia/nemotron-super@3+120b+a12b"),
+        members: &["openrouter/nvidia/nemotron-3-super-120b-a12b"],
         rolling_aliases: &[],
     },
     FamilyRow {
@@ -339,6 +351,23 @@ pub(super) static FAMILY_INDEX: &[FamilyRow] = &[
             "zenmux/openai/gpt-5.4-mini",
         ],
         rolling_aliases: &["openrouter/openai/gpt-mini-latest"],
+    },
+    FamilyRow {
+        key: "openai/gpt-oss",
+        latest: Some("openai/gpt-oss+20b"),
+        members: &[
+            "groq/openai/gpt-oss-120b",
+            "groq/openai/gpt-oss-20b",
+            "openrouter/openai/gpt-oss-120b",
+            "openrouter/openai/gpt-oss-20b",
+        ],
+        rolling_aliases: &[],
+    },
+    FamilyRow {
+        key: "xai/grok-0309-reasoning",
+        latest: Some("xai/grok-0309-reasoning@4.20"),
+        members: &["x-ai/grok-4.20-0309-reasoning"],
+        rolling_aliases: &[],
     },
     FamilyRow {
         key: "xai/grok-build",
