@@ -16,6 +16,7 @@ use super::goose::GOOSE_INFO;
 use super::kilo::KILO_INFO;
 use super::kimi::KIMI_INFO;
 use super::opencode::OPENCODE_INFO;
+use super::pi::PI_INFO;
 use super::qwen::QWEN_INFO;
 
 /// The canonical provider registry, initialized on first access.
@@ -37,6 +38,7 @@ pub fn provider_info(provider: Provider) -> &'static ProviderInfo {
             &OPENCODE_INFO,
             &QWEN_INFO,
             &KILO_INFO,
+            &PI_INFO,
         ]
     });
     registry[provider as usize]

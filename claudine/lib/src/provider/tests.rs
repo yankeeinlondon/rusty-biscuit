@@ -838,8 +838,10 @@ fn representative_payload_for(provider: Provider) -> Option<serde_json::Value> {
         Provider::KimiCode => serde_json::json!({"method": "notification"}),
         // Goose and Qwen do not detect via raw payload shape today. Kilo
         // shares OpenCode's payload shape, so it cannot be uniquely detected
-        // from a raw payload — the wrapper path knows the provider instead.
-        Provider::Goose | Provider::QwenCode | Provider::Kilo => return None,
+        // from a raw payload — the wrapper path knows the provider instead. Pi
+        // has no native hooks, so it never delivers a raw hook payload at all;
+        // its `--mode json` stdout stream is parsed by PiSemanticStreamParser.
+        Provider::Goose | Provider::QwenCode | Provider::Kilo | Provider::Pi => return None,
     })
 }
 

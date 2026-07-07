@@ -35,6 +35,7 @@ mod offering;
 mod opencode;
 mod output_format;
 mod path_template;
+mod pi;
 mod platform_kind;
 mod prompt_args;
 mod qwen;

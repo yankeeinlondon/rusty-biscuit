@@ -4,6 +4,7 @@ pub(crate) mod gemini;
 pub(crate) mod goose;
 pub(crate) mod kimicode;
 pub(crate) mod opencode;
+pub(crate) mod pi;
 pub(crate) mod qwen;
 
 use serde_json::Value;
@@ -112,6 +113,7 @@ pub(crate) static GEMINI_ADAPTER: gemini::GeminiAdapter = gemini::GeminiAdapter;
 pub(crate) static GOOSE_ADAPTER: goose::GooseAdapter = goose::GooseAdapter;
 pub(crate) static KIMI_ADAPTER: kimicode::KimiCodeAdapter = kimicode::KimiCodeAdapter;
 pub(crate) static OPENCODE_ADAPTER: opencode::OpenCodeAdapter = opencode::OpenCodeAdapter;
+pub(crate) static PI_ADAPTER: pi::PiAdapter = pi::PiAdapter;
 pub(crate) static QWEN_ADAPTER: qwen::QwenAdapter = qwen::QwenAdapter;
 
 /// Returns the adapter singleton for a provider.
