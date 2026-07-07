@@ -176,14 +176,70 @@ Ken may want to confirm:
   (Claudine never registers against its TS extension API), so there is no
   dispatchable native-hook surface to remediate — `[]` matches the qwen
   precedent. Flagged in case the 4 events are wanted listed.
-- **Prompt delivery uses `--`** — Pi takes a positional prompt (`pi --mode json
-  "PROMPT"`); the wrapper prepends `--` for leading-dash safety (composed
-  prompts open with Markdown bullets). Assumes Pi's arg parser honors `--`
-  (standard for its Node CLI); a judgment call worth a live smoke if a Pi binary
-  is available.
-- **Resume via `pi --session <full-id>`** — the full session UUID (from the JSON
-  header) is passed to avoid the cross-project fork prompt a *partial* UUID can
-  trigger (research warns partial matches are unsafe for unattended runs).
+- **Resume via `pi --session-id <id>`** — corrected from an initial
+  `--session <full-id>` after a live multi-turn smoke (see below). `--session-id`
+  is the unattended-safe selector: exact project id, appends to the same session
+  file (true resume), never prompts; `--session`'s partial-UUID match risks a
+  cross-project fork prompt.
+
+## Live validation against pi 0.80.3 (research corrections)
+
+After the initial from-research build, a real `pi` binary
+(`@earendil-works/pi-coding-agent` 0.80.3) became available on the host, so the
+wrapper and parser were smoke-tested end-to-end against it (a local `omlx`
+model let the run complete offline). This **validated the parser** and
+**corrected three wrapper assumptions the research could not reveal** — the
+exact value of having a live binary:
+
+- **Parser wire format confirmed.** The real `--mode json` stream matched
+  `protocol/pi.rs` exactly: the `session` header, `agent_start`/`turn_start`/
+  `message_start` lifecycle, `message_update` →
+  `assistantMessageEvent.type: "thinking_delta"` with a `.delta` payload, and the
+  `message.usage` envelope (`{input, output, cacheRead, cacheWrite, totalTokens,
+  cost:{total}}`). A full `claudine pi "..."` run rendered thinking (coalesced
+  BlockQuote), assistant text, and the metrics trailer (input/output tokens,
+  duration) — the whole seam works live.
+- **Fix 1 — prompt delivery is STDIN, not positional.** The real Pi parser
+  **rejects `--`** (`Error: Unknown option: --`) *and* rejects any positional
+  message beginning with `-` (`Error: Unknown option: - ...`). The
+  Kilo-mirrored `AppendArgs(["--", prompt])` would have failed on every composed
+  prompt. Pi reads the prompt from **stdin** in `-p` mode (verified: `echo
+  PROMPT | pi -p --mode json` streams the run), so `prompt_delivery` now returns
+  `PromptDelivery::Stdin`.
+- **Fix 2 — the entrypoint flag is `-p`, not `--mode json`.** The facts wrongly
+  placed `[--mode, json]` in the entrypoint `required_flags` (that is the stream
+  *selector's* job, sourced from `output_formats`) and omitted `-p`. Without
+  `-p`, a non-interactive run opens the TUI. Corrected: `entrypoints.required_flags:
+  [-p]`; `--mode json` + the determinism companions come from the stream
+  output-format as designed. The spawned argv is now `pi -p --no-approve
+  --no-extensions --no-skills --no-prompt-templates --no-context-files --mode
+  json` + stdin — verified against the real binary.
+- **Fix 3 — system prompt needed a wrapper override + inline delivery.** The
+  default `apply_system_prompt` is a stub that always reports "unsupported";
+  providers that support it override it (the catalog spec only drives capability
+  reporting). Pi's first run warned "does not support append system prompt" and
+  skipped it. `PiWrapper` now overrides `apply_system_prompt` (delegating to the
+  shared `apply_system_prompt_via_spec`, like Qwen), and the facts moved from
+  `file_flag` to **`inline_flag`** (`--append-system-prompt`/`--system-prompt`
+  accept inline text per the 0.80.3 help — unambiguous vs the text-or-path
+  heuristic). Confirmed: the re-run delivers the prompt (input tokens rose
+  2K→3K, no warning).
+- **Fix 4 — resume selector is `--session-id`, not `--session`.** A live
+  multi-turn smoke (turn 1 establishes a token in an isolated `--session-dir`,
+  capture the session id, resume and recall) showed `--session-id <id>` is the
+  correct unattended selector: it reused the exact session, **appended to the
+  same session file** (2→4 messages = true resume, not a fork), **recalled the
+  token**, and exited cleanly with no prompt. The initial `--session <full-id>`
+  used the partial-UUID path whose cross-project match can raise a fork prompt.
+  `build_resume_args` now emits `pi --session-id <id>`.
+- **`--list-models` is a human table**, confirming `model_catalog_source: none`
+  (follow-up #3 resolved in favor of `none`).
+
+These are exactly the class of defect the research→codegen path *cannot* catch
+(argv-parser quirks, stub-default overrides) and a live binary catches
+immediately — a data point for the process retro: **the facts/wrapper layer
+benefits from one real-binary smoke per provider before graduation is called
+final.**
 
 ## Onboarding footprint (the mechanical checklist, as walked)
 
@@ -227,6 +283,13 @@ Ken may want to confirm:
   link `https://pi.dev/docs/latest`), confirming the no-hook/no-subagent posture
   from `DisplayPolicy` + capability facts with **no per-provider render code**;
   `claudine hooks --support` shows the Pi column.
+- **Live end-to-end against `pi` 0.80.3** (see the live-validation section): a
+  real `claudine pi "..."` run streamed through `PiSemanticStreamParser` and
+  rendered thinking + assistant text + the metrics trailer; the parser wire
+  format matched the real binary; three wrapper fixes (stdin delivery, `-p`
+  entrypoint, system-prompt override) landed and were re-verified. `just test`
+  re-run green after the fixes (cli 1892, gen 89); inventory re-blessed (a
+  `Provider::Pi` line-number shift from the two added imports).
 - Known host flakes excepted per the phase brief.
 
 ## Recommended follow-ups (not blocking H2)
@@ -237,12 +300,12 @@ Ken may want to confirm:
 2. **Onboarding notes: aggregator `default_models` id-collision.** Add a note
    that multi-provider providers will hit the `expected_offerings` duplicate-id
    error and need a merge-not-drop reconciliation of the research (as done here).
-3. **Verify `pi --list-models` output shape** — if it is (or can be) machine
-   parseable, migrate `model_catalog_source` from `none` to a `ShellCommand` so
-   Pi gets a real drift channel; delete the override.
-4. **Live smoke against a real `pi` binary** — confirm the `--` positional
-   delivery and `--session` resume behave as designed (authored from research;
-   no live Pi binary was exercised this milestone).
+3. **`pi --list-models` output shape — RESOLVED** to a human table (not JSON),
+   so `model_catalog_source: none` stands. Revisit only if Pi adds a
+   `--json`/machine-readable listing.
+4. **Live smoke — DONE** for prompt delivery, entrypoint, system prompt, the
+   parser, and `--session-id` resume (four fixes landed; see the live-validation
+   section). No open behavior-half items remain from the live smoke.
 5. **agent-models consumption-side work** (retire the recurring
    `model_catalog_source` overrides across providers) remains the standing
    Phase-I / pre-M-Antigravity item; M-Pi did not need a `model_cli_flag`
