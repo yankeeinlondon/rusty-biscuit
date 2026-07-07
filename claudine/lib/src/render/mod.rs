@@ -6,6 +6,18 @@
 //! identically by construction. Design authority:
 //! `features/2026-07-02-provider-metadata/design/render-components.md`.
 
+mod event_renderer;
 mod final_message;
+mod metrics_report;
+mod prompt;
 
+pub use event_renderer::{
+    DISPATCH, Disposition, EventRenderer, RenderUnit, error_kind_presentation,
+    pending_matches_tool_call, strip_progress_verb,
+};
 pub use final_message::FinalMessage;
+pub use metrics_report::MetricsReport;
+pub use prompt::{
+    AgentPrompt, ReportMode, SystemPrompt, TruncationMode, parse_frontmatter_verbosity,
+    resolve_agent_prompt_report_mode, resolve_system_prompt_report_mode,
+};

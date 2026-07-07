@@ -13,7 +13,7 @@
 /// ## Examples
 ///
 /// ```ignore
-/// use claudine::prompt_reporting::truncate_front_back;
+/// use claudine::render::prompt::truncate_front_back;
 ///
 /// let text = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6";
 /// let result = truncate_front_back(text, 2, 2);
@@ -101,7 +101,7 @@ pub fn truncate_head(text: &str, count: usize) -> String {
 /// ## Examples
 ///
 /// ```ignore
-/// use claudine::prompt_reporting::strip_leading_whitespace;
+/// use claudine::render::prompt::strip_leading_whitespace;
 ///
 /// // Common 4-space indent is removed; the inner 4-space indent of the
 /// // sub-bullet is preserved relative to its parent.

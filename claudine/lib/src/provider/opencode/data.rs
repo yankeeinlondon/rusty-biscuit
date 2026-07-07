@@ -21,6 +21,7 @@ use crate::provider::{OutputFormatSelector, ProviderInfo};
 use crate::provider::acp::{AcpServerMode, AcpSupport};
 use crate::provider::billing_model::BillingModel;
 use crate::provider::cli_sensitivity::CliSensitiveAxes;
+use crate::provider::display_policy::{DisplayPolicy, EventClass, ToolResultSummary};
 use crate::provider::event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
 use crate::provider::identity::Provider;
 use crate::provider::known_gap::{KnownGap, KnownGapArea};
@@ -642,8 +643,15 @@ pub(in crate::provider) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
     non_interactive_conflicting_flags: &["--mini", "--interactive"],
     billing_models: &[BillingModel::ProviderOnly],
     allowed_env_keys: &[],
-    stdout_noise_prefixes: &[],
-    stderr_noise_prefixes: &["✱ ", "$ ", "> build ", "████ ", "⚙ "],
+    display_policy: DisplayPolicy {
+        tool_result_summary: ToolResultSummary::Show,
+        info_event_suppression: &[EventClass::StepProgress],
+        collapse_task_progress: false,
+        suppress_subscription_rate_limit: false,
+        silent_extension_kinds: &[],
+        stdout_noise_prefixes: &[],
+        stderr_noise_prefixes: &["✱ ", "$ ", "> build ", "████ ", "⚙ "],
+    },
     suppress_structured_stderr_on_success: false,
     supports_interactive_inline_closure: false,
     model_required_in_non_tty: true,

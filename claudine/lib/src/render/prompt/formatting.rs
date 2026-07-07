@@ -55,7 +55,7 @@ pub fn render_markdown_for_terminal(text: &str, _term: &Terminal, max_width: u32
 /// ## Examples
 ///
 /// ```ignore
-/// use claudine::prompt_reporting::collapse_blank_lines;
+/// use claudine::render::prompt::collapse_blank_lines;
 ///
 /// let text = "A\n\n\n\nB";
 /// let result = collapse_blank_lines(text, 2);

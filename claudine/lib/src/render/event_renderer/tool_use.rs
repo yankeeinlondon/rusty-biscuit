@@ -1,24 +1,42 @@
-//! Tool call rendering — the `ToolCallDisplay` contract.
+//! Tool-call rendering — the `ToolCallDisplay` contract, tool-result bodies,
+//! file-tool errors, and the `task_progress` dedup helpers.
 
-use super::LiveSemanticSink;
-use super::{Section, TOOL_RESULT_BODY_MAX_LINES, ToolResultBody};
 use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::components::status::StatusState;
+use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{Color, Tailwind};
-use biscuit_terminal::utils::layout::{Length, Edges, TargetValue, WordWrap};
-use claudine::stream::semantic::SemanticEvent;
-use claudine::stream::tool_display::{ToolCallDisplay, ToolDirection, ToolStatus};
+use biscuit_terminal::utils::layout::{Edges, Length, WordWrap};
 use serde_json::Value;
 
-impl LiveSemanticSink {
+use super::{EventRenderer, RenderUnit, escape_prose};
+use crate::provider::EventClass;
+use crate::stream::semantic::SemanticEvent;
+use crate::stream::tool_display::{ToolCallDisplay, ToolDirection, ToolStatus};
+
+pub(super) const TOOL_RESULT_BODY_MAX_LINES: usize = 10;
+
+/// Bounded, normalized text extracted from a successful tool result, ready to
+/// render as a block quote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ToolResultBody {
+    pub(super) text: String,
+    pub(super) truncated: bool,
+}
+
+impl EventRenderer {
     /// Render the bounded body of a successful Codex tool result. The
     /// header line stays terse (`← Zsh(successful)`), while the actual
     /// stdout/stderr text is surfaced immediately below as a purple
     /// BlockQuote with grey text.
-    pub(crate) fn render_tool_result_body(&mut self, section: Section, body: &ToolResultBody) {
-        let prose = Prose::new(super::escape_prose(&body.text))
+    pub(super) fn render_tool_result_body(
+        &self,
+        terminal: &Terminal,
+        body: &ToolResultBody,
+    ) -> Vec<String> {
+        let mut lines = Vec::new();
+        let prose = Prose::new(escape_prose(&body.text))
             .with_word_wrap(WordWrap::Truncate(Some("…".into())));
         let mut block = BlockQuote::new(RenderableTerminalContent::from(prose), None::<&str>)
             .with_text_color(Color::Tailwind(Tailwind::Gray500))
@@ -26,9 +44,9 @@ impl LiveSemanticSink {
             .with_border("\u{2503} ");
         block.layout_mut().margin = Edges::x(Length::ch(0));
         block.layout_mut().margin = Edges::x(Length::ch(0));
-        let rendered = block.render(&self.terminal);
+        let rendered = block.render(terminal);
         for line in rendered.lines() {
-            self.emit_section_line(section, line);
+            lines.push(line.to_string());
         }
 
         if body.truncated {
@@ -39,15 +57,17 @@ impl LiveSemanticSink {
                     .with_border("\u{2503} ");
             note_block.layout_mut().margin = Edges::x(Length::ch(0));
             note_block.layout_mut().margin = Edges::x(Length::ch(0));
-            let rendered = note_block.render(&self.terminal);
+            let rendered = note_block.render(terminal);
             for line in rendered.lines() {
-                self.emit_section_line(section, line);
+                lines.push(line.to_string());
             }
         }
+        lines
     }
 
     /// Render a `ToolCallDisplay` into prose-markup for
-    /// [`Status::from_prose`]. Per spec:
+    /// [`Status::from_prose`](biscuit_terminal::components::status::Status::from_prose).
+    /// Per spec:
     ///
     /// - Outgoing summary / incoming success / incoming pending render the
     ///   slot as dim-italic (`<dim><i>…</i></dim>`).
@@ -66,12 +86,12 @@ impl LiveSemanticSink {
     /// - The slot is wrapped in parentheses attached to the tool name
     ///   (e.g. `→ Bash(<dim><i>bash ls</i></dim>)`) so the rendering
     ///   reads like a function call rather than a `Name · summary` pair.
-    pub(crate) fn render_tool_display(&self, display: ToolCallDisplay) -> String {
+    pub(super) fn render_tool_display(&self, display: ToolCallDisplay) -> String {
         let arrow = match display.direction {
             ToolDirection::Outgoing => '\u{2192}',
             ToolDirection::Incoming => '\u{2190}',
         };
-        let name = super::escape_prose(&display.display_name);
+        let name = escape_prose(&display.display_name);
         let is_file_tool = display.is_file_tool();
         let file_path = if is_file_tool {
             display.summary.as_deref()
@@ -86,7 +106,7 @@ impl LiveSemanticSink {
                     s.push_str(&format!("<dim>{}</dim>", self.render_file_link(path)));
                 } else if let Some(text) = summary.as_deref().filter(|t| !t.is_empty()) {
                     s.push_str(", ");
-                    s.push_str(&format!("<dim><i>{}</i></dim>", super::escape_prose(text)));
+                    s.push_str(&format!("<dim><i>{}</i></dim>", escape_prose(text)));
                 }
                 Some(s)
             }
@@ -97,10 +117,7 @@ impl LiveSemanticSink {
                     s.push_str(&format!("<dim>{}</dim>", self.render_file_link(path)));
                 }
                 if let Some(detail) = display.error_detail.as_deref().filter(|s| !s.is_empty()) {
-                    s.push_str(&format!(
-                        " <dim><i>{}</i></dim>",
-                        super::escape_prose(detail)
-                    ));
+                    s.push_str(&format!(" <dim><i>{}</i></dim>", escape_prose(detail)));
                 }
                 Some(s)
             }
@@ -111,7 +128,7 @@ impl LiveSemanticSink {
                     s.push_str(&format!("<dim>{}</dim>", self.render_file_link(path)));
                 } else if let Some(text) = summary.as_deref().filter(|t| !t.is_empty()) {
                     s.push_str(", ");
-                    s.push_str(&format!("<dim><i>{}</i></dim>", super::escape_prose(text)));
+                    s.push_str(&format!("<dim><i>{}</i></dim>", escape_prose(text)));
                 }
                 Some(s)
             }
@@ -119,10 +136,7 @@ impl LiveSemanticSink {
                 if is_file_tool {
                     Some(self.render_file_link(summary))
                 } else {
-                    Some(format!(
-                        "<dim><i>{}</i></dim>",
-                        super::escape_prose(summary)
-                    ))
+                    Some(format!("<dim><i>{}</i></dim>", escape_prose(summary)))
                 }
             }
             (None, None) => None,
@@ -133,11 +147,11 @@ impl LiveSemanticSink {
         }
     }
 
-    /// Resolve `raw` into styled Prose markup using the sink's cwd and
+    /// Resolve `raw` into styled Prose markup using the renderer's cwd and
     /// home-directory context. Shared by outgoing and incoming file-tool
     /// rendering so the link shape stays consistent in both directions.
-    pub(crate) fn render_file_link(&self, raw: &str) -> String {
-        claudine::stream::path_link::format_file_link(raw, &self.cwd, self.home.as_deref())
+    pub(super) fn render_file_link(&self, raw: &str) -> String {
+        crate::stream::path_link::format_file_link(raw, &self.cwd, self.home.as_deref())
     }
 
     /// Render a file-tool error as a two-part block: a `Warning` header
@@ -146,8 +160,12 @@ impl LiveSemanticSink {
     /// verbatim. The upstream provider may itself have truncated the
     /// message with a trailing ellipsis; this path never adds a local
     /// truncation of its own.
-    pub(crate) fn render_file_tool_error(&mut self, section: Section, display: &ToolCallDisplay) {
-        let name = super::escape_prose(&display.display_name);
+    pub(super) fn render_file_tool_error(
+        &self,
+        terminal: &Terminal,
+        display: &ToolCallDisplay,
+    ) -> Vec<String> {
+        let name = escape_prose(&display.display_name);
         let path_markup = display
             .summary
             .as_deref()
@@ -161,9 +179,9 @@ impl LiveSemanticSink {
             .error_detail
             .as_deref()
             .filter(|s| !s.is_empty())
-            .map(super::escape_prose)
+            .map(escape_prose)
             .unwrap_or_default();
-        self.render_warning_header_and_body(section, header, &body);
+        self.render_warning_header_and_body(terminal, header, &body)
     }
 
     /// Decide whether the pending `task_progress` Info line is redundant
@@ -175,10 +193,11 @@ impl LiveSemanticSink {
     /// - Otherwise flush the pending buffer as a standard `Info` status
     ///   line and clear it. This keeps genuinely novel progress prose on
     ///   stderr while collapsing the common duplicate pair.
-    pub(crate) fn resolve_pending_task_progress(
+    pub(super) fn resolve_pending_task_progress(
         &mut self,
-        section: Section,
         event: &SemanticEvent,
+        terminal: &Terminal,
+        units: &mut Vec<RenderUnit>,
     ) {
         let Some(pending) = self.pending_task_progress.take() else {
             return;
@@ -186,20 +205,15 @@ impl LiveSemanticSink {
         if pending_matches_tool_call(&pending, event) {
             return;
         }
-        self.render_status(section, StatusState::Info, pending);
-    }
-
-    /// Flush any pending `task_progress` Info. Called when the stream
-    /// terminates (turn-complete / session-stop) so nothing is lost if
-    /// no follow-up tool call ever arrives.
-    pub(crate) fn flush_pending_task_progress(&mut self) {
-        if let Some(pending) = self.pending_task_progress.take() {
-            self.render_status(Section::ToolUseAndEvents, StatusState::Info, pending);
-        }
+        let text = self.status_line(terminal, StatusState::Info, pending);
+        units.push(RenderUnit {
+            class: EventClass::StepProgress,
+            text,
+        });
     }
 }
 
-pub(crate) fn tool_result_body(event: &SemanticEvent) -> Option<ToolResultBody> {
+pub(super) fn tool_result_body(event: &SemanticEvent) -> Option<ToolResultBody> {
     let SemanticEvent::ToolResult { status, output, .. } = event else {
         return None;
     };
@@ -230,7 +244,7 @@ pub(crate) fn tool_result_body(event: &SemanticEvent) -> Option<ToolResultBody> 
     })
 }
 
-pub(crate) fn tool_result_output_text(value: &Value) -> Option<String> {
+pub(super) fn tool_result_output_text(value: &Value) -> Option<String> {
     if let Some(s) = value.as_str().filter(|s| !s.is_empty()) {
         return Some(s.to_string());
     }
@@ -280,7 +294,7 @@ pub(crate) fn tool_result_output_text(value: &Value) -> Option<String> {
 /// message and compare the remainder with the tool call's extracted
 /// summary. A minimum-length shared overlap guards against unrelated
 /// short progress lines accidentally cancelling each other.
-pub(crate) fn pending_matches_tool_call(pending: &str, event: &SemanticEvent) -> bool {
+pub fn pending_matches_tool_call(pending: &str, event: &SemanticEvent) -> bool {
     let SemanticEvent::ToolCall { .. } = event else {
         return false;
     };
@@ -306,7 +320,7 @@ pub(crate) fn pending_matches_tool_call(pending: &str, event: &SemanticEvent) ->
 /// `message` and return the remainder. Returns the original string when
 /// no known verb prefix is present so unrelated Info lines are not
 /// truncated.
-pub(crate) fn strip_progress_verb(message: &str) -> &str {
+pub fn strip_progress_verb(message: &str) -> &str {
     const VERBS: &[&str] = &[
         "Reading ",
         "Running ",

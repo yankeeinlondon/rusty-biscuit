@@ -21,6 +21,7 @@ use crate::provider::{OutputFormatSelector, ProviderInfo};
 use crate::provider::acp::{AcpServerMode, AcpSupport};
 use crate::provider::billing_model::BillingModel;
 use crate::provider::cli_sensitivity::CliSensitiveAxes;
+use crate::provider::display_policy::{DisplayPolicy, ToolResultSummary};
 use crate::provider::event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
 use crate::provider::identity::Provider;
 use crate::provider::model_catalog_source::ModelCatalogSource;
@@ -269,8 +270,15 @@ pub(in crate::provider) static CODEX_INFO: ProviderInfo = ProviderInfo {
     non_interactive_conflicting_flags: &[],
     billing_models: &[BillingModel::Subscription, BillingModel::PerToken],
     allowed_env_keys: &["OPENAI_API_KEY", "CODEX_API_KEY"],
-    stdout_noise_prefixes: &[],
-    stderr_noise_prefixes: &["Reading prompt from stdin..."],
+    display_policy: DisplayPolicy {
+        tool_result_summary: ToolResultSummary::PreferBody,
+        info_event_suppression: &[],
+        collapse_task_progress: false,
+        suppress_subscription_rate_limit: false,
+        silent_extension_kinds: &["item.started", "item.completed"],
+        stdout_noise_prefixes: &[],
+        stderr_noise_prefixes: &["Reading prompt from stdin..."],
+    },
     suppress_structured_stderr_on_success: false,
     supports_interactive_inline_closure: true,
     model_required_in_non_tty: false,

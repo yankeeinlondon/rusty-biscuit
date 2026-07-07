@@ -20,6 +20,7 @@ mod billing_model;
 mod claude;
 mod cli_sensitivity;
 mod codex;
+mod display_policy;
 mod errors;
 mod event_mapping;
 mod gemini;
@@ -52,6 +53,7 @@ pub use behavior::{
 };
 pub use billing_model::BillingModel;
 pub use cli_sensitivity::CliSensitiveAxes;
+pub use display_policy::{DisplayPolicy, EventClass, ToolResultSummary};
 pub use errors::{ConfigError, McpError};
 pub use event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
 pub use identity::PROVIDER_COUNT;
@@ -298,13 +300,9 @@ pub struct ProviderInfo {
     /// research.
     pub allowed_env_keys: &'static [&'static str],
 
-    /// Curated suppression list: stdout line prefixes stripped as
-    /// provider noise in non-interactive mode.
-    pub stdout_noise_prefixes: &'static [&'static str],
-
-    /// Curated suppression list: stderr line prefixes stripped as
-    /// provider noise in all modes.
-    pub stderr_noise_prefixes: &'static [&'static str],
+    /// Render policy consumed by shared render components (single owner
+    /// of the curated stdout/stderr noise-prefix suppression lists).
+    pub display_policy: DisplayPolicy,
 
     /// Whether structured non-interactive runs buffer filtered stderr and
     /// surface it only when the provider exits with an error.

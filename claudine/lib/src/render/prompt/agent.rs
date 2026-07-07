@@ -1,4 +1,4 @@
-//! User prompt reporting for Phase 4.
+//! The agent (user) prompt render component.
 //!
 //! Provides header rendering and body rendering (partial/full) inside a
 //! green block quote for the user (agent) prompt.
@@ -6,6 +6,7 @@
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
+use biscuit_terminal::utils::layout::Layout;
 
 use super::formatting::{
     create_user_prompt_blockquote, prompt_body_width, render_markdown_for_terminal,
@@ -52,40 +53,57 @@ fn render_user_prompt_body(
     }
 }
 
-/// Encapsulated user/agent-prompt report.
+/// The user/agent-prompt render component.
 ///
-/// Construct with [`AgentPromptReport::new`] and render with
-/// [`AgentPromptReport::render`]. The report borrows the prompt text; it does
-/// not take ownership.
-pub struct AgentPromptReport<'a> {
-    text: &'a str,
+/// Suppression is decided at construction: [`AgentPrompt::from_mode`] returns
+/// `None` for [`ReportMode::Silent`], so a constructed value always produces
+/// output. Sink concerns (TTY detection, writer choice) stay with the caller.
+#[derive(Debug)]
+pub struct AgentPrompt {
+    text: String,
     mode: ReportMode,
+    layout: Layout,
 }
 
-impl<'a> AgentPromptReport<'a> {
-    /// Create a new agent-prompt report.
-    pub fn new(text: &'a str, mode: ReportMode) -> Self {
-        Self { text, mode }
-    }
-
-    /// Render the report.
-    ///
-    /// Returns `None` when the mode is `Silent`.
-    pub fn render(&self, term: &Terminal) -> Option<String> {
-        if matches!(self.mode, ReportMode::Silent) {
+impl AgentPrompt {
+    /// Build the component, or `None` when `mode` is [`ReportMode::Silent`].
+    pub fn from_mode(text: impl Into<String>, mode: ReportMode) -> Option<Self> {
+        if matches!(mode, ReportMode::Silent) {
             return None;
         }
 
+        Some(Self {
+            text: text.into(),
+            mode,
+            layout: Layout::default(),
+        })
+    }
+}
+
+impl TerminalRenderable for AgentPrompt {
+    fn render(&self, term: &Terminal) -> String {
         let mut parts = vec![render_user_prompt_header(term)];
 
         if !matches!(self.mode, ReportMode::Summary) {
-            let body = render_user_prompt_body(self.text, self.mode, term);
+            let body = render_user_prompt_body(&self.text, self.mode, term);
             if !body.is_empty() {
                 parts.push(body);
             }
         }
 
-        Some(parts.join("\n"))
+        parts.join("\n")
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn layout(&self) -> &Layout {
+        &self.layout
+    }
+
+    fn layout_mut(&mut self) -> &mut Layout {
+        &mut self.layout
     }
 }
 
@@ -259,21 +277,19 @@ mod tests {
         );
     }
 
-    // --- AgentPromptReport direct tests ---
+    // --- AgentPrompt direct tests ---
 
     #[test]
     fn agent_report_silent_returns_none() {
-        let term = test_terminal();
-        let report = AgentPromptReport::new("Test prompt", ReportMode::Silent);
-        assert!(report.render(&term).is_none());
+        assert!(AgentPrompt::from_mode("Test prompt", ReportMode::Silent).is_none());
     }
 
     #[test]
     fn agent_report_summary_renders_header_only() {
         let term = test_terminal();
-        let report = AgentPromptReport::new("Test prompt", ReportMode::Summary);
-        let output = report.render(&term).expect("should produce output");
-        let plain = strip_ansi_codes(&output);
+        let report = AgentPrompt::from_mode("Test prompt", ReportMode::Summary)
+            .expect("should produce output");
+        let plain = strip_ansi_codes(&report.render(&term));
         assert!(plain.contains("Agent Prompt"));
         assert!(!plain.contains("Test prompt"));
     }
@@ -281,9 +297,9 @@ mod tests {
     #[test]
     fn agent_report_full_renders_header_and_body() {
         let term = test_terminal();
-        let report = AgentPromptReport::new("Full prompt body.", ReportMode::Full);
-        let output = report.render(&term).expect("should produce output");
-        let plain = strip_ansi_codes(&output);
+        let report = AgentPrompt::from_mode("Full prompt body.", ReportMode::Full)
+            .expect("should produce output");
+        let plain = strip_ansi_codes(&report.render(&term));
         assert!(plain.contains("Agent Prompt"));
         assert!(plain.contains("Full prompt body"));
     }
@@ -295,14 +311,14 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         let term = test_terminal();
-        let report = AgentPromptReport::new(
-            &text,
+        let report = AgentPrompt::from_mode(
+            text,
             ReportMode::Partial {
                 truncation: TruncationMode::FrontBack,
             },
-        );
-        let output = report.render(&term).expect("should produce output");
-        let plain = strip_ansi_codes(&output);
+        )
+        .expect("should produce output");
+        let plain = strip_ansi_codes(&report.render(&term));
         assert!(plain.contains("Agent Prompt"));
         assert!(plain.contains("Line 1"));
         assert!(plain.contains(" 50"), "should contain the last line number");
@@ -314,14 +330,14 @@ mod tests {
         // Per spec 6.3: `--quiet` is a no-op for the user prompt. The
         // resolved mode is `Full` for short prompts.
         let term = test_terminal();
-        let mode = crate::prompt_reporting::resolve_agent_prompt_report_mode(
+        let mode = crate::render::resolve_agent_prompt_report_mode(
             false, // silent
             false, // verbose
             10,
         );
-        let result = AgentPromptReport::new("Test prompt", mode).render(&term);
-        let output = result.expect("--quiet should not suppress user prompt");
-        let plain = strip_ansi_codes(&output);
+        let report = AgentPrompt::from_mode("Test prompt", mode)
+            .expect("--quiet should not suppress user prompt");
+        let plain = strip_ansi_codes(&report.render(&term));
         assert!(plain.contains("Agent Prompt"));
         assert!(plain.contains("Test prompt"));
     }
@@ -330,9 +346,9 @@ mod tests {
     fn short_prompt_renders_full_body() {
         let text = "Line 1\nLine 2\nLine 3";
         let term = test_terminal();
-        let report = AgentPromptReport::new(text, ReportMode::Full);
-        let output = report.render(&term).expect("should produce output");
-        let plain = strip_ansi_codes(&output);
+        let report =
+            AgentPrompt::from_mode(text, ReportMode::Full).expect("should produce output");
+        let plain = strip_ansi_codes(&report.render(&term));
         assert!(plain.contains("Line 1"));
         assert!(plain.contains("Line 2"));
         assert!(plain.contains("Line 3"));
@@ -345,9 +361,9 @@ mod tests {
         // left margin) so the bar visually centers under the 2-column
         // 🗣️ emoji on the header.
         let term = test_terminal();
-        let report = AgentPromptReport::new("Body line one", ReportMode::Full);
-        let output = report.render(&term).expect("should produce output");
-        let plain = strip_ansi_codes(&output);
+        let report = AgentPrompt::from_mode("Body line one", ReportMode::Full)
+            .expect("should produce output");
+        let plain = strip_ansi_codes(&report.render(&term));
         let mut lines = plain.lines().filter(|l| !l.trim().is_empty());
         let header = lines.next().expect("header line");
         assert!(header.contains("■"), "header line should contain ■");
@@ -369,9 +385,9 @@ mod tests {
     fn strips_leading_whitespace_in_report() {
         let text = "    Line 1\n      Line 2\n        Line 3";
         let term = test_terminal();
-        let report = AgentPromptReport::new(text, ReportMode::Full);
-        let output = report.render(&term).expect("should produce output");
-        let plain = strip_ansi_codes(&output);
+        let report =
+            AgentPrompt::from_mode(text, ReportMode::Full).expect("should produce output");
+        let plain = strip_ansi_codes(&report.render(&term));
         assert!(plain.contains("Line 1"));
         assert!(plain.contains("Line 2"));
         assert!(plain.contains("Line 3"));

@@ -21,6 +21,7 @@ use crate::provider::{OutputFormatSelector, ProviderInfo};
 use crate::provider::acp::{AcpEvent, AcpServerMode, AcpSupport};
 use crate::provider::billing_model::BillingModel;
 use crate::provider::cli_sensitivity::CliSensitiveAxes;
+use crate::provider::display_policy::{DisplayPolicy, ToolResultSummary};
 use crate::provider::event_mapping::{EventMapping, EventMappingTable, EventSupportLevel, WireProxyMode};
 use crate::provider::identity::Provider;
 use crate::provider::model_catalog_source::ModelCatalogSource;
@@ -285,8 +286,23 @@ pub(in crate::provider) static KIMI_INFO: ProviderInfo = ProviderInfo {
     non_interactive_conflicting_flags: &["--print", "--quiet", "--final-message-only", "--output-format", "--input-format"],
     billing_models: &[BillingModel::Subscription, BillingModel::PerToken],
     allowed_env_keys: &["KIMI_API_KEY"],
-    stdout_noise_prefixes: &[],
-    stderr_noise_prefixes: &[],
+    display_policy: DisplayPolicy {
+        tool_result_summary: ToolResultSummary::Show,
+        info_event_suppression: &[],
+        collapse_task_progress: false,
+        suppress_subscription_rate_limit: false,
+        silent_extension_kinds: &[
+            "event:ContentPart",
+            "event:ToolCallPart",
+            "event:StatusUpdate",
+            "event:MessageStart",
+            "event:MessageDelta",
+            "event:MessageEnd",
+            "event:Thinking",
+        ],
+        stdout_noise_prefixes: &[],
+        stderr_noise_prefixes: &[],
+    },
     suppress_structured_stderr_on_success: false,
     supports_interactive_inline_closure: false,
     model_required_in_non_tty: false,
