@@ -79,6 +79,11 @@ pub struct GenerateArgs {
     /// Write every drifted file without prompting (forwarded).
     #[arg(long, conflicts_with = "dry_run")]
     pub yes: bool,
+
+    /// Scaffold a newly wired provider (facts skeleton + mod.rs/behavior.rs
+    /// stubs) before generating its data.rs (forwarded). Requires a slug.
+    #[arg(long, requires = "slug", conflicts_with = "mapping")]
+    pub scaffold: bool,
 }
 
 fn supports_custom_resource(provider: Provider, resource: LinkableResource) -> bool {
@@ -166,6 +171,9 @@ fn run_generate(args: GenerateArgs) -> Result<()> {
     }
     if args.yes {
         forwarded.push("--yes");
+    }
+    if args.scaffold {
+        forwarded.push("--scaffold");
     }
     run_gen_passthrough(&forwarded)
 }

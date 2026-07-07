@@ -103,6 +103,8 @@ pub(crate) enum Commands {
     Opencode(commands::wrap::WrapperArgs),
     /// Wrap Goose with Claudine preflight/env handling.
     Goose(commands::wrap::WrapperArgs),
+    /// Wrap Kilo Code with Claudine preflight/env handling.
+    Kilo(commands::wrap::WrapperArgs),
     /// Compose a Markdown document and send as prompt to an agentic CLI.
     Compose(commands::compose::ComposeArgs),
     /// Inline composition: use frontmatter prompt to generate and replace body.
