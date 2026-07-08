@@ -247,6 +247,79 @@ install *args="":
 # Validate the source code without doing a full build
 check:
     @cargo check -p {{ LIBRARY }} -p {{ CLI }} -p {{ DMLS }}
+    @just check-zed
+
+# Check the Zed WASM extension (zed-dmls) compiles against its wasm target.
+#
+# The extension is workspace-excluded (it targets wasm32 and carries its own
+# empty `[workspace]`), so it is checked standalone. `wasm32-wasip1` is the
+# target Zed compiles extensions for. Skips cleanly when the target is not
+# installed so the check never fails merely because the host lacks it; install
+# it with `rustup target add wasm32-wasip1` to make the compile mandatory.
+check-zed:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    target="wasm32-wasip1"
+    if ! rustup target list --installed 2>/dev/null | grep -qx "$target"; then
+        echo -e "{{ YELLOW }}skip{{ RESET }} check-zed: rust target {{ BOLD }}$target{{ RESET }} is not installed"
+        echo -e "{{ DIM }}- install it with: rustup target add $target{{ RESET }}"
+        exit 0
+    fi
+    echo -e "Checking the {{ BOLD }}Zed WASM extension{{ RESET }} (zed-dmls) against $target"
+    cargo check --manifest-path ./dmls/zed-dmls/Cargo.toml --target "$target"
+    echo -e "✅ {{ GREEN }}zed-dmls compiles for $target{{ RESET }}"
+
+# Distribution matrix (the Zed extension downloads assets by these names):
+#   macOS (universal) : dmls-<version>-macos-universal.tar.gz  (lipo aarch64+x86_64)
+#   Linux x86_64      : dmls-<version>-linux-x86_64.tar.gz
+#   Linux aarch64     : dmls-<version>-linux-aarch64.tar.gz
+#   Windows x86_64    : dmls-<version>-windows-x86_64.zip
+# CI wires the full per-target build; this recipe packages the host target.
+
+# Build a release `dmls` archive for the host, named per the distribution matrix
+dist:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    version=$(cargo metadata --no-deps --format-version 1 \
+        | grep -o '"name":"dmls"[^}]*"version":"[^"]*"' \
+        | grep -o '"version":"[^"]*"' | head -1 | cut -d'"' -f4)
+    os=$(uname -s)
+    arch=$(uname -m)
+    out="./dmls/dist"
+    mkdir -p "$out"
+    case "$os" in
+        Darwin)
+            echo -e "Building {{ BOLD }}macOS universal{{ RESET }} dmls $version"
+            cargo build -p {{ DMLS }} --release --target aarch64-apple-darwin
+            cargo build -p {{ DMLS }} --release --target x86_64-apple-darwin
+            lipo -create -output "$out/dmls" \
+                ../target/aarch64-apple-darwin/release/dmls \
+                ../target/x86_64-apple-darwin/release/dmls
+            tar -C "$out" -czf "$out/dmls-$version-macos-universal.tar.gz" dmls
+            rm -f "$out/dmls"
+            echo -e "{{ GREEN }}wrote{{ RESET }} $out/dmls-$version-macos-universal.tar.gz"
+            ;;
+        Linux)
+            case "$arch" in
+                aarch64|arm64) triple="linux-aarch64" ;;
+                *)             triple="linux-x86_64" ;;
+            esac
+            echo -e "Building {{ BOLD }}$triple{{ RESET }} dmls $version"
+            cargo build -p {{ DMLS }} --release
+            cp ../target/release/dmls "$out/dmls"
+            tar -C "$out" -czf "$out/dmls-$version-$triple.tar.gz" dmls
+            rm -f "$out/dmls"
+            echo -e "{{ GREEN }}wrote{{ RESET }} $out/dmls-$version-$triple.tar.gz"
+            ;;
+        *)
+            echo -e "Building {{ BOLD }}windows-x86_64{{ RESET }} dmls $version"
+            cargo build -p {{ DMLS }} --release
+            cp ../target/release/dmls.exe "$out/dmls.exe"
+            ( cd "$out" && zip -q "dmls-$version-windows-x86_64.zip" dmls.exe )
+            rm -f "$out/dmls.exe"
+            echo -e "{{ GREEN }}wrote{{ RESET }} $out/dmls-$version-windows-x86_64.zip"
+            ;;
+    esac
 
 # ---------- benchmarking + profiling ----------
 
