@@ -1,4 +1,5 @@
 ---
+name: create-new-provider
 description: Canonical playbook for onboarding a new agentic-CLI provider into the Claudine library + CLI.
 ---
 
@@ -35,7 +36,7 @@ compile/test checkpoint. Do **not** skip the live-binary smoke.
   `lib/src/provider/<slug>/data.rs` is NEVER hand-edited — only `behavior.rs`
   and the wrapper/parser/adapter/config are hand-written.
 
-## Phase 0 — Identity & wrappability
+## Phase 0 — Identity & Wrap-ability
 
 Claudine wraps a provider by spawning its **headless, non-interactive CLI** and
 parsing its **structured stream** (JSON/NDJSON) on stdout. Before anything:
