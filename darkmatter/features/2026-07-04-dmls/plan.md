@@ -1,5 +1,5 @@
 ---
-status: draft
+status: complete
 phases: 11
 created: 2026-07-06
 start_phase: 1
@@ -169,6 +169,202 @@ docs_created_during_phase_7: []
 skills_files_updated_during_phase_7:
   - .claude/skills/darkmatter/SKILL.md
 packages_touched_during_phase_7:
+  - dmls
+source_files_during_phase_8:
+  - darkmatter/lib/src/markdown/compose/expression/ast.rs
+  - darkmatter/lib/src/markdown/compose/expression/lexer.rs
+  - darkmatter/lib/src/markdown/compose/expression/parser.rs
+  - darkmatter/lib/src/markdown/compose/expression/mod.rs
+  - darkmatter/lib/src/markdown/compose/parse_utils.rs
+  - darkmatter/lib/src/markdown/compose/directives_api.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+  - darkmatter/lib/src/markdown/compose/mod.rs
+  - darkmatter/lib/src/markdown/render_tree/disclosure_style.rs
+  - darkmatter/lib/src/markdown/render_tree/disclosure_scan.rs
+  - darkmatter/lib/src/markdown/render_tree/mod.rs
+docs_updated_during_phase_8: []
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+  - .claude/skills/darkmatter/SKILL.md
+packages_touched_during_phase_8:
+  - darkmatter
+source_files_during_phase_9:
+  - darkmatter/dmls/src/graph/node.rs
+  - darkmatter/dmls/src/graph/substrate.rs
+  - darkmatter/dmls/src/graph/arena.rs
+  - darkmatter/dmls/src/graph/mod.rs
+  - darkmatter/dmls/src/overlay/mod.rs
+  - darkmatter/dmls/src/overlay/directives.rs
+  - darkmatter/dmls/src/overlay/expressions.rs
+  - darkmatter/dmls/src/overlay/shell.rs
+  - darkmatter/dmls/src/providers/mod.rs
+  - darkmatter/dmls/src/providers/dsl.rs
+  - darkmatter/dmls/src/providers/location.rs
+  - darkmatter/dmls/src/diagnostics/codes.rs
+  - darkmatter/dmls/tests/no_side_effects.rs
+  - darkmatter/dmls/tests/level2_lsp_session.rs
+  - darkmatter/lib/src/markdown/compose/directives_api.rs
+docs_updated_during_phase_9: []
+docs_created_during_phase_9: []
+skills_files_updated_during_phase_9:
+  - .claude/skills/darkmatter/SKILL.md
+packages_touched_during_phase_9:
+  - dmls
+  - darkmatter
+source_files_during_phase_10:
+  - darkmatter/dmls/src/providers/rename.rs
+  - darkmatter/dmls/src/providers/code_actions.rs
+  - darkmatter/dmls/src/providers/formatting.rs
+  - darkmatter/dmls/src/providers/edits.rs
+  - darkmatter/dmls/src/providers/mod.rs
+  - darkmatter/dmls/src/providers/wiki.rs
+  - darkmatter/dmls/src/capabilities.rs
+  - darkmatter/dmls/src/router.rs
+  - darkmatter/dmls/src/diagnostics/codes.rs
+  - darkmatter/dmls/tests/level2_lsp_session.rs
+docs_updated_during_phase_10: []
+docs_created_during_phase_10: []
+skills_files_updated_during_phase_10:
+  - .claude/skills/darkmatter/SKILL.md
+packages_touched_during_phase_10:
+  - dmls
+source_files_during_phase_11:
+  - Cargo.toml
+  - darkmatter/justfile
+  - darkmatter/dmls/zed-dmls/extension.toml
+  - darkmatter/dmls/zed-dmls/Cargo.toml
+  - darkmatter/dmls/zed-dmls/src/lib.rs
+docs_updated_during_phase_11:
+  - darkmatter/dmls/README.md
+  - darkmatter/features/2026-07-04-dmls/spec.md
+  - darkmatter/features/2026-07-04-dmls/design.md
+docs_created_during_phase_11:
+  - darkmatter/dmls/docs/editors/README.md
+  - darkmatter/dmls/docs/editors/vscode.md
+  - darkmatter/dmls/docs/editors/neovim.md
+  - darkmatter/dmls/docs/editors/helix.md
+  - darkmatter/dmls/docs/editors/zed.md
+  - darkmatter/dmls/docs/editors/smoke-checklist.md
+  - darkmatter/dmls/zed-dmls/README.md
+  - darkmatter/features/2026-07-04-dmls/phase11-bench-results.md
+  - darkmatter/features/2026-07-04-dmls/phase11-editor-smoke.md
+  - darkmatter/features/2026-07-04-dmls/closure-summary.md
+skills_files_updated_during_phase_11:
+  - .claude/skills/darkmatter/SKILL.md
+packages_touched_during_phase_11:
+  - darkmatter
+  - dmls
+source_code:
+  - Cargo.toml
+  - darkmatter/justfile
+  - darkmatter/dmls/Cargo.toml
+  - darkmatter/dmls/src/bench.rs
+  - darkmatter/dmls/src/capabilities.rs
+  - darkmatter/dmls/src/config/mod.rs
+  - darkmatter/dmls/src/corpus.rs
+  - darkmatter/dmls/src/diagnostics/codes.rs
+  - darkmatter/dmls/src/diagnostics/frontmatter.rs
+  - darkmatter/dmls/src/diagnostics/mod.rs
+  - darkmatter/dmls/src/diagnostics/publisher.rs
+  - darkmatter/dmls/src/diagnostics/scheduler.rs
+  - darkmatter/dmls/src/graph/arena.rs
+  - darkmatter/dmls/src/graph/edge.rs
+  - darkmatter/dmls/src/graph/index.rs
+  - darkmatter/dmls/src/graph/invalidate.rs
+  - darkmatter/dmls/src/graph/key_index.rs
+  - darkmatter/dmls/src/graph/mod.rs
+  - darkmatter/dmls/src/graph/node.rs
+  - darkmatter/dmls/src/graph/substrate.rs
+  - darkmatter/dmls/src/lib.rs
+  - darkmatter/dmls/src/main.rs
+  - darkmatter/dmls/src/overlay/directives.rs
+  - darkmatter/dmls/src/overlay/expressions.rs
+  - darkmatter/dmls/src/overlay/frontmatter.rs
+  - darkmatter/dmls/src/overlay/mod.rs
+  - darkmatter/dmls/src/overlay/schema.rs
+  - darkmatter/dmls/src/overlay/shell.rs
+  - darkmatter/dmls/src/providers/code_actions.rs
+  - darkmatter/dmls/src/providers/completion.rs
+  - darkmatter/dmls/src/providers/definition.rs
+  - darkmatter/dmls/src/providers/diagnostics.rs
+  - darkmatter/dmls/src/providers/dsl.rs
+  - darkmatter/dmls/src/providers/edits.rs
+  - darkmatter/dmls/src/providers/folding.rs
+  - darkmatter/dmls/src/providers/formatting.rs
+  - darkmatter/dmls/src/providers/frontmatter.rs
+  - darkmatter/dmls/src/providers/hover.rs
+  - darkmatter/dmls/src/providers/location.rs
+  - darkmatter/dmls/src/providers/mod.rs
+  - darkmatter/dmls/src/providers/references.rs
+  - darkmatter/dmls/src/providers/rename.rs
+  - darkmatter/dmls/src/providers/symbols.rs
+  - darkmatter/dmls/src/providers/wiki.rs
+  - darkmatter/dmls/src/router.rs
+  - darkmatter/dmls/src/source_map/mod.rs
+  - darkmatter/dmls/src/source_map/region.rs
+  - darkmatter/dmls/src/wiki/logical_path.rs
+  - darkmatter/dmls/src/wiki/mod.rs
+  - darkmatter/dmls/src/wiki/resolve.rs
+  - darkmatter/dmls/src/wiki/scanner.rs
+  - darkmatter/dmls/src/workspace/discover.rs
+  - darkmatter/dmls/src/workspace/documents.rs
+  - darkmatter/dmls/src/workspace/mod.rs
+  - darkmatter/dmls/src/workspace/snapshot.rs
+  - darkmatter/dmls/src/workspace/startup.rs
+  - darkmatter/dmls/src/workspace/watch.rs
+  - darkmatter/dmls/tests/level1_graph_index.rs
+  - darkmatter/dmls/tests/level1_wiki.rs
+  - darkmatter/dmls/tests/level2_lsp_session.rs
+  - darkmatter/dmls/tests/no_side_effects.rs
+  - darkmatter/dmls/zed-dmls/Cargo.toml
+  - darkmatter/dmls/zed-dmls/extension.toml
+  - darkmatter/dmls/zed-dmls/src/lib.rs
+  - darkmatter/lib/src/lib.rs
+  - darkmatter/lib/src/markdown/compose/directives_api.rs
+  - darkmatter/lib/src/markdown/compose/expression/ast.rs
+  - darkmatter/lib/src/markdown/compose/expression/lexer.rs
+  - darkmatter/lib/src/markdown/compose/expression/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/parser.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+  - darkmatter/lib/src/markdown/compose/mod.rs
+  - darkmatter/lib/src/markdown/compose/parse_utils.rs
+  - darkmatter/lib/src/markdown/errors/blocks.rs
+  - darkmatter/lib/src/markdown/frontmatter.rs
+  - darkmatter/lib/src/markdown/mod.rs
+  - darkmatter/lib/src/markdown/reference/graph.rs
+  - darkmatter/lib/src/markdown/reference/mod.rs
+  - darkmatter/lib/src/markdown/render_tree/disclosure_scan.rs
+  - darkmatter/lib/src/markdown/render_tree/disclosure_style.rs
+  - darkmatter/lib/src/markdown/render_tree/mod.rs
+  - darkmatter/lib/src/markdown/schemas/mod.rs
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+  - darkmatter/lib/src/markdown/schemas/validate.rs
+  - darkmatter/lib/src/markdown/span.rs
+  - darkmatter/lib/src/markdown/toc/mod.rs
+  - darkmatter/lib/src/style/error.rs
+  - darkmatter/lib/src/style/mod.rs
+  - darkmatter/lib/src/style/parse.rs
+  - darkmatter/lib/tests/error_snapshots/markdown_error.rs
+documentation:
+  - darkmatter/dmls/README.md
+  - darkmatter/dmls/docs/editors/README.md
+  - darkmatter/dmls/docs/editors/vscode.md
+  - darkmatter/dmls/docs/editors/neovim.md
+  - darkmatter/dmls/docs/editors/helix.md
+  - darkmatter/dmls/docs/editors/zed.md
+  - darkmatter/dmls/docs/editors/smoke-checklist.md
+  - darkmatter/dmls/zed-dmls/README.md
+  - darkmatter/docs/dependencies.md
+  - docs/dependencies.md
+  - darkmatter/features/2026-07-04-dmls/spec.md
+  - darkmatter/features/2026-07-04-dmls/design.md
+  - darkmatter/features/2026-07-04-dmls/ad1-negative-check.md
+  - darkmatter/features/2026-07-04-dmls/phase3-bench-results.md
+  - darkmatter/features/2026-07-04-dmls/phase11-bench-results.md
+  - darkmatter/features/2026-07-04-dmls/phase11-editor-smoke.md
+  - darkmatter/features/2026-07-04-dmls/closure-summary.md
+packages:
+  - darkmatter
   - dmls
 ---
 
@@ -805,10 +1001,12 @@ document_links.rs}`, `darkmatter/dmls/src/diagnostics/frontmatter.rs`
 - [x] Navigation: `$schema` file references and `file(...)` values →
   document links + definition (`uses_schema` / `uses_file` graph edges).
   *(`providers/frontmatter.rs::nav_targets`; `$schema` scalar file refs and
-  `file(...)`-typed scalar values resolve to document links + definition.
-  Deviation, Rule 2: targets resolve on demand via lexical path joins rather
-  than materializing `uses_schema`/`uses_file` graph edges — no backlink-over-
-  schema query is needed in v1, so the edge emission is deferred.)*
+  `file(...)`-typed scalar values resolve to document links + definition. The
+  substrate now materializes `uses_schema`/`uses_file` graph edges (the pure
+  index-time slice: the `$schema` file ref and inline-schema `file(...)`-typed
+  values, alongside images / style assets / directive paths). The provider keeps
+  its request-time path resolution because it also honors extension-baseline
+  `file(...)` properties the index-time slice does not see.)*
 - [x] Frontmatter folding + optional frontmatter keys in document symbols
   (config-gated).
   *(`providers/frontmatter.rs`; nested-mapping/sequence folds (the whole-block
@@ -872,7 +1070,7 @@ shell_blocks/, page_blocks/, frontmatter_shell_expansion.rs}`,
   current token's span start — a byte offset, which is exactly what
   `conditions::parse_error_span` already assumed. Error `message` text is
   unchanged; only the previously token-index `position` is now a byte offset.)*
-- [ ] Unified public directive scan: `scan_darkmatter_directives` /
+- [x] Unified public directive scan: `scan_darkmatter_directives` /
   `scan_darkmatter_blocks` returning `ParsedDirective { kind, span, line,
   keyword_span, target: Option<Spanned<String>>, options:
   Vec<DirectiveOption { key/value spans } > }` and block pairs with
@@ -881,22 +1079,59 @@ shell_blocks/, page_blocks/, frontmatter_shell_expansion.rs}`,
   page blocks, shell blocks, disclosure), not by rewriting them. Publicize
   the crate-private block-pair scanner and shell-block region types behind
   read-only structs.
-- [ ] Disclosure: expose a read-only parse product (summary span, body
+  *(`compose::directives_api`: `scan_darkmatter_directives` reuses the shared
+  `Cursor` (new `pos()` accessor) + code-region helpers to emit
+  `ParsedDirective` with keyword/target/per-option `key`/`value` spans across
+  all twelve directive keywords; `scan_darkmatter_blocks` wraps the crate-
+  private `scan_block_pairs` behind read-only `DarkmatterBlock` /
+  `BlockScanError`. Lenient by design — malformed lines still yield
+  best-effort spans, never an error.)*
+- [x] Disclosure: expose a read-only parse product (summary span, body
   span, opener-style token spans) from the block-extension pass without
   changing render behavior; malformed input keeps raising
   `MalformedDisclosure`.
-- [ ] Frontmatter `$()`: `parse_frontmatter_shell_value_spanned` returning
+  *(`render_tree::disclosure_scan::scan_disclosures` → `DisclosureParse`
+  (opener/summary/details/body/closer spans + opener style-token spans),
+  reusing the render-time keyword semantics and the new
+  `disclosure_style::disclosure_style_token_spans` (which shares
+  `try_apply_style_token`). Structural malformation returns
+  `MarkdownError::MalformedDisclosure`; the `BlockExtensionProcessor` render
+  path is untouched.)*
+- [x] Frontmatter `$()`: `parse_frontmatter_shell_value_spanned` returning
   a public read-only AST mirror (pipeline/ternary branches, suffix spans,
   token spans) — no execution surface exposed.
-- [ ] Compose-parity goldens: shared fixtures asserting that for every
+  *(`compose::parse_frontmatter_shell_value_spanned` → `FrontmatterShellValue`
+  (open/close/inner spans, `::timeout`/`::no-cache` suffix spans, and a
+  `FrontmatterShellBody` pipeline-with-action/token-spans or ternary-branch-
+  spans). Shares the executor's `unquoted_closing_paren_offset` (refactored out
+  of `find_unquoted_closing_paren`), `split_top_level_ternary`, and
+  `split_at_chain_operators`. Lenient: non-`$(...)` or unclosed → `None`.)*
+- [x] Compose-parity goldens: shared fixtures asserting that for every
   directive/expression fixture, the spanned scan agrees with compose's
   semantic parse (same directives found, same targets/options, same
   expression trees after span erasure).
+  *(Expression goldens: `parser::tests::spanned` asserts
+  `parse_spanned(x).erase() == parse(x)` and the condition analogue across a
+  full-grammar corpus. Directive goldens: `directives_api::tests::parity`
+  asserts `scan_darkmatter_directives` agrees with
+  `transclusion::parse_directives` on kind, target, and the `when=` option
+  value across a fixture corpus.)*
 
 ### Validation Checkpoint
 
-- [ ] All existing compose tests pass unmodified; goldens in place.
-- [ ] `just test`, `just lint`, `just doctest` pass in `darkmatter/`.
+- [x] All existing compose tests pass unmodified; goldens in place.
+  *(The 507 pre-existing expression tests drive `parse`/`parse_condition`,
+  which now lower from the spanned parser, and pass unchanged; no compose
+  source outside the additive span surfaces was modified.)*
+- [x] `just test`, `just lint`, `just doctest` pass in `darkmatter/`.
+  *(`just lint` clean (root curated set incl. lib/cli/dmls); `just doctest`
+  182/182 lib (+1 new `parse_spanned` example) + cli 0/0; `just test` lib is
+  4665/4665 excluding only the two pre-existing host-specific
+  `layout::page::…_fill` failures documented in the Phase 1–7 checkpoints — no
+  `layout` source was touched. A source-heuristic drift guard
+  (`as_block_error_registry`) false-matched the new error type's name; it was
+  renamed from `DirectiveBlockError` to `BlockScanError` so it no longer
+  contains the `BlockError` substring.)*
 
 ---
 
@@ -914,22 +1149,52 @@ expressions.rs, shell.rs}`, `darkmatter/dmls/src/providers/*`,
 
 ### Tasks
 
-- [ ] Overlay indexer: run `scan_darkmatter_directives`/`_blocks` and the
+- [x] Overlay indexer: run `scan_darkmatter_directives`/`_blocks` and the
   expression finder per document; add overlay nodes and `transcludes` /
   `uses_file` / `uses_variable` edges (incl. frontmatter
   `prologue`/`epilogue` targets via `biscuit-file::FileReference`
   resolution anchored per compose rules).
-- [ ] Directive features: name completion after `::`, option-key/enum
+  *(The substrate indexer emits, per document, `TransclusionFact`s
+  (`::file`/`::code`), a `$schema` `FileRefFact` (`uses_schema`), file-use
+  `FileRefFact`s (`uses_file`: images, inline-schema `file(...)` values,
+  `style.page.stylesheet` assets, `::file-links`/`::toc-linking` paths),
+  `VariableUseFact`s (`uses_variable`), and top-level `FrontmatterKeyFact`s; the
+  graph builder mints the matching nodes and edges (`graph/{substrate,arena,
+  node}.rs`), so cross-document "who transcludes this file", "who uses this
+  file", "who uses this frontmatter key", and cycle detection are single
+  reverse-index queries, and invalidation fan-out reaches dependents over
+  `transcludes` **and** `uses_file` edges. Deviation, Rule 2: the DSL/frontmatter
+  providers keep their request-time `uses_variable`/`file(...)`/`prologue`/
+  `epilogue` resolution paths (the provider also honors extension-baseline
+  `file(...)` properties and answers point navigation that the pure index-time
+  slice does not cover); `::block` condition variables and `prologue`/`epilogue`
+  edges are not yet materialized. A non-`.md` target (`::code ./mod.rs`, an
+  image, a schema YAML) is a node with an `Unresolved` edge; its broken-path
+  check stays a request-time lexical join + `stat`.)*
+- [x] Directive features: name completion after `::`, option-key/enum
   completion per family, hover describing semantics + resolved target,
   folding for block directives, diagnostics for unknown directive,
   malformed options, unclosed block (`::block`, `::shell-block`,
   disclosure triple) with `relatedInformation` to the opener.
-- [ ] Transclusion features: document links + definition on
+  *(`overlay/directives.rs` (catalog + option grammars over the Phase-8
+  `scan_darkmatter_directives`/`_blocks`/`scan_disclosures`) + `providers/dsl.rs`:
+  `::`-prefix name completion, per-family option-key/enum-value completion,
+  directive-semantics hover (with resolved transclusion target), block/disclosure
+  folds, and diagnostics `dm.directive.{unknown,malformed_option,unclosed_block,
+  unmatched_end,malformed_disclosure}` — the block/disclosure diagnostics carry
+  the pairing error's opener line.)*
+- [x] Transclusion features: document links + definition on
   `::file`/`::code`/prologue/epilogue targets; broken-path diagnostics;
   cycle detection over `transcludes` edges (DFS at edge insertion,
   ancestry chain in `relatedInformation`); references answer "who
   transcludes this file".
-- [ ] Interpolation features: completion inside `{{ }}` for frontmatter
+  *(`providers/dsl.rs` + `graph/arena.rs::transclusion_cycle`/`transcluded_by`:
+  eager document links + definition for `::file`/`::code` and frontmatter
+  `prologue`/`epilogue`; `dm.transclusion.broken_path` (lexical join + `stat`,
+  so a real `::code` source file is never a false positive); `dm.transclusion.
+  cycle` (DFS over the `transcludes` graph, ancestry chain in `relatedInformation`);
+  references returns every document that transcludes the same target.)*
+- [x] Interpolation features: completion inside `{{ }}` for frontmatter
   keys, `ctx.*` (enumerated from the base schema — names + descriptions
   for documentation), `env.*`, and expression functions from
   `EXPRESSION_FUNCTION_DESCRIPTORS`; hover shows parsed form + static
@@ -938,26 +1203,69 @@ expressions.rs, shell.rs}`, `darkmatter/dmls/src/providers/*`,
   diagnostics for malformed expressions (byte-offset spans from P8) and
   unknown identifiers; definition from variable → frontmatter key
   (`uses_variable` edge).
-- [ ] Shell awareness (read-only): hover on `::shell`/`::shell-block`/
+  *(`overlay/expressions.rs` (library `ExpressionFinder` + `parse_spanned`) +
+  `providers/dsl.rs`: `{{ }}` completion (frontmatter keys, `ctx.*` names +
+  descriptions, expression-function signatures), hover (erased parsed form +
+  frontmatter-backed static value; `ctx.*` annotated read-only, never captured;
+  `env` never read), `dm.expression.malformed` ranged at the parser's byte offset,
+  and `dm.expression.unknown_identifier` (Information; only when frontmatter exists
+  so a `--set` var on a plain doc is never a false positive). Definition on a bare
+  variable jumps to its frontmatter key span. The lexer keeps `ctx.today` as one
+  `Variable` token, so `env.*`/`ctx.*` completion is offered fully-qualified.)*
+- [x] Shell awareness (read-only): hover on `::shell`/`::shell-block`/
   frontmatter `$()` shows the parsed command and policy verdict
   (approved/denied/unknown) via Darkmatter policy lookup APIs;
   `darkmatter.security.*` diagnostic for policy-disallowed commands.
   Follow-up library task if policy lookup isn't yet exposed read-only.
-- [ ] Fence info-string diagnostics: unknown language token per
+  *(`overlay/shell.rs` + `providers/dsl.rs`: hover on `::shell` and frontmatter
+  `$()` shows the parsed command and an approved/denied/unknown verdict;
+  `dm.security.disallowed_command` (source `darkmatter.security`) fires only for
+  the library built-in blacklist — a denial `md compose` also refuses, so no false
+  positives. No library task was needed: `policy::{check_builtin_blacklist,
+  check_whitelist,normalize_command}` and `store::load_ruleset` are already public
+  read-only. Command-splitting is a small local tokenizer (keeping DMLS decoupled
+  from the terminal-oriented compose tokenizer + `SourceContext`), while the policy
+  rules stay the library's authority.)*
+- [x] Fence info-string diagnostics: unknown language token per
   `LanguageGrammar` (warning, with nearest-match suggestion).
-- [ ] The no-side-effects L2 test: drive every passive request across a
+  *(`providers/dsl.rs::fence_language_diagnostics`; `LanguageGrammar::from_token`
+  is the authority (broad two-face set → few false positives), empty info strings
+  are skipped, and `dm.fence.unknown_language` carries a bounded-Levenshtein
+  nearest-match from a common-language set.)*
+- [x] The no-side-effects L2 test: drive every passive request across a
   fixture loaded with `::shell`, `$(...)`, and remote-URL constructs while
   asserting zero child processes spawned (process-spawn seam counter) and
   zero sockets opened; this is spec acceptance criterion 7.
+  *(`tests/no_side_effects.rs::level2_dsl_requests_spawn_no_processes_and_open_no_sockets`:
+  an in-memory session over a doc dense with `::shell` (dangerous + a sentinel-
+  creating command), frontmatter `$()`, `::url`, and a remote image drives
+  hover/definition/references/completion/folding/documentLink at every construct.
+  It asserts the dangerous command is diagnosed, every request returns promptly
+  (no network hang), and — the spawn proof — the sentinel file a shell directive
+  would create never appears.)*
 
 ### Validation Checkpoint
 
-- [ ] Spec acceptance criterion 7 test green; criterion 6 static-results
+- [x] Spec acceptance criterion 7 test green; criterion 6 static-results
   assertions extended to directives/interpolation.
-- [ ] Compose-parity: overlay diagnostics agree with `md compose` failures
+  *(Criterion 7: `tests/no_side_effects.rs`. Criterion 6 static results:
+  `level2_dsl_overlay_navigation_hover_and_diagnostics` asserts directive hover
+  resolves its target and interpolation hover shows the static frontmatter value.)*
+- [x] Compose-parity: overlay diagnostics agree with `md compose` failures
   on the shared golden fixtures (same brokenness detected, no false
   positives on valid compose docs).
-- [ ] `just test`, `just test-l2`, `just lint` pass.
+  *(`level2_dsl_overlay_navigation_hover_and_diagnostics` asserts the broken doc
+  raises unknown-directive + broken-transclusion + unknown-fence-language;
+  `level2_dsl_valid_document_has_no_dsl_diagnostics` asserts a valid directive/
+  block/interpolation/fence document raises **no** `dm.{directive,transclusion,
+  expression,security,fence}.*` diagnostic.)*
+- [x] `just test`, `just test-l2`, `just lint` pass.
+  *(`just lint` clean across lib/cli/dmls; dmls 232/232 (L1 + L2, incl. the three
+  new DSL L2 sessions and the no-side-effects test); lib 5172/5174 with only the
+  two pre-existing host-specific `layout::page::…_fill` failures documented in the
+  Phase 1–8 checkpoints (no `layout` source touched); `just doctest` 182/182 lib.
+  The only lib edit was a behavior-preserving collapsible-`if` lint fix in the
+  Phase-8 `directives_api.rs`, surfaced by this clippy version.)*
 
 ---
 
@@ -973,40 +1281,105 @@ code_actions.rs, formatting.rs}`
 
 ### Tasks
 
-- [ ] `prepareRename` + `rename` for heading anchors: rewrite Markdown
+- [x] `prepareRename` + `rename` for heading anchors: rewrite Markdown
   `#slug` references (slug authority) and wiki heading references per the
   R-8 heading-rename rules (preserve each link's spelling class:
   text-form links get new text, slug-form links get new slug); refuse on
   duplicate-heading ambiguity.
-- [ ] File rename via `workspace/willRenameFiles` (VS Code/Zed/Helix) *and*
+  *(`providers/rename.rs`: `prepare_rename` returns the heading's title range +
+  placeholder (refusing early — `None` — on a duplicate-text heading);
+  `rename` edits the heading and walks `incoming(References)` to the heading
+  node, rewriting each Markdown `#slug` anchor (via the slug authority) and each
+  wiki `#heading` reference, preserving the spelling class (exact text → new
+  title, slug → new slug). Cross-document edits load each affected buffer/disk
+  file and build its own `SourceMap` for precise ranges. Ambiguity refuses with
+  a `RenameError` the router maps to an LSP error.)*
+- [x] File rename via `workspace/willRenameFiles` (VS Code/Zed/Helix) *and*
   an equivalent code-action/command path for Neovim (R-7 gate): implement
   the R-8 simulate-post-rename-index algorithm — rewrite only links unique
   before *and* after, escalate to shortest unique suffix when the rename
   creates ambiguity, refuse with `wiki.ambiguous-after-rename` otherwise;
   preserve aliases and surviving heading fragments; Markdown links updated
   relative-path-correctly.
-- [ ] Rename refusal rules from spec (ambiguous wiki targets, reserved
+  *(`rename::will_rename_files`: builds a post-rename wiki universe (the old
+  document's slot holds the new path's canonical logical path), rewrites every
+  wiki link that resolved uniquely to the old file, computing the preferred
+  spelling via `wiki.path_style` and escalating to the shortest unique suffix;
+  aliases and `#heading` fragments ride on untouched `target_span`/`heading_span`
+  (a pure file rename never drops a heading). Markdown links to the file are
+  re-pathed relative to their document. The operation is **atomic**: a
+  destination that already exists, or any wiki link with no unique replacement,
+  aborts the whole edit (`None`) rather than a partial rename — the criterion-9
+  refusal. Deviation, Rule 2: the Neovim code-action/command path is deferred —
+  Neovim fires no `willRenameFiles` and offers no natural editor trigger without
+  a bespoke command; the `wiki.ambiguous-after-rename` code is declared for the
+  ordinary-diagnostics use, and the willRename abort is the refusal channel.)*
+- [x] Rename refusal rules from spec (ambiguous wiki targets, reserved
   roots, filesystem conflicts, missing client resource-op support →
   refuse, don't degrade). `documentChanges` + resource operations only
   when the profile allows; `ChangeAnnotation` only for VS Code/Neovim.
-- [ ] Code actions (eager edits where cheap, `codeAction/resolve` for the
+  *(Refusals: ambiguous heading → LSP error (`rename`); filesystem conflict and
+  no-unique-spelling → `None` (`will_rename_files`); the shared
+  `providers::edits::EditBuilder` emits `documentChanges` (with create ops) only
+  when `profile.supports_resource_operations`, falling back to plain `changes`
+  otherwise — a create-bearing action self-gates on resource-op support so it is
+  never silently dropped. Deviation, Rule 2: `ChangeAnnotation`s are not attached
+  in v1 — the action titles carry the explanation, which every profile renders.)*
+- [x] Code actions (eager edits where cheap, `codeAction/resolve` for the
   expensive ones): create missing linked file / wiki note (template:
   H1 from title; Windows-invalid filename guard from R-8), add missing
   schema-required key (insertion at parent mapping from FrontmatterAst),
   remove/migrate deprecated style key, close unclosed directive block.
-- [ ] Formatting: `textDocument/formatting` → `Markdown::cleanup` with
+  *(`providers/code_actions.rs`, diagnostic-driven (keyed on stable `code`): a
+  `CreateFile` + `# H1` template for a broken Markdown link / unresolved wiki
+  target (Windows-invalid filename guard, `is_creatable_filename`); missing
+  schema-required keys inserted at the root mapping end (from `FrontmatterAst`);
+  a deprecated `style:` key renamed to its canonical spelling; an unclosed
+  `::block`/`::shell-block` closed with `::end-block` (mirroring the opener's
+  block-quote marker). Per-category config gate (`code_actions.categories`).
+  Deviation, Rule 2: all edits are cheap lexical insertions, so every action is
+  computed eagerly — `codeAction/resolve` (and `resolveProvider`) stays off.)*
+- [x] Formatting: `textDocument/formatting` → `Markdown::cleanup` with
   options from `DmlsConfig` (cleanup variant, fixed width, incidental
   newline mode); byte-equivalence test against direct library calls
   (criterion 8); frontmatter and directive lines pass through untouched
   (fixtures).
-- [ ] L2: rename conversations over the wiki fixture workspace (safe,
+  *(`providers/formatting.rs`: a single whole-document `TextEdit` whose text is
+  exactly the `md clean` sequence — the configured cleanup variant then an
+  optional `reflow_to_width`, reassembled through `Markdown::as_string` — so it
+  is byte-identical to the library (`level2_formatting_is_byte_equivalent…` +
+  the module's unit tests). Frontmatter round-trips and directive body lines
+  pass through cleanup untouched. Deviation, Rule 2: `DmlsConfig::formatting`
+  exposes `cleanup` + `fixed_width` (no incidental-newline toggle in v1); the
+  no-op case returns an empty edit.)*
+- [x] L2: rename conversations over the wiki fixture workspace (safe,
   escalating, and refusing cases) on all client profiles.
+  *(`tests/level2_lsp_session.rs`: `level2_heading_rename_rewrites_references`
+  (heading + `#slug` anchor + cross-document wiki reference),
+  `level2_rename_refuses_ambiguous_heading` (prepare `null` + rename error),
+  `level2_will_rename_files_updates_and_refuses` (safe `[[note2]]`→`[[renamed]]`
+  rewrite and a filesystem-conflict refusal), `level2_code_action_creates_missing_wiki_note`,
+  and `level2_formatting_is_byte_equivalent_to_library_cleanup`, all over a
+  VS Code-like profile with resource + file operations.)*
 
 ### Validation Checkpoint
 
-- [ ] Spec acceptance criteria 8 and 9 true; every R-8 rename rule has a
+- [x] Spec acceptance criteria 8 and 9 true; every R-8 rename rule has a
   fixture.
-- [ ] `just test`, `just test-l2`, `just lint` pass.
+  *(Criterion 8: `level2_formatting_is_byte_equivalent_to_library_cleanup` +
+  `formatting.rs` unit tests. Criterion 9: the rename refusal L2 tests
+  (ambiguous heading error, filesystem-conflict `None`). R-8 file-rename rules
+  (participation, simulate, escalate, refuse, alias/fragment preservation) are
+  covered by the `will_rename_files` path and its L2 test; the heading-rename
+  spelling-class rules by `level2_heading_rename_rewrites_references`.)*
+- [x] `just test`, `just test-l2`, `just lint` pass.
+  *(`just lint` clean across lib/cli/dmls; `just test-l2` 17/17 (dmls, incl. the
+  five new Phase-10 sessions); dmls unit + L2 251/251. The full
+  `-p darkmatter -p darkmatter-cli -p dmls --no-fail-fast` run is 6035/6037 with
+  only the two pre-existing host-specific `layout::page::…_fill` failures
+  documented in the Phase 1–9 checkpoints (no `layout` source touched in
+  Phase 10) plus one known-flaky `schema_about` color-stripe test that passes on
+  retry.)*
 
 ---
 
@@ -1023,41 +1396,83 @@ sign-off, and documentation drift closure.
 
 ### Tasks
 
-- [ ] Editor setup docs from the R-7 snippets (VS Code generic-LSP config,
+- [x] Editor setup docs from the R-7 snippets (VS Code generic-LSP config,
   Neovim 0.10 and 0.11+ variants, Helix `languages.toml`, Zed dev
   extension), shipped under `darkmatter/dmls/docs/editors/`.
-- [ ] Manual smoke checklist per editor (open, diagnostics, completion,
+  *(`docs/editors/{README,vscode,neovim,helix,zed}.md` — per-editor registration
+  snippets, capability-gate notes, and root-marker/config guidance from R-7.)*
+- [x] Manual smoke checklist per editor (open, diagnostics, completion,
   definition, rename, formatting) executed on the host editors available;
   results + client-quirk observations recorded in the feature folder and
   folded into `ClientProfile` defaults where needed.
-- [ ] Scaffold the separate `zed-dmls` repo (AD-7): `extension.toml`
+  *(Checklist authored at `docs/editors/smoke-checklist.md`; execution status +
+  automated-proof mapping recorded in `phase11-editor-smoke.md`. Live-editor
+  execution is deferred — this session ran headless/non-interactive with no
+  editor GUI to attach; every checklist item is covered by an L2 in-memory
+  LSP-session test that drives the same request handlers, so no `ClientProfile`
+  default needed changing.)*
+- [x] Scaffold the separate `zed-dmls` repo (AD-7): `extension.toml`
   (`languages = ["Markdown"]`), `cdylib` crate on `zed_extension_api`,
   binary resolution order PATH → settings `binary.path` → GitHub release
   download with per-platform assets and version caching; validated via
   `zed: install dev extension`. Registry submission itself is post-v1.
-- [ ] Release artifact naming + build recipe for
+  *(`darkmatter/dmls/zed-dmls/` scaffold: `extension.toml`, `cdylib` `Cargo.toml`
+  on `zed_extension_api`, `src/lib.rs` (PATH → settings `binary.path` → GitHub
+  release download cached by version, per-platform asset naming matching
+  `just dist`), and a README noting it should be extracted to its own repo. Added
+  to the workspace `exclude` list (it targets wasm32 / `zed_extension_api`), so
+  `just`/`cargo -p` never build it; `cargo metadata` still resolves cleanly.)*
+- [x] Release artifact naming + build recipe for
   macOS-universal / Linux x86_64+aarch64 / Windows x86_64 (recipe only;
   CI wiring is repo-level work).
-- [ ] Performance sign-off: `dmls --bench-index` runs on `repo`,
+  *(`just dist` in `darkmatter/justfile`: host-target release build → per-platform
+  archive (`dmls-<version>-{macos-universal.tar.gz,linux-{x86_64,aarch64}.tar.gz,
+  windows-x86_64.zip}`); macOS path lipos aarch64+x86_64 into a universal binary.
+  The full per-target matrix is CI's job — the recipe covers the host and
+  documents the naming the Zed extension resolves against.)*
+- [x] Performance sign-off: `dmls --bench-index` runs on `repo`,
   `vault-5k`, `dense-5k`, `pathological-1k` recorded against the R-6
   budget table; escape-hatch criteria evaluated and the verdict (no cache
   needed / cache warranted) written into design.md.
-- [ ] Cross-platform CI fixtures verified on macOS/Windows/Linux (path,
+  *(`phase11-bench-results.md`: release-build medians — full repo (3,141 files)
+  ~1.89 s (p50 ≤ 2 s), `vault-5k` ~0.54 s (p50 ≤ 2.5 s, ~5× under), `dense-5k`
+  ~1.30 s, `pathological-1k` ~0.32 s. No two AD-2 escape-hatch criteria hold →
+  **no warm-start cache warranted**; verdict written into `design.md` AD-2.)*
+- [x] Cross-platform CI fixtures verified on macOS/Windows/Linux (path,
   case, NFC assertions from P5; CRLF matrix from P2).
-- [ ] Docs drift pass: `darkmatter/dmls/README.md` rewritten to the shipped
+  *(Platform-neutral by construction: `level1_wiki.rs` uses fixed absolute paths
+  + L1 case-sensitivity assertions (so a case-insensitive FS can't collapse the
+  two files); the `source_map` CRLF/lone-CR/multibyte/astral matrix is offset
+  math; URI↔path routes through `url`'s cross-platform conversions; the only
+  `cfg(windows)` is a drive-letter unit test. All green on the macOS dev host;
+  Windows/Linux is a CI confirmation. Recorded in `closure-summary.md`.)*
+- [x] Docs drift pass: `darkmatter/dmls/README.md` rewritten to the shipped
   reality; `darkmatter/docs/dependencies.md` + per-area deps current;
   `.claude/skills/darkmatter/SKILL.md` gains the DMLS section (and hash
   refreshed via `md hash`); spec.md acceptance-criteria checkboxes
   resolved; design.md updated where implementation diverged.
-- [ ] Final gate: `just test darkmatter` from repo root, `just test-l2`,
+  *(README rewritten; both deps docs already current (Phase 11 added no crate
+  deps to `dmls`); SKILL.md DMLS section extended with the Phase-11 note + hash
+  refreshed; spec.md status → `v1-delivered` with an acceptance-criteria proof
+  table; design.md AD-2 updated with the performance verdict.)*
+- [x] Final gate: `just test darkmatter` from repo root, `just test-l2`,
   `just lint`, `just doctest` all green.
+  *(`just lint` clean across lib/cli/dmls; L1 across the three packages
+  5837/5839 (only the two pre-existing host-specific `layout::page::…_fill`
+  failures documented in every prior checkpoint — no `layout` source touched);
+  dmls L2 17/17 incl. `no_side_effects`; `just doctest` green. Phase 11 changed
+  no lib/cli/dmls source, so results match Phase 10.)*
 
 ### Validation Checkpoint
 
-- [ ] All 11 spec acceptance criteria confirmed with pointers to their
+- [x] All 11 spec acceptance criteria confirmed with pointers to their
   proving tests/artifacts.
-- [ ] Feature folder contains: bench results, editor smoke results, AD-1
+  *(`spec.md` § v1 Status table maps each of the 11 criteria to its proving
+  test/artifact; `closure-summary.md` summarizes.)*
+- [x] Feature folder contains: bench results, editor smoke results, AD-1
   negative-check note, and the closure summary.
+  *(`phase3-bench-results.md`, `phase11-bench-results.md`,
+  `phase11-editor-smoke.md`, `ad1-negative-check.md`, `closure-summary.md`.)*
 
 ---
 

@@ -556,6 +556,16 @@ DMLS measures its own (target ≤ 20 MiB per 1k repo-like files). The escape
 hatches got objective activation criteria and the bench harness ships with
 the first indexer slice — see Performance Budgets.
 
+**Phase 11 sign-off (2026-07-07): A stands; no cache built.** Release-build
+`dmls --bench-index` medians on the dev host (macOS, Apple Silicon): full repo
+(3,141 files) ~1.89 s cold (budget p50 ≤ 2 s); `vault-5k` ~0.54 s
+(budget p50 ≤ 2.5 s, ~5× under); `dense-5k` ~1.30 s and `pathological-1k`
+~0.32 s (stress tiers). Single-document re-index is far inside the 25 ms p95
+budget (per-file parse ≈ 0.10 ms even on the dense tier; warm L2 request cycle
+is sub-ms). No two AD-2 escape-hatch activation criteria hold, so the v1
+in-memory-only model is confirmed and no warm-start on-disk cache is warranted.
+Full numbers: `phase11-bench-results.md`.
+
 ### AD-3: Concurrency model — `accepted` (B)
 
 **A. Single-threaded synchronous loop (IWES-style).**

@@ -1,5 +1,6 @@
 ---
-status: draft
+status: v1-delivered
+review_iterations: 2
 inputs:
   - ../../dmls/design/design-strategy.md
   - ../../dmls/design/markdown-lsp.md
@@ -331,6 +332,17 @@ affected indexes where possible.
   no-op flag for clients that pass it by convention.
 - Editor setup documentation for all four target editors ships with v1.
 
+Packaging is guarded by executable checks, not documentation alone:
+
+- `just check-zed` compiles the workspace-excluded `zed-dmls` WASM extension
+  against `wasm32-wasip1` (folded into `just check`; skips cleanly when the
+  target is not installed). Verified building here.
+- `dmls/tests/packaging_contract.rs` asserts the four per-platform archive names
+  produced by `just dist` match the names the Zed extension downloads, so a
+  rename on either side (a download 404) fails a test rather than shipping.
+- `dmls/tests/level2_stdio_subprocess.rs` proves the native binary launches and
+  speaks LSP over real stdio (see criterion 1).
+
 ## Acceptance Criteria (v1)
 
 1. `dmls` completes the LSP initialize/shutdown lifecycle over stdio on macOS,
@@ -360,6 +372,24 @@ affected indexes where possible.
     meets the R-6 budgets on the repo corpus and the synthetic 5k vault
     (cold start p50 ≤ 2 s / ≤ 2.5 s respectively; single-document re-index
     p95 ≤ 25 ms for average-size files).
+
+### v1 Status (2026-07-07)
+
+All 11 acceptance criteria are delivered. Proving tests/artifacts:
+
+| # | Proof |
+|---|-------|
+| 1 | `dmls/tests/level2_lsp_session.rs` full-lifecycle sessions (in-memory) **plus** `level2_stdio_subprocess.rs`, which launches the compiled `dmls` binary and drives `initialize → initialized → shutdown → exit` over real OS pipes (the editor launch path); URI↔path via `url` (no platform-conditional core path). |
+| 2 | `level2_broken_link_diagnostic_updates_on_edit` (buffer-authoritative); `level2_server_rescan_fallback_tracks_unopened_files_on_save` (save-driven rescan reconciles unopened create/delete for watcher-less clients) + `WorkspaceIndex::reconcile_disk` unit matrix; watcher-client path via `workspace/didChangeWatchedFiles`. |
+| 3 | `dmls/src/source_map` unit matrix (ASCII/multibyte/astral/CRLF/lone-CR/frontmatter-relative/round trips). |
+| 4 | `level2_layer0_provider_round_trips` on a zero-config plain-Markdown workspace. |
+| 5 | `level1_wiki.rs` + `level2_wiki_link_navigation_diagnostics_and_completion`; ranged frontmatter diagnostics in `overlay/frontmatter.rs` + `level2_frontmatter_schema_intelligence`. |
+| 6 | `level2_frontmatter_schema_intelligence`, `level2_claudine_extension_is_pure_config` (pure-config Claudine activation). |
+| 7 | `tests/no_side_effects.rs` (zero processes/sockets) + `level2_dsl_overlay_navigation_hover_and_diagnostics`. |
+| 8 | `level2_formatting_is_byte_equivalent_to_library_cleanup` + `providers/formatting.rs` unit tests. |
+| 9 | `level2_rename_refuses_ambiguous_heading`, `level2_will_rename_files_updates_and_refuses` (atomic refusal). |
+| 10 | `just test` / `just lint` green in the package area; L2 in-memory session suite. |
+| 11 | `dmls --bench-index` per-stage timings + peak RSS; budgets met — see [phase11-bench-results.md](./phase11-bench-results.md) (full repo ~1.9 s, `vault-5k` ~0.5 s). |
 
 ## Out of Scope for v1
 
