@@ -137,3 +137,35 @@ closeout track, scheduled when the memory design process starts.
 - All 9 provider docs validate clean via `md schema validate` against the tightened
   sidecar. Refresh fleets are unaffected: the 1c addition is optional-until-refresh and
   the 1d values were normalized in place, so no fleet run is forced by this change.
+
+## 2026-07-07 — Closeout-fleet completion reconciled (log↔reality drift)
+
+This log recorded only the `permissions` fleet (2026-07-03) and the authored-but-unrun
+`memory` topic, which read as "closeout barely started" — but that is a **stale log**,
+not the real state. Verified against the filesystem + git today:
+
+- **Every closeout topic in the ratified roster has run and is committed.** Each of
+  `agent-cli`, `non-interactive-sessions`, `usage`, `permissions` (`agent-permissions`),
+  `hooks`, `skills`, `slash-commands`, `subagents`, `system-prompt`, `acp`, `resume`,
+  and `mcp` (plus `plugins` and `signals`) carries `_schema.yaml` + `_fleet.md` and is
+  **roster-complete** — 9 provider docs including `pi.md` + `kilo.md` — all
+  `last_updated: 2026-07-03` (signals refreshed 2026-07-06). Thirteen topic dirs carry a
+  2026-07-03 `pi.md`. `local_runners` is complete at its own 5-runner roster (not a
+  provider roster).
+- Landed across the committed fleet-refresh commits (`d0702ca93` "refresh research
+  fleets and topic docs for 7-provider lineup", plus the per-topic expansions
+  `692e49e50` hooks kilo/pi/qwen-cli, `10361d86b`/`27bd41151` mcp, `3b0b98216`/`8703a1c6e`
+  skills, `b35528168` hooks, …). The 9-provider research roster (pi + kilo included) ran
+  ahead of the compiled enum exactly as designed; M-Kilo/M-Pi code graduation followed.
+- **Only `memory` remains unrun**, by design (Ken's B2 ruling: authored as design input,
+  deliberately not wired to codegen; deferred to when the memory design process starts).
+- **Why the log looked empty:** the plan's Phase-3 step 3 ("append a per-topic outcome
+  note after each topic") was not kept during the 2026-07-03 batch. This entry is the
+  reconciliation; per-topic prompt-iteration/verdict notes were not captured at run time
+  and are not reconstructed here.
+- **Not a Checkpoint 3.** Phase 4's closeout review (present the per-topic outcome log +
+  updated topic table; decide follow-on codegen work) is Ken-gated and remains open. This
+  entry records that the **fleets** are done — the gating fact for M-Antigravity (H3),
+  whose roster entry lands only after the closeout fleets finish — not that the closeout
+  is formally signed off. Still-open follow-ups from earlier entries (typed
+  `env_vars.effect` enum; `precedence.scope` already tightened in 1d) carry forward.

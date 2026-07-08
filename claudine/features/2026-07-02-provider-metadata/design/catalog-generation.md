@@ -72,7 +72,8 @@ through renderable components. Gen stays render-free (no biscuit-terminal dep).
 
 Generated code references `Provider::<New>`, which cannot exist before the enum
 variant. The order is fixed, with compile checkpoints. **Amended against the
-M-Kilo graduation (2026-07-07) — the real step list, not "three edits":**
+M-Kilo and M-Pi graduations (2026-07-07) — the real step list, not "three
+edits":**
 
 1. **Roster entry** (identity facts) — no code. Must carry `sniff_binding`,
    `docs_url`, and the other roster-sourced required fields; a missing one is a
@@ -105,7 +106,16 @@ M-Kilo graduation (2026-07-07) — the real step list, not "three edits":**
    site) — **hard-stop generation** until a field-keyed `overrides/<slug>.yaml`
    entry pins the value. This is a *required* step for any provider with dynamic
    listing, not optional, until the `agent-models` sidecar grows typed keys for
-   them (tracked follow-up in the M-Kilo graduation report).
+   them (tracked follow-up in the M-Kilo graduation report). **Aggregator
+   providers (M-Pi):** a multi-provider front-end lists the same model id as the
+   per-provider default for several providers, so `expected_offerings`
+   (`default_models` → `DefaultModelsToExpectedOfferings`) hard-stops on a
+   duplicate-id error. Per the collision-is-error rule, resolve it by *merging*
+   the research — fold the duplicate `default_models` entries in
+   `agent-models/<slug>.md` into one (record the second provider in the kept
+   entry's notes), never by dropping a row. Expect `model_env_vars` and
+   `non_interactive_conflicting_flags` to project empty for such a provider (no
+   single bare model env var) — correct, no override.
 6. **Implement behavior** where the provider genuinely differs. Consistency the
    test suite enforces — each is a one-line per-provider edit surfaced as a
    *failing test*, never a silent gap:
@@ -121,11 +131,35 @@ M-Kilo graduation (2026-07-07) — the real step list, not "three edits":**
      `claudine-contract` `support_matrix` length + the `auth_env_vars` arm, and
      the signals dormant-example test (swap to a still-unwired slug).
    - Re-bless `docs/providers/dispatch-inventory.json` (`CLAUDINE_UPDATE_INVENTORY=1`).
+7. **Live-binary wrapper smoke — REQUIRED before graduation is final (M-Pi).**
+   The compiler and test suite validate the data seam and the parser in the
+   abstract, but they cannot catch argv-parser quirks or stub-default behavior.
+   If a real provider binary is installable, do one dry-run (inspect the spawned
+   argv) then one real streamed run, and confirm the four wrapper facts the
+   research cannot reveal:
+   - **Prompt delivery** — does the binary accept the prompt positionally, after
+     `--`, or only on **stdin**? (Pi rejected both `--` and a `-`-leading
+     positional; the prompt is stdin-only in `-p` mode — the Kilo-mirrored
+     `AppendArgs(["--", prompt])` would have failed on every composed prompt.)
+   - **Entrypoint flag vs stream selector** — the non-interactive entrypoint flag
+     (`entrypoints.required_flags`, e.g. Pi's `-p`) is distinct from the
+     structured-output selector (`--mode json`, sourced from `output_formats`);
+     conflating them opens the TUI headless.
+   - **System-prompt override** — the default `apply_system_prompt` is a stub that
+     always reports "unsupported"; a provider that supports it must override the
+     method (delegating to `apply_system_prompt_via_spec`) or the prompt is
+     silently skipped with a warning. Confirm input tokens rise on a re-run.
+   - **Resume selector** — the unattended-safe handle (Pi: `--session-id`, not the
+     partial-UUID `--session` that can raise a cross-project fork prompt); verify a
+     two-turn smoke appends to the same session file rather than forking.
+   Land any corrections in the facts/wrapper and re-run `just test`; re-bless the
+   inventory if imports shifted line numbers.
 
 The spec's "steps 1–3 are mechanical" is retired: onboarding spans a roster
 entry + a `sniff` variant + the wiring above + overrides + behavior + a handful
-of per-provider test lines. The **compiler** owns the *structural* checklist; the
-**test suite** owns the *consistency* checklist.
+of per-provider test lines + one live-binary wrapper smoke. The **compiler** owns
+the *structural* checklist; the **test suite** owns the *consistency* checklist;
+the **live smoke** owns the argv/stub-default checklist neither can see.
 
 ## Compiled-subset mechanics (rules Open Question 4)
 
