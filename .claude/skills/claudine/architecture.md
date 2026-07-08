@@ -12,18 +12,20 @@ claudine/lib/src/
 ├── composition/  → Markdown frontmatter composition (inline and chained prompt pipelines)
 ├── config/       → Agent detection, hook registration, atomic writes, backups
 ├── dispatch/     → Event processing pipeline (loader, template, matcher, runner)
-├── events/       → Normalized event model and types (16 events, 7 providers)
+├── events/       → Normalized event model and types (16 events, 10 providers)
 ├── linking/      → Cross-provider skill synchronization (4 resource types) with portability classification
 ├── mcp/          → MCP catalog, defaults, import/export, session, and injection
 ├── permissions/  → Provider-agnostic PolicyEngine for permission queries and mutation planning
 ├── render/       → Functional render components (FinalMessage, AgentPrompt/SystemPrompt, EventRenderer + DISPATCH table, MetricsReport, StreamRenderable/AssistantStream); consume data + policy (DisplayPolicy), never `match provider`
 ├── reporting/    → JSONL-to-SQLite reporting index, sync, and typed queries
 ├── services/     → Cross-provider runtime policy services (ProtectService)
-├── stream/       → Structured stream parsing for 6 providers + summary/reporting
+├── stream/       → Structured stream parsing for 8 providers (Kilo reuses OpenCode's) + summary/reporting
 └── error.rs      → ClaudineError enum
 ```
 
-The per-provider modules under `lib/src/provider/<slug>/` split into two halves: `data.rs` is **generated** by `claudine-gen` from roster + facts + research + overrides (regenerate with `claudine providers generate`; drift-checked in CI by the gen crate's drift test / `claudine-gen check`, which also verify the committed `docs/providers/catalog.json` superset), while `behavior.rs` is hand-written. Never edit a `data.rs` by hand — change the owning input file and regenerate.
+The per-provider modules under `lib/src/provider/<slug>/` split into two halves: `data.rs` is **generated** by `claudine-gen` (crate `claudine/gen`, sharing vocab enums with the leaf `claudine/catalog-types` crate) from roster + facts + research + overrides (regenerate with `claudine providers generate`; drift-checked in CI by the gen crate's drift test / `claudine-gen check`, which also verify the committed `docs/providers/catalog.json` superset), while `behavior.rs` is hand-written. Never edit a `data.rs` by hand — change the owning input file and regenerate.
+
+**Dispatch drift guard (Phase I).** Decentralized `match Provider` / `matches!` / `==` / `!=` dispatch is prevented from regrowing by one site-level guard in `claudine-cli/tests/dispatch_inventory.rs`, covering **both** `lib/src` and `cli/src` (it retired the lib crate's earlier regex `no_unauthorized_match_provider_in_lib` guard). Every conditional, non-exempt dispatch site must be grandfathered in `GUARD_ALLOWLIST` with a tag + reason (all 18 current sites are `keep` — genuinely behavioral wire/shadow-HOME/stderr-bridge quirks and Claude's canonical linking role); a new one fails until migrated to a `ProviderInfo` field/trait or consciously listed. The committed census is `docs/providers/dispatch-inventory.json`.
 
 ## Event Support Matrix
 
@@ -47,6 +49,11 @@ The per-provider modules under `lib/src/provider/<slug>/` split into two halves:
 | notification | ✓ | ○ | ✓ | ○ | ○ | ✓ | ○ |
 
 **Legend:** ✓ = Hook support (config file), ○ = NonHook (wrapper/proxy required), - = Not supported
+
+> The three providers added by the Phase H ladder (Kilo, Pi, Antigravity) are not
+> yet columns above. Their authoritative event support lives in the generated
+> `lib/src/provider/<slug>/data.rs` `event_mapping` — inspect it (or
+> `claudine providers --describe`) rather than trusting this seven-column summary.
 
 ## Key Types
 
@@ -298,7 +305,7 @@ pub struct RepoOverrideConfig {
 ### Config Management
 
 - `detect_agents()` — returns detected providers with their configurators
-- `discover_agents_full()` — all 7 providers with install/registration status (`AgentInfo`)
+- `discover_agents_full()` — all 10 providers with install/registration status (`AgentInfo`)
 - `get_configurator(provider)` — returns the configurator for a specific provider
 - `AgentConfigurator` trait — `register()`, `deregister()`, `is_registered()`, `registered_events()`, `create_minimal_config()`, `supports_config_registration()`, `registerable_events()`, `is_cli_installed()`
 

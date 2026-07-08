@@ -1,6 +1,12 @@
 # Provider Metadata Automation
 
-> **Status:** DRAFT — brainstorming in progress. Open decisions are marked with `❓ OPEN`.
+> **Status:** RATIFIED & IMPLEMENTED (2026-07-08). Phases A–I complete; all seven
+> Open Questions closed (stamped below with their design-doc rulings). Three
+> providers (Kilo, Pi, Antigravity) entered production through the new process.
+> The unified `Provider`-dispatch drift guard holds the line
+> (`claudine-cli/tests/dispatch_inventory.rs`). This spec is the historical
+> umbrella; live behavior is documented in `docs/topics/provider-metadata.md` and
+> the `claudine` skill.
 
 ## Motivation
 
@@ -331,10 +337,10 @@ lifecycle `resume` action; the `OPENCODE_CONFIG_CONTENT` merge contract (system-
 MCP + permissions all write one env var); and a consolidated **Roo refresh sweep** (Roo
 research is missing or stale across six topics).
 
-❓ OPEN: how much of B belongs in compiled `ProviderInfo` vs staying research-only (consumed
-by docs/reporting tooling but not compiled)? Proposal: research frontmatter is a superset;
-the mapping registry declares the compiled subset; unmapped fields remain available to
-tooling (drift reports, docs generation, `claudine providers --describe` enrichment).
+> **Resolved (Open Question 4, Phase B):** research frontmatter is a superset; the
+> `claudine-gen` mapping registry declares the compiled subset; unmapped fields remain
+> available to tooling (drift reports, docs generation, `claudine providers --describe`
+> enrichment) via `catalog.json`. Realized as proposed — see the Open Questions section.
 
 ## Signal Catalog — fine-grained event semantics
 
@@ -763,11 +769,12 @@ the Kilo → Pi → Antigravity provider-onboarding validation ladder):
 
 ## Open Questions
 
-1. ~~**Corrections/overrides home**~~ — *provisionally decided:*
-   `docs/providers/overrides/<slug>.yaml` (see "Why an overrides layer exists"). Ken to
-   confirm.
-2. ~~**Generator home**~~ — *provisionally decided:* dedicated `claudine/gen` crate (see
-   Codegen mechanics). Ken to confirm.
+1. ~~**Corrections/overrides home**~~ — *decided (confirmed Checkpoint A, 2026-07-04):*
+   `docs/providers/overrides/<slug>.yaml`, field-keyed `{value, reason}` entries. Live
+   in Phases B–H.
+2. ~~**Generator home**~~ — *decided (confirmed, 2026-07-04):* dedicated `claudine/gen`
+   crate (plus the leaf `claudine/catalog-types` crate for shared vocab). Live since
+   Phase A.
 3. ~~**`config_format` granularity**~~ — *decided (2026-07-04, Checkpoint B round 2):*
    per config-file entry, but not as a standalone field: `ConfigFileSpec`
    (`PathTemplate` + format + scope) becomes the eventual richer type of the existing
@@ -776,21 +783,24 @@ the Kilo → Pi → Antigravity provider-onboarding validation ladder):
    model-extension file list is a distinct population (frontmatter key
    `model_config_paths`), covered by a future `model_config_paths` catalog field when
    needed. Full ruling record: field-source-matrix.md, Open question 5.
-4. **Compiled subset boundary** — confirm the "research is a superset; mapping registry
-   declares the compiled subset" proposal. Supporting evidence (2026-07-03): the
-   agent-cli cross-provider summary independently converged on a concrete partition —
-   durable identity facts (binaries/aliases per OS, docs URLs, config roots, version
-   probes, primary non-interactive entry points) compile; observed surface (full switch
-   inventories, latest versions, update mechanics, hidden commands) stays research-side
-   with provenance and `last_verified` stamps.
-5. **Prompt delivery** — does `PromptDeliverySpec` ever become data, or is it accepted as
-   permanent behavior-half code? (Topic doc rates it highest-effort/highest-value.)
-   Supporting evidence (2026-07-03): the system-prompt cross-provider summary decomposes
-   delivery into an enumerable mechanism vocabulary (`native_flag_text | native_flag_file
-   | config_key | env_var_file | context_file | agent_spec | unsupported`, per operation)
-   plus per-mechanism caveat facts — most of prompt delivery is expressible as catalog
-   data, with the `OPENCODE_CONFIG_CONTENT` blob-merge and Goose's run/session split as
-   the residual behavior half.
+4. ~~**Compiled subset boundary**~~ — *decided (confirmed, Phase B):* research is the
+   superset; the `claudine-gen` mapping registry declares the **compiled** subset and
+   `catalog.json` emits the full superset. Realized exactly as proposed — durable
+   identity facts compile into `ProviderInfo`; the observed surface (full switch
+   inventories, latest versions, update mechanics) stays research-side with provenance.
+   The registry-covers-all-fields guard (`gen/tests/registry_coverage.rs` + its lib
+   twin) enforces the boundary. Record: field-source-matrix.md, design/catalog-generation.md.
+5. ~~**Prompt delivery**~~ — *decided (Checkpoint D, 2026-07-04/05):* **split** — the
+   strategy *selection* is data, the *mechanics* stay behavior-half. `apply_non_interactive_flags`
+   and `prompt_delivery` were classified `behavior` in the disposition table
+   (`disposition-table.md`): the delivery mechanics (stdin vs argv position vs wire
+   JSON-RPC, size guards, `-`-prefix handling, the `OPENCODE_CONFIG_CONTENT` blob-merge,
+   Goose's run/session split) remain the required `WrapperProfile::prompt_delivery` impl.
+   The enumerable mechanism vocabulary graduating to a `PromptDeliverySpec` *selection*
+   field is a tracked future item (field-source-matrix.md `prompt_delivery`), not a v1
+   change — consistent with design/pipeline-dry.md's end-state (the trait survives as a
+   genuine behavior shim). This was the design's canonical "highest-effort/highest-value"
+   example of a gap that stays behavior.
 6. ~~**Declarative detection at runtime?**~~ — *decided:* records both document AND drive
    runtime detection, via generate-time compilation into static detection tables walked by
    one generic signal engine, with the `bespoke` escape hatch emitting into the same
