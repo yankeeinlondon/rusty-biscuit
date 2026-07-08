@@ -154,18 +154,19 @@ list:
     - name: Antigravity
       file: antigravity.md
       slug: antigravity
-      # Provisional identity seeded for the research fleet; `binary`, the dirs,
-      # and `docs_url` are confirmed by the agent-cli / non-interactive-sessions
-      # research. `sniff_binding` names the AiCli variant added at graduation
-      # (unwired here, so claudine-gen skips it — the Pi/Kilo pattern).
+      # Identity confirmed at graduation (M-Antigravity) against the installed
+      # `agy` 1.1.0 and the research: the CLI binary is `agy`; user CLI state
+      # lives under `~/.gemini/antigravity-cli` (NOT `~/.antigravity`, which is
+      # the separate desktop-IDE app-shell dir), and repo-level agent config
+      # lives under `.agents/`. `sniff_binding` names the wired AiCli variant.
       binary: agy
       display_name: Antigravity
       short_name: antigravity
       cli_aliases: ["antigravity"]
       docs_url: https://antigravity.google/product/antigravity-cli
       sniff_binding: Antigravity
-      user_dir: "~/.antigravity"
-      repo_dir: ".antigravity"
+      user_dir: "~/.gemini/antigravity-cli"
+      repo_dir: ".agents"
       vendor: Google
       model_provider: true
       site: https://antigravity.google/product/antigravity-cli
