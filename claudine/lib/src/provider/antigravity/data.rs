@@ -124,7 +124,7 @@ pub(in crate::provider) static ANTIGRAVITY_INFO: ProviderInfo = ProviderInfo {
     known_gaps: &[
         KnownGap {
             area: KnownGapArea::Hooks,
-            note: "agy honors file-based hooks (hooks.json) in its interactive/IDE surfaces, but this was unverified on host and print mode exposes no hook-registration surface; Claudine treats agy as no-hook. Revisit if a headless hook contract is confirmed.",
+            note: "agy's hook subsystem is confirmed to LOAD and parse ~/.gemini/config/hooks.json during a --print run (verified against 1.1.0), and the five hook events are wired (real configurator + adapter). NOT YET confirmed is whether a hook handler's command EXECUTES in one-shot --print mode (probing destabilized the local agy backend before a clean firing could be captured). Verify with a single clean PreInvocation/Stop command hook on a stable agy; if it does not fire, print mode skips hooks like `claude --bare` and these should revert to not_supported.",
             tracker: Some("claudine/docs/research/hooks/antigravity.md"),
         },
         KnownGap {
@@ -321,15 +321,19 @@ pub(in crate::provider) static ANTIGRAVITY_EVENT_MAPPING: EventMappingTable = Ev
         },
         EventMapping {
             event: AgenticEvent::BeforeTool,
-            support_level: EventSupportLevel::NotSupported,
+            support_level: EventSupportLevel::Hook {
+                native_name: "PreToolUse",
+            },
             parse_aliases: &[],
-            registration_target: false,
+            registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::AfterTool,
-            support_level: EventSupportLevel::NotSupported,
+            support_level: EventSupportLevel::Hook {
+                native_name: "PostToolUse",
+            },
             parse_aliases: &[],
-            registration_target: false,
+            registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::ToolError,
@@ -351,19 +355,15 @@ pub(in crate::provider) static ANTIGRAVITY_EVENT_MAPPING: EventMappingTable = Ev
         },
         EventMapping {
             event: AgenticEvent::TurnComplete,
-            support_level: EventSupportLevel::StreamParse {
-                protocol: StreamProtocol::Json,
-                native_name: "print_result",
+            support_level: EventSupportLevel::Hook {
+                native_name: "Stop",
             },
             parse_aliases: &[],
-            registration_target: false,
+            registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::TurnError,
-            support_level: EventSupportLevel::StreamParse {
-                protocol: StreamProtocol::Json,
-                native_name: "print_result",
-            },
+            support_level: EventSupportLevel::NotSupported,
             parse_aliases: &[],
             registration_target: false,
         },
@@ -381,18 +381,19 @@ pub(in crate::provider) static ANTIGRAVITY_EVENT_MAPPING: EventMappingTable = Ev
         },
         EventMapping {
             event: AgenticEvent::BeforeModel,
-            support_level: EventSupportLevel::NotSupported,
+            support_level: EventSupportLevel::Hook {
+                native_name: "PreInvocation",
+            },
             parse_aliases: &[],
-            registration_target: false,
+            registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::AfterModel,
-            support_level: EventSupportLevel::StreamParse {
-                protocol: StreamProtocol::Json,
-                native_name: "print_result",
+            support_level: EventSupportLevel::Hook {
+                native_name: "PostInvocation",
             },
             parse_aliases: &[],
-            registration_target: false,
+            registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::BeforeCompact,

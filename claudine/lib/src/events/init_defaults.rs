@@ -175,6 +175,9 @@ mod tests {
                 Provider::OpenCode,
                 // Kilo Code is an OpenCode fork with the same plugin-bus hooks.
                 Provider::Kilo,
+                // Antigravity registers a Stop hook for turn_complete (a
+                // recommended init event) via ~/.gemini/config/hooks.json.
+                Provider::Antigravity,
             ]
         );
     }

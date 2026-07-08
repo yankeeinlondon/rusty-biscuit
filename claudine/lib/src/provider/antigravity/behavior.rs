@@ -42,6 +42,13 @@ impl AdapterBehavior for AntigravityProvider {
     }
 }
 impl ConfiguratorBehavior for AntigravityProvider {
+    fn hooks_supported(&self) -> bool {
+        // agy has a real file-based hook system (~/.gemini/config/hooks.json)
+        // whose subsystem loads during `--print` runs; AntigravityConfigurator
+        // registers Claudine's handlers there.
+        true
+    }
+
     fn agent_configurator(&self) -> Box<dyn AgentConfigurator> {
         Box::new(crate::config::AntigravityConfigurator)
     }
