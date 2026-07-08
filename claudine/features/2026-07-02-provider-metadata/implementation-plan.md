@@ -759,6 +759,15 @@ report (closeout well underway).
    grandfather-with-burn-down allow-list seeded from the (now shrunken) A2 inventory;
    back-port extended patterns to the lib guard.
    ► **CHECKPOINT I (Ken):** allow-list + burn-down tags review.
+   > **Scope note:** this guard prevents *new decentralized* `match Provider`
+   > dispatch from regrowing — it does **not** add or remove the per-provider
+   > `claudine <slug>` command or its switches. Adding/removing a provider's CLI
+   > command + switches is the on/offboarding state machine
+   > (design/catalog-generation.md), which runs at onboarding/removal time, not
+   > in this phase. The one Phase-I coupling: when a provider is *removed*, its
+   > exempted clap-mapping site disappears, so the guard's committed inventory /
+   > allow-list must be re-seeded in the same change or it goes stale (a removed
+   > entry that no longer matches any source is itself a guard failure).
 2. Close the spec: Open Questions 1–5 stamped with their design-doc rulings; DRAFT
    status lifted; `docs/topics/provider-metadata.md` refreshed against reality
    (its inventory is already superseded by A2's mechanical one).

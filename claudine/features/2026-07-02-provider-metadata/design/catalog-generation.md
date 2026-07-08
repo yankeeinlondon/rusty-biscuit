@@ -161,6 +161,65 @@ of per-provider test lines + one live-binary wrapper smoke. The **compiler** own
 the *structural* checklist; the **test suite** owns the *consistency* checklist;
 the **live smoke** owns the argv/stub-default checklist neither can see.
 
+## Offboarding state machine (removal & soft-deprecation)
+
+Provider *removal* is the inverse of onboarding and is owned here, not by any
+phase — a provider can be retired at any time. It is **not** the Phase-I CLI
+drift guard (design/pipeline-dry.md), which only prevents *new* decentralized
+dispatch from regrowing and deliberately exempts the clap Provider mapping and
+the per-provider profile files. Adding **and removing** the `claudine <slug>`
+subcommand + its switches is this machine's job (onboarding = add;
+offboarding = remove); the guard never adds or removes a command.
+
+Two retirement modes:
+
+1. **Soft-deprecate (`skip_research: true`)** — keep the roster entry, the
+   `Provider` variant, and **all** code + CLI wiring; only exclude the entry
+   from research fleet fan-out. `claudine-gen` fails loudly if asked to generate
+   a `skip_research` provider (its `data.rs` is frozen at last generation). Use
+   for a keep-identity-but-pause hiatus, or an old major version kept for
+   identity after its successor lands (Kimi v1→v2 precedent). **No CLI change** —
+   `claudine <slug>` still wraps the (now research-frozen) binary.
+2. **Full removal (the Roo precedent)** — tear down every site the onboarding
+   footprint added. The **compiler** (the `[T; PROVIDER_COUNT]` arrays), the
+   **gen drift test**, and the **consistency tests** walk the same structural +
+   consistency checklists in reverse, so removal is compiler-walked exactly like
+   onboarding; the manual (not-compiler-forced) sites are the same ones —
+   `emit::PROVIDER_VARIANTS`, `signals::SIGNAL_SLUGS`, and the clap surface.
+
+Full-removal teardown sites (inverse of the onboarding footprint):
+
+- **Roster + inputs:** delete the `list:` entry, `facts/<slug>.yaml`,
+  `overrides/<slug>.yaml`, and `docs/research/<topic>/<slug>.md` across every
+  topic; remove `<slug>` from `signals::SIGNAL_SLUGS` (else the generated signals
+  table is orphaned).
+- **Enum / registry (compiler-forced):** remove the `Provider::<X>` variant,
+  decrement `PROVIDER_COUNT`, drop it from `PROVIDERS_DISPLAY_ORDER` + the
+  discriminant const-assert, and `provider/registry.rs` (`&<X>_INFO`).
+  **Caveat:** removing a non-terminal variant *renumbers* every later
+  discriminant — a wider blast radius than appending at the end (why Roo, at
+  index 2, was removed deliberately). Prefer soft-deprecation if the only goal is
+  to stop fleets.
+- **CLI command + switches (the surface this note is about):** remove the clap
+  subcommand in `args.rs`, the `main.rs` `wrapper_command` mapping arm **and** the
+  `unreachable!` arm, the `argv::WRAPPER_SUBCOMMANDS` entry, both `telemetry.rs`
+  arms, the `cli .../wrap/profile/<slug>.rs` file, and its `mod` / `use` /
+  `static` / `WRAPPER_REGISTRY` slot.
+- **Behavior + gen bridge:** delete `provider/<slug>/`,
+  `stream/protocol/<slug>.rs`, `stream/providers/<slug>.rs` (+ the
+  `for_provider` arm), `adapters/<slug>.rs` (+ `mod` + `*_ADAPTER`),
+  `config/<slug>.rs` (+ `mod` + `use`); remove the `emit::PROVIDER_VARIANTS`
+  entry (the one gen-side edit, mirror of onboarding).
+- **sniff:** removing `AiCli::<X>` is *optional* — `sniff` detects agentic CLIs
+  beyond Claudine's compiled set, so leave the variant unless nothing else
+  references it (removing it renumbers `AiCli`, like the `Provider` caveat).
+- **Tests + artifacts:** update `discover_agents_full` count,
+  `representative_payload_for`, contract `support_matrix` length + the
+  `auth_env_vars` arm, and the gen `provider_slugs` / wired-set tests; regenerate
+  `data.rs` (all) + `catalog.json` + signals + families; re-bless
+  `dispatch-inventory.json`; and re-seed the Phase-I CLI-guard inventory so the
+  removed provider's exempted clap arm does not linger as stale drift.
+
 ## Compiled-subset mechanics (rules Open Question 4)
 
 The runtime binary embeds **only** the compiled subset (`data.rs`). Gen additionally

@@ -59,16 +59,30 @@ Behavior half authored from scratch (nothing reused):
   plain-text auth failure) is recorded as a classified error in `finish`. 6 unit
   tests cover success, pretty-print, error-status, non-JSON stdout, empty
   stdout, and the lenient-reparse (below).
-- **`adapters/antigravity.rs`** — `AntigravityAdapter`, best-effort for
-  `claudine handle`; `detect_from_payload → false` and
-  `representative_payload_for(Antigravity) → None` (agy delivers no raw hook
-  payload — the wrapper always knows the provider from the subcommand).
-- **`config/antigravity.rs`** — `AntigravityConfigurator`, the minimal no-hook
-  kind (`SkipReason::NoHookSupport`), mirroring `PiConfigurator`. This keeps the
-  hook-support invariant green **by construction**: agy's `event_mapping`
-  declares zero `Hook`-level entries (every event is `stream_parse` or
-  `not_supported`, `registration_target: false`), so no real configurator is
-  required and Antigravity is correctly absent from `init --quick`.
+- **`adapters/antigravity.rs`** — `AntigravityAdapter`, a real hook-payload
+  parser for `claudine handle`. agy hook payloads are camelCase JSON with **no**
+  event-name field, so `parse_event` infers the Claudine event from the field
+  shape (`toolCall` → before_tool, `fullyIdle`/`terminationReason` →
+  turn_complete, `invocationNum` → before_model, bare `stepIdx` → after_tool)
+  and `format_response` emits agy's stdout decision JSON (`{decision: allow|deny|
+  ask}` for PreToolUse, `{decision: continue}` for Stop, `{terminationBehavior}`
+  for the invocation events). `detect_from_payload → false` /
+  `representative_payload_for → None` (agy's payloads share common fields and
+  are not uniquely shape-detectable; the hook path passes the provider
+  explicitly). Documented limitation: PreInvocation and PostInvocation have an
+  identical payload shape and cannot be distinguished from the payload alone —
+  the ambiguous case maps to `before_model`.
+- **`config/antigravity.rs`** — `AntigravityConfigurator`, a **real** configurator
+  (`hooks_supported() → true`). It registers Claudine's command handlers into
+  the global `~/.gemini/config/hooks.json` (the path agy loads in print mode)
+  under a single `"claudine"` named-hook key, using agy's schema:
+  `PreToolUse`/`PostToolUse` as matcher-groups (`[{matcher:"*", hooks:[…]}]`),
+  and `PreInvocation`/`PostInvocation`/`Stop` as direct handler arrays; each
+  handler is `{type: command, command: "claudine handle <event> --provider
+  antigravity", timeout: 30}`. Whole-key replace preserves other named hooks.
+  This satisfies the hook-support invariant (Hook-level `event_mapping` ⟺ real
+  configurator) and puts Antigravity in `init --quick` (it registers a `Stop`
+  hook for the recommended `turn_complete` event).
 - **`cli .../wrap/profile/antigravity.rs`** — `AntigravityWrapper`. The only
   overrides over the catalog defaults: `prompt_delivery` (append `--print
   <prompt>` LAST so the value stays adjacent to its flag for Go's parser),
@@ -78,14 +92,31 @@ Behavior half authored from scratch (nothing reused):
   `apply_sandbox` (`--sandbox`), and `apply_model` (`--model` dedup + `MODEL`
   env). Model selection, YOLO, and reject-direct-yolo are catalog-driven.
 
-**Deliberate conservative posture (documented gaps, not oversights):** agy's
-richer surfaces are tied to its interactive/IDE features, so v1 does not claim
-them — file-based `hooks.json` (unverified on host, no headless registration
-surface), MCP (shared config files but no safe runtime injection — a shadow
-HOME would break keyring auth), subagents (`/agents` is interactive-only, no
-`--agent` selector), and slash commands (skill-derived, no separate dir, no arg
-placeholders). Skills are the one first-class linkable resource. All are
-recorded in the facts `known_gaps` with trackers.
+**Hooks — wired (corrected mid-graduation).** The first pass wrongly treated agy
+as no-hook ("unverified"). On review (Ken, 2026-07-08) a live probe proved the
+hook subsystem **loads and parses `~/.gemini/config/hooks.json` during a
+`--print` run** (`hooks_manager.go` parsed the config live), and the binary's
+embedded docs gave the authoritative schema. So agy is wired as a real hook
+provider — five `Hook`-level events (PreToolUse→before_tool,
+PostToolUse→after_tool, PreInvocation→before_model, PostInvocation→after_model,
+Stop→turn_complete), a real configurator, and a real payload adapter — while the
+`--output-format json` envelope remains the wrapper-mode rendering source.
+**One caveat, Ken-approved (wire-now, verify-later):** hook LOADING in print mode
+is confirmed, but a hook handler's command was **not yet observed EXECUTING** in
+one-shot `--print` (the probing destabilized the local agy backend before a
+clean firing could be captured). Wired now on the strength of the research +
+loaded-in-print evidence; a single clean firing check on a stable agy is the
+outstanding confirmation (facts `known_gaps` + follow-up #7). *(Correction to my
+earlier claim: the research doc's hook schema was actually right — the
+named-hook wrapper is documented; my first probe misread it by putting the event
+at the top level.)*
+
+**Other surfaces still unwired (documented gaps):** MCP (shared config files but
+no safe runtime injection — a shadow HOME would break keyring auth), subagents
+(`/agents` is interactive-only, no `--agent` selector), and slash commands
+(skill-derived, no separate dir, no arg placeholders). Skills are the one
+first-class linkable resource. All are recorded in the facts `known_gaps` with
+trackers.
 
 ## Scaffold + generate UX
 
@@ -201,8 +232,15 @@ Plus two findings only a live run surfaces:
   `provider_slugs_match_the_wired_set_in_order` (+antigravity) and
   `provider_variant_rejects_unknown_slug` (swapped its example `"antigravity"` →
   `"nonesuch"` — it is now wired). Re-blessed `dispatch-inventory.json`
-  (`CLAUDINE_UPDATE_INVENTORY=1`). The signals dormant test needed **no** change
-  (M-Pi's synthetic-slug rewrite made it provider-independent — as predicted).
+  (`CLAUDINE_UPDATE_INVENTORY=1`, no drift). The signals dormant test needed
+  **no** change (M-Pi's synthetic-slug rewrite made it provider-independent).
+- **Hook wiring (second pass, after the no-hook correction):** facts
+  `event_mapping` flipped 5 events to `Hook`-level (`registration_target: true`);
+  `behavior.rs` `hooks_supported() → true`; `config/antigravity.rs` rewritten
+  from a no-op stub to a real `hooks.json` configurator; `adapters/antigravity.rs`
+  rewritten from an envelope stub to a real hook-payload parser;
+  `init_defaults.rs` quick-start test updated (+Antigravity, via its `Stop`
+  hook for `turn_complete`). Regenerated `data.rs`/`catalog.json` (clean).
 
 ## Verification status
 
@@ -222,12 +260,26 @@ Plus two findings only a live run surfaces:
   trailer; single-line, multi-line, and two-turn resume smokes all succeeded;
   the cached keyring login was reused with no browser prompt. `claudine
   providers` renders the Antigravity row (skills ✅ / slash ❌ / agents ❌ /
-  hooks 0) and `claudine hooks --support` shows the Antigravity column — both
-  from `DisplayPolicy` + capability facts with **no per-provider render code**.
+  **hooks 5**) and `claudine hooks --support` shows the Antigravity column with
+  BeforeTool/AfterTool/BeforeModel/AfterModel/TurnComplete ✅ — both from
+  `DisplayPolicy` + capability facts with **no per-provider render code**.
+- **Hook subsystem (loaded, not yet fired):** a live probe confirmed agy
+  parses `~/.gemini/config/hooks.json` during a `--print` run; a hook handler's
+  command was **not** observed executing in one-shot print before the local agy
+  backend was destabilized by the probing. Wired on that evidence per the
+  wire-now/verify-later decision; the clean firing check is follow-up #1.
 
 ## Recommended follow-ups (not blocking H3)
 
-1. **Facts skeleton should emit `acp` keys** (or a reminder line) — now confirmed
+1. **Confirm print-mode hook EXECUTION (the wire-now/verify-later item).** The
+   hook subsystem loads in `--print`, but a handler firing was not cleanly
+   observed. On a stable agy (restart it first — repeated force-kills poison its
+   local backend), run ONE clean probe: a `PreInvocation` or `Stop` command hook
+   in `~/.gemini/config/hooks.json` under a named key + a plain `agy --print`
+   from an approved workspace. If it fires, done. If it does not, print mode
+   skips hooks like `claude --bare` — revert the 5 events to `not_supported` and
+   the configurator to no-op.
+2. **Facts skeleton should emit `acp` keys** (or a reminder line) — now confirmed
    on three from-scratch onboardings (Kilo/Pi/Antigravity). Promote to a fix.
 2. **System-prompt via workspace rule files.** agy has no system-prompt flag but
    reads `AGENTS.md` / `.agents/rules/*.md`; a future `apply_system_prompt`
