@@ -11,9 +11,12 @@ model: kimi-for-coding/k2p7
 update: "{{file_exists(file) && !markdown_body_empty(file)}}"
 initialize:
     stack:
-        - when: "file_exists(file) && frontmatter(file, 'last_updated') == ctx.today"
+        - when: "!file_exists(file) || !frontmatter(file, 'last_updated') || date_delta(frontmatter(file, 'last_updated'), ctx.today, '14d')"
           action:
-              - stderr: "Research for <b>{{state.name}}</b> plugins is already up to date ({{ctx.today}}) — skipping."
+              - message: "The provider **{{state.name}}** needs to update its research on **plugins**"
+        - when: "file_exists(file) && frontmatter(file, 'last_updated') && !date_delta(frontmatter(file, 'last_updated'), ctx.today, '14d')"
+          action:
+              - message: "The provider **{{state.name}}** has research for **plugins** that is current; skipping updates"
               - skip
 success:
     stack:

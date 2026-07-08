@@ -16,9 +16,12 @@ update: "{{file_exists(file) && !markdown_body_empty(file)}}"
 # make interrupted fleet runs resumable: skip runners already researched today
 initialize:
     stack:
-        - when: "file_exists(file) && frontmatter(file, 'last_updated') == ctx.today"
+        - when: "!file_exists(file) || !frontmatter(file, 'last_updated') || date_delta(frontmatter(file, 'last_updated'), ctx.today, '14d')"
           action:
-              - stderr: "Research for <b>{{state.name}}</b> is already up to date ({{ctx.today}}) — skipping."
+              - message: "The provider **{{state.name}}** needs to update its research on **Local Runners**"
+        - when: "file_exists(file) && frontmatter(file, 'last_updated') && !date_delta(frontmatter(file, 'last_updated'), ctx.today, '14d')"
+          action:
+              - message: "The provider **{{state.name}}** has research for **Local Runners** that is current; skipping updates"
               - skip
 # a provider exiting 0 is not proof the research was written — verify the
 # agent actually stamped today's date before accepting success
