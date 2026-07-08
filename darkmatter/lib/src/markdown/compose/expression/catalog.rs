@@ -510,6 +510,37 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
         example: Some(Example { invocation: "is_this_year_utc(\"2024-06-15\")", result: "true", verification: ExampleVerification::DisplayOnly("wall-clock dependent") }),
 
     },
+    // ── Date Arithmetic ─────────────────────────────────────────────
+    ExpressionFunctionDescriptor {
+
+        signature: "date_delta(date1, date2, diff)",
+        description: "Returns true when the two dates are at least the given duration apart, ignoring order (duration like 14d, 2mo, 1 hour).",
+        category: "Date Arithmetic",
+        order: 1,
+
+        example: Some(Example { invocation: "date_delta(\"2024-06-01\", \"2024-06-20\", \"14d\")", result: "true", verification: ExampleVerification::Executable }),
+
+    },
+    ExpressionFunctionDescriptor {
+
+        signature: "older_than(date1, date2, diff)",
+        description: "Returns true when date1 is at least the given duration older (earlier) than date2.",
+        category: "Date Arithmetic",
+        order: 2,
+
+        example: Some(Example { invocation: "older_than(\"2024-06-01\", \"2024-06-20\", \"14d\")", result: "true", verification: ExampleVerification::Executable }),
+
+    },
+    ExpressionFunctionDescriptor {
+
+        signature: "newer_than(date1, date2, diff)",
+        description: "Returns true when date1 is at least the given duration newer (later) than date2.",
+        category: "Date Arithmetic",
+        order: 3,
+
+        example: Some(Example { invocation: "newer_than(\"2024-06-20\", \"2024-06-01\", \"14d\")", result: "true", verification: ExampleVerification::Executable }),
+
+    },
     // ── Core Operators (in evaluate_function) ───────────────────────
     ExpressionFunctionDescriptor {
 
