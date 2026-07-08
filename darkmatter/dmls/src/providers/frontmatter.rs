@@ -53,17 +53,15 @@ pub fn completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
         Some(colon) => {
             let key = trimmed[..colon].trim().to_string();
             let value_partial = trimmed[colon + 1..].trim_start();
-            value_completions(ctx, offset, &key, value_partial)
+            let ancestors = enclosing_path(ctx.text, line_start, indent);
+            value_completions(ctx, offset, &ancestors, &key, value_partial)
         }
         None if indent == 0 => top_level_key_completions(ctx, ast, offset, trimmed),
-        None => match enclosing_key(ctx.text, line_start, indent) {
-            Some(parent) if parent == "style" => style_key_completions(ctx, offset, trimmed),
-            _ => Vec::new(),
-        },
+        None => nested_key_completions(ctx, ast, offset, line_start, indent, trimmed),
     }
 }
 
-/// Schema keys not yet present, filtered by the typed prefix.
+/// Top-level schema keys not yet present, filtered by the typed prefix.
 fn top_level_key_completions(
     ctx: &DocumentContext,
     ast: &FrontmatterAst,
@@ -71,8 +69,45 @@ fn top_level_key_completions(
     partial: &str,
 ) -> Vec<CompletionItem> {
     let present: Vec<&str> = ast.top_level().map(|entry| entry.key.as_str()).collect();
-    let start = offset - partial.len();
     let shape = known_shape(ctx);
+    shape_key_completions(ctx, offset, &shape, &present, partial)
+}
+
+/// Nested-mapping key completion. When the enclosing parent path resolves to an
+/// inline-object shape, offers that shape's not-yet-present keys; otherwise
+/// falls back to the `style.*` descriptor catalog when the immediate parent is
+/// the opaque `style` object (which is not an inline object in the schema).
+fn nested_key_completions(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    offset: usize,
+    line_start: usize,
+    indent: usize,
+    partial: &str,
+) -> Vec<CompletionItem> {
+    let ancestors = enclosing_path(ctx.text, line_start, indent);
+    let ancestor_refs: Vec<&str> = ancestors.iter().map(String::as_str).collect();
+    let shape = known_shape(ctx);
+    if let Some(nested) = nested_shape(&shape, &ancestor_refs) {
+        let present = present_child_keys(ast, &ancestors);
+        return shape_key_completions(ctx, offset, nested, &present, partial);
+    }
+    if ancestor_refs.last() == Some(&"style") {
+        return style_key_completions(ctx, offset, partial);
+    }
+    Vec::new()
+}
+
+/// A shape's not-yet-present property keys, filtered by `partial` and marked
+/// `(required)`, as `FIELD` completions with an eager `key: ` text edit.
+fn shape_key_completions(
+    ctx: &DocumentContext,
+    offset: usize,
+    shape: &SchemaShape,
+    present: &[&str],
+    partial: &str,
+) -> Vec<CompletionItem> {
+    let start = offset - partial.len();
     shape
         .properties
         .iter()
@@ -93,16 +128,34 @@ fn top_level_key_completions(
         .collect()
 }
 
-/// Enum members, boolish scaffolds, or file paths for a top-level key's value.
+/// The already-authored direct child keys of the mapping at `ancestors`, so
+/// completion can exclude them. The dotted-prefix guard keeps a same-named
+/// mapping elsewhere in the tree (e.g. under `$schema`) from leaking in.
+fn present_child_keys<'a>(ast: &'a FrontmatterAst, ancestors: &[String]) -> Vec<&'a str> {
+    let depth = ancestors.len();
+    let prefix = format!("{}.", ancestors.join("."));
+    ast.entries()
+        .iter()
+        .filter(|entry| entry.depth == depth)
+        .filter_map(|entry| entry.dotted.strip_prefix(&prefix).filter(|rest| !rest.contains('.')))
+        .collect()
+}
+
+/// Enum members, boolish scaffolds, or file paths for a key's value. `ancestors`
+/// is the parent mapping path (empty at the top level); the leaf atom is
+/// resolved by descending inline objects.
 fn value_completions(
     ctx: &DocumentContext,
     offset: usize,
+    ancestors: &[String],
     key: &str,
     partial: &str,
 ) -> Vec<CompletionItem> {
     let start = offset - partial.len();
     let shape = known_shape(ctx);
-    let Some(atom) = shape.properties.get(key).and_then(primary_atom) else {
+    let mut path: Vec<&str> = ancestors.iter().map(String::as_str).collect();
+    path.push(key);
+    let Some(atom) = def_at_path(&shape, &path).and_then(primary_atom) else {
         return Vec::new();
     };
 
@@ -190,13 +243,12 @@ pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     schema_hover(ctx, entry)
 }
 
-/// Hover content for a schema-declared property.
+/// Hover content for a schema-declared property, at any nesting depth.
 fn schema_hover(ctx: &DocumentContext, entry: &FmEntry) -> Option<Hover> {
-    if entry.depth != 0 {
-        return None;
-    }
     let shape = known_shape(ctx);
-    let atom = shape.properties.get(&entry.key).and_then(primary_atom)?;
+    let path: Vec<&str> = entry.dotted.split('.').collect();
+    let def = def_at_path(&shape, &path)?;
+    let atom = primary_atom(def)?;
     let mut lines = vec![format!("**`{}`**", entry.key)];
 
     let type_line = match &atom.ty {
@@ -208,7 +260,7 @@ fn schema_hover(ctx: &DocumentContext, entry: &FmEntry) -> Option<Hover> {
     };
     lines.push(type_line);
 
-    if is_required(shape.properties.get(&entry.key)?) {
+    if is_required(def) {
         lines.push("Required".to_string());
     }
     if let Some(members) = enum_members(atom) {
@@ -293,13 +345,16 @@ fn nav_targets(ctx: &DocumentContext, ast: &FrontmatterAst) -> Vec<(SourceSpan, 
         targets.push((entry.value_span.clone(), normalize_join(base_dir, value)));
     }
 
-    // `file(...)`-typed top-level scalar values.
+    // `file(...)`-typed scalar values at any depth: a top-level key is a
+    // single-segment path, a nested one resolves through the schema's inline
+    // objects. Splitting `dotted` on `.` mirrors the completion/hover path.
     let shape = known_shape(ctx);
-    for entry in ast.top_level() {
+    for entry in ast.entries() {
         if entry.kind != FmValueKind::Scalar {
             continue;
         }
-        let Some(atom) = shape.properties.get(&entry.key).and_then(primary_atom) else {
+        let path: Vec<&str> = entry.dotted.split('.').collect();
+        let Some(atom) = def_at_path(&shape, &path).and_then(primary_atom) else {
             continue;
         };
         if is_file(atom)
@@ -383,7 +438,9 @@ pub fn document_symbols(ctx: &DocumentContext) -> Vec<DocumentSymbol> {
 /// The effective completion shape: the Darkmatter base properties, overlaid
 /// with each matched extension baseline (e.g. Claudine), then the document's
 /// own `$schema` (document > extension > base — compose precedence).
-fn known_shape(ctx: &DocumentContext) -> SchemaShape {
+///
+/// Exposed for reuse by other frontmatter-aware providers (e.g. navigation).
+pub(crate) fn known_shape(ctx: &DocumentContext) -> SchemaShape {
     let mut shape = match darkmatter_base_schema() {
         SimplifiedSchema::Single(shape) => shape,
         SimplifiedSchema::Union(_) => SchemaShape::default(),
@@ -403,8 +460,37 @@ fn known_shape(ctx: &DocumentContext) -> SchemaShape {
     shape
 }
 
+/// The nested [`SchemaShape`] reached by walking each `ancestors` segment's
+/// primary atom into its inline-object type. An empty path yields `root`;
+/// `None` when any segment is absent or is not an inline object (e.g. the
+/// opaque `object`-typed `style`).
+pub(crate) fn nested_shape<'a>(root: &'a SchemaShape, ancestors: &[&str]) -> Option<&'a SchemaShape> {
+    let mut shape = root;
+    for segment in ancestors {
+        let atom = shape.properties.get(*segment).and_then(primary_atom)?;
+        match &atom.ty {
+            TypeExpr::InlineObject(inner) => shape = inner,
+            TypeExpr::Primitive(_) => return None,
+        }
+    }
+    Some(shape)
+}
+
+/// The [`PropertyDef`] at a full key `path` (ancestor segments followed by the
+/// leaf key), descending inline objects for the ancestors. `None` when any
+/// ancestor is missing/not an inline object, or the leaf key is absent.
+///
+/// This is the reusable nested schema-path resolver: split a `FrontmatterAst`
+/// entry's `dotted` path on `.` and pass it here to reach the schema definition
+/// governing that value at any nesting depth.
+pub(crate) fn def_at_path<'a>(root: &'a SchemaShape, path: &[&str]) -> Option<&'a PropertyDef> {
+    let (leaf, ancestors) = path.split_last()?;
+    let shape = nested_shape(root, ancestors)?;
+    shape.properties.get(*leaf)
+}
+
 /// The primary atom of a property definition (the first arm of a union).
-fn primary_atom(def: &PropertyDef) -> Option<&PropertyAtom> {
+pub(crate) fn primary_atom(def: &PropertyDef) -> Option<&PropertyAtom> {
     match def {
         PropertyDef::Single(atom) => Some(atom),
         PropertyDef::Union(atoms) => atoms.first(),
@@ -447,7 +533,7 @@ fn is_boolish(atom: &PropertyAtom) -> bool {
 }
 
 /// Whether an atom is a `file(...)` value.
-fn is_file(atom: &PropertyAtom) -> bool {
+pub(crate) fn is_file(atom: &PropertyAtom) -> bool {
     matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::File))
 }
 
@@ -465,20 +551,31 @@ fn line_prefix(text: &str, offset: usize) -> (usize, &str) {
     (line_start, &text[line_start..offset])
 }
 
-/// The nearest less-indented parent key above `line_start`.
-fn enclosing_key(text: &str, line_start: usize, indent: usize) -> Option<String> {
+/// The full chain of ancestor keys above `line_start`, outermost first, for a
+/// line at column `indent` — one key per strictly-decreasing indent level, so
+/// nested inline-object mappings resolve. Empty for a top-level line.
+fn enclosing_path(text: &str, line_start: usize, indent: usize) -> Vec<String> {
+    let mut path = Vec::new();
+    let mut needed = indent;
     for line in text[..line_start].lines().rev() {
-        let line_indent = line.len() - line.trim_start().len();
         let trimmed = line.trim_start();
         if trimmed.is_empty() || trimmed == "---" {
             continue;
         }
-        if line_indent < indent {
+        let line_indent = line.len() - trimmed.len();
+        if line_indent < needed {
             let key = trimmed.split(':').next().unwrap_or("").trim();
-            return (!key.is_empty()).then(|| key.to_string());
+            if !key.is_empty() {
+                path.push(key.to_string());
+            }
+            needed = line_indent;
+            if needed == 0 {
+                break;
+            }
         }
     }
-    None
+    path.reverse();
+    path
 }
 
 /// Whether a scalar value is plausibly a local file path (not a URL or an
@@ -567,14 +664,65 @@ mod tests {
     }
 
     #[test]
-    fn test_enclosing_key_finds_style_parent() {
-        let text = "---\nstyle:\n  page:\n";
-        // A line indented under `page:` — enclosing key at indent 2 is `page`.
-        let line_start = text.len();
-        assert_eq!(enclosing_key(text, line_start, 4), Some("page".to_string()));
-        // At indent 2 (under `style:`), the enclosing key is `style`.
+    fn test_enclosing_path_builds_full_ancestor_chain() {
+        let text = "---\nstyle:\n  page:\n    ";
+        // A line indented under `page:` (indent 4) has ancestors `style` →
+        // `page`, outermost first.
+        assert_eq!(enclosing_path(text, text.len(), 4), vec!["style", "page"]);
+        // A line under `style:` (indent 2) has just `style`.
         let under_style = "---\nstyle:\n".len();
-        assert_eq!(enclosing_key(text, under_style + 2, 2), Some("style".to_string()));
+        assert_eq!(enclosing_path(text, under_style + 2, 2), vec!["style"]);
+        // A top-level line (indent 0) has no ancestors.
+        assert!(enclosing_path(text, under_style, 0).is_empty());
+    }
+
+    fn nested_fixture() -> SchemaShape {
+        let mut inner = SchemaShape::new();
+        inner
+            .properties
+            .insert("mode".to_string(), PropertyDef::Single(PropertyAtom::bare(SimplifiedType::Enum)));
+        let mut root = SchemaShape::new();
+        root.properties.insert(
+            "settings".to_string(),
+            PropertyDef::Single(PropertyAtom::bare_inline_object(inner)),
+        );
+        root.properties
+            .insert("title".to_string(), PropertyDef::Single(PropertyAtom::bare(SimplifiedType::String)));
+        root
+    }
+
+    #[test]
+    fn test_nested_shape_walks_inline_objects() {
+        let root = nested_fixture();
+        // Empty path is the root itself.
+        assert!(nested_shape(&root, &[]).unwrap().properties.contains_key("settings"));
+        // One inline-object segment descends into its shape.
+        let settings = nested_shape(&root, &["settings"]).unwrap();
+        assert!(settings.properties.contains_key("mode"));
+    }
+
+    #[test]
+    fn test_nested_shape_missing_segment_is_none() {
+        let root = nested_fixture();
+        assert!(nested_shape(&root, &["absent"]).is_none());
+    }
+
+    #[test]
+    fn test_nested_shape_non_inline_object_is_none() {
+        let root = nested_fixture();
+        // `title` is a primitive, not an inline object — cannot descend.
+        assert!(nested_shape(&root, &["title"]).is_none());
+    }
+
+    #[test]
+    fn test_def_at_path_resolves_leaf_atom() {
+        let root = nested_fixture();
+        let def = def_at_path(&root, &["settings", "mode"]).unwrap();
+        assert_eq!(primary_atom(def).unwrap().ty, TypeExpr::Primitive(SimplifiedType::Enum));
+        // A missing leaf under a valid inline object is `None`.
+        assert!(def_at_path(&root, &["settings", "absent"]).is_none());
+        // A top-level leaf resolves through an empty ancestor path.
+        assert!(def_at_path(&root, &["title"]).is_some());
     }
 
     #[test]

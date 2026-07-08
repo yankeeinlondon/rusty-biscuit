@@ -24,6 +24,10 @@ pub fn node_line(graph: &WorkspaceGraph, id: NodeId) -> usize {
         Some(NodePayload::Heading(heading)) => heading.line,
         Some(NodePayload::Link(link)) => link.line,
         Some(NodePayload::WikiLink(wiki)) => wiki.line,
+        Some(NodePayload::Transclusion(transclusion)) => transclusion.line,
+        Some(NodePayload::FileRef(file)) => file.line,
+        Some(NodePayload::VariableUse(variable)) => variable.line,
+        Some(NodePayload::FrontmatterKey(key)) => key.line,
         _ => 1,
     }
 }

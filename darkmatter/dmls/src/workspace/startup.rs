@@ -10,13 +10,44 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use crossbeam_channel::unbounded;
 
 use crate::config::WorkspaceConfig;
-use crate::graph::{DocumentIndex, WorkspaceIndex, index_document};
+use crate::graph::{DocumentIndex, IndexTimings, WorkspaceIndex, index_document_timed};
 
 use super::discover::{DiscoveryReport, discover_workspace};
+
+/// Aggregate per-stage indexing timings, summed across the worker pool.
+///
+/// Because indexing is parallel these are aggregate CPU time per stage, not
+/// disjoint wall-clock slices (the stages overlap across workers). The bench
+/// harness reports them as the R-6 `read`/`hash`/`frontmatter`/`parse_markdown`
+/// /`directives` stages so a bench run can attribute cold-start cost.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct IndexStageTimings {
+    /// Reading file contents from disk.
+    pub read: Duration,
+    /// Content hashing (xxHash identity).
+    pub hash: Duration,
+    /// Frontmatter block extraction + span-aware AST read.
+    pub frontmatter: Duration,
+    /// Markdown parsing (headings, links, images, wiki links).
+    pub parse_markdown: Duration,
+    /// Darkmatter DSL scanning (directives, `{{ }}` interpolation).
+    pub directives: Duration,
+}
+
+impl IndexStageTimings {
+    fn accumulate(&mut self, read: Duration, index: IndexTimings) {
+        self.read += read;
+        self.hash += index.hash;
+        self.frontmatter += index.frontmatter;
+        self.parse_markdown += index.parse_markdown;
+        self.directives += index.directives;
+    }
+}
 
 /// A sink for indexing progress. Implementations drive
 /// `window/workDoneProgress` (protocol loop) or collect for tests.
@@ -53,6 +84,22 @@ pub fn index_workspace(
     WorkspaceIndex::from_indices(collect_indices(roots, config, reporter))
 }
 
+/// Indexes an already-discovered file list, returning the per-document map and
+/// aggregate per-stage timings.
+///
+/// The bench harness uses this so discovery runs exactly once (it walks the
+/// workspace itself, then hands the file list here) rather than discovering a
+/// second time inside indexing.
+pub fn collect_indices_from_files(
+    files: &[PathBuf],
+    reporter: &dyn ProgressReporter,
+) -> (BTreeMap<PathBuf, DocumentIndex>, IndexStageTimings) {
+    reporter.begin("Indexing workspace");
+    let out = parallel_index(files, reporter);
+    reporter.end();
+    out
+}
+
 /// Discovers and parses a workspace into a per-document index map, without
 /// assembling the graph.
 ///
@@ -69,7 +116,7 @@ pub fn collect_indices(
     for duplicate in &report.duplicates {
         tracing::warn!("skipping duplicate physical file {}", duplicate.display());
     }
-    let indices = parallel_index(&report.files, reporter);
+    let (indices, _timings) = parallel_index(&report.files, reporter);
     reporter.end();
     indices
 }
@@ -80,16 +127,18 @@ pub fn discover(roots: &[PathBuf], config: &WorkspaceConfig) -> DiscoveryReport 
     discover_workspace(roots, config)
 }
 
-/// Reads and parses `files` across a worker pool, reporting progress.
+/// Reads and parses `files` across a worker pool, reporting progress and
+/// accumulating per-stage timings.
 fn parallel_index(
     files: &[PathBuf],
     reporter: &dyn ProgressReporter,
-) -> BTreeMap<PathBuf, DocumentIndex> {
+) -> (BTreeMap<PathBuf, DocumentIndex>, IndexStageTimings) {
     let total = files.len();
     let mut map: BTreeMap<PathBuf, DocumentIndex> = BTreeMap::new();
+    let mut stages = IndexStageTimings::default();
     if total == 0 {
         reporter.report(0, 0);
-        return map;
+        return (map, stages);
     }
 
     let worker_count = worker_count(total);
@@ -98,7 +147,8 @@ fn parallel_index(
         let _ = work_tx.send(file.clone());
     }
     drop(work_tx);
-    let (result_tx, result_rx) = unbounded::<(PathBuf, Option<DocumentIndex>)>();
+    type IndexResult = Option<(DocumentIndex, Duration, IndexTimings)>;
+    let (result_tx, result_rx) = unbounded::<(PathBuf, IndexResult)>();
 
     std::thread::scope(|scope| {
         for _ in 0..worker_count {
@@ -117,27 +167,33 @@ fn parallel_index(
         drop(result_tx);
 
         let mut done = 0;
-        while let Ok((path, index)) = result_rx.recv() {
-            if let Some(index) = index {
+        while let Ok((path, result)) = result_rx.recv() {
+            if let Some((index, read, timings)) = result {
                 map.insert(path, index);
+                stages.accumulate(read, timings);
             }
             done += 1;
             reporter.report(done, total);
         }
     });
 
-    map
+    (map, stages)
 }
 
-/// Reads one file and indexes it; `None` when unreadable or not valid UTF-8.
-fn read_and_index(path: &Path) -> Option<DocumentIndex> {
-    match std::fs::read_to_string(path) {
-        Ok(source) => Some(index_document(path, &source)),
+/// Reads one file and indexes it, capturing the read and per-stage parse
+/// timings; `None` when unreadable or not valid UTF-8.
+fn read_and_index(path: &Path) -> Option<(DocumentIndex, Duration, IndexTimings)> {
+    let read_start = Instant::now();
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
         Err(error) => {
             tracing::debug!("skipping unreadable {}: {error}", path.display());
-            None
+            return None;
         }
-    }
+    };
+    let read = read_start.elapsed();
+    let (index, timings) = index_document_timed(path, &source);
+    Some((index, read, timings))
 }
 
 /// Worker count: at least one, at most the available parallelism, never more

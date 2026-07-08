@@ -551,7 +551,7 @@ fn info_message(info: WikiInfo) -> &'static str {
     }
 }
 
-mod insertion {
+pub(crate) mod insertion {
     use crate::config::WikiPathStyle;
     use crate::wiki::{WikiDoc, shortest_unique_suffix};
 

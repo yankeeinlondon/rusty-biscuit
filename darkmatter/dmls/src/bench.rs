@@ -6,21 +6,37 @@
 //! shape (per-stage timings, peak RSS, graph counts) for `--json` or a compact
 //! human summary otherwise.
 //!
-//! Timing granularity is per-stage wall clock captured around the same units
-//! of work the `tracing` spans (`discover`, `read`, `hash`, `parse_markdown`,
-//! `frontmatter`, `directives`, `graph_build`, `reverse_index`, `diagnostics`,
-//! `snapshot_swap`) name; stages not exercised by the substrate slice report
-//! zero so the shape is stable as later phases fill them in.
+//! Discovery runs once; the resulting file list is reused for indexing (there
+//! is no second walk). Each R-6 stage carries its own measurement:
+//!
+//! - `discover`, `graph_build`, `reverse_index`, `snapshot_swap` are
+//!   single-threaded wall clock around, respectively, the workspace walk, the
+//!   node/edge assembly pass (`WorkspaceGraph::assemble`), the reverse-index
+//!   pass (`WorkspaceGraph::finalize`), and the immutable-snapshot `Arc` swap.
+//! - `read`, `hash`, `frontmatter`, `parse_markdown`, `directives` are
+//!   aggregate CPU time summed across the parallel worker pool (they overlap
+//!   in wall clock), captured per document by
+//!   [`index_document_timed`](crate::graph::index_document_timed) and the
+//!   read step in the worker.
+//! - `diagnostics` stays zero: DMLS computes diagnostics request-time in the
+//!   providers, not during cold indexing, so the index bench does not exercise
+//!   that stage.
 
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
 use crate::config::WorkspaceConfig;
-use crate::graph::WorkspaceIndex;
+use crate::graph::WorkspaceGraph;
 use crate::workspace::discover_workspace;
-use crate::workspace::startup::{SilentProgress, collect_indices};
+use crate::workspace::startup::{SilentProgress, collect_indices_from_files};
+
+/// Snapshot generation stamped on the bench-built graph (mirrors the batch
+/// startup path, [`WorkspaceIndex::from_indices`](crate::graph::WorkspaceIndex),
+/// which builds at generation 1).
+const BENCH_GENERATION: u64 = 1;
 
 /// Per-stage wall-clock timings in milliseconds (R-6 stage names).
 #[derive(Debug, Default, Serialize)]
@@ -31,17 +47,19 @@ pub struct StageTimings {
     pub read_ms: f64,
     /// Content hashing (xxHash identity).
     pub hash_ms: f64,
-    /// Markdown parsing (headings, links).
+    /// Markdown parsing (headings, links, images, wiki links).
     pub parse_markdown_ms: f64,
-    /// Frontmatter block extraction.
+    /// Frontmatter block extraction + span-aware AST read.
     pub frontmatter_ms: f64,
-    /// Directive scanning (overlay; zero in the substrate slice).
+    /// Darkmatter DSL scanning (transclusion/file directives, `{{ }}`
+    /// interpolation).
     pub directives_ms: f64,
     /// Graph node/edge construction.
     pub graph_build_ms: f64,
-    /// Reverse-index construction.
+    /// Reverse-index (+ key-index) construction.
     pub reverse_index_ms: f64,
-    /// Diagnostics (zero in the substrate slice).
+    /// Diagnostics — zero here: DMLS diagnostics are request-time, not part of
+    /// cold indexing.
     pub diagnostics_ms: f64,
     /// Immutable snapshot swap.
     pub snapshot_swap_ms: f64,
@@ -117,24 +135,36 @@ pub fn bench_index(root: &Path) -> BenchReport {
     let total_start = Instant::now();
     let mut stages = StageTimings::default();
 
+    // Discover once; the file list is reused by indexing so the walk runs
+    // exactly once (no second discovery inside `collect_indices`).
     let discover_start = Instant::now();
     let report = discover_workspace(&[root.to_path_buf()], &config);
     stages.discover_ms = elapsed_ms(discover_start);
 
-    // Read + hash + frontmatter + markdown parsing run across the worker pool —
-    // the same path the server takes at startup, so the total reflects real
-    // cold-start latency rather than a sequential worst case. The finer
-    // per-span split (read vs hash vs parse) lands with the `tracing`-span
-    // backing in later work; here they are folded into `parse_markdown_ms`.
-    let parse_start = Instant::now();
-    let indices = collect_indices(&[root.to_path_buf()], &config, &SilentProgress);
-    stages.parse_markdown_ms = elapsed_ms(parse_start);
+    // Read + parse across the worker pool (the same path the server takes at
+    // startup, so the total reflects real cold-start latency). The per-stage
+    // figures are aggregate CPU time summed across workers.
+    let (indices, index_stages) = collect_indices_from_files(&report.files, &SilentProgress);
+    stages.read_ms = ms(index_stages.read);
+    stages.hash_ms = ms(index_stages.hash);
+    stages.frontmatter_ms = ms(index_stages.frontmatter);
+    stages.parse_markdown_ms = ms(index_stages.parse_markdown);
+    stages.directives_ms = ms(index_stages.directives);
 
+    // Graph build → reverse index → snapshot swap, timed as the three R-6
+    // stages the batch startup path runs back to back inside `from_indices`.
     let build_start = Instant::now();
-    let index = WorkspaceIndex::from_indices(indices);
+    let assembly = WorkspaceGraph::assemble(&indices, BENCH_GENERATION, &[]);
     stages.graph_build_ms = elapsed_ms(build_start);
 
-    let snapshot = index.snapshot();
+    let reverse_start = Instant::now();
+    let graph = WorkspaceGraph::finalize(assembly);
+    stages.reverse_index_ms = elapsed_ms(reverse_start);
+
+    let swap_start = Instant::now();
+    let snapshot = Arc::new(graph);
+    stages.snapshot_swap_ms = elapsed_ms(swap_start);
+
     let counts = GraphCounts {
         documents: snapshot.document_count(),
         nodes: snapshot.node_count(),
@@ -153,6 +183,10 @@ pub fn bench_index(root: &Path) -> BenchReport {
 
 fn elapsed_ms(start: Instant) -> f64 {
     start.elapsed().as_secs_f64() * 1000.0
+}
+
+fn ms(duration: Duration) -> f64 {
+    duration.as_secs_f64() * 1000.0
 }
 
 /// Peak resident set size in bytes.
@@ -243,8 +277,52 @@ mod tests {
 
         let json: serde_json::Value = serde_json::from_str(&report.to_json()).unwrap();
         assert_eq!(json["files"], 2);
+        assert!(json["stages"]["read_ms"].is_number());
         assert!(json["stages"]["graph_build_ms"].is_number());
+        assert!(json["stages"]["reverse_index_ms"].is_number());
         assert!(json["counts"]["edges"].is_number());
+    }
+
+    #[test]
+    fn test_stage_fields_are_populated_over_a_corpus() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        // A multi-file corpus that exercises every timed stage: frontmatter
+        // (with an inline-schema `file(...)` value), headings, links between
+        // documents, a `::file` transclusion directive, and `{{ }}`
+        // interpolation.
+        for i in 0..6 {
+            let next = (i + 1) % 6;
+            write(
+                root,
+                &format!("doc{i}.md"),
+                &format!(
+                    "---\ntitle: Doc {i}\n$schema:\n  cover: \"file\"\ncover: ./img{i}.png\n---\n\n\
+                     # Doc {i}\n\n## Section\n\nSee [next](doc{next}.md) and {{{{ title }}}}.\n\n\
+                     ::file ./doc{next}.md\n"
+                ),
+            );
+        }
+
+        let report = bench_index(root);
+        assert_eq!(report.files, 6);
+        assert_eq!(report.counts.documents, 6);
+
+        let s = &report.stages;
+        // Every stage that performs real work over this corpus must be nonzero.
+        assert!(s.discover_ms > 0.0, "discover: {s:?}");
+        assert!(s.read_ms > 0.0, "read: {s:?}");
+        assert!(s.hash_ms > 0.0, "hash: {s:?}");
+        assert!(s.frontmatter_ms > 0.0, "frontmatter: {s:?}");
+        assert!(s.parse_markdown_ms > 0.0, "parse_markdown: {s:?}");
+        assert!(s.directives_ms > 0.0, "directives: {s:?}");
+        assert!(s.graph_build_ms > 0.0, "graph_build: {s:?}");
+        assert!(s.reverse_index_ms > 0.0, "reverse_index: {s:?}");
+        // The snapshot swap is a single `Arc::new`; it is measured but can round
+        // below the timer floor, so it need only be recorded (non-negative).
+        assert!(s.snapshot_swap_ms >= 0.0, "snapshot_swap: {s:?}");
+        // Diagnostics are request-time, never part of cold indexing.
+        assert_eq!(s.diagnostics_ms, 0.0, "diagnostics: {s:?}");
     }
 
     #[test]

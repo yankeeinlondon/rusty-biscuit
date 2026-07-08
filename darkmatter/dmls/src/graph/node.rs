@@ -1,10 +1,14 @@
 //! Graph node model: the typed node identity, kinds, and per-kind payloads.
 //!
-//! The substrate indexer (Phase 3) emits only [`NodeKind::Document`],
-//! [`NodeKind::Heading`], and [`NodeKind::Link`]; the overlay variants are
-//! declared now so the single-graph-with-edge-kinds bet (AD-1/AD-2) is the
-//! same seam the Darkmatter DSL overlay writes into in later phases, without a
-//! second graph vocabulary.
+//! The substrate indexer emits the Markdown structural kinds
+//! ([`NodeKind::Document`], [`NodeKind::Heading`], [`NodeKind::Link`],
+//! [`NodeKind::WikiLink`]) plus the Darkmatter semantic sources the single
+//! graph carries as typed edges: [`NodeKind::TransclusionTarget`],
+//! [`NodeKind::SchemaDeclaration`] (`uses_schema`), [`NodeKind::FileReference`]
+//! (`uses_file`), and [`NodeKind::Interpolation`] → [`NodeKind::FrontmatterKey`]
+//! (`uses_variable`). Every source is extracted through the side-effect-free
+//! `darkmatter` span APIs, so the single-graph-with-edge-kinds bet (AD-1/AD-2)
+//! is one vocabulary, not two.
 
 use darkmatter::markdown::span::SourceSpan;
 
@@ -20,12 +24,9 @@ use super::arena::DocumentId;
 pub struct NodeId(pub u32);
 
 /// The kind of a graph node.
-///
-/// Substrate kinds are produced by the Markdown indexer; overlay kinds are
-/// reserved for the Darkmatter semantic overlay (Phases 7 and 9).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeKind {
-    // ── Substrate (Markdown) ──
+    // ── Markdown structural ──
     /// A whole document (the root node for one file).
     Document,
     /// A heading (ATX or setext), the anchor/symbol authority.
@@ -37,25 +38,33 @@ pub enum NodeKind {
     /// A link-reference definition (`[id]: url`).
     LinkDefinition,
 
-    // ── Overlay (Darkmatter) — declared, not yet emitted ──
+    // ── Darkmatter semantic sources (emitted by the substrate indexer) ──
+    /// A top-level frontmatter key — the target a `uses_variable` edge resolves
+    /// to.
+    FrontmatterKey,
+    /// A `$schema` file reference — the source of a `uses_schema` edge.
+    SchemaDeclaration,
+    /// A `{{ … }}` interpolation — the source of a `uses_variable` edge.
+    Interpolation,
+    /// A file use (image, frontmatter `file(...)` value, style asset, or
+    /// `::file-links`/`::toc-linking` directive path) — the source of a
+    /// `uses_file` edge.
+    FileReference,
+    /// A transclusion target (`::file`/`::code`/prologue/epilogue) — the source
+    /// of a `transcludes` edge.
+    TransclusionTarget,
+
+    // ── Declared for later phases, not yet emitted ──
     /// The frontmatter block.
     FrontmatterBlock,
-    /// A frontmatter key path.
-    FrontmatterKey,
-    /// A `$schema` declaration.
-    SchemaDeclaration,
     /// A `style:` declaration.
     StyleDeclaration,
     /// A `::` directive.
     Directive,
     /// A directive argument/option.
     DirectiveArgument,
-    /// A `{{ … }}` interpolation expression.
-    Interpolation,
     /// A `::block` condition expression.
     Condition,
-    /// A transclusion target (`::file`/`::code`/prologue/epilogue).
-    TransclusionTarget,
     /// A `::shell` directive.
     ShellDirective,
     /// A disclosure block.
@@ -67,7 +76,9 @@ pub enum NodeKind {
 }
 
 impl NodeKind {
-    /// Whether this kind is produced by the Markdown substrate indexer.
+    /// Whether this kind is a Markdown structural node (document, heading, or
+    /// link), as opposed to a Darkmatter semantic source or a
+    /// declared-but-unemitted overlay kind.
     pub fn is_substrate(self) -> bool {
         matches!(
             self,
@@ -116,8 +127,66 @@ pub enum NodePayload {
     Link(LinkPayload),
     /// A `[[wiki]]` link's parse product and resolution outcome.
     WikiLink(WikiLinkPayload),
+    /// A `::file`/`::code` transclusion target (Layer 3 overlay).
+    Transclusion(TransclusionPayload),
+    /// A `$schema` or file use's raw target and resolved path
+    /// ([`NodeKind::SchemaDeclaration`] / [`NodeKind::FileReference`]).
+    FileRef(FileRefPayload),
+    /// A `{{ … }}` interpolation's leading variable identifier
+    /// ([`NodeKind::Interpolation`]).
+    VariableUse(VariableUsePayload),
+    /// A top-level frontmatter key ([`NodeKind::FrontmatterKey`]).
+    FrontmatterKey(FrontmatterKeyPayload),
     /// Reserved for overlay kinds not yet emitted.
     Empty,
+}
+
+/// Structured data for a [`NodeKind::SchemaDeclaration`] or
+/// [`NodeKind::FileReference`] node — a source position that uses an external
+/// file (a `$schema` file reference, an image, a frontmatter `file(...)` value,
+/// a `style.page.stylesheet` asset, or a `::file-links`/`::toc-linking`
+/// directive path).
+///
+/// A `uses_schema`/`uses_file` edge links this node to the referenced
+/// document's root when `path` names an indexed Markdown document; a non-`.md`
+/// asset (image, schema YAML, directory) or a path outside the workspace
+/// carries an [`EdgeTarget::Unresolved`](super::edge::EdgeTarget) target
+/// instead, so the reference is recorded without any filesystem touch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileRefPayload {
+    /// Raw reference exactly as authored (may carry a `#fragment`).
+    pub raw_target: String,
+    /// The workspace-local path portion (any `#fragment` stripped).
+    pub path: String,
+    /// 1-indexed source line the reference is on.
+    pub line: usize,
+}
+
+/// Structured data for a [`NodeKind::Interpolation`] node — one `{{ … }}`
+/// variable use.
+///
+/// A `uses_variable` edge links this node to the same-document
+/// [`NodeKind::FrontmatterKey`] node when the leading identifier names a
+/// top-level frontmatter key; a `ctx.*` / `env.*` / function / unknown
+/// identifier carries an [`EdgeTarget::Unresolved`](super::edge::EdgeTarget)
+/// target instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VariableUsePayload {
+    /// The leading identifier of the interpolation expression (`title`,
+    /// `ctx.today`, `author.name`), exactly as the compose parser sees it.
+    pub name: String,
+    /// 1-indexed source line the interpolation is on.
+    pub line: usize,
+}
+
+/// Structured data for a [`NodeKind::FrontmatterKey`] node — a top-level
+/// authored frontmatter key, the target a `uses_variable` edge resolves to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontmatterKeyPayload {
+    /// The key name.
+    pub key: String,
+    /// 1-indexed source line the key is on.
+    pub line: usize,
 }
 
 /// Structured data for a [`NodeKind::Heading`] node.
@@ -146,6 +215,23 @@ pub struct LinkPayload {
     pub target: LinkTarget,
     /// 1-indexed source line the link is on (for cross-document locations
     /// where no source map is available).
+    pub line: usize,
+}
+
+/// Structured data for a [`NodeKind::TransclusionTarget`] node.
+///
+/// Emitted by the Layer-3 overlay for `::file`/`::code` directives whose target
+/// is a workspace-local path. A `transcludes` edge links this node to the
+/// resolved target document root when the path matches an indexed document; a
+/// non-`.md` target (e.g. `::code ./mod.rs`) or a broken path carries no edge
+/// and is diagnosed at request time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransclusionPayload {
+    /// Raw directive target exactly as authored (may carry a `#fragment`).
+    pub raw_target: String,
+    /// The workspace-local path portion (any `#fragment` stripped).
+    pub path: String,
+    /// 1-indexed source line the directive is on.
     pub line: usize,
 }
 
@@ -238,6 +324,38 @@ impl Node {
     pub fn as_wiki_link(&self) -> Option<&WikiLinkPayload> {
         match &self.payload {
             NodePayload::WikiLink(payload) => Some(payload),
+            _ => None,
+        }
+    }
+
+    /// The transclusion payload, if this is a transclusion-target node.
+    pub fn as_transclusion(&self) -> Option<&TransclusionPayload> {
+        match &self.payload {
+            NodePayload::Transclusion(payload) => Some(payload),
+            _ => None,
+        }
+    }
+
+    /// The file-reference payload, if this is a `$schema`/file-use node.
+    pub fn as_file_ref(&self) -> Option<&FileRefPayload> {
+        match &self.payload {
+            NodePayload::FileRef(payload) => Some(payload),
+            _ => None,
+        }
+    }
+
+    /// The variable-use payload, if this is an interpolation node.
+    pub fn as_variable_use(&self) -> Option<&VariableUsePayload> {
+        match &self.payload {
+            NodePayload::VariableUse(payload) => Some(payload),
+            _ => None,
+        }
+    }
+
+    /// The frontmatter-key payload, if this is a frontmatter-key node.
+    pub fn as_frontmatter_key(&self) -> Option<&FrontmatterKeyPayload> {
+        match &self.payload {
+            NodePayload::FrontmatterKey(payload) => Some(payload),
             _ => None,
         }
     }

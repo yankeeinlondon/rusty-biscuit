@@ -16,8 +16,9 @@ use super::edge::{Edge, EdgeId, EdgeKind};
 use super::index::ReverseIndex;
 use super::key_index::KeyIndex;
 use super::node::{
-    HeadingPayload, LinkPayload, LinkTarget, Node, NodeId, NodeKind, NodePayload, WikiInfo,
-    WikiLinkPayload, WikiResolution,
+    FileRefPayload, FrontmatterKeyPayload, HeadingPayload, LinkPayload, LinkTarget, Node, NodeId,
+    NodeKind, NodePayload, TransclusionPayload, VariableUsePayload, WikiInfo, WikiLinkPayload,
+    WikiResolution,
 };
 use super::substrate::{DocumentIndex, WikiLinkFact};
 use crate::wiki::{self, Match, ParseOutcome, WikiDoc};
@@ -56,6 +57,25 @@ pub struct WorkspaceGraph {
     generation: u64,
 }
 
+/// The product of the node/edge assembly pass, handed to
+/// [`WorkspaceGraph::finalize`].
+///
+/// Exists so the bench harness can time graph construction ([`assemble`]) and
+/// reverse-index construction ([`finalize`]) as the separate R-6 stages the
+/// design's stage list calls for, without duplicating the build logic —
+/// production runs both back to back through [`build_with_roots`].
+///
+/// [`assemble`]: WorkspaceGraph::assemble
+/// [`finalize`]: WorkspaceGraph::finalize
+/// [`build_with_roots`]: WorkspaceGraph::build_with_roots
+pub(crate) struct GraphAssembly {
+    documents: Vec<DocumentRecord>,
+    by_path: HashMap<PathBuf, DocumentId>,
+    nodes: Vec<Node>,
+    edges: Vec<Edge>,
+    generation: u64,
+}
+
 impl WorkspaceGraph {
     /// Assembles a snapshot from per-document parse products (no wiki roots —
     /// wiki resolution falls back to absolute-path tails; see
@@ -76,6 +96,23 @@ impl WorkspaceGraph {
         generation: u64,
         wiki_roots: &[PathBuf],
     ) -> Self {
+        Self::finalize(Self::assemble(indices, generation, wiki_roots))
+    }
+
+    /// Node/edge assembly pass: mints every node and resolves every edge,
+    /// deferring reverse-index and key-index construction to [`finalize`].
+    ///
+    /// Split from [`finalize`] purely so the bench harness can time the two
+    /// as separate R-6 stages (`graph_build` vs `reverse_index`);
+    /// [`build_with_roots`] runs them back to back.
+    ///
+    /// [`finalize`]: WorkspaceGraph::finalize
+    /// [`build_with_roots`]: WorkspaceGraph::build_with_roots
+    pub(crate) fn assemble(
+        indices: &BTreeMap<PathBuf, DocumentIndex>,
+        generation: u64,
+        wiki_roots: &[PathBuf],
+    ) -> GraphAssembly {
         let mut nodes: Vec<Node> = Vec::new();
         let mut documents: Vec<DocumentRecord> = Vec::new();
         let mut by_path: HashMap<PathBuf, DocumentId> = HashMap::new();
@@ -87,6 +124,16 @@ impl WorkspaceGraph {
         let mut pending_links: Vec<(NodeId, DocumentId, LinkTarget, String)> = Vec::new();
         // Deferred wiki resolution: (source wiki node, owning doc, fact).
         let mut pending_wiki: Vec<(NodeId, DocumentId, WikiLinkFact)> = Vec::new();
+        // Deferred transclusion resolution: (source node, owning doc, local path).
+        let mut pending_transclusions: Vec<(NodeId, DocumentId, String)> = Vec::new();
+        // Deferred file-reference resolution: (source node, owning doc, local path).
+        let mut pending_schema_uses: Vec<(NodeId, DocumentId, String)> = Vec::new();
+        let mut pending_file_uses: Vec<(NodeId, DocumentId, String)> = Vec::new();
+        // Deferred variable resolution: (source node, owning doc, identifier).
+        let mut pending_variable_uses: Vec<(NodeId, DocumentId, String)> = Vec::new();
+        // (DocumentId, top-level key) → frontmatter-key node, for variable
+        // resolution.
+        let mut key_by_name: HashMap<(DocumentId, String), NodeId> = HashMap::new();
         // Document root + its heading nodes, to emit defines_* edges after all
         // nodes exist.
         let mut heading_nodes: Vec<(NodeId, NodeId)> = Vec::new();
@@ -167,6 +214,81 @@ impl WorkspaceGraph {
                 });
                 pending_wiki.push((node_id, doc_id, wiki.clone()));
             }
+
+            for transclusion in &index.transclusions {
+                let node_id = NodeId(nodes.len() as u32);
+                nodes.push(Node {
+                    document: doc_id,
+                    kind: NodeKind::TransclusionTarget,
+                    span: transclusion.span.clone(),
+                    payload: NodePayload::Transclusion(TransclusionPayload {
+                        raw_target: transclusion.raw_target.clone(),
+                        path: transclusion.path.clone(),
+                        line: transclusion.line,
+                    }),
+                });
+                pending_transclusions.push((node_id, doc_id, transclusion.path.clone()));
+            }
+
+            for key in &index.frontmatter_keys {
+                let node_id = NodeId(nodes.len() as u32);
+                nodes.push(Node {
+                    document: doc_id,
+                    kind: NodeKind::FrontmatterKey,
+                    span: key.span.clone(),
+                    payload: NodePayload::FrontmatterKey(FrontmatterKeyPayload {
+                        key: key.key.clone(),
+                        line: key.line,
+                    }),
+                });
+                // First occurrence wins (a duplicate authored key is invalid YAML
+                // and would already be a parse error upstream).
+                key_by_name.entry((doc_id, key.key.clone())).or_insert(node_id);
+            }
+
+            for schema in &index.schema_uses {
+                let node_id = NodeId(nodes.len() as u32);
+                nodes.push(Node {
+                    document: doc_id,
+                    kind: NodeKind::SchemaDeclaration,
+                    span: schema.span.clone(),
+                    payload: NodePayload::FileRef(FileRefPayload {
+                        raw_target: schema.raw_target.clone(),
+                        path: schema.path.clone(),
+                        line: schema.line,
+                    }),
+                });
+                pending_schema_uses.push((node_id, doc_id, schema.path.clone()));
+            }
+
+            for file in &index.file_uses {
+                let node_id = NodeId(nodes.len() as u32);
+                nodes.push(Node {
+                    document: doc_id,
+                    kind: NodeKind::FileReference,
+                    span: file.span.clone(),
+                    payload: NodePayload::FileRef(FileRefPayload {
+                        raw_target: file.raw_target.clone(),
+                        path: file.path.clone(),
+                        line: file.line,
+                    }),
+                });
+                pending_file_uses.push((node_id, doc_id, file.path.clone()));
+            }
+
+            for variable in &index.variable_uses {
+                let node_id = NodeId(nodes.len() as u32);
+                nodes.push(Node {
+                    document: doc_id,
+                    kind: NodeKind::Interpolation,
+                    span: variable.span.clone(),
+                    payload: NodePayload::VariableUse(VariableUsePayload {
+                        name: variable.name.clone(),
+                        line: variable.line,
+                    }),
+                });
+                pending_variable_uses.push((node_id, doc_id, variable.name.clone()));
+            }
         }
 
         let mut edges: Vec<Edge> = Vec::new();
@@ -225,6 +347,71 @@ impl WorkspaceGraph {
             }
         }
 
+        // Resolve `::file`/`::code` transclusions: a `transcludes` edge is emitted
+        // only when the path names an indexed document. A non-`.md` target
+        // (`::code ./mod.rs`) or a broken path carries no edge — request-time
+        // diagnostics distinguish "missing" from "not a workspace document".
+        for (source, doc_id, path) in pending_transclusions {
+            let Some(base_dir) = documents
+                .get(doc_id.0 as usize)
+                .and_then(|record| record.path.parent())
+            else {
+                continue;
+            };
+            let resolved = normalize_join(base_dir, &path);
+            if let Some(&target_doc) = by_path.get(&resolved)
+                && let Some(record) = documents.get(target_doc.0 as usize)
+            {
+                edges.push(Edge::to_node(source, EdgeKind::Transcludes, record.root));
+            }
+        }
+
+        // Resolve `$schema` (uses_schema) and file uses (uses_file). Schema
+        // files and assets (`.yaml`, images, directories) are not `.md` graph
+        // documents, so they stay `Unresolved`; a `file(...)` value naming an
+        // indexed document resolves to its root, feeding invalidation fan-out.
+        for (source, doc_id, path) in pending_schema_uses {
+            edges.push(resolve_file_edge(source, EdgeKind::UsesSchema, doc_id, &path, &documents, &by_path));
+        }
+        for (source, doc_id, path) in pending_file_uses {
+            edges.push(resolve_file_edge(source, EdgeKind::UsesFile, doc_id, &path, &documents, &by_path));
+        }
+
+        // Resolve interpolation variables (uses_variable) against a same-document
+        // top-level frontmatter key. The leading segment of a dotted identifier
+        // (`author` of `author.name`) names the key; `ctx.*`/`env.*`/functions and
+        // unknown names stay `Unresolved` so the use is still recorded.
+        for (source, doc_id, name) in pending_variable_uses {
+            let first_segment = name.split('.').next().unwrap_or(&name);
+            match key_by_name.get(&(doc_id, first_segment.to_string())) {
+                Some(&target) => edges.push(Edge::to_node(source, EdgeKind::UsesVariable, target)),
+                None => edges.push(Edge::unresolved(source, EdgeKind::UsesVariable, name)),
+            }
+        }
+
+        GraphAssembly {
+            documents,
+            by_path,
+            nodes,
+            edges,
+            generation,
+        }
+    }
+
+    /// Reverse-index / key-index construction pass: builds the lookups over the
+    /// assembled nodes and edges and freezes the immutable snapshot.
+    ///
+    /// See [`assemble`] for why the two passes are separate.
+    ///
+    /// [`assemble`]: WorkspaceGraph::assemble
+    pub(crate) fn finalize(assembly: GraphAssembly) -> Self {
+        let GraphAssembly {
+            documents,
+            by_path,
+            nodes,
+            edges,
+            generation,
+        } = assembly;
         let reverse = ReverseIndex::build(&edges);
         let keys = KeyIndex::build(
             documents
@@ -342,6 +529,113 @@ impl WorkspaceGraph {
             .filter(move |(_, node)| node.document == document && node.kind == NodeKind::WikiLink)
     }
 
+    /// Transclusion-target nodes of a document, in document order.
+    pub fn transclusions(&self, document: DocumentId) -> impl Iterator<Item = (NodeId, &Node)> {
+        self.nodes
+            .iter()
+            .enumerate()
+            .map(|(position, node)| (NodeId(position as u32), node))
+            .filter(move |(_, node)| {
+                node.document == document && node.kind == NodeKind::TransclusionTarget
+            })
+    }
+
+    /// `$schema` file-reference nodes of a document (`uses_schema` sources).
+    pub fn schema_uses(&self, document: DocumentId) -> impl Iterator<Item = (NodeId, &Node)> {
+        self.nodes_of_kind(document, NodeKind::SchemaDeclaration)
+    }
+
+    /// File-use nodes of a document (`uses_file` sources).
+    pub fn file_uses(&self, document: DocumentId) -> impl Iterator<Item = (NodeId, &Node)> {
+        self.nodes_of_kind(document, NodeKind::FileReference)
+    }
+
+    /// Interpolation nodes of a document (`uses_variable` sources).
+    pub fn variable_uses(&self, document: DocumentId) -> impl Iterator<Item = (NodeId, &Node)> {
+        self.nodes_of_kind(document, NodeKind::Interpolation)
+    }
+
+    /// Top-level frontmatter-key nodes of a document (`uses_variable` targets).
+    pub fn frontmatter_keys(&self, document: DocumentId) -> impl Iterator<Item = (NodeId, &Node)> {
+        self.nodes_of_kind(document, NodeKind::FrontmatterKey)
+    }
+
+    /// Nodes of `document` of a given kind, in document order.
+    fn nodes_of_kind(&self, document: DocumentId, kind: NodeKind) -> impl Iterator<Item = (NodeId, &Node)> {
+        self.nodes
+            .iter()
+            .enumerate()
+            .map(|(position, node)| (NodeId(position as u32), node))
+            .filter(move |(_, node)| node.document == document && node.kind == kind)
+    }
+
+    /// Documents that transclude `document` via `::file`/`::code` — the source
+    /// document of every incoming `transcludes` edge to the document's root.
+    pub fn transcluded_by(&self, document: DocumentId) -> Vec<NodeId> {
+        let Some(root) = self.document(document).map(|record| record.root) else {
+            return Vec::new();
+        };
+        self.incoming(root, EdgeKind::Transcludes)
+            .map(|edge| edge.source)
+            .collect()
+    }
+
+    /// Detects a transclusion cycle reachable from `start`, returning the
+    /// document chain that closes the loop (`start … → start`) when one exists.
+    ///
+    /// The walk follows `transcludes` edges document-to-document; the first time
+    /// a document is revisited on the current path, the slice from that document
+    /// onward (plus the repeated document) is the cycle. Only cycles that pass
+    /// through `start` are reported, so a diagnostic ranges the document the user
+    /// is editing.
+    pub fn transclusion_cycle(&self, start: DocumentId) -> Option<Vec<DocumentId>> {
+        let mut path = vec![start];
+        let mut visited = std::collections::HashSet::new();
+        self.walk_cycle(start, start, &mut path, &mut visited)
+    }
+
+    /// Depth-first search for a `transcludes` cycle returning to `target`.
+    fn walk_cycle(
+        &self,
+        current: DocumentId,
+        target: DocumentId,
+        path: &mut Vec<DocumentId>,
+        visited: &mut std::collections::HashSet<DocumentId>,
+    ) -> Option<Vec<DocumentId>> {
+        for next in self.transclusion_targets(current) {
+            if next == target {
+                let mut cycle = path.clone();
+                cycle.push(target);
+                return Some(cycle);
+            }
+            if !visited.insert(next) {
+                continue;
+            }
+            path.push(next);
+            if let Some(cycle) = self.walk_cycle(next, target, path, visited) {
+                return Some(cycle);
+            }
+            path.pop();
+        }
+        None
+    }
+
+    /// Documents `document` transcludes directly (the target document of every
+    /// outgoing `transcludes` edge from one of its transclusion-target nodes).
+    fn transclusion_targets(&self, document: DocumentId) -> Vec<DocumentId> {
+        let mut targets = Vec::new();
+        for (node_id, _) in self.transclusions(document) {
+            for edge in self.outgoing(node_id, EdgeKind::Transcludes) {
+                if let Some(target) = edge.target.node()
+                    && let Some(node) = self.node(target)
+                {
+                    targets.push(node.document);
+                }
+            }
+        }
+        targets
+    }
+
     /// The documents as the wiki matcher sees them (canonical path + wiki root),
     /// indexed by `DocumentId`, for completion-time suffix resolution.
     pub fn wiki_docs(&self) -> Vec<WikiDoc> {
@@ -456,6 +750,32 @@ fn resolve_link(
             }
         }
     }
+}
+
+/// Resolves a `uses_schema`/`uses_file` reference to an edge: a resolved edge to
+/// an indexed Markdown document's root when `path` names one, else an
+/// `Unresolved` edge carrying the raw path (an asset, schema YAML, or directory
+/// that is not a graph document). Purely lexical — no filesystem access.
+fn resolve_file_edge(
+    source: NodeId,
+    kind: EdgeKind,
+    source_doc: DocumentId,
+    path: &str,
+    documents: &[DocumentRecord],
+    by_path: &HashMap<PathBuf, DocumentId>,
+) -> Edge {
+    if let Some(base_dir) = documents
+        .get(source_doc.0 as usize)
+        .and_then(|record| record.path.parent())
+    {
+        let resolved = normalize_join(base_dir, path);
+        if let Some(&target_doc) = by_path.get(&resolved)
+            && let Some(record) = documents.get(target_doc.0 as usize)
+        {
+            return Edge::to_node(source, kind, record.root);
+        }
+    }
+    Edge::unresolved(source, kind, path.to_string())
 }
 
 /// A document's wiki root membership: the index of the first `wiki_roots`
@@ -740,6 +1060,124 @@ mod tests {
             normalize_join(Path::new("/w/docs"), "./y.md"),
             PathBuf::from("/w/docs/y.md")
         );
+    }
+
+    #[test]
+    fn test_transclusion_edge_resolves_to_target_document() {
+        let g = graph(&[
+            ("/w/a.md", "# A\n\n::file ./b.md\n"),
+            ("/w/b.md", "# B\n"),
+        ]);
+        let a = g.document_id(Path::new("/w/a.md")).unwrap();
+        let b = g.document_id(Path::new("/w/b.md")).unwrap();
+        // A has one transclusion-target node pointing at B's root.
+        assert_eq!(g.transclusions(a).count(), 1);
+        assert_eq!(g.transcluded_by(b).len(), 1);
+    }
+
+    #[test]
+    fn test_transclusion_of_non_document_target_carries_no_edge() {
+        // `::code ./mod.rs` names a non-`.md` file: a transclusion node exists but
+        // no `transcludes` edge (nothing to resolve in the document graph).
+        let g = graph(&[("/w/a.md", "::code ./mod.rs\n")]);
+        let a = g.document_id(Path::new("/w/a.md")).unwrap();
+        assert_eq!(g.transclusions(a).count(), 1);
+        let (node_id, _) = g.transclusions(a).next().unwrap();
+        assert_eq!(g.outgoing(node_id, EdgeKind::Transcludes).count(), 0);
+    }
+
+    #[test]
+    fn test_transclusion_cycle_detected() {
+        let g = graph(&[
+            ("/w/a.md", "::file ./b.md\n"),
+            ("/w/b.md", "::file ./a.md\n"),
+        ]);
+        let a = g.document_id(Path::new("/w/a.md")).unwrap();
+        let cycle = g.transclusion_cycle(a).expect("cycle exists");
+        // The chain closes back on the starting document.
+        assert_eq!(cycle.first(), Some(&a));
+        assert_eq!(cycle.last(), Some(&a));
+    }
+
+    #[test]
+    fn test_no_transclusion_cycle_for_acyclic_chain() {
+        let g = graph(&[
+            ("/w/a.md", "::file ./b.md\n"),
+            ("/w/b.md", "# B\n"),
+        ]);
+        let a = g.document_id(Path::new("/w/a.md")).unwrap();
+        assert!(g.transclusion_cycle(a).is_none());
+    }
+
+    #[test]
+    fn test_uses_schema_edge_emitted() {
+        let g = graph(&[("/w/a.md", "---\n$schema: ./schema.yaml\n---\n\n# Title\n")]);
+        let a = g.document_id(Path::new("/w/a.md")).unwrap();
+        assert_eq!(g.schema_uses(a).count(), 1);
+        let (node_id, node) = g.schema_uses(a).next().unwrap();
+        assert_eq!(node.as_file_ref().unwrap().path, "./schema.yaml");
+        let edges: Vec<_> = g.outgoing(node_id, EdgeKind::UsesSchema).collect();
+        assert_eq!(edges.len(), 1);
+        // A schema YAML is not a `.md` graph document, so the target stays raw.
+        assert!(matches!(edges[0].target, EdgeTarget::Unresolved(_)));
+    }
+
+    #[test]
+    fn test_uses_file_edges_emitted_for_each_source() {
+        // Frontmatter `file(...)` value (inline-schema-declared), a style asset,
+        // a body image, and a `::file-links` directive path.
+        let source = "---\n$schema:\n  cover: \"file -> art\"\ncover: ./art/cover.png\n\
+                      style:\n  page:\n    stylesheet: ./theme.css\n---\n\n\
+                      # Doc\n\n![diagram](./img/d.png)\n\n::file-links ./notes\n";
+        let g = graph(&[("/w/a.md", source)]);
+        let a = g.document_id(Path::new("/w/a.md")).unwrap();
+        assert_eq!(g.file_uses(a).count(), 4);
+        for (node_id, _) in g.file_uses(a) {
+            assert_eq!(g.outgoing(node_id, EdgeKind::UsesFile).count(), 1);
+        }
+    }
+
+    #[test]
+    fn test_uses_file_resolves_to_indexed_document_and_reverse_index() {
+        let g = graph(&[
+            ("/w/a.md", "---\n$schema:\n  include: \"file\"\ninclude: ./b.md\n---\n\n# A\n"),
+            ("/w/b.md", "# B\n"),
+        ]);
+        let a = g.document_id(Path::new("/w/a.md")).unwrap();
+        let b = g.document_id(Path::new("/w/b.md")).unwrap();
+        let (node_id, _) = g.file_uses(a).next().expect("one file use");
+        let edge = g.outgoing(node_id, EdgeKind::UsesFile).next().expect("one uses_file edge");
+        let b_root = g.document(b).unwrap().root;
+        // The `file(...)` value names an indexed document, so it resolves to b's
+        // root and is visible as an incoming edge (invalidation fan-out).
+        assert_eq!(edge.target.node(), Some(b_root));
+        assert_eq!(g.incoming(b_root, EdgeKind::UsesFile).count(), 1);
+    }
+
+    #[test]
+    fn test_uses_variable_edges_emitted_and_reverse_index() {
+        let g = graph(&[(
+            "/w/a.md",
+            "---\ntitle: Hello\n---\n\n# Body\n\nSee {{ title }} and {{ ctx.today }}.\n",
+        )]);
+        let a = g.document_id(Path::new("/w/a.md")).unwrap();
+        assert_eq!(g.variable_uses(a).count(), 2);
+        // `{{ title }}` resolves to the `title` frontmatter-key node; the reverse
+        // index answers "who uses key `title`".
+        let (title_key, _) = g
+            .frontmatter_keys(a)
+            .find(|(_, node)| node.as_frontmatter_key().unwrap().key == "title")
+            .expect("a title key node");
+        assert_eq!(g.incoming(title_key, EdgeKind::UsesVariable).count(), 1);
+        // `{{ ctx.today }}` names an external namespace: unresolved, still recorded.
+        let unresolved = g
+            .variable_uses(a)
+            .filter(|(id, _)| {
+                g.outgoing(*id, EdgeKind::UsesVariable)
+                    .any(|edge| matches!(edge.target, EdgeTarget::Unresolved(_)))
+            })
+            .count();
+        assert_eq!(unresolved, 1);
     }
 
     #[test]

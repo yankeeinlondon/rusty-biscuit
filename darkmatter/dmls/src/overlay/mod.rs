@@ -12,8 +12,11 @@
 //! [`DocumentContext`](crate::providers::DocumentContext); no provider ever
 //! touches the YAML parser or the schema library directly.
 
+pub mod directives;
+pub mod expressions;
 pub mod frontmatter;
 pub mod schema;
+pub mod shell;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

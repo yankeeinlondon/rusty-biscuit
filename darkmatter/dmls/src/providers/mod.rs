@@ -8,14 +8,19 @@
 //! panic boundary so one misbehaving provider degrades to an empty
 //! contribution and a logged warning instead of taking down the request loop.
 
+pub mod code_actions;
 pub mod completion;
 pub mod definition;
 pub mod diagnostics;
+pub mod dsl;
+pub mod edits;
 pub mod folding;
+pub mod formatting;
 pub mod frontmatter;
 pub mod hover;
 pub mod location;
 pub mod references;
+pub mod rename;
 pub mod symbols;
 pub mod wiki;
 
@@ -257,6 +262,48 @@ impl Provider for FrontmatterProvider {
     }
 }
 
+/// The Layer-3 Darkmatter DSL provider: directives, transclusion,
+/// interpolation, shell awareness, and fenced-language diagnostics.
+///
+/// Registered last so its contributions merge on top of every other provider;
+/// each capability re-scans the buffer with the passive Phase-8 library scanners
+/// and never executes a directive, expression, or command.
+pub struct DslProvider;
+
+impl Provider for DslProvider {
+    fn name(&self) -> &'static str {
+        "dsl"
+    }
+
+    fn definition(&self, ctx: &DocumentContext, offset: usize) -> Vec<Location> {
+        dsl::definition(ctx, offset)
+    }
+
+    fn document_links(&self, ctx: &DocumentContext) -> Vec<DocumentLink> {
+        dsl::document_links(ctx)
+    }
+
+    fn references(&self, ctx: &DocumentContext, offset: usize, include_declaration: bool) -> Vec<Location> {
+        dsl::references(ctx, offset, include_declaration)
+    }
+
+    fn folding_ranges(&self, ctx: &DocumentContext) -> Vec<FoldingRange> {
+        dsl::folding_ranges(ctx)
+    }
+
+    fn hover(&self, ctx: &DocumentContext, offset: usize) -> Option<Hover> {
+        dsl::hover(ctx, offset)
+    }
+
+    fn completion(&self, ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
+        dsl::completion(ctx, offset)
+    }
+
+    fn diagnostics(&self, ctx: &DocumentContext) -> Vec<Diagnostic> {
+        dsl::diagnostics(ctx)
+    }
+}
+
 /// Result cap for workspace symbol queries (design "workspace symbols: …
 /// result cap").
 const WORKSPACE_SYMBOL_CAP: usize = 256;
@@ -282,6 +329,7 @@ impl ProviderRegistry {
                 Box::new(SubstrateProvider),
                 Box::new(WikiProvider),
                 Box::new(FrontmatterProvider),
+                Box::new(DslProvider),
             ],
         }
     }

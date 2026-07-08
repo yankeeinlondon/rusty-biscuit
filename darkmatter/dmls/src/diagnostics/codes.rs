@@ -58,6 +58,9 @@ pub mod code {
     /// A wiki heading resolved by exact text but a different heading would
     /// match by slug.
     pub const WIKI_HEADING_SPELLING: &str = "wiki.ambiguous-heading-spelling";
+    /// A rename would leave a wiki link with no unique replacement spelling
+    /// (R-8 file-rename rule 11).
+    pub const WIKI_AMBIGUOUS_AFTER_RENAME: &str = "wiki.ambiguous-after-rename";
 
     // ── Frontmatter / schema (R-5, source `darkmatter.frontmatter` /
     // `darkmatter.schema`) ──
@@ -88,4 +91,31 @@ pub mod code {
     pub const STYLE_UNKNOWN_KEY: &str = "dm.style.unknown_key";
     /// A deprecated `style:` key (a canonical replacement exists).
     pub const STYLE_DEPRECATED_KEY: &str = "dm.style.deprecated_key";
+
+    // ── Layer-3 Darkmatter DSL overlay (source `darkmatter.compose` /
+    // `darkmatter.security`) ──
+
+    /// A `::` directive keyword the DSL does not recognize.
+    pub const DIRECTIVE_UNKNOWN: &str = "dm.directive.unknown";
+    /// A `::block` / `::shell-block` / disclosure triple left unclosed.
+    pub const DIRECTIVE_UNCLOSED_BLOCK: &str = "dm.directive.unclosed_block";
+    /// A `::end-block` closer with no matching opener.
+    pub const DIRECTIVE_UNMATCHED_END: &str = "dm.directive.unmatched_end";
+    /// An option key a directive family does not recognize.
+    pub const DIRECTIVE_MALFORMED_OPTION: &str = "dm.directive.malformed_option";
+    /// A `::disclosure` triple left structurally malformed.
+    pub const DIRECTIVE_MALFORMED_DISCLOSURE: &str = "dm.directive.malformed_disclosure";
+    /// A `::file`/`::code`/prologue/epilogue target that matched no file.
+    pub const TRANSCLUSION_BROKEN_PATH: &str = "dm.transclusion.broken_path";
+    /// A `::file`/`::code` transclusion cycle.
+    pub const TRANSCLUSION_CYCLE: &str = "dm.transclusion.cycle";
+    /// A malformed `{{ … }}` interpolation or `when=` expression.
+    pub const EXPRESSION_MALFORMED: &str = "dm.expression.malformed";
+    /// An interpolation identifier that names no frontmatter key, `ctx.*`,
+    /// `env.*`, or expression function.
+    pub const EXPRESSION_UNKNOWN_IDENTIFIER: &str = "dm.expression.unknown_identifier";
+    /// A fenced-code info string whose language token no grammar recognizes.
+    pub const FENCE_UNKNOWN_LANGUAGE: &str = "dm.fence.unknown_language";
+    /// A `::shell` / `::shell-block` / `$()` command the shell policy disallows.
+    pub const SECURITY_DISALLOWED_COMMAND: &str = "dm.security.disallowed_command";
 }

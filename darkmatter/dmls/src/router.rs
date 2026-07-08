@@ -13,6 +13,7 @@
 //! decode positions until the encoding is negotiated (Helix) are safe by
 //! construction.
 
+use std::collections::HashSet;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -26,31 +27,33 @@ use lsp_types::notification::{
     Notification as _, Progress,
 };
 use lsp_types::request::{
-    Completion, DocumentHighlightRequest, DocumentLinkRequest, DocumentSymbolRequest,
-    FoldingRangeRequest, GotoDefinition, HoverRequest, References, RegisterCapability,
-    Request as _, WorkDoneProgressCreate, WorkspaceSymbolRequest,
+    CodeActionRequest, Completion, DocumentHighlightRequest, DocumentLinkRequest,
+    DocumentSymbolRequest, FoldingRangeRequest, Formatting, GotoDefinition, HoverRequest,
+    PrepareRenameRequest, References, RegisterCapability, Rename, Request as _,
+    WillRenameFiles, WorkDoneProgressCreate, WorkspaceSymbolRequest,
 };
 use lsp_types::{
-    CancelParams, CompletionParams, CompletionResponse, DidChangeConfigurationParams,
-    DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentHighlightParams,
-    DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse, FileChangeType,
-    FoldingRangeParams, GotoDefinitionParams, GotoDefinitionResponse, HoverParams,
-    InitializeParams, InitializeResult, NumberOrString, ProgressParams, ProgressParamsValue,
-    ReferenceParams, RegistrationParams, ServerInfo, Uri, WorkDoneProgress, WorkDoneProgressBegin,
-    WorkDoneProgressCreateParams, WorkDoneProgressEnd, WorkDoneProgressReport,
-    WorkspaceSymbolParams, WorkspaceSymbolResponse,
+    CancelParams, CodeActionParams, CompletionParams, CompletionResponse,
+    DidChangeConfigurationParams, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
+    DocumentFormattingParams, DocumentHighlightParams, DocumentLinkParams, DocumentSymbolParams,
+    DocumentSymbolResponse, FileChangeType, FoldingRangeParams, GotoDefinitionParams,
+    GotoDefinitionResponse, HoverParams, InitializeParams, InitializeResult, NumberOrString,
+    ProgressParams, ProgressParamsValue, ReferenceParams, RegistrationParams, RenameFilesParams,
+    RenameParams, ServerInfo, TextDocumentPositionParams, Uri, WorkDoneProgress,
+    WorkDoneProgressBegin, WorkDoneProgressCreateParams, WorkDoneProgressEnd,
+    WorkDoneProgressReport, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use thiserror::Error;
 
 use crate::capabilities::{ClientProfile, negotiate_position_encoding, server_capabilities};
 use crate::config::ConfigState;
 use crate::diagnostics::DiagnosticsScheduler;
-use crate::graph::WorkspaceIndex;
+use crate::graph::{WorkspaceGraph, WorkspaceIndex};
 use crate::overlay::OverlayState;
 use crate::providers::{DocumentContext, ProviderRegistry};
 use crate::workspace::snapshot::SharedSnapshot;
-use crate::workspace::startup::{ProgressReporter, collect_indices};
+use crate::workspace::startup::{ProgressReporter, SilentProgress, collect_indices};
 use crate::workspace::watch::{WatchMode, coalesce_changes, watch_registration};
 use crate::workspace::{DocumentStore, uri_to_file_path, workspace_roots};
 
@@ -120,7 +123,8 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
         SharedSnapshot::new(guard.snapshot())
     };
 
-    register_watchers(&connection.sender, &profile, config.effective());
+    let watch_mode = WatchMode::for_profile(&profile);
+    register_watchers(&connection.sender, watch_mode, config.effective());
     spawn_startup_index(
         connection.sender.clone(),
         roots.clone(),
@@ -141,14 +145,18 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
         registry: ProviderRegistry::with_substrate(),
         diagnostics,
         overlay: OverlayState::default(),
+        watch_mode,
     };
     Router::new(connection, state).run()
 }
 
-/// Registers dynamic file watchers when the client watches for us; a
-/// server-side rescan covers the rest and needs no registration.
-fn register_watchers(sender: &Sender<Message>, profile: &ClientProfile, config: &crate::DmlsConfig) {
-    if WatchMode::for_profile(profile) != WatchMode::ClientWatched {
+/// Registers dynamic file watchers for a [`WatchMode::ClientWatched`] client.
+///
+/// A [`WatchMode::ServerRescan`] client (no reliable watcher — e.g. Neovim on
+/// Linux) is served by [`ServerState::rescan_workspace`] on save instead, so it
+/// needs no registration.
+fn register_watchers(sender: &Sender<Message>, watch_mode: WatchMode, config: &crate::DmlsConfig) {
+    if watch_mode != WatchMode::ClientWatched {
         return;
     }
     let Some(registration) = watch_registration(&config.workspace) else {
@@ -210,6 +218,10 @@ pub struct ServerState {
     pub diagnostics: DiagnosticsScheduler,
     /// Frontmatter overlay caches (last-good AST + effective schema).
     pub overlay: OverlayState,
+    /// How this client learns about on-disk changes. `ServerRescan` drives a
+    /// save-triggered rescan for unopened files; `ClientWatched` relies on
+    /// `didChangeWatchedFiles`.
+    pub watch_mode: WatchMode,
 }
 
 impl ServerState {
@@ -263,12 +275,111 @@ impl ServerState {
         self.diagnostics.publish(uri.clone(), version, diagnostics);
     }
 
+    /// Builds the environment the rename providers need beyond the request
+    /// payload (open buffers, snapshot, config/profile, roots, encoding).
+    fn rename_env<'a>(
+        &'a self,
+        graph: &'a WorkspaceGraph,
+    ) -> crate::providers::rename::RenameEnv<'a> {
+        crate::providers::rename::RenameEnv {
+            documents: &self.documents,
+            graph,
+            config: self.config.effective(),
+            profile: &self.profile,
+            roots: &self.roots,
+            encoding: self.profile.position_encoding,
+        }
+    }
+
     /// Refreshes diagnostics for every open document — a change to one file can
     /// flip another's link validity, so the whole open set is re-published.
     fn refresh_all_diagnostics(&self) {
         for uri in self.documents.open_uris() {
             self.refresh_diagnostics(&uri);
         }
+    }
+
+    /// The filesystem paths of all currently open buffers (buffer authoritative
+    /// over disk during a rescan).
+    fn open_document_paths(&self) -> HashSet<PathBuf> {
+        self.documents
+            .open_uris()
+            .iter()
+            .filter_map(uri_to_file_path)
+            .collect()
+    }
+
+    /// Rescans the workspace from disk and reconciles the index for
+    /// [`WatchMode::ServerRescan`] clients (no reliable file watcher).
+    ///
+    /// This is the save-driven fallback that keeps unopened files current for
+    /// clients like Neovim on Linux: it re-runs discovery, reads and re-hashes
+    /// the discovered files on the worker pool, and adopts created/changed and
+    /// drops deleted files (open buffers stay authoritative). It reads disk but
+    /// never composes, executes, or fetches — the same passive contract as
+    /// startup indexing.
+    ///
+    /// ## Returns
+    ///
+    /// `true` when the snapshot changed, so the caller refreshes diagnostics.
+    fn rescan_workspace(&self) -> bool {
+        let discovered = collect_indices(
+            &self.roots,
+            &self.config.effective().workspace,
+            &SilentProgress,
+        );
+        let open_paths = self.open_document_paths();
+        let mut index = self.index.lock().expect("index lock poisoned");
+        let changed = index.reconcile_disk(discovered, &open_paths);
+        if changed {
+            self.snapshot.store(index.snapshot());
+        }
+        changed
+    }
+
+    /// Reloads configuration after a `workspace/didChangeConfiguration` and
+    /// re-derives every part of the analysis universe that depends on it, so a
+    /// settings change takes effect without a server restart.
+    ///
+    /// Beyond storing the new settings, this recomputes the wiki resolution
+    /// roots (`wiki.wiki_root`) and rebuilds the graph against them, re-discovers
+    /// and reconciles the workspace against the new discovery globs
+    /// (`workspace.include`/`exclude`), and re-publishes diagnostics for every
+    /// open document. Schema-extension activation (`schema.extensions`) flows
+    /// through the overlay's content-and-config-keyed schema cache, so it
+    /// re-assembles on the diagnostics refresh by construction. Nothing runs
+    /// when the effective config is unchanged, and the expensive re-discovery
+    /// runs only when the `workspace` section actually changed.
+    fn reload_config(&mut self, settings: serde_json::Value) {
+        let before = self.config.effective().clone();
+        self.config.apply_client_settings(settings);
+        let after = self.config.effective();
+        if *after == before {
+            return;
+        }
+
+        let wiki_roots = (after.wiki.wiki_root != before.wiki.wiki_root).then(|| {
+            crate::workspace::resolve_wiki_roots(&self.roots, after.wiki.wiki_root.as_deref())
+        });
+        let discovered = (after.workspace != before.workspace)
+            .then(|| collect_indices(&self.roots, &after.workspace, &SilentProgress));
+        let open_paths = self.open_document_paths();
+
+        {
+            let mut index = self.index.lock().expect("index lock poisoned");
+            let mut dirty = false;
+            if let Some(wiki_roots) = wiki_roots {
+                index.set_wiki_roots(wiki_roots);
+                dirty = true;
+            }
+            if let Some(discovered) = discovered {
+                dirty |= index.reconcile_disk(discovered, &open_paths);
+            }
+            if dirty {
+                self.snapshot.store(index.snapshot());
+            }
+        }
+        self.refresh_all_diagnostics();
     }
 
     /// Applies a coalesced on-disk change: read + re-index, or drop.
@@ -489,6 +600,11 @@ impl Router {
             FoldingRangeRequest::METHOD => self.folding_range(id, request.params),
             HoverRequest::METHOD => self.hover(id, request.params),
             Completion::METHOD => self.completion(id, request.params),
+            CodeActionRequest::METHOD => self.code_action(id, request.params),
+            Formatting::METHOD => self.formatting(id, request.params),
+            PrepareRenameRequest::METHOD => self.prepare_rename(id, request.params),
+            Rename::METHOD => self.rename(id, request.params),
+            WillRenameFiles::METHOD => self.will_rename_files(id, request.params),
             other => {
                 tracing::debug!(method = other, "unhandled request");
                 Response::new_err(
@@ -633,6 +749,78 @@ impl Router {
         Response::new_ok(id, CompletionResponse::Array(items))
     }
 
+    fn code_action(&self, id: RequestId, params: serde_json::Value) -> Response {
+        let Ok(params) = serde_json::from_value::<CodeActionParams>(params) else {
+            return invalid_params(id);
+        };
+        let uri = params.text_document.uri;
+        let diagnostics = params.context.diagnostics;
+        let actions = self
+            .state
+            .with_document(&uri, |ctx| {
+                crate::providers::code_actions::code_actions(ctx, &diagnostics)
+            })
+            .unwrap_or_default();
+        Response::new_ok(id, actions)
+    }
+
+    fn formatting(&self, id: RequestId, params: serde_json::Value) -> Response {
+        let Ok(params) = serde_json::from_value::<DocumentFormattingParams>(params) else {
+            return invalid_params(id);
+        };
+        let edits = self
+            .state
+            .with_document(&params.text_document.uri, |ctx| {
+                crate::providers::formatting::formatting(ctx)
+            })
+            .unwrap_or_default();
+        Response::new_ok(id, edits)
+    }
+
+    fn prepare_rename(&self, id: RequestId, params: serde_json::Value) -> Response {
+        let Ok(params) = serde_json::from_value::<TextDocumentPositionParams>(params) else {
+            return invalid_params(id);
+        };
+        let snapshot = self.state.snapshot.load();
+        let env = self.state.rename_env(snapshot.as_ref());
+        let response = crate::providers::rename::prepare_rename(
+            &env,
+            &params.text_document.uri,
+            params.position,
+        );
+        Response::new_ok(id, response)
+    }
+
+    fn rename(&self, id: RequestId, params: serde_json::Value) -> Response {
+        let Ok(params) = serde_json::from_value::<RenameParams>(params) else {
+            return invalid_params(id);
+        };
+        let position = params.text_document_position.position;
+        let uri = params.text_document_position.text_document.uri;
+        let snapshot = self.state.snapshot.load();
+        let env = self.state.rename_env(snapshot.as_ref());
+        match crate::providers::rename::rename(&env, &uri, position, &params.new_name) {
+            Ok(edit) => Response::new_ok(id, edit),
+            // Refuse unsafe/ambiguous renames with an error the client surfaces,
+            // rather than applying a partial edit (spec criterion 9).
+            Err(error) => Response::new_err(
+                id,
+                ErrorCode::InvalidRequest as i32,
+                error.message().to_string(),
+            ),
+        }
+    }
+
+    fn will_rename_files(&self, id: RequestId, params: serde_json::Value) -> Response {
+        let Ok(params) = serde_json::from_value::<RenameFilesParams>(params) else {
+            return invalid_params(id);
+        };
+        let snapshot = self.state.snapshot.load();
+        let env = self.state.rename_env(snapshot.as_ref());
+        let edit = crate::providers::rename::will_rename_files(&env, &params.files);
+        Response::new_ok(id, edit)
+    }
+
     fn handle_notification(&mut self, notification: Notification) {
         let method = notification.method.clone();
         let outcome = catch_unwind(AssertUnwindSafe(|| {
@@ -692,9 +880,19 @@ impl Router {
                 else {
                     return;
                 };
-                // Full sync keeps the client buffer authoritative; the save
-                // itself carries no new state for DMLS.
+                // Full sync keeps the saved buffer itself authoritative, so the
+                // save carries no new state for that document. It is, however,
+                // the trigger for the server-side rescan fallback: a
+                // `ServerRescan` client (no reliable watcher) learns about
+                // *other* files that were created/changed/deleted on disk only
+                // here — a `ClientWatched` client gets that from
+                // `didChangeWatchedFiles`, so it skips the scan.
                 tracing::debug!(uri = params.text_document.uri.as_str(), "didSave");
+                if self.state.watch_mode == WatchMode::ServerRescan
+                    && self.state.rescan_workspace()
+                {
+                    self.state.refresh_all_diagnostics();
+                }
             }
             DidChangeConfiguration::METHOD => {
                 let Some(params) =
@@ -703,7 +901,7 @@ impl Router {
                     return;
                 };
                 tracing::debug!("didChangeConfiguration");
-                self.state.config.apply_client_settings(params.settings);
+                self.state.reload_config(params.settings);
             }
             DidChangeWatchedFiles::METHOD => {
                 let Some(params) =

@@ -8,7 +8,7 @@
 //! rebuilt snapshot carries an incremented generation so superseded async work
 //! (diagnostics, indexing) can be discarded (AD-3).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -25,8 +25,9 @@ pub enum Invalidation {
     /// The document was re-indexed and a new snapshot generation published.
     Reindexed {
         /// Other documents whose analysis depends on the changed one
-        /// (reachable over `transcludes`/`uses_file` edges). Their diagnostics
-        /// should be refreshed. Empty until the overlay adds those edges.
+        /// (reachable over `transcludes`/`uses_file` edges — e.g. a document
+        /// that transcludes it or references it through a frontmatter
+        /// `file(...)` value). Their diagnostics should be refreshed.
         dependents: Vec<PathBuf>,
     },
 }
@@ -125,6 +126,55 @@ impl WorkspaceIndex {
         self.documents.insert(path.to_path_buf(), fresh);
         self.rebuild();
         Invalidation::Reindexed { dependents }
+    }
+
+    /// Reconciles the index against a fresh disk scan for the server-side
+    /// rescan fallback (clients without reliable file watching).
+    ///
+    /// Adopts created and content-changed files (xxHash compare), drops files
+    /// that vanished from disk, and never touches an open buffer — the client
+    /// buffer stays authoritative over disk (`open_paths` names those buffers,
+    /// which may not exist on disk yet). The snapshot is rebuilt once if
+    /// anything changed.
+    ///
+    /// ## Returns
+    ///
+    /// `true` when the snapshot was rebuilt (something changed), so the caller
+    /// knows to refresh diagnostics.
+    pub fn reconcile_disk(
+        &mut self,
+        disk: BTreeMap<PathBuf, DocumentIndex>,
+        open_paths: &HashSet<PathBuf>,
+    ) -> bool {
+        let mut changed = false;
+        let mut on_disk: HashSet<PathBuf> = HashSet::with_capacity(disk.len());
+        for (path, fresh) in disk {
+            on_disk.insert(path.clone());
+            if open_paths.contains(&path) {
+                continue;
+            }
+            match self.documents.get(&path) {
+                Some(existing) if existing.content_hash == fresh.content_hash => {}
+                _ => {
+                    self.documents.insert(path, fresh);
+                    changed = true;
+                }
+            }
+        }
+        let vanished: Vec<PathBuf> = self
+            .documents
+            .keys()
+            .filter(|path| !on_disk.contains(*path) && !open_paths.contains(*path))
+            .cloned()
+            .collect();
+        for path in vanished {
+            self.documents.remove(&path);
+            changed = true;
+        }
+        if changed {
+            self.rebuild();
+        }
+        changed
     }
 
     /// Drops a document (deletion), rebuilding the snapshot if it was present.
@@ -276,10 +326,115 @@ mod tests {
         assert_eq!(index.snapshot().document_count(), 3);
     }
 
+    fn disk_scan(entries: &[(&str, &str)]) -> BTreeMap<PathBuf, DocumentIndex> {
+        entries
+            .iter()
+            .map(|(path, source)| {
+                let path = PathBuf::from(path);
+                let index = index_document(&path, source);
+                (path, index)
+            })
+            .collect()
+    }
+
     #[test]
-    fn test_substrate_has_no_transclude_dependents_yet() {
-        // The dependent mechanism exists but the substrate emits no
-        // transcludes/uses_file edges, so a plain-link change reports none.
+    fn test_reconcile_disk_adopts_created_and_changed_drops_deleted() {
+        let mut index = WorkspaceIndex::new();
+        let a = PathBuf::from("/w/a.md");
+        index.set_document(&a, "# A\n");
+        let before = index.generation();
+
+        // b.md is new, a.md changed; both are adopted and the snapshot rebuilds.
+        let changed =
+            index.reconcile_disk(disk_scan(&[("/w/a.md", "# A2\n"), ("/w/b.md", "# B\n")]), &HashSet::new());
+        assert!(changed);
+        assert!(index.generation() > before);
+        assert!(index.contains(&PathBuf::from("/w/b.md")));
+        let snapshot = index.snapshot();
+        let a_id = snapshot.document_id(&a).unwrap();
+        assert_eq!(
+            snapshot.headings(a_id).next().unwrap().1.as_heading().unwrap().title,
+            "A2"
+        );
+
+        // A scan missing a.md (and no open buffers) drops it.
+        let changed = index.reconcile_disk(disk_scan(&[("/w/b.md", "# B\n")]), &HashSet::new());
+        assert!(changed);
+        assert!(!index.contains(&a));
+        assert!(index.contains(&PathBuf::from("/w/b.md")));
+    }
+
+    #[test]
+    fn test_reconcile_disk_no_change_is_free() {
+        let mut index = WorkspaceIndex::new();
+        index.set_document(&PathBuf::from("/w/a.md"), "# A\n");
+        let generation = index.generation();
+        // The same bytes on disk → no rebuild, generation frozen.
+        let changed = index.reconcile_disk(disk_scan(&[("/w/a.md", "# A\n")]), &HashSet::new());
+        assert!(!changed);
+        assert_eq!(index.generation(), generation);
+    }
+
+    #[test]
+    fn test_reconcile_disk_never_touches_open_buffers() {
+        let mut index = WorkspaceIndex::new();
+        let open = PathBuf::from("/w/open.md");
+        // The open buffer holds unsaved edits; disk still has the old bytes.
+        index.set_document(&open, "# Buffer edit\n");
+        let mut open_paths = HashSet::new();
+        open_paths.insert(open.clone());
+
+        // A scan whose disk copy differs and that omits the open buffer entirely
+        // must neither overwrite nor drop it.
+        let changed = index.reconcile_disk(disk_scan(&[("/w/open.md", "# Stale disk\n")]), &open_paths);
+        assert!(!changed);
+        let snapshot = index.snapshot();
+        let id = snapshot.document_id(&open).unwrap();
+        assert_eq!(
+            snapshot.headings(id).next().unwrap().1.as_heading().unwrap().title,
+            "Buffer edit"
+        );
+
+        // An empty scan (buffer never saved to disk) still keeps the buffer.
+        let changed = index.reconcile_disk(BTreeMap::new(), &open_paths);
+        assert!(!changed);
+        assert!(index.contains(&open));
+    }
+
+    #[test]
+    fn test_set_wiki_roots_changes_wiki_resolution() {
+        use crate::graph::WikiResolution;
+
+        let mut index = WorkspaceIndex::new();
+        let target = PathBuf::from("/w/notes/Target.md");
+        let source = PathBuf::from("/w/notes/Source.md");
+        index.set_document(&target, "# Target\n");
+        index.set_document(&source, "[[/notes/Target]]\n");
+
+        let resolution = |index: &WorkspaceIndex| {
+            let snapshot = index.snapshot();
+            let doc = snapshot.document_id(&source).unwrap();
+            let (_, node) = snapshot.wiki_links(doc).next().expect("a wiki link");
+            node.as_wiki_link().unwrap().resolution.clone()
+        };
+
+        // Workspace-root wiki roots give Target the canonical path `notes/Target`,
+        // so the two-segment root-relative link resolves.
+        index.set_wiki_roots(vec![PathBuf::from("/w")]);
+        assert!(matches!(resolution(&index), WikiResolution::Resolved(_)));
+
+        // Narrowing the wiki root to `/w/notes` shortens Target's canonical path
+        // to `Target`, so the same root-relative link no longer matches — the
+        // reload-triggered rebuild flips resolution without any document edit.
+        index.set_wiki_roots(vec![PathBuf::from("/w/notes")]);
+        assert_eq!(resolution(&index), WikiResolution::Unresolved);
+    }
+
+    #[test]
+    fn test_plain_link_change_reports_no_dependents() {
+        // A plain Markdown link is a `references` edge, not a compositional
+        // (`transcludes`/`uses_file`) edge, so changing its target reports no
+        // dependents to re-diagnose.
         let mut index = WorkspaceIndex::new();
         let a = PathBuf::from("/w/a.md");
         let b = PathBuf::from("/w/b.md");
@@ -287,5 +442,31 @@ mod tests {
         index.set_document(&b, "# B\n");
         let outcome = index.set_document(&b, "# B changed\n");
         assert_eq!(outcome, Invalidation::Reindexed { dependents: vec![] });
+    }
+
+    #[test]
+    fn test_uses_file_change_reports_dependents() {
+        // a.md references b.md through a frontmatter `file(...)` value (declared
+        // by a's inline `$schema`), so editing b.md fans out to a.md over the
+        // `uses_file` edge.
+        let mut index = WorkspaceIndex::new();
+        let a = PathBuf::from("/w/a.md");
+        let b = PathBuf::from("/w/b.md");
+        index.set_document(&a, "---\n$schema:\n  include: \"file\"\ninclude: ./b.md\n---\n\n# A\n");
+        index.set_document(&b, "# B\n");
+        let outcome = index.set_document(&b, "# B changed\n");
+        assert_eq!(outcome, Invalidation::Reindexed { dependents: vec![a] });
+    }
+
+    #[test]
+    fn test_transclude_change_reports_dependents() {
+        // a.md transcludes b.md, so editing b.md fans out to a.md.
+        let mut index = WorkspaceIndex::new();
+        let a = PathBuf::from("/w/a.md");
+        let b = PathBuf::from("/w/b.md");
+        index.set_document(&a, "::file ./b.md\n");
+        index.set_document(&b, "# B\n");
+        let outcome = index.set_document(&b, "# B changed\n");
+        assert_eq!(outcome, Invalidation::Reindexed { dependents: vec![a] });
     }
 }

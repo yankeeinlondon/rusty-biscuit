@@ -8,9 +8,13 @@
 //! (`darkmatter/dmls/design/research/r7-editor-capability-matrix.md`).
 
 use lsp_types::{
-    ClientCapabilities, CompletionOptions, DocumentLinkOptions, FoldingRangeProviderCapability,
-    HoverProviderCapability, InitializeParams, OneOf, PositionEncodingKind, SaveOptions,
-    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    ClientCapabilities, CodeActionProviderCapability, CompletionOptions, DocumentLinkOptions,
+    FileOperationFilter, FileOperationPattern, FileOperationPatternKind,
+    FileOperationRegistrationOptions, FoldingRangeProviderCapability, HoverProviderCapability,
+    InitializeParams, OneOf, PositionEncodingKind, RenameOptions, SaveOptions, ServerCapabilities,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    WorkspaceFileOperationsServerCapabilities, WorkspaceServerCapabilities,
+    WorkDoneProgressOptions,
 };
 
 use crate::source_map::PositionEncoding;
@@ -47,9 +51,19 @@ pub fn negotiate_position_encoding(capabilities: &ClientCapabilities) -> Positio
 /// links, references/highlights, hover, completion, and folding — on top of the
 /// Phase-2 document-sync lifecycle. Folding is gated on the client profile
 /// (omitted for Helix, which has no LSP folding); diagnostics are push-based
-/// (`publishDiagnostics`) and need no capability advertisement.
+/// (`publishDiagnostics`) and need no capability advertisement. Phase 10 adds the
+/// editing surface — rename (with prepare support), quick-fix code actions, and
+/// whole-document formatting — plus `workspace/willRenameFiles` gated on the
+/// client's file-operation support (R-7: not Neovim).
 pub fn server_capabilities(profile: &ClientProfile) -> ServerCapabilities {
     ServerCapabilities {
+        workspace: workspace_capabilities(profile),
+        rename_provider: Some(OneOf::Right(RenameOptions {
+            prepare_provider: Some(true),
+            work_done_progress_options: WorkDoneProgressOptions::default(),
+        })),
+        code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+        document_formatting_provider: Some(OneOf::Left(true)),
         position_encoding: Some(match profile.position_encoding {
             PositionEncoding::Utf8 => PositionEncodingKind::UTF8,
             PositionEncoding::Utf16 => PositionEncodingKind::UTF16,
@@ -86,6 +100,32 @@ pub fn server_capabilities(profile: &ClientProfile) -> ServerCapabilities {
             .then_some(FoldingRangeProviderCapability::Simple(true)),
         ..Default::default()
     }
+}
+
+/// Workspace-scoped server capabilities: `willRenameFiles` for Markdown files,
+/// advertised only when the client honors file operations (R-7 gate — not
+/// Neovim, which reaches file rename through a code action instead).
+fn workspace_capabilities(profile: &ClientProfile) -> Option<WorkspaceServerCapabilities> {
+    if !profile.supports_file_operations {
+        return None;
+    }
+    let filter = FileOperationFilter {
+        scheme: Some("file".to_string()),
+        pattern: FileOperationPattern {
+            glob: "**/*.{md,markdown}".to_string(),
+            matches: Some(FileOperationPatternKind::File),
+            options: None,
+        },
+    };
+    Some(WorkspaceServerCapabilities {
+        workspace_folders: None,
+        file_operations: Some(WorkspaceFileOperationsServerCapabilities {
+            will_rename: Some(FileOperationRegistrationOptions {
+                filters: vec![filter],
+            }),
+            ..Default::default()
+        }),
+    })
 }
 
 /// How rich hover content may be for this client.
@@ -385,10 +425,42 @@ mod tests {
         assert!(advertised.workspace_symbol_provider.is_some());
         assert!(advertised.document_link_provider.is_some());
         assert!(advertised.folding_range_provider.is_some());
-        // Editing features (rename, code actions, formatting) land in Phase 10.
-        assert!(advertised.rename_provider.is_none());
-        assert!(advertised.code_action_provider.is_none());
-        assert!(advertised.document_formatting_provider.is_none());
+        // Phase 10 editing surface: rename (with prepare), code actions, and
+        // whole-document formatting.
+        assert!(matches!(
+            advertised.rename_provider,
+            Some(OneOf::Right(RenameOptions {
+                prepare_provider: Some(true),
+                ..
+            }))
+        ));
+        assert!(advertised.code_action_provider.is_some());
+        assert!(advertised.document_formatting_provider.is_some());
+    }
+
+    #[test]
+    fn test_will_rename_files_gated_on_file_operations() {
+        // A client that honors file operations gets willRenameFiles advertised.
+        let with_ops = profile_with(
+            PositionEncoding::Utf8,
+            json!({ "workspace": { "fileOperations": { "willRename": true } } }),
+        );
+        let advertised = server_capabilities(&with_ops);
+        let ops = advertised
+            .workspace
+            .and_then(|ws| ws.file_operations)
+            .and_then(|fo| fo.will_rename);
+        assert!(ops.is_some());
+
+        // A client without file operations (e.g. Neovim) does not.
+        let neovim = ClientProfile::from_initialize(
+            &init_params(json!({
+                "clientInfo": { "name": "Neovim", "version": "0.11.0" },
+                "capabilities": {}
+            })),
+            PositionEncoding::Utf8,
+        );
+        assert!(server_capabilities(&neovim).workspace.is_none());
     }
 
     #[test]

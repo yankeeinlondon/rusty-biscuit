@@ -1,10 +1,13 @@
 //! The workspace graph substrate.
 //!
 //! A single in-memory graph carries every node kind and every edge kind
-//! (AD-1/AD-2): the Markdown substrate writes documents, headings, and links
-//! today; the Darkmatter overlay writes directives, transclusions, and
-//! interpolation into the *same* graph in later phases. Providers query one
-//! graph with an edge-kind filter — never two vocabularies.
+//! (AD-1/AD-2). The Markdown substrate indexer writes documents, headings,
+//! links, and wiki-links, plus the Darkmatter semantic sources the graph
+//! carries as typed edges: transclusions (`transcludes`), `$schema` uses
+//! (`uses_schema`), file uses (`uses_file` — images, frontmatter `file(...)`
+//! values, style assets, `::file-links`/`::toc-linking` paths), and
+//! interpolation variables (`uses_variable`). Providers query one graph with
+//! an edge-kind filter — never two vocabularies.
 //!
 //! Module map:
 //!
@@ -29,7 +32,11 @@ pub use edge::{Edge, EdgeId, EdgeKind, EdgeTarget};
 pub use invalidate::{Invalidation, WorkspaceIndex};
 pub use key_index::KeyIndex;
 pub use node::{
-    HeadingPayload, LinkPayload, LinkTarget, Node, NodeId, NodeKind, NodePayload, WikiInfo,
-    WikiLinkPayload, WikiResolution, classify_link_target,
+    FileRefPayload, FrontmatterKeyPayload, HeadingPayload, LinkPayload, LinkTarget, Node, NodeId,
+    NodeKind, NodePayload, TransclusionPayload, VariableUsePayload, WikiInfo, WikiLinkPayload,
+    WikiResolution, classify_link_target,
 };
-pub use substrate::{DocumentIndex, HeadingFact, LinkFact, WikiLinkFact, index_document};
+pub use substrate::{
+    DocumentIndex, FileRefFact, FrontmatterKeyFact, HeadingFact, IndexTimings, LinkFact,
+    TransclusionFact, VariableUseFact, WikiLinkFact, index_document, index_document_timed,
+};
