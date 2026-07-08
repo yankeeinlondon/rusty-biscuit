@@ -73,6 +73,10 @@ pub(crate) fn auth_env_vars(provider: Provider) -> &'static [&'static str] {
             "OPENAI_API_KEY",
             "GEMINI_API_KEY",
         ],
+        // Antigravity authenticates via the OS keyring / Google Sign-In OAuth;
+        // it honors no API-key env var, so there is nothing to forward.
+        // Rejected in contract v1 regardless, so this is informational.
+        Provider::Antigravity => &[],
         // `Provider` is non-exhaustive, but every known variant is enumerated
         // above. A new provider must update this match rather than silently
         // receiving no forwarded auth variables.

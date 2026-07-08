@@ -842,8 +842,13 @@ fn support_matrix_enables_only_curated_providers() {
         provider_support(Provider::Pi),
         ProviderSupport::Rejected(_)
     ));
+    // Antigravity is wired but not v1-enabled for tool-free inference either.
+    assert!(matches!(
+        provider_support(Provider::Antigravity),
+        ProviderSupport::Rejected(_)
+    ));
     // Every provider appears exactly once in the matrix.
-    assert_eq!(support_matrix().len(), 9);
+    assert_eq!(support_matrix().len(), 10);
 }
 
 #[test]
@@ -876,6 +881,7 @@ fn auth_env_vars_are_explicit_for_all_providers() {
             "GEMINI_API_KEY"
         ]
     );
+    assert!(auth_env_vars(Provider::Antigravity).is_empty());
 }
 
 // -- process runner: concurrent pipe draining --------------------------------
