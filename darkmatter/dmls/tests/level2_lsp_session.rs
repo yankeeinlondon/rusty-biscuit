@@ -910,6 +910,247 @@ fn level2_frontmatter_nested_file_navigation() {
     fixture.shutdown();
 }
 
+/// A document whose inline `$schema` types `license` as `file` and whose value
+/// is a bare extensionless filename (`LICENSE`). A dot/slash heuristic would drop
+/// it; once the schema confirms the `file` type it must navigate.
+const EXTENSIONLESS_FILE_DOC: &str =
+    "---\n$schema:\n  license: file\nlicense: LICENSE\n---\n\n# Doc\n";
+
+#[test]
+fn level2_frontmatter_extensionless_file_navigation() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc.md"), EXTENSIONLESS_FILE_DOC).unwrap();
+    // The extensionless target must exist so resolution has something to reach.
+    std::fs::write(workspace.path().join("LICENSE"), "All rights reserved.\n").unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), EXTENSIONLESS_FILE_DOC);
+
+    // definition on the `license` value (line 3, `license: LICENSE`) resolves to
+    // the extensionless LICENSE file.
+    let definition = fixture
+        .request(
+            "textDocument/definition",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 3, "character": 12 }
+            }),
+        )
+        .result
+        .expect("extensionless definition");
+    let locations = definition.as_array().expect("definition array");
+    assert_eq!(locations.len(), 1, "extensionless file definition: {locations:?}");
+    assert!(
+        locations[0]["uri"].as_str().unwrap().ends_with("LICENSE"),
+        "definition should reach the LICENSE file: {locations:?}"
+    );
+
+    // documentLink yields a link over the value's span targeting LICENSE.
+    let links = fixture
+        .request(
+            "textDocument/documentLink",
+            json!({ "textDocument": { "uri": uri.as_str() } }),
+        )
+        .result
+        .expect("links");
+    let links = links.as_array().expect("link array");
+    let license_link = links
+        .iter()
+        .find(|link| link["target"].as_str().is_some_and(|target| target.ends_with("LICENSE")))
+        .expect("a document link over the extensionless file value");
+    assert_eq!(license_link["range"]["start"]["line"], json!(3), "{license_link:?}");
+
+    fixture.shutdown();
+}
+
+/// A document whose inline `$schema` declares `asset` as a property-level union
+/// whose completable arm (`file`) is *second*. The single-atom `primary_atom`
+/// path would resolve only the first (`string`) arm and offer no completion, so
+/// this exercises capability-specific arm selection for value completion.
+const UNION_VALUE_DOC: &str =
+    "---\n$schema:\n  asset:\n    - string\n    - file\nasset: \n---\n\n# Doc\n";
+
+#[test]
+fn level2_frontmatter_union_value_completion() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc.md"), UNION_VALUE_DOC).unwrap();
+    // A sibling document so the `file(...)` arm's value completion has a target.
+    std::fs::write(workspace.path().join("other.md"), "# Other\n").unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), UNION_VALUE_DOC);
+
+    // Value completion after `asset: ` (line 5) offers the sibling document,
+    // driven by the union's *second* (`file`) arm.
+    let values = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 5, "character": 7 }
+            }),
+        )
+        .result
+        .expect("value completions");
+    assert!(
+        values.as_array().unwrap().iter().any(|item| item["label"] == json!("other.md")),
+        "expected a file-path value completion from the second union arm: {values:?}"
+    );
+
+    fixture.shutdown();
+}
+
+/// A document whose inline `$schema` declares `home` as a property-level union
+/// whose `file` arm is *second*, so a file value is only navigable if
+/// navigation consults every arm rather than just the first.
+const UNION_FILE_NAV_DOC: &str =
+    "---\n$schema:\n  home:\n    - string\n    - file\nhome: top.md\n---\n\n# Doc\n";
+
+#[test]
+fn level2_frontmatter_union_file_navigation() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc.md"), UNION_FILE_NAV_DOC).unwrap();
+    std::fs::write(workspace.path().join("top.md"), "# Top\n").unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), UNION_FILE_NAV_DOC);
+
+    // definition on `home: top.md` (line 5) resolves through the second union
+    // (`file`) arm to top.md.
+    let definition = fixture
+        .request(
+            "textDocument/definition",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 5, "character": 8 }
+            }),
+        )
+        .result
+        .expect("definition");
+    let locations = definition.as_array().expect("definition array");
+    assert!(
+        locations.iter().any(|loc| loc["uri"].as_str().unwrap().ends_with("top.md")),
+        "union file arm definition should reach top.md: {locations:?}"
+    );
+
+    // documentLink produces a link over the value targeting top.md.
+    let links = fixture
+        .request("textDocument/documentLink", json!({ "textDocument": { "uri": uri.as_str() } }))
+        .result
+        .expect("links");
+    assert!(
+        links
+            .as_array()
+            .expect("link array")
+            .iter()
+            .any(|link| link["target"].as_str().is_some_and(|t| t.ends_with("top.md"))),
+        "union file arm should produce a document link: {links:?}"
+    );
+
+    fixture.shutdown();
+}
+
+/// A document whose inline `$schema` declares `settings` as a property-level
+/// union whose inline-object arm is *second*. Nested-key intelligence must
+/// descend that arm even though the first arm (`string`) is not an object.
+const UNION_NESTED_DOC: &str = "---\n$schema:\n  settings:\n    - string\n    - mode: enum(dev, prod)\n      path: file\n      level: number\nsettings:\n  mode: dev\n  path: nested.md\n---\n\n# Doc\n";
+
+#[test]
+fn level2_frontmatter_union_nested_schema_intelligence() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc.md"), UNION_NESTED_DOC).unwrap();
+    std::fs::write(workspace.path().join("nested.md"), "# Nested\n").unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), UNION_NESTED_DOC);
+
+    // Nested key completion: on the `mode` line (line 8), the second-arm inline
+    // object offers its not-yet-present `level` key.
+    let keys = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 8, "character": 2 }
+            }),
+        )
+        .result
+        .expect("nested key completions");
+    assert!(
+        keys.as_array().unwrap().iter().any(|item| item["label"] == json!("level")),
+        "expected a nested `level` key completion through the union arm: {keys:?}"
+    );
+
+    // Nested enum value completion: after `mode: ` (line 8) offers the enum
+    // members declared on the second-arm inline object's `mode` atom.
+    let enum_values = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 8, "character": 8 }
+            }),
+        )
+        .result
+        .expect("nested enum value completions");
+    assert!(
+        enum_values.as_array().unwrap().iter().any(|item| item["label"] == json!("prod")),
+        "expected a nested enum value completion through the union arm: {enum_values:?}"
+    );
+
+    // Nested `file(...)` value completion: after `path: ` (line 9) offers the
+    // sibling document.
+    let file_values = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 9, "character": 8 }
+            }),
+        )
+        .result
+        .expect("nested file value completions");
+    assert!(
+        file_values.as_array().unwrap().iter().any(|item| item["label"] == json!("nested.md")),
+        "expected a nested file-path value completion through the union arm: {file_values:?}"
+    );
+
+    // Nested definition on `path: nested.md` (line 9) resolves through the
+    // union's inline-object arm to nested.md.
+    let definition = fixture
+        .request(
+            "textDocument/definition",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 9, "character": 10 }
+            }),
+        )
+        .result
+        .expect("nested definition");
+    assert!(
+        definition
+            .as_array()
+            .expect("definition array")
+            .iter()
+            .any(|loc| loc["uri"].as_str().unwrap().ends_with("nested.md")),
+        "nested union-arm definition should reach nested.md: {definition:?}"
+    );
+
+    fixture.shutdown();
+}
+
 #[test]
 fn level2_claudine_extension_is_pure_config() {
     // Criterion 6: a Claudine prompt activates a schema baseline through
