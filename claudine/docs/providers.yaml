@@ -158,7 +158,7 @@ list:
       # and `docs_url` are confirmed by the agent-cli / non-interactive-sessions
       # research. `sniff_binding` names the AiCli variant added at graduation
       # (unwired here, so claudine-gen skips it — the Pi/Kilo pattern).
-      binary: antigravity
+      binary: agy
       display_name: Antigravity
       short_name: antigravity
       cli_aliases: ["antigravity"]
