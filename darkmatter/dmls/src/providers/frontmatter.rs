@@ -155,7 +155,7 @@ fn value_completions(
     let shape = known_shape(ctx);
     let mut path: Vec<&str> = ancestors.iter().map(String::as_str).collect();
     path.push(key);
-    let Some(atom) = def_at_path(&shape, &path).and_then(primary_atom) else {
+    let Some(atom) = def_at_path(&shape, &path).and_then(completable_atom) else {
         return Vec::new();
     };
 
@@ -347,19 +347,17 @@ fn nav_targets(ctx: &DocumentContext, ast: &FrontmatterAst) -> Vec<(SourceSpan, 
 
     // `file(...)`-typed scalar values at any depth: a top-level key is a
     // single-segment path, a nested one resolves through the schema's inline
-    // objects. Splitting `dotted` on `.` mirrors the completion/hover path.
+    // objects. Splitting `dotted` on `.` mirrors the completion/hover path. Any
+    // union arm being a `file` type makes the value a navigable reference.
     let shape = known_shape(ctx);
     for entry in ast.entries() {
         if entry.kind != FmValueKind::Scalar {
             continue;
         }
         let path: Vec<&str> = entry.dotted.split('.').collect();
-        let Some(atom) = def_at_path(&shape, &path).and_then(primary_atom) else {
-            continue;
-        };
-        if is_file(atom)
+        if def_at_path(&shape, &path).and_then(file_atom).is_some()
             && let Some(value) = &entry.scalar
-            && looks_like_path(value)
+            && is_schema_file_value(value)
         {
             targets.push((entry.value_span.clone(), normalize_join(base_dir, value)));
         }
@@ -460,18 +458,14 @@ pub(crate) fn known_shape(ctx: &DocumentContext) -> SchemaShape {
     shape
 }
 
-/// The nested [`SchemaShape`] reached by walking each `ancestors` segment's
-/// primary atom into its inline-object type. An empty path yields `root`;
-/// `None` when any segment is absent or is not an inline object (e.g. the
-/// opaque `object`-typed `style`).
+/// The nested [`SchemaShape`] reached by walking each `ancestors` segment into
+/// its inline-object type, selecting the first inline-object arm of a union. An
+/// empty path yields `root`; `None` when any segment is absent or has no
+/// inline-object arm (e.g. the opaque `object`-typed `style`).
 pub(crate) fn nested_shape<'a>(root: &'a SchemaShape, ancestors: &[&str]) -> Option<&'a SchemaShape> {
     let mut shape = root;
     for segment in ancestors {
-        let atom = shape.properties.get(*segment).and_then(primary_atom)?;
-        match &atom.ty {
-            TypeExpr::InlineObject(inner) => shape = inner,
-            TypeExpr::Primitive(_) => return None,
-        }
+        shape = shape.properties.get(*segment).and_then(inline_object_shape)?;
     }
     Some(shape)
 }
@@ -489,21 +483,48 @@ pub(crate) fn def_at_path<'a>(root: &'a SchemaShape, path: &[&str]) -> Option<&'
     shape.properties.get(*leaf)
 }
 
-/// The primary atom of a property definition (the first arm of a union).
-pub(crate) fn primary_atom(def: &PropertyDef) -> Option<&PropertyAtom> {
+/// A property definition's arms as a slice (one element for a single atom).
+fn atoms_of(def: &PropertyDef) -> &[PropertyAtom] {
     match def {
-        PropertyDef::Single(atom) => Some(atom),
-        PropertyDef::Union(atoms) => atoms.first(),
+        PropertyDef::Single(atom) => std::slice::from_ref(atom),
+        PropertyDef::Union(atoms) => atoms,
     }
+}
+
+/// The representative atom for hover rendering: the first arm of a union.
+/// Hover only needs one coherent shape to describe, so first-arm is fine.
+pub(crate) fn primary_atom(def: &PropertyDef) -> Option<&PropertyAtom> {
+    atoms_of(def).first()
+}
+
+/// The first arm whose type drives a value completion (enum members, boolish
+/// scaffold, or `file(...)` paths). Mirrors the schema library's
+/// `first_completable_atom` arm search so a union whose completable arm is not
+/// first still offers value completion.
+fn completable_atom(def: &PropertyDef) -> Option<&PropertyAtom> {
+    atoms_of(def)
+        .iter()
+        .find(|atom| enum_members(atom).is_some() || is_boolish(atom) || is_file(atom))
+}
+
+/// The first `file(...)`-typed arm, if any — so navigation and document links
+/// treat the value as a file reference even when the file arm is not first.
+fn file_atom(def: &PropertyDef) -> Option<&PropertyAtom> {
+    atoms_of(def).iter().find(|atom| is_file(atom))
+}
+
+/// The shape of the first inline-object arm, if any — the deterministic arm a
+/// nested-key lookup descends through even when it is not first.
+fn inline_object_shape(def: &PropertyDef) -> Option<&SchemaShape> {
+    atoms_of(def).iter().find_map(|atom| match &atom.ty {
+        TypeExpr::InlineObject(inner) => Some(inner),
+        TypeExpr::Primitive(_) => None,
+    })
 }
 
 /// Whether any arm of a property is required.
 fn is_required(def: &PropertyDef) -> bool {
-    let atoms: &[PropertyAtom] = match def {
-        PropertyDef::Single(atom) => std::slice::from_ref(atom),
-        PropertyDef::Union(atoms) => atoms,
-    };
-    atoms
+    atoms_of(def)
         .iter()
         .any(|atom| atom.constraints.iter().any(|c| matches!(c, Constraint::Required)))
 }
@@ -580,12 +601,30 @@ fn enclosing_path(text: &str, line_start: usize, indent: usize) -> Vec<String> {
 
 /// Whether a scalar value is plausibly a local file path (not a URL or an
 /// obvious non-path token).
+///
+/// A dot/slash heuristic for callers with no schema type to trust — the
+/// `$schema` source reference, whose value is a `.yaml`/`.md`/`.json` file or an
+/// inline `{ ... }` mapping. A schema-confirmed `file(...)` value uses
+/// [`is_schema_file_value`] instead, which does not require a dot or slash.
 fn looks_like_path(value: &str) -> bool {
     let value = value.trim();
     !value.is_empty()
         && !value.contains("://")
         && !value.starts_with('{')
         && (value.contains('/') || value.contains('.'))
+}
+
+/// Whether a value the schema already types as `file(...)` is a navigable local
+/// reference.
+///
+/// Once the effective schema confirms the `file` type, a bare extensionless
+/// filename (e.g. `LICENSE`, `Makefile`) is a valid relative reference — the
+/// same implicit-relative form `FileReference` accepts — so only a URL or an
+/// inline-object literal disqualifies it. The dot/slash heuristic in
+/// [`looks_like_path`] must not gate this path.
+fn is_schema_file_value(value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty() && !value.contains("://") && !value.starts_with('{')
 }
 
 /// Builds a completion item with an eager text edit over `start..offset`.
@@ -732,5 +771,95 @@ mod tests {
         assert!(!looks_like_path("https://example.com/s.yaml"));
         assert!(!looks_like_path("plain"));
         assert!(!looks_like_path("{ inline: true }"));
+    }
+
+    #[test]
+    fn test_is_schema_file_value_accepts_extensionless() {
+        // A schema-confirmed `file` value navigates even without a dot or slash.
+        assert!(is_schema_file_value("LICENSE"));
+        assert!(is_schema_file_value("Makefile"));
+        assert!(is_schema_file_value("./guide.md"));
+        // URLs and inline-object literals are still rejected.
+        assert!(!is_schema_file_value("https://example.com/s.yaml"));
+        assert!(!is_schema_file_value("{ inline: true }"));
+        assert!(!is_schema_file_value("   "));
+    }
+
+    /// An enum atom carrying its members, so [`enum_members`] resolves (a bare
+    /// `PropertyAtom::bare(Enum)` has none and would not drive completion).
+    fn enum_atom(members: &[&str]) -> PropertyAtom {
+        let mut atom = PropertyAtom::bare(SimplifiedType::Enum);
+        atom.constraints
+            .push(Constraint::Members(members.iter().map(|m| m.to_string()).collect()));
+        atom
+    }
+
+    #[test]
+    fn test_completable_atom_selects_non_first_arm() {
+        // `[string, enum(dev, prod)]` — the completable arm is second, but the
+        // first (`string`) is not completable.
+        let def = PropertyDef::Union(vec![
+            PropertyAtom::bare(SimplifiedType::String),
+            enum_atom(&["dev", "prod"]),
+        ]);
+        let atom = completable_atom(&def).expect("the enum arm is completable");
+        assert_eq!(enum_members(atom), Some(["dev".to_string(), "prod".to_string()].as_slice()));
+        // A non-completable single atom yields nothing.
+        assert!(completable_atom(&PropertyDef::Single(PropertyAtom::bare(SimplifiedType::String))).is_none());
+    }
+
+    #[test]
+    fn test_file_atom_selects_non_first_arm() {
+        // `[string, file]` — the file arm is second; `primary_atom` (first arm)
+        // would miss it, so navigation must consult `file_atom`.
+        let def = PropertyDef::Union(vec![
+            PropertyAtom::bare(SimplifiedType::String),
+            PropertyAtom::bare(SimplifiedType::File),
+        ]);
+        assert!(is_file(file_atom(&def).expect("the file arm is selectable")));
+        // `primary_atom` still reports the first (string) arm, proving the two
+        // selectors diverge for this union.
+        assert!(!is_file(primary_atom(&def).unwrap()));
+        // No file arm → `None`.
+        assert!(file_atom(&PropertyDef::Single(PropertyAtom::bare(SimplifiedType::String))).is_none());
+    }
+
+    #[test]
+    fn test_inline_object_shape_selects_non_first_arm() {
+        // `[string, { mode: enum }]` — the inline-object arm is second.
+        let mut inner = SchemaShape::new();
+        inner
+            .properties
+            .insert("mode".to_string(), PropertyDef::Single(PropertyAtom::bare(SimplifiedType::Enum)));
+        let def = PropertyDef::Union(vec![
+            PropertyAtom::bare(SimplifiedType::String),
+            PropertyAtom::bare_inline_object(inner),
+        ]);
+        let shape = inline_object_shape(&def).expect("the inline-object arm is selectable");
+        assert!(shape.properties.contains_key("mode"));
+        // No inline-object arm → `None`.
+        assert!(inline_object_shape(&PropertyDef::Single(PropertyAtom::bare(SimplifiedType::String))).is_none());
+    }
+
+    #[test]
+    fn test_nested_shape_descends_through_union_inline_object_arm() {
+        // A `settings` property that is a union whose inline-object arm is
+        // second still resolves its nested keys.
+        let mut inner = SchemaShape::new();
+        inner
+            .properties
+            .insert("mode".to_string(), PropertyDef::Single(PropertyAtom::bare(SimplifiedType::Enum)));
+        let mut root = SchemaShape::new();
+        root.properties.insert(
+            "settings".to_string(),
+            PropertyDef::Union(vec![
+                PropertyAtom::bare(SimplifiedType::String),
+                PropertyAtom::bare_inline_object(inner),
+            ]),
+        );
+        let settings = nested_shape(&root, &["settings"]).expect("descends the union inline arm");
+        assert!(settings.properties.contains_key("mode"));
+        // And `def_at_path` reaches the nested leaf through the same union arm.
+        assert!(def_at_path(&root, &["settings", "mode"]).is_some());
     }
 }

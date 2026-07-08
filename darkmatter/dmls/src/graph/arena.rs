@@ -1155,6 +1155,21 @@ mod tests {
     }
 
     #[test]
+    fn test_uses_file_edge_for_extensionless_file_value() {
+        // A schema-typed `file` value that is a bare extensionless filename
+        // (`LICENSE`) must still emit a `uses_file` edge — the dot/slash
+        // heuristic must not drop it once the schema confirms the `file` type.
+        let g = graph(&[(
+            "/w/a.md",
+            "---\n$schema:\n  license: \"file\"\nlicense: LICENSE\n---\n\n# A\n",
+        )]);
+        let a = g.document_id(Path::new("/w/a.md")).unwrap();
+        let (node_id, node) = g.file_uses(a).next().expect("one file use");
+        assert_eq!(node.as_file_ref().unwrap().path, "LICENSE");
+        assert_eq!(g.outgoing(node_id, EdgeKind::UsesFile).count(), 1);
+    }
+
+    #[test]
     fn test_uses_variable_edges_emitted_and_reverse_index() {
         let g = graph(&[(
             "/w/a.md",

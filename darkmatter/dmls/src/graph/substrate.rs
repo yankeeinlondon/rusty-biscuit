@@ -366,12 +366,15 @@ pub fn index_document_timed(path: &Path, source: &str) -> (DocumentIndex, IndexT
                 continue;
             }
             let Some(value) = &entry.scalar else { continue };
-            if !looks_like_path(value) || is_remote_target(value) {
-                continue;
-            }
             if entry.key == "$schema" {
-                schema_uses.push(file_ref_fact(source, value, &entry.value_span));
-            } else if file_typed.contains(&entry.key) {
+                // The `$schema` source reference has no schema type to trust, so
+                // it keeps the dot/slash heuristic (a `.yaml`/`.md`/`.json` file).
+                if looks_like_path(value) && !is_remote_target(value) {
+                    schema_uses.push(file_ref_fact(source, value, &entry.value_span));
+                }
+            } else if file_typed.contains(&entry.key) && is_schema_file_value(value) {
+                // The inline `$schema` already types this key as `file(...)`, so a
+                // bare extensionless name (e.g. `LICENSE`) is a valid file use.
                 file_uses.push(file_ref_fact(source, value, &entry.value_span));
             }
         }
@@ -484,12 +487,30 @@ fn file_ref_fact(source: &str, value: &str, value_span: &SourceSpan) -> FileRefF
 
 /// Whether a frontmatter scalar is plausibly a local file path (not a URL, an
 /// inline object, or an obvious non-path token).
+///
+/// A dot/slash heuristic for values with no declared schema type — the `$schema`
+/// source reference and the `style.page.stylesheet` asset. A value the inline
+/// `$schema` already types as `file(...)` uses [`is_schema_file_value`] instead,
+/// which does not require a dot or slash.
 fn looks_like_path(value: &str) -> bool {
     let value = value.trim();
     !value.is_empty()
         && !value.contains("://")
         && !value.starts_with('{')
         && (value.contains('/') || value.contains('.'))
+}
+
+/// Whether a value the inline `$schema` already types as `file(...)` is a
+/// navigable local file use.
+///
+/// The schema having confirmed the `file` type makes a bare extensionless
+/// filename (e.g. `LICENSE`, `Makefile`) a valid relative reference — the same
+/// implicit-relative form `FileReference` accepts — so only a URL or an
+/// inline-object literal disqualifies it. The dot/slash heuristic in
+/// [`looks_like_path`] must not gate this path.
+fn is_schema_file_value(value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty() && !value.contains("://") && !value.starts_with('{')
 }
 
 /// The direct-child keys of a document's inline `$schema` mapping whose declared
@@ -660,6 +681,37 @@ mod tests {
         assert_eq!(index.file_uses.len(), 1);
         assert_eq!(index.file_uses[0].path, "./guide.md");
         assert_eq!(&source[index.file_uses[0].span.clone()], "./guide.md");
+    }
+
+    #[test]
+    fn test_inline_schema_extensionless_file_value_is_a_file_use() {
+        // Once the inline `$schema` types `license` as `file`, a bare
+        // extensionless value (`LICENSE`) is a valid `uses_file` source.
+        let source = "---\n$schema:\n  license: \"file\"\nlicense: LICENSE\n---\n\n# Doc\n";
+        let index = index_document(Path::new("doc.md"), source);
+        assert_eq!(index.file_uses.len(), 1);
+        assert_eq!(index.file_uses[0].path, "LICENSE");
+        assert_eq!(&source[index.file_uses[0].span.clone()], "LICENSE");
+    }
+
+    #[test]
+    fn test_inline_schema_file_value_still_rejects_url_and_inline_object() {
+        // A schema-typed `file` value that is a URL or an inline-object literal
+        // is never a local file use.
+        let url = "---\n$schema:\n  home: \"file\"\nhome: https://example.com/x\n---\n\n# Doc\n";
+        assert!(index_document(Path::new("doc.md"), url).file_uses.is_empty());
+        let inline = "---\n$schema:\n  home: \"file\"\nhome: \"{ a: 1 }\"\n---\n\n# Doc\n";
+        assert!(index_document(Path::new("doc.md"), inline).file_uses.is_empty());
+    }
+
+    #[test]
+    fn test_is_schema_file_value_accepts_extensionless() {
+        assert!(is_schema_file_value("LICENSE"));
+        assert!(is_schema_file_value("Makefile"));
+        assert!(is_schema_file_value("./guide.md"));
+        assert!(!is_schema_file_value("https://example.com/s.yaml"));
+        assert!(!is_schema_file_value("{ inline: true }"));
+        assert!(!is_schema_file_value("   "));
     }
 
     #[test]
