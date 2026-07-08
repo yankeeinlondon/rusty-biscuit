@@ -16,7 +16,7 @@ initialize:
               - message: "The provider **{{state.name}}** needs to update its research on **slash commands**"
         - when: "file_exists(file) && frontmatter(file, 'last_updated') && !date_delta(frontmatter(file, 'last_updated'), ctx.today, '14d')"
           action:
-              - message: "The provider **{{state.name}}** has research for **slash commands** that is current; skipping updates"
+              - stderr: "The provider **{{state.name}}** has research for **slash commands** that is current; skipping updates"
               - skip
 success:
     stack:
