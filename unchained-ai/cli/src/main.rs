@@ -1,5 +1,5 @@
 use clap::{CommandFactory, Parser, Subcommand};
-use clap_complete::Shell;
+use clap_complete::{CompleteEnv, Shell};
 use color_eyre::eyre::Result;
 use unchained_ai::rigging::providers::models::ProviderModel;
 
@@ -25,10 +25,6 @@ struct Cli {
     /// Increase output verbosity
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     verbose: u8,
-
-    /// Generate shell completions for the specified shell
-    #[arg(long, value_name = "SHELL", hide = true)]
-    completions: Option<Shell>,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -58,11 +54,21 @@ enum Commands {
         #[arg(value_parser = model_value_parser())]
         model: String,
     },
+    /// Print shell completion setup for the specified shell
+    Completions {
+        /// Shell to generate completions for (bash, zsh, fish, powershell, elvish)
+        shell: Shell,
+    },
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
+
+    // Dynamic shell completions: when invoked by a generated completion script
+    // (COMPLETE=<shell> set in the env) this emits candidates and exits before
+    // any real work happens.
+    CompleteEnv::with_factory(Cli::command).complete();
 
     // Set up tracing
     let filter = match std::env::var("RUST_LOG") {
@@ -72,17 +78,6 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
     let cli = Cli::parse();
-
-    // Handle shell completions
-    if let Some(shell) = cli.completions {
-        clap_complete::generate(
-            shell,
-            &mut Cli::command(),
-            "unchained",
-            &mut std::io::stdout(),
-        );
-        return Ok(());
-    }
 
     match cli.command {
         Some(Commands::Limits { platform }) => {
@@ -94,6 +89,9 @@ async fn main() -> Result<()> {
         Some(Commands::Model { model }) => {
             commands::model::run(model, cli.json).await?;
         }
+        Some(Commands::Completions { shell }) => {
+            print_completions(shell);
+        }
         None => {
             Cli::command().print_help()?;
             std::process::exit(1);
@@ -101,4 +99,34 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Prints shell completion setup instructions.
+///
+/// Completions are dynamic: the emitted line registers a callback that shells
+/// out to `unchained` on every `<TAB>`, so candidates always reflect the
+/// installed binary — no regeneration after upgrades. Sourcing this output
+/// (`source <(unchained completions zsh)`) activates completions directly; the
+/// leading comment is inert when sourced.
+fn print_completions(shell: Shell) {
+    let (setup_cmd, config_file) = match shell {
+        Shell::Bash => ("source <(COMPLETE=bash unchained)", "~/.bashrc"),
+        Shell::Zsh => ("source <(COMPLETE=zsh unchained)", "~/.zshrc"),
+        Shell::Fish => (
+            "COMPLETE=fish unchained | source",
+            "~/.config/fish/config.fish",
+        ),
+        Shell::PowerShell => (
+            r#"$env:COMPLETE = "powershell"; unchained | Out-String | Invoke-Expression; Remove-Item Env:\COMPLETE"#,
+            "$PROFILE",
+        ),
+        Shell::Elvish => ("eval (E:COMPLETE=elvish unchained | slurp)", "~/.elvish/rc.elv"),
+        _ => {
+            eprintln!("Shell {shell:?} is not supported for dynamic completions");
+            return;
+        }
+    };
+
+    println!("# Add this line to {config_file}:");
+    println!("{setup_cmd}");
 }
