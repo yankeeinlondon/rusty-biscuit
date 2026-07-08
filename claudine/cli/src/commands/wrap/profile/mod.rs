@@ -16,6 +16,7 @@ use color_eyre::eyre::{Result, bail};
 #[cfg(test)]
 use claudine::provider::{EntrypointMode, OutputFormatSelector};
 
+mod antigravity;
 mod apply;
 mod claude;
 mod codex;
@@ -32,6 +33,7 @@ pub(crate) use self::resolve::{
     NoModelProvided, OpenCodeEnvSnapshot, OpenCodeModelSource, apply_opencode_model_resolution,
     extract_prompt_source_from_passthrough, require_prompt_present, resolve_opencode_model,
 };
+pub(crate) use self::antigravity::AntigravityWrapper;
 pub(crate) use self::claude::ClaudeWrapper;
 pub(crate) use self::codex::CodexWrapper;
 pub(crate) use self::gemini::GeminiWrapper;
@@ -608,6 +610,7 @@ static OPENCODE: OpencodeWrapper = OpencodeWrapper;
 static GOOSE: GooseWrapper = GooseWrapper;
 static KILO: KiloWrapper = KiloWrapper;
 static PI: PiWrapper = PiWrapper;
+static ANTIGRAVITY: AntigravityWrapper = AntigravityWrapper;
 
 /// Wrapper registry indexed by `Provider as usize`.
 ///
@@ -634,6 +637,7 @@ static WRAPPER_REGISTRY: [Option<&'static dyn WrapperProfile>; PROVIDER_COUNT] =
     /* 6: QwenCode */ Some(&QWEN),
     /* 7: Kilo     */ Some(&KILO),
     /* 8: Pi       */ Some(&PI),
+    /* 9: Antigravity */ Some(&ANTIGRAVITY),
 ];
 
 /// Look up the wrapper profile for a given provider.

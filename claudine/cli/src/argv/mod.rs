@@ -65,7 +65,7 @@ pub(crate) use rule4_help_hoist::hoist_composition_help;
 
 /// Wrapper subcommands that hand off to an external agent CLI.
 pub(crate) const WRAPPER_SUBCOMMANDS: &[&str] = &[
-    "claude", "codex", "gemini", "kimi", "qwen", "opencode", "goose", "kilo", "pi",
+    "claude", "codex", "gemini", "kimi", "qwen", "opencode", "goose", "kilo", "pi", "antigravity",
 ];
 
 /// Composition subcommands that collect positional args plus `key=value`

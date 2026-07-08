@@ -107,6 +107,8 @@ pub(crate) enum Commands {
     Kilo(commands::wrap::WrapperArgs),
     /// Wrap Pi with Claudine preflight/env handling.
     Pi(commands::wrap::WrapperArgs),
+    /// Wrap Antigravity (the `agy` CLI) with Claudine preflight/env handling.
+    Antigravity(commands::wrap::WrapperArgs),
     /// Compose a Markdown document and send as prompt to an agentic CLI.
     Compose(commands::compose::ComposeArgs),
     /// Inline composition: use frontmatter prompt to generate and replace body.

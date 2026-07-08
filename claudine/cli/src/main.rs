@@ -30,6 +30,7 @@ fn wrapper_command(
         Commands::Goose(args) => Ok((Provider::Goose, args)),
         Commands::Kilo(args) => Ok((Provider::Kilo, args)),
         Commands::Pi(args) => Ok((Provider::Pi, args)),
+        Commands::Antigravity(args) => Ok((Provider::Antigravity, args)),
         other => Err(Box::new(other)),
     }
 }
@@ -346,7 +347,8 @@ async fn async_main(
         | Commands::Opencode(_)
         | Commands::Goose(_)
         | Commands::Kilo(_)
-        | Commands::Pi(_) => unreachable!("wrapper commands are handled before this match"),
+        | Commands::Pi(_)
+        | Commands::Antigravity(_) => unreachable!("wrapper commands are handled before this match"),
         Commands::Compose(args) => {
             commands::compose::run_compose(args, cli.verbose, startup_timings)
         }

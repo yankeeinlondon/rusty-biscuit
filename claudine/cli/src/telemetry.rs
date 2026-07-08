@@ -148,7 +148,8 @@ fn command_name(command: &Commands) -> &'static str {
         | Commands::Opencode(_)
         | Commands::Goose(_)
         | Commands::Kilo(_)
-        | Commands::Pi(_) => "wrap",
+        | Commands::Pi(_)
+        | Commands::Antigravity(_) => "wrap",
         Commands::Compose(_) => "compose",
         Commands::InlineCompose(_) => "inline-compose",
         Commands::Sequence(_) => "sequence",
@@ -168,6 +169,7 @@ fn provider_subcommand_name(command: Option<&Commands>) -> Option<&'static str> 
         Commands::Goose(_) => Some("goose"),
         Commands::Kilo(_) => Some("kilo"),
         Commands::Pi(_) => Some("pi"),
+        Commands::Antigravity(_) => Some("antigravity"),
         _ => None,
     }
 }
