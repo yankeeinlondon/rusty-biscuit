@@ -230,6 +230,35 @@ check:
 cli *args="":
     @cargo run -p claudine-cli {{ args }}
 
+# Incrementally source topic research with the given provider, 3 topics in parallel
+run-fleet-research agent="codex":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    # Each fleet's `initialize` gate skips any provider whose research is fresh
+    # (<14d via date_delta), so a run only sources stale/missing docs — e.g. a
+    # newly-rostered provider (Antigravity) across every live topic. `memory` is
+    # excluded on purpose (no docs yet, deferred B2 topic — including it would fan
+    # a full research run out to every provider, not just the new one).
+    cargo build -q -p claudine-cli || exit 1
+    topics=(acp agent-cli agent-logging agent-models agent-permissions hooks
+            local_runners mcp model-config non-interactive-sessions plugins
+            resume signals skills slash-commands subagents system-prompt usage)
+    failed=()
+    for ((i = 0; i < ${#topics[@]}; i += 3)); do
+        batch=("${topics[@]:i:3}")
+        echo "▶ batch: ${batch[*]} (--{{agent}})"
+        pids=()
+        for t in "${batch[@]}"; do
+            cargo run -q -p claudine-cli -- sequence "docs/research/$t/_fleet.md" -y --{{agent}} &
+            pids+=("$!:$t")
+        done
+        for entry in "${pids[@]}"; do
+            if ! wait "${entry%%:*}"; then failed+=("${entry#*:}"); fi
+        done
+    done
+    if ((${#failed[@]})); then echo "✗ fleets with failures: ${failed[*]}" >&2; exit 1; fi
+    echo "✓ all topic fleets completed"
+
 # generate model enumeration using the unchained-ai codebase
 generate-models:
     #!/usr/bin/env bash
