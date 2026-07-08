@@ -95,6 +95,52 @@ pub fn parse_disclosure_opener_style(rest: &str) -> (Option<CommonStyle>, Option
     }
 }
 
+/// Returns the byte spans of the leading recognized `key=value` style tokens in
+/// a `::disclosure` opener remainder, in source order.
+///
+/// Uses the same left-to-right consumption rule as
+/// [`parse_disclosure_opener_style`]: whitespace-separated `key=value` tokens
+/// are consumed until the first token that is not a recognized style pair.
+/// Everything after the last returned span is summary text. Spans are byte
+/// offsets into `rest`. This is the span-aware companion used by the read-only
+/// disclosure scanner; it shares [`try_apply_style_token`] so the set of
+/// recognized tokens can never drift from the render path.
+pub fn disclosure_style_token_spans(rest: &str) -> Vec<std::ops::Range<usize>> {
+    let mut spans = Vec::new();
+    let mut style = CommonStyle::default();
+    let bytes = rest.as_bytes();
+    let mut idx = 0usize;
+
+    loop {
+        while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+            idx += 1;
+        }
+        if idx >= bytes.len() {
+            break;
+        }
+        let start = idx;
+        while idx < bytes.len() && !bytes[idx].is_ascii_whitespace() {
+            idx += 1;
+        }
+        let end = idx;
+        let token = &rest[start..end];
+
+        let recognized = token
+            .split_once('=')
+            .map(|(key, value)| (key.trim(), value.trim()))
+            .filter(|(_, value)| !value.is_empty())
+            .is_some_and(|(key, value)| try_apply_style_token(key, value, &mut style));
+
+        if recognized {
+            spans.push(start..end);
+        } else {
+            break;
+        }
+    }
+
+    spans
+}
+
 fn try_apply_style_token(key: &str, value: &str, style: &mut CommonStyle) -> bool {
     match key {
         "width" => {
