@@ -102,3 +102,14 @@ Update alongside code changes:
 
 - any hashing requirements should prefer using the crypto, non-crypto, and password hashing that **biscuit-hash** provides
 - in the case of hashing Markdown documents, the **Darkmatter** hasher should be used (as it uses a Markdown aware approach)
+
+## Features and Fixes
+
+- each package area will have a `features` and `fixes` directory which contains specs
+    - **features** tend to be larger in scope and can introduce new features
+    - **fixes** are primarily focused on fixing existing functionality
+- we have two lifecycle directories `_unscheduled` and `_completed` which can be found as subdirectories of features/fixes
+    - features/fixes which have been identified but not scheduled (aka, lower urgency) will be found in `_unscheduled` with non-dated filename
+    - features/fixes as direct subdirectories are "active" features/fixes and should always follow the format `YYYY-MM-DD-{name}`
+        - the files in a feature/fix can vary but almost always will be the `spec.md` file
+    - when a feature/fix is completed it is moved to `_completed`
