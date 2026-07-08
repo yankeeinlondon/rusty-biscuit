@@ -688,6 +688,19 @@ fn load_fixture_payloads(fixtures_dir: &Path, key: &str, slug: &str) -> Result<V
                 classification.to_signal_payload()
             })
             .collect()),
+        // Other providers' `.txt` fixtures are opaque plaintext side-channels —
+        // e.g. Antigravity's glog-style app log, whose records are
+        // `detection: bespoke` and stay `[SKIP]` until a log-line classifier is
+        // wired (`requires_claudine_update`). Load each non-empty line as an
+        // opaque string payload: evidence-existence and negative-overlap checks
+        // pass without a classifier (no declarative record's match path
+        // navigates into a bare string, so nothing false-fires), and a future
+        // bespoke replayer receives the raw lines to parse.
+        "txt" => Ok(text
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| Value::String(line.to_string()))
+            .collect()),
         other => bail!(
             "{}: unsupported fixture extension `{other}` for provider `{slug}`",
             path.display()
