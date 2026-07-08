@@ -943,13 +943,16 @@ mod tests {
 
     /// The variant-derived accessor preserves the historical wired set and
     /// order (== `Provider` discriminant order): the retired `PROVIDER_SLUGS`
-    /// const's original seven, plus kilo and pi (each graduated to a wired
-    /// `Provider`).
+    /// const's original seven, plus kilo, pi, and antigravity (each graduated
+    /// to a wired `Provider`).
     #[test]
     fn provider_slugs_match_the_wired_set_in_order() {
         assert_eq!(
             provider_slugs(),
-            ["claude", "codex", "gemini", "goose", "kimi", "opencode", "qwen", "kilo", "pi"]
+            [
+                "claude", "codex", "gemini", "goose", "kimi", "opencode", "qwen", "kilo", "pi",
+                "antigravity"
+            ]
         );
     }
 

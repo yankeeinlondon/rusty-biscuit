@@ -31,7 +31,7 @@ use crate::inputs::load_validated_frontmatter;
 /// Every signals research doc, alphabetical (= emission order). A superset
 /// of [`crate::generate::PROVIDER_SLUGS`]: kilo and pi are roster-only.
 pub const SIGNAL_SLUGS: &[&str] = &[
-    "claude", "codex", "gemini", "goose", "kilo", "kimi", "opencode", "pi", "qwen",
+    "antigravity", "claude", "codex", "gemini", "goose", "kilo", "kimi", "opencode", "pi", "qwen",
 ];
 
 /// The committed generated signals path under an area root.

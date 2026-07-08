@@ -33,6 +33,7 @@ pub const PROVIDER_VARIANTS: &[(&str, &str)] = &[
     ("qwen", "QwenCode"),
     ("kilo", "Kilo"),
     ("pi", "Pi"),
+    ("antigravity", "Antigravity"),
 ];
 
 /// Resolves the `Provider` variant name for a slug, failing loudly for
@@ -257,6 +258,7 @@ fn stream_protocol_variant(
         "ndjson" => "Ndjson",
         "jsonl" => "Jsonl",
         "wire-json-rpc" => "WireJsonRpc",
+        "json" => "Json",
         other => {
             return Err(unmappable(
                 field,
@@ -1671,7 +1673,7 @@ mod tests {
     #[test]
     fn provider_variant_rejects_unknown_slug() {
         assert_eq!(provider_variant("kimi").unwrap(), "KimiCode");
-        assert!(provider_variant("antigravity").is_err());
+        assert!(provider_variant("nonesuch").is_err());
     }
 
     #[test]
