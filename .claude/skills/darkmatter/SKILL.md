@@ -1,7 +1,7 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-f0b4c2c683ed4425
+hash: 87f17662fa397abe-215c1f3d7e2b2aa8
 last_updated: 2026-07-07
 ---
 
@@ -205,6 +205,26 @@ The removed god-files (`args.rs`, `commands.rs`, `output.rs`,
   keystroke. This is the span-carrying, side-effect-free entry point DMLS's
   substrate indexer builds `references` edges from; the composing
   `Markdown::composed_references` is the wrong shape for a passive analyzer.
+- **Spanned DSL parse products (added for DMLS, R-4 items 3–5).** These are the
+  span-carrying, side-effect-free companions to the compose parsers, so a
+  language server sees the same structure `md compose` does, plus byte spans:
+  - `compose::expression::{parse_spanned, parse_condition_spanned, lex_spanned}`
+    produce the `SpannedExpr`/`SpannedExprKind` AST (and `Spanned<Token>`
+    stream). This is the **primary** parse — `parse`/`parse_condition` are
+    exactly `parse_spanned(_)?.erase()`, so there is one grammar and
+    `ParseError.position` is now a byte offset (not a token index).
+  - `compose::directives_api::{scan_darkmatter_directives, scan_darkmatter_blocks}`
+    → `ParsedDirective` (keyword/target/per-option `key`/`value` spans across all
+    twelve directive keywords) and `DarkmatterBlock`/`BlockScanError` (the
+    read-only view of the crate-private block-pair scanner). Shares the `Cursor`
+    and code-region helpers; lenient (never errors on a malformed line).
+  - `render_tree::disclosure_scan::scan_disclosures` → `DisclosureParse`
+    (opener/summary/details/body/closer spans + opener style-token spans);
+    structural malformation still raises `MarkdownError::MalformedDisclosure`.
+  - `compose::parse_frontmatter_shell_value_spanned` → `FrontmatterShellValue`
+    (a read-only mirror of a `$(...)` value: `$(`/`)`/inner spans,
+    `::timeout`/`::no-cache` suffix spans, and a pipeline-with-action/token-spans
+    or ternary-branch-spans body). No execution surface is exposed.
 
 ## DMLS (Darkmatter Language Server)
 
@@ -217,22 +237,39 @@ Phase 2 (skeleton) provides the full LSP lifecycle: position-encoding
 negotiation (UTF-8/UTF-16, UTF-16 default), per-client `ClientProfile`
 gates, a `line-index`-backed source map (CRLF + lone-CR aware, frontmatter
 region projection), a full-sync open-document store with stale-change
-rejection, layered `.dmls.toml` / `workspace/configuration` config, and an
-in-memory L2 LSP-session test fixture.
+rejection, layered `.dmls.toml` / `workspace/configuration` config (a
+`didChangeConfiguration` reload is live: it recomputes wiki roots and rebuilds
+the graph, reconciles workspace discovery against the new
+`workspace.include`/`exclude` globs, and re-publishes diagnostics for open
+documents without a restart), and an in-memory L2 LSP-session test fixture.
 
 Phase 3 (workspace graph substrate) adds the single in-memory graph
 (`dmls::graph`): one arena carrying every node kind and all eight edge kinds
 (`references`, `includes`, `transcludes`, `uses_schema`, `uses_file`,
 `uses_variable`, `defines_anchor`, `defines_symbol`) with a single reverse
 index, a wiki basename `KeyIndex`, and a Markdown substrate indexer that
-parses through the `darkmatter` library (headings, slugs, links) into an
-immutable `WorkspaceGraph` snapshot. `WorkspaceIndex` owns invalidation
-(xxHash content-hash compare, generation-stamped snapshot swap — AD-3).
+parses through the side-effect-free `darkmatter` span APIs into an immutable
+`WorkspaceGraph` snapshot. The indexer materializes every committed edge
+source: headings/slugs (`defines_anchor`/`defines_symbol`), links and
+`[[wiki]]` links (`references`), `::file`/`::code` transclusions
+(`transcludes`), the `$schema` file reference (`uses_schema`), file uses
+(`uses_file` — images, frontmatter `file(...)` values, `style.page.stylesheet`
+assets, and `::file-links`/`::toc-linking` paths), and `{{ }}` body
+interpolation variables (`uses_variable` → same-document frontmatter-key node).
+`file(...)`-typed detection at index time is the pure document-local slice —
+the document's own inline `$schema`; extension-baseline `file(...)` properties
+stay request-time in the frontmatter provider. `WorkspaceIndex` owns
+invalidation (xxHash content-hash compare, generation-stamped snapshot swap —
+AD-3); its dependent fan-out reaches documents over `transcludes` **and**
+`uses_file` edges.
 Workspace support (`dmls::workspace`) adds `ignore`/`globset` discovery
 (symlinks not followed), a crossbeam worker-pool startup indexer with
-`window/workDoneProgress`, dynamic `didChangeWatchedFiles` registration plus
-a server-side rescan fallback and event coalescing, and a `SharedSnapshot`
-handoff. The R-6 bench harness ships with it: `dmls --bench-index <dir>
+`window/workDoneProgress`, dynamic `didChangeWatchedFiles` registration (with
+event coalescing) plus a save-driven server-side rescan fallback for
+watcher-less clients (`WatchMode::ServerRescan` — e.g. Neovim on Linux): a
+`didSave` re-runs discovery and `WorkspaceIndex::reconcile_disk`
+(content-hash compare) so an unopened file's create/change/delete reaches the
+graph. And a `SharedSnapshot` handoff. The R-6 bench harness ships with it: `dmls --bench-index <dir>
 [--json]` (per-stage timings, graph counts, peak RSS) and a deterministic
 `dmls --gen-corpus <tier> <dir>` corpus generator.
 
@@ -293,10 +330,82 @@ plus `dm.style.*` for `style:` keys, ranged against the `FrontmatterAst` (missin
 keys → parent mapping; unknown keys → the offending key; values → the value node)
 with `relatedInformation` to a referenced schema file. Claudine activation is pure
 config (a `[schema.extensions.claudine]` entry in `.dmls.toml` + `.claude/**`
-globs) — zero Claudine-specific code. Deviation: `$schema`/`file(...)` navigation
-resolves paths on demand rather than materializing `uses_schema`/`uses_file` graph
-edges (deferred). Feature phases beyond Layer 2 (DSL overlay, rename/formatting)
-land later — see `darkmatter/features/2026-07-04-dmls/plan.md`.
+globs) — zero Claudine-specific code. The substrate materializes `uses_schema`
+edges for the `$schema` file reference and `uses_file` edges for inline-schema
+`file(...)`-typed values (and images / style assets / directive paths); the
+provider's `$schema`/`file(...)` navigation keeps its own request-time path
+resolution because it also honors extension-baseline `file(...)` properties the
+pure index-time slice does not see.
+
+Phase 9 (Layer-3 Darkmatter DSL overlay) adds `dmls::overlay::{directives,
+expressions, shell}` (thin passive wrappers over the Phase-8 library scanners —
+`scan_darkmatter_directives`/`_blocks`, `scan_disclosures`, `ExpressionFinder` +
+`parse_spanned`, and the shell-policy lookups) and the `DslProvider` (registered
+last). Directives get `::`-prefix name completion, per-family option-key/enum
+completion, semantics + resolved-target hover, block/disclosure folds, and the
+`dm.directive.*` diagnostics (unknown, malformed option, unclosed block/unmatched
+end, malformed disclosure). Transclusion gets document links + definition on
+`::file`/`::code`/`prologue`/`epilogue`, `dm.transclusion.broken_path` (lexical
+join + `stat`), `dm.transclusion.cycle` (DFS over the new `transcludes` graph
+edges, ancestry in `relatedInformation`), and references ("who transcludes this
+file"). Interpolation gets `{{ }}` completion (frontmatter keys, `ctx.*`,
+functions), erased-parsed-form + frontmatter-backed static-value hover, variable→
+frontmatter-key definition, and `dm.expression.{malformed,unknown_identifier}`.
+Shell awareness (read-only) hovers `::shell` / frontmatter `$()` with an
+approved/denied/unknown policy verdict and emits `dm.security.disallowed_command`
+(source `darkmatter.security`) for built-in-blacklist denials. Fenced-code info
+strings get `dm.fence.unknown_language` (via `LanguageGrammar::from_token`, with a
+nearest-match suggestion). The overlay is **passive** — spec acceptance criterion
+7 (`tests/no_side_effects.rs`): no directive, expression, or command is ever
+executed. The graph substrate carries `NodeKind::TransclusionTarget` nodes and
+`transcludes` edges (`::file`/`::code` → resolved `.md` document root), plus
+`NodeKind::Interpolation` nodes and `uses_variable` edges (`{{ ident }}` → the
+same-document top-level frontmatter-key node, else an `Unresolved(ident)` for
+`ctx.*`/`env.*`/functions). The DSL provider keeps its request-time
+interpolation definition/hover path; `prologue`/`epilogue` transclusion
+resolution also stays request-time (no persistent edge).
+
+Phase 10 (rename, code actions, formatting) adds the v1 editing surface as
+standalone editing providers (not registry-merged — each has a single correct
+answer): `providers::{rename, code_actions, formatting}` plus the shared
+`providers::edits::EditBuilder` (lowers text edits + create-file ops to a
+`WorkspaceEdit` in the richest form the client profile allows — `documentChanges`
+with resource ops, else plain `changes`). **Rename** (`textDocument/prepareRename`
++ `rename`): heading-anchor rename rewrites the heading and every Markdown `#slug`
+and wiki `#heading` reference that uniquely resolves to it, preserving each link's
+spelling class (text-form → new title, slug-form → new slug); duplicate-text
+headings refuse (prepare `None`, rename LSP error). Cross-document edits load each
+affected buffer/disk file and build its own `SourceMap`. **File rename**
+(`workspace/willRenameFiles`, gated on `supports_file_operations` — not Neovim)
+runs the R-8 simulate-post-rename algorithm (rewrite wiki links unique before and
+after, escalate to shortest unique suffix, atomically abort — `None` — on a
+filesystem conflict or any non-unique replacement, never a partial rename) and
+re-paths Markdown links relative to their document. **Code actions**
+(`providers::code_actions`, diagnostic-driven, all eager — `resolveProvider` off):
+create-missing-file/wiki-note (`CreateFile` + `# H1` template, Windows-invalid
+filename guard), add-missing-schema-required-key (insertion from `FrontmatterAst`),
+migrate-deprecated-`style:`-key, close-unclosed-`::block` — each gated by
+`code_actions.categories`. **Formatting** (`textDocument/formatting`) is
+byte-equivalent to the `md clean` cleanup sequence (`FormattingConfig` cleanup
+variant + optional `reflow_to_width`, reassembled via `Markdown::as_string`) — spec
+criterion 8. `wiki.ambiguous-after-rename` joins the diagnostic-code taxonomy.
+Deviation: the Neovim file-rename code-action/command path and `ChangeAnnotation`s
+are deferred.
+
+Phase 11 (editors, packaging, hardening, closure) is documentation + packaging
+only — no library or `dmls` source surface changed. Per-editor setup guides
+(VS Code, Zed, Neovim, Helix) and a manual smoke checklist ship under
+`darkmatter/dmls/docs/editors/`; the Zed extension is a thin WASM shim launching
+the native binary, scaffolded at `darkmatter/dmls/zed-dmls/` (a `cdylib` on
+`zed_extension_api` with PATH → settings → GitHub-release binary resolution,
+workspace-**excluded** since it targets wasm32). `just dist` in the area
+`justfile` builds a per-platform release archive
+(`dmls-<version>-{macos-universal,linux-x86_64,linux-aarch64,windows-x86_64}`)
+the extension downloads by. The release-build performance sign-off
+(`phase11-bench-results.md`) confirms all 11 spec acceptance criteria and the
+AD-2 verdict — full repo (3,141 files) ~1.9 s cold, `vault-5k` ~0.5 s, both
+inside the R-6 budget — so the v1 in-memory-only model stands and no warm-start
+cache is built. See `darkmatter/features/2026-07-04-dmls/plan.md`.
 
 ## Common Entry Points
 
