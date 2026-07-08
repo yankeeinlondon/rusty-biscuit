@@ -30,6 +30,19 @@
 # 2026-07-05 seed pass.
 
 fixtures:
+  # antigravity/ — live local capture from installed `agy` 1.0.6 on
+  # 2026-07-08. The internal language-server process reported 1.1.0 in the
+  # configured log file; the public release manifest also reported 1.1.0.
+  - file: antigravity/exit-auth-invalid-models.json
+    class: capture
+    source: "live capture 2026-07-08: `AGY_CLI_NO_UPDATE=1 agy --log-file <tmp>/agy.log models`, stdout and exit code scrubbed"
+  - file: antigravity/app-log-auth-version.txt
+    class: capture
+    source: "live capture 2026-07-08: `AGY_CLI_NO_UPDATE=1 agy --log-file <tmp>/agy.log models`, log lines scrubbed for pid and local paths"
+  - file: antigravity/exit-auth-invalid-print.json
+    class: capture
+    source: "live capture 2026-07-08: `AGY_CLI_NO_UPDATE=1 agy --log-file <tmp>/agy.log --print-timeout 15s --print <prompt>`, stdout and exit code scrubbed"
+
   # claude/ — seed pass 2026-07-05
   - file: claude/rate-limit-throttled-message.jsonl
     class: test_vector

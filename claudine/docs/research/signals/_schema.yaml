@@ -35,14 +35,13 @@
 # shape needs) when a record has no seeded evidence. A record with no
 # obtainable fixture must be `confidence: inferred` with a `gaps` entry.
 #
-# **SimplifiedSchema `eager` constraint limitation:** The design doc specified
-# `evidence: file(eager; required)`, but SimplifiedSchema's inline-object
-# grammar does not currently recognize the `eager` constraint inside inline-
-# object literals (the parser rejects it with "unknown constraint `eager`").
-# The schema uses `file(required)` instead — presence is enforced, but
-# existence validation (the `eager` semantic) is deferred to the generate-time
-# fixture-replay check (`claudine signals check`). This limitation and the
-# design-doc intent are surfaced at Ken's checkpoint.
+# **SimplifiedSchema inline file constraint limitation:** The design doc
+# specified `evidence: file(eager; required)`, but SimplifiedSchema's inline-
+# object grammar does not currently accept `file(...)` constraints inside
+# object-list literals reliably. The schema uses `string(required)` instead —
+# presence is enforced, but file-reference validation is deferred to the
+# generate-time fixture-replay check (`claudine signals check`). This limitation
+# and the design-doc intent are surfaced at Ken's checkpoint.
 $schema:
     # Date the research file was first created. Optional because update-mode
     # legacy docs may predate the schema contract.
@@ -78,7 +77,7 @@ $schema:
     # `LogClassification` fields (`lib/src/stream/logs/opencode/events.rs`),
     # and the vocabulary/conjunction logic feeding that classifier stays
     # bespoke in the behavior half.
-    records: "{ id: string(required), signal: enum(usage_cap_approaching,usage_capped,rate_limited,provider_overloaded,retries_exhausted,no_funds,auth_invalid,auth_kind_detected,permission_denied_read,permission_denied_write,tokens_consumed,model_resolved,model_fallback,model_catalog_drift,provider_version,generation_retried,stalled_generation,repeated_stream_error,timeout,step_timeout,exit_expression,runaway_repetition,runaway_volume,unsupported_protocol_version,turn_limit_reached,session_time_limit_reached,interrupted,session_tainted,human_input_requested,session_resumable; required), source: enum(stream,session_log,app_log,sqlite,hook,stderr_diagnostic,stderr_promoted,acp,exit,wrapper; required), locator: string(required), detection: enum(declarative,bespoke; required), priority: number(required), match_path: string, match_op: enum(eq,in,substring_ci,regex,exists), match_value: string, match_values: string[], distinguish: string, vocabulary: string[], since: string, until: string, confidence: enum(inferred,documented,observed,source_code; required), evidence: file(required), notes: string }[]"
+    records: "{ id: string(required), signal: enum(usage_cap_approaching,usage_capped,rate_limited,provider_overloaded,retries_exhausted,no_funds,auth_invalid,auth_kind_detected,permission_denied_read,permission_denied_write,tokens_consumed,model_resolved,model_fallback,model_catalog_drift,provider_version,generation_retried,stalled_generation,repeated_stream_error,timeout,step_timeout,exit_expression,runaway_repetition,runaway_volume,unsupported_protocol_version,turn_limit_reached,session_time_limit_reached,interrupted,session_tainted,human_input_requested,session_resumable; required), source: enum(stream,session_log,app_log,sqlite,hook,stderr_diagnostic,stderr_promoted,acp,exit,wrapper; required), locator: string(required), detection: enum(declarative,bespoke; required), priority: number(required), match_path: string, match_op: enum(eq,in,substring_ci,regex,exists), match_value: string, match_values: string[], distinguish: string, vocabulary: string[], since: string, until: string, confidence: enum(inferred,documented,observed,source_code; required), evidence: string(required), notes: string }[]"
 
     # Payload extraction paths for declarative records. One row per extracted
     # field, joined to `records` via the `record` key. The `field` name is the
