@@ -71,7 +71,7 @@ members = [
     "schematic/oauth",
     "agent-sandbox/cli",
 ]
-exclude = ["schematic/schema"]
+exclude = ["schematic/schema", "darkmatter/dmls/zed-dmls"]
 
 [profile.dev]
 # Keep panic/backtrace line numbers but drop full DWARF (variables/types) -- the bulk of
