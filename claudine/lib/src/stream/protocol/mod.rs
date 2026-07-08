@@ -6,6 +6,7 @@
 //! trees. Unknown event types fall through to a `Value`-based fallback in the
 //! parser so the surrounding pipeline continues to tolerate format evolution.
 
+pub mod antigravity;
 pub mod claude;
 pub mod codex;
 pub mod gemini;

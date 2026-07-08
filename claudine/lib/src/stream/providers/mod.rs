@@ -1,3 +1,4 @@
+pub mod antigravity;
 pub mod claude;
 pub mod codex;
 pub mod gemini;
@@ -53,6 +54,12 @@ pub fn for_provider(
         )),
         // Pi is a bespoke provider with its own `--mode json` NDJSON format.
         Provider::Pi => Box::new(pi::PiSemanticStreamParser::new(sink, config.model)),
+        // Antigravity's `--output-format json` print mode emits ONE buffered
+        // JSON envelope (not a line stream); its bespoke parser accumulates and
+        // parses that single object.
+        Provider::Antigravity => Box::new(
+            antigravity::AntigravitySemanticStreamParser::new(sink, config.model),
+        ),
         _ => Box::new(claude::ClaudeSemanticStreamParser::new(sink)),
     }
 }

@@ -42,13 +42,15 @@ pub enum Provider {
     Kilo = 7,
     /// Pi (earendil-works) — a bespoke multi-provider agentic coding CLI.
     Pi = 8,
+    /// Antigravity (Google) — the headless `agy` coding CLI.
+    Antigravity = 9,
 }
 
 /// Total number of [`Provider`] variants.
 ///
 /// Anchors compile-time array length checks for the registry and any other
 /// `[T; PROVIDER_COUNT]` table indexed by `Provider as usize`.
-pub const PROVIDER_COUNT: usize = 9;
+pub const PROVIDER_COUNT: usize = 10;
 
 /// Providers in canonical display order for matrix-style reporting.
 pub const PROVIDERS_DISPLAY_ORDER: [Provider; PROVIDER_COUNT] = [
@@ -61,6 +63,7 @@ pub const PROVIDERS_DISPLAY_ORDER: [Provider; PROVIDER_COUNT] = [
     Provider::QwenCode,
     Provider::Kilo,
     Provider::Pi,
+    Provider::Antigravity,
 ];
 
 // Compile-time assertion: every `Provider` discriminant fits in
@@ -80,6 +83,7 @@ const _: () = {
     let _qwen: usize = Provider::QwenCode as usize;
     let _kilo: usize = Provider::Kilo as usize;
     let _pi: usize = Provider::Pi as usize;
+    let _antigravity: usize = Provider::Antigravity as usize;
     assert!(_claude == 0);
     assert!(_codex == 1);
     assert!(_gemini == 2);
@@ -88,6 +92,7 @@ const _: () = {
     assert!(_open == 5);
     assert!(_qwen == 6);
     assert!(_kilo == 7);
+    assert!(_pi == 8);
 };
 
 /// Typed selector metadata for provider-native output formats.

@@ -54,6 +54,11 @@ pub enum StreamProtocol {
     /// mode where stdout carries `{"jsonrpc":"2.0",…}` envelopes (events,
     /// requests, responses) instead of provider-specific stream-json shapes.
     WireJsonRpc,
+    /// A single buffered JSON document for the entire response (not
+    /// line-delimited). Used by Antigravity's `--output-format json` print
+    /// mode, whose stdout is one `{conversation_id,status,response,usage,…}`
+    /// object emitted after the run completes.
+    Json,
 }
 
 /// Optional configuration for parser construction.
@@ -209,6 +214,7 @@ mod tests {
             (StreamProtocol::Ndjson, "\"ndjson\""),
             (StreamProtocol::Jsonl, "\"jsonl\""),
             (StreamProtocol::WireJsonRpc, "\"wire-json-rpc\""),
+            (StreamProtocol::Json, "\"json\""),
         ];
         for (proto, expected_json) in &protocols {
             let json = serde_json::to_string(proto).unwrap();

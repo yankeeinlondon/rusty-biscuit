@@ -15,6 +15,7 @@
 //! behavior traits.
 
 mod acp;
+mod antigravity;
 mod behavior;
 mod billing_model;
 mod claude;

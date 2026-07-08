@@ -841,7 +841,14 @@ fn representative_payload_for(provider: Provider) -> Option<serde_json::Value> {
         // from a raw payload — the wrapper path knows the provider instead. Pi
         // has no native hooks, so it never delivers a raw hook payload at all;
         // its `--mode json` stdout stream is parsed by PiSemanticStreamParser.
-        Provider::Goose | Provider::QwenCode | Provider::Kilo | Provider::Pi => return None,
+        // Antigravity likewise delivers no raw hook payload; its
+        // `--output-format json` envelope is parsed by
+        // AntigravitySemanticStreamParser.
+        Provider::Goose
+        | Provider::QwenCode
+        | Provider::Kilo
+        | Provider::Pi
+        | Provider::Antigravity => return None,
     })
 }
 

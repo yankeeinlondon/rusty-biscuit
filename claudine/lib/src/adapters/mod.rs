@@ -1,3 +1,4 @@
+pub(crate) mod antigravity;
 pub(crate) mod claude;
 pub(crate) mod codex;
 pub(crate) mod gemini;
@@ -107,6 +108,8 @@ pub trait ProviderAdapter: Send + Sync {
     }
 }
 
+pub(crate) static ANTIGRAVITY_ADAPTER: antigravity::AntigravityAdapter =
+    antigravity::AntigravityAdapter;
 pub(crate) static CLAUDE_ADAPTER: claude::ClaudeAdapter = claude::ClaudeAdapter;
 pub(crate) static CODEX_ADAPTER: codex::CodexAdapter = codex::CodexAdapter;
 pub(crate) static GEMINI_ADAPTER: gemini::GeminiAdapter = gemini::GeminiAdapter;

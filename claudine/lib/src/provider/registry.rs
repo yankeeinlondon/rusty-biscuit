@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 use crate::provider_id::{PROVIDER_COUNT, PROVIDERS_DISPLAY_ORDER, Provider};
 
 use super::ProviderInfo;
+use super::antigravity::ANTIGRAVITY_INFO;
 use super::claude::CLAUDE_INFO;
 use super::codex::CODEX_INFO;
 use super::gemini::GEMINI_INFO;
@@ -39,6 +40,7 @@ pub fn provider_info(provider: Provider) -> &'static ProviderInfo {
             &QWEN_INFO,
             &KILO_INFO,
             &PI_INFO,
+            &ANTIGRAVITY_INFO,
         ]
     });
     registry[provider as usize]

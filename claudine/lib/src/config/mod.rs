@@ -1,4 +1,5 @@
 pub mod atomic;
+pub(crate) mod antigravity;
 pub(crate) mod backup;
 pub(crate) mod claude;
 pub mod claudine_config;
@@ -26,6 +27,7 @@ pub use claudine_config::{
 pub use messaging_block::{ClaudineMessengerConfig, MessengerProviderConfig};
 pub use tts::{Gender, TtsConfigSettings, TtsValue, VoiceSelection};
 
+pub(crate) use antigravity::AntigravityConfigurator;
 pub(crate) use claude::ClaudeConfigurator;
 pub(crate) use codex::CodexConfigurator;
 pub(crate) use gemini::GeminiConfigurator;
@@ -160,7 +162,7 @@ mod tests {
     #[test]
     fn discover_agents_full_returns_all_providers() {
         let agents = discover_agents_full();
-        assert_eq!(agents.len(), 9);
+        assert_eq!(agents.len(), 10);
 
         // Check all providers are present
         let providers: Vec<_> = agents.iter().map(|a| a.provider).collect();
@@ -173,6 +175,7 @@ mod tests {
         assert!(providers.contains(&Provider::QwenCode));
         assert!(providers.contains(&Provider::Kilo));
         assert!(providers.contains(&Provider::Pi));
+        assert!(providers.contains(&Provider::Antigravity));
     }
 
     #[test]

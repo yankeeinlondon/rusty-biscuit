@@ -2903,6 +2903,9 @@ pub(crate) static KILO_INSTALL: &[InstallationMethod] = &[
 ];
 pub(crate) static PI_INSTALL: &[InstallationMethod] =
     &[InstallationMethod::Npm("@earendil-works/pi-coding-agent")];
+pub(crate) static ANTIGRAVITY_INSTALL: &[InstallationMethod] = &[InstallationMethod::RemoteBash(
+    "https://antigravity.google/cli/install.sh",
+)];
 
 /// Metadata lookup table for AI CLI tools.
 pub(crate) static AI_CLI_INFO: &[ProgramInfo] = &[
@@ -3071,6 +3074,21 @@ pub(crate) static AI_CLI_INFO: &[ProgramInfo] = &[
         installation_methods: PI_INSTALL,
         system_prerequisites: &[],
     },
+    ProgramInfo {
+        binary_name: "agy",
+        display_name: "Antigravity",
+        description: "Google's Antigravity headless coding CLI",
+        website: "https://antigravity.google/product/antigravity-cli",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/google-antigravity/antigravity-cli"),
+        installation_methods: ANTIGRAVITY_INSTALL,
+        system_prerequisites: &[],
+    },
 ];
 
 impl ProgramMetadata for AiCli {
@@ -3101,6 +3119,7 @@ impl CategoryEnum for AiCli {
             AiCli::QwenCli => "qwen_cli",
             AiCli::Kilo => "kilo",
             AiCli::Pi => "pi",
+            AiCli::Antigravity => "antigravity",
         }
     }
 }
