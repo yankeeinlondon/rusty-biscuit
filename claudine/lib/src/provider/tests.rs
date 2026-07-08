@@ -381,34 +381,15 @@ fn resource_support_provider_matches_provider() {
     }
 }
 
-/// Drift guard: the only authoritative dispatch sites for [`Provider`] in
-/// the lib crate are the central registry and identity helpers. Every other
-/// per-domain dispatch must route through `ProviderInfo` behavior traits.
-///
-/// The scan walks `claudine/lib/src/**/*.rs` and flags files whose source
-/// contains any of the following patterns (after Rust line comments and
-/// `/* ... */` block comments are stripped):
-///
-/// 1. `match <ident> { ... Provider::<Variant> => ... }` — a `match`
-///    expression with at least one `Provider::<Variant> =>` arm,
-///    regardless of binding name (`provider`, `p`, `self`, `self.provider`,
-///    `*self`, `&*self`, etc.).
-/// 2. Standalone `Provider::<Variant> => ` arms (catches single-arm matches
-///    or `if let` ladders that drift back into per-variant dispatch).
-/// 3. `[(Provider::<Variant>, ...)]` provider tuple arrays — the exact
-///    duplicated-fact pattern Phase 2 removed from `discover_agents_full`.
-///
-/// Plain `[Provider::<Variant>, ...]` arrays are *not* flagged: they are
-/// commonly used in tests as input fixtures (display-order checks, picker
-/// preference lists, etc.) and do not represent provider facts.
-///
-/// The allow-list is intentionally narrow. Positive invariant tests
-/// (catalog round-trip, wrapper registry coverage, agent discovery, etc.)
-/// are the primary safety net; this scan is a defense-in-depth backstop.
-/// Strip Rust `//` line comments and `/* ... */` block comments from
-/// `src` so commented-out examples don't trip source-scan tests. Does NOT
+/// Strip Rust `//` line comments and `/* ... */` block comments from `src` so
+/// commented-out examples don't trip the source-scan guard below. Does NOT
 /// attempt to handle Rust strings containing `//` — false positives from
-/// string literals are rare enough to allow-list explicitly.
+/// string literals are rare and handled at the call site.
+///
+/// The package-wide `Provider` dispatch guard now lives in
+/// `claudine-cli/tests/dispatch_inventory.rs` (Phase I unified both crates into
+/// one inventory-based, site-level guard). This helper survives only for the
+/// [`detect_from_payload_has_no_provider_specific_branches`] source scan.
 fn strip_comments(src: &str) -> String {
     let mut out = String::with_capacity(src.len());
     let bytes = src.as_bytes();
@@ -432,110 +413,6 @@ fn strip_comments(src: &str) -> String {
         }
     }
     out
-}
-
-#[test]
-fn no_unauthorized_match_provider_in_lib() {
-    use regex::Regex;
-    use std::fs;
-    use std::path::{Path, PathBuf};
-
-    fn collect_rs_files(root: &Path, out: &mut Vec<PathBuf>) {
-        let Ok(entries) = fs::read_dir(root) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                collect_rs_files(&path, out);
-            } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
-                out.push(path);
-            }
-        }
-    }
-
-    let lib_src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let allowed: &[&str] = &[
-        // Central registry (the one authoritative dispatch site).
-        "src/provider/registry.rs",
-        // Canonical identity helpers (slug, sniff binding, aliases, display
-        // order). These are part of the central registry surface.
-        "src/provider/identity.rs",
-        // The guard test source code itself contains the literal patterns
-        // we are scanning for. Self-allow.
-        "src/provider/tests.rs",
-        // Test fixture in the adapters module uses a `match provider`
-        // expression with `Provider::Claude => json!(...)` arms to
-        // synthesize raw payloads. Test-only fixture.
-        "src/adapters/mod.rs",
-        // `provider/methods.rs` test module uses
-        // `[(Provider::X, "expected-slug"), ...]` tuple fixtures to assert
-        // canonical serialization/Display output. The "expected-slug"
-        // strings are not duplicated provider facts — they pin the
-        // canonical surface that downstream code consumes via
-        // `Provider::as_slug()` etc.
-        "src/provider/methods.rs",
-        // `stream/providers/mod.rs` contains the `SemanticParser` factory
-        // function that matches on `Provider` to construct the correct
-        // provider-specific stream parser. This is an intentional
-        // per-provider dispatch site introduced by Phase 2.5 of the
-        // Sentrux quality remediation plan.
-        "src/stream/providers/mod.rs",
-    ];
-
-    let mut files = Vec::new();
-    collect_rs_files(&lib_src, &mut files);
-
-    // Pattern 1: `match <ident> { ... Provider::<Variant> => ... }` block
-    // — catches all match-form dispatch on Provider regardless of binding.
-    // Multiline + dot-matches-newline keeps this practical for real code.
-    let match_with_provider_arm = Regex::new(
-        r"(?s)match\s+[A-Za-z_][A-Za-z0-9_\.\*&]*\s*\{[^}]*?Provider::[A-Z][A-Za-z]+\s*=>",
-    )
-    .unwrap();
-    // Pattern 2: standalone `Provider::<Variant> => ` arms (catches
-    // alternate forms like `if let` ladders or single-arm matches that the
-    // block-level scan may not capture).
-    let provider_arm = Regex::new(r"Provider::[A-Z][A-Za-z]+\s*=>").unwrap();
-    // Pattern 3: provider tuple arrays — `[(Provider::Foo, ...)]`.
-    let provider_tuple_array = Regex::new(r"\[\s*\(\s*Provider::[A-Z]").unwrap();
-
-    let mut violators: Vec<(String, &'static str)> = Vec::new();
-    for file in &files {
-        let rel = file
-            .strip_prefix(env!("CARGO_MANIFEST_DIR"))
-            .unwrap_or(file)
-            .to_string_lossy()
-            .replace('\\', "/");
-        if allowed.iter().any(|allow| rel.ends_with(allow)) {
-            continue;
-        }
-        let Ok(content) = fs::read_to_string(file) else {
-            continue;
-        };
-        let stripped = strip_comments(&content);
-
-        if match_with_provider_arm.is_match(&stripped) {
-            violators.push((rel.clone(), "match-with-Provider-arm"));
-        }
-        if provider_arm.is_match(&stripped) {
-            // The block-level pattern subsumes most single-arm cases, but
-            // record separately so the diagnostic explains which pattern
-            // class fired.
-            violators.push((rel.clone(), "Provider::Variant-arm"));
-        }
-        if provider_tuple_array.is_match(&stripped) {
-            violators.push((rel, "[(Provider::...)] tuple array"));
-        }
-    }
-
-    assert!(
-        violators.is_empty(),
-        "Drift guard: unauthorized per-variant `Provider` dispatch found in lib crate. \
-         Route per-domain dispatch through `ProviderInfo` behavior traits, or add the \
-         file to the allow-list in `provider::tests::no_unauthorized_match_provider_in_lib` \
-         with a comment explaining why. Violators: {violators:?}"
-    );
 }
 
 /// Guard against `provider/<slug>/legacy.rs` files ever returning.

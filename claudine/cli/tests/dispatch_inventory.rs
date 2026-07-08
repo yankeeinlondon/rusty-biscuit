@@ -1,13 +1,29 @@
-//! Mechanical dispatch inventory for the `claudine-cli` crate (provider-metadata
-//! Phase A2, `features/2026-07-02-provider-metadata/design/pipeline-dry.md`).
+//! Mechanical dispatch inventory **and** unified drift guard for the whole
+//! `claudine` package area (provider-metadata Phase A2 + Phase I,
+//! `features/2026-07-02-provider-metadata/design/pipeline-dry.md`).
 //!
-//! Scans every `.rs` file under `cli/src/` for per-variant `Provider` dispatch
-//! and regenerates the committed inventory at
+//! Scans every production `.rs` file under `lib/src/` **and** `cli/src/` for
+//! per-variant `Provider` dispatch and regenerates the committed inventory at
 //! `claudine/docs/providers/dispatch-inventory.json`. The drift test
 //! byte-compares the regenerated document against the committed file, so a
 //! plain `just test` run fails whenever dispatch sites change without a
-//! matching inventory update. Integration tests under `cli/tests/` are out of
-//! scope by design.
+//! matching inventory update. `#[cfg(test)]` module bodies are blanked before
+//! scanning (test fixtures are not production dispatch), so integration tests
+//! under `*/tests/` and inline unit-test modules are both out of scope by
+//! design.
+//!
+//! ## The unified guard (Phase I)
+//!
+//! Phase I retired the lib crate's bespoke regex guard
+//! (`no_unauthorized_match_provider_in_lib`) and folded both crates into this
+//! one inventory-based, site-level guard. Beyond the byte-compare drift test,
+//! [`cli_dispatch_guard_holds_the_line`] cross-checks every **conditional,
+//! non-exempt** site against [`GUARD_ALLOWLIST`] — a grandfather-with-burn-down
+//! list where each entry carries a workstream `tag` and a `reason`. A new
+//! decentralized dispatch site fails the guard until it is either migrated to a
+//! `ProviderInfo` catalog field / behavior trait or consciously grandfathered
+//! with a tag and reason. A stale allow-list entry (matching no live site, e.g.
+//! after a provider removal) also fails, keeping the list honest.
 //!
 //! Regenerate after intentional dispatch changes:
 //!
@@ -15,12 +31,12 @@
 //! CLAUDINE_UPDATE_INVENTORY=1 cargo nextest run -p claudine-cli --test dispatch_inventory
 //! ```
 //!
-//! ## Pattern forms (pattern-set v1)
+//! ## Pattern forms (pattern-set v3)
 //!
-//! Extends the lib guard's three forms (`no_unauthorized_match_provider_in_lib`
-//! in `lib/src/provider/tests.rs`) with the dominant CLI forms named in
-//! `design/pipeline-dry.md`. Every `Provider::<Variant>` occurrence in
-//! non-comment, non-literal source is classified into exactly one form:
+//! The full extended set from `design/pipeline-dry.md` — the three forms of the
+//! retired lib regex guard PLUS the `matches!` / `==` / `!=` forms it could not
+//! see. Every `Provider::<Variant>` occurrence in non-comment, non-literal,
+//! non-test source is classified into exactly one form:
 //!
 //! - `match-provider` — `match expr { Provider::X => .. }`; one record per
 //!   `match` expression, listing every variant named in its arm patterns.
@@ -38,8 +54,9 @@
 //!   recorded so the inventory total reconciles against a raw grep.
 //!
 //! Because classification is total, `totals.provider_refs` equals the raw
-//! occurrence count of `Provider::<KnownVariant>` in `cli/src/**` minus hits
-//! inside comments and string/char literals. Lookalike enums (`TtsProvider`,
+//! occurrence count of `Provider::<KnownVariant>` in `lib/src/**` +
+//! `cli/src/**` minus hits inside comments, string/char literals, and
+//! `#[cfg(test)]` module bodies. Lookalike enums (`TtsProvider`,
 //! `HostTtsProvider`, ..) and lowercase associated functions
 //! (`Provider::parse_cli_name`, ..) are excluded by the variant-name filter.
 //!
@@ -52,14 +69,17 @@
 //!   `assert_matches!`) classify their interior variants as `direct-ref`.
 //! - `Some(Provider::X)` inside `if let` classifies as `direct-ref` because the
 //!   `let` keyword is not adjacent to the variant path.
-//! - Inline `#[cfg(test)]` modules inside `src/**` files are inventoried and
-//!   are not distinguishable by path; only `src/**/tests/` directories receive
-//!   the path-based `exempt_candidate` tag. The Phase I guard, not this
-//!   inventory, decides final test exemptions.
+//! - Inline `#[cfg(test)]` module bodies are blanked before scanning, so
+//!   test-only dispatch never reaches the inventory. Whole-file test modules
+//!   (a separate `mod tests;` file, e.g. `provider/tests.rs`) are excluded via
+//!   the `/tests.rs` path rule in [`exempt_candidate`] instead.
 //! - `exempt_candidate` mirrors the blanket-exemption list in
-//!   `design/pipeline-dry.md` (`commands/wrap/profile/*.rs`, the clap mapping
-//!   in `main.rs`, test paths). Those sites are still recorded because they
-//!   feed the Phase D WrapperProfile disposition table.
+//!   `design/pipeline-dry.md`: the CLI's per-provider `commands/wrap/profile/*.rs`,
+//!   the clap mapping in `main.rs`, and — folded in by Phase I — the lib's
+//!   authoritative registry/identity/methods, the stream-parser factory, and the
+//!   lib's per-provider `permissions/providers/*.rs` impl files. Those sites are
+//!   still recorded (with `exempt_candidate: true`) so the inventory stays a
+//!   complete census.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -67,7 +87,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-const PATTERN_SET_VERSION: u32 = 2;
+const PATTERN_SET_VERSION: u32 = 3;
 const BLESS_ENV: &str = "CLAUDINE_UPDATE_INVENTORY";
 const REGEN_COMMAND: &str =
     "CLAUDINE_UPDATE_INVENTORY=1 cargo nextest run -p claudine-cli --test dispatch_inventory";
@@ -255,7 +275,79 @@ fn sanitize(src: &str) -> Vec<u8> {
             i += 1;
         }
     }
+    blank_cfg_test_modules(&mut out);
     out
+}
+
+/// Blank the body of every inline `#[cfg(test)] mod NAME { .. }` module so
+/// test-only `Provider` dispatch never reaches the inventory or the guard.
+/// Runs on already-sanitized bytes (comments/strings blanked), so a
+/// `#[cfg(test)]` inside a comment or string cannot trigger blanking. Newlines
+/// are preserved to keep line numbers accurate. Whole-file test modules (a
+/// separate `mod tests;` file) are handled by [`exempt_candidate`] instead.
+fn blank_cfg_test_modules(bytes: &mut [u8]) {
+    let n = bytes.len();
+    let mut i = 0;
+    while i < n {
+        if bytes[i] == b'#'
+            && bytes.get(i + 1) == Some(&b'[')
+            && let Some(close) = matching_delimiter(bytes, i + 1, b'[')
+        {
+            if attr_is_cfg_test(&bytes[i..=close]) {
+                // Skip further stacked attributes, then require `mod NAME {`.
+                let mut j = close + 1;
+                loop {
+                    j = skip_ws(bytes, j);
+                    if bytes.get(j) == Some(&b'#')
+                        && bytes.get(j + 1) == Some(&b'[')
+                        && let Some(c2) = matching_delimiter(bytes, j + 1, b'[')
+                    {
+                        j = c2 + 1;
+                        continue;
+                    }
+                    break;
+                }
+                j = skip_ws(bytes, j);
+                if bytes[j..].starts_with(b"mod")
+                    && bytes.get(j + 3).is_some_and(|&b| !is_ident(b))
+                {
+                    let mut k = skip_ws(bytes, j + 3);
+                    while k < n && is_ident(bytes[k]) {
+                        k += 1;
+                    }
+                    k = skip_ws(bytes, k);
+                    if bytes.get(k) == Some(&b'{')
+                        && let Some(body_close) = matching_delimiter(bytes, k, b'{')
+                    {
+                        for slot in bytes.iter_mut().take(body_close).skip(k + 1) {
+                            if *slot != b'\n' {
+                                *slot = b' ';
+                            }
+                        }
+                        i = body_close + 1;
+                        continue;
+                    }
+                }
+            }
+            i = close + 1;
+            continue;
+        }
+        i += 1;
+    }
+}
+
+/// True when `attr` (bytes from `#` through the closing `]`) is a
+/// `#[cfg(test)]`-style gate: the `cfg(` predicate's first token is `test`.
+/// Matches `#[cfg(test)]` and `#[cfg(test, ..)]`; deliberately conservative so
+/// `#[cfg(feature = "test-utils")]` is NOT treated as a test gate.
+fn attr_is_cfg_test(attr: &[u8]) -> bool {
+    let text = std::str::from_utf8(attr).unwrap_or("");
+    let inner = text.trim_start_matches("#[").trim_end_matches(']').trim();
+    let Some(pred) = inner.strip_prefix("cfg(") else {
+        return false;
+    };
+    let pred = pred.trim_start();
+    pred == "test" || pred.starts_with("test)") || pred.starts_with("test,") || pred.starts_with("test ")
 }
 
 /// If a raw (byte) string opens at `i` (`r"`, `r#"`, `br"`, ..), return the
@@ -659,9 +751,18 @@ fn classify(
     (FORM_DIRECT, occ.start)
 }
 
-/// Blanket-exemption candidates per `design/pipeline-dry.md`: the per-provider
-/// profile impl files, the clap mapping in `main.rs`, and test paths.
+/// Blanket-exemption candidates per `design/pipeline-dry.md` (extended by
+/// Phase I to cover the lib crate). These sites are recorded in the inventory
+/// but excluded from the guard's universe: they are legitimate per-provider
+/// dispatch by design.
 fn exempt_candidate(rel_path: &str) -> bool {
+    // Test paths: `*/tests/` integration dirs and whole-file `*/tests.rs`
+    // modules (inline `#[cfg(test)]` bodies are already blanked before scan).
+    if rel_path.contains("/tests/") || rel_path.ends_with("/tests.rs") {
+        return true;
+    }
+    // CLI blanket exemptions: the clap Provider mapping in `main.rs` and the
+    // per-provider wrapper-profile impl files.
     if rel_path == "claudine/cli/src/main.rs" {
         return true;
     }
@@ -670,7 +771,24 @@ fn exempt_candidate(rel_path: &str) -> bool {
     {
         return true;
     }
-    rel_path.contains("/tests/")
+    // Lib blanket exemptions (folded in by Phase I): the authoritative registry
+    // + identity + canonical-surface methods, the stream-parser factory, and the
+    // per-provider permissions impl files (the lib analog of wrap/profile).
+    if matches!(
+        rel_path,
+        "claudine/lib/src/provider/registry.rs"
+            | "claudine/lib/src/provider/identity.rs"
+            | "claudine/lib/src/provider/methods.rs"
+            | "claudine/lib/src/stream/providers/mod.rs"
+    ) {
+        return true;
+    }
+    if let Some(rest) = rel_path.strip_prefix("claudine/lib/src/permissions/providers/")
+        && !rest.contains('/')
+    {
+        return true;
+    }
+    false
 }
 
 /// Scan one file's source, returning its grouped sites and the raw count of
@@ -740,32 +858,38 @@ fn variant_names() -> Vec<String> {
 }
 
 fn generate_inventory() -> Inventory {
-    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let src_root = manifest_dir.join("src");
+    let cli_manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let area = cli_manifest
+        .parent()
+        .expect("cli crate has a parent package area");
     let variants = variant_names();
-
-    let mut files = Vec::new();
-    collect_rs_files(&src_root, &mut files);
-    assert!(
-        !files.is_empty(),
-        "no .rs files found under {} — scan root is broken",
-        src_root.display()
-    );
 
     let mut sites = Vec::new();
     let mut provider_refs = 0usize;
-    for file in &files {
-        let content = fs::read_to_string(file)
-            .unwrap_or_else(|e| panic!("failed to read {}: {e}", file.display()));
-        let rel = file
-            .strip_prefix(manifest_dir)
-            .expect("scanned file lives under the manifest dir")
-            .to_string_lossy()
-            .replace('\\', "/");
-        let rel_repo = format!("claudine/cli/{rel}");
-        let (file_sites, refs) = scan_source(&rel_repo, &content, &variants);
-        sites.extend(file_sites);
-        provider_refs += refs;
+    // Scan both production crates. `lib/src` first so the sorted inventory keeps
+    // lib sites ahead of cli sites (path-sorted anyway, but explicit here).
+    for sub in ["lib/src", "cli/src"] {
+        let root = area.join(sub);
+        let mut files = Vec::new();
+        collect_rs_files(&root, &mut files);
+        assert!(
+            !files.is_empty(),
+            "no .rs files found under {} — scan root is broken",
+            root.display()
+        );
+        for file in &files {
+            let content = fs::read_to_string(file)
+                .unwrap_or_else(|e| panic!("failed to read {}: {e}", file.display()));
+            let rel = file
+                .strip_prefix(area)
+                .expect("scanned file lives under the package area")
+                .to_string_lossy()
+                .replace('\\', "/");
+            let rel_repo = format!("claudine/{rel}");
+            let (file_sites, refs) = scan_source(&rel_repo, &content, &variants);
+            sites.extend(file_sites);
+            provider_refs += refs;
+        }
     }
     sites.sort();
 
@@ -784,7 +908,7 @@ fn generate_inventory() -> Inventory {
     Inventory {
         tool: "claudine-cli/tests/dispatch_inventory.rs",
         pattern_set_version: PATTERN_SET_VERSION,
-        scanned_root: "claudine/cli/src",
+        scanned_root: "claudine/lib/src + claudine/cli/src",
         regenerate: REGEN_COMMAND,
         forms: form_descriptions(),
         dispatch_classes: dispatch_class_descriptions(),
@@ -866,6 +990,245 @@ fn dispatch_inventory_matches_committed_file() {
             path.display()
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Unified drift guard (Phase I): tagged allow-list + burn-down
+// ---------------------------------------------------------------------------
+
+/// One grandfathered dispatch site: a conditional, non-exempt `Provider`
+/// dispatch consciously allowed to remain, carrying a workstream `tag` and a
+/// `reason`. Matched to live inventory sites by `(path, form, providers)` —
+/// line-number-independent, so ordinary edits do not churn the list. One entry
+/// may cover several identical sites in the same file (e.g. two
+/// `== Provider::Claude` guards).
+struct GuardEntry {
+    path: &'static str,
+    form: &'static str,
+    /// Variant names, alphabetically sorted (must match `Site::providers`).
+    providers: &'static [&'static str],
+    tag: &'static str,
+    reason: &'static str,
+}
+
+// Burn-down tags. Every ws0-prep / ws3-profile / render migration completed in
+// Phases C/D/G, so every live entry is `keep`; the workstream tags stay
+// recognized for provenance and any future grandfathering.
+const KEEP: &str = "keep";
+const TAG_WS0: &str = "ws0-prep";
+const TAG_WS3: &str = "ws3-profile";
+const TAG_RENDER: &str = "render";
+const ALLOWED_TAGS: &[&str] = &[KEEP, TAG_WS0, TAG_WS3, TAG_RENDER];
+
+/// The grandfather-with-burn-down allow-list. Seeded from the mechanical
+/// inventory at Phase I guard-landing. All entries are genuinely behavioral
+/// (wire-protocol quirks, shadow-HOME mechanics, stderr bridging, Claude's
+/// canonical role as the native resource home) and were ruled `keep` at
+/// Checkpoint I (2026-07-08). A new conditional, non-exempt site not listed
+/// here fails [`cli_dispatch_guard_holds_the_line`]; migrate it to a
+/// `ProviderInfo` catalog field / behavior trait, or add a `keep` entry with a
+/// reason if it is truly behavioral.
+const GUARD_ALLOWLIST: &[GuardEntry] = &[
+    // --- CLI: Codex/Gemini shadow-HOME MCP injection need (dup pair; kept per
+    //     Checkpoint I — consolidating reopens Phase-D catalog-data discipline).
+    GuardEntry {
+        path: "claudine/cli/src/commands/wrap/composition/mod.rs",
+        form: FORM_MATCHES,
+        providers: &["Codex", "Gemini"],
+        tag: KEEP,
+        reason: "MCP shadow-HOME is needed only for the shadow-HOME MCP injectors (Codex, Gemini).",
+    },
+    GuardEntry {
+        path: "claudine/cli/src/commands/wrap/mod.rs",
+        form: FORM_MATCHES,
+        providers: &["Codex", "Gemini"],
+        tag: KEEP,
+        reason: "MCP shadow-HOME need (direct wrapper twin of the composition-path predicate).",
+    },
+    // --- CLI: Codex structured-output final-message emission (dup pair).
+    GuardEntry {
+        path: "claudine/cli/src/commands/wrap/harness_orch/attempt.rs",
+        form: FORM_EQ,
+        providers: &["Codex"],
+        tag: KEEP,
+        reason: "Codex final-message stdout emission on the structured-output rendering path.",
+    },
+    GuardEntry {
+        path: "claudine/cli/src/commands/wrap/wrapper_exec.rs",
+        form: FORM_EQ,
+        providers: &["Codex"],
+        tag: KEEP,
+        reason: "Codex final-message stdout emission (direct wrapper twin).",
+    },
+    // --- CLI: other behavioral wire/prep quirks.
+    GuardEntry {
+        path: "claudine/cli/src/commands/exec_prep/mod.rs",
+        form: FORM_NE,
+        providers: &["Codex"],
+        tag: KEEP,
+        reason: "Codex-only structured-output prep guard inside the shared exec_prep stage.",
+    },
+    GuardEntry {
+        path: "claudine/cli/src/commands/wrap/inline.rs",
+        form: FORM_MATCHES,
+        providers: &["Codex", "Gemini", "OpenCode"],
+        tag: KEEP,
+        reason: "Strip MCP prompt tags for providers that inject MCP via config, not argv.",
+    },
+    GuardEntry {
+        path: "claudine/cli/src/commands/wrap/policy.rs",
+        form: FORM_NE,
+        providers: &["OpenCode"],
+        tag: KEEP,
+        reason: "Stalled-generation backstop is OpenCode-scoped; inert elsewhere (debug-trace only).",
+    },
+    GuardEntry {
+        path: "claudine/cli/src/commands/wrap/policy.rs",
+        form: FORM_EQ,
+        providers: &["OpenCode"],
+        tag: KEEP,
+        reason: "OpenCode dual-source stderr bridge + promoted-stderr sink wiring.",
+    },
+    GuardEntry {
+        path: "claudine/cli/src/commands/wrap/policy.rs",
+        form: FORM_EQ,
+        providers: &["Codex"],
+        tag: KEEP,
+        reason: "Codex stderr tracing-subscriber bridge (render inline vs leak raw).",
+    },
+    GuardEntry {
+        path: "claudine/cli/src/commands/wrap/repo_home.rs",
+        form: FORM_MATCHES,
+        providers: &["Codex"],
+        tag: KEEP,
+        reason: "Codex shadow-HOME repo-root preservation predicate.",
+    },
+    GuardEntry {
+        path: "claudine/cli/src/commands/wrap/repo_home.rs",
+        form: FORM_EQ,
+        providers: &["Codex"],
+        tag: KEEP,
+        reason: "Codex prompt materialization into the shadow HOME.",
+    },
+    GuardEntry {
+        path: "claudine/cli/src/commands/wrap/wrapper_stages.rs",
+        form: FORM_NE,
+        providers: &["OpenCode"],
+        tag: KEEP,
+        reason: "OpenCode YOLO config overlay (OPENCODE_CONFIG_CONTENT); no-op elsewhere.",
+    },
+    // --- Lib: Claude is the canonical native home for linked resources; other
+    //     providers link to it (one entry per file; some cover two sites).
+    GuardEntry {
+        path: "claudine/lib/src/linking/skills/portable.rs",
+        form: FORM_EQ,
+        providers: &["Claude"],
+        tag: KEEP,
+        reason: "Claude is the canonical native home for linked skills; others link to it.",
+    },
+    GuardEntry {
+        path: "claudine/lib/src/linking/skills/native.rs",
+        form: FORM_EQ,
+        providers: &["Claude"],
+        tag: KEEP,
+        reason: "Claude is the canonical native home for linked skills; others link to it.",
+    },
+    GuardEntry {
+        path: "claudine/lib/src/linking/commands.rs",
+        form: FORM_EQ,
+        providers: &["Claude"],
+        tag: KEEP,
+        reason: "Claude is the canonical native home for linked slash commands.",
+    },
+    GuardEntry {
+        path: "claudine/lib/src/linking/agents.rs",
+        form: FORM_EQ,
+        providers: &["Claude"],
+        tag: KEEP,
+        reason: "Claude is the canonical native home for linked agents.",
+    },
+];
+
+fn guard_entry_matches(entry: &GuardEntry, site: &Site) -> bool {
+    entry.path == site.path
+        && entry.form == site.form
+        && entry.providers.len() == site.providers.len()
+        && entry
+            .providers
+            .iter()
+            .zip(&site.providers)
+            .all(|(a, b)| *a == b)
+}
+
+/// Phase I unified drift guard. Every conditional, non-exempt `Provider`
+/// dispatch site across `lib/src` + `cli/src` must be grandfathered in
+/// [`GUARD_ALLOWLIST`] with a recognized tag and a reason; a new one fails
+/// until migrated to the catalog or consciously listed. Stale entries (matching
+/// no live site — e.g. after a provider removal) also fail, keeping the list
+/// honest. A burn-down summary by tag is printed on every run.
+#[test]
+fn cli_dispatch_guard_holds_the_line() {
+    let inventory = generate_inventory();
+    let governed: Vec<&Site> = inventory
+        .sites
+        .iter()
+        .filter(|s| s.dispatch_class == CLASS_CONDITIONAL && !s.exempt_candidate)
+        .collect();
+
+    // 1. Every governed site is grandfathered.
+    let unlisted: Vec<String> = governed
+        .iter()
+        .filter(|site| !GUARD_ALLOWLIST.iter().any(|e| guard_entry_matches(e, site)))
+        .map(|s| format!("{}:{} {} {:?}", s.path, s.line, s.form, s.providers))
+        .collect();
+
+    // 2. Every allow-list entry still matches at least one live site.
+    let stale: Vec<String> = GUARD_ALLOWLIST
+        .iter()
+        .filter(|e| !governed.iter().any(|s| guard_entry_matches(e, s)))
+        .map(|e| format!("{} {} {:?}", e.path, e.form, e.providers))
+        .collect();
+
+    // 3. Every entry has a recognized tag and (for `keep`) a reason.
+    let bad_meta: Vec<String> = GUARD_ALLOWLIST
+        .iter()
+        .filter(|e| !ALLOWED_TAGS.contains(&e.tag) || (e.tag == KEEP && e.reason.trim().is_empty()))
+        .map(|e| format!("{} {} {:?} tag={:?}", e.path, e.form, e.providers, e.tag))
+        .collect();
+
+    // Burn-down by tag (governed sites, counted through their matching entry).
+    let mut burn_down: BTreeMap<&'static str, usize> = BTreeMap::new();
+    for site in &governed {
+        if let Some(entry) = GUARD_ALLOWLIST.iter().find(|e| guard_entry_matches(e, site)) {
+            *burn_down.entry(entry.tag).or_default() += 1;
+        }
+    }
+    let pending: usize = burn_down
+        .iter()
+        .filter(|(tag, _)| **tag != KEEP)
+        .map(|(_, n)| *n)
+        .sum();
+    eprintln!(
+        "dispatch guard burn-down ({} governed sites): {burn_down:?} — {pending} pending migration",
+        governed.len()
+    );
+
+    assert!(
+        unlisted.is_empty(),
+        "New decentralized `Provider` dispatch found that is not grandfathered in \
+         GUARD_ALLOWLIST (cli/tests/dispatch_inventory.rs). Migrate it to a ProviderInfo \
+         catalog field / behavior trait, or add a `keep` entry with a reason.\nUnlisted: {unlisted:#?}"
+    );
+    assert!(
+        stale.is_empty(),
+        "Stale GUARD_ALLOWLIST entries match no live dispatch site (a migration or provider \
+         removal left them behind). Remove them so the burn-down stays honest.\nStale: {stale:#?}"
+    );
+    assert!(
+        bad_meta.is_empty(),
+        "GUARD_ALLOWLIST entries with an unrecognized tag or a `keep` entry missing a \
+         reason: {bad_meta:#?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -963,6 +1326,7 @@ mod classifier_tests {
 
     #[test]
     fn exempt_candidate_paths() {
+        // CLI blanket exemptions.
         assert!(exempt_candidate("claudine/cli/src/main.rs"));
         assert!(exempt_candidate(
             "claudine/cli/src/commands/wrap/profile/codex.rs"
@@ -971,5 +1335,29 @@ mod classifier_tests {
             "claudine/cli/src/commands/wrap/profile/tests/apply.rs"
         ));
         assert!(!exempt_candidate("claudine/cli/src/commands/wrap/mod.rs"));
+        // Lib blanket exemptions (Phase I).
+        assert!(exempt_candidate("claudine/lib/src/provider/registry.rs"));
+        assert!(exempt_candidate("claudine/lib/src/provider/methods.rs"));
+        assert!(exempt_candidate("claudine/lib/src/stream/providers/mod.rs"));
+        assert!(exempt_candidate(
+            "claudine/lib/src/permissions/providers/opencode.rs"
+        ));
+        assert!(!exempt_candidate("claudine/lib/src/linking/commands.rs"));
+        // Whole-file test modules.
+        assert!(exempt_candidate("claudine/lib/src/provider/tests.rs"));
+    }
+
+    #[test]
+    fn cfg_test_module_body_is_blanked() {
+        let src = "fn f(p: Provider) -> bool { p == Provider::Claude }\n\
+                   #[cfg(test)]\nmod tests {\n    use super::*;\n    \
+                   fn g(p: Provider) -> bool { matches!(p, Provider::Codex) }\n}\n";
+        let (sites, refs) = scan(src);
+        // Only the production `== Provider::Claude` survives; the test module's
+        // `matches!(p, Provider::Codex)` is blanked out.
+        assert_eq!(refs, 1);
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].form, FORM_EQ);
+        assert_eq!(sites[0].providers, ["Claude"]);
     }
 }

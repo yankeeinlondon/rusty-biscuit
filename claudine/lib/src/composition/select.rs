@@ -263,8 +263,9 @@ where
     let (model, model_reason) =
         resolve_model_with_env(provider, hints, cli_model, &env_lookup, catalog);
 
-    // OpenCode non-TTY hard error: model is required
-    if provider == Provider::OpenCode && model.is_none() {
+    // Providers that require an explicit model in non-interactive mode (catalog
+    // `model_required_in_non_tty`; OpenCode today) hard-error when none resolved.
+    if provider_info(provider).model_required_in_non_tty && model.is_none() {
         return Err(CompositionError::ModelSelectionFailed {
             provider,
             reason: "OpenCode requires a model in non-interactive mode; set --model, OPENCODE_MODEL, or MODEL".into(),
