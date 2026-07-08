@@ -151,3 +151,22 @@ list:
       vendor: Kilo
       site: https://kilo.ai/
       repo: https://github.com/Kilo-Org/kilocode
+    - name: Antigravity
+      file: antigravity.md
+      slug: antigravity
+      # Provisional identity seeded for the research fleet; `binary`, the dirs,
+      # and `docs_url` are confirmed by the agent-cli / non-interactive-sessions
+      # research. `sniff_binding` names the AiCli variant added at graduation
+      # (unwired here, so claudine-gen skips it — the Pi/Kilo pattern).
+      binary: antigravity
+      display_name: Antigravity
+      short_name: antigravity
+      cli_aliases: ["antigravity"]
+      docs_url: https://antigravity.google/product/antigravity-cli
+      sniff_binding: Antigravity
+      user_dir: "~/.antigravity"
+      repo_dir: ".antigravity"
+      vendor: Google
+      model_provider: true
+      site: https://antigravity.google/product/antigravity-cli
+      repo: https://github.com/google-antigravity/antigravity-cli
