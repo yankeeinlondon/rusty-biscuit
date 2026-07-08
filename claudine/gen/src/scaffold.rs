@@ -20,16 +20,26 @@ use std::path::Path;
 
 use crate::emit;
 use crate::errors::GenError;
-use crate::registry::{DeclaredSource, REGISTRY};
+use crate::registry::{Coercion, DeclaredSource, REGISTRY};
 
 /// Writes `docs/providers/facts/<slug>.yaml` IF ABSENT, seeded with the
 /// facts-sourced registry fields (each `null`, prefixed with a
-/// `# TODO(<required|optional>): <description>` line), in registry order.
+/// `# TODO(<required|optional>): <description>` line), in registry order,
+/// plus the facts-fed `acp:` sub-record (see below).
 ///
 /// Returns `true` when it wrote the skeleton, `false` when the file already
 /// existed (never overwrites). A still-`null` required field fails `data.rs`
 /// generation loudly — that is the intended "fill it" signal, so no typed
 /// placeholder is invented here.
+///
+/// ## Notes
+///
+/// The `acp` field is `Research`-sourced for `server_mode`, but its coercion
+/// is mixed: `client_supported`/`events_via_acp` are read from this facts
+/// file's `acp:` sub-record. The registry loop only walks
+/// [`DeclaredSource::Facts`] entries, so it skips `acp` — the sub-record is
+/// emitted explicitly here, or a fully-wired provider fails generation with
+/// "facts file has no `acp` key" (a confirmed M-Kilo/M-Pi onboarding papercut).
 pub fn scaffold_facts(area: &Path, slug: &str) -> Result<bool, GenError> {
     let path = area.join(format!("docs/providers/facts/{slug}.yaml"));
     if path.exists() {
@@ -49,6 +59,22 @@ pub fn scaffold_facts(area: &Path, slug: &str) -> Result<bool, GenError> {
         let kind = if entry.optional { "optional" } else { "required" };
         out.push_str(&format!("# TODO({kind}): {}\n", entry.description));
         out.push_str(&format!("{key}: null\n"));
+    }
+    // `acp` is Research-sourced (`server_mode`) so the loop above skips it, but
+    // its coercion also reads `client_supported`/`events_via_acp` from this facts
+    // file — emit that sub-record, or generation fails "facts file has no `acp`
+    // key". Gated on the coercion so it self-removes if `acp` ever goes
+    // single-source. `server_mode` is research-owned: seeding it here is a
+    // generation error, so it is deliberately absent.
+    if let Some(acp) = REGISTRY.iter().find(|entry| entry.coercion == Coercion::AcpRecord) {
+        out.push_str(&format!(
+            "\n# TODO(required): ACP facts sub-record — client_supported (bool) and\n\
+             # events_via_acp (list) are facts-fed; never add server_mode (research-owned).\n\
+             {}:\n\
+             \x20 client_supported: null\n\
+             \x20 events_via_acp: []\n",
+            acp.field,
+        ));
     }
     write_if_absent(&path, &out)
 }
@@ -158,9 +184,11 @@ mod tests {
         assert!(scaffold_facts(area, "kilo").unwrap(), "absent file is written");
 
         let text = std::fs::read_to_string(area.join("docs/providers/facts/kilo.yaml")).unwrap();
-        // Every facts key appears, `null`-valued, in registry order.
+        // Every facts key appears, `null`-valued, in registry order. Indented
+        // lines (the nested `acp:` sub-record) are not top-level facts keys.
         let emitted: Vec<String> = text
             .lines()
+            .filter(|line| !line.starts_with(char::is_whitespace))
             .filter_map(|line| line.strip_suffix(": null"))
             .map(str::to_string)
             .collect();
@@ -169,6 +197,23 @@ mod tests {
         // Required vs optional is reflected in the preceding TODO tag.
         assert!(text.contains("# TODO(optional): "), "{text}");
         assert!(text.contains("# TODO(required): "), "{text}");
+    }
+
+    #[test]
+    fn facts_skeleton_emits_the_mixed_source_acp_subrecord() {
+        let dir = tempfile::tempdir().unwrap();
+        let area = dir.path();
+        assert!(scaffold_facts(area, "kilo").unwrap());
+
+        let text = std::fs::read_to_string(area.join("docs/providers/facts/kilo.yaml")).unwrap();
+        // The nested facts-fed sub-record the AcpRecord coercion reads (missing
+        // it fails generation with "facts file has no `acp` key").
+        assert!(text.contains("\nacp:\n"), "acp sub-record present:\n{text}");
+        assert!(text.contains("client_supported: null"), "{text}");
+        assert!(text.contains("events_via_acp: []"), "{text}");
+        // `server_mode` is research-owned; seeding the key here is a generation
+        // error, so it must never appear as a facts sub-key.
+        assert!(!text.contains("server_mode:"), "{text}");
     }
 
     #[test]
