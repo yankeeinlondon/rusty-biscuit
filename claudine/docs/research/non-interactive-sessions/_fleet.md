@@ -12,7 +12,7 @@ initialize:
               - message: "The provider **{{state.name}}** needs to update its research on **non-interactive sessions**"
         - when: "file_exists(file) && frontmatter(file, 'last_updated') && !date_delta(frontmatter(file, 'last_updated'), ctx.today, '14d')"
           action:
-              - message: "The provider **{{state.name}}** has research for **non-interactive sessions** that is current; skipping updates"
+              - stderr: "The provider **{{state.name}}** has research for **non-interactive sessions** that is current; skipping updates"
               - skip
 success:
     stack:

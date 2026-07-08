@@ -16,13 +16,13 @@ initialize:
               - message: "The provider **{{state.name}}** needs to update its research on **MCP**"
         - when: "file_exists(file) && frontmatter(file, 'last_updated') && !date_delta(frontmatter(file, 'last_updated'), ctx.today, '14d')"
           action:
-              - message: "The provider **{{state.name}}** has research for **MCP** that is current; skipping updates"
+              - stderr: "The provider **{{state.name}}** has research for **MCP** that is current; skipping updates"
               - skip
 success:
     stack:
         - when: "frontmatter(file, 'last_updated') != ctx.today"
           action:
-              - stderr: "The step reported success but <b>{{file}}</b> was not updated — <code>last_updated</code> is not {{ctx.today}}."
+              - warn: "The step reported success but <b>{{file}}</b> was not updated — <code>last_updated</code> is not {{ctx.today}}."
               - error: "research file was not updated"
         - when: "frontmatter(file, 'last_updated') == ctx.today"
           action:
