@@ -18,10 +18,10 @@
     "reference": "code merely names a provider (fixtures, constructor arguments); nothing to migrate"
   },
   "totals": {
-    "sites": 434,
-    "provider_refs": 461,
+    "sites": 436,
+    "provider_refs": 463,
     "by_form": {
-      "direct-ref": 420,
+      "direct-ref": 422,
       "eq-comparison": 6,
       "matches-macro": 4,
       "ne-comparison": 3,
@@ -29,7 +29,7 @@
     },
     "by_dispatch_class": {
       "conditional": 14,
-      "reference": 420
+      "reference": 422
     }
   },
   "sites": [
@@ -2610,6 +2610,16 @@
       "exempt_candidate": false
     },
     {
+      "path": "claudine/cli/src/commands/wrap/profile/antigravity.rs",
+      "line": 24,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Antigravity"
+      ],
+      "exempt_candidate": true
+    },
+    {
       "path": "claudine/cli/src/commands/wrap/profile/claude.rs",
       "line": 12,
       "form": "direct-ref",
@@ -4327,6 +4337,16 @@
       "dispatch_class": "reference",
       "providers": [
         "Pi"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/main.rs",
+      "line": 33,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Antigravity"
       ],
       "exempt_candidate": true
     },
