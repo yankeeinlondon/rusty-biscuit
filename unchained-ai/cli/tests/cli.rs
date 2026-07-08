@@ -97,18 +97,30 @@ fn test_no_subcommand() {
 #[test]
 fn test_completions_bash() {
     let mut cmd = unchained();
-    cmd.arg("--completions")
+    cmd.arg("completions")
         .arg("bash")
         .assert()
         .success()
-        .stdout(predicate::str::contains("_unchained()"));
+        .stdout(predicate::str::contains("source <(COMPLETE=bash unchained)"));
 }
 
 #[test]
 fn test_completions_zsh() {
     let mut cmd = unchained();
-    cmd.arg("--completions")
+    cmd.arg("completions")
         .arg("zsh")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("source <(COMPLETE=zsh unchained)"));
+}
+
+/// The dynamic bootstrap line printed by `completions zsh` sets `COMPLETE=zsh`,
+/// which must make the binary emit the actual completion script rather than run
+/// a normal command.
+#[test]
+fn test_dynamic_completion_activation() {
+    let mut cmd = unchained();
+    cmd.env("COMPLETE", "zsh")
         .assert()
         .success()
         .stdout(predicate::str::contains("#compdef unchained"));
