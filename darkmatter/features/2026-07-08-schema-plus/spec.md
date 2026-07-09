@@ -1,7 +1,7 @@
 ---
 status: ready for planning and implementation
 reviewed: true
-review_iterations: 1
+review_iterations: 4
 inputs:
   - ../../lib/src/markdown/schemas/simplified/types.rs
   - ../../lib/src/markdown/schemas/simplified/grammar.rs
@@ -425,8 +425,13 @@ Rules:
 
 1. `example(<file>, …)` parses as a `Constraint`, resolves via magic paths +
    `this`, validates each example against the corrected `example.yaml` envelope at
-   load, and validates target-specific `parameters` against the inherited target
-   signature.
+   load, and validates a target-typed `returns` value against the annotated
+   property's compiled type. Target-specific `parameters` validate only against
+   the generic `parameter[]` shape (array of single-key maps, O-A4); validating
+   them against a **typed expression-function signature** (param names, arity,
+   per-param types) is **deferred to single-sourcing D7** per O-A1 — the function
+   catalog is untyped today, so there is no signature to inherit. When that
+   catalog is typed, this criterion extends to signature-aware parameter checks.
 2. `Name@fileref` and `Name@this` resolve named types across files, with cycle
    detection, unresolved-import conversion errors, and cache invalidation on
    referenced-file change.
