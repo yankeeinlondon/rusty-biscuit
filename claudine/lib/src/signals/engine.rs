@@ -8,8 +8,8 @@
 //!   `model_resolved` and `auth_kind_detected`) while same-kind fallbacks
 //!   stay mutually exclusive (`total_cost_usd` beats legacy `cost_usd`).
 //! - **Non-declarative records are skipped here.** Bespoke emitters construct
-//!   [`SignalEvent`]s directly and feed the same sink; documentation records
-//!   have no runtime detector at all. Neither carries declarative match fields.
+//!   [`SignalEvent`]s directly and feed the same sink; they carry no
+//!   declarative match fields.
 //! - **Version-range selection.** While the provider version is unknown the
 //!   candidate set is the UNION of all records (version-scoped included);
 //!   once [`SignalEngine::observe_provider_version`] sees a parsable
@@ -64,8 +64,8 @@ pub struct SignalEngine {
 impl SignalEngine {
     /// Compile `table` into priority-sorted per-(source, kind) groups.
     ///
-    /// Only declarative records enter the groups (bespoke and documentation
-    /// records carry no match fields). Regex compilation cannot fail for a
+    /// Only declarative records enter the groups (bespoke records carry no
+    /// match fields). Regex compilation cannot fail for a
     /// table the generator validated — the impossible-error branch skips the
     /// record with a `warn!` instead of panicking.
     pub fn new(table: &'static ProviderSignalTable) -> Self {

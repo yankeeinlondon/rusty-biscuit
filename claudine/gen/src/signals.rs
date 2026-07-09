@@ -278,7 +278,9 @@ fn check_match_terms(
         ));
     }
     let Some(op) = op else {
-        // Bespoke without match terms: documentation-only, nothing to gate.
+        // A bespoke record with no `match_op` is a cross-record/temporal
+        // detector — its firing lives in the behavior half, so there are no
+        // match terms to gate here.
         return Ok(());
     };
     if match_path.is_none() {

@@ -16,9 +16,6 @@
 //!   validated at generate time, not at match time.
 //! - Rows with `mode:` [`DetectionMode::Bespoke`] have a hand-written emitter
 //!   in the behavior half rather than the generic matcher.
-//! - Rows with `mode:` [`DetectionMode::Documentation`] are cataloged with NO
-//!   runtime detector yet — the escape hatch for a declared-but-unimplemented
-//!   surface; they never fire.
 
 use crate::signal::{DetectionMode, MatchOp, SignalKind, SignalSource};
 use crate::vocab::{Unit, Zone};

@@ -678,10 +678,8 @@ mod tests {
 
     /// The invariant this finding is about: every compiled
     /// [`DetectionMode::Bespoke`] record must have a registered replayer,
-    /// which proves a runtime detector exists. A cataloged-but-unwired surface
-    /// belongs in [`DetectionMode::Documentation`], not `Bespoke`, so
-    /// `signals check` cannot go green while a bespoke record silently lacks a
-    /// detector.
+    /// which proves a runtime detector exists, so `signals check` cannot go
+    /// green while a bespoke record silently lacks a detector.
     #[test]
     fn every_bespoke_record_has_a_registered_replayer() {
         use claudine_catalog_types::DetectionMode;
@@ -694,45 +692,11 @@ mod tests {
                     assert!(
                         bespoke_replayer(record.id).is_some(),
                         "bespoke record `{}` (provider `{}`) has no registered replayer — \
-                         wire a detector or mark it `detection: documentation`",
+                         wire a runtime detector/replayer",
                         record.id,
                         table.slug,
                     );
                 }
-            }
-        }
-    }
-
-    /// The two Antigravity app-log records are cataloged as
-    /// [`DetectionMode::Documentation`] (no runtime detector wired yet), so
-    /// they carry no match fields and are excluded from the declarative
-    /// matcher — they can never appear in `observe_detailed` output.
-    #[test]
-    fn antigravity_app_log_records_are_documentation_only_and_never_fire() {
-        use claudine_catalog_types::DetectionMode;
-
-        let table = detection_table("antigravity").expect("antigravity table");
-        let doc_ids = [
-            "app_log-provider_version-language-server",
-            "app_log-auth_invalid-not-logged-in",
-        ];
-        for id in doc_ids {
-            let record = table.records.iter().find(|r| r.id == id).expect(id);
-            assert_eq!(record.mode, DetectionMode::Documentation, "{id}");
-        }
-        let engine = SignalEngine::new(table);
-        let lines = [
-            json!("I0708 11:17:34 server.go:1380] Language server version: 1.1.0"),
-            json!("E0708 log.go:398] You are not logged into Antigravity."),
-        ];
-        for payload in &lines {
-            let fired: Vec<&str> = engine
-                .observe_detailed(SignalSource::AppLog, payload)
-                .iter()
-                .map(|obs| obs.record.id)
-                .collect();
-            for id in doc_ids {
-                assert!(!fired.contains(&id), "documentation record {id} fired: {fired:?}");
             }
         }
     }

@@ -137,10 +137,6 @@ struct ProviderReport {
     records: usize,
     positives_passed: usize,
     negatives_passed: usize,
-    /// Records cataloged with `detection: documentation` — no runtime detector
-    /// is wired yet, so they cannot fire. Tolerated (their evidence fixture is
-    /// still required), unlike a replayer-less bespoke record, which fails.
-    documentation_only: Vec<String>,
     exclusions_applied: Vec<String>,
     failures: Vec<String>,
 }
@@ -152,7 +148,6 @@ struct FleetReport {
     records: usize,
     positives_passed: usize,
     negatives_passed: usize,
-    documentation_only: usize,
     exclusions_applied: usize,
     failures: usize,
 }
@@ -226,7 +221,6 @@ fn run_check(args: CheckArgs) -> Result<()> {
         records: providers.iter().map(|p| p.records).sum(),
         positives_passed: providers.iter().map(|p| p.positives_passed).sum(),
         negatives_passed: providers.iter().map(|p| p.negatives_passed).sum(),
-        documentation_only: providers.iter().map(|p| p.documentation_only.len()).sum(),
         exclusions_applied: providers.iter().map(|p| p.exclusions_applied.len()).sum(),
         failures: providers.iter().map(|p| p.failures.len()).sum(),
         unused_exclusions,
@@ -242,25 +236,32 @@ fn run_check(args: CheckArgs) -> Result<()> {
     if fleet.failures > 0 {
         bail!("signals check failed with {} failure(s)", fleet.failures);
     }
+    // Every compiled record is a bespoke or declarative record that must
+    // positively replay on its own evidence (there is no skip path anymore):
+    // "verified == shipped" is mechanical. A subset run (`--provider`) is
+    // exempt because `records` then counts only the selected provider's rows,
+    // which `positives_passed` already matches when clean.
+    if fleet.positives_passed != fleet.records {
+        bail!(
+            "signals check: {} of {} records positively replayed — every compiled record must \
+             fire on its own evidence",
+            fleet.positives_passed,
+            fleet.records,
+        );
+    }
     Ok(())
 }
 
 fn render_fleet(fleet: &FleetReport) {
     for provider in &fleet.providers {
         log::data(&format!(
-            "{} — {} records: positives {}, negatives {}, documentation-only {}, exclusions {}",
+            "{} — {} records: positives {}, negatives {}, exclusions {}",
             provider.provider,
             provider.records,
             provider.positives_passed,
             provider.negatives_passed,
-            provider.documentation_only.len(),
             provider.exclusions_applied.len(),
         ));
-        for doc_only in &provider.documentation_only {
-            log::data(&format!(
-                "  [DOC-ONLY] {doc_only} (cataloged, no runtime detector wired)"
-            ));
-        }
         for info in &provider.exclusions_applied {
             log::data(&format!("  [INFO] exclusion: {info}"));
         }
@@ -272,11 +273,10 @@ fn render_fleet(fleet: &FleetReport) {
         log::data(&format!("[INFO] unused exclusion: {unused}"));
     }
     log::data(&format!(
-        "fleet: {} records checked — positives {} passed, negatives {} passed, documentation-only {}, exclusions {} applied, failures {}",
+        "fleet: {} records checked — positives {} passed, negatives {} passed, exclusions {} applied, failures {}",
         fleet.records,
         fleet.positives_passed,
         fleet.negatives_passed,
-        fleet.documentation_only,
         fleet.exclusions_applied,
         fleet.failures,
     ));
@@ -353,13 +353,6 @@ fn check_provider(
             continue;
         }
         match record.mode {
-            // Cataloged but unwired: no runtime detector, so it cannot fire.
-            // Tolerated (its evidence fixture existence was verified above),
-            // reported distinctly — never counted as a pass or a failure.
-            DetectionMode::Documentation => {
-                report.documentation_only.push(record.id.to_string());
-                continue;
-            }
             DetectionMode::Bespoke => {
                 match bespoke_replayer(record.id) {
                     Some(replay) => {
@@ -380,7 +373,7 @@ fn check_provider(
                     // emitter that does not exist.
                     None => report.failures.push(format!(
                         "record `{}`: bespoke record has no registered replayer — \
-                         wire a runtime detector/replayer or mark `detection: documentation`",
+                         wire a runtime detector/replayer",
                         record.id
                     )),
                 }
@@ -722,19 +715,6 @@ fn load_fixture_payloads(fixtures_dir: &Path, key: &str, slug: &str) -> Result<V
                 classification.to_signal_payload()
             })
             .collect()),
-        // Other providers' `.txt` fixtures are opaque plaintext side-channels —
-        // e.g. Antigravity's glog-style app log, whose records are
-        // `detection: documentation` and stay `[DOC-ONLY]` until a log-line
-        // classifier is wired (`requires_claudine_update`). Load each non-empty
-        // line as an opaque string payload: evidence-existence and
-        // negative-overlap checks pass without a classifier (no declarative
-        // record's match path navigates into a bare string, so nothing
-        // false-fires), and a future detector receives the raw lines to parse.
-        "txt" => Ok(text
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| Value::String(line.to_string()))
-            .collect()),
         other => bail!(
             "{}: unsupported fixture extension `{other}` for provider `{slug}`",
             path.display()
@@ -796,11 +776,11 @@ mod tests {
     }
 
     #[test]
-    fn antigravity_app_log_records_report_documentation_only_without_failure() {
-        // Real-corpus classification: the two `detection: documentation`
-        // Antigravity app-log records land in `documentation_only` (evidence
-        // existence still enforced by check_provider) and are NOT failures —
-        // the escape hatch a replayer-less bespoke record no longer gets.
+    fn antigravity_exit_records_positively_replay_and_no_app_log_records_remain() {
+        // Positive verification: both Antigravity `exit` auth records replay
+        // clean on their own evidence (positives_passed == records, no
+        // failures). The two former app-log records were moved to `gaps`, so
+        // the compiled table must carry no `app_log`-source record.
         let area = resolve_area().expect("rusty-biscuit checkout");
         let signals_dir = area.join("docs/research/signals");
         let fixtures_dir = signals_dir.join("fixtures");
@@ -812,20 +792,21 @@ mod tests {
         let mut used = BTreeSet::new();
         let report = check_provider(table, &signals_dir, &fixtures_dir, &[], &mut used)
             .expect("check_provider succeeds");
-        for id in [
-            "app_log-provider_version-language-server",
-            "app_log-auth_invalid-not-logged-in",
-        ] {
-            assert!(
-                report.documentation_only.iter().any(|doc| doc == id),
-                "`{id}` missing from documentation_only: {:?}",
-                report.documentation_only
-            );
-        }
         assert!(
             report.failures.is_empty(),
             "unexpected failures: {:?}",
             report.failures
+        );
+        assert_eq!(
+            report.positives_passed, report.records,
+            "every antigravity record must positively replay",
+        );
+        assert!(
+            !table
+                .records
+                .iter()
+                .any(|record| record.source == claudine::signals::SignalSource::AppLog),
+            "no antigravity record may observe the app_log source (moved to gaps)",
         );
     }
 
