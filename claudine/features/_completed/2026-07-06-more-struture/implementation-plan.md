@@ -49,9 +49,37 @@
   `start:`+`stop:` authoring and emits the variant; all 82 records regenerated
   `path:` → `ExtractStrategy::Path(...)`, gen byte-clean, zero behavior change. CLI
   `signals check` diagnostic updated. 4 new strategy unit tests. Closes two Cat 5
-  grammar gaps (Regex/StartStopTokens now research-usable). **Remaining in Cluster
-  0: the cap variant reshape (0a) + Layer A catalog (0b) + tz fix, riding on this
-  foundation.**
+  grammar gaps (Regex/StartStopTokens now research-usable).
+
+- **Cluster 0 — 0a (cap event reshape + tz fix) DONE (2026-07-09).**
+  `UsageWindow` (and its `SevenDayOpus` wart) retired. Both cap variants reshaped
+  to `{ model: CapScope, timeframe: Option<Quantity/*DurationSecs*/>, remaining:
+  Option<Quantity/*Percent*/>, resets_at|lifts_at, message }`. New `CapScope { All,
+  Specific(Cow<'static,str>) }` (serializes to a bare token; `Cow` unifies the
+  runtime owned token with static catalog `&'static str`). `event_builder` grew
+  `take_cap_scope`, dropped `take_window`; capped ⇒ `remaining Some(0%)` default,
+  approaching ⇒ `None`. **Claude cap records:** the two status-matched approaching
+  records replaced by one record per `rateLimitType` SDK token (usage, seven_day,
+  five_hour, seven_day_opus, seven_day_sonnet), each decomposing the combined token
+  into `model`/`timeframe` via `ExtractStrategy::Literal` — the ratified claude
+  mechanism (cap-model-design.md). 3 synthetic fixtures (five_hour/opus/sonnet,
+  `docs_example` provenance). **tz fix:** `parse_iso8601` now honors `zone: local`
+  (host-local → UTC at ingest); storage stays UTC; no report renders cap reset
+  times so no display-side conversion was missing. Schema sidecar extended for
+  `literal:`/`regex:`/`start:`+`stop:` authoring. Consumers (project bridge,
+  opencode reasoning UsageCapped, semantics tests, gen validation tests) updated.
+  gen byte-clean; signals check 85/85/0.
+
+- **Cluster 0 — 0b (Layer A cap-policy catalog) DONE (2026-07-09).** New
+  `CapPolicy { model: CapScope, timeframe: Quantity }` in catalog-types.
+  `ProviderInfo` gained `cap_policies: &'static [CapPolicy]` (a **Facts** field,
+  mirroring `billing_models`; sourced from `docs/providers/facts/<slug>.yaml`
+  `cap_policies: [{model, timeframe_secs}]`). Full one-change gen discipline:
+  registry entry + `Coercion::CapPolicyRecords` + `emit::cap_policies` +
+  regen-all `data.rs` + `catalog.json` + both field-list guards (42→43 fields) +
+  dispatch-inventory re-bless (pure line shifts, no new dispatch). Claude Max
+  populated: `(All,5h) (All,7d) (Opus,7d) (Sonnet,7d)`; other 9 providers `&[]`
+  pending research. `test`/`lint`/`test-gen`/`signals-check` green.
 
 ## Clusters and sequencing
 
