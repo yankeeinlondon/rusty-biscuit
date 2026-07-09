@@ -147,6 +147,20 @@ with D4 functions. This is a **breaking change** to the `ctx.*` surface, accepte
 because the monorepo has no external users (see Migration). The exact keep/rename
 list is enumerated during design.
 
+### D7 — Type the expression-function catalog
+
+`ExpressionFunctionDescriptor` currently carries only an untyped `signature` string
+(`as_csv(list)`) — no parameter types, no return type. Add typed signatures:
+per-parameter **data types** and a **return type** (data types, plus `error` as a
+union member for fallible functions — e.g. `as_csv(list: any[]) -> string | error`),
+using the type domains defined in
+[schema-plus](../2026-07-08-schema-plus/spec.md) (§ Type domains). This makes the
+catalog the single source of function types, so `example()` files inherit them
+(schema-plus O-A1, Solution 2) and DMLS / `md schema about` get real signatures.
+Functions remain **catalog-only** — a frontmatter property can never be typed as a
+function (schema-plus, structural exclusion). Prerequisite for the E3 function
+examples below.
+
 ## Consequences
 
 ### DMLS (dependent spec)

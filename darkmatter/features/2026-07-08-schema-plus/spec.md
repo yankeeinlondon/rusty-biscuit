@@ -1,5 +1,5 @@
 ---
-status: spike
+status: draft
 review_iterations: 0
 inputs:
   - ../../lib/src/markdown/schemas/simplified/types.rs
@@ -148,17 +148,21 @@ parameter:
     "<string>": any                     # any string key → any value (one pair; see arity)
 ```
 
-Key forms:
+Key forms (O-C1 resolved — ergonomic sugar for *literal* prefix/suffix, raw regex
+for anything more):
 
 - `<string>` — any string key. → JSON Schema `additionalProperties: <valueType>`.
-- `<starting::PREFIX>` — keys beginning with `PREFIX`.
-- `<ending::SET>` — keys ending with a char in `SET`.
+- `<starting::PREFIX>` — keys beginning with the **literal** string `PREFIX`.
+  Desugars to anchored `^PREFIX`.
+- `<ending::SUFFIX>` — keys ending with the **literal** string `SUFFIX`. Desugars
+  to `SUFFIX$`.
+- `<pattern::RE>` — a raw ECMA-262 regex escape hatch for sets/alternation/etc.,
+  reusing `Constraint::Pattern` directly (e.g. `<pattern::[0-9_]$>`).
 
-→ `<starting::>`/`<ending::>` compile to anchored `patternProperties` regexes.
-The `SET` mini-syntax (`[0-9,_]` = "a digit or `_`") is comma-separated members
-with ranges (`0-9`) and literals (`_`), compiled to an anchored regex char class
-(`[0-9_]$`). See O-C1 — we may instead accept raw ECMA-262 patterns, since
-`Constraint::Pattern` already exists.
+All three compile to `patternProperties` (one mechanism). There is **no** custom
+set mini-language — the earlier `<ending::[0-9,_]>` sketch becomes
+`<pattern::[0-9_]$>`, drawing the line exactly where the shorthand got ambiguous
+with real regex char classes.
 
 Rules:
 
@@ -172,16 +176,32 @@ Rules:
 
 Pattern-keyed objects match 0..N keys, but some shapes need a bounded count — a
 `parameter` must be **exactly one** key/value pair, yet `{ "<string>": any }`
-currently permits any number of keys. Add object **property-count constraints**:
+permits any number. Add object **property-count constraints** — the direct
+object-analog of the existing array `min-items(n)` / `max-items(n)`:
 
-- `min-keys(n)` / `max-keys(n)` → JSON Schema `minProperties` / `maxProperties`.
-- `parameter` becomes an exactly-one-pair map: `{ "<string>": any }` with
-  `min-keys(1); max-keys(1)`.
+- `min-keys(n)` / `max-keys(n)` → JSON Schema `minProperties` / `maxProperties`
+  (kebab-case canonical, matching `min-items` / `min-len`).
+- **Attach via a reserved `$constraints` metadata key** on the block object — the
+  ergonomic alternative to the ugly quoted-inline `{ … }(…)` string, keeping the
+  readable block form (and scaling to object arrays). It desugars to the *same*
+  canonical `Constraint`s the postfix form produces — **one model, two surfaces**:
 
-**O-C3** (open): how a constraint attaches to a *block-form* object value in YAML.
-The inline `{ … }(constraints)` postfix already exists in the grammar, but authors
-write `parameter` as a nested block mapping. Options: require the inline form for
-constrained objects, a dedicated count marker on the pattern key, or a metadata key.
+  ```yaml
+  parameter:
+      "<string>": any
+      $constraints:
+          min-keys: 1
+          max-keys: 1
+  ```
+
+  `$constraints` (dollar — mirrors the `$schema` convention) is **reserved**: it is
+  stripped before shape assembly and never participates in literal/pattern key
+  matching, so no data object may use `$constraints` as a real key. Flag constraints
+  (`required`, `not-empty`, …) are written `name: true`. The inline
+  `{ … }(min-keys(1); max-keys(1))` form remains valid and equivalent.
+
+No `keys(n)` exact-count shorthand — arrays have no `items(n)` sugar either, so
+this stays symmetric.
 
 ## Feature D — content-format string types (`yaml`, `json`)
 
@@ -222,6 +242,32 @@ Driver: `example.yaml`'s `invocation` union `{ frontmatter: yaml }`. Per O-A3 th
 `-fm` instance's native mapping is valid via coercion, so the driver stands and
 Feature D ships in v1.
 
+## Type domains and the `error` type
+
+Typing the function catalog (single-sourcing, O-A1) and prohibiting function-typed
+frontmatter partition the vocabulary into three domains:
+
+- **Data types** — frontmatter property values *and* function parameters. The
+  `SimplifiedType` set (`string`, `number`, `boolean`, `date`, `datetime`, `time`,
+  `object`, arrays, `file`, `url`, `email`, `yaml`, `json`, `any`). **No `error`,
+  no function types.**
+- **Return types** — function return positions. Data types **plus `error`**, as a
+  union member: a fallible function returns `<success> | error` (mirrors Rust
+  `Result<T, error>`), e.g. `as_csv(list: any[]) -> string | error`. Infallible
+  functions just return their success type.
+- **Function types** — signatures `(params) -> return`. A **catalog-domain**
+  concept only.
+
+Rules:
+
+- **Frontmatter properties are data-only.** A schema property may never be typed as
+  a function or as `error`; those keywords are not accepted in property-type
+  position — a **structural** exclusion, not a runtime check. `SimplifiedType` (the
+  frontmatter validator) is untouched by function typing.
+- **`error`** is a first-class type but appears only in **return** position (via a
+  union). It is the type-system anchor for typed expression errors (the future
+  real-errors story).
+
 ## Existing-code anchors
 
 - `Constraint` enum (`simplified/types.rs`) already has `Pattern(String)` (ECMA
@@ -236,16 +282,19 @@ Feature D ships in v1.
 
 ## Open decisions
 
-- **O-A1 — Example ↔ target consistency.** An example declares `type`/`parameters`
-  that duplicate the real signature of the annotated variable/function
-  (`today-example` says `type: date`; the schema already says `today: date`).
-  Options: (a) example omits type/params and inherits from the target; (b)
-  example declares them and they are **cross-checked** against the target at
-  load (drift guard); (c) purely documentary. **Leaning:** (b) — cheap drift
-  protection, keeps examples self-contained.
-- **O-A2 — When are example files validated?** At schema load (fail-loud) vs.
-  lazily on first read. **Leaning:** at load, behind the same resolution pass as
-  `$schema` refs.
+- **O-A1 — Example ↔ target consistency.** ✅ Resolved: **Solution 2 (inherit)** —
+  example files omit `type`/`parameters`; they derive from the target, so drift is
+  impossible. **Gated on Option A:** typing the expression-function catalog (return
+  type incl. `error`, param types), tracked in single-sourcing, since functions have
+  no declared types today. ctx-variable examples inherit from the base schema;
+  function examples inherit from the typed catalog. **Follow-up:** `example.yaml`
+  drops the `type`/`parameters` fields; `types.yaml`'s `type` enum / `parameter` are
+  repurposed as the function-signature vocabulary. File edits deferred until the
+  function catalog is typed.
+- **O-A2 — When are example files validated?** ✅ Resolved: **at schema load**
+  (eager, fail-loud), in the same resolution pass as `$schema` file refs, with
+  content-hash caching so warm reloads skip unchanged files. Lazy validation
+  rejected — it lets malformed examples lurk until viewed.
 - **O-A3 — Frontmatter-invocation shape.** ✅ Resolved: keep `{ frontmatter: yaml }`.
   The `yaml` type accepts **either** a YAML string **or** a native YAML structure,
   **coercing** native → its YAML-string serialization (like existing scalar
@@ -258,20 +307,41 @@ Feature D ships in v1.
   `type` enum is used only for the return `type`. Example input data has three
   sources: `parameters`, a frontmatter-invocation property, or a static literal in
   the invocation (`as_unordered_list("1,2,3")` — best for string params).
-- **O-C3 — Arity constraint attach-syntax.** How `min-keys`/`max-keys` attach to a
-  block-form object value (Feature C § Object arity). Property-count constraints
-  recommended; exact author-facing surface open.
-- **O-B1 — `@` grammar precedence** of `[]`/`()` vs `@`
-  (`(parameter[])@file` vs `parameter@(file...)`) and whether `@` is allowed in
-  arbitrary type positions or only top-level property types.
-- **O-B2 — What is importable.** Only top-level `$schema:` entries, or nested
-  named types too? Recommend top-level only for v1.
+- **O-C3 — Object arity + block-form constraints.** ✅ Resolved: add
+  `min-keys(n)` / `max-keys(n)` (object-analog of `min-items` / `max-items` →
+  `minProperties` / `maxProperties`), authored via a reserved **`$constraints`**
+  metadata key on block objects (desugars to the canonical `Constraint`s; reserved,
+  excluded from key matching; flags as `name: true`). The inline `{ … }(…)` form
+  stays equivalent. `parameter` = `{ "<string>": any }` + `$constraints: { min-keys:
+  1, max-keys: 1 }`. Residual design detail: exact `$constraints` scope/desugaring
+  rules (design phase).
+- **O-C4 — `$as_array` block-form array marker.** ⏸️ Deferred. A `$as_array: true`
+  key to wrap a block object in an array. Held off: cardinality already belongs at
+  the *use site* via the `[]` postfix (`parameter[]`), baking it into a named type
+  couples cardinality to the type, and `$as_array` + `$constraints` is ambiguous
+  (element- vs array-level). If a block-form *inline* object-array need appears,
+  prefer a `$array:` *scope* (presence ⇒ array; body carries array constraints)
+  over a boolean with a dead `false` no-op.
+- **O-B1 — `@` grammar precedence.** ✅ Resolved (Solution A): postfix `[]`/`()`
+  bind to the type name; `@fileref` is the **terminal** suffix (runs to the end of
+  the type expression — unambiguous, no filename-delimiter problem). Grammar:
+  `type_ref := base ('[]')? ('(' constraints ')')? '@' fileref`. `@` may appear in
+  any type-expression position (union arm, inline-object value, array element),
+  always terminal within that sub-expression.
+- **O-B2 — What is importable.** ✅ Resolved (Solution 1): `Name@file` resolves only
+  among a file's **top-level `$schema:` named types** (flat per-file namespace;
+  mirrors JSON Schema `$defs`/`$ref`). Reusing a nested shape means promoting it to
+  a named top-level type — intentional reuse, stable against internal reorg. `@this`
+  covers intra-file composition. No dotted-path imports.
 - **O-B3 — Recursive/self types.** ✅ Resolved (Feature B): named types form a DAG;
   a self-referential type is a recursion error in v1 (bounded expansion, mirrors
   the inline-object depth cap). `this` is allowed for non-recursive cross-references
   within a file. True recursive/reference types deferred.
-- **O-C1 — Pattern mini-syntax vs raw regex.** Adopt the `[0-9,_]` set shorthand,
-  or accept ECMA-262 patterns directly (reusing `Constraint::Pattern`), or both.
+- **O-C1 — Pattern-key matching.** ✅ Resolved (Solution 3): `<string>` (any),
+  literal-only `<starting::PREFIX>` / `<ending::SUFFIX>` sugar (desugars to anchored
+  `^PREFIX` / `SUFFIX$`), and a raw-regex `<pattern::RE>` escape hatch for
+  sets/alternation (reuses `Constraint::Pattern`). No custom set mini-language; all
+  lower to `patternProperties`. `<ending::[0-9,_]>` → `<pattern::[0-9_]$>`.
 - **O-C2 — Type vocabulary.** ✅ Resolved. `@`-import is **structural inline
   expansion** (Feature B); named types are ordinary definitions, so **no**
   recursive `type-expr` meta-primitive is introduced. The scalar enum `type` is
@@ -279,12 +349,14 @@ Feature D ships in v1.
   **values** (O-A4), so `parameter` is `{ "<string>": any }` — the `any[]` concern
   is moot (values are `any`). A `type-expr` string primitive remains a deferred
   escape hatch if precise param typing is ever wanted — out of v1 scope.
-- **O-D1 — Scope split.** Confirm this is its own feature with single-sourcing
-  depending on it (recommended), vs. folded into single-sourcing.
-- **O-D2 — Content-format family breadth (Feature D).** Ship `yaml` + `json` only
-  (concrete driver), or the full biscuit-file `DataFormat` set (`toml`, `json5`)
-  for symmetry? **Leaning:** `yaml` + `json` now; others on demand (each is a
-  one-line format registration).
+- **O-D1 — Scope split.** ✅ Resolved: schema-plus is its own feature; both
+  single-sourcing and modal-and-autocomplete depend on it (confirmed when the specs
+  were split).
+- **O-D2 — Content-format family breadth.** ✅ Resolved (Solution 3): ship `yaml` +
+  `json` now (the formats with concrete drivers); `toml` / `json5` are
+  **pre-blessed fast-follows** added when a driver appears. The format seam is
+  general, but their coercion nuances (TOML can't represent `null` / top-level
+  arrays; JSON5 is input-only) are best designed against a real use case.
 
 ## Acceptance criteria (draft)
 
