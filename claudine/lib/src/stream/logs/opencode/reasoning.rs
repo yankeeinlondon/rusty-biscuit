@@ -12,7 +12,9 @@ use chrono::{DateTime, Utc};
 use serde_json::{Map, Value, json};
 use tracing::{debug, warn};
 
-use crate::signals::{SignalEvent as TaxonomySignalEvent, SignalHub, SignalSource, UsageWindow};
+use claudine_catalog_types::{Quantity, Unit};
+
+use crate::signals::{CapScope, SignalEvent as TaxonomySignalEvent, SignalHub, SignalSource};
 use crate::stream::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use crate::stream::summary::{RateLimitInfo, StderrDiagnostics};
 
@@ -230,9 +232,15 @@ impl EarlyTermination {
             // stderr_promoted record; this bespoke mirror keeps parity with
             // the summary's cap semantics.
             Self::RateLimit { message, reset_at } => TaxonomySignalEvent::UsageCapped {
-                window: UsageWindow::Unknown,
+                // OpenCode's terminal cap payload names no model or window.
+                model: CapScope::All,
+                timeframe: None,
+                // A fired cap has zero capacity left (design convention).
+                remaining: Some(Quantity {
+                    value: 0.0,
+                    unit: Unit::Percent,
+                }),
                 lifts_at: *reset_at,
-                remaining: None,
                 message: Some(message.clone()),
             },
             Self::Timeout { message } => TaxonomySignalEvent::Timeout {

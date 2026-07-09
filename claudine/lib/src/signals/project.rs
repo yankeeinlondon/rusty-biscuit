@@ -81,7 +81,7 @@ fn quantity_to_millis(quantity: &Quantity) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use chrono::{DateTime, TimeZone, Utc};
-    use claudine_catalog_types::{SignalSource, UsageWindow};
+    use claudine_catalog_types::{CapScope, SignalSource};
 
     use super::*;
 
@@ -152,9 +152,10 @@ mod tests {
     fn usage_capped_projects_throttled_with_lifts_at_as_reset() {
         let lifts_at: DateTime<Utc> = Utc.timestamp_opt(1_712_000_000, 0).unwrap();
         let signals = vec![observed(SignalEvent::UsageCapped {
-            window: UsageWindow::FiveHour,
-            lifts_at: Some(lifts_at),
+            model: CapScope::All,
+            timeframe: None,
             remaining: None,
+            lifts_at: Some(lifts_at),
             message: Some("limit reached".into()),
         })];
         assert_eq!(
@@ -172,9 +173,10 @@ mod tests {
     fn last_relevant_observation_wins() {
         let signals = vec![
             observed(SignalEvent::UsageCapApproaching {
-                window: UsageWindow::Unknown,
-                resets_at: None,
+                model: CapScope::All,
+                timeframe: None,
                 remaining: None,
+                resets_at: None,
                 message: Some("approaching".into()),
             }),
             observed(SignalEvent::RateLimited {

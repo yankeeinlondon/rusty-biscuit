@@ -1,39 +1,81 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-05
-last_updated: 2026-07-06
+last_updated: 2026-07-09
 agent: codex
 model: default
 docs: https://code.claude.com/docs/en/agent-sdk/typescript
 records:
-  - id: stream-usage_cap_approaching-approaching_limit
+  - id: stream-usage_cap_approaching-usage
     signal: usage_cap_approaching
     source: stream
     locator: "type=rate_limit_event"
     detection: declarative
     priority: 10
-    match_path: rate_limit_info.status
+    match_path: rate_limit_info.rateLimitType
     match_op: eq
-    match_value: approaching_limit
-    distinguish: "This is an observed warning state: the account can still continue, but the current usage window is close to its cap. It differs from throttling because `is_throttled` is absent or false and no retry delay is required."
-    vocabulary: ["approaching_limit", "allowed_warning", "allowed", "rejected", "limited", "blocked"]
+    match_value: usage
+    distinguish: "`rateLimitType: usage` is the generic account-wide usage marker: it names neither a model tier nor a window duration, so it decomposes to `model: All` with no `timeframe`. A `rate_limit_event` carrying a `rateLimitType` is the informative approaching channel; active throttling arrives via `is_throttled`/`assistant.error` instead."
+    vocabulary: ["usage", "five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet", "seven_day_overage_included", "overage"]
     confidence: observed
     evidence: ./fixtures/claude/rate-limit-info-approaching.jsonl
-    notes: "The current SDK type no longer lists `approaching_limit`, but seeded live/test fixtures prove Claude Code has emitted it."
-  - id: stream-usage_cap_approaching-allowed_warning
+    notes: "Cap axes are decomposed from `rateLimitType` per the provider-neutral cap model (more-struture Cluster 0). This seeded fixture pairs `rateLimitType: usage` with the observed `status: approaching_limit`."
+  - id: stream-usage_cap_approaching-seven_day
     signal: usage_cap_approaching
     source: stream
     locator: "type=rate_limit_event"
     detection: declarative
-    priority: 20
-    match_path: rate_limit_info.status
+    priority: 11
+    match_path: rate_limit_info.rateLimitType
     match_op: eq
-    match_value: allowed_warning
-    distinguish: "This is a soft warning or notice state. It should not be treated as capped because requests are still allowed and `overageStatus` remains `allowed` in the fixture."
-    vocabulary: ["approaching_limit", "allowed_warning", "allowed", "rejected", "limited", "blocked"]
+    match_value: seven_day
+    distinguish: "`rateLimitType: seven_day` is the account-wide 7-day window (`model: All`, `timeframe: 604800s`), distinct from the model-scoped `seven_day_opus`/`seven_day_sonnet` variants."
+    vocabulary: ["usage", "five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet", "seven_day_overage_included", "overage"]
     confidence: source_code
     evidence: ./fixtures/claude/rate-limit-info-allowed-warning-seven-day.jsonl
-    notes: "SDK `0.3.201` includes `allowed_warning` in `SDKRateLimitInfo.status`."
+    notes: "SDK `0.3.201` lists `seven_day` in `SDKRateLimitInfo.rateLimitType`; the seeded fixture pairs it with `status: allowed_warning`."
+  - id: stream-usage_cap_approaching-five_hour
+    signal: usage_cap_approaching
+    source: stream
+    locator: "type=rate_limit_event"
+    detection: declarative
+    priority: 12
+    match_path: rate_limit_info.rateLimitType
+    match_op: eq
+    match_value: five_hour
+    distinguish: "`rateLimitType: five_hour` is the account-wide 5-hour window (`model: All`, `timeframe: 18000s`)."
+    vocabulary: ["usage", "five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet", "seven_day_overage_included", "overage"]
+    confidence: documented
+    evidence: ./fixtures/claude/rate-limit-info-five-hour.jsonl
+    notes: "SDK `0.3.201` declares `five_hour` in `SDKRateLimitInfo.rateLimitType`; no scrubbed real stream captured it, so the evidence is a synthetic fixture mirroring the observed `seven_day` shape."
+  - id: stream-usage_cap_approaching-seven_day_opus
+    signal: usage_cap_approaching
+    source: stream
+    locator: "type=rate_limit_event"
+    detection: declarative
+    priority: 13
+    match_path: rate_limit_info.rateLimitType
+    match_op: eq
+    match_value: seven_day_opus
+    distinguish: "`rateLimitType: seven_day_opus` is the Opus-scoped 7-day window (`model: Specific(opus)`, `timeframe: 604800s`) — the model tier is pinned in research via `literal: opus` because the wire bundles model and window into one token."
+    vocabulary: ["usage", "five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet", "seven_day_overage_included", "overage"]
+    confidence: documented
+    evidence: ./fixtures/claude/rate-limit-info-seven-day-opus.jsonl
+    notes: "SDK `0.3.201` declares `seven_day_opus`; evidence is a synthetic fixture (no scrubbed real stream captured it) mirroring the observed `seven_day` shape."
+  - id: stream-usage_cap_approaching-seven_day_sonnet
+    signal: usage_cap_approaching
+    source: stream
+    locator: "type=rate_limit_event"
+    detection: declarative
+    priority: 14
+    match_path: rate_limit_info.rateLimitType
+    match_op: eq
+    match_value: seven_day_sonnet
+    distinguish: "`rateLimitType: seven_day_sonnet` is the Sonnet-scoped 7-day window (`model: Specific(sonnet)`, `timeframe: 604800s`)."
+    vocabulary: ["usage", "five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet", "seven_day_overage_included", "overage"]
+    confidence: documented
+    evidence: ./fixtures/claude/rate-limit-info-seven-day-sonnet.jsonl
+    notes: "SDK `0.3.201` declares `seven_day_sonnet`; evidence is a synthetic fixture (no scrubbed real stream captured it) mirroring the observed `seven_day` shape."
   - id: stream-rate_limited-throttled
     signal: rate_limited
     source: stream
@@ -150,22 +192,53 @@ records:
     confidence: observed
     evidence: ./fixtures/claude/billing-error-synthetic-result.jsonl
 extractions:
-  - record: stream-usage_cap_approaching-approaching_limit
+  - record: stream-usage_cap_approaching-usage
     field: resets_at
     path: rate_limit_info.resetsAt
     unit: unix_seconds
     zone: utc
-  - record: stream-usage_cap_approaching-approaching_limit
-    field: window
-    path: rate_limit_info.rateLimitType
-  - record: stream-usage_cap_approaching-allowed_warning
+  - record: stream-usage_cap_approaching-seven_day
     field: resets_at
     path: rate_limit_info.resetsAt
     unit: unix_seconds
     zone: utc
-  - record: stream-usage_cap_approaching-allowed_warning
-    field: window
-    path: rate_limit_info.rateLimitType
+  - record: stream-usage_cap_approaching-seven_day
+    field: timeframe
+    literal: "604800"
+    unit: duration_secs
+  - record: stream-usage_cap_approaching-five_hour
+    field: resets_at
+    path: rate_limit_info.resetsAt
+    unit: unix_seconds
+    zone: utc
+  - record: stream-usage_cap_approaching-five_hour
+    field: timeframe
+    literal: "18000"
+    unit: duration_secs
+  - record: stream-usage_cap_approaching-seven_day_opus
+    field: resets_at
+    path: rate_limit_info.resetsAt
+    unit: unix_seconds
+    zone: utc
+  - record: stream-usage_cap_approaching-seven_day_opus
+    field: model
+    literal: opus
+  - record: stream-usage_cap_approaching-seven_day_opus
+    field: timeframe
+    literal: "604800"
+    unit: duration_secs
+  - record: stream-usage_cap_approaching-seven_day_sonnet
+    field: resets_at
+    path: rate_limit_info.resetsAt
+    unit: unix_seconds
+    zone: utc
+  - record: stream-usage_cap_approaching-seven_day_sonnet
+    field: model
+    literal: sonnet
+  - record: stream-usage_cap_approaching-seven_day_sonnet
+    field: timeframe
+    literal: "604800"
+    unit: duration_secs
   - record: stream-rate_limited-throttled
     field: retry_after
     path: retry_after_ms
@@ -235,6 +308,7 @@ gaps:
 changes:
   - "2026-07-06: rewrote the total_cost_usd, cost_usd, and apiKeySource numeric/any-value regex presence proxies to `match_op: exists`; retry_after extraction now uses the new `duration_millis` unit, and the unit-lie gap entry plus body quirk are removed."
   - "2026-07-06: renamed extraction fields to the canonical SignalEvent payload names — usage_cap_approaching `lifts_at` → `resets_at` (the variant field is `resets_at`; `lifts_at` belongs to usage_capped) and model_resolved `model` → `resolved`."
+  - "2026-07-09: replaced the two status-matched usage_cap_approaching records with one record per `rateLimitType` SDK token (usage, seven_day, five_hour, seven_day_opus, seven_day_sonnet), each decomposing the combined token into the provider-neutral cap axes via `ExtractStrategy::Literal` (model tier + timeframe seconds) per more-struture Cluster 0. The `window` extraction is retired. five_hour/seven_day_opus/seven_day_sonnet carry synthetic fixtures (SDK-declared tokens with no scrubbed real stream)."
 requires_claudine_update: true
 reason: "Claude Code signal detection is codegen-wired and this research adds declarative records for usage-cap warnings, throttling, billing/no-funds, model/auth metadata, token usage cost spellings, and a bespoke session-taint rule."
 ---
@@ -271,7 +345,7 @@ The SDK control channel contains request/response records for permission checks,
 
 Claude Code emits `rate_limit_event` for subscription usage windows and active throttling. Current SDK `SDKRateLimitInfo` declares `status` values `allowed`, `allowed_warning`, and `rejected`; optional fields include `resetsAt`, `rateLimitType`, `utilization`, `overageStatus`, `overageResetsAt`, `overageDisabledReason`, `errorCode`, and payment/credit booleans. Observed seeded fixtures additionally contain `status: "approaching_limit"` and legacy top-level `is_throttled`, `retry_after_ms`, and `message`.
 
-`usage_cap_approaching` maps to nested `rate_limit_info.status` warning states where work is still allowed. The fixture-backed values are `approaching_limit` and `allowed_warning`. `rateLimitType` is the window label; observed values include `usage` and `seven_day`, while SDK `0.3.201` declares `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`, `seven_day_overage_included`, and `overage`. `resetsAt` is a Unix seconds timestamp in UTC.
+`usage_cap_approaching` is keyed on `rate_limit_info.rateLimitType`, the combined window token. Under the provider-neutral cap model (more-struture Cluster 0) each token decomposes into the typed cap axes — `model` (`All`, or a `Specific` tier) and `timeframe` (a duration) — pinned in research via `ExtractStrategy::Literal` because the wire bundles both into one token: `usage` → `{All, no timeframe}`, `seven_day`/`five_hour` → `{All, 604800s/18000s}`, `seven_day_opus`/`seven_day_sonnet` → `{Specific(opus/sonnet), 604800s}`. Observed tokens are `usage` and `seven_day`; SDK `0.3.201` also declares `five_hour`, `seven_day_opus`, `seven_day_sonnet`, `seven_day_overage_included`, and `overage`. The overage spellings are billing state (out of the typed cap model) and carry no record. `resetsAt` is a Unix seconds timestamp in UTC. A `rate_limit_event` carrying a `rateLimitType` is the informative approaching channel; active throttling arrives via `is_throttled`/`assistant.error`.
 
 `rate_limited` maps to active throttling. The legacy/observed shape is `type: "rate_limit_event"`, `is_throttled: true`, optionally `retry_after_ms` and `message`. A second terminal form is `type: "assistant.error"` with `error.type: "rate_limit"`.
 

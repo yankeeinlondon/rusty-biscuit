@@ -6,10 +6,10 @@
 //! (e.g. `cache_read`, `cost`, `provider`, `session_id`) — they resolve but
 //! never reach the frozen variants, and are surfaced at debug level.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, TimeZone, Utc};
 use claudine_catalog_types::{
-    DetectionRecord, DriftObservation, ExtractStrategy, ExtractionSpec, Quantity, SignalEvent,
-    SignalKind, Unit, UsageWindow,
+    CapScope, DetectionRecord, DriftObservation, ExtractStrategy, ExtractionSpec, Quantity,
+    SignalEvent, SignalKind, Unit, Zone,
 };
 use regex::Regex;
 use serde_json::Value;
@@ -134,20 +134,14 @@ impl ResolvedFields {
         self.take_integer(name).and_then(|n| u32::try_from(n).ok())
     }
 
-    /// Missing or unrecognized window spellings collapse to
-    /// [`UsageWindow::Unknown`] instead of suppressing the event —
-    /// `Unknown` exists precisely for cap signals whose payload does not
-    /// name a window (codex/kilo/opencode/pi caps carry none).
-    fn take_window(&mut self, name: &str) -> UsageWindow {
-        match self.take_string(name).as_deref() {
-            Some("five_hour") => UsageWindow::FiveHour,
-            Some("seven_day") => UsageWindow::SevenDay,
-            Some("seven_day_opus") => UsageWindow::SevenDayOpus,
-            Some("monthly") => UsageWindow::Monthly,
-            // Observed claude spelling "usage" does not name a window;
-            // SDK-declared members without a taxonomy slot (seven_day_sonnet,
-            // overage, ...) land here too.
-            _ => UsageWindow::Unknown,
+    /// A `model` extraction naming a specific model tier narrows the cap
+    /// scope; its absence means the cap is account-wide ([`CapScope::All`]).
+    /// Claude's per-token cap records pin the model via `ExtractStrategy::
+    /// Literal`; providers whose cap payload names no model resolve to `All`.
+    fn take_cap_scope(&mut self, name: &str) -> CapScope {
+        match self.take_string(name) {
+            Some(model) => CapScope::Specific(model.into()),
+            None => CapScope::All,
         }
     }
 
@@ -244,7 +238,7 @@ fn convert(raw: &Value, spec: &ExtractionSpec) -> Option<ResolvedValue> {
         Some(Unit::UnixSeconds) => epoch_to_datetime(raw, 1.0),
         Some(Unit::UnixMillis) => epoch_to_datetime(raw, 1e3),
         Some(Unit::UnixNanos) => epoch_to_datetime(raw, 1e9),
-        Some(Unit::Iso8601) => parse_iso8601(raw.as_str()?).map(ResolvedValue::Timestamp),
+        Some(Unit::Iso8601) => parse_iso8601(raw.as_str()?, spec.zone).map(ResolvedValue::Timestamp),
         Some(
             unit @ (Unit::DurationSecs
             | Unit::DurationMillis
@@ -283,16 +277,27 @@ fn epoch_to_datetime(raw: &Value, per_second: f64) -> Option<ResolvedValue> {
     DateTime::<Utc>::from_timestamp(secs as i64, nanos).map(ResolvedValue::Timestamp)
 }
 
-/// RFC 3339 first; naive fallbacks are interpreted as UTC. For sites whose
-/// zone is `local`/`unspecified` that is an approximation — the corpus
-/// flags those through `known_gaps` rather than the engine guessing a zone.
-fn parse_iso8601(text: &str) -> Option<DateTime<Utc>> {
+/// RFC 3339 first (its embedded offset always wins). A naive timestamp is
+/// interpreted per the declared `zone`: `Zone::Local` converts host-local →
+/// UTC at ingest (storage is always UTC); every other zone — `Utc`,
+/// `EmbeddedOffset` (with no offset actually present), `Unspecified`, or an
+/// absent zone — assumes UTC. A `local` conversion that is ambiguous or
+/// nonexistent (DST boundaries) falls back to the earliest candidate, then to
+/// a UTC reading.
+fn parse_iso8601(text: &str, zone: Option<Zone>) -> Option<DateTime<Utc>> {
     if let Ok(at) = DateTime::parse_from_rfc3339(text) {
         return Some(at.with_timezone(&Utc));
     }
     for format in ["%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%d %H:%M:%S%.f"] {
         if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(text, format) {
-            return Some(naive.and_utc());
+            return Some(match zone {
+                Some(Zone::Local) => Local
+                    .from_local_datetime(&naive)
+                    .earliest()
+                    .map(|at| at.with_timezone(&Utc))
+                    .unwrap_or_else(|| naive.and_utc()),
+                _ => naive.and_utc(),
+            });
         }
     }
     None
@@ -330,15 +335,24 @@ pub(crate) fn build_event(
 fn build_from_fields(kind: SignalKind, f: &mut ResolvedFields) -> Option<SignalEvent> {
     let event = match kind {
         SignalKind::UsageCapApproaching => SignalEvent::UsageCapApproaching {
-            window: f.take_window("window"),
-            resets_at: f.take_datetime("resets_at"),
+            model: f.take_cap_scope("model"),
+            timeframe: f.take_quantity("timeframe"),
+            // Approaching with no counted remaining is known-low, exact %
+            // unknown → `None` (design ruling).
             remaining: f.take_quantity("remaining"),
+            resets_at: f.take_datetime("resets_at"),
             message: f.take_string("message"),
         },
         SignalKind::UsageCapped => SignalEvent::UsageCapped {
-            window: f.take_window("window"),
+            model: f.take_cap_scope("model"),
+            timeframe: f.take_quantity("timeframe"),
+            // A fired cap means zero capacity left: default to `Some(0%)`
+            // when the payload carries no explicit remaining (design ruling).
+            remaining: f.take_quantity("remaining").or(Some(Quantity {
+                value: 0.0,
+                unit: Unit::Percent,
+            })),
             lifts_at: f.take_datetime("lifts_at"),
-            remaining: f.take_quantity("remaining"),
             message: f.take_string("message"),
         },
         SignalKind::RateLimited => SignalEvent::RateLimited {
@@ -515,5 +529,41 @@ mod strategy_tests {
         assert_eq!(resolve_source(&payload, &re), None);
         let missing = ExtractStrategy::Path("absent");
         assert_eq!(resolve_source(&payload, &missing), None);
+    }
+}
+
+#[cfg(test)]
+mod timezone_tests {
+    use super::parse_iso8601;
+    use chrono::{Local, TimeZone};
+    use claudine_catalog_types::Zone;
+
+    /// An embedded offset always wins, regardless of the declared zone.
+    #[test]
+    fn rfc3339_offset_overrides_declared_zone() {
+        let parsed = parse_iso8601("2026-04-16T04:18:56+02:00", Some(Zone::Local)).unwrap();
+        assert_eq!(parsed.to_rfc3339(), "2026-04-16T02:18:56+00:00");
+    }
+
+    /// A naive `zone: utc` timestamp is read as UTC (the default behavior for
+    /// every zone except `local`).
+    #[test]
+    fn naive_utc_zone_reads_as_utc() {
+        let parsed = parse_iso8601("2026-04-16T04:18:56", Some(Zone::Utc)).unwrap();
+        assert_eq!(parsed.to_rfc3339(), "2026-04-16T04:18:56+00:00");
+    }
+
+    /// A naive `zone: local` timestamp is converted host-local → UTC at
+    /// ingest, matching an explicit `Local` interpretation of the same wall
+    /// clock (equals the UTC reading only on a UTC host).
+    #[test]
+    fn naive_local_zone_converts_host_local_to_utc() {
+        let parsed = parse_iso8601("2026-04-16T04:18:56", Some(Zone::Local)).unwrap();
+        let expected = Local
+            .with_ymd_and_hms(2026, 4, 16, 4, 18, 56)
+            .earliest()
+            .expect("wall clock is representable in the host zone")
+            .to_utc();
+        assert_eq!(parsed, expected);
     }
 }

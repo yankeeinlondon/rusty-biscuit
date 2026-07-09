@@ -82,8 +82,8 @@ fn wildcard_match_path_is_rejected() {
     let fixture = Fixture::new();
     fixture.replace(
         "claude",
-        "match_path: rate_limit_info.status",
-        "match_path: \"rate_limit_info[*].status\"",
+        "match_path: rate_limit_info.rateLimitType",
+        "match_path: \"rate_limit_info[*].rateLimitType\"",
     );
     match fixture.build().unwrap_err() {
         GenError::SignalRecordInvalid {
@@ -92,8 +92,9 @@ fn wildcard_match_path_is_rejected() {
             message,
         } => {
             assert!(path.ends_with("claude.md"), "{}", path.display());
-            assert_eq!(record, "stream-usage_cap_approaching-approaching_limit");
-            assert!(message.contains("rate_limit_info[*].status"), "{message}");
+            // First cap record in document order carries the doctored path.
+            assert_eq!(record, "stream-usage_cap_approaching-usage");
+            assert!(message.contains("rate_limit_info[*].rateLimitType"), "{message}");
             assert!(message.contains("not numeric"), "{message}");
         }
         other => panic!("expected SignalRecordInvalid, got: {other}"),
@@ -120,15 +121,15 @@ fn non_compiling_regex_is_rejected() {
 #[test]
 fn duplicate_priority_in_a_source_group_is_rejected() {
     let fixture = Fixture::new();
-    // claude stream priorities are 10, 20, ... — collide 20 into 10.
-    fixture.replace("claude", "priority: 20", "priority: 10");
+    // claude stream cap priorities are 10, 11, 12, ... — collide 11 into 10.
+    fixture.replace("claude", "priority: 11", "priority: 10");
     match fixture.build().unwrap_err() {
         GenError::SignalRecordInvalid {
             record, message, ..
         } => {
-            assert_eq!(record, "stream-usage_cap_approaching-allowed_warning");
+            assert_eq!(record, "stream-usage_cap_approaching-seven_day");
             assert!(
-                message.contains("duplicates record `stream-usage_cap_approaching-approaching_limit`"),
+                message.contains("duplicates record `stream-usage_cap_approaching-usage`"),
                 "{message}"
             );
             assert!(message.contains("`stream` source group"), "{message}");
@@ -143,7 +144,7 @@ fn dangling_extraction_reference_is_rejected() {
     let fixture = Fixture::new();
     fixture.replace(
         "claude",
-        "- record: stream-usage_cap_approaching-approaching_limit",
+        "- record: stream-usage_cap_approaching-usage",
         "- record: stream-usage_cap_approaching-vanished",
     );
     match fixture.build().unwrap_err() {

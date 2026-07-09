@@ -79,15 +79,28 @@ $schema:
     # bespoke in the behavior half.
     records: "{ id: string(required), signal: enum(usage_cap_approaching,usage_capped,rate_limited,provider_overloaded,retries_exhausted,no_funds,auth_invalid,auth_kind_detected,permission_denied_read,permission_denied_write,tokens_consumed,model_resolved,model_fallback,model_catalog_drift,provider_version,generation_retried,stalled_generation,repeated_stream_error,timeout,step_timeout,exit_expression,runaway_repetition,runaway_volume,unsupported_protocol_version,turn_limit_reached,session_time_limit_reached,interrupted,session_tainted,human_input_requested,session_resumable; required), source: enum(stream,session_log,app_log,sqlite,hook,stderr_diagnostic,stderr_promoted,acp,exit,wrapper; required), locator: string(required), detection: enum(declarative,bespoke; required), priority: number(required), match_path: string, match_op: enum(eq,in,substring_ci,regex,exists), match_value: string, match_values: string[], distinguish: string, vocabulary: string[], since: string, until: string, confidence: enum(inferred,documented,observed,source_code; required), evidence: string(required), notes: string }[]"
 
-    # Payload extraction paths for declarative records. One row per extracted
+    # Payload extraction sites for declarative records. One row per extracted
     # field, joined to `records` via the `record` key. The `field` name is the
-    # normalized payload field name in the signal's typed payload; `path` is
-    # the same restricted JSONPath subset as `match_path` (dot segments and
-    # numeric bracket indices ONLY — no wildcards, filters, or recursive
-    # descent). `unit` and `zone` are forced answers to the units/timezone
-    # questions; `zone: unspecified` is allowed but flows into `known_gaps`
-    # reporting, never silently passes.
-    extractions: "{ record: string(required), field: string(required), path: string(required), unit: enum(unix_seconds,unix_millis,unix_nanos,iso8601,duration_secs,duration_millis,percent,tokens,requests,usd), zone: enum(utc,local,embedded_offset,unspecified), notes: string }[]"
+    # normalized payload field name in the signal's typed payload.
+    #
+    # Each row selects ONE extraction strategy (mirrors catalog-types
+    # `ExtractStrategy`), by which keys are present:
+    #   - `path` alone           → walk the payload at that dot/bracket path
+    #     (the common case; the same restricted JSONPath subset as `match_path`
+    #     — dot segments and numeric bracket indices ONLY, no wildcards,
+    #     filters, or recursive descent);
+    #   - `literal`              → a constant declared by research, independent
+    #     of the payload (e.g. a decomposed cap axis when the provider bundles
+    #     several into one wire token; the value is passed through `unit`
+    #     conversion, so a `duration_secs` timeframe pins seconds like "604800");
+    #   - `regex` + `path`       → first capture group of the pattern applied
+    #     to the string at `path`;
+    #   - `start` + `stop` + `path` → the substring between the two markers.
+    # The generator rejects a row that names no strategy; `unit` and `zone`
+    # apply to whatever the strategy resolves. `unit` and `zone` are forced
+    # answers to the units/timezone questions; `zone: unspecified` is allowed
+    # but flows into `known_gaps` reporting, never silently passes.
+    extractions: "{ record: string(required), field: string(required), path: string, literal: string, regex: string, start: string, stop: string, unit: enum(unix_seconds,unix_millis,unix_nanos,iso8601,duration_secs,duration_millis,percent,tokens,requests,usd), zone: enum(utc,local,embedded_offset,unspecified), notes: string }[]"
 
     # Optional prose entries, one per bespoke record, saying WHY it cannot be
     # declarative. Per the ratified boundary: single-payload matching is

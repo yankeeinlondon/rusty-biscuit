@@ -53,6 +53,15 @@ fixtures:
   - file: claude/rate-limit-info-allowed-warning-seven-day.jsonl
     class: test_vector
     source: "providers/claude.rs:1386"
+  - file: claude/rate-limit-info-five-hour.jsonl
+    class: docs_example
+    source: "SDK 0.3.201 SDKRateLimitInfo.rateLimitType='five_hour'; synthetic rate_limit_event mirroring the observed seven_day shape (more-struture Cluster 0)"
+  - file: claude/rate-limit-info-seven-day-opus.jsonl
+    class: docs_example
+    source: "SDK 0.3.201 SDKRateLimitInfo.rateLimitType='seven_day_opus'; synthetic rate_limit_event mirroring the observed seven_day shape (more-struture Cluster 0)"
+  - file: claude/rate-limit-info-seven-day-sonnet.jsonl
+    class: docs_example
+    source: "SDK 0.3.201 SDKRateLimitInfo.rateLimitType='seven_day_sonnet'; synthetic rate_limit_event mirroring the observed seven_day shape (more-struture Cluster 0)"
   - file: claude/rate-limit-not-throttled.jsonl
     class: test_vector
     source: "providers/claude.rs:1421"

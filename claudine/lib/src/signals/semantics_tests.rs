@@ -3,7 +3,7 @@
 //! the ground truth for payload shapes.
 
 use chrono::DateTime;
-use claudine_catalog_types::{Quantity, SignalEvent, SignalKind, SignalSource, Unit, UsageWindow};
+use claudine_catalog_types::{CapScope, Quantity, SignalEvent, SignalKind, SignalSource, Unit};
 use serde_json::Value;
 
 use super::detection_table;
@@ -22,6 +22,9 @@ const CLAUDE_APPROACHING: &str = include_str!(
 );
 const CLAUDE_WARNING_SEVEN_DAY: &str = include_str!(
     "../../../docs/research/signals/fixtures/claude/rate-limit-info-allowed-warning-seven-day.jsonl"
+);
+const CLAUDE_SEVEN_DAY_OPUS: &str = include_str!(
+    "../../../docs/research/signals/fixtures/claude/rate-limit-info-seven-day-opus.jsonl"
 );
 const CLAUDE_BILLING_SYNTHETIC: &str = include_str!(
     "../../../docs/research/signals/fixtures/claude/billing-error-synthetic-result.jsonl"
@@ -212,12 +215,17 @@ fn opencode_usage_cap_pair_narrows_on_observed_version() {
     engine.observe_provider_version("1.17.7");
     assert_eq!(cap_record(&engine), Some("stderr_promoted-usage_capped-legacy"));
 
-    // The built event carries the ISO reset time as lifts_at.
+    // The built event carries the ISO reset time as lifts_at, the extracted
+    // `model_id` as a specific cap scope, and the fired-cap remaining default.
     let events = engine.observe(SignalSource::StderrPromoted, &payload);
     assert!(events.contains(&SignalEvent::UsageCapped {
-        window: UsageWindow::Unknown,
+        model: CapScope::Specific("glm-5.1".into()),
+        timeframe: None,
+        remaining: Some(Quantity {
+            value: 0.0,
+            unit: Unit::Percent,
+        }),
         lifts_at: Some(DateTime::parse_from_rfc3339("2026-04-16T04:18:56Z").unwrap().to_utc()),
-        remaining: None,
         message: Some(
             "Usage limit reached. Your limit will reset at 2026-04-16 04:18:56".to_string()
         ),
@@ -268,18 +276,48 @@ fn builder_converts_durations_and_epoch_seconds() {
     let resets_at = DateTime::from_timestamp(1_712_000_000, 0);
     let events = engine.observe(SignalSource::Stream, &line(CLAUDE_APPROACHING, 0));
     assert!(events.contains(&SignalEvent::UsageCapApproaching {
-        // Observed claude spelling "usage" names no taxonomy window.
-        window: UsageWindow::Unknown,
-        resets_at,
+        // The observed claude spelling "usage" is a generic account-wide
+        // marker: no model tier, no window duration.
+        model: CapScope::All,
+        timeframe: None,
         remaining: None,
+        resets_at,
         message: None,
     }));
 
     let events = engine.observe(SignalSource::Stream, &line(CLAUDE_WARNING_SEVEN_DAY, 0));
     assert!(events.contains(&SignalEvent::UsageCapApproaching {
-        window: UsageWindow::SevenDay,
-        resets_at,
+        // "seven_day" is account-wide with a 7-day (604800s) window.
+        model: CapScope::All,
+        timeframe: Some(Quantity {
+            value: 604_800.0,
+            unit: Unit::DurationSecs,
+        }),
         remaining: None,
+        resets_at,
         message: None,
     }));
+}
+
+/// A claude cap record decomposes the combined `rateLimitType` wire token
+/// into the provider-neutral cap axes via `ExtractStrategy::Literal`:
+/// `seven_day_opus` → `{model: Specific(opus), timeframe: 7d}` (more-struture
+/// Cluster 0). This is the mechanism the whole cap reshape exists to enable.
+#[test]
+fn claude_cap_record_decomposes_model_and_timeframe_via_literal() {
+    let mut engine = engine("claude");
+    let events = engine.observe(SignalSource::Stream, &line(CLAUDE_SEVEN_DAY_OPUS, 0));
+    assert!(
+        events.contains(&SignalEvent::UsageCapApproaching {
+            model: CapScope::Specific("opus".into()),
+            timeframe: Some(Quantity {
+                value: 604_800.0,
+                unit: Unit::DurationSecs,
+            }),
+            remaining: None,
+            resets_at: DateTime::from_timestamp(1_712_000_000, 0),
+            message: None,
+        }),
+        "got {events:?}"
+    );
 }
