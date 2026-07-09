@@ -417,6 +417,23 @@ fn coerce_property_union(arms: &[Value], value: &Value) -> Option<Value> {
     }
 }
 
+/// Coerces a single value against a single property schema, returning a coerced
+/// copy (or a clone when nothing coerces). Pure: never mutates the input.
+///
+/// Mirrors the per-arm coercion [`coerce_property_union`] applies, but for a lone
+/// value/schema pair rather than a property inside an object — e.g. an
+/// `example(...)` artifact's `returns` against its annotated target, where the
+/// schema describes the value directly (`{"type":"string","format":"darkmatter-yaml"}`)
+/// instead of an object with `properties`. A schema outside the coercion matrix
+/// (or an already-correctly-typed value) yields a plain clone, so this is safe to
+/// run before a strict validator.
+pub fn coerce_value_against_schema(schema: &Value, value: &Value) -> Value {
+    match coercion_target(schema) {
+        Some(target) => coerce_value(&target, value).unwrap_or_else(|| value.clone()),
+        None => value.clone(),
+    }
+}
+
 /// Applies a scalar/array/object coercion target to one value.
 ///
 /// Returns `Some(replacement)` when the value was converted, `None` to leave it
@@ -1826,6 +1843,36 @@ mod tests {
         let second = coerce_frontmatter(&schema, &first.value);
         assert!(!second.changed, "second run should be a no-op");
         assert_eq!(first.value, second.value);
+    }
+
+    #[test]
+    fn coerce_value_against_schema_serializes_native_values() {
+        // A lone value/schema pair (an example artifact's `returns` against its
+        // annotated target) serializes a native mapping/sequence to the format's
+        // string form, so a `type: string` validator then accepts it.
+        let yaml_target = json!({ "type": "string", "format": "darkmatter-yaml" });
+        let mapping = coerce_value_against_schema(&yaml_target, &json!({ "title": "Foo" }));
+        assert!(mapping.is_string(), "native mapping must coerce to a yaml string");
+
+        let json_target = json!({ "type": "string", "format": "darkmatter-json" });
+        assert_eq!(
+            coerce_value_against_schema(&json_target, &json!([1, 2, 3])),
+            json!("[1,2,3]")
+        );
+    }
+
+    #[test]
+    fn coerce_value_against_schema_passes_through_string_and_out_of_matrix() {
+        // An already-string value is returned unchanged (no double-encode), and a
+        // schema outside the coercion matrix (opaque `object`) yields a plain clone.
+        let yaml_target = json!({ "type": "string", "format": "darkmatter-yaml" });
+        assert_eq!(
+            coerce_value_against_schema(&yaml_target, &json!("title: Foo")),
+            json!("title: Foo")
+        );
+        let opaque = json!({ "type": "object" });
+        let value = json!({ "k": "v" });
+        assert_eq!(coerce_value_against_schema(&opaque, &value), value);
     }
 
     #[test]

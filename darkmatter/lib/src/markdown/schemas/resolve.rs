@@ -68,6 +68,13 @@ pub struct ResolvedSchema {
     /// [`ResolvedSchema::imports`], these are dependency edges for warm-cache /
     /// DMLS invalidation; the invalidation wiring itself is deferred.
     pub examples: Vec<PathBuf>,
+
+    /// Resolved paths of the schema FILES this `$schema` references directly:
+    /// the top-level referenced file (`$schema: ./schema.yaml`) and each
+    /// root-union string arm's file. Sorted, deduplicated. Empty for inline
+    /// `$schema` mappings. These are dependency edges: a change to the schema
+    /// file's own content must invalidate a cached effective schema.
+    pub referenced_files: Vec<PathBuf>,
 }
 
 /// Resolves a frontmatter `$schema` value into a JSON Schema.
@@ -118,6 +125,7 @@ pub fn resolve_yaml_schema(
                 origin: SchemaOrigin::document(),
                 imports,
                 examples,
+                referenced_files: Vec::new(),
             })
         }
         YamlValue::Sequence(items) => resolve_root_union(items, base_dir),
@@ -140,6 +148,7 @@ fn resolve_root_union(items: &[YamlValue], base_dir: &Path) -> Result<ResolvedSc
     let mut all_simplified_arms: Option<Vec<SchemaArm>> = Some(Vec::with_capacity(items.len()));
     let mut imports: BTreeSet<PathBuf> = BTreeSet::new();
     let mut examples: BTreeSet<PathBuf> = BTreeSet::new();
+    let mut referenced_files: BTreeSet<PathBuf> = BTreeSet::new();
     for item in items {
         match item {
             YamlValue::Mapping(_) => {
@@ -163,6 +172,7 @@ fn resolve_root_union(items: &[YamlValue], base_dir: &Path) -> Result<ResolvedSc
                 let resolved = resolve_reference(reference, base_dir)?;
                 imports.extend(resolved.imports.iter().cloned());
                 examples.extend(resolved.examples.iter().cloned());
+                referenced_files.extend(resolved.referenced_files.iter().cloned());
                 // If this arm itself came from a SimplifiedSchema file, preserve
                 // it in the simplified projection only when it is a single
                 // shape (root unions of unions are not modelled in v1).
@@ -199,6 +209,7 @@ fn resolve_root_union(items: &[YamlValue], base_dir: &Path) -> Result<ResolvedSc
         origin: SchemaOrigin::document(),
         imports: imports.into_iter().collect(),
         examples: examples.into_iter().collect(),
+        referenced_files: referenced_files.into_iter().collect(),
     })
 }
 
@@ -237,7 +248,10 @@ fn resolve_reference(reference: &str, base_dir: &Path) -> Result<ResolvedSchema,
     let mut resolved = load_schema_from_path(&path)?;
     // The schema was loaded from a file — record the resolved path so
     // diagnostics can point `relatedInformation` at the referenced source.
-    resolved.origin = SchemaOrigin::referenced_file(path);
+    resolved.origin = SchemaOrigin::referenced_file(path.clone());
+    // The referenced file's own content is a dependency edge: editing
+    // `schema.yaml`'s type must invalidate a cached effective schema.
+    resolved.referenced_files = vec![canonical_path(&path)];
     Ok(resolved)
 }
 
@@ -289,6 +303,9 @@ fn parse_yaml_referenced_file(path: &Path, bytes: &[u8]) -> Result<ResolvedSchem
             origin: SchemaOrigin::document(),
             imports,
             examples,
+            // The reference itself is recorded by `resolve_reference`, which
+            // wraps this loader; the file path is added there.
+            referenced_files: Vec::new(),
         });
     }
 
@@ -308,6 +325,7 @@ fn parse_yaml_referenced_file(path: &Path, bytes: &[u8]) -> Result<ResolvedSchem
         origin: SchemaOrigin::document(),
         imports: Vec::new(),
         examples: Vec::new(),
+        referenced_files: Vec::new(),
     })
 }
 
@@ -327,6 +345,7 @@ fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, Sc
         origin: SchemaOrigin::document(),
         imports: Vec::new(),
         examples: Vec::new(),
+        referenced_files: Vec::new(),
     })
 }
 
@@ -847,10 +866,23 @@ fn resolve_examples_in_json(
             if let Some(Value::Array(items)) = map.get("x-darkmatter-example")
                 && items.iter().all(Value::is_string)
             {
+                // The annotated target is this property's own compiled schema
+                // with the example annotation stripped — its sibling keys carry
+                // the property's value type, which each example's `returns` must
+                // match. Cloned before the annotation is overwritten below.
+                let mut target = map.clone();
+                target.remove("x-darkmatter-example");
+                let target = Value::Object(target);
                 let mut resolved = Vec::with_capacity(items.len());
                 for item in items {
                     let reference = item.as_str().expect("all-string checked above");
-                    resolved.push(resolve_one_example(reference, base_dir, this_file, deps)?);
+                    resolved.push(resolve_one_example(
+                        reference,
+                        base_dir,
+                        this_file,
+                        Some(&target),
+                        deps,
+                    )?);
                 }
                 map.insert("x-darkmatter-example".into(), Value::Array(resolved));
             }
@@ -879,11 +911,14 @@ fn resolve_examples_in_json(
 /// `this` targets the current schema file (`this_file`); every other value is a
 /// `biscuit-file` reference resolved relative to `base_dir` — the same
 /// resolution `$schema` file references use. The referenced file is validated
-/// against the example-artifact envelope with content-hash caching.
+/// against the example-artifact envelope with content-hash caching, then — when
+/// `target` is `Some` — its `returns` value is validated against the annotated
+/// property's target schema as a separate, un-cached gate.
 fn resolve_one_example(
     reference: &str,
     base_dir: &Path,
     this_file: Option<&Path>,
+    target: Option<&Value>,
     deps: &mut BTreeSet<PathBuf>,
 ) -> Result<Value, SchemaError> {
     let trimmed = reference.trim();
@@ -925,6 +960,12 @@ fn resolve_one_example(
         source,
     })?;
     let object = super::example::validate_example_bytes(reference, &bytes)?;
+    // Layer 3: the example's `returns` must match the property it annotates.
+    // Applied here (not inside the byte cache) so the same file validated
+    // against different targets never shares a target verdict.
+    if let Some(target) = target {
+        super::example::validate_returns_against_target(reference, &object, target)?;
+    }
     deps.insert(canonical_path(&path));
     Ok(object)
 }
@@ -1238,6 +1279,43 @@ mod tests {
         assert!(resolved.simplified.is_some());
         let required = resolved.json_schema["required"].as_array().unwrap();
         assert_eq!(required[0], "title");
+    }
+
+    #[test]
+    fn referenced_file_is_recorded_as_dependency_edge() {
+        // Editing `schema.yaml`'s own type must be able to invalidate a cached
+        // effective schema, so the referenced file itself is a dependency edge.
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_schema_file(
+            dir.path(),
+            "schema.yaml",
+            "$schema:\n  title: 'string(required)'\n",
+        );
+        let v = yaml_value("./schema.yaml");
+        let resolved = resolve_yaml_schema(&v, dir.path()).unwrap();
+        assert_eq!(resolved.referenced_files, vec![canonical_path(&path)]);
+    }
+
+    #[test]
+    fn inline_mapping_records_no_referenced_files() {
+        let v = yaml_value("title: 'string(required)'");
+        let resolved = resolve_yaml_schema(&v, Path::new(".")).unwrap();
+        assert!(resolved.referenced_files.is_empty());
+    }
+
+    #[test]
+    fn root_union_string_arm_records_referenced_file() {
+        // A root-union string arm's file is a dependency edge like a top-level
+        // referenced file; an inline arm contributes none.
+        let dir = tempfile::tempdir().unwrap();
+        let arm = write_schema_file(
+            dir.path(),
+            "arm.yaml",
+            "$schema:\n  title: 'string(required)'\n",
+        );
+        let v = yaml_value("- ./arm.yaml\n- name: string\n");
+        let resolved = resolve_yaml_schema(&v, dir.path()).unwrap();
+        assert_eq!(resolved.referenced_files, vec![canonical_path(&arm)]);
     }
 
     #[test]
@@ -1857,6 +1935,58 @@ mod schema_plus_phase1 {
                     "error must name the parameters failure: {message}"
                 );
             }
+            other => panic!("expected InvalidExample, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn example_returns_matching_target_type_resolves() {
+        // Positive guard: a required, concretely-typed property whose example
+        // `returns` matches the annotated target type resolves cleanly.
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "count-example.yaml",
+            "kind: example\ninvocation: \"count()\"\nreturns: 3\ndescription: d\n",
+        );
+        write(
+            dir.path(),
+            "main.yaml",
+            "$schema:\n  count: \"number(required; example(./count-example.yaml))\"\n",
+        );
+        let resolved =
+            resolve_file(dir.path(), "main.yaml").expect("matching-type example must resolve");
+        let examples = &resolved.json_schema["properties"]["count"]["x-darkmatter-example"];
+        assert_eq!(
+            examples[0]["kind"], "example",
+            "example must resolve when its `returns` matches the number target: {examples}"
+        );
+    }
+
+    #[test]
+    fn example_returns_wrong_target_type_is_a_schema_load_error() {
+        // The core gap this fix closes: a well-formed envelope whose `returns`
+        // is the wrong type for the annotated property (string `returns` on a
+        // `number` property) must fail at load with `InvalidExample`, not slip
+        // through because only the envelope was checked.
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "bad-returns.yaml",
+            "kind: example\ninvocation: \"count()\"\nreturns: \"not-a-number\"\ndescription: d\n",
+        );
+        write(
+            dir.path(),
+            "main.yaml",
+            "$schema:\n  count: \"number(required; example(./bad-returns.yaml))\"\n",
+        );
+        let err = resolve_file(dir.path(), "main.yaml")
+            .expect_err("wrong-typed example `returns` must error");
+        match err {
+            SchemaError::InvalidExample { message, .. } => assert!(
+                message.contains("annotated target type"),
+                "error must name the target-type mismatch: {message}"
+            ),
             other => panic!("expected InvalidExample, got {other:?}"),
         }
     }

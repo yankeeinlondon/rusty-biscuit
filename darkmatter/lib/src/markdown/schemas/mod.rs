@@ -288,6 +288,23 @@ impl DarkmatterSchemas {
         let validator = self.cache.validator_for(&merged_json, Some(&base_dir))?;
         let arm_validators = build_arm_validators(&merged_json, &self.cache, &base_dir)?;
         let origins = build_origin_map(resolved.as_ref(), &merged_json);
+        // Read the import/example dependency edges before the `resolved` value is
+        // consumed by the `.and_then(|r| r.simplified)` move below.
+        let dependencies = resolved
+            .as_ref()
+            .map(|r| {
+                let mut deps: Vec<PathBuf> = r
+                    .imports
+                    .iter()
+                    .chain(r.examples.iter())
+                    .chain(r.referenced_files.iter())
+                    .cloned()
+                    .collect();
+                deps.sort();
+                deps.dedup();
+                deps
+            })
+            .unwrap_or_default();
         Ok(Some(EffectiveSchema {
             simplified: resolved.and_then(|r| r.simplified),
             json_schema: merged_json,
@@ -296,6 +313,7 @@ impl DarkmatterSchemas {
             arm_validators,
             base_dir: Some(base_dir),
             file_ref_fallback_dir: self.cache.file_ref_fallback_dir().map(Path::to_path_buf),
+            dependencies,
         }))
     }
 
@@ -363,9 +381,33 @@ pub struct EffectiveSchema {
     /// Captured launch-area fallback the validator was built with, the second
     /// anchor for `format: darkmatter-file` re-resolution.
     file_ref_fallback_dir: Option<PathBuf>,
+    /// Resolved paths of the files this schema depends on: the sorted,
+    /// deduplicated union of the document `$schema`'s `Name@file`/`@this` imports
+    /// (Feature B), its `example(...)` artifacts (Feature A), and the referenced
+    /// schema files themselves (`$schema: ./schema.yaml` and each root-union
+    /// string arm). Empty when the document has an inline `$schema` mapping with
+    /// no imports/examples, or no `$schema` at all.
+    ///
+    /// Contract: these are dependency edges of the effective schema — a change to
+    /// any listed file's *content* (with the document text and schema config
+    /// otherwise unchanged) must invalidate a cached [`EffectiveSchema`]. The DMLS
+    /// overlay cache content-hashes each entry to honor this.
+    dependencies: Vec<PathBuf>,
 }
 
 impl EffectiveSchema {
+    /// The files this schema depends on (imports + examples + the referenced
+    /// schema files themselves), as resolved absolute/canonical paths, sorted and
+    /// deduplicated. Empty when the document has an inline `$schema` mapping with
+    /// no imports/examples, or no `$schema` at all.
+    ///
+    /// A change to any of these files' content invalidates this effective schema;
+    /// consumers that cache an [`EffectiveSchema`] keyed on document text must
+    /// also track these paths' content to stay correct.
+    pub fn dependencies(&self) -> &[PathBuf] {
+        &self.dependencies
+    }
+
     /// Validates a frontmatter JSON value against this schema. Equivalent to
     /// [`Self::validate_with_positions`] with an empty position map (problems
     /// will carry no line/column information).
@@ -2078,5 +2120,76 @@ mod tests {
             "expected the referenced file path, got {:?}",
             origin.uri,
         );
+    }
+
+    #[test]
+    fn dependencies_surface_import_and_example_edges() {
+        // A `$schema` that pulls in a `Name@file` import and an `example(...)`
+        // artifact surfaces both resolved paths on `EffectiveSchema::dependencies`
+        // so a warm cache can invalidate the schema when either file changes.
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("types.yaml"), "$schema:\n  type: 'enum(a, b)'\n")
+            .expect("write types");
+        std::fs::write(
+            dir.path().join("today-example.yaml"),
+            "kind: example\ninvocation: \"{{ ctx.today }}\"\nreturns: \"2024-12-25\"\ndescription: d\n",
+        )
+        .expect("write example");
+        let md = prompt_with_source(
+            dir.path(),
+            "$schema:\n  value: type@./types.yaml\n  today: \"date(example(./today-example.yaml))\"\nvalue: a\n",
+        );
+        let effective = DarkmatterSchemas::new()
+            .effective_for(&md)
+            .unwrap()
+            .unwrap();
+        let deps = effective.dependencies();
+        assert!(
+            deps.iter().any(|p| p.ends_with("types.yaml")),
+            "import edge missing: {deps:?}",
+        );
+        assert!(
+            deps.iter().any(|p| p.ends_with("today-example.yaml")),
+            "example edge missing: {deps:?}",
+        );
+        // The union is sorted and deduplicated.
+        let mut expected = deps.to_vec();
+        expected.sort();
+        expected.dedup();
+        assert_eq!(deps, expected.as_slice());
+    }
+
+    #[test]
+    fn dependencies_surface_referenced_schema_file() {
+        // A `$schema: ./schema.yaml` document depends on that file's content —
+        // editing the referenced schema's own type must invalidate a warm cache,
+        // so the resolved file surfaces on `EffectiveSchema::dependencies`.
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("schema.yaml"),
+            "$schema:\n  title: 'string(required)'\n",
+        )
+        .expect("write schema");
+        let md = prompt_with_source(dir.path(), "$schema: ./schema.yaml\ntitle: hi\n");
+        let effective = DarkmatterSchemas::new()
+            .effective_for(&md)
+            .unwrap()
+            .unwrap();
+        let deps = effective.dependencies();
+        assert!(
+            deps.iter().any(|p| p.ends_with("schema.yaml")),
+            "referenced schema file missing: {deps:?}",
+        );
+    }
+
+    #[test]
+    fn dependencies_empty_without_imports_or_examples() {
+        // The no-dependency fast path: a plain inline `$schema` records no edges.
+        let md = md_with_schema("$schema:\n  title: 'string(required)'\ntitle: hi\n");
+        let effective = DarkmatterSchemas::new()
+            .effective_for(&md)
+            .unwrap()
+            .unwrap();
+        assert!(effective.dependencies().is_empty());
     }
 }
