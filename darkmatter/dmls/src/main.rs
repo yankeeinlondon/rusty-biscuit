@@ -173,7 +173,10 @@ fn run_bench_index(dir: &Path, json: bool) -> ExitCode {
 /// Runs `--gen-corpus`: materialize a synthetic corpus tier, then exit.
 fn run_gen_corpus(tier_name: &str, dir: &Path) -> ExitCode {
     let Some(tier) = dmls::CorpusTier::parse(tier_name) else {
-        eprintln!("error: unknown corpus tier: {tier_name}");
+        eprintln!(
+            "error: unknown corpus tier: {tier_name}\n  known tiers: {}",
+            dmls::CorpusTier::NAMES.join(", ")
+        );
         return ExitCode::from(2);
     };
     match dmls::generate_corpus(tier, dir) {

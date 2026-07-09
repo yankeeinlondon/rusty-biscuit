@@ -21,6 +21,12 @@ pub enum CorpusTier {
     Vault5k,
     /// 5,000 files, dense cross-linking.
     Dense5k,
+    /// 5,000 files dense in Darkmatter DSL: `$schema` (file-ref + inline),
+    /// `file(...)`/image values, `::file`/`::code` transclusion, `{{ }}`
+    /// interpolation, and disclosures. Exercises the indexer's directive +
+    /// frontmatter stages and the `transcludes`/`uses_schema`/`uses_file`/
+    /// `uses_variable` edges that the other tiers leave empty.
+    Darkmatter5k,
     /// 1,000 files with adversarial content (huge files, Unicode, duplicate
     /// headings, deep nesting, broken links).
     Pathological1k,
@@ -29,6 +35,18 @@ pub enum CorpusTier {
 }
 
 impl CorpusTier {
+    /// Every tier name, for `--gen-corpus` help and error messages. Kept in sync
+    /// with [`parse`](Self::parse) by hand (both are exhaustive over the tiers).
+    pub const NAMES: &'static [&'static str] = &[
+        "tiny-100",
+        "small-1k",
+        "vault-5k",
+        "dense-5k",
+        "darkmatter-5k",
+        "pathological-1k",
+        "large-20k",
+    ];
+
     /// Parses a tier name (`tiny-100`, `small-1k`, …).
     pub fn parse(name: &str) -> Option<Self> {
         Some(match name {
@@ -36,6 +54,7 @@ impl CorpusTier {
             "small-1k" => Self::Small1k,
             "vault-5k" => Self::Vault5k,
             "dense-5k" => Self::Dense5k,
+            "darkmatter-5k" => Self::Darkmatter5k,
             "pathological-1k" => Self::Pathological1k,
             "large-20k" => Self::Large20k,
             _ => return None,
@@ -45,12 +64,18 @@ impl CorpusTier {
     /// The tier's generation spec.
     fn spec(self) -> TierSpec {
         match self {
-            Self::Tiny100 => TierSpec::new("tiny-100", 100, 5, 3, 5, false, false),
-            Self::Small1k => TierSpec::new("small-1k", 1_000, 8, 5, 6, false, false),
-            Self::Vault5k => TierSpec::new("vault-5k", 5_000, 6, 8, 4, true, false),
-            Self::Dense5k => TierSpec::new("dense-5k", 5_000, 20, 25, 8, true, false),
-            Self::Pathological1k => TierSpec::new("pathological-1k", 1_000, 40, 20, 9, true, true),
-            Self::Large20k => TierSpec::new("large-20k", 20_000, 10, 8, 5, true, false),
+            // Trailing bools are (wiki, pathological, dm).
+            Self::Tiny100 => TierSpec::new("tiny-100", 100, 5, 3, 5, false, false, false),
+            Self::Small1k => TierSpec::new("small-1k", 1_000, 8, 5, 6, false, false, false),
+            Self::Vault5k => TierSpec::new("vault-5k", 5_000, 6, 8, 4, true, false, false),
+            Self::Dense5k => TierSpec::new("dense-5k", 5_000, 20, 25, 8, true, false, false),
+            Self::Darkmatter5k => {
+                TierSpec::new("darkmatter-5k", 5_000, 6, 6, 10, true, false, true)
+            }
+            Self::Pathological1k => {
+                TierSpec::new("pathological-1k", 1_000, 40, 20, 9, true, true, false)
+            }
+            Self::Large20k => TierSpec::new("large-20k", 20_000, 10, 8, 5, true, false, false),
         }
     }
 
@@ -70,9 +95,15 @@ struct TierSpec {
     frontmatter_ratio: u32,
     wiki: bool,
     pathological: bool,
+    /// Emit Darkmatter DSL constructs so the indexer's directive + frontmatter
+    /// stages and the `transcludes`/`uses_schema`/`uses_file`/`uses_variable`
+    /// edges are exercised (the other tiers leave those empty).
+    dm: bool,
 }
 
 impl TierSpec {
+    // Positional by design: `spec()` reads as a compact one-line-per-tier table.
+    #[allow(clippy::too_many_arguments)]
     const fn new(
         name: &'static str,
         files: usize,
@@ -81,6 +112,7 @@ impl TierSpec {
         frontmatter_ratio: u32,
         wiki: bool,
         pathological: bool,
+        dm: bool,
     ) -> Self {
         Self {
             name,
@@ -90,6 +122,7 @@ impl TierSpec {
             frontmatter_ratio,
             wiki,
             pathological,
+            dm,
         }
     }
 }
@@ -116,6 +149,11 @@ impl Rng {
     }
 }
 
+/// SimplifiedSchema the DSL tier's `$schema: ./schema.yaml` file references
+/// resolve to. Only read request-time by the frontmatter provider, never during
+/// cold indexing, so its exact shape does not affect bench timings.
+const DM_SCHEMA: &str = "title: string\ncover: file\n";
+
 const WORDS: &[&str] = &[
     "alpha", "vector", "harbor", "signal", "ember", "quartz", "meadow", "cinder", "lattice",
     "orbit", "canyon", "delta", "prairie", "summit", "wander", "thistle", "beacon", "current",
@@ -129,6 +167,12 @@ pub fn generate_corpus(tier: CorpusTier, dir: &Path) -> io::Result<usize> {
     let spec = tier.spec();
     tracing::debug!(tier = spec.name, files = spec.files, "generating corpus");
     std::fs::create_dir_all(dir)?;
+    if spec.dm {
+        // The shared schema the DSL tier's `$schema: ./schema.yaml` refs resolve
+        // to. Not a `.md` file, so workspace discovery ignores it (it never
+        // inflates the document count).
+        std::fs::write(dir.join("schema.yaml"), DM_SCHEMA)?;
+    }
     for index in 0..spec.files {
         let content = generate_file(&spec, index);
         std::fs::write(dir.join(format!("note-{index}.md")), content)?;
@@ -146,6 +190,17 @@ fn generate_file(spec: &TierSpec, index: usize) -> String {
         out.push_str("---\n");
         out.push_str(&format!("title: {} {}\n", word(&mut rng), index));
         out.push_str(&format!("tags: [{}, {}]\n", word(&mut rng), word(&mut rng)));
+        if spec.dm {
+            // Half reference a shared schema file (→ `uses_schema` edge); half
+            // carry an inline object schema (→ index-time `file(...)` detection
+            // of `cover`). Either way `cover` is a `file(...)` value.
+            if index.is_multiple_of(2) {
+                out.push_str("$schema: ./schema.yaml\n");
+            } else {
+                out.push_str("$schema:\n  title: string\n  cover: file\n");
+            }
+            out.push_str(&format!("cover: ./img-{index}.png\n"));
+        }
         if spec.pathological {
             // A duplicate key and a Unicode value stress the frontmatter path.
             out.push_str("title: résumé café\n");
@@ -187,6 +242,24 @@ fn generate_file(spec: &TierSpec, index: usize) -> String {
         }
     }
 
+    if spec.dm {
+        // `{{ }}` interpolation → `uses_variable` edge to the `title`
+        // frontmatter key (plus an unresolved `ctx.*` reference).
+        out.push_str("Rendered from {{ title }} on {{ ctx.date }}.\n\n");
+        // Image → `uses_file` edge.
+        out.push_str(&format!("![cover](./img-{index}.png)\n\n"));
+        // Transclusion → `transcludes` edge + directive scan.
+        let target = rng.below(spec.files);
+        out.push_str(&format!("::file ./note-{target}.md\n\n"));
+        if rng.below(3) == 0 {
+            out.push_str("::code ./example.rs\n\n");
+        }
+        // A disclosure block exercises the block scanner (no graph edge).
+        if index.is_multiple_of(4) {
+            out.push_str("::disclosure Notes\n::details\nHidden **body** text.\n::end-disclosure\n\n");
+        }
+    }
+
     if spec.pathological && index.is_multiple_of(50) {
         // A handful of very large files to stress read/parse budgets.
         for filler in 0..2_000 {
@@ -218,7 +291,34 @@ mod tests {
     fn test_tier_parse_round_trip() {
         assert_eq!(CorpusTier::parse("tiny-100"), Some(CorpusTier::Tiny100));
         assert_eq!(CorpusTier::parse("dense-5k"), Some(CorpusTier::Dense5k));
+        assert_eq!(
+            CorpusTier::parse("darkmatter-5k"),
+            Some(CorpusTier::Darkmatter5k)
+        );
         assert_eq!(CorpusTier::parse("nope"), None);
+        // NAMES must stay in sync with parse (both exhaustive over the tiers).
+        for name in CorpusTier::NAMES {
+            assert!(CorpusTier::parse(name).is_some(), "NAMES has stray {name}");
+        }
+    }
+
+    #[test]
+    fn test_darkmatter_tier_emits_dsl_constructs() {
+        // index 0 → the file-ref `$schema` and disclosure branches are both taken.
+        let content = generate_file(&CorpusTier::Darkmatter5k.spec(), 0);
+        assert!(content.contains("$schema: ./schema.yaml"), "{content}");
+        assert!(content.contains("cover: ./img-0.png"), "{content}");
+        assert!(content.contains("{{ title }}"), "{content}");
+        assert!(content.contains("![cover](./img-0.png)"), "{content}");
+        assert!(content.contains("::file ./note-"), "{content}");
+        assert!(content.contains("::disclosure"), "{content}");
+        // Odd index → the inline object `$schema` branch.
+        let inline = generate_file(&CorpusTier::Darkmatter5k.spec(), 1);
+        assert!(inline.contains("$schema:\n  title: string"), "{inline}");
+        // Plain tiers stay free of DSL constructs.
+        let plain = generate_file(&CorpusTier::Small1k.spec(), 0);
+        assert!(!plain.contains("::file"), "{plain}");
+        assert!(!plain.contains("$schema"), "{plain}");
     }
 
     #[test]

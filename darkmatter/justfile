@@ -350,6 +350,30 @@ bench-compare name:
     @echo -e "Comparing against Criterion baseline {{ BOLD }}{{ name }}{{ RESET }}"
     @cargo bench -p {{ LIBRARY }} --benches -- --baseline {{ name }}
 
+# bench the DMLS workspace indexer against a deterministic synthetic corpus.
+# The tier is generated once under the gitignored root target/ and reused; the
+# generator is seeded (byte-identical run to run), so `rm -rf` it to refresh.
+# darkmatter-5k (default) is DSL-dense (directives/$schema/interpolation edges);
+# bench vault-5k for a same-size plain-Markdown/wiki control to isolate DSL cost.
+# Usage: `just bench-dmls [tier] [--json]`
+# tiers: tiny-100 | small-1k | vault-5k | dense-5k | darkmatter-5k (default) | pathological-1k | large-20k
+bench-dmls tier="darkmatter-5k" *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    corpus="../target/dmls-bench/{{ tier }}"
+    echo -e "Building {{ BOLD }}{{ DMLS_NAME }}{{ RESET }} {{ DIM }}(release){{ RESET }}"
+    cargo build -p {{ DMLS }} --release
+    bin="../target/release/dmls"
+    if [[ -d "$corpus" ]]; then
+        echo -e "{{ DIM }}Reusing {{ tier }} corpus at $corpus (rm -rf to regenerate){{ RESET }}"
+    else
+        echo -e "Generating {{ BOLD }}{{ tier }}{{ RESET }} corpus → $corpus"
+        "$bin" --gen-corpus "{{ tier }}" "$corpus"
+    fi
+    echo
+    echo -e "Bench-indexing {{ BOLD }}{{ tier }}{{ RESET }}"
+    "$bin" --bench-index "$corpus" {{ args }}
+
 # Run the latest debug build of the Claudine CLI
 cli *args="":
     @cargo run -p {{ CLI }} {{ args }}
