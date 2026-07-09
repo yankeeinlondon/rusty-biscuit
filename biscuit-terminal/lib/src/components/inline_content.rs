@@ -18,6 +18,15 @@ use crate::utils::layout::Layout;
 /// does not add line breaks between items. This makes it ideal for creating
 /// horizontal sequences of text, styled spans, or comma-separated lists.
 ///
+/// ## Layout & Style Contract
+///
+/// `InlineContent` is an inline sequence component (spec C7). It carries no
+/// block box, so `Layout` box properties (`margin`, `padding`, `width`,
+/// `max_width`, `alignment`) are **N/A** — the containing block owns the box.
+/// `Style::color` and `Style::emphasis` flow through child components such as
+/// [`Prose`]. `Style::background` may be honored by an inline `Span` child,
+/// painting only the inline content. `Style::border` is N/A.
+///
 /// ## Examples
 ///
 /// ```

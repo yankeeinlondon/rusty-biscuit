@@ -45,6 +45,7 @@ default:
 
 # Build the library and CLI
 build *args="":
+    @just _build biscuit-terminal "Biscuit Terminal" {{ args }}
     @just _build worktree "Worktree Library" {{ args }}
     @just _build worktree-cli "Worktree CLI" {{ args }}
 

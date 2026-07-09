@@ -2,6 +2,9 @@ use crate::args::LayoutArgs;
 use crate::commands::shared::*;
 use crate::output::RenderMeta;
 use biscuit_terminal::components::mermaid::MermaidDiagram;
+use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::components::section::{HeadingLevel, Section};
 use biscuit_terminal::terminal::Terminal;
 use std::time::Instant;
 
@@ -54,14 +57,14 @@ pub fn display_mermaid(
     layout: &LayoutArgs,
     meta: bool,
     debug: bool,
+    terminal: &Terminal,
 ) -> color_eyre::Result<()> {
     let start_time = Instant::now();
-    let terminal = Terminal::new();
 
-    let result = match diagram.try_render(&terminal) {
+    let result = match diagram.try_render(terminal) {
         Ok(result) => result,
         Err(e) => {
-            return handle_mermaid_error(e, instructions, diagram_type);
+            return handle_mermaid_error(e, instructions, diagram_type, terminal);
         }
     };
 
@@ -103,10 +106,9 @@ pub fn handle_mermaid_error(
     error: biscuit_terminal::components::mermaid::MermaidRenderError,
     instructions: &str,
     diagram_type: &str,
+    term: &Terminal,
 ) -> color_eyre::Result<()> {
     use biscuit_terminal::components::mermaid::MermaidRenderError;
-
-    let s = crate::types::CliStyles::detect();
 
     match error {
         MermaidRenderError::NoImageSupport => {
@@ -116,20 +118,29 @@ pub fn handle_mermaid_error(
             Ok(())
         }
         MermaidRenderError::Visualization(ref viz_err) => {
-            eprintln!();
-            eprintln!("{}{}Error:{} {}", s.red, s.bold, s.reset, viz_err);
-            eprintln!(
-                "\n{}Mermaid {} was defined as:{}\n",
-                s.dim, diagram_type, s.reset
-            );
-            eprintln!("```mermaid\n{}\n```", instructions);
+            let mut section = Section::new(HeadingLevel::h3, "Error");
+            section.push(Prose::new(format!(
+                "<red><b>Error:</b></red> {}",
+                Prose::escape_text(&viz_err.to_string())
+            )));
+            section.push(Prose::new(format!(
+                "<dim>Mermaid {} was defined as:</dim>",
+                diagram_type
+            )));
+            section.push(Prose::new(format!(
+                "```mermaid\n{}\n```",
+                Prose::escape_text(instructions)
+            )));
+            eprintln!("{}", section.render(term));
             Err(color_eyre::eyre::eyre!("{}", viz_err))
         }
         MermaidRenderError::DisplayError(ref msg) => {
-            eprintln!(
-                "{}{}Error:{} Failed to display image: {}",
-                s.red, s.bold, s.reset, msg
-            );
+            let mut section = Section::new(HeadingLevel::h3, "Error");
+            section.push(Prose::new(format!(
+                "<red><b>Error:</b></red> Failed to display image: {}",
+                Prose::escape_text(msg)
+            )));
+            eprintln!("{}", section.render(term));
             Err(color_eyre::eyre::eyre!("Failed to display image: {}", msg))
         }
     }

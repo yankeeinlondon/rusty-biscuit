@@ -558,3 +558,124 @@ fn tree_render_skips_sgr_at_color_depth_none() {
         "no ANSI escapes when terminal lacks color support: {out:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Width-mode slack sink (style-everywhere Phase 2, Task 2.7)
+//
+// Progress is an internal-layout component. The shared render-tree fold
+// resolves the outer box from `Layout::width`; the bar track renders at its
+// explicit `bar_width` (default 20). The bar track is the documented slack
+// sink (spec D2): when the box is too narrow for `label + brackets + bar +
+// percentage`, the bar gives way; the label, brackets, and percentage stay
+// at their natural widths.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn width_auto_outer_box_fills_available() {
+    // Width::Auto is the default. The bar renders at bar_width (default 20),
+    // the outer box is the available width, and alignment applies. With no
+    // alignment the rendered line is left-aligned at the available width.
+    use biscuit_terminal::utils::layout::{Alignment, Layout};
+    let mut bar = Progress::new(0.5).with_label("Loading");
+    bar.layout_mut().width = biscuit_terminal::utils::layout::Width::Auto;
+    bar.layout_mut().alignment = Alignment::Center;
+    bar.layout_mut().margin = Default::default();
+    let _ = Layout::default();
+    let term = test_terminal(80);
+    let out = strip_ansi(&bar.render(&term));
+    // The bar track (20 cells) + label + brackets + percentage is well under
+    // 80 columns; under center alignment the line is padded symmetrically.
+    assert!(
+        out.lines().any(|l| l.starts_with(' ') && l.contains('[')),
+        "Width::Auto + center alignment centers the bar within the available width: {out:?}"
+    );
+}
+
+#[test]
+fn width_fixed_percent_50_does_not_double_apply() {
+    // Width::Fixed(50%) resolves the outer box to 50% of available. The bar
+    // still renders at its full bar_width — the box does NOT re-resolve the
+    // percentage against itself. A bar width of 20 + the label + brackets +
+    // percentage (~30 cells total) fits inside the 40-cell box.
+    use biscuit_terminal::utils::layout::{Length, TargetValue, Width};
+    let mut bar = Progress::new(0.5).with_label("Loading");
+    bar.layout_mut().width =
+        Width::Fixed(TargetValue::universal(Length::Percent(50.0)));
+    bar.layout_mut().margin = Default::default();
+    let node = bar.render_tree_node().expect("tree node");
+    let out = render_tree(&node, 80);
+    let stripped = strip_ansi(&out);
+    let widest = stripped
+        .lines()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0);
+    assert!(
+        widest <= 40,
+        "Fixed(50%) caps the outer box at 40 cells: widest={widest}"
+    );
+    // The bar's 10 fill chars (50% of bar_width 20) and 10 empty chars must
+    // still be present — they were not re-resolved to 5+5 (which would be
+    // the double-application bug).
+    assert!(
+        stripped.contains(&"█".repeat(10)),
+        "bar fill is the full 10 chars (50% of bar_width 20, not 50% of 50%): {stripped:?}"
+    );
+}
+
+#[test]
+fn width_fit_content_hugs_bar_track() {
+    // FitContent hugs the natural width. The natural width is the bar track
+    // (20) + label + brackets + percentage; the rendered line is well below
+    // the 80-column available width and is not padded.
+    use biscuit_terminal::utils::layout::Width;
+    let mut bar = Progress::new(0.5).with_label("Loading");
+    bar.layout_mut().width = Width::FitContent;
+    bar.layout_mut().margin = Default::default();
+    let node = bar.render_tree_node().expect("tree node");
+    let out = render_tree(&node, 80);
+    let stripped = strip_ansi(&out);
+    let widest = stripped
+        .lines()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0);
+    assert!(
+        widest < 80,
+        "FitContent hugs the bar track natural width and does not pad to full available: widest={widest}"
+    );
+    assert!(
+        widest > 20,
+        "FitContent does not collapse the bar: widest={widest}"
+    );
+}
+
+#[test]
+fn bar_track_is_the_slack_sink_when_box_is_narrow() {
+    // D2 slack sink: when the outer box (Layout::width Fixed small) is
+    // narrower than the natural `label + brackets + bar + percentage` width,
+    // the rendered output clamps inside the box. The label, brackets, and
+    // percentage are fixed-width; the bar is the conceptual slack absorber.
+    use biscuit_terminal::utils::layout::{Length, TargetValue, Width};
+    let mut bar = Progress::new(0.5).with_label("Loading");
+    bar.layout_mut().width = Width::Fixed(TargetValue::universal(Length::ch(60)));
+    bar.layout_mut().margin = Default::default();
+    let node = bar.render_tree_node().expect("tree node");
+    let out = render_tree(&node, 80);
+    let stripped = strip_ansi(&out);
+    let widest = stripped
+        .lines()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0);
+    assert!(
+        widest <= 60,
+        "Fixed(60ch) caps the outer box at 60 cells: widest={widest}"
+    );
+    // The fixed-width chrome (label "Loading", brackets `[` `]`, percentage
+    // ` 50%`) all survive — they are not the slack sink.
+    assert!(stripped.contains("Loading"), "label is fixed: {stripped:?}");
+    assert!(stripped.contains('['), "left bracket is fixed: {stripped:?}");
+    assert!(stripped.contains(']'), "right bracket is fixed: {stripped:?}");
+    assert!(stripped.contains("50%"), "percentage is fixed: {stripped:?}");
+}

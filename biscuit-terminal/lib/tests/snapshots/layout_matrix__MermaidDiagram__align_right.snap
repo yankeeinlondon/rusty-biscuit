@@ -1,0 +1,15 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: block
+---
+VIA_RENDER
+                                                               [```mermaid
+                                                               flowchart LR
+                                                                   A --> B --> C
+                                                               ```]
+---
+VIA_TREE_DIRECT
+                                                               [```mermaid
+                                                               flowchart LR
+                                                                   A --> B --> C
+                                                               ```]

@@ -1,0 +1,11 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: block
+---
+VIA_RENDER
+
+ [[Image: tiny.png]]
+---
+VIA_TREE_DIRECT
+
+ [[Image: tiny.png]]

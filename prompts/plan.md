@@ -1,18 +1,17 @@
 ---
 $schema:
-    spec: file(required;match(**/*spec*.md))
+    spec: file(required;match(**/*spec*.md);eager)
     design: file(match(**/*design*.md))
+    plan: file
+    
 description: "Creates a multi-phase, high confidence plan from a _feature_ or _fix_"
 root: "{{ctx.repo_root}}"
 area: "{{ctx.current_package_area == 'root' ? ctx.current_package || '' : ctx.current_package_area}}"
-dir: "$(dirname '{{ spec }}')"
-spec: ""
-design: ""
-plan: "plan.md"
+plan: "{{ dirname(spec) + '/spec.md' }}"
 start:
     message: "🖊️ creating a plan for the `{{spec}}` specification"
 success:
-    stderr: "The `{{area}}/{{dir}}/{{plan}}` _plan_ has been created"
+    stderr: "The `{{plan}}` _plan_ has been created"
     message: "✅  the _plan_ for the spec `{{spec}}` was created _at_ {{ctx.time}}"
 failure:
     message: "❌️  the _plan_ for the spec `{{spec}}` failed to complete!"

@@ -2,6 +2,7 @@ use renderable::browser::PageOptions;
 use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::html::HtmlPage;
 use renderable::markdown::MarkdownRenderable;
+use renderable::style::Style;
 use renderable::tree::render::{
     BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
     render_markdown_node,
@@ -153,6 +154,30 @@ fn render_column_block(render: &RenderedColumn, offset: u32) -> String {
 /// When the terminal is too narrow, columns automatically stack vertically
 /// to ensure content remains readable. The breakpoint depends on the gap
 /// and minimum column widths.
+///
+/// ## Layout & Style Contract
+///
+/// `TwoColumn` is an internal-layout component (spec C2). The shared
+/// render-tree fold resolves the outer box from [`Layout::width`], then
+/// `render_columns` pads both columns to fill the resolved content width:
+///
+/// - [`Width::Auto`] (default) and [`Width::Fixed`] **fill** the available
+///   width; [`Width::FitContent`] is observationally identical to `Auto` on
+///   the terminal target (the box always pads to the handed width).
+/// - **Slack sink** (spec D2): the RIGHT column absorbs the slack after
+///   honoring the explicit/fractional left width and the gap. The left
+///   column's width is stable so its content does not reflow when the
+///   terminal widens; the right column flexes.
+/// - A fractional `Fixed(50%)` is resolved exactly once by the fold; the
+///   column planner never re-resolves the raw percentage (the
+///   `Fixed(50%) → 25%` double-application bug).
+/// - The reconstructed [`ColumnsHints`] round-trip carries the projected
+///   [`Layout`] onto the carrier node (C4), so a second render pass honors
+///   the same outer-box contract.
+///
+/// [`Width::Auto`]: renderable::layout::Width::Auto
+/// [`Width::Fixed`]: renderable::layout::Width::Fixed
+/// [`Width::FitContent`]: renderable::layout::Width::FitContent
 #[derive(Debug, Clone)]
 pub struct TwoColumn {
     left: RenderableTerminalContent,
@@ -160,6 +185,7 @@ pub struct TwoColumn {
     left_width: ColumnWidth,
     gap: u32,
     layout: Layout,
+    style: Style,
 }
 
 impl Default for TwoColumn {
@@ -170,6 +196,7 @@ impl Default for TwoColumn {
             left_width: ColumnWidth::Percent(0.5),
             gap: DEFAULT_GAP,
             layout: Layout::default(),
+            style: Style::default(),
         }
     }
 }
@@ -186,6 +213,7 @@ impl TwoColumn {
             left_width: ColumnWidth::Percent(0.5),
             gap: DEFAULT_GAP,
             layout: Layout::default(),
+            style: Style::default(),
         }
     }
 
@@ -464,6 +492,15 @@ impl TwoColumn {
     /// render-tree representation. Callers must detect this and fall back to
     /// the bespoke terminal path; Browser and MarkdownPlus surface the
     /// standard unsupported behavior according to strictness.
+    ///
+    /// ## Notes
+    ///
+    /// The fold resolves the outer box from [`Layout::width`], then pads both
+    /// columns to fill the resolved content width. The RIGHT column is the
+    /// documented slack sink for `Width::Auto` and `Width::Fixed` fill
+    /// (spec decision D2). On the terminal target, `Width::FitContent` is
+    /// observationally identical to `Width::Auto`: the box always pads to fill
+    /// the handed width, so terminal FitContent does not hug.
     fn to_render_node(&self) -> RenderNode {
         if content_is_terminal_image(&self.left) || content_is_terminal_image(&self.right) {
             return RenderNode::unsupported("two-column terminal image");
@@ -486,6 +523,7 @@ impl TwoColumn {
         if self.layout != Layout::default() {
             container.attrs.set_layout(&self.layout);
         }
+        crate::components::renderable::overlay_style_onto_node(&mut container, &self.style);
         container
     }
 
@@ -639,6 +677,14 @@ impl TerminalRenderable for TwoColumn {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+
+    fn style(&self) -> Style {
+        self.style.clone()
+    }
+
+    fn style_mut(&mut self) -> Option<&mut Style> {
+        Some(&mut self.style)
     }
 
     /// Renders to a terminal string at an explicit width.

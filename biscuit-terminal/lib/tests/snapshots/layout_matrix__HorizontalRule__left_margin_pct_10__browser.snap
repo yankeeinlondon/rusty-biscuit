@@ -1,0 +1,7 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: html
+---
+<div style="margin-top:0;margin-bottom:0;margin-left:10%;margin-right:0"><svg class="darkmatter-hr" width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 0 0 0; --hr-weight: 4; --hr-color: currentColor; --hr-width: 100%;">
+  <line x1="0" y1="50%" x2="100%" y2="50%" stroke="var(--hr-color, currentColor)" stroke-width="var(--hr-weight, 4)" stroke-linecap="round" stroke-dasharray="8,4"/>
+</svg></div>

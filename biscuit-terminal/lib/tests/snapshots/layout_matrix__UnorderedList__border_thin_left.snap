@@ -1,0 +1,13 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: block
+---
+VIA_RENDER
+│- First item
+│- Second item
+│- Third item
+---
+VIA_TREE_DIRECT
+│- First item
+│- Second item
+│- Third item

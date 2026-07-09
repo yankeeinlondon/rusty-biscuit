@@ -7,8 +7,10 @@ use crate::components::prose::Prose;
 use crate::components::renderable::TerminalRenderable;
 use crate::discovery::detection::{ColorDepth, ColorMode};
 use crate::terminal::Terminal;
+use crate::utils::block_constraint::wrap_lines;
 use crate::utils::color::{Color, Tailwind, TailwindColorWrapper};
-use crate::utils::layout::{Layout, LayoutTerminalExt, RenderableWrapper};
+use crate::utils::layout::Layout;
+use crate::utils::layout::RenderableWrapper;
 use crate::utils::wrap_policy::WordWrap;
 
 // ── Nerd Font icons ── Circular theme ──────────────────────────────────────
@@ -418,6 +420,29 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
 /// | Info       | ℹ        | blue-500   |
 /// | ToolUse    | 🔧        | purple-700 |
 /// | Subagent   | 🤖        | violet-500 |
+///
+/// ## Layout & Style Contract
+///
+/// `Status` is classified as an **inline badge** (spec C7). A status line is
+/// a single inline run (icon + description) — it does not own a block box,
+/// so the layout-box properties are **N/A** here. When `Status` is composed
+/// into a block container (e.g. via `Compose` or `Section`), the containing
+/// block owns the box and `Status`'s content flows inline within it.
+///
+/// The bespoke terminal render path (`to_terminal`) honors icon color from
+/// `StatusState::default_color` and routes the description through `Prose`
+/// when `use_prose = true`, so inherited `color` and `emphasis` flow through.
+/// Only `Layout::word_wrap` is applied by [`TerminalRenderable::render`];
+/// margins, alignment, `max_width`, `width`, and `padding` are ignored.
+///
+/// | Property | Status | Rationale |
+/// |----------|--------|-----------|
+/// | `Layout::word_wrap` | **Honored** | Wraps the full status line (icon + description) using the configured strategy. Default `WrapProse` with a 2-cell hanging indent for the plain constructor; `WrapProse(Some(8), Some(2))` for `from_prose`. |
+/// | `Layout::margin` / `alignment` / `max_width` / `width` / `padding` | **N/A** | Inline badge — no block box. Compose inside a `Section` / `Compose` for block placement. |
+/// | `Style::color` | **Honored** (via the state's `default_color` and the Tailwind icon palette) | The icon color flows from `StatusState::default_color`; the description inherits the terminal's current color. |
+/// | `Style::emphasis` | **Honored** (via `Prose` when `use_prose = true`) | The `from_prose` constructor enables markup like `<b>` / `<red>` which lowers to `emphasis` / `color`. |
+/// | `Style::background` | **N/A** | Inline background has no padding box; the icon glyph and description are the inline content. |
+/// | `Style::border` | **N/A** | No inline-border design exists; the status glyph is its own visual terminator. |
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Status {
     state: StatusState,
@@ -534,14 +559,23 @@ impl TerminalRenderable for Status {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let term = Terminal::new_optimistic(width);
-        let content = self.to_terminal(&term);
-        self.layout.apply_layout(&content, width)
+        self.render(&term)
     }
 
     fn render(&self, term: &Terminal) -> String {
         let width = term.width();
         let content = self.to_terminal(term);
-        self.layout.apply_layout(&content, width)
+        if width == 0 {
+            return String::new();
+        }
+        // `Status` is an inline badge (spec C7): only `Layout::word_wrap` is
+        // honored here. Margin, alignment, max_width, width, and padding are
+        // N/A — the containing block owns the box when Status is composed
+        // inside a block component.
+        match &self.layout.word_wrap {
+            WordWrap::None => content,
+            strategy => wrap_lines(vec![content], strategy, width).join("\n"),
+        }
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

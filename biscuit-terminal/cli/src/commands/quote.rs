@@ -53,7 +53,7 @@ pub struct QuoteArgs {
 }
 
 impl Run for QuoteArgs {
-    fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
+    fn run(self, ctx: &CliContext) -> color_eyre::Result<()> {
         let text = if self.example {
             QUOTE_EXAMPLE.to_string()
         } else {
@@ -111,7 +111,7 @@ impl Run for QuoteArgs {
         }
 
         // Default: render for the terminal through the canonical render tree.
-        let term = detect_terminal_honoring_force_color();
+        let term = terminal_for_render(ctx.plain);
         let root = RenderNode::root(vec![quote.render_tree()]);
         let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
         let rendered = render_terminal_node(&root, &opts)

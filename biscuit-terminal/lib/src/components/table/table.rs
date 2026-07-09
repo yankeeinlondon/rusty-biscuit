@@ -117,6 +117,25 @@ use crate::discovery::detection::{ColorDepth, ColorMode};
 ///         ],
 ///     ]);
 /// ```
+///
+/// ## Layout & Style Contract
+///
+/// `Table` is an internal-layout component (spec C2/C3/C4). The shared
+/// render-tree fold resolves the outer box; `Table`'s default width hugs its
+/// content, while an explicit fixed width such as `width: 100%` fills the
+/// resolved width it receives. In the fill case, the slack sink is the last
+/// visible flexible column (spec D2). All applicable `Layout` and `Style`
+/// properties route through the fold on every target (C1).
+///
+/// The `prefer_cursor_alignment` knob (spec C5/C6) keeps a bespoke
+/// terminal-only escape hatch: ANSI cursor moves (`CSI N G`) cannot be
+/// represented in the render tree, so the cursor core is irreducible. The
+/// honored subset for that bespoke path is `margin` / `alignment` /
+/// `max_width` (outer-box placement, target-agnostic). Cursor moves
+/// replace inter-cell space padding only — they do not change the visible
+/// cell text or the outer box position. `render_bespoke` and
+/// `render_via_tree` agree on the honored subset after cursor escapes are
+/// stripped; parity is pinned in `table_parity.rs`.
 #[derive(Debug, Default, Clone)]
 pub struct Table {
     title: Option<String>,
@@ -130,6 +149,9 @@ pub struct Table {
     /// Typed style slot for row striping — the migrated home of the former
     /// `alternate_background_color` / `alternate_text_color` boolean fields.
     style: TableStyle,
+    /// Caller-supplied block appearance (color/background/emphasis/border)
+    /// overlaid onto the projected table node so both render paths carry it.
+    block_style: Style,
 }
 
 impl Table {
@@ -296,6 +318,7 @@ impl Table {
             layout: self.layout.clone(),
             prefer_cursor_alignment: self.prefer_cursor_alignment,
             style: self.style.clone(),
+            block_style: self.block_style.clone(),
         })
     }
 
@@ -607,13 +630,13 @@ impl Table {
         })
     }
 
-    /// Grow the last visible column so the table fills the width it was handed
-    /// instead of hugging its content.
+    /// Grow the last visible column when the table has an explicit width.
     ///
     /// Honors [`Layout::width`](renderable::layout::Layout):
-    /// - [`Width::Auto`] (the default) and [`Width::Fixed`] (e.g. `width: 100%`
-    ///   ⇒ `Width::Fixed(Length::Percent(100.0))`) **fill** the available width.
-    /// - [`Width::FitContent`] **hugs** the content's widest line.
+    /// - [`Width::Auto`] (the default) and [`Width::FitContent`] hug the
+    ///   content's widest line.
+    /// - [`Width::Fixed`] (e.g. `width: 100%` ⇒
+    ///   `Width::Fixed(Length::Percent(100.0))`) fills the available width.
     ///
     /// The fill targets the *available width already handed to the planner*, not
     /// a freshly resolved length: whoever sizes the table's box (the render-tree
@@ -628,7 +651,7 @@ impl Table {
         available_render_width: usize,
         border_overhead: usize,
     ) {
-        if matches!(self.layout.width, Width::FitContent) {
+        if !matches!(self.layout.width, Width::Fixed(_)) {
             return;
         }
 
@@ -1609,6 +1632,7 @@ impl Table {
             node.attrs.set_table_title(title);
         }
 
+        crate::components::renderable::overlay_style_onto_node(&mut node, &self.block_style);
         node
     }
 
@@ -1788,6 +1812,14 @@ impl TerminalRenderable for Table {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+
+    fn style(&self) -> Style {
+        self.block_style.clone()
+    }
+
+    fn style_mut(&mut self) -> Option<&mut Style> {
+        Some(&mut self.block_style)
     }
 
     fn is_block_level(&self) -> bool {
@@ -2701,7 +2733,7 @@ mod tests {
         assert!(result.contains("Bob"));
     }
 
-    // ── width: 100% fill ──────────────────────────────────────────
+    // ── table width planning ──────────────────────────────────────
 
     fn two_column_table() -> Table {
         Table::new()
@@ -2710,47 +2742,68 @@ mod tests {
     }
 
     #[test]
-    fn width_auto_fills_available() {
-        // `Width::Auto` (the default) fills the available width, matching the
-        // documented "fill the parent's available width" semantics. The last
-        // column absorbs the slack.
+    fn width_auto_hugs_content_below_available() {
         let plan = two_column_table().plan_widths(60).expect("plan");
-        assert_eq!(
-            plan.table_width, 60,
-            "Auto must fill the available width; table_width={}",
-            plan.table_width
-        );
+        assert_eq!(plan.table_width, 9, "Auto must hug content by default");
         let widths = plan.content_widths();
-        assert!(
-            widths[1] > widths[0],
-            "the last column must absorb the slack; widths={widths:?}"
-        );
+        assert_eq!(widths, vec![1, 1], "Auto must not assign slack: {widths:?}");
     }
 
     #[test]
     fn width_auto_hugs_when_width_is_unbounded() {
-        // "Fill the available width" needs a finite width. A natural-width
-        // measurement passes the `u32::MAX` sentinel (here via `None`), which
-        // has nothing to fill, so even `Auto` hugs its content.
         let widths = two_column_table().calculate_column_widths(None);
         assert_eq!(
             widths,
             vec![1, 1],
-            "unbounded width must hug, not fill to u32::MAX; widths={widths:?}"
+            "unbounded width must also hug, not fill to u32::MAX; widths={widths:?}"
         );
     }
 
     #[test]
-    fn width_fit_content_hugs_below_available() {
-        // `Width::FitContent` is the explicit content-hugging opt-out: tiny
-        // content does not stretch to the available width.
+    fn width_fit_content_matches_auto_hugging_behavior() {
         let mut table = two_column_table();
         table.layout_mut().width = Width::FitContent;
         let plan = table.plan_widths(60).expect("plan");
+        assert_eq!(plan.table_width, 9, "FitContent must hug content");
+    }
+
+    #[test]
+    fn default_worktree_shaped_table_does_not_expand_commits_column() {
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("Worktree"),
+                TableColumn::new("Worktree Name"),
+                TableColumn::new("Branch"),
+                TableColumn::new("Merge"),
+                TableColumn::new("Commits"),
+            ])
+            .with_data(vec![
+                vec![
+                    "Clean".into(),
+                    "main::(rusty-biscuit)".into(),
+                    "main".into(),
+                    "".into(),
+                    "+275 -55".into(),
+                ],
+                vec![
+                    "Dirty".into(),
+                    "terminal".into(),
+                    "terminal".into(),
+                    "clean".into(),
+                    "+1".into(),
+                ],
+            ]);
+
+        let plan = table.plan_widths(180).expect("plan");
         assert!(
-            plan.table_width < 60,
-            "FitContent must hug content, not fill; table_width={}",
+            plan.table_width < 120,
+            "default table should hug content, not fill terminal width: {}",
             plan.table_width
+        );
+        assert_eq!(
+            plan.content_widths()[4],
+            "+275 -55".len(),
+            "last column should not absorb terminal slack by default"
         );
     }
 
@@ -3246,10 +3299,8 @@ mod tests {
             .with_data(vec![vec!["A".into()]])
             .prefer_cursor_alignment();
         table.layout_mut().alignment = Alignment::Center;
-        // Block alignment only has an effect when the table is narrower than the
-        // area; `FitContent` hugs so the alignment offset is observable (the
-        // default `Auto` fills the width, leaving no slack to center).
-        table.layout_mut().width = Width::FitContent;
+        // Block alignment is observable because the default `Auto` table width
+        // hugs content instead of filling all available columns.
 
         let result = table.render_bespoke(&Terminal::new_optimistic(80));
         // With 80 width and small table, table_start should be > 1
@@ -3285,9 +3336,8 @@ mod tests {
             .with_data(vec![vec!["A".into()]])
             .prefer_cursor_alignment();
         table.layout_mut().alignment = Alignment::Right;
-        // `FitContent` hugs so the right-alignment offset is observable; the
-        // default `Auto` fills the width and would leave the table at column 1.
-        table.layout_mut().width = Width::FitContent;
+        // Right alignment is observable because the default `Auto` table width
+        // hugs content instead of filling all available columns.
 
         let result = table.render_bespoke(&Terminal::new_optimistic(80));
         // With 80 width and small table (~5 chars), table should start near column 75
@@ -3535,13 +3585,8 @@ mod tests {
             .with_columns(vec![TableColumn::new("X"), TableColumn::new("Y")])
             .with_data(vec![vec!["A".into(), "B".into()]]);
 
-        // `Width::Auto` (the default) fills the available width: the first
-        // column keeps its 1-cell content and the last column absorbs the rest
-        // of the 80-cell budget (73 content cells after 7 cells of borders).
         let widths = table.calculate_column_widths(Some(80));
-        assert_eq!(widths[0], 1, "first column hugs its content");
-        assert!(widths[1] > 1, "last column absorbs the slack: {widths:?}");
-        assert_eq!(widths.iter().sum::<usize>(), 73, "content fills the budget: {widths:?}");
+        assert_eq!(widths, vec![1, 1], "default table hugs content: {widths:?}");
     }
 
     #[test]

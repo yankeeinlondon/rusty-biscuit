@@ -486,6 +486,24 @@ impl Style {
             border: self.border.clone(),
         }
     }
+
+    /// Returns `self` overlaid onto `base`: `self` wins per field where set,
+    /// `base` supplies the rest, and `emphasis` is the union of the two.
+    ///
+    /// Unlike [`inherited_from`](Self::inherited_from) — which keeps the
+    /// box-painting fields (`background`, `border`) from `self` only — this
+    /// merge fills every field from `base` when `self` leaves it unset. It is
+    /// the "caller-supplied style applied on top of a component's own
+    /// defaults" operation.
+    #[must_use]
+    pub fn overlay_onto(&self, base: &Style) -> Style {
+        Style {
+            color: self.color.clone().or_else(|| base.color.clone()),
+            background: self.background.clone().or_else(|| base.background.clone()),
+            emphasis: self.emphasis.inherited_from(&base.emphasis),
+            border: self.border.clone().or_else(|| base.border.clone()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -853,6 +871,43 @@ mod tests {
         let merged = Style::default().inherited_from(&parent);
         assert!(merged.background.is_none());
         assert!(merged.border.is_none());
+    }
+
+    #[test]
+    fn overlay_onto_fills_unset_fields_from_base() {
+        let base = Style {
+            border: Some(Border::default()),
+            ..Style::default()
+        };
+        let overlay = Style {
+            background: Some(Background::subtle()),
+            ..Style::default()
+        };
+        let merged = overlay.overlay_onto(&base);
+        // Overlay wins where set, base fills the rest.
+        assert!(merged.background.is_some(), "overlay background retained");
+        assert!(merged.border.is_some(), "base border filled in");
+    }
+
+    #[test]
+    fn overlay_onto_unions_emphasis() {
+        let base = Style {
+            emphasis: TextEmphasis {
+                bold: true,
+                ..TextEmphasis::default()
+            },
+            ..Style::default()
+        };
+        let overlay = Style {
+            emphasis: TextEmphasis {
+                italic: true,
+                ..TextEmphasis::default()
+            },
+            ..Style::default()
+        };
+        let merged = overlay.overlay_onto(&base);
+        assert!(merged.emphasis.bold, "base bold preserved");
+        assert!(merged.emphasis.italic, "overlay italic preserved");
     }
 
     #[test]

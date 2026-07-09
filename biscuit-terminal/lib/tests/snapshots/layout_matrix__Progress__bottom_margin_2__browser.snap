@@ -1,0 +1,5 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: html
+---
+<span class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="75" aria-label="Loading" style="margin-top:0;margin-bottom:2lh;margin-left:0;margin-right:0;padding-top:0;padding-bottom:0;padding-left:0;padding-right:0;white-space:nowrap"><span class="progress-label">Loading</span><span class="progress-track" style="width:20ch"><span class="progress-filled" style="width:75%"></span></span><span class="progress-percentage">75%</span></span>

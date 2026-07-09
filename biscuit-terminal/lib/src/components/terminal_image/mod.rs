@@ -34,6 +34,8 @@ use crate::{
     utils::layout::{Alignment, Layout, Length, TargetValue},
 };
 
+use renderable::tree::{RenderNode, TreeRenderable};
+
 mod cursor;
 mod iterm;
 mod kitty;
@@ -191,6 +193,32 @@ pub enum TerminalImageError {
 ///
 /// The `TerminalImage` type validates paths to prevent path traversal attacks.
 /// Use `TerminalImageOptions` with a `base_path` to restrict file access.
+///
+/// ## Layout & Style Contract
+///
+/// `TerminalImage` is a bespoke image-protocol component (spec C5/D5). The
+/// Kitty / iTerm2 / Sixel escape sequences are irreducible — no render-tree
+/// `NodeKind` can represent an inline image protocol — so the component
+/// emits the protocol bytes directly through `TerminalRenderable::render`.
+/// The fold-style box model does not apply.
+///
+/// The honored subset (spec C5: minimum bar) is the outer placement:
+///
+/// | Property | Status | Rationale |
+/// |----------|--------|-----------|
+/// | `Layout::margin` | **Honored** | Reduces `available_width` and seeds `x_offset` via `resolve_dimensions`. |
+/// | `Layout::alignment` | **Honored** | Selects left / center / right placement of the image canvas within the slack. |
+/// | `Layout::max_width` | **N/A** | The image canvas is sized by `ImageWidth` (the explicit contract for this component). `Layout::width` and `Layout::max_width` are not read by the resolver — `ImageWidth::Fill` / `Percent` / `Characters` is the sole width control. This is the documented TerminalImage-specific carve-out, not a silent no-op. |
+/// | `Layout::width` | **N/A** | See `max_width` above — `ImageWidth` is the explicit contract. |
+/// | `Layout::padding` | **N/A** | The image protocol has no "padding box"; padding cannot paint protocol bytes. |
+/// | `Layout::word_wrap` | **N/A** | An image protocol escape cannot wrap. |
+/// | `Style::color` / `emphasis` | **N/A** | The image bytes are not text the SGR can recolor. |
+/// | `Style::background` | **N/A** | A block background would have to paint cells *around* the protocol bytes; the protocol owns the cells it covers. |
+/// | `Style::border` | **N/A** | Box-drawing glyphs cannot frame an image-protocol escape without corrupting the protocol's cell coverage. |
+///
+/// Parity for the honored subset is pinned in `terminal_image_parity.rs`
+/// via `TerminalImage::resolve_dimensions_for` — the single width/margin
+/// calculator both `TerminalImage` and `GraphExpression` share.
 #[derive(Debug)]
 pub struct TerminalImage {
     /// Fully qualified filename (absolute path).
@@ -264,6 +292,35 @@ impl TerminalRenderable for TerminalImage {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+}
+
+impl TreeRenderable for TerminalImage {
+    /// Projects the image into a [`NodeKind::Paragraph`] wrapping an inline
+    /// [`NodeKind::Image`] and carrying the component's outer-box [`Layout`]
+    /// (margin, alignment).
+    ///
+    /// The Kitty/iTerm2 protocol bytes are irreducible (spec C5/D5); the
+    /// structural image node carries placement and degrades to alt text on
+    /// targets that cannot render inline images. The `url` carries the image's
+    /// basename so Browser/Markdown output is portable; `alt` falls back to
+    /// the generated alt-text label.
+    ///
+    /// [`NodeKind::Image`]: renderable::tree::NodeKind::Image
+    /// [`NodeKind::Paragraph`]: renderable::tree::NodeKind::Paragraph
+    fn render_tree(&self) -> RenderNode {
+        let alt = self.generate_alt_text();
+        // Use the basename so tree snapshots are portable across machines;
+        // the full filesystem path lives on the `filename` field for the
+        // bespoke protocol path.
+        let url = Path::new(&self.filename)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let image = RenderNode::image(&url, None, &alt);
+        let mut node = RenderNode::paragraph(vec![image]);
+        node.attrs.set_layout(&self.layout);
+        node
     }
 }
 

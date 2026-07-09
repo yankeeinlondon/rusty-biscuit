@@ -1,0 +1,5 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: html
+---
+<div style="box-sizing:content-box;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0;padding-top:0;padding-bottom:0;padding-left:0;padding-right:0;width:fit-content;white-space:nowrap"><ul style="list-style:none"><li class="fs-dir"><p style="color:rgb(0, 0, 128);font-weight:bold"><span class="fs-icon">📂</span> <span class="fs-dir">sub</span></p><ul style="list-style:none"><li class="fs-file"><p><span class="fs-icon">📝</span> <span class="fs-file">c.txt</span></p></li></ul></li><li class="fs-file"><p><span class="fs-icon">📝</span> <span class="fs-file">a.txt</span></p></li><li class="fs-file"><p><span class="fs-icon">📝</span> <span class="fs-file">b.txt</span></p></li></ul></div>

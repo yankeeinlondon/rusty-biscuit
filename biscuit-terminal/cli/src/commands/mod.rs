@@ -1,5 +1,6 @@
 use color_eyre::Result;
 
+pub mod about;
 pub mod block;
 pub mod color_parse;
 pub mod columns;
@@ -34,6 +35,8 @@ pub mod xy_chart;
 pub struct CliContext {
     /// Whether `--json` was passed on the command line.
     pub json: bool,
+    /// Whether `--plain` was passed on the command line.
+    pub plain: bool,
 }
 
 /// Trait implemented by every subcommand args struct for dispatch.

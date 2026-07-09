@@ -132,6 +132,15 @@ pub(crate) fn heading_emphasis(depth: u8) -> TextEmphasis {
 /// assert!(output.contains("## Getting Started"));
 /// ```
 ///
+/// ## Layout & Style Contract
+///
+/// `Section` is a block component that routes through the shared render-tree
+/// fold (spec C1). All applicable `Layout` properties (`margin`, `padding`,
+/// `width`, `max_width`, `alignment`, `word_wrap`) and `Style` properties
+/// (`color`, `background`, `emphasis`, `border`) are honored on Terminal and
+/// Browser; Markdown degrades layout/appearance attrs by Decision D1 and
+/// preserves the Markdown heading structure and nested content.
+///
 /// ## Notes
 ///
 /// Content can be strings, [`Prose`][crate::components::prose::Prose],
@@ -142,6 +151,7 @@ pub struct Section {
     title: String,
     content: Vec<RenderableTerminalContent>,
     layout: Layout,
+    style: Style,
 }
 
 impl Section {
@@ -152,6 +162,7 @@ impl Section {
             title: title.into(),
             content: Vec::new(),
             layout: Layout::default(),
+            style: Style::default(),
         }
     }
 
@@ -228,6 +239,7 @@ impl Section {
         if self.layout != Layout::default() {
             node.attrs.set_layout(&self.layout);
         }
+        crate::components::renderable::overlay_style_onto_node(&mut node, &self.style);
         node
     }
 
@@ -285,6 +297,14 @@ impl TerminalRenderable for Section {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+
+    fn style(&self) -> Style {
+        self.style.clone()
+    }
+
+    fn style_mut(&mut self) -> Option<&mut Style> {
+        Some(&mut self.style)
     }
 
     fn is_block_level(&self) -> bool {

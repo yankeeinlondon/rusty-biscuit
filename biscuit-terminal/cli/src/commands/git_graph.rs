@@ -1,6 +1,6 @@
 use crate::args::LayoutArgs;
 use crate::commands::mermaid::{build_mermaid_diagram, display_mermaid};
-use crate::commands::shared::print_example_command;
+use crate::commands::shared::{print_example_command_with_terminal, terminal_for_render};
 use crate::commands::{CliContext, Run};
 use clap::Args as ClapArgs;
 use std::io::Write;
@@ -86,6 +86,7 @@ impl Run for GitGraphArgs {
             width_str.as_deref(),
             &self.layout,
         )?;
+        let terminal = terminal_for_render(ctx.plain);
         display_mermaid(
             &diagram,
             &instructions,
@@ -93,10 +94,11 @@ impl Run for GitGraphArgs {
             &self.layout,
             self.meta,
             false,
+            &terminal,
         )?;
 
         if self.example {
-            print_example_command(GIT_GRAPH_EXAMPLE_CMD);
+            print_example_command_with_terminal(GIT_GRAPH_EXAMPLE_CMD, &terminal);
         }
 
         Ok(())

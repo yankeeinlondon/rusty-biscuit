@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-635c3c71b227bcbb
-last_updated: 2026-06-19
+hash: 87f17662fa397abe-13cb5bd473770411
+last_updated: 2026-06-30
 ---
 
 # darkmatter
@@ -85,7 +85,7 @@ not a regression.
 ## `style:` Frontmatter Status
 
 The active style-frontmatter wiring phase is
-`darkmatter::style::parse::ACTIVE_STYLE_WIRING_SUB_SPEC = 7`.
+`darkmatter::style::parse::ACTIVE_STYLE_WIRING_SUB_SPEC = 8`.
 
 Implemented:
 
@@ -102,9 +102,17 @@ Implemented:
   for `{ kind: ... }`; `apply_hr_style` wires `style.hr.*` onto `DarkmatterPage`
 - sub-spec #7 bespoke knobs: `page.stylesheet`, `page.meta`, `page.code.theme`,
   hyperlink/image local-style behavior; `apply_bespoke_style` wired into the
-  CLI render pipeline; `ACTIVE_STYLE_WIRING_SUB_SPEC` advanced to `7`
+  CLI render pipeline
+- sub-spec #8 `style.disclosure.*` disclosure blocks
+- sub-spec #9 (Style Everywhere): the schema recognizes expanded per-component
+  layout/appearance keys (`margin`, `padding`, `border`, `emphasis`, `word-wrap`)
+  and explicit `width` mode keywords (`auto`, `fit-content`, lengths). The
+  applicator lowers these values to `ComponentPolicy`. See the
+  [Style Everywhere matrix](../../../renderable/features/2026-06-30-style-everywhere/matrix.md)
+  for the per-component support contract.
 
-No valid v1 schema keys remain unwired.
+No valid v1 schema keys are silently ignored: each is either honored,
+rejected, or reported via `KnownButInactive`.
 
 CLI flags win over frontmatter field-by-field. For implementation details, read
 `darkmatter/lib/src/style/{parse.rs,apply.rs,cli_claims.rs}` and

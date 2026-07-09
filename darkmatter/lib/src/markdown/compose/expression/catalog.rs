@@ -845,6 +845,16 @@ pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
     },
     ExpressionFunctionDescriptor {
 
+        signature: "has_command(cmd)",
+        description: "Returns true when the command is found on PATH or is an existing executable absolute path.",
+        category: "Filesystem",
+        order: 24,
+
+        example: None,
+
+    },
+    ExpressionFunctionDescriptor {
+
         signature: "has_skill(name)",
         description: "Returns true when a skill directory exists in a user-scoped or local-scoped skill root.",
         category: "Context",
