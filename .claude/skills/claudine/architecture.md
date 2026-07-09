@@ -29,31 +29,26 @@ The per-provider modules under `lib/src/provider/<slug>/` split into two halves:
 
 ## Event Support Matrix
 
-| Event | Claude | Codex | Gemini | Goose | Kimi | OpenCode | Qwen |
-|-------|:------:|:-----:|:------:|:-----:|:----:|:--------:|:----:|
-| session_start | ✓ | ○ | ✓ | - | - | ✓ | - |
-| session_end | ✓ | - | ✓ | - | - | ✓ | - |
-| before_prompt | ✓ | ○ | ✓ | - | ○ | ✓ | - |
-| before_tool | ✓ | ○ | ✓ | - | ○ | ✓ | - |
-| after_tool | ✓ | ○ | ✓ | - | ○ | ✓ | - |
-| tool_error | ✓ | ○ | - | - | ○ | - | - |
-| permission_request | ✓ | - | - | - | ○ | ✓ | - |
-| human_in_the_loop | ✓ | - | - | - | - | - | - |
-| turn_complete | ✓ | ✓ | ✓ | ○ | ○ | ✓ | ○ |
-| turn_error | - | ○ | - | ○ | ○ | ✓ | ○ |
-| subagent_start | ✓ | - | - | ○ | ○ | - | - |
-| subagent_stop | ✓ | - | - | ○ | ○ | - | - |
-| before_model | - | - | ✓ | - | - | ✓ | - |
-| after_model | - | ○ | ✓ | ○ | ○ | ✓ | ○ |
-| before_compact | ✓ | - | ✓ | - | ○ | ✓ | - |
-| notification | ✓ | ○ | ✓ | ○ | ○ | ✓ | ○ |
+| Event | Claude | Codex | Gemini | Goose | Kimi | OpenCode | Qwen | Kilo | Pi | Antigravity |
+|-------|:------:|:-----:|:------:|:-----:|:----:|:--------:|:----:|:----:|:--:|:-----------:|
+| session_start | ✓ | ○ | ✓ | - | - | ✓ | - | ✓ | ○ | - |
+| session_end | ✓ | - | ✓ | - | - | ✓ | - | ✓ | - | - |
+| before_prompt | ✓ | ○ | ✓ | - | ○ | ✓ | - | ✓ | - | - |
+| before_tool | ✓ | ○ | ✓ | - | ○ | ✓ | - | ✓ | ○ | ✓ |
+| after_tool | ✓ | ○ | ✓ | - | ○ | ✓ | - | ✓ | ○ | ✓ |
+| tool_error | ✓ | ○ | - | - | ○ | - | - | - | - | - |
+| permission_request | ✓ | - | - | - | ○ | ✓ | - | ✓ | - | - |
+| human_in_the_loop | ✓ | - | - | - | - | - | - | ✓ | - | - |
+| turn_complete | ✓ | ✓ | ✓ | ○ | ○ | ✓ | ○ | ✓ | ○ | ✓ |
+| turn_error | - | ○ | - | ○ | ○ | ✓ | ○ | ✓ | ○ | - |
+| subagent_start | ✓ | - | - | ○ | ○ | - | - | - | - | - |
+| subagent_stop | ✓ | - | - | ○ | ○ | - | - | - | - | - |
+| before_model | - | - | ✓ | - | - | ✓ | - | ✓ | - | ✓ |
+| after_model | - | ○ | ✓ | ○ | ○ | ✓ | ○ | ✓ | ○ | ✓ |
+| before_compact | ✓ | - | ✓ | - | ○ | ✓ | - | ✓ | ○ | - |
+| notification | ✓ | ○ | ✓ | ○ | ○ | ✓ | ○ | ✓ | - | - |
 
-**Legend:** ✓ = Hook support (config file), ○ = NonHook (wrapper/proxy required), - = Not supported
-
-> The three providers added by the Phase H ladder (Kilo, Pi, Antigravity) are not
-> yet columns above. Their authoritative event support lives in the generated
-> `lib/src/provider/<slug>/data.rs` `event_mapping` — inspect it (or
-> `claudine providers --describe`) rather than trusting this seven-column summary.
+**Legend:** ✓ = Hook support (config file), ○ = NonHook (wrapper/proxy/stream-parse required), - = Not supported. The authoritative source is each provider's generated `lib/src/provider/<slug>/data.rs` `event_mapping` (or `claudine hooks --support`), where `○` further splits into StreamParse / WireProxy / Wrapper / Acp (🅐).
 
 ## Key Types
 
