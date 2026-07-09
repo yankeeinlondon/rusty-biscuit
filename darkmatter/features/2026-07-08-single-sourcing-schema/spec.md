@@ -1,6 +1,7 @@
 ---
-status: draft
-review_iterations: 0
+status: ready for planning and implementation
+reviewed: true
+review_iterations: 1
 depends_on:
   - ../2026-07-08-schema-plus/spec.md
 inputs:
@@ -13,9 +14,10 @@ related:
 
 # Single-Sourcing the Frontmatter Schema and Context-Variable Catalog
 
-**Status:** Draft for review. Defines *what* changes and why. The *how*
-(codegen vs. runtime projection, evaluator array support) is deferred to a
-design/plan phase.
+**Status:** Reviewed and ready for planning and implementation. Defines *what*
+changes and why, including the two implementation choices that were still open
+in the first draft: runtime projection from the authored YAML and
+interpolation-scoped array rendering.
 
 ## Purpose
 
@@ -130,22 +132,34 @@ Rules:
 ### D5 — Feed the catalog from the YAML
 
 `CONTEXT_VARIABLE_DESCRIPTORS` stops hand-declaring name/type/description/flags.
-Those come from parsing the base schema. Presentation-only metadata that is not
-schema data (`category`, `subsection`, `order`, `example`) is handled per O2.
-Mechanism (build-time codegen vs. runtime projection of the already-parsed base
-schema) is a design decision — see O1.
+Those come from parsing the base schema at runtime through a private `LazyLock`
+projection of `darkmatter_base_schema()`. Keep the public accessor
+`context_variable_descriptors() -> &'static [ContextVariableDescriptor]`, backed
+by the projected vector, so DMLS, `md schema about`, and existing library callers
+do not need an API change.
+
+Presentation-only metadata that is not schema data is handled explicitly:
+
+- `order` derives from YAML declaration order (`IndexMap` preserves it).
+- `example` moves to schema-plus `example(<file>)` artifacts.
+- `category` and `subsection` remain in a deliberately small Rust grouping map
+  keyed by variable name. This is presentation taxonomy, not schema semantics;
+  putting it into the validation schema would force fake grouping fields into
+  SimplifiedSchema and make ordinary validation data carry documentation layout.
+  The grouping map must be total for every projected `ctx.*` key, and a test must
+  fail if the YAML adds or removes a key without updating grouping.
 
 ### D6 — Collapse redundant list/CSV variable pairs
 
 Many `ctx.*` variables exist today only as pre-rendered twins — a comma-separated
 `X` and a Markdown-list `X_list` of the same data (e.g. `packages` /
 `packages_list`, `dirty_files` / `dirty_files_list`, `staged_packages` /
-`staged_packages_list`, plus the `NestedMarkdownList` trio `depends_on`,
-`used_by`, `current_packages`). Under D3/D4 both twins become the *same* array,
-so each pair collapses to a single array-typed variable; callers choose rendering
-with D4 functions. This is a **breaking change** to the `ctx.*` surface, accepted
-because the monorepo has no external users (see Migration). The exact keep/rename
-list is enumerated during design.
+`staged_packages_list`, plus the nested Markdown variables `depends_on` and
+`used_by`). Under D3/D4 both twins become the *same* array, so each pair collapses
+to a single array-typed variable; callers choose rendering with D4 functions.
+This is a **breaking change** to the `ctx.*` surface, accepted because the
+monorepo has no external users (see Migration). The exact keep/rename list is
+enumerated below.
 
 ### D7 — Type the expression-function catalog
 
@@ -176,15 +190,18 @@ examples below.
 ### `md schema about` / docs
 
 - `context-variables.md` and `md schema about` render from the same derived
-  catalog. Ordering/grouping depends on O2's resolution.
+  catalog. Ordering follows YAML declaration order; grouping comes from the
+  total Rust grouping map described in D5.
 
 ### Compose / evaluator
 
 - The interpolation evaluator must treat list-typed `ctx.*` values as **first-class
   arrays** and support the D4 functions over them (today several are pre-rendered
-  strings). This is the largest implementation surface and a risk (see O4).
+  strings). This is the largest implementation surface, but the evaluator already
+  carries `serde_json::Value::Array`, so the risk is contained to capture,
+  formatting functions, and interpolation output rendering.
 
-## Spike findings — evaluator array support (O4)
+## Evaluator array support
 
 **Verdict: feasible, low-to-medium risk. No value-model surgery required.** The
 interpolation/expression value model is already `serde_json::Value`, which has
@@ -224,11 +241,10 @@ The work reduces to three well-bounded change sites:
    `format_csv`/`format_md_list` join helpers retire (their job moves to the D4
    functions). This is the largest surface but purely mechanical.
 
-Net: no new primitives, no error-typing dependency; the only design choice is the
-render-boundary scoping (recommend interpolation-only). O4 is considered
-resolved — folded into scope above.
+Net: no new primitives, no error-typing dependency. The render-boundary choice is
+settled here: arrays render line-separated only on the interpolation output path.
 
-## O5 — exact `ctx.*` array conversion and collapse list
+## Exact `ctx.*` array conversion and collapse list
 
 Extracted from `context/catalog.rs` (95 variables). Only the list-typed variables
 change shape; every scalar keeps its name (D3 retypes `timezone`/`timezone_iana`
@@ -275,14 +291,25 @@ Rename type only; names unchanged.
 `render_dependency_list` emits `- 'pkg' depends on:` with each dependency as a
 sub-bullet. Flattening would lose the grouping.
 
-**Recommendation:** model each as a **nested array** — a list of
-`[package, [dependencies…]]` (or `{ package, dependencies }`) elements — rendered
-by `as_unordered_list`'s auto-nesting. The composed verb wording (`depends on:` /
-the "has no dependencies" line) is dropped as presentation; the variable name plus
-nesting convey it. SimplifiedSchema cannot express a precise tree type, so type
-these two loosely in the YAML (`any`, or `object[]`) with the shape spelled out in
-the description. (Alternative, rejected: keep them as opaque pre-rendered `string`
-— it perpetuates a MarkdownList special case and defeats the cleanup.)
+**Decision:** model each as an **object array**:
+
+```yaml
+depends_on:
+  - package: darkmatter
+    dependencies:
+      - biscuit-terminal
+      - renderable
+```
+
+Use `object[]` in the YAML and spell out the object shape in the description
+until schema-plus grows precise nested object-array typing. Prefer objects over
+tuple arrays because the JSON shape is self-describing for DMLS hover,
+`md schema about`, examples, and any future serialized diagnostics; a tuple form
+like `[package, [dependencies...]]` is shorter but brittle and hard to read. The
+composed verb wording (`depends on:` / the "has no dependencies" line) is dropped
+as presentation; the variable name plus object fields convey it. (Alternative,
+rejected: keep them as opaque pre-rendered `string` — it perpetuates a
+MarkdownList special case and defeats the cleanup.)
 
 ### Net effect
 
@@ -293,7 +320,7 @@ the description. (Alternative, rejected: keep them as opaque pre-rendered `strin
 - All in-repo docs referencing a removed `*_list` var or expecting CSV/bullet
   output from a bare name are updated in the same change (Migration).
 
-## Spike findings — derivation mechanism (O1)
+## Runtime projection mechanism
 
 **Verdict: runtime projection of the parsed base schema is feasible and is the
 recommendation.** No build-time codegen needed.
@@ -306,7 +333,7 @@ recommendation.** No build-time codegen needed.
   `description: Option<String>`, and constraints (`Required` / `Generated` /
   `Default(_)` via `keyword()`).
 - **Ordering is free:** `IndexMap` preserves YAML declaration order, so the
-  projected catalog order = YAML document order (resolves the `order` half of O2).
+  projected catalog order = YAML document order.
 - **`const` → `LazyLock` blast radius is contained.** Keep the public accessor
   `context_variable_descriptors() -> &'static [ContextVariableDescriptor]`, backed
   by a private `LazyLock<Vec<…>>` projected from the base schema on first use.
@@ -319,7 +346,7 @@ recommendation.** No build-time codegen needed.
 **Mechanism decision:** runtime `LazyLock` projection. Committed codegen is the
 fallback only if a `const`/compile-time guarantee is later required.
 
-## Examples fidelity (resolves O2)
+## Examples and grouping fidelity
 
 Examples are the one piece of catalog data the YAML genuinely cannot hold at full
 fidelity. `Example` is structured (`invocation`, `result`, `verification`) and
@@ -341,11 +368,12 @@ some variants are **test-executed** (`Executable`), whereas SimplifiedSchema's
   `@` cross-file type import, pattern keys), so **single-sourcing depends on
   schema-plus** and starts after it.
 
-**O2 resolution:** `example` moves to referenced YAML files via schema-plus's
-`example()` constraint (E3). `order` derives from YAML document order (O1). The
-only remaining sidecar candidates are `category`/`subsection` for docs grouping —
-open sub-point: keep a minimal Rust grouping map, or derive grouping from the
-YAML's section structure. Deferred to design.
+**Resolution:** `example` moves to referenced YAML files via schema-plus's
+`example()` constraint (E3). `order` derives from YAML document order. `category`
+and `subsection` stay in a minimal Rust grouping map keyed by variable name, with
+a totality test against the projected YAML keys. This keeps the validation schema
+semantic and avoids inventing YAML comments or section markers as parser-visible
+metadata.
 
 ## Migration
 
@@ -353,7 +381,17 @@ The monorepo has no external users, so breaking the `ctx.*` surface (D6, D3) is
 acceptable and preferred over carrying compatibility aliases. In-repo documents
 that reference removed twins (`*_list`, comma forms) are updated in the same
 change. A short deprecation-alias window is explicitly **not** required unless
-design surfaces a concrete need.
+implementation surfaces a concrete in-repo consumer that cannot migrate in the
+same change.
+
+Migration rules:
+
+- Replace `{{ ctx.foo_list }}` with `{{ as_unordered_list(ctx.foo) }}`.
+- Replace uses that depended on old comma-separated bare output with
+  `{{ as_csv(ctx.foo) }}`.
+- Leave bare `{{ ctx.foo }}` only when line-separated output is intended.
+- Update examples, snapshots, docs, and any generated schema-about output in the
+  same change that changes the capture values.
 
 ## Acceptance criteria
 
@@ -361,40 +399,49 @@ design surfaces a concrete need.
    name/type/description/flags; the Rust catalog derives them.
 2. A test fails if the derived catalog and the YAML disagree on any
    name/type/description/flag (drift guard).
-3. `ctx.now` / `ctx.now_utc` (and any other mistyped temporal keys) are
+3. A test fails if any projected `ctx.*` key lacks grouping metadata, or if the
+   grouping map references a key no longer present in the YAML.
+4. `ctx.now` / `ctx.now_utc` (and any other mistyped temporal keys) are
    `datetime`; `ctx.today`-family remain `date`.
-4. `ContextValueType`'s presentation-only variants are gone; the catalog stores a
+5. `ContextValueType`'s presentation-only variants are gone; the catalog stores a
    SimplifiedSchema type (or the enum is retired entirely).
-5. The six D4 functions exist, are documented in the expression-function catalog,
+6. The catalog accessor keeps the existing public shape
+   `context_variable_descriptors() -> &'static [ContextVariableDescriptor]`.
+7. The six D4 functions exist, are documented in the expression-function catalog,
    and have verified examples; `{{ ctx.list }}` with no function renders
-   line-separated.
-6. `as_unordered_list` / `as_ordered_list` render nested arrays as nested
-   sublists.
-7. `md schema about`, `context-variables.md`, `md schema validate`, and compose
-   output remain correct for the migrated variables.
-8. Builds and passes on macOS, Windows, and Linux.
+   line-separated only on the interpolation output path.
+8. `scalar_string` behavior used for equality comparison and frontmatter shell
+   expansion remains byte-identical unless a separate spec changes those surfaces.
+9. `as_unordered_list` / `as_ordered_list` render nested arrays and the
+   `depends_on` / `used_by` object-array shape as nested sublists.
+10. Removed `*_list` variables are absent from the generated catalog and the YAML;
+    in-repo callers are migrated to formatting functions.
+11. `md schema about`, `context-variables.md`, `md schema validate`, and compose
+    output remain correct for the migrated variables.
+12. Builds and passes on macOS, Windows, and Linux.
 
 ## Open questions
 
-- **O1 — Derivation mechanism.** ✅ Resolved by spike (see *Spike findings —
-  derivation mechanism*): runtime `LazyLock` projection of the parsed base schema;
-  ordering free from `IndexMap`; accessor keeps `&'static [...]` so external
-  consumers are unaffected.
-- **O2 — Home for presentation-only metadata.** ✅ Resolved (see *Examples
-  fidelity*): `example` moves to referenced YAML files via
-  [schema-plus](../2026-07-08-schema-plus/spec.md)'s `example()` constraint (E3;
-  E2 sidecar is the fallback). `order` derives from YAML document order. Residual
-  sub-point: whether `category`/`subsection` survive as a minimal Rust grouping
-  map or derive from YAML section structure.
 - **O3 — Force-flatten list function.** Do we ever want `as_unordered_list` to
   *not* nest? Default is auto-nest; add `as_flat_*` only on demand.
-- **O4 — Evaluator array support.** ✅ Resolved by spike (see *Spike findings*
-  above): feasible, no value-model surgery; scoped to three change sites. Only
-  residual choice is render-boundary scoping (recommend interpolation-only).
-- **O5 — Exact D6 keep/rename list.** ✅ Resolved — see *O5 — exact `ctx.*` array
-  conversion and collapse list* above (10 `_list` twins removed, 15 retyped to
-  `string[]`, `depends_on`/`used_by` → nested arrays). Residual: confirm the
-  nested-array element shape for Group 3 (`[name, [deps]]` vs `{name, deps}`).
+
+  Suggested solutions:
+
+  1. **No force-flatten function in this spec (recommended).**
+     Pros: keeps the function surface small, matches the data-shape-driven design,
+     and avoids adding behavior without a known caller. Cons: a future caller that
+     wants flattening must add a new function later.
+  2. **Add `as_flat_unordered_list` / `as_flat_ordered_list` now.**
+     Pros: makes both rendering modes explicit up front. Cons: doubles the list
+     formatting API before there is evidence that flattened nested data is useful.
+  3. **Add an options argument, e.g. `as_unordered_list(list, flatten: true)`.**
+     Pros: avoids extra function names. Cons: current expression functions do not
+     have named options, so this would expand the function-call convention for a
+     marginal case.
+
+  Recommendation: choose solution 1. Auto-nesting is the right default because it
+  preserves structure; flattening should wait until a real caller can define the
+  expected ordering and lossiness.
 
 ## Out of scope
 
