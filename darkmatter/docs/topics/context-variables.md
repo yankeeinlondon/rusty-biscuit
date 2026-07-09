@@ -32,8 +32,8 @@ Variables are organized into capture groups. The expensive I/O for each group ru
 | Group | Expensive I/O | Properties |
 |-------|--------------|------------|
 | **DateTime** | `Local::now()` / `Utc::now()` syscalls (near-zero) | `now`, `now_utc`, `today`, `yesterday`, `tomorrow`, all `_utc` date variants, `day`, `day_abbr`, `day_utc`, `day_abbr_utc`, `year`, `year_utc`, `month`, `month_name`, `month_name_abbr`, `day_of_month`, `day_of_month_suffixed`, `time`, `time_military`, `time_utc`, `time_military_utc`, `timezone`, `timezone_offset`, `timezone_iana`, week boundaries, `season`, `timestamp`, `timestamp_ms` |
-| **Repo** | `GitRepo::discover` + `detect_repo_structure` | `repo`, `repo_root`, `is_monorepo`, `package_root`, `package_area_root`, `packages`, `packages_list`, `package_areas`, `package_areas_list`, `current_package`, `current_package_area`, `area`, `area_description`, `area_root`, `current_packages`, `depends_on`, `used_by` |
-| **FileChanges** | `GitRepo::file_changes()` | `dirty_files`, `dirty_files_list`, `dirty_source_code_files`, `dirty_source_code_files_list`, `staged_files`, `staged_files_list`, `untracked_files`, `untracked_files_list`, `dirty_packages`, `dirty_packages_list`, `dirty_package_areas`, `dirty_package_areas_list`, `staged_packages`, `staged_packages_list`, `staged_package_areas`, `staged_package_areas_list`, `current_package_has_*`, `current_package_area_has_*` |
+| **Repo** | `GitRepo::discover` + `detect_repo_structure` | `repo`, `repo_root`, `is_monorepo`, `package_root`, `package_area_root`, `packages`, `package_areas`, `current_package`, `current_package_area`, `area`, `area_description`, `area_root`, `current_packages`, `depends_on`, `used_by` |
+| **FileChanges** | `GitRepo::file_changes()` | `dirty_files`, `dirty_source_code_files`, `staged_files`, `untracked_files`, `dirty_packages`, `dirty_package_areas`, `staged_packages`, `staged_package_areas`, `current_package_has_*`, `current_package_area_has_*` |
 | **Languages** | Reads from already-captured repo info (no additional I/O) | `programming_languages_in_repo`, `programming_language`, `package_manager` |
 | **Documents** | `detect_docs_with_packages` | `docs_readme`, `docs_blast_radius`, `docs_drift`, `docs_skill` |
 | **OS** | `detect_os_with_request` | `os`, `os_distro`, `os_package_manager`, `os_version` |
@@ -47,6 +47,16 @@ Variables are organized into capture groups. The expensive I/O for each group ru
 We will now provide a grouped overview of all the information stored in Darkmatter's `ctx` variable:
 
 > **Note:** all date and time related information is reported using _local_ time but there will be a `_utc` variant that provides the same utility only using UTC time to resolve.
+
+> **List-valued variables.** Variables typed `[String]` (e.g. `packages`,
+> `dirty_files`) or `[Object]` (`depends_on`, `used_by`) are captured as real
+> arrays. A bare `{{ ctx.foo }}` renders an array **line-separated** (one element
+> per line). To render other shapes use the list-formatting expression functions:
+> `as_csv`, `as_tsv`, `as_space_separated`, `as_line_separated`,
+> `as_unordered_list`, and `as_ordered_list`. The Markdown-list renderers
+> auto-nest nested arrays and the `depends_on` / `used_by` object shape. The
+> former pre-rendered `_list` twin variables have been removed — replace
+> `{{ ctx.dirty_files_list }}` with `{{ as_unordered_list(ctx.dirty_files) }}`.
 
 ### Date and Time Information
 
@@ -135,35 +145,27 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 | `area`                 | `String`          | Scope name: package name in a package, area name in an area; empty string at root or when not a monorepo |
 | `area_description`     | `String`          | `"{package} package"` in a package, `"{area} package area"` in an area; empty string at root or when not a monorepo |
 | `area_root`            | `String`          | Absolute path to the `area` root (no trailing separator); repo root when not a monorepo |
-| `current_packages`     | `String`          | Markdown bullet list (`- {name} ({relative})`) of packages under the current directory; empty string outside a monorepo |
-| `depends_on`           | `String`          | Nested Markdown list of workspace-internal packages the scoped `area` depends on; empty string outside a monorepo |
-| `used_by`              | `String`          | Nested Markdown list of workspace-internal packages that depend on the scoped `area`; empty string outside a monorepo |
+| `current_packages`     | `[String]`        | Packages under the current directory, each as `{name} ({relative})`; empty array outside a monorepo |
+| `depends_on`           | `[Object]`        | Workspace-internal packages the scoped `area` depends on, each `{ package, dependencies }`; empty array outside a monorepo |
+| `used_by`              | `[Object]`        | Workspace-internal packages that depend on the scoped `area`, each `{ package, users }`; empty array outside a monorepo |
 
 #### Changed Files
 
-| Variable                       | Type     | Description                                      |
-|--------------------------------|----------|--------------------------------------------------|
-| `dirty_files`                  | `String` | Comma-separated dirty file paths (empty if none) |
-| `dirty_files_list`             | `String` | Markdown bullet list of dirty files              |
-| `dirty_source_code_files`      | `String` | Comma-separated dirty source code file paths     |
-| `dirty_source_code_files_list` | `String` | Markdown bullet list of dirty source code files  |
-| `staged_files`                 | `String` | Comma-separated staged file paths                |
-| `staged_files_list`            | `String` | Markdown bullet list of staged files             |
-| `untracked_files`              | `String` | Comma-separated untracked file paths             |
-| `untracked_files_list`         | `String` | Markdown bullet list of untracked files          |
+| Variable                  | Type       | Description                                |
+|---------------------------|------------|--------------------------------------------|
+| `dirty_files`             | `[String]` | Dirty file paths (empty array if none)     |
+| `dirty_source_code_files` | `[String]` | Dirty source code file paths               |
+| `staged_files`            | `[String]` | Staged file paths                          |
+| `untracked_files`         | `[String]` | Untracked file paths                       |
 
 #### Package-Level Changes
 
-| Variable                                | Type     | Description                                   |
-|-----------------------------------------|----------|-----------------------------------------------|
-| `dirty_packages`                        | `String` | Comma-separated dirty package names           |
-| `dirty_packages_list`                   | `String` | Markdown bullet list of dirty packages        |
-| `dirty_package_areas`                   | `String` | Comma-separated dirty package area names      |
-| `dirty_package_areas_list`              | `String` | Markdown bullet list of dirty package areas   |
-| `staged_packages`                       | `String` | Comma-separated staged package names          |
-| `staged_packages_list`                  | `String` | Markdown bullet list of staged packages       |
-| `staged_package_areas`                  | `String` | Comma-separated staged package area names     |
-| `staged_package_areas_list`             | `String` | Markdown bullet list of staged package areas  |
+| Variable                                | Type       | Description                                 |
+|-----------------------------------------|------------|---------------------------------------------|
+| `dirty_packages`                        | `[String]` | Dirty package names                         |
+| `dirty_package_areas`                   | `[String]` | Dirty package area names                    |
+| `staged_packages`                       | `[String]` | Staged package names                        |
+| `staged_package_areas`                  | `[String]` | Staged package area names                   |
 | `current_package_has_staged_files`      | `bool`   | Whether current package has staged files      |
 | `current_package_area_has_staged_files` | `bool`   | Whether current package area has staged files |
 | `current_package_has_dirty_files`       | `bool`   | Whether current package has dirty files       |
@@ -173,7 +175,7 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 
 | Variable                        | Type            | Description                                                                 |
 |---------------------------------|-----------------|-----------------------------------------------------------------------------|
-| `programming_languages_in_repo` | `String \| null` | Comma-separated unique languages across all packages; null if not in a repo |
+| `programming_languages_in_repo` | `[String] \| null` | Unique languages across all packages; null if not in a repo |
 | `programming_language`          | `String \| null` | Context-sensitive primary language (see rules below); null if not in a repo |
 | `package_manager`               | `String \| null` | Context-sensitive package manager (see rules below); null if not in a repo  |
 
@@ -195,9 +197,9 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 
 | Variable            | Type            | Description                                                          |
 |---------------------|-----------------|----------------------------------------------------------------------|
-| `docs_readme`       | `String`        | Comma-separated README paths, scope-filtered                         |
-| `docs_blast_radius` | `String`        | Comma-separated docs with `blast_radius` frontmatter, scope-filtered |
-| `docs_drift`        | `String`        | Comma-separated docs at risk of drift from source changes            |
+| `docs_readme`       | `[String]`      | README paths, scope-filtered                                         |
+| `docs_blast_radius` | `[String]`      | Docs with `blast_radius` frontmatter, scope-filtered                 |
+| `docs_drift`        | `[String]`      | Docs at risk of drift from source changes                            |
 | `docs_skill`        | `String \| null` | Repo-relative path to best matching SKILL.md; null if none found     |
 
 **Scope filtering** (for monorepos):
