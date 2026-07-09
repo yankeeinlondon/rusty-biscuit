@@ -285,17 +285,38 @@ fn assert_chooser_and_detail(frame: &CapturedFrame) {
     );
 }
 
-/// In a wide terminal the detail pane sits to the right of the list, so
-/// some single line carries both a candidate label and detail text.
+/// In a wide terminal the detail pane sits to the right of the list, so on
+/// some list row the detail text begins at a column to the right of the list
+/// glyph. This keys off the *geometry* (a list glyph with detail text to its
+/// right on the same line), not a specific candidate label: the visible label
+/// is the repo-relative path (never the frontmatter `name`), and which item
+/// is selected is not fixed, so a label-coincidence check was brittle.
 fn assert_wide_layout(frame: &CapturedFrame) {
-    let has_side_by_side = frame.plain.lines().any(|line| {
-        is_list_line(line) && candidate_marker(line) && detail_marker(line)
-    });
+    let has_side_by_side = frame
+        .plain
+        .lines()
+        .any(|line| is_list_line(line) && detail_right_of_glyph(line));
     assert!(
         has_side_by_side,
-        "wide terminal must render list and detail side-by-side; plain:\n{}",
+        "wide terminal must render the detail pane to the right of the list; plain:\n{}",
         frame.plain
     );
+}
+
+/// True when a detail-pane marker appears to the right of the leftmost list
+/// glyph on the same line — the signature of a side-by-side (horizontal)
+/// split. Byte offsets are compared, which is sufficient for left-to-right
+/// ordering within one line.
+fn detail_right_of_glyph(line: &str) -> bool {
+    let glyph = ['○', '☐', '▶', '☑', '\u{f043e}', '\u{f4aa}', '\u{f0131}', '\u{f14a}']
+        .into_iter()
+        .filter_map(|g| line.find(g))
+        .min();
+    let detail = ["Schema:", "no description", "no schema defined", "FILE"]
+        .into_iter()
+        .filter_map(|m| line.find(m))
+        .min();
+    matches!((glyph, detail), (Some(g), Some(d)) if d > g)
 }
 
 /// In a tall terminal the detail pane sits above the list, so detail text
