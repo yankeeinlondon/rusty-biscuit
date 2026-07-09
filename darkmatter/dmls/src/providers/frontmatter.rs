@@ -257,6 +257,10 @@ fn schema_hover(ctx: &DocumentContext, entry: &FmEntry) -> Option<Hover> {
             format!("Type: `{}{}`", ty.as_keyword(), suffix)
         }
         TypeExpr::InlineObject(_) => "Type: `object`".to_string(),
+        TypeExpr::Imported { name, reference } => {
+            let suffix = if atom.is_array { "[]" } else { "" };
+            format!("Type: `{name}{suffix}@{reference}`")
+        }
     };
     lines.push(type_line);
 
@@ -518,7 +522,7 @@ fn file_atom(def: &PropertyDef) -> Option<&PropertyAtom> {
 fn inline_object_shape(def: &PropertyDef) -> Option<&SchemaShape> {
     atoms_of(def).iter().find_map(|atom| match &atom.ty {
         TypeExpr::InlineObject(inner) => Some(inner),
-        TypeExpr::Primitive(_) => None,
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } => None,
     })
 }
 
