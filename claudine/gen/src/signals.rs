@@ -97,9 +97,19 @@ struct RecordRow {
 
 struct ExtractionRow {
     field: String,
-    path: String,
+    source: ExtractSource,
     unit: Option<Unit>,
     zone: Option<Zone>,
+}
+
+/// Gen-side mirror of `claudine_catalog_types::ExtractStrategy`. Research
+/// authoring: `path:` (the common form), or `literal:`, or `regex:`+`path:`,
+/// or `start:`+`stop:`+`path:`.
+enum ExtractSource {
+    Path(String),
+    Literal(String),
+    Regex { path: String, pattern: String },
+    StartStopTokens { path: String, start: String, stop: String },
 }
 
 fn doc_err(path: &Path, message: impl Into<String>) -> GenError {
@@ -382,14 +392,7 @@ fn check_groups(doc: &Path, records: &[RecordRow]) -> Result<(), GenError> {
 
 fn parse_extraction(doc: &Path, record: &str, value: &Value) -> Result<ExtractionRow, GenError> {
     let field = require_str(doc, record, value, "field")?;
-    let path = require_str(doc, record, value, "path")?;
-    parse_signal_path(&path).map_err(|reason| {
-        record_err(
-            doc,
-            record,
-            format!("extraction `{field}` path `{path}`: {reason}"),
-        )
-    })?;
+    let source = parse_extract_source(doc, record, &field, value)?;
     let unit = match optional_str(doc, record, value, "unit")? {
         Some(member) => Some(parse_member::<Unit>(doc, record, "Unit", &member)?),
         None => None,
@@ -400,10 +403,48 @@ fn parse_extraction(doc: &Path, record: &str, value: &Value) -> Result<Extractio
     };
     Ok(ExtractionRow {
         field,
-        path,
+        source,
         unit,
         zone,
     })
+}
+
+/// Select the extraction strategy from the authored keys, validating any path.
+fn parse_extract_source(
+    doc: &Path,
+    record: &str,
+    field: &str,
+    value: &Value,
+) -> Result<ExtractSource, GenError> {
+    let validate_path = |path: &str| -> Result<(), GenError> {
+        parse_signal_path(path)
+            .map(|_| ())
+            .map_err(|reason| {
+                record_err(doc, record, format!("extraction `{field}` path `{path}`: {reason}"))
+            })
+    };
+    if let Some(literal) = optional_str(doc, record, value, "literal")? {
+        return Ok(ExtractSource::Literal(literal));
+    }
+    if let Some(pattern) = optional_str(doc, record, value, "regex")? {
+        let path = require_str(doc, record, value, "path")?;
+        validate_path(&path)?;
+        return Ok(ExtractSource::Regex { path, pattern });
+    }
+    let start = optional_str(doc, record, value, "start")?;
+    let stop = optional_str(doc, record, value, "stop")?;
+    if start.is_some() || stop.is_some() {
+        let path = require_str(doc, record, value, "path")?;
+        validate_path(&path)?;
+        let (start, stop) = (
+            start.ok_or_else(|| record_err(doc, record, format!("extraction `{field}` has `stop` but no `start`")))?,
+            stop.ok_or_else(|| record_err(doc, record, format!("extraction `{field}` has `start` but no `stop`")))?,
+        );
+        return Ok(ExtractSource::StartStopTokens { path, start, stop });
+    }
+    let path = require_str(doc, record, value, "path")?;
+    validate_path(&path)?;
+    Ok(ExtractSource::Path(path))
 }
 
 // ---------------------------------------------------------------------------
@@ -607,6 +648,7 @@ fn render_imports(tables: &[DocTable]) -> String {
         names.push("MatchOp");
     }
     if any_extraction {
+        names.push("ExtractStrategy");
         names.push("ExtractionSpec");
     }
     if any_unit {
@@ -714,7 +756,10 @@ fn emit_extractions(extractions: &[ExtractionRow], level: usize) -> String {
     for extraction in extractions {
         out.push_str(&format!("{element}ExtractionSpec {{\n"));
         out.push_str(&format!("{field_pad}field: {:?},\n", extraction.field));
-        out.push_str(&format!("{field_pad}path: {:?},\n", extraction.path));
+        out.push_str(&format!(
+            "{field_pad}source: {},\n",
+            emit_extract_source(&extraction.source)
+        ));
         let unit = match extraction.unit {
             Some(unit) => format!("Some(Unit::{})", pascal(unit.into())),
             None => "None".to_string(),
@@ -729,6 +774,19 @@ fn emit_extractions(extractions: &[ExtractionRow], level: usize) -> String {
     }
     out.push_str(&format!("{pad}]"));
     out
+}
+
+fn emit_extract_source(source: &ExtractSource) -> String {
+    match source {
+        ExtractSource::Path(path) => format!("ExtractStrategy::Path({path:?})"),
+        ExtractSource::Literal(value) => format!("ExtractStrategy::Literal({value:?})"),
+        ExtractSource::Regex { path, pattern } => {
+            format!("ExtractStrategy::Regex {{ path: {path:?}, pattern: {pattern:?} }}")
+        }
+        ExtractSource::StartStopTokens { path, start, stop } => format!(
+            "ExtractStrategy::StartStopTokens {{ path: {path:?}, start: {start:?}, stop: {stop:?} }}"
+        ),
+    }
 }
 
 fn opt_str_expr(value: &Option<String>) -> String {
