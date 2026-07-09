@@ -1,3 +1,7 @@
+---
+review_iterations: 2
+---
+
 # Provider Metadata Automation
 
 > **Status:** RATIFIED & IMPLEMENTED (2026-07-08). Phases A–I complete; all seven
