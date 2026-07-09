@@ -14,9 +14,11 @@
 //!   filters, or recursive descent).
 //! - `value`/`values` hold match terms as strings; regex patterns are
 //!   validated at generate time, not at match time.
-//! - Rows with `mode:` [`DetectionMode::Bespoke`] are catalog documentation:
-//!   their emission comes from bespoke code in the behavior half, not the
-//!   generic matcher.
+//! - Rows with `mode:` [`DetectionMode::Bespoke`] have a hand-written emitter
+//!   in the behavior half rather than the generic matcher.
+//! - Rows with `mode:` [`DetectionMode::Documentation`] are cataloged with NO
+//!   runtime detector yet — the escape hatch for a declared-but-unimplemented
+//!   surface; they never fire.
 
 use crate::signal::{DetectionMode, MatchOp, SignalKind, SignalSource};
 use crate::vocab::{Unit, Zone};

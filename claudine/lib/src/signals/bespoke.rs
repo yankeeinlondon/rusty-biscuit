@@ -22,14 +22,36 @@ use crate::stream::protocol::kimi::SUPPORTED_WIRE_PROTOCOL_VERSIONS;
 /// (`TOOL_RESULT_BODY_MAX_LINES`).
 pub const EXIT_STDERR_TAIL_LINES: usize = 10;
 
-/// The ratified `exit` source payload: `{"exit_code", "stderr_tail"}`
-/// (sidecar schema's exit-source contract; see the pi exit fixture for the
-/// canonical shape). `stderr_tail` carries the last
-/// [`EXIT_STDERR_TAIL_LINES`] lines of the captured stderr.
-pub fn exit_source_payload(exit_code: i32, stderr: &str) -> Value {
-    let lines: Vec<&str> = stderr.lines().collect();
-    let tail = lines[lines.len().saturating_sub(EXIT_STDERR_TAIL_LINES)..].join("\n");
-    json!({ "exit_code": exit_code, "stderr_tail": tail })
+/// Lines kept in the wrapper-synthesized exit payload's `stdout_tail`.
+///
+/// The stdout counterpart of [`EXIT_STDERR_TAIL_LINES`], kept at the same
+/// width so both tails truncate identically.
+pub const EXIT_STDOUT_TAIL_LINES: usize = 10;
+
+/// The ratified `exit` source payload:
+/// `{"exit_code", "stdout_tail", "stderr_tail"}` (sidecar schema's exit-source
+/// contract; see the pi exit fixture for the canonical shape). `stdout_tail` /
+/// `stderr_tail` carry the last [`EXIT_STDOUT_TAIL_LINES`] /
+/// [`EXIT_STDERR_TAIL_LINES`] lines of the captured streams.
+///
+/// ## Notes
+///
+/// Both streams are tailed because a provider's terminal diagnostics are not
+/// always on stderr — Antigravity's `agy` writes its auth errors to stdout, so
+/// its `source: exit` records match `stdout_tail`.
+pub fn exit_source_payload(exit_code: i32, stdout: &str, stderr: &str) -> Value {
+    json!({
+        "exit_code": exit_code,
+        "stdout_tail": tail_lines(stdout, EXIT_STDOUT_TAIL_LINES),
+        "stderr_tail": tail_lines(stderr, EXIT_STDERR_TAIL_LINES),
+    })
+}
+
+/// The last `keep` lines of `text`, joined with newlines (whole text when it
+/// has fewer than `keep` lines).
+fn tail_lines(text: &str, keep: usize) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    lines[lines.len().saturating_sub(keep)..].join("\n")
 }
 
 /// One stateful cross-payload detector. Fed every payload the hub observes,
@@ -383,7 +405,7 @@ impl BespokeDetector for KimiProtocolWindow {
 mod tests {
     use claudine_catalog_types::SignalKind;
 
-    use super::super::{SignalHub, detection_table};
+    use super::super::{SignalEngine, SignalHub, detection_table};
     use super::*;
 
     const CLAUDE_BILLING: &str = include_str!(
@@ -548,7 +570,7 @@ mod tests {
             let events = run_chain(
                 "qwen",
                 SignalSource::Exit,
-                &[exit_source_payload(code, "tail")],
+                &[exit_source_payload(code, "", "tail")],
             );
             let kinds: Vec<SignalKind> = events.iter().map(SignalEvent::kind).collect();
             match expected {
@@ -587,19 +609,132 @@ mod tests {
 
     #[test]
     fn exit_source_payload_carries_code_and_last_lines_tail() {
-        let stderr = (1..=15)
-            .map(|n| format!("line {n}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let payload = exit_source_payload(53, &stderr);
+        let long = |prefix: &str| {
+            (1..=15)
+                .map(|n| format!("{prefix} {n}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let payload = exit_source_payload(53, &long("out"), &long("err"));
         assert_eq!(payload["exit_code"], 53);
-        let tail = payload["stderr_tail"].as_str().unwrap();
-        assert!(tail.starts_with("line 6"), "tail: {tail}");
-        assert!(tail.ends_with("line 15"), "tail: {tail}");
-        assert_eq!(tail.lines().count(), EXIT_STDERR_TAIL_LINES);
 
-        // Short stderr passes through whole.
-        assert_eq!(exit_source_payload(1, "only line")["stderr_tail"], "only line");
+        let stdout_tail = payload["stdout_tail"].as_str().unwrap();
+        assert!(stdout_tail.starts_with("out 6"), "stdout_tail: {stdout_tail}");
+        assert!(stdout_tail.ends_with("out 15"), "stdout_tail: {stdout_tail}");
+        assert_eq!(stdout_tail.lines().count(), EXIT_STDOUT_TAIL_LINES);
+
+        let stderr_tail = payload["stderr_tail"].as_str().unwrap();
+        assert!(stderr_tail.starts_with("err 6"), "stderr_tail: {stderr_tail}");
+        assert!(stderr_tail.ends_with("err 15"), "stderr_tail: {stderr_tail}");
+        assert_eq!(stderr_tail.lines().count(), EXIT_STDERR_TAIL_LINES);
+
+        // Short streams pass through whole, each on its own field.
+        let short = exit_source_payload(1, "only out", "only err");
+        assert_eq!(short["stdout_tail"], "only out");
+        assert_eq!(short["stderr_tail"], "only err");
+    }
+
+    /// Shipped-behavior parity: the SAME payload the wrapper synthesizes at
+    /// exit — Antigravity's `agy` writes its auth errors to stdout, so they
+    /// arrive in `stdout_tail`, not `stderr_tail` — must fire the production
+    /// `source: exit` AuthInvalid records. This is the guard the fixtures
+    /// alone cannot give: it proves the runtime payload shape matches what the
+    /// generated records key on.
+    #[test]
+    fn antigravity_exit_stdout_tail_fires_auth_invalid_records() {
+        let table = detection_table("antigravity").expect("antigravity table");
+        let cases = [
+            (
+                "Error: Please sign in to view available models. Launch the CLI without arguments to sign in.",
+                "exit-auth_invalid-models-signin",
+            ),
+            (
+                "Error: authentication failed or timed out",
+                "exit-auth_invalid-print-timeout",
+            ),
+        ];
+        for (stdout, record_id) in cases {
+            let payload = exit_source_payload(1, stdout, "");
+
+            let mut engine = SignalEngine::new(table);
+            let kinds: Vec<SignalKind> = engine
+                .observe(SignalSource::Exit, &payload)
+                .iter()
+                .map(SignalEvent::kind)
+                .collect();
+            assert_eq!(kinds, vec![SignalKind::AuthInvalid], "kind for {record_id}");
+
+            let fired: Vec<&str> = engine
+                .observe_detailed(SignalSource::Exit, &payload)
+                .iter()
+                .map(|obs| obs.record.id)
+                .collect();
+            assert!(
+                fired.contains(&record_id),
+                "record {record_id} must fire on its stdout evidence; fired {fired:?}"
+            );
+        }
+    }
+
+    /// The invariant this finding is about: every compiled
+    /// [`DetectionMode::Bespoke`] record must have a registered replayer,
+    /// which proves a runtime detector exists. A cataloged-but-unwired surface
+    /// belongs in [`DetectionMode::Documentation`], not `Bespoke`, so
+    /// `signals check` cannot go green while a bespoke record silently lacks a
+    /// detector.
+    #[test]
+    fn every_bespoke_record_has_a_registered_replayer() {
+        use claudine_catalog_types::DetectionMode;
+
+        use super::super::all_detection_tables;
+
+        for table in all_detection_tables() {
+            for record in table.records {
+                if record.mode == DetectionMode::Bespoke {
+                    assert!(
+                        bespoke_replayer(record.id).is_some(),
+                        "bespoke record `{}` (provider `{}`) has no registered replayer — \
+                         wire a detector or mark it `detection: documentation`",
+                        record.id,
+                        table.slug,
+                    );
+                }
+            }
+        }
+    }
+
+    /// The two Antigravity app-log records are cataloged as
+    /// [`DetectionMode::Documentation`] (no runtime detector wired yet), so
+    /// they carry no match fields and are excluded from the declarative
+    /// matcher — they can never appear in `observe_detailed` output.
+    #[test]
+    fn antigravity_app_log_records_are_documentation_only_and_never_fire() {
+        use claudine_catalog_types::DetectionMode;
+
+        let table = detection_table("antigravity").expect("antigravity table");
+        let doc_ids = [
+            "app_log-provider_version-language-server",
+            "app_log-auth_invalid-not-logged-in",
+        ];
+        for id in doc_ids {
+            let record = table.records.iter().find(|r| r.id == id).expect(id);
+            assert_eq!(record.mode, DetectionMode::Documentation, "{id}");
+        }
+        let engine = SignalEngine::new(table);
+        let lines = [
+            json!("I0708 11:17:34 server.go:1380] Language server version: 1.1.0"),
+            json!("E0708 log.go:398] You are not logged into Antigravity."),
+        ];
+        for payload in &lines {
+            let fired: Vec<&str> = engine
+                .observe_detailed(SignalSource::AppLog, payload)
+                .iter()
+                .map(|obs| obs.record.id)
+                .collect();
+            for id in doc_ids {
+                assert!(!fired.contains(&id), "documentation record {id} fired: {fired:?}");
+            }
+        }
     }
 
     #[test]

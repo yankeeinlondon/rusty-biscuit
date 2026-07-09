@@ -117,14 +117,25 @@ pub enum MatchOp {
     Exists,
 }
 
-/// How a taxonomy signal is detected: single-payload matching is
-/// declarative; anything needing cross-record or temporal state is bespoke.
+/// How a taxonomy signal is detected.
+///
+/// - `Declarative` — a single-payload generic matcher (`match_path` + `op`)
+///   compiled into the detection engine.
+/// - `Bespoke` — a hand-written behavior-half detector: anything needing
+///   cross-record or temporal state. Every bespoke record MUST have a
+///   runtime emitter (and a `signals check` replayer proving it fires on its
+///   evidence).
+/// - `Documentation` — cataloged, but no runtime detector is wired yet. The
+///   escape hatch for a declared-but-unimplemented surface: it carries no
+///   declarative match fields and never fires, so `signals check` tolerates
+///   it (reported distinctly) instead of failing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, EnumIter, IntoStaticStr, VariantNames)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum DetectionMode {
     Declarative,
     Bespoke,
+    Documentation,
 }
 
 /// A measured or extracted value with an explicit unit.

@@ -25,7 +25,9 @@ pub use claudine_catalog_types::{
     CapScope, DetectionMode, DetectionRecord, DriftObservation, ExtractStrategy, ExtractionSpec,
     ProviderSignalTable, Quantity, SignalEvent, SignalKind, SignalSource,
 };
-pub use bespoke::{EXIT_STDERR_TAIL_LINES, bespoke_replayer, exit_source_payload};
+pub use bespoke::{
+    EXIT_STDERR_TAIL_LINES, EXIT_STDOUT_TAIL_LINES, bespoke_replayer, exit_source_payload,
+};
 pub use engine::{ReplayObservation, SignalEngine};
 pub use hub::SignalHub;
 pub use sink::{CORRELATION_WINDOW, ObservedSignal, SignalSink};

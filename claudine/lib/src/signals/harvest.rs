@@ -353,7 +353,7 @@ mod tests {
 
     #[test]
     fn predicate_fires_on_nonzero_exit_only_for_exit_source() {
-        let payload = exit_source_payload(53, "boom");
+        let payload = exit_source_payload(53, "", "boom");
         assert!(is_error_or_warning_class(SignalSource::Exit, &payload));
         assert!(
             !is_error_or_warning_class(SignalSource::Stream, &payload),
@@ -361,7 +361,7 @@ mod tests {
         );
         assert!(!is_error_or_warning_class(
             SignalSource::Exit,
-            &exit_source_payload(0, "")
+            &exit_source_payload(0, "", "")
         ));
     }
 
