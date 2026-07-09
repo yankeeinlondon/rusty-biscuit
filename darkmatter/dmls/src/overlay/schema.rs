@@ -9,6 +9,7 @@
 //! this module only decides *which* baselines apply and hands the layered
 //! result to [`DarkmatterSchemas::effective_for`].
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::Markdown;
@@ -40,6 +41,15 @@ pub struct SchemaBundle {
     /// extension-declared keys (e.g. Claudine's `provider`/`model`) even when
     /// the document has no `$schema` of its own.
     pub extension_shapes: Vec<SchemaShape>,
+    /// Extension-baseline dependency files (each matched extension's own path
+    /// plus its imports/examples), sorted and deduplicated. These are NOT on
+    /// `effective.dependencies()` because extension baselines are merged into the
+    /// baseline JSON schema *before* the effective schema is assembled, so their
+    /// edges never reach [`EffectiveSchema::dependencies`]. The overlay cache
+    /// content-hashes them alongside the effective dependencies so editing a
+    /// configured extension baseline (or a type it imports) invalidates the
+    /// cached bundle.
+    pub extension_dependencies: Vec<PathBuf>,
 }
 
 /// Assembles the effective schema for a document.
@@ -60,7 +70,7 @@ pub fn assemble(
     config: &DmlsConfig,
     workspace_roots: &[PathBuf],
 ) -> Result<Option<SchemaBundle>, SchemaError> {
-    let (baseline, extension_shapes) = combined_baseline(doc_path, config, workspace_roots)?;
+    let combined = combined_baseline(doc_path, config, workspace_roots)?;
 
     let md: Markdown = document_text.into();
     let md = md.with_source(ComposeSource::File(doc_path.to_path_buf()));
@@ -68,7 +78,7 @@ pub fn assemble(
         return Ok(None);
     }
 
-    let mut schemas = DarkmatterSchemas::new().with_baseline_json_schema(baseline)?;
+    let mut schemas = DarkmatterSchemas::new().with_baseline_json_schema(combined.baseline)?;
     if let Some(dir) = doc_path.parent() {
         schemas = schemas.with_file_ref_fallback_dir(dir.to_path_buf());
     }
@@ -77,10 +87,20 @@ pub fn assemble(
         Some(effective) => Ok(Some(SchemaBundle {
             effective,
             frontmatter_json: frontmatter_json(&md),
-            extension_shapes,
+            extension_shapes: combined.extension_shapes,
+            extension_dependencies: combined.dependencies,
         })),
         None => Ok(None),
     }
+}
+
+/// The Darkmatter base baseline with matching extension baselines merged over
+/// it, plus the matched extensions' SimplifiedSchema shapes and dependency
+/// files.
+struct CombinedBaseline {
+    baseline: Value,
+    extension_shapes: Vec<SchemaShape>,
+    dependencies: Vec<PathBuf>,
 }
 
 /// The Darkmatter base baseline with every matching extension baseline merged
@@ -90,9 +110,10 @@ fn combined_baseline(
     doc_path: &Path,
     config: &DmlsConfig,
     workspace_roots: &[PathBuf],
-) -> Result<(Value, Vec<SchemaShape>), SchemaError> {
+) -> Result<CombinedBaseline, SchemaError> {
     let mut baseline = darkmatter_base_json_schema();
     let mut shapes = Vec::new();
+    let mut dependencies: BTreeSet<PathBuf> = BTreeSet::new();
     for extension in config.schema.extensions.values() {
         if !extension_matches(doc_path, extension, workspace_roots) {
             continue;
@@ -101,11 +122,23 @@ fn combined_baseline(
         if let Some(SimplifiedSchema::Single(shape)) = &resolved.simplified {
             shapes.push(shape.clone());
         }
+        // The extension file's own path (via `referenced_files`, since
+        // `load_extension_schema` resolves a `Value::String(path)`) plus the
+        // types it imports and examples it references are dependency edges the
+        // overlay cache must hash — they never reach `effective.dependencies()`
+        // because the extension is merged into the baseline before assembly.
+        dependencies.extend(resolved.referenced_files.iter().cloned());
+        dependencies.extend(resolved.imports.iter().cloned());
+        dependencies.extend(resolved.examples.iter().cloned());
         // `merge_baseline(under, over)` lets `over` win — the extension
         // overrides the base, matching compose's layering.
         baseline = merge_baseline(&baseline, resolved.json_schema)?;
     }
-    Ok((baseline, shapes))
+    Ok(CombinedBaseline {
+        baseline,
+        extension_shapes: shapes,
+        dependencies: dependencies.into_iter().collect(),
+    })
 }
 
 /// Loads one extension's SimplifiedSchema (or JSON Schema) file.
