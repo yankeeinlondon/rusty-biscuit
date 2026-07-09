@@ -35,30 +35,6 @@ records:
     confidence: observed
     evidence: ./fixtures/antigravity/exit-auth-invalid-print.json
     notes: "Captured from installed `agy` 1.1.0 on 2026-07-08 with `--print-timeout 15s`; the OAuth wait in the app log was 30s."
-  - id: app_log-provider_version-language-server
-    signal: provider_version
-    source: app_log
-    locator: "--log-file <path>; line contains `Language server version:`"
-    detection: documentation
-    priority: 10
-    distinguish: "The app log's language-server boot line is runtime version metadata. It is distinct from `agy --version`, although both reported 1.1.0 in the current local capture."
-    vocabulary: ["Language server version"]
-    confidence: observed
-    evidence: ./fixtures/antigravity/app-log-auth-version.txt
-    notes: "The log format is glog-style plaintext, not JSON; the captured fixture reports `Language server version: 1.1.0`."
-  - id: app_log-auth_invalid-not-logged-in
-    signal: auth_invalid
-    source: app_log
-    locator: "--log-file <path>; token-source/cache failures"
-    detection: documentation
-    priority: 20
-    distinguish: "Repeated `You are not logged into Antigravity` token-source failures are auth diagnostics emitted while startup managers poll experiments, user info, quota, and available models. They should not be classified as provider overload or model-resolution failure."
-    vocabulary: ["You are not logged into Antigravity", "Failed to poll FetchAvailableModels", "quotaRefreshLoop: skipped (not logged in)"]
-    confidence: observed
-    evidence: ./fixtures/antigravity/app-log-auth-version.txt
-bespoke_rationale:
-  - "app_log-provider_version-language-server: Antigravity app logs are glog-style plaintext side-channel records, not structured JSON payloads. Detection needs a log-line parser that extracts severity/date/time/source file/message before matching the message text."
-  - "app_log-auth_invalid-not-logged-in: the useful auth signal is a cluster of plaintext token-source/cache failures within one startup window. A single `You are not logged into Antigravity` line is strong evidence, but robust classification should deduplicate repeated cache and poll failures and avoid emitting one signal per cache line."
 extractions:
   - record: exit-auth_invalid-models-signin
     field: message
@@ -67,6 +43,8 @@ extractions:
     field: message
     path: stdout_tail
 gaps:
+  - "Antigravity app logs (`--log-file`) carry a glog-style `Language server version:` line (`provider_version`), documented and backed by a scrubbed fixture at `./fixtures/antigravity/app-log-auth-version.txt`. Claudine has no runtime app-log ingestion path for Antigravity yet, so this is not compiled as a detection record. Adding it requires a bespoke glog-line classifier fed from the wrapper reading `--log-file`."
+  - "Antigravity app logs (`--log-file`) carry clustered `You are not logged into Antigravity` token-source failures (`auth_invalid`), documented and backed by the same scrubbed fixture at `./fixtures/antigravity/app-log-auth-version.txt`. Claudine has no runtime app-log ingestion path for Antigravity yet, so this is not compiled as a detection record. Adding it requires a bespoke glog-line classifier that deduplicates the repeated cache/poll failures within one startup window."
   - "The public `google-antigravity/antigravity-cli` repository at tag `1.1.0` (`ee2382093ac06d9d68fc88e822713357c2401a78`) contains README, changelog, examples, and media, but no implementation source. Source-code-first inspection therefore found no event enums, stream schemas, error enums, or log-entry types to cite."
   - "The official statusline documentation URL is the closest signal/event documentation found, but the public page is rendered as a client-side app and the repository example gives only consumer code, not a verbatim payload fixture. No official machine-readable stream/event contract for `agy` was found."
   - "The glog-style app-log timestamp (`I0708 11:17:34.547650`) carries month/day and local wall-clock time but no year or timezone. No timestamp extraction is recorded; any future timestamp payload should use `zone: unspecified` unless source confirms otherwise."
@@ -79,8 +57,9 @@ changes:
   - "Confirmed the public repository still lacks implementation source, so no `source_code` confidence signal records can be produced."
   - "Added a separate fixture-backed `exit-auth_invalid-print-timeout` record for unauthenticated headless print mode."
   - "Updated version-drift notes: launcher and language-server version now both report 1.1.0 in the local capture."
+  - "Moved the two app-log observations (`provider_version`, `auth_invalid`) from detection records to `gaps`; there is no runtime app-log ingestion path yet. Removed the retired `documentation` detection mode."
 requires_claudine_update: true
-reason: "Antigravity is not currently in Claudine's generated signal tables; the added `exit-auth_invalid-print-timeout` record and existing app-log bespoke records require generated metadata and likely a small bespoke app-log classifier if Antigravity support is added."
+reason: "Antigravity's generated signal tables now carry the two fixture-backed `exit` auth records; the app-log `provider_version` / `auth_invalid` observations remain future work in `gaps` pending a bespoke app-log classifier fed from the wrapper reading `--log-file`."
 ---
 
 # Antigravity CLI Signal Detection
@@ -119,7 +98,7 @@ E0708 11:17:34.648690 12345 log.go:398] Failed to poll FetchAvailableModels: fai
 I0708 11:17:34.656522 12345 quota_manager.go:63] quotaRefreshLoop: skipped (not logged in)
 ```
 
-This is a diagnostic side-channel rather than a stable JSON contract. It is still operationally useful because it carries provider-version and auth-state signals even when stdout contains only a user-facing error.
+This is a diagnostic side-channel rather than a stable JSON contract. It is still operationally useful because it carries provider-version and auth-state signals even when stdout contains only a user-facing error. Those two app-log observations (`provider_version`, `auth_invalid`) are documented here and a scrubbed fixture is retained, but they are NOT emitted as detection records: Claudine has no runtime app-log ingestion path for Antigravity yet, so they live in `gaps` as future work pending a bespoke glog-line classifier.
 
 ### Statusline Payload
 
@@ -143,7 +122,7 @@ The local unauthenticated capture did include `quotaRefreshLoop: skipped (not lo
 
 The README states that Antigravity CLI authenticates through the system keyring and falls back to Google Sign-In when no active session exists. In the local capture, `agy models` failed with a stdout error asking the user to sign in. The app log from the same run emitted repeated token-source failures with the message `You are not logged into Antigravity`.
 
-The `models` exit/stdout shape is declarative: match `stdout_tail` for `Please sign in to view available models`. The `--print` exit/stdout shape is also declarative: match `stdout_tail` for `authentication failed or timed out`. The app-log shape is bespoke because it is plaintext and repeated across several cache/poll lines; a future classifier should parse glog metadata, classify the message cluster once, and attach the surrounding source site (`FetchAvailableModels`, `availableModels`, `userInfo`, `quotaRefreshLoop`, or `printmode.go`) as diagnostic context.
+The `models` exit/stdout shape is declarative: match `stdout_tail` for `Please sign in to view available models`. The `--print` exit/stdout shape is also declarative: match `stdout_tail` for `authentication failed or timed out`. The app-log auth shape is documented but NOT emitted as a detection record — it lives in `gaps` — because there is no runtime app-log ingestion path yet; a future classifier would parse glog metadata, classify the message cluster once, and attach the surrounding source site (`FetchAvailableModels`, `availableModels`, `userInfo`, `quotaRefreshLoop`, or `printmode.go`) as diagnostic context.
 
 Permission behavior is documented but not recordable from this pass. The changelog documents `request-review` mode, `/permissions`, project/user/CLI permission merging, sandbox auto-approval, and fixes for read/write workspace checks. No stable payload was found that distinguishes `permission_denied_read` from `permission_denied_write`.
 
@@ -157,7 +136,7 @@ The model-related classification risk from this pass is negative: the `models` f
 
 `agy --version` printed `1.1.0`, and the configured app log for `agy models` reported `Language server version: 1.1.0`. The public `1.1.0` tag is `ee2382093ac06d9d68fc88e822713357c2401a78`.
 
-The frontmatter records the app-log language-server line as `provider_version` with `detection: bespoke`, because it requires plaintext log parsing. A future Antigravity adapter should still decide whether to expose the launcher version, embedded language-server version, or both as separate metadata fields; earlier local research observed a launcher/server mismatch, while this refresh did not.
+The app-log language-server line is documented as a `provider_version` observation but is NOT emitted as a detection record — it lives in `gaps` — because it requires plaintext log parsing and Claudine has no runtime app-log ingestion path yet. A future Antigravity adapter should still decide whether to expose the launcher version, embedded language-server version, or both as separate metadata fields; earlier local research observed a launcher/server mismatch, while this refresh did not.
 
 ## Token Metering
 
