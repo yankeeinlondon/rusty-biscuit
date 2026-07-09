@@ -1,9 +1,11 @@
 # More Structure: Graduating Unmapped Research into the Typed System
 
-> **Status: DRAFT.** Do **not** implement until the 2026-07-02 provider-metadata
-> spec is fully complete (Phases E–I closed out, provider ladder validated).
-> This spec exists so the unmapped-data inventory below is not lost in the
-> meantime; treat it as a parking lot with a designed exit, not active work.
+> **Status: ACTIVE (2026-07-08).** The gate — *"the 2026-07-02 provider-metadata
+> spec fully complete (Phases E–I closed, provider ladder validated)"* — is met:
+> that epic is RATIFIED & IMPLEMENTED and Checkpoint H3 is approved. This spec is
+> now unblocked. Method §"Method (when activated)" governs: **scripted audit →
+> classification → ► CHECKPOINT with Ken → implement per cluster.** No code lands
+> before the classification checkpoint.
 
 ## Why
 
