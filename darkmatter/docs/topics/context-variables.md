@@ -44,12 +44,18 @@ Variables are organized into capture groups. The expensive I/O for each group ru
 
 ## Information Provided
 
-We will now provide a grouped overview of all the information stored in Darkmatter's `ctx` variable:
+The per-variable reference below is **generated** from the schema-derived
+`ctx.*` catalog — the exact output of `md schema about --verbose`. It is
+projected from the base frontmatter schema
+(`darkmatter/docs/schemas/darkmatter.yaml`), so it can never drift from
+validation. Do not hand-edit the block between the markers; a parity test
+(`context_variables_doc_matches_generated_catalog`) regenerates it and its
+failure message prints the up-to-date block to paste back.
 
 > **Note:** all date and time related information is reported using _local_ time but there will be a `_utc` variant that provides the same utility only using UTC time to resolve.
 
-> **List-valued variables.** Variables typed `[String]` (e.g. `packages`,
-> `dirty_files`) or `[Object]` (`depends_on`, `used_by`) are captured as real
+> **List-valued variables.** Variables typed `string[]` (e.g. `packages`,
+> `dirty_files`) or `object[]` (`depends_on`, `used_by`) are captured as real
 > arrays. A bare `{{ ctx.foo }}` renders an array **line-separated** (one element
 > per line). To render other shapes use the list-formatting expression functions:
 > `as_csv`, `as_tsv`, `as_space_separated`, `as_line_separated`,
@@ -58,126 +64,133 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 > former pre-rendered `_list` twin variables have been removed — replace
 > `{{ ctx.dirty_files_list }}` with `{{ as_unordered_list(ctx.dirty_files) }}`.
 
-### Date and Time Information
+> **Note:** the CWD in all file/git operations is the directory which _executed_ the `md compose` command **not** the directory where the composed document lives.
+> Most discovery in the Repository, File Changes, Languages, and Documents groups leverages the `sniff` library.
 
-#### Date Only
+<!-- BEGIN GENERATED: ctx catalog (source: md schema about / context_catalog_markdown) -->
+**Date and Time**
 
-| Variable                | Type     | Description                                 |
-|-------------------------|----------|---------------------------------------------|
-| `today`                 | `String` | ISO Date string (`YYYY-MM-DD`), local time  |
-| `today_utc`             | `String` | ISO Date string (`YYYY-MM-DD`), UTC         |
-| `yesterday`             | `String` | Yesterday's date (`YYYY-MM-DD`), local time |
-| `yesterday_utc`         | `String` | Yesterday's date (`YYYY-MM-DD`), UTC        |
-| `tomorrow`              | `String` | Tomorrow's date (`YYYY-MM-DD`), local time  |
-| `tomorrow_utc`          | `String` | Tomorrow's date (`YYYY-MM-DD`), UTC         |
-| `start_of_week_sun`     | `String` | Start of week (Sunday), `YYYY-MM-DD`        |
-| `start_of_week_sun_utc` | `String` | Start of week (Sunday), UTC                 |
-| `start_of_week_mon`     | `String` | Start of week (Monday), `YYYY-MM-DD`        |
-| `start_of_week_mon_utc` | `String` | Start of week (Monday), UTC                 |
-| `end_of_week_sun`       | `String` | End of week (Saturday), `YYYY-MM-DD`        |
-| `end_of_week_sun_utc`   | `String` | End of week (Saturday), UTC                 |
-| `end_of_week_mon`       | `String` | End of week (Sunday), `YYYY-MM-DD`          |
-| `end_of_week_mon_utc`   | `String` | End of week (Sunday), UTC                   |
+- **ctx.now** — `datetime` — Local date and time in ISO-8601 format.
+- **ctx.now\_utc** — `datetime` — UTC date and time in ISO-8601 format.
+- **ctx.today** — `date` — Local date in ISO-8601 format.
+- **ctx.today\_utc** — `date` — UTC date in ISO-8601 format.
+- **ctx.yesterday** — `date` — Local date for yesterday in ISO-8601 format.
+- **ctx.yesterday\_utc** — `date` — UTC date for yesterday in ISO-8601 format.
+- **ctx.tomorrow** — `date` — Local date for tomorrow in ISO-8601 format.
+- **ctx.tomorrow\_utc** — `date` — UTC date for tomorrow in ISO-8601 format.
+- **ctx.day** — `string` — Full day of week name, local time.
+- **ctx.day\_utc** — `string` — Full day of week name, UTC.
+- **ctx.day\_abbr** — `string` — Abbreviated day of week name, local time.
+- **ctx.day\_abbr\_utc** — `string` — Abbreviated day of week name, UTC.
+- **ctx.year** — `string` — Current year, local time.
+- **ctx.year\_utc** — `string` — Current year, UTC.
+- **ctx.month** — `string` — Current month as a zero-padded number, local time.
+- **ctx.month\_name** — `string` — Current month name, local time.
+- **ctx.month\_name\_abbr** — `string` — Abbreviated current month name, local time.
+- **ctx.day\_of\_month** — `string` — Current day of month.
+- **ctx.day\_of\_month\_suffixed** — `string` — Current day of month with ordinal suffix.
+- **ctx.time** — `string` — Local time in 12-hour format with AM/PM.
+- **ctx.time\_military** — `string` — Local time in 24-hour format.
+- **ctx.time\_utc** — `string` — UTC time in 12-hour format with AM/PM.
+- **ctx.time\_military\_utc** — `string` — UTC time in 24-hour format.
+- **ctx.timezone** — `string` _(optional)_ — Local timezone abbreviation, or null when unavailable.
+- **ctx.timezone\_offset** — `string` — Local UTC offset.
+- **ctx.timezone\_iana** — `string` _(optional)_ — Local IANA timezone name, or null when unavailable.
+- **ctx.start\_of\_week\_sun** — `date` — Start of the current Sunday-based week, local time.
+- **ctx.end\_of\_week\_sun** — `date` — End of the current Sunday-based week, local time.
+- **ctx.start\_of\_week\_mon** — `date` — Start of the current Monday-based week, local time.
+- **ctx.end\_of\_week\_mon** — `date` — End of the current Monday-based week, local time.
+- **ctx.start\_of\_week\_sun\_utc** — `date` — Start of the current Sunday-based week, UTC.
+- **ctx.end\_of\_week\_sun\_utc** — `date` — End of the current Sunday-based week, UTC.
+- **ctx.start\_of\_week\_mon\_utc** — `date` — Start of the current Monday-based week, UTC.
+- **ctx.end\_of\_week\_mon\_utc** — `date` — End of the current Monday-based week, UTC.
+- **ctx.season** — `string` — Current meteorological season.
+- **ctx.timestamp** — `number(integer)` — Current Unix timestamp in seconds.
+- **ctx.timestamp\_ms** — `number(integer)` — Current Unix timestamp in milliseconds.
+- _Aliases_
+  - **ctx.utc** — `datetime` — Alias for now_utc.
+  - **ctx.dow** — `string` — Alias for day.
+  - **ctx.dow\_abbr** — `string` — Alias for day_abbr.
 
-#### Date and Time
+**Repository**
 
-| Variable  | Type     | Description                                                |
-|-----------|----------|------------------------------------------------------------|
-| `now`     | `String` | ISO Datetime string for local time (`YYYY-MM-DDThh:mm:ss`) |
-| `now_utc` | `String` | ISO Datetime string for UTC (`YYYY-MM-DDThh:mm:ssZ`)       |
-| `utc`     | `String` | **Alias** for `now_utc` (backward compatibility)           |
+- **ctx.repo** — `string` _(optional)_ — Repository name from the preferred remote URL, or null when unavailable.
+- **ctx.repo\_root** — `string` _(optional)_ — Absolute repository root path, or null when unavailable.
+- **ctx.is\_monorepo** — `boolean` — Whether the current repository is a monorepo.
+- _Packages_
+  - **ctx.package\_root** — `string` _(optional)_ — Absolute current package root path, or null when unavailable.
+  - **ctx.package\_area\_root** — `string` _(optional)_ — Absolute current package area root path, or null when unavailable.
+  - **ctx.packages** — `string[]` _(optional)_ — Package names, or null when unavailable.
+  - **ctx.package\_areas** — `string[]` _(optional)_ — Package area names, or null when unavailable.
+  - **ctx.current\_package** — `string` _(optional)_ — Current package name, or null when unavailable.
+  - **ctx.current\_package\_area** — `string` _(optional)_ — Current package area, or null when unavailable.
+- _Scope_
+  - **ctx.area** — `string` — Scoped area name.
+  - **ctx.area\_description** — `string` — Human-readable scoped area description.
+  - **ctx.area\_root** — `string` — Absolute scoped area root path.
+  - **ctx.current\_packages** — `string[]` _(optional)_ — Packages under the current directory.
+  - **ctx.depends\_on** — `object[]` _(optional)_ — Workspace-internal package dependencies. Each item is an object with a `package` (string) field and a `dependencies` (string[]) field listing the packages it depends on.
+  - **ctx.used\_by** — `object[]` _(optional)_ — Workspace-internal package reverse dependencies. Each item is an object with a `package` (string) field and a `users` (string[]) field listing the packages that depend on it.
 
-#### Time Only
+**File Changes**
 
-| Variable             | Type     | Description                                          |
-|----------------------|----------|------------------------------------------------------|
-| `time`               | `String` | Time in `hh:mm AM/PM` format (e.g., `12:43 PM`)       |
-| `time_military`      | `String` | Time in 24-hour format (e.g., `22:30`)               |
-| `time_utc`           | `String` | UTC time in `hh:mm AM/PM` format (e.g., `7:43 PM (UTC)`) |
-| `time_military_utc`  | `String` | UTC time in 24-hour format (e.g., `19:43 (UTC)`)     |
-| `timezone`           | `String` | Timezone abbreviation (e.g., `PDT`, `UTC`)           |
-| `timezone_offset` | `String` | UTC offset (e.g., `-0700`)                      |
-| `timezone_iana`   | `String` | UTC offset (e.g., `America/Los_Angeles`)                      |
+- **ctx.dirty\_files** — `string[]` _(optional)_ — Dirty file paths.
+- **ctx.dirty\_source\_code\_files** — `string[]` _(optional)_ — Dirty source-code file paths.
+- **ctx.staged\_files** — `string[]` _(optional)_ — Staged file paths.
+- **ctx.untracked\_files** — `string[]` _(optional)_ — Untracked file paths.
+- _Packages_
+  - **ctx.dirty\_packages** — `string[]` _(optional)_ — Dirty package names.
+  - **ctx.dirty\_package\_areas** — `string[]` _(optional)_ — Dirty package area names.
+  - **ctx.staged\_packages** — `string[]` _(optional)_ — Staged package names.
+  - **ctx.staged\_package\_areas** — `string[]` _(optional)_ — Staged package area names.
+- _Flags_
+  - **ctx.current\_package\_has\_staged\_files** — `boolean` — Whether the current package has staged files.
+  - **ctx.current\_package\_area\_has\_staged\_files** — `boolean` — Whether the current package area has staged files.
+  - **ctx.current\_package\_has\_dirty\_files** — `boolean` — Whether the current package has dirty files.
+  - **ctx.current\_package\_area\_has\_dirty\_files** — `boolean` — Whether the current package area has dirty files.
 
-#### Calendar
+**Languages**
 
-| Variable                | Type     | Description                                         |
-|-------------------------|----------|-----------------------------------------------------|
-| `day`                   | `String` | Day of the week (e.g., Monday, Tuesday)             |
-| `dow`                   | `String` | **Alias** for `day` (backward compatibility)        |
-| `day_abbr`              | `String` | Abbreviated day (e.g., Mon, Tue)                    |
-| `dow_abbr`              | `String` | **Alias** for `day_abbr` (backward compatibility)   |
-| `day_utc`               | `String` | Day of the week, UTC                                |
-| `day_abbr_utc`          | `String` | Abbreviated day, UTC                                |
-| `year`                  | `String` | Four-digit year, local time                         |
-| `year_utc`              | `String` | Four-digit year, UTC                                |
-| `day_of_month`          | `String` | Numeric day of month                                |
-| `day_of_month_suffixed` | `String` | Day with ordinal suffix (1st, 2nd, 3rd, etc.)       |
-| `month`                 | `String` | Two-digit month (01-12)                             |
-| `month_name`            | `String` | Full month name (e.g., January)                     |
-| `month_name_abbr`       | `String` | Abbreviated month name (e.g., Jan)                  |
-| `season`                | `String` | Meteorological season: Spring, Summer, Fall, Winter |
+- **ctx.programming\_languages\_in\_repo** — `string[]` _(optional)_ — Programming languages in the repository, or null when unavailable.
+- **ctx.programming\_language** — `string` _(optional)_ — Context-sensitive primary programming language, or null when unavailable.
+- **ctx.package\_manager** — `string` _(optional)_ — Context-sensitive package manager, or null when unavailable.
 
-#### Timestamps
+**Documents**
 
-| Variable       | Type     | Description                     |
-|----------------|----------|---------------------------------|
-| `timestamp`    | `Number` | EPOCH timestamp in seconds      |
-| `timestamp_ms` | `Number` | EPOCH timestamp in milliseconds |
+- **ctx.docs\_readme** — `string[]` _(optional)_ — README paths, scope-filtered.
+- **ctx.docs\_blast\_radius** — `string[]` _(optional)_ — Docs with blast_radius frontmatter, scope-filtered.
+- **ctx.docs\_drift** — `string[]` _(optional)_ — Docs at risk of drift from source changes.
+- **ctx.docs\_skill** — `string` _(optional)_ — Repo-relative path to the best matching skill file, or null when unavailable.
 
-### Filesystem and Git
+**Operating System**
 
-> **Note:** the CWD in all file/git operations is the directory which _executed_ the `md compose` command **not** the directory where the composed document lives
-> 
-> **Note:** most discovery in this section leverages the `sniff` library
+- **ctx.os** — `string` _(optional)_ — Operating system name, or null when unavailable.
+- **ctx.os\_distro** — `string` — Linux distribution name, empty on macOS and Windows.
+- **ctx.os\_package\_manager** — `string` _(optional)_ — Primary system package manager, or null when unavailable.
+- **ctx.os\_version** — `string` — Operating system version.
 
-| Variable               | Type              | Description                                                                        |
-|------------------------|-------------------|------------------------------------------------------------------------------------|
-| `repo`                 | `String \| null`   | Repository name; null if not in a git repo                                         |
-| `repo_root`            | `String \| null`   | Absolute path to repo root (no trailing separator); null if not in a git repo      |
-| `is_monorepo`          | `bool`            | Whether the repo is a monorepo; false if not in a repo                             |
-| `package_root`         | `String \| null`   | Absolute path to current package root; null if not monorepo or not in a package    |
-| `package_area_root`    | `String \| null`   | Absolute path to current package area root; null if not monorepo or not in an area |
-| `packages`             | `[String] \| null` | List of package names; null if not a monorepo                                      |
-| `package_areas`        | `[String] \| null` | List of unique package areas; null if not a monorepo                               |
-| `current_package`      | `String \| null`   | Current package name; null if not in a monorepo package                            |
-| `current_package_area` | `String \| null`   | Current package area; null if not in a monorepo area                               |
-| `area`                 | `String`          | Scope name: package name in a package, area name in an area; empty string at root or when not a monorepo |
-| `area_description`     | `String`          | `"{package} package"` in a package, `"{area} package area"` in an area; empty string at root or when not a monorepo |
-| `area_root`            | `String`          | Absolute path to the `area` root (no trailing separator); repo root when not a monorepo |
-| `current_packages`     | `[String]`        | Packages under the current directory, each as `{name} ({relative})`; empty array outside a monorepo |
-| `depends_on`           | `[Object]`        | Workspace-internal packages the scoped `area` depends on, each `{ package, dependencies }`; empty array outside a monorepo |
-| `used_by`              | `[Object]`        | Workspace-internal packages that depend on the scoped `area`, each `{ package, users }`; empty array outside a monorepo |
+**Hardware**
 
-#### Changed Files
+- **ctx.memory\_total** — `string` _(optional)_ — Total system memory in bytes, or null when unavailable.
+- **ctx.memory\_used** — `string` _(optional)_ — Percentage of memory currently used, or null when unavailable.
+- **ctx.memory\_avail** — `string` _(optional)_ — Available system memory in bytes, or null when unavailable.
+- **ctx.cpu\_cores** — `number(integer)` _(optional)_ — Number of logical CPU cores, or null when unavailable.
+- **ctx.cpu\_arch** — `string` _(optional)_ — CPU architecture, or null when unavailable.
+- **ctx.gpu** — `string` _(optional)_ — GPU device names, or null when unavailable.
 
-| Variable                  | Type       | Description                                |
-|---------------------------|------------|--------------------------------------------|
-| `dirty_files`             | `[String]` | Dirty file paths (empty array if none)     |
-| `dirty_source_code_files` | `[String]` | Dirty source code file paths               |
-| `staged_files`            | `[String]` | Staged file paths                          |
-| `untracked_files`         | `[String]` | Untracked file paths                       |
+**Agent**
 
-#### Package-Level Changes
+- **ctx.agent** — `string` — Executing agentic CLI name, trimmed from the AGENT env var; defaults to "unknown".
+- **ctx.model** — `string` — Active model identifier, trimmed from the MODEL env var; defaults to "default".
+<!-- END GENERATED: ctx catalog -->
 
-| Variable                                | Type       | Description                                 |
-|-----------------------------------------|------------|---------------------------------------------|
-| `dirty_packages`                        | `[String]` | Dirty package names                         |
-| `dirty_package_areas`                   | `[String]` | Dirty package area names                    |
-| `staged_packages`                       | `[String]` | Staged package names                        |
-| `staged_package_areas`                  | `[String]` | Staged package area names                   |
-| `current_package_has_staged_files`      | `bool`   | Whether current package has staged files      |
-| `current_package_area_has_staged_files` | `bool`   | Whether current package area has staged files |
-| `current_package_has_dirty_files`       | `bool`   | Whether current package has dirty files       |
-| `current_package_area_has_dirty_files`  | `bool`   | Whether current package area has dirty files  |
+## Notes on Specific Groups
 
-### Programming Language
+The prose below adds constraints and derivation rules that the per-variable
+types above cannot express. Variable names, types, and one-line descriptions
+live only in the generated block.
 
-| Variable                        | Type            | Description                                                                 |
-|---------------------------------|-----------------|-----------------------------------------------------------------------------|
-| `programming_languages_in_repo` | `[String] \| null` | Unique languages across all packages; null if not in a repo |
-| `programming_language`          | `String \| null` | Context-sensitive primary language (see rules below); null if not in a repo |
-| `package_manager`               | `String \| null` | Context-sensitive package manager (see rules below); null if not in a repo  |
+### Languages
 
 **`programming_language` rules:**
 
@@ -195,13 +208,6 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 
 ### Documents
 
-| Variable            | Type            | Description                                                          |
-|---------------------|-----------------|----------------------------------------------------------------------|
-| `docs_readme`       | `[String]`      | README paths, scope-filtered                                         |
-| `docs_blast_radius` | `[String]`      | Docs with `blast_radius` frontmatter, scope-filtered                 |
-| `docs_drift`        | `[String]`      | Docs at risk of drift from source changes                            |
-| `docs_skill`        | `String \| null` | Repo-relative path to best matching SKILL.md; null if none found     |
-
 **Scope filtering** (for monorepos):
 
 - In a package: filter to that package
@@ -212,38 +218,13 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 
 **`docs_skill` discovery:** Scans `{repo_root}/.claude/skills/*/SKILL.md` and `{repo_root}/.agents/skills/*/SKILL.md`, preferring skills whose directory name matches the current package, area, or repo name.
 
-### Operating System
-
-| Variable             | Type            | Description                                                   |
-|----------------------|-----------------|---------------------------------------------------------------|
-| `os`                 | `String \| null` | `"Windows"`, `"macOS"`, or `"Linux"`; null for other OS types |
-| `os_distro`          | `String`        | Linux distribution name; empty string on macOS/Windows        |
-| `os_package_manager` | `String \| null` | Primary system package manager; null if not detected          |
-| `os_version`         | `String`        | Operating system version                                      |
-
-### Hardware
-
-| Variable       | Type            | Description                                                |
-|----------------|-----------------|------------------------------------------------------------|
-| `memory_total` | `Number`        | Total system memory in bytes                               |
-| `memory_used`  | `Number`        | Percentage of memory currently used                        |
-| `memory_avail` | `Number`        | Available memory in bytes                                  |
-| `cpu_cores`    | `Number`        | Number of logical CPU cores                                |
-| `cpu_arch`     | `String`        | CPU architecture (e.g., `aarch64`, `x86_64`)               |
-| `gpu`          | `String \| null` | GPU device name(s), comma-separated; null if none detected |
-
 ### Agent
 
 The **Agent** group is captured when `ctx.agent` or `ctx.model` is referenced.
 It performs no host probes: it reads the `AGENT` and `MODEL` environment
 variables, trims ASCII whitespace, and applies simple defaults.
 
-| Variable | Type     | Description                                                |
-|----------|----------|------------------------------------------------------------|
-| `agent`  | `String` | Executing agentic CLI name (from `AGENT` env var); defaults to `"unknown"` |
-| `model`  | `String` | Active model identifier (from `MODEL` env var); defaults to `"default"` |
-
-- Missing or empty values receive the defaults above.
+- Missing or empty values receive the defaults (`"unknown"` for `agent`, `"default"` for `model`).
 - Values are trimmed before use.
 - There is no model allowlist; any value is accepted as-is.
 - The recognized agent names and aliases are: `claude` / `claude_code` /
