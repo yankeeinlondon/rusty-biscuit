@@ -98,6 +98,8 @@ $schema:
 | `enum`       | A value from an explicit set.                                                                          | Constraints required — the members are the constraint. See [Enumerations](#enumerations).                                                                                       |
 | `url`        | A string parseable as an absolute URL.                                                                 | Constraints: `scheme(...)`, `default`, `required`.                                                                                                                              |
 | `email`      | A string in `addr-spec` form.                                                                          | JSON Schema `format: email`.                                                                                                                                                    |
+| `yaml`       | A string whose **content** parses as YAML, **or** a native mapping/sequence/scalar coerced to a YAML string. | JSON Schema `format: darkmatter-yaml`. Accepts JSON too (JSON is valid YAML). See [Content-Format Types](#content-format-types-yaml--json).                              |
+| `json`       | A string whose **content** parses as strict JSON, **or** a native value coerced to a JSON string.      | JSON Schema `format: darkmatter-json`. Rejects YAML-only syntax. See [Content-Format Types](#content-format-types-yaml--json).                                                  |
 | `any`        | Anything.                                                                                              | Only `required` is meaningful. `any(required)` is presence-only because `any` already includes `null`.                                                                          |
 
 Append `[]` to any type for an array of that type — e.g. `string[]`, `enum(red,green,blue)[]`, `file(match('*.md'))[]`.
@@ -344,6 +346,122 @@ An inline object compiles to the same Draft 2020-12 JSON Schema shape a hand-wri
 
 For an array of inline objects, the `items` sub-schema is the inline object fragment and `minItems` / `maxItems` / `uniqueItems` / `required` come from the postfix constraints after `[]`.
 
+## Composition Primitives
+
+Four primitives compose named types, dictionaries, and content-format strings on top of the base grammar. They are additive — a schema that uses none of them parses and compiles exactly as before.
+
+### `example(...)` Constraint
+
+`example(...)` attaches one or more **example artifacts** to a property. Examples are documentation, like a richer `description` — they do **not** constrain the annotated property's value. Comma-separated file references resolve relative to the referencing schema file (magic paths and `this` are honored, mirroring `$schema` resolution).
+
+```yaml
+$schema:
+    today: "date(required; example(./ctx/today-example.yaml)) -> Local date"
+    demo:  "string(example(./a.yaml, ./b.yaml))"
+```
+
+Each referenced file is validated at **schema-load time** — a missing, malformed, or invalid example is a schema-load error (fail loud; the point is trustworthy examples). Validation has two layers:
+
+1. The common **envelope** validates against the built-in example schema (`kind`, `invocation`, `returns`, `description`).
+2. Target-specific fields such as `parameters` validate against the inherited target shape (for expression-function examples, an array of single-key `name → value` maps).
+
+Resolved example objects are emitted onto the JSON Schema as the `x-darkmatter-example` extension so downstream consumers (`md schema about`, DMLS hover) read them without re-reading disk. Unchanged example files are cached by content hash across warm loads.
+
+### Cross-File Named-Type Imports (`Name@file`)
+
+`Name@fileref` **inlines** the definition of the named type `Name` from the referenced file at the use site — structural substitution, not a persistent reference. A schema file's **top-level `$schema:` entries are its named types**; each is a full SimplifiedSchema definition (scalar, enum, union, or an inline object with literal or pattern keys).
+
+```yaml
+$schema:
+    type:       type@./types.yaml        # inlines types.yaml's `type` definition
+    parameters: parameter[]@./types.yaml # array of the inlined `parameter` map
+    value:      type@this                # the `type` defined in *this* file
+```
+
+Grammar: `type_ref := ident ('[]')? ('(' constraints ')')? '@' fileref`. Postfix composes **outward**:
+
+- `Name[]@file` — an array of the inlined `Name`.
+- `Name(constraints)@file` — the inlined type with `constraints` applied to it.
+- `@this` — the current schema file (self-target), including inline top-level documents.
+
+Rules:
+
+- The right side resolves through `biscuit_file::FileReference::resolve_from(base_dir)` — the same resolution as root-union file refs and `$schema`.
+- The target must be a SimplifiedSchema file with a matching named type. Importing from a raw JSON Schema file, from a file with no matching type name, or a missing file is a schema error.
+- Expansion is **eager, bounded, and cycle-checked**. Named types form a DAG; a type that transitively references itself is a recursion error (`SchemaError::ImportCycle`), and an import chain that exceeds the depth cap is rejected — the same protection as the inline-object nesting cap. True recursive types are deferred.
+- Each import is a **dependency edge** recorded on the resolved schema (`ResolvedSchema.imports`) so the schema cache and DMLS index can invalidate when an imported file changes.
+- `to_json_schema` rejects any unresolved import that reaches conversion, exactly as it rejects unresolved root-union file arms — imports are always expanded by the resolver first.
+
+Because a named type can be *any* definition and `@` inlines it, composition (named types + `@` + `[]` + unions + pattern keys) **is** the type system — SimplifiedSchema's ergonomic answer to JSON Schema `$ref` / `$defs`.
+
+### Pattern / Dictionary Keys
+
+Inside an inline object (or a YAML-block schema object), keys may follow a **pattern** instead of a fixed literal set. This types dictionaries — objects whose keys are data, not a known vocabulary.
+
+```yaml
+$schema:
+    headers: "{ <string>: string }"                 # any string key → string value
+    parameter:
+        "<string>": any                             # any string key → any value
+```
+
+Key forms:
+
+| Form                    | Meaning                                              | JSON Schema                          |
+|-------------------------|------------------------------------------------------|--------------------------------------|
+| `<string>`              | Any string key (catch-all).                          | `additionalProperties: <valueType>`  |
+| `<starting::PREFIX>`    | Keys beginning with the **literal** string `PREFIX`. | `patternProperties` (`^PREFIX`)      |
+| `<ending::SUFFIX>`      | Keys ending with the **literal** string `SUFFIX`.    | `patternProperties` (`SUFFIX$`)      |
+| `<pattern::RE>`         | A raw ECMA-262 regex escape hatch.                   | `patternProperties` (`RE`)           |
+
+Rules:
+
+- **Literal keys win** over pattern keys. Because JSON Schema's `patternProperties` also applies to declared `properties`, the converter subtracts literal names from each emitted non-catch-all pattern with a negative lookahead. For example `<starting::x->` alongside literal key `x-kind` emits a pattern equivalent to `^(?!(?:x-kind)$)x-`. If wrapping would make a user-supplied `<pattern::RE>` invalid, conversion fails loudly rather than silently double-validating.
+- Multiple pattern keys are allowed (multiple `patternProperties`).
+- A pattern-keyed object is **closed** by default (`additionalProperties: false`) unless a `<string>` catch-all is present, in which case the catch-all lowers to `additionalProperties: <valueType>`.
+- A pattern-keyed object whose value type is a `@`-import sidesteps the one-level inline-object nesting cap — cross-file named types are the depth escape hatch.
+
+Schemas that emit a lookaround-bearing pattern are validated with `jsonschema`'s `fancy-regex` engine **per schema**; every other schema keeps the ReDoS-safe linear engine.
+
+### Object Arity Constraints (`min-keys` / `max-keys`)
+
+Pattern-keyed objects match `0..N` keys; some shapes need a bounded count. `min-keys(n)` / `max-keys(n)` are the object analog of the array `min` / `max`, lowering to JSON Schema `minProperties` / `maxProperties`. They apply only to object atoms — using them on a non-object type or an array-level constraint position is a schema error.
+
+They can be authored as **postfix constraints** or via the reserved **`$constraints`** block key — one canonical model, two surfaces:
+
+```yaml
+$schema:
+    # Postfix form — exactly one key/value pair
+    parameter: "{ <string>: any }(min-keys(1); max-keys(1))"
+
+    # $constraints block form — identical desugaring
+    parameter:
+        "<string>": any
+        $constraints:
+            min-keys: 1
+            max-keys: 1
+```
+
+`$constraints` (dollar-prefixed, mirroring `$schema`) is **reserved only inside authored schema objects**: it is stripped before shape assembly and never participates in literal/pattern key matching. Flag constraints are written `name: true`. This does **not** reserve `$constraints` in user frontmatter data — only the schema-authoring language uses the sentinel.
+
+### Content-Format Types (`yaml` / `json`)
+
+`yaml` and `json` type a **string whose content must parse** as a structured document. They join the string-with-format family (`date`, `datetime`, `time`, `email`, `url`, `file`) — the same custom-format seam, not a new mechanism.
+
+```yaml
+$schema:
+    invocation:
+        - string(required)
+        - { frontmatter: yaml }   # a frontmatter block expressed as a YAML string
+    config: json                  # a string of strict JSON
+```
+
+- They compile to `{ "type": "string", "format": "darkmatter-yaml" }` / `"darkmatter-json"`, with validators that parse the value through biscuit-file's YAML / strict-JSON facilities. A parse failure is a validation error.
+- **String or native, with coercion.** The value may be a YAML/JSON **string** *or* a **native** mapping/sequence/scalar. A native value is coerced to its YAML/JSON string serialization (the same write-back model as scalar coercion) before validation; a native value that cannot be represented in the target format is a validation error. So `frontmatter: yaml` accepts both `"title: Foo"` and a native `{ title: Foo }`.
+- **`json` is strict; `yaml` is a superset.** JSON is valid YAML, so `yaml` accepts JSON; `json` rejects YAML-only syntax.
+- Validation-only APIs stay **non-mutating** — they validate against a transient coerced copy and leave the caller's frontmatter untouched. Only the composing/write-back path exposes the serialized value.
+- Embedded sub-schema constraints (`yaml(schema(<ref>))`) are deferred to a future extension.
+
 ## Unions
 
 ### Property-Level Unions
@@ -485,6 +603,8 @@ Coercion is **default-on**: there is no opt-in flag and no opt-out / strict-type
 | `number` / `integer` | a string matching `^-?\d+(\.\d+)?$` | real number (`"42"` → `42`, `"3.14"` → `3.14`) |
 | `numberlike` | a numeric string (same regex) | real number (**normalized** — previously left as a string) |
 | `string` (incl. `date` / `datetime` / `time` / `url` / `email` / `file`) | a `number` or `boolean` scalar | its canonical string (`42` → `"42"`, `true` → `"true"`) |
+| `yaml` | a native mapping / sequence / scalar | its YAML string serialization (validated as YAML) |
+| `json` | a native mapping / sequence / scalar | its JSON string serialization (validated as strict JSON) |
 | `array` of a coercible item type | an array | each element coerced by the item rule (recursively) |
 
 The string direction is reverse-direction and always unambiguous (every scalar has exactly one canonical string form). It targets `string` only — a number landing in a `date` field coerces to its string form and then fails the `date` format check normally, so coercion never produces a false accept.
@@ -864,7 +984,9 @@ All failure modes are variants of `SchemaError`:
 | `AmbiguousReferenced`   | Referenced file is neither a valid SimplifiedSchema nor a valid JSON Schema.                              |
 | `RemoteUnsupported`     | `http://` / `https://` `$schema` references are rejected in v1.                                           |
 | `Baseline`              | Baseline could not be loaded or is not a simple object schema.                                            |
-| `Convert`               | SimplifiedSchema could not be lowered to JSON Schema (e.g. conflicting `default(...)` on a union).        |
+| `Convert`               | SimplifiedSchema could not be lowered to JSON Schema (e.g. conflicting `default(...)` on a union, an unresolved `@`-import reaching conversion, or a `<pattern::RE>` that cannot be wrapped for literal-key precedence). |
+| `ImportCycle`           | A `Name@file` named-type import references itself directly or transitively (or exceeds the import-depth cap). |
+| `InvalidExample`        | An `example(...)` file is malformed or fails validation against the example envelope or inherited target shape. |
 | `BuildValidator`        | `jsonschema` could not build a validator from the produced schema.                                        |
 | `Io`                    | Filesystem read failure with the offending path.                                                          |
 

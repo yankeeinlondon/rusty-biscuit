@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-215c1f3d7e2b2aa8
-last_updated: 2026-07-07
+hash: 87f17662fa397abe-0c9872bc6071f119
+last_updated: 2026-07-09
 ---
 
 # darkmatter
@@ -487,6 +487,8 @@ Darkmatter defines, detects, and evaluates schemas for Markdown frontmatter via 
 - `ComposeOptions::with_baseline_schema(...)` for programmatic baseline injection.
 - Typed schema-language descriptor catalog (`schema_type_descriptors()`, `schema_constraint_descriptors()`, `schema_shape_descriptors()`, `inline_object_rule_descriptors()`, `coercion_rule_descriptors()`, `validation_behavior_descriptors()`) — the authoritative source for `md schema about` and the same surface library callers render their own reports from.
 - Span-aware diagnostic shapes (added for DMLS, R-5). `ValidationProblem` carries, alongside the legacy fields, a fine-grained `code: ValidationProblemCode` (missing-required / type-mismatch / constraint-violation / unknown-key / invalid-file-reference), a parsed `instance_path: JsonPointer`, optional `schema_path`, `offending_property` (the undeclared key for `additionalProperties` failures), and `file_reference: Option<FileReferenceDiagnostic>` (invalid-syntax / resolution-failed / no-match, resolved-from context). These are purely additive — `message` and `md schema validate` output are byte-identical. `EffectiveSchema::origins: SchemaOriginMap` records each top-level property's provenance (document vs baseline vs referenced-file path). `EffectiveSchema::validate_with_options(_, _, ValidationOptions { pending_policy, excluded_keys })` mirrors the compose deferral rules as data — populating `ValidationReport.pending: Vec<PendingValue>` (`$(...)` → shell-expression, `{{ }}` → unresolved-template) and dropping deferred/excluded problems — **without executing anything**. The plain `validate` / `validate_with_positions` entry points are unchanged (empty `pending`). On the style side, `darkmatter::style::build_yaml_position_map` maps a dotted YAML key path to a raw-YAML-relative `StyleSpan`, `StyleWarning::source_span` is populated by `from_frontmatter` when `Frontmatter::raw_source()` is available, and `StyleParseError::source_span()` surfaces the first `Strict`-warning span.
+
+- Composition primitives (schema-plus). SimplifiedSchema composes named types and dictionaries on top of the base grammar: `example(...)` attaches documentation-only example artifacts (validated at schema-load time, emitted as the `x-darkmatter-example` extension); `Name@file` / `Name@this` inline a named type's definition from another schema file's top-level `$schema:` entries (eager, bounded, cycle-checked — `SchemaError::ImportCycle`, dependency edges on `ResolvedSchema.imports`); pattern keys (`<string>` → `additionalProperties`, `<starting::P>` / `<ending::S>` / `<pattern::RE>` → `patternProperties` with literal-key precedence via negative-lookahead wrapping) plus `min-keys` / `max-keys` (authored postfix or via the reserved `$constraints` block key) type dictionaries; and `yaml` / `json` are content-format string types (`format: darkmatter-yaml` / `darkmatter-json`) that accept a string or a coerced native value. A malformed example is `SchemaError::InvalidExample`. Schemas emitting a lookaround-bearing pattern validate on `jsonschema`'s `fancy-regex` engine per-schema; all others keep the ReDoS-safe linear engine.
 
 See `darkmatter/docs/topics/schema-definition.md` for the full topic documentation.
 

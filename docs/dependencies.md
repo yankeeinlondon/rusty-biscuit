@@ -36,6 +36,11 @@
 - `darkmatter/lib` enables `biscuit-file/fetch` and uses `reqwest`, `tokio`,
   and `url` for remote URL composition, persistent remote cache revalidation,
   and side-effect `http_post` host-policy enforcement.
+- `darkmatter/lib` takes a direct `fancy-regex` dependency (already in the tree
+  transitively via `jsonschema`) so SimplifiedSchema pattern-key literal
+  precedence (Feature C) can emit negative-lookahead `patternProperties`: such
+  schemas opt into `jsonschema`'s backtracking `fancy-regex` engine, while every
+  lookaround-free schema stays on the linear (ReDoS-safe) `regex` engine.
 - `darkmatter/dmls` (`dmls`) is the Darkmatter Language Server. Protocol
   stack: `lsp-server` (stdio framing, in-memory test connections) +
   `lsp-types` (LSP 3.17 types) + `crossbeam-channel` (the channel family
