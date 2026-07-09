@@ -269,6 +269,7 @@ pub(in crate::provider) static CODEX_INFO: ProviderInfo = ProviderInfo {
     model_cli_flag: Some("--model"),
     non_interactive_conflicting_flags: &[],
     billing_models: &[BillingModel::Subscription, BillingModel::PerToken],
+    cap_policies: &[],
     allowed_env_keys: &["OPENAI_API_KEY", "CODEX_API_KEY"],
     display_policy: DisplayPolicy {
         tool_result_summary: ToolResultSummary::PreferBody,

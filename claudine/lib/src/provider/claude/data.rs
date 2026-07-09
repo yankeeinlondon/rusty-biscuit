@@ -20,6 +20,7 @@ use crate::linking::capabilities::{ProviderCapabilities, ResourceFormat, Resourc
 use crate::provider::{OutputFormatSelector, ProviderInfo};
 use crate::provider::acp::{AcpServerMode, AcpSupport};
 use crate::provider::billing_model::BillingModel;
+use crate::provider::cap_policy::{CapPolicy, CapScope, Quantity, Unit};
 use crate::provider::cli_sensitivity::CliSensitiveAxes;
 use crate::provider::display_policy::{DisplayPolicy, ToolResultSummary};
 use crate::provider::event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
@@ -296,6 +297,24 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
     model_cli_flag: Some("--model"),
     non_interactive_conflicting_flags: &[],
     billing_models: &[BillingModel::Subscription, BillingModel::PerToken],
+    cap_policies: &[
+        CapPolicy {
+            model: CapScope::All,
+            timeframe: Quantity { value: 18000.0, unit: Unit::DurationSecs },
+        },
+        CapPolicy {
+            model: CapScope::All,
+            timeframe: Quantity { value: 604800.0, unit: Unit::DurationSecs },
+        },
+        CapPolicy {
+            model: CapScope::specific("opus"),
+            timeframe: Quantity { value: 604800.0, unit: Unit::DurationSecs },
+        },
+        CapPolicy {
+            model: CapScope::specific("sonnet"),
+            timeframe: Quantity { value: 604800.0, unit: Unit::DurationSecs },
+        },
+    ],
     allowed_env_keys: &[],
     display_policy: DisplayPolicy {
         tool_result_summary: ToolResultSummary::Show,

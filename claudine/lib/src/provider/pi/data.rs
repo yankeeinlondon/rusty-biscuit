@@ -416,6 +416,7 @@ pub(in crate::provider) static PI_INFO: ProviderInfo = ProviderInfo {
     model_cli_flag: Some("--model"),
     non_interactive_conflicting_flags: &[],
     billing_models: &[BillingModel::PrepaidCredits, BillingModel::Subscription, BillingModel::PerToken],
+    cap_policies: &[],
     allowed_env_keys: &["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY"],
     display_policy: DisplayPolicy {
         tool_result_summary: ToolResultSummary::Show,

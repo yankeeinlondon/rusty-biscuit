@@ -285,6 +285,7 @@ repo_home_root_files: []
 billing_models:
 - subscription
 - per_token
+cap_policies: []
 allowed_env_keys:
 - OPENAI_API_KEY
 - CODEX_API_KEY

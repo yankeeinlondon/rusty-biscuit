@@ -289,6 +289,7 @@ billing_models:
 - prepaid_credits
 - subscription
 - per_token
+cap_policies: []
 allowed_env_keys:
 # Representative provider auth keys Pi reads (documented in the research); Pi
 # aggregates many more provider-specific *_API_KEY vars — a wrapper preserves

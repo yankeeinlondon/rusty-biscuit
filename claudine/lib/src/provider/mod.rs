@@ -18,6 +18,7 @@ mod acp;
 mod antigravity;
 mod behavior;
 mod billing_model;
+mod cap_policy;
 mod claude;
 mod cli_sensitivity;
 mod codex;
@@ -55,6 +56,7 @@ pub use behavior::{
     AdapterBehavior, BoxedSemanticEventSink, ConfiguratorBehavior, McpBehavior, ProviderBehavior,
 };
 pub use billing_model::BillingModel;
+pub use cap_policy::CapPolicy;
 pub use cli_sensitivity::CliSensitiveAxes;
 pub use display_policy::{DisplayPolicy, EventClass, ToolResultSummary};
 pub use errors::{ConfigError, McpError};
@@ -297,6 +299,14 @@ pub struct ProviderInfo {
 
     /// Billing models the provider offers.
     pub billing_models: &'static [BillingModel],
+
+    /// Cap policies the provider imposes (Layer A of the provider-neutral cap
+    /// model): the static 1:M set of `(model-scope, timeframe)` windows, from
+    /// research. The runtime cap event (`SignalEvent::UsageCapped` /
+    /// `UsageCapApproaching`) is one firing of a policy; this catalog is the
+    /// declared universe of them. Empty until research supplies a provider's
+    /// policies.
+    pub cap_policies: &'static [CapPolicy],
 
     /// Hand-ruled security allowlist of provider env keys that bypass the
     /// wrapper's sensitive-key sanitizer. Never auto-widened from

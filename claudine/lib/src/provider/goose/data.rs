@@ -250,6 +250,7 @@ pub(in crate::provider) static GOOSE_INFO: ProviderInfo = ProviderInfo {
     model_cli_flag: Some("--model"),
     non_interactive_conflicting_flags: &["--interactive"],
     billing_models: &[BillingModel::ProviderOnly],
+    cap_policies: &[],
     allowed_env_keys: &[],
     display_policy: DisplayPolicy {
         tool_result_summary: ToolResultSummary::Show,

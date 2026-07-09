@@ -223,6 +223,7 @@ fn serialized_field_list_matches_catalog() {
         "model_cli_flag",
         "non_interactive_conflicting_flags",
         "billing_models",
+        "cap_policies",
         "allowed_env_keys",
         "display_policy",
         "suppress_structured_stderr_on_success",

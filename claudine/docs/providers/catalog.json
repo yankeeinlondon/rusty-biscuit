@@ -46,6 +46,13 @@
           },
           "value": "agy"
         },
+        "cap_policies": {
+          "source": {
+            "key": "cap_policies",
+            "kind": "facts"
+          },
+          "value": []
+        },
         "cli_aliases": {
           "source": {
             "key": "cli_aliases",
@@ -3381,6 +3388,30 @@
             "kind": "roster"
           },
           "value": "claude"
+        },
+        "cap_policies": {
+          "source": {
+            "key": "cap_policies",
+            "kind": "facts"
+          },
+          "value": [
+            {
+              "model": "all",
+              "timeframe_secs": 18000
+            },
+            {
+              "model": "all",
+              "timeframe_secs": 604800
+            },
+            {
+              "model": "opus",
+              "timeframe_secs": 604800
+            },
+            {
+              "model": "sonnet",
+              "timeframe_secs": 604800
+            }
+          ]
         },
         "cli_aliases": {
           "source": {
@@ -9046,6 +9077,13 @@
           },
           "value": "codex"
         },
+        "cap_policies": {
+          "source": {
+            "key": "cap_policies",
+            "kind": "facts"
+          },
+          "value": []
+        },
         "cli_aliases": {
           "source": {
             "key": "cli_aliases",
@@ -14500,6 +14538,13 @@
           },
           "value": "gemini"
         },
+        "cap_policies": {
+          "source": {
+            "key": "cap_policies",
+            "kind": "facts"
+          },
+          "value": []
+        },
         "cli_aliases": {
           "source": {
             "key": "cli_aliases",
@@ -19336,6 +19381,13 @@
             "kind": "roster"
           },
           "value": "goose"
+        },
+        "cap_policies": {
+          "source": {
+            "key": "cap_policies",
+            "kind": "facts"
+          },
+          "value": []
         },
         "cli_aliases": {
           "source": {
@@ -24252,6 +24304,13 @@
             "kind": "roster"
           },
           "value": "kilo"
+        },
+        "cap_policies": {
+          "source": {
+            "key": "cap_policies",
+            "kind": "facts"
+          },
+          "value": []
         },
         "cli_aliases": {
           "source": {
@@ -29381,6 +29440,13 @@
           },
           "value": "kimi"
         },
+        "cap_policies": {
+          "source": {
+            "key": "cap_policies",
+            "kind": "facts"
+          },
+          "value": []
+        },
         "cli_aliases": {
           "source": {
             "key": "cli_aliases",
@@ -33951,6 +34017,13 @@
             "kind": "roster"
           },
           "value": "opencode"
+        },
+        "cap_policies": {
+          "source": {
+            "key": "cap_policies",
+            "kind": "facts"
+          },
+          "value": []
         },
         "cli_aliases": {
           "source": {
@@ -40141,6 +40214,13 @@
           },
           "value": "pi"
         },
+        "cap_policies": {
+          "source": {
+            "key": "cap_policies",
+            "kind": "facts"
+          },
+          "value": []
+        },
         "cli_aliases": {
           "source": {
             "key": "cli_aliases",
@@ -45005,6 +45085,13 @@
             "kind": "roster"
           },
           "value": "qwen"
+        },
+        "cap_policies": {
+          "source": {
+            "key": "cap_policies",
+            "kind": "facts"
+          },
+          "value": []
         },
         "cli_aliases": {
           "source": {

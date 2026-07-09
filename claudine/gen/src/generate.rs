@@ -807,6 +807,7 @@ fn coerce_to_catalog_shape(
         | Coercion::KnownGapRecords
         | Coercion::UnmappedNativeEventRecords
         | Coercion::PromptArgRecord
+        | Coercion::CapPolicyRecords
         | Coercion::AxesRecord => Ok(raw.clone()),
     }
 }

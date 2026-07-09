@@ -318,6 +318,7 @@ pub(in crate::provider) static KILO_INFO: ProviderInfo = ProviderInfo {
     model_cli_flag: Some("--model"),
     non_interactive_conflicting_flags: &["--interactive", "--replay", "--replay-limit", "--demo"],
     billing_models: &[BillingModel::Subscription, BillingModel::PerToken],
+    cap_policies: &[],
     allowed_env_keys: &["KILO_API_KEY"],
     display_policy: DisplayPolicy {
         tool_result_summary: ToolResultSummary::Show,

@@ -225,6 +225,7 @@ cli_sensitive_axes:
 repo_home_root_files: []
 billing_models:
 - provider_only
+cap_policies: []
 allowed_env_keys: []
 display_policy:
   tool_result_summary: show

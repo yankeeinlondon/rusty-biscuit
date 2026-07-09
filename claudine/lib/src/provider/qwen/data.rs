@@ -298,6 +298,7 @@ pub(in crate::provider) static QWEN_INFO: ProviderInfo = ProviderInfo {
     model_cli_flag: Some("--model"),
     non_interactive_conflicting_flags: &["--prompt-interactive"],
     billing_models: &[BillingModel::PrepaidCredits, BillingModel::Subscription, BillingModel::PerToken],
+    cap_policies: &[],
     allowed_env_keys: &["DASHSCOPE_API_KEY", "QWEN_API_KEY"],
     display_policy: DisplayPolicy {
         tool_result_summary: ToolResultSummary::Show,

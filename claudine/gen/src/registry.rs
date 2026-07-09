@@ -204,6 +204,8 @@ pub enum Coercion {
     FlagListToStringSlice,
     /// Facts snake_case member list → `&[BillingModel]`.
     BillingModelList,
+    /// Facts `{model, timeframe_secs}` records → `&[CapPolicy]`.
+    CapPolicyRecords,
     /// Facts `platform_kind` enum member → `PlatformKind` expression.
     PlatformKindMember,
 }
@@ -248,6 +250,7 @@ impl Coercion {
             Coercion::CliFlagSitesToFlag => "cli_flag_sites_to_flag",
             Coercion::FlagListToStringSlice => "flag_list_to_string_slice",
             Coercion::BillingModelList => "billing_model_list",
+            Coercion::CapPolicyRecords => "cap_policy_records",
             Coercion::PlatformKindMember => "platform_kind_member",
         }
     }
@@ -294,7 +297,7 @@ pub const SKILL_SUPPORT_MEMBERS: &[&str] =
     &["first_class", "partial", "convention_only", "none", "unknown"];
 
 /// The generator-v1 mapping registry, in `ProviderInfo` serialization
-/// order (10 roster + 11 research + 21 facts = 42 fields).
+/// order (10 roster + 11 research + 22 facts = 43 fields).
 pub const REGISTRY: &[RegistryEntry] = &[
     entry(
         "provider",
@@ -665,6 +668,17 @@ pub const REGISTRY: &[RegistryEntry] = &[
         "Billing models the provider offers",
     ),
     entry(
+        "cap_policies",
+        DeclaredSource::Facts {
+            key: "cap_policies",
+        },
+        &[SchemaExpectation::RecordArray {
+            required_fields: &["model", "timeframe_secs"],
+        }],
+        Coercion::CapPolicyRecords,
+        "Cap policies the provider imposes (Layer A: the static (model, timeframe) window set)",
+    ),
+    entry(
         "allowed_env_keys",
         DeclaredSource::Facts {
             key: "allowed_env_keys",
@@ -819,8 +833,8 @@ mod tests {
         };
         assert_eq!(count("roster"), 10, "roster rows");
         assert_eq!(count("research"), 11, "research rows");
-        assert_eq!(count("facts"), 21, "facts rows");
-        assert_eq!(REGISTRY.len(), 42, "total serialized fields");
+        assert_eq!(count("facts"), 22, "facts rows");
+        assert_eq!(REGISTRY.len(), 43, "total serialized fields");
     }
 
     #[test]

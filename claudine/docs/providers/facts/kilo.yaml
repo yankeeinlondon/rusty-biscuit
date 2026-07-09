@@ -257,6 +257,7 @@ repo_home_root_files: []
 billing_models:
 - subscription
 - per_token
+cap_policies: []
 allowed_env_keys:
 - KILO_API_KEY
 display_policy:

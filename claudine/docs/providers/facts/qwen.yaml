@@ -235,6 +235,7 @@ billing_models:
 - prepaid_credits
 - subscription
 - per_token
+cap_policies: []
 allowed_env_keys:
 - DASHSCOPE_API_KEY
 - QWEN_API_KEY

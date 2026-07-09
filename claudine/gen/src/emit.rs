@@ -315,6 +315,42 @@ pub fn billing_models(
     Ok(render_slice(&elements, level))
 }
 
+/// `&[CapPolicy { ... }, ...]` from the facts `{model, timeframe_secs}`
+/// records (Layer A cap-policy catalog). `model: "all"` → `CapScope::All`;
+/// any other token → `CapScope::specific(token)`. `timeframe_secs` becomes a
+/// `Quantity` in `Unit::DurationSecs`.
+pub fn cap_policies(
+    field: &'static str,
+    value: &Value,
+    level: usize,
+    ctx: &mut EmitCtx,
+) -> Result<String, GenError> {
+    let records = expect_array(field, value, "the cap-policy list")?;
+    let mut elements = Vec::with_capacity(records.len());
+    for record in records {
+        ctx.import("crate::provider::cap_policy::CapPolicy");
+        ctx.import("crate::provider::cap_policy::CapScope");
+        ctx.import("crate::provider::cap_policy::Quantity");
+        ctx.import("crate::provider::cap_policy::Unit");
+        let model = expect_str(field, get(field, record, "model")?, "`model`")?;
+        let scope = if model == "all" {
+            "CapScope::All".to_string()
+        } else {
+            format!("CapScope::specific({model:?})")
+        };
+        let secs = number_u32(field, get(field, record, "timeframe_secs")?)?;
+        let inner = indent(level + 2);
+        elements.push(format!(
+            "CapPolicy {{\n\
+             {inner}model: {scope},\n\
+             {inner}timeframe: Quantity {{ value: {secs}.0, unit: Unit::DurationSecs }},\n\
+             {}}}",
+            indent(level + 1)
+        ));
+    }
+    Ok(render_struct_slice(&elements, level))
+}
+
 /// Offering-class member → the `OfferingClass` variant name.
 fn offering_class_variant(field: &'static str, value: &Value) -> Result<String, GenError> {
     let member = expect_str(field, value, "an offering-class member")?;
@@ -1475,6 +1511,10 @@ pub fn emit_data_file(
     push(
         "billing_models",
         billing_models("billing_models", lookup("billing_models")?, 1, &mut ctx)?,
+    );
+    push(
+        "cap_policies",
+        cap_policies("cap_policies", lookup("cap_policies")?, 1, &mut ctx)?,
     );
     push(
         "allowed_env_keys",

@@ -281,6 +281,7 @@ pub(in crate::provider) static ANTIGRAVITY_INFO: ProviderInfo = ProviderInfo {
     model_cli_flag: Some("--model"),
     non_interactive_conflicting_flags: &["--prompt-interactive"],
     billing_models: &[BillingModel::Subscription, BillingModel::PrepaidCredits],
+    cap_policies: &[],
     allowed_env_keys: &[],
     display_policy: DisplayPolicy {
         tool_result_summary: ToolResultSummary::Show,

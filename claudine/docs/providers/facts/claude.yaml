@@ -308,6 +308,19 @@ repo_home_root_files:
 billing_models:
 - subscription
 - per_token
+# Layer A cap-policy catalog (more-struture Cluster 0): the Claude Max cap
+# windows. `all` = account-wide; timeframe_secs is the window before reset
+# (5h = 18000, 7d = 604800). See docs/research/signals/claude.md for the
+# runtime detection records that decompose rateLimitType into these axes.
+cap_policies:
+- model: all
+  timeframe_secs: 18000
+- model: all
+  timeframe_secs: 604800
+- model: opus
+  timeframe_secs: 604800
+- model: sonnet
+  timeframe_secs: 604800
 allowed_env_keys: []
 display_policy:
   tool_result_summary: show

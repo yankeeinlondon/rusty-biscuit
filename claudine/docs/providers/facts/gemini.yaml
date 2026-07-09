@@ -260,6 +260,7 @@ repo_home_root_files: []
 billing_models:
 - subscription
 - per_token
+cap_policies: []
 allowed_env_keys:
 - GEMINI_API_KEY
 - GOOGLE_API_KEY

@@ -275,6 +275,7 @@ billing_models:
 # wrapped run reuses the cached keyring/OAuth session, so no auth key bypasses
 # the sanitizer. (HOME preservation — required for keyring access — is handled
 # by the wrapper env plan, not this allowlist.)
+cap_policies: []
 allowed_env_keys: []
 display_policy:
   tool_result_summary: show
