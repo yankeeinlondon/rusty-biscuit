@@ -619,12 +619,13 @@ pub(crate) fn run_child_capture(
     if let Some(termination) = early_termination.as_ref() {
         signal_hub.emit_bespoke(termination.to_signal_event(), SignalSource::Stream);
     }
-    // Exit source (E5): the same once-per-run `{exit_code, stderr_tail}`
-    // synthesis as the structured-stream path (inert on the hub-less
-    // fallback, which compiles no detection table).
+    // Exit source (E5): the same once-per-run
+    // `{exit_code, stdout_tail, stderr_tail}` synthesis as the
+    // structured-stream path (inert on the hub-less fallback, which compiles
+    // no detection table).
     signal_hub.observe_json(
         SignalSource::Exit,
-        &claudine::signals::exit_source_payload(exit_code, &stderr),
+        &claudine::signals::exit_source_payload(exit_code, &stdout, &stderr),
     );
     // Resolved-model drift check against the expected-offerings baseline,
     // before flush/drain so any drift event rides this run's signals.
@@ -873,6 +874,13 @@ pub(crate) fn run_child_stream_semantic(
     // (the OpenCode stderr bridge, the post-wait termination synthesis
     // below) feed the same hub, so cross-source dedup is automatic.
     let stdout_signal_hub = Arc::clone(&signal_hub);
+    // Bounded ring of the raw stdout lines the child wrote, retained so the
+    // exit-source payload can carry a `stdout_tail`. Some providers (notably
+    // Antigravity's `agy`) write terminal auth errors to stdout, which is
+    // consumed here rather than surfaced to the join like `captured` stderr.
+    let stdout_tail_ring: Arc<std::sync::Mutex<std::collections::VecDeque<String>>> =
+        Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
+    let stdout_tail_ring_clone = Arc::clone(&stdout_tail_ring);
     let stdout_handle = thread::spawn(move || {
         let _stream_guard = stream_span.enter();
         let _parse_span = info_span!("stream_parse").entered();
@@ -916,6 +924,16 @@ pub(crate) fn run_child_stream_semantic(
                 if g.is_none() {
                     *g = Some(line_at);
                 }
+            }
+
+            // Retain the raw (pre-render) line in the capped tail ring so the
+            // exit-source payload reflects what the child actually wrote.
+            {
+                let mut ring = stdout_tail_ring_clone.lock().unwrap();
+                if ring.len() == claudine::signals::EXIT_STDOUT_TAIL_LINES {
+                    ring.pop_front();
+                }
+                ring.push_back(line.clone());
             }
 
             // Provider-agnostic activity heartbeat: refresh the byte clock
@@ -1168,15 +1186,21 @@ pub(crate) fn run_child_stream_semantic(
         eprintln!("{captured}");
     }
 
-    // Exit source (E5): synthesize the ratified `{exit_code, stderr_tail}`
-    // payload once per run. This is what makes `source: exit` detection
-    // records (and the qwen 53/55/130 bespoke exit mapping) live — those
-    // terminations bypass any terminal `result` event, so only the wrapper
-    // can observe them. `captured` is the same stderr the error-report path
-    // consumes via `summary.stderr_text`.
+    // Exit source (E5): synthesize the ratified
+    // `{exit_code, stdout_tail, stderr_tail}` payload once per run. This is
+    // what makes `source: exit` detection records (and the qwen 53/55/130
+    // bespoke exit mapping) live — those terminations bypass any terminal
+    // `result` event, so only the wrapper can observe them. `captured` is the
+    // same stderr the error-report path consumes via `summary.stderr_text`;
+    // `stdout_tail` carries the child's last stdout lines (the surface
+    // Antigravity's `agy` writes its auth errors to).
+    let stdout_tail = {
+        let ring = stdout_tail_ring.lock().unwrap();
+        ring.iter().cloned().collect::<Vec<_>>().join("\n")
+    };
     signal_hub.observe_json(
         SignalSource::Exit,
-        &claudine::signals::exit_source_payload(exit_code, &captured),
+        &claudine::signals::exit_source_payload(exit_code, &stdout_tail, &captured),
     );
 
     let mut summary = parser.finish(exit_code);
