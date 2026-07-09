@@ -21,6 +21,7 @@ use std::collections::HashSet;
 use jsonschema::Validator;
 use serde_json::{Map, Value};
 
+use super::format::{DARKMATTER_JSON_FORMAT, DARKMATTER_YAML_FORMAT};
 use super::simplified::convert::{BOOLISH_VALUES, NUMBERLIKE_PATTERN};
 use super::validate::{self, build_validator, error_top_level_key};
 
@@ -33,6 +34,15 @@ pub enum CoercionTarget {
     ToNumber,
     /// A scalar (number or boolean) → its canonical string form.
     ToString,
+    /// A native (mapping/sequence/scalar) value → its YAML string
+    /// serialization, for a `yaml` content-format field (Feature D). A value
+    /// that is already a string (or null) is left untouched so the `format`
+    /// validator checks it directly.
+    ToYamlString,
+    /// A native value → its strict-JSON string serialization, for a `json`
+    /// content-format field (Feature D). A value already a string (or null) is
+    /// left untouched.
+    ToJsonString,
     /// An array whose elements coerce by the inner target.
     Array(Box<CoercionTarget>),
     /// An inline object fragment: recurse into the named properties. Each
@@ -126,7 +136,15 @@ pub fn coercion_target(property_schema: &Value) -> Option<CoercionTarget> {
     match ty {
         "boolean" => Some(CoercionTarget::ToBoolean),
         "number" | "integer" => Some(CoercionTarget::ToNumber),
-        "string" => Some(CoercionTarget::ToString),
+        // A `string` carrying a content-format seam (Feature D) serializes a
+        // native value to that format's string form; every other string type
+        // (including `file`, `email`, `url` formats) keeps the plain
+        // scalar→string coercion.
+        "string" => match obj.get("format").and_then(Value::as_str) {
+            Some(DARKMATTER_YAML_FORMAT) => Some(CoercionTarget::ToYamlString),
+            Some(DARKMATTER_JSON_FORMAT) => Some(CoercionTarget::ToJsonString),
+            _ => Some(CoercionTarget::ToString),
+        },
         "array" => {
             let items = obj.get("items")?;
             let inner = coercion_target(items)?;
@@ -410,6 +428,8 @@ fn coerce_value(target: &CoercionTarget, value: &Value) -> Option<Value> {
         CoercionTarget::ToBoolean => coerce_to_boolean(value),
         CoercionTarget::ToNumber => coerce_to_number(value),
         CoercionTarget::ToString => coerce_to_string(value),
+        CoercionTarget::ToYamlString => coerce_to_yaml_string(value),
+        CoercionTarget::ToJsonString => coerce_to_json_string(value),
         CoercionTarget::Array(inner) => coerce_array(inner, value),
         CoercionTarget::Object(props) => coerce_inline_object(props, value),
     }
@@ -451,6 +471,32 @@ fn coerce_to_string(value: &Value) -> Option<Value> {
         Value::Bool(b) => Some(Value::String(b.to_string())),
         _ => None,
     }
+}
+
+/// Serializes a native value to a YAML string for a `yaml` content-format
+/// field. Values that are already a string (the `format` validator checks them
+/// directly) or `null` (the optional-property "absent" sentinel) are left
+/// untouched. Serialization of a `serde_json::Value` never fails in practice;
+/// on the theoretical failure the value is left untouched so the `type: string`
+/// check surfaces a validation error rather than silently passing.
+fn coerce_to_yaml_string(value: &Value) -> Option<Value> {
+    if value.is_string() || value.is_null() {
+        return None;
+    }
+    let yaml = serde_yaml_ng::to_string(value).ok()?;
+    // Trim the single trailing newline serde_yaml_ng appends so the written-back
+    // scalar stays tidy; interior newlines (multi-line mappings) are preserved.
+    Some(Value::String(yaml.trim_end_matches('\n').to_string()))
+}
+
+/// Serializes a native value to a strict-JSON string for a `json` content-format
+/// field. Mirrors [`coerce_to_yaml_string`]'s string/null passthrough.
+fn coerce_to_json_string(value: &Value) -> Option<Value> {
+    if value.is_string() || value.is_null() {
+        return None;
+    }
+    let json = serde_json::to_string(value).ok()?;
+    Some(Value::String(json))
 }
 
 fn coerce_array(inner: &CoercionTarget, value: &Value) -> Option<Value> {
@@ -1702,5 +1748,101 @@ mod tests {
         let outcome3 = coerce_frontmatter(&schema, &null_instance);
         assert!(!outcome3.changed);
         assert_eq!(outcome3.value, null_instance);
+    }
+
+    // ── Content-format string types (Feature D, Phase 5) ────────────────
+
+    #[test]
+    fn recognizes_yaml_and_json_content_formats() {
+        assert_eq!(
+            coercion_target(&json!({"type": "string", "format": "darkmatter-yaml"})),
+            Some(CoercionTarget::ToYamlString)
+        );
+        assert_eq!(
+            coercion_target(&json!({"type": "string", "format": "darkmatter-json"})),
+            Some(CoercionTarget::ToJsonString)
+        );
+        // A string with any other (or no) format keeps the plain ToString
+        // coercion so `file`/`email`/`url` fields are unaffected.
+        assert_eq!(
+            coercion_target(&json!({"type": "string", "format": "email"})),
+            Some(CoercionTarget::ToString)
+        );
+    }
+
+    #[test]
+    fn yaml_string_and_null_are_left_untouched() {
+        // An already-string value flows straight to the `format` validator; a
+        // null value is the optional-property "absent" sentinel.
+        assert_eq!(coerce_to_yaml_string(&json!("title: Foo")), None);
+        assert_eq!(coerce_to_yaml_string(&Value::Null), None);
+        assert_eq!(coerce_to_json_string(&json!("{}")), None);
+        assert_eq!(coerce_to_json_string(&Value::Null), None);
+    }
+
+    #[test]
+    fn native_mapping_coerces_to_yaml_and_json_strings() {
+        let mapping = json!({ "title": "Foo", "tags": ["a", "b"] });
+        let yaml = coerce_to_yaml_string(&mapping).expect("yaml coercion");
+        // The serialized string round-trips through a YAML parse.
+        assert!(serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml.as_str().unwrap()).is_ok());
+        assert!(!yaml.as_str().unwrap().ends_with('\n'), "trailing newline trimmed");
+
+        let jsonv = coerce_to_json_string(&mapping).expect("json coercion");
+        // Compare by re-parse rather than exact bytes: serde_json map ordering
+        // depends on build features.
+        let reparsed: Value = serde_json::from_str(jsonv.as_str().unwrap()).expect("valid json");
+        assert_eq!(reparsed, mapping);
+    }
+
+    #[test]
+    fn native_sequence_coerces_to_content_format_string() {
+        let seq = json!([1, 2, 3]);
+        let yaml = coerce_to_yaml_string(&seq).expect("yaml coercion");
+        assert!(serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml.as_str().unwrap()).is_ok());
+        assert_eq!(coerce_to_json_string(&seq), Some(json!("[1,2,3]")));
+    }
+
+    #[test]
+    fn native_scalar_coerces_to_content_format_string() {
+        // Numbers and booleans serialize to their format-string form.
+        assert_eq!(coerce_to_json_string(&json!(42)), Some(json!("42")));
+        assert_eq!(coerce_to_json_string(&json!(true)), Some(json!("true")));
+        let yaml = coerce_to_yaml_string(&json!(42)).expect("yaml coercion");
+        assert!(serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml.as_str().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn content_format_coercion_is_idempotent() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "frontmatter": {"type": "string", "format": "darkmatter-yaml"}
+            }
+        });
+        let instance = json!({ "frontmatter": { "title": "Foo" } });
+        let first = coerce_frontmatter(&schema, &instance);
+        assert!(first.changed);
+        let second = coerce_frontmatter(&schema, &first.value);
+        assert!(!second.changed, "second run should be a no-op");
+        assert_eq!(first.value, second.value);
+    }
+
+    #[test]
+    fn native_content_format_object_pass_coerces_and_is_non_mutating() {
+        // The object pass serializes a native mapping for a `yaml` field on a
+        // fresh copy; the caller's instance is never mutated.
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "frontmatter": {"type": "string", "format": "darkmatter-yaml"}
+            }
+        });
+        let instance = json!({ "frontmatter": { "title": "Foo" } });
+        let outcome = coerce_frontmatter(&schema, &instance);
+        assert!(outcome.changed);
+        assert!(outcome.value["frontmatter"].is_string());
+        // Non-mutating: the original instance still holds the native mapping.
+        assert_eq!(instance, json!({ "frontmatter": { "title": "Foo" } }));
     }
 }

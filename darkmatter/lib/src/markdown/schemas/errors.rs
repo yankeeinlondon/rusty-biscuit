@@ -105,6 +105,23 @@ pub enum SchemaError {
     /// mapping, sequence, or string).
     #[error("$schema frontmatter value has an unsupported shape: {message}")]
     FrontmatterShape { message: String },
+
+    /// A cross-file named-type import (`Name@file`) forms a direct or
+    /// transitive cycle. Named types must form a DAG in v1 — a type that
+    /// (transitively) references itself is a structural recursion error,
+    /// mirroring the inline-object depth cap. `chain` describes the offending
+    /// import path.
+    #[error("named-type import cycle detected: {chain}")]
+    ImportCycle { chain: String },
+
+    /// An `example(...)` constraint (Feature A) referenced a file that is
+    /// missing, malformed, or does not validate against the example-artifact
+    /// envelope (or its inherited `parameters` shape). Example files are
+    /// documentation the schema promises are trustworthy, so a broken example
+    /// is a fail-loud schema-load error, never a warning. `reference` is the
+    /// authored `example(...)` reference; `message` is the underlying reason.
+    #[error("invalid example artifact `{reference}`: {message}")]
+    InvalidExample { reference: String, message: String },
 }
 
 impl biscuit_terminal::errors::BlockError for SchemaError {
@@ -272,6 +289,40 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     "<cyan>$schema</cyan> must be a YAML mapping (inline schema), a string (file \
                      reference), or a sequence (root union).",
                 ),
+
+            SchemaError::ImportCycle { chain } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "SchemaError",
+                    "named-type import cycle",
+                ))
+                .body(Prose::new(format!(
+                    "<dim>Cycle:</dim> {}",
+                    Prose::escape_text(chain)
+                )))
+                .hint(
+                    "Named-type imports (<cyan>Name@file</cyan>) must form a DAG. Break the \
+                     self-reference; recursive types are not supported in v1.",
+                ),
+
+            SchemaError::InvalidExample { reference, message } => {
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("SchemaError", "invalid example artifact"))
+                    .body(vec![
+                        Prose::new(format!(
+                            "<cyan>example({})</cyan> does not validate:",
+                            Prose::escape_text(reference)
+                        )),
+                        Prose::new(format!(
+                            "<dim>Reason:</dim> {}",
+                            Prose::escape_text(message)
+                        )),
+                    ])
+                    .hint(
+                        "Each <cyan>example(...)</cyan> file must exist and validate against the \
+                         example-artifact envelope (<cyan>kind</cyan>, <cyan>invocation</cyan>, \
+                         <cyan>returns</cyan>, <cyan>description</cyan>).",
+                    )
+            }
         }
     }
 }

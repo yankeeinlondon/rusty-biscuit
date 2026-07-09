@@ -223,15 +223,17 @@ fn is_completable(ty: &TypeExpr) -> bool {
                 | SimplifiedType::Time
         ),
         // Inline objects don't have a single completable value at the
-        // property level — they describe a typed shape.
-        TypeExpr::InlineObject(_) => false,
+        // property level — they describe a typed shape. Imported types are
+        // resolved before completion runs; an unresolved one is not
+        // completable here.
+        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } => false,
     }
 }
 
 fn kind_for_atom(atom: &PropertyAtom) -> Option<CompletionKind> {
     let ty = match &atom.ty {
         TypeExpr::Primitive(ty) => *ty,
-        TypeExpr::InlineObject(_) => return None,
+        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } => return None,
     };
     match ty {
         SimplifiedType::File => Some(CompletionKind::File {

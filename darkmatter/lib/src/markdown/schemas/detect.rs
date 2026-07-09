@@ -74,7 +74,10 @@ pub fn detect_from_document(md: &Markdown) -> SchemaShape {
         let atom = detect_value_atom(value, &base_dir);
         properties.insert(key.clone(), PropertyDef::Single(atom));
     }
-    SchemaShape { properties }
+    SchemaShape {
+        properties,
+        ..Default::default()
+    }
 }
 
 fn base_dir_for(md: &Markdown) -> PathBuf {
@@ -250,7 +253,10 @@ fn union_shapes_no_promote(shapes: &[SchemaShape]) -> SchemaShape {
             }
         }
     }
-    SchemaShape { properties }
+    SchemaShape {
+        properties,
+        ..Default::default()
+    }
 }
 
 fn merge_shapes_widening(shapes: &[SchemaShape]) -> SchemaShape {
@@ -278,7 +284,10 @@ fn merge_shapes_widening(shapes: &[SchemaShape]) -> SchemaShape {
         }
     }
 
-    SchemaShape { properties: acc }
+    SchemaShape {
+        properties: acc,
+        ..Default::default()
+    }
 }
 
 /// Walk both sides; widen single+single via the type hierarchy, fall back to
@@ -388,9 +397,9 @@ fn unify_types(a: &TypeExpr, b: &TypeExpr) -> Option<SimplifiedType> {
 fn primitive(ty: &TypeExpr) -> Option<SimplifiedType> {
     match ty {
         TypeExpr::Primitive(p) => Some(*p),
-        // Inline objects do not unify with any other type in detection
-        // (detection of inline objects is a non-goal of this feature).
-        TypeExpr::InlineObject(_) => None,
+        // Inline objects and imported types do not unify with any other type
+        // in detection (detecting either is a non-goal of this feature).
+        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } => None,
     }
 }
 

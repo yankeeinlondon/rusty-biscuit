@@ -21,16 +21,24 @@
 //! Remote (`http://` / `https://`) `$schema` values are rejected up front
 //! with [`SchemaError::RemoteUnsupported`].
 
-use std::{fs, path::Path};
+use std::{
+    collections::BTreeSet,
+    fs,
+    path::{Path, PathBuf},
+};
 
 use biscuit_file::FileReference;
+use indexmap::IndexMap;
 use serde_json::{Map, Value};
 use serde_yaml_ng::Value as YamlValue;
 
 use super::{
     SchemaArm, SchemaOrigin, SchemaShape, SimplifiedSchema,
     errors::SchemaError,
-    simplified::{parse_yaml_schema, to_json_schema},
+    simplified::{
+        parse_yaml_schema, to_json_schema,
+        types::{Constraint, PatternKeyDef, PropertyAtom, PropertyDef, TypeExpr},
+    },
 };
 
 /// The product of resolving a document's `$schema`.
@@ -47,6 +55,19 @@ pub struct ResolvedSchema {
     /// the resolved path). Preserved so diagnostics can point
     /// `relatedInformation` at the schema source (R-5 Priority 2).
     pub origin: SchemaOrigin,
+
+    /// Resolved paths of files pulled in by `Name@file` named-type imports
+    /// (Feature B), in sorted order. Empty for schemas that use no imports.
+    /// These are the dependency edges the base-schema LRU cache and DMLS live
+    /// index consume to invalidate a schema when an imported file changes; the
+    /// downstream invalidation wiring itself is deferred.
+    pub imports: Vec<PathBuf>,
+
+    /// Resolved paths of `example(...)` artifact files (Feature A), in sorted
+    /// order. Empty for schemas with no `example()` constraints. Like
+    /// [`ResolvedSchema::imports`], these are dependency edges for warm-cache /
+    /// DMLS invalidation; the invalidation wiring itself is deferred.
+    pub examples: Vec<PathBuf>,
 }
 
 /// Resolves a frontmatter `$schema` value into a JSON Schema.
@@ -81,11 +102,22 @@ pub fn resolve_yaml_schema(
         YamlValue::String(reference) => resolve_reference(reference, base_dir),
         YamlValue::Mapping(_) => {
             let schema = parse_yaml_schema(value)?;
-            let json = to_json_schema(&schema)?;
+            // Inline the definitions of any `Name@file` named-type imports
+            // (Feature B) before conversion — `to_json_schema` rejects a
+            // surviving import. This is the top-level document, so `@this`
+            // resolves against the inline root (`NamespaceKey::Root`).
+            let (schema, imports) = expand_document_imports(schema, base_dir, NamespaceKey::Root)?;
+            let mut json = to_json_schema(&schema)?;
+            // Inline `$schema` mappings have no on-disk path, so `this` example
+            // references have no target here (the acceptance driver references
+            // examples from a schema *file*, resolved in `parse_yaml_referenced_file`).
+            let examples = resolve_document_examples(&mut json, base_dir, None)?;
             Ok(ResolvedSchema {
                 simplified: Some(schema),
                 json_schema: json,
                 origin: SchemaOrigin::document(),
+                imports,
+                examples,
             })
         }
         YamlValue::Sequence(items) => resolve_root_union(items, base_dir),
@@ -106,11 +138,18 @@ fn resolve_root_union(items: &[YamlValue], base_dir: &Path) -> Result<ResolvedSc
     }
     let mut any_of: Vec<Value> = Vec::with_capacity(items.len());
     let mut all_simplified_arms: Option<Vec<SchemaArm>> = Some(Vec::with_capacity(items.len()));
+    let mut imports: BTreeSet<PathBuf> = BTreeSet::new();
+    let mut examples: BTreeSet<PathBuf> = BTreeSet::new();
     for item in items {
         match item {
             YamlValue::Mapping(_) => {
                 let arm_schema = parse_yaml_schema(item)?;
-                let arm_json = to_json_schema(&arm_schema)?;
+                // Named-type imports are inlined per arm before conversion.
+                let (arm_schema, arm_imports) =
+                    expand_document_imports(arm_schema, base_dir, NamespaceKey::Root)?;
+                imports.extend(arm_imports);
+                let mut arm_json = to_json_schema(&arm_schema)?;
+                examples.extend(resolve_document_examples(&mut arm_json, base_dir, None)?);
                 if let SimplifiedSchema::Single(shape) = &arm_schema
                     && let Some(arms) = all_simplified_arms.as_mut()
                 {
@@ -122,6 +161,8 @@ fn resolve_root_union(items: &[YamlValue], base_dir: &Path) -> Result<ResolvedSc
             }
             YamlValue::String(reference) => {
                 let resolved = resolve_reference(reference, base_dir)?;
+                imports.extend(resolved.imports.iter().cloned());
+                examples.extend(resolved.examples.iter().cloned());
                 // If this arm itself came from a SimplifiedSchema file, preserve
                 // it in the simplified projection only when it is a single
                 // shape (root unions of unions are not modelled in v1).
@@ -156,6 +197,8 @@ fn resolve_root_union(items: &[YamlValue], base_dir: &Path) -> Result<ResolvedSc
         simplified: all_simplified_arms.map(SimplifiedSchema::Union),
         json_schema: Value::Object(root),
         origin: SchemaOrigin::document(),
+        imports: imports.into_iter().collect(),
+        examples: examples.into_iter().collect(),
     })
 }
 
@@ -231,12 +274,21 @@ fn parse_yaml_referenced_file(path: &Path, bytes: &[u8]) -> Result<ResolvedSchem
         && matches!(schema_value, YamlValue::Mapping(_) | YamlValue::Sequence(_))
     {
         let parsed = parse_yaml_schema(schema_value)?;
-        let json = to_json_schema(&parsed)?;
+        // Named-type imports inside a referenced schema file resolve relative
+        // to that file's directory, and its `@this` targets the file itself.
+        let file_dir = path.parent().unwrap_or_else(|| Path::new("."));
+        let key = NamespaceKey::File(canonical_path(path));
+        let (parsed, imports) = expand_document_imports(parsed, file_dir, key)?;
+        let mut json = to_json_schema(&parsed)?;
+        // `example(this)` inside a referenced schema file targets the file itself.
+        let examples = resolve_document_examples(&mut json, file_dir, Some(path))?;
         return Ok(ResolvedSchema {
             simplified: Some(parsed),
             json_schema: json,
             // `resolve_reference` overwrites this with the file path.
             origin: SchemaOrigin::document(),
+            imports,
+            examples,
         });
     }
 
@@ -254,6 +306,8 @@ fn parse_yaml_referenced_file(path: &Path, bytes: &[u8]) -> Result<ResolvedSchem
         simplified: None,
         json_schema: json,
         origin: SchemaOrigin::document(),
+        imports: Vec::new(),
+        examples: Vec::new(),
     })
 }
 
@@ -271,7 +325,608 @@ fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, Sc
         simplified: None,
         json_schema: value,
         origin: SchemaOrigin::document(),
+        imports: Vec::new(),
+        examples: Vec::new(),
     })
+}
+
+// ── Cross-file named-type imports (Feature B) ───────────────────────────────
+//
+// `Name@fileref` inlines the definition of a named type `Name` from the
+// referenced file at the use site (structural substitution). A schema file's
+// top-level `$schema:` entries are its named types; `@this` targets the
+// current file. Postfix composes outward: `Name[]@file` becomes an array of
+// the inlined type, and `Name(constraints)@file` applies constraints to the
+// inlined value. Expansion is eager, bounded, and cycle-checked (named types
+// form a DAG in v1); `to_json_schema` still rejects any import that survives.
+
+/// Hard cap on named-type import expansion depth. Mirrors the inline-object
+/// depth cap so import chains cannot bypass the recursion guard indefinitely.
+const MAX_IMPORT_DEPTH: usize = 32;
+
+/// Cycle-detection identity for a named-type namespace. The inline document
+/// root has no path, so it uses a dedicated sentinel; every other namespace is
+/// keyed by the canonicalized path of the file it was loaded from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum NamespaceKey {
+    /// The inline document `$schema` (or a root-union arm) — the top-level
+    /// schema being resolved, which has no on-disk path of its own.
+    Root,
+    /// A named-type file, keyed by its canonicalized path.
+    File(PathBuf),
+}
+
+/// A named-type namespace: the set of top-level `$schema:` entries a file (or
+/// the inline document) exposes for `Name@…` imports, plus the context needed
+/// to resolve relative imports and `@this` inside it.
+struct Namespace {
+    /// Cycle-detection identity for this namespace.
+    key: NamespaceKey,
+    /// Directory that relative imports authored inside this namespace resolve
+    /// against (mirrors `$schema` file-ref resolution).
+    base_dir: PathBuf,
+    /// The unexpanded top-level named types (`$schema:` entries).
+    named_types: IndexMap<String, PropertyDef>,
+}
+
+/// Drives eager, bounded, cycle-checked expansion of `Name@file` imports over
+/// a parsed [`SimplifiedSchema`].
+struct ImportEngine {
+    /// Stack of `(namespace, type-name)` frames currently being expanded, used
+    /// to detect direct and transitive cycles.
+    stack: Vec<(NamespaceKey, String)>,
+    /// Resolved import file paths, deduplicated — the dependency edges a warm
+    /// cache / DMLS index consumes to invalidate on imported-file change.
+    dependencies: BTreeSet<PathBuf>,
+}
+
+/// Expands every `Name@file` import in `schema`. `base_dir` and `key` describe
+/// the document being resolved: `base_dir` anchors relative imports and `@this`
+/// resolves against `key` and the document's own top-level named types.
+///
+/// Returns the import-free schema plus the sorted dependency edges. Schemas
+/// with no imports are returned untouched (byte-equivalent to legacy output).
+fn expand_document_imports(
+    schema: SimplifiedSchema,
+    base_dir: &Path,
+    key: NamespaceKey,
+) -> Result<(SimplifiedSchema, Vec<PathBuf>), SchemaError> {
+    if !schema_has_imports(&schema) {
+        return Ok((schema, Vec::new()));
+    }
+    // `@this` resolves against the document's own (unexpanded) named types.
+    let named_types = match &schema {
+        SimplifiedSchema::Single(shape) => shape.properties.clone(),
+        SimplifiedSchema::Union(_) => IndexMap::new(),
+    };
+    let current = Namespace {
+        key,
+        base_dir: base_dir.to_path_buf(),
+        named_types,
+    };
+    let mut engine = ImportEngine {
+        stack: Vec::new(),
+        dependencies: BTreeSet::new(),
+    };
+    let expanded = engine.expand_schema(schema, &current)?;
+    Ok((expanded, engine.dependencies.into_iter().collect()))
+}
+
+impl ImportEngine {
+    fn expand_schema(
+        &mut self,
+        schema: SimplifiedSchema,
+        current: &Namespace,
+    ) -> Result<SimplifiedSchema, SchemaError> {
+        match schema {
+            SimplifiedSchema::Single(shape) => {
+                Ok(SimplifiedSchema::Single(self.expand_shape(shape, current)?))
+            }
+            SimplifiedSchema::Union(arms) => {
+                let mut out = Vec::with_capacity(arms.len());
+                for arm in arms {
+                    out.push(match arm {
+                        SchemaArm::Inline(shape) => {
+                            SchemaArm::Inline(self.expand_shape(shape, current)?)
+                        }
+                        // File-ref arms are inlined by the root-union resolver,
+                        // not here; leave them for `to_json_schema` to reject if
+                        // one somehow survives.
+                        SchemaArm::FileRef(s) => SchemaArm::FileRef(s),
+                    });
+                }
+                Ok(SimplifiedSchema::Union(out))
+            }
+        }
+    }
+
+    fn expand_shape(
+        &mut self,
+        shape: SchemaShape,
+        current: &Namespace,
+    ) -> Result<SchemaShape, SchemaError> {
+        let mut properties = IndexMap::with_capacity(shape.properties.len());
+        for (name, def) in shape.properties {
+            properties.insert(name, self.expand_property_def(def, current)?);
+        }
+        let mut pattern_keys = Vec::with_capacity(shape.pattern_keys.len());
+        for pk in shape.pattern_keys {
+            pattern_keys.push(PatternKeyDef {
+                key: pk.key,
+                def: self.expand_property_def(pk.def, current)?,
+            });
+        }
+        Ok(SchemaShape {
+            properties,
+            pattern_keys,
+            constraints: shape.constraints,
+        })
+    }
+
+    fn expand_property_def(
+        &mut self,
+        def: PropertyDef,
+        current: &Namespace,
+    ) -> Result<PropertyDef, SchemaError> {
+        match def {
+            PropertyDef::Single(atom) => self.expand_atom(atom, current),
+            PropertyDef::Union(arms) => {
+                // A union-typed named type flattens into the enclosing union.
+                let mut out = Vec::with_capacity(arms.len());
+                for atom in arms {
+                    match self.expand_atom(atom, current)? {
+                        PropertyDef::Single(a) => out.push(a),
+                        PropertyDef::Union(mut arms2) => out.append(&mut arms2),
+                    }
+                }
+                Ok(PropertyDef::Union(out))
+            }
+        }
+    }
+
+    fn expand_atom(
+        &mut self,
+        atom: PropertyAtom,
+        current: &Namespace,
+    ) -> Result<PropertyDef, SchemaError> {
+        let PropertyAtom {
+            ty,
+            is_array,
+            constraints,
+            array_constraints,
+            description,
+        } = atom;
+        match ty {
+            TypeExpr::Primitive(p) => Ok(PropertyDef::Single(PropertyAtom {
+                ty: TypeExpr::Primitive(p),
+                is_array,
+                constraints,
+                array_constraints,
+                description,
+            })),
+            TypeExpr::InlineObject(shape) => {
+                let expanded = self.expand_shape(shape, current)?;
+                Ok(PropertyDef::Single(PropertyAtom {
+                    ty: TypeExpr::InlineObject(expanded),
+                    is_array,
+                    constraints,
+                    array_constraints,
+                    description,
+                }))
+            }
+            TypeExpr::Imported { name, reference } => self.expand_import(
+                name,
+                reference,
+                is_array,
+                constraints,
+                array_constraints,
+                description,
+                current,
+            ),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn expand_import(
+        &mut self,
+        name: String,
+        reference: String,
+        is_array: bool,
+        constraints: Vec<Constraint>,
+        array_constraints: Vec<Constraint>,
+        description: Option<String>,
+        current: &Namespace,
+    ) -> Result<PropertyDef, SchemaError> {
+        if self.stack.len() >= MAX_IMPORT_DEPTH {
+            return Err(SchemaError::ImportCycle {
+                chain: format!(
+                    "named-type import expansion exceeded {MAX_IMPORT_DEPTH} levels near \
+                     `{name}@{reference}`"
+                ),
+            });
+        }
+
+        let target = self.resolve_namespace(&reference, current)?;
+        let def = target.named_types.get(&name).cloned().ok_or_else(|| {
+            // A missing named type is a resolution error, not a grammar error:
+            // the import parsed fine, the target file simply does not define it.
+            SchemaError::Convert {
+                property: name.clone(),
+                message: format!(
+                    "named type `{name}` is not defined in `{reference}` (a schema file's \
+                     top-level `$schema:` entries are its named types)"
+                ),
+            }
+        })?;
+
+        let frame = (target.key.clone(), name.clone());
+        if self.stack.contains(&frame) {
+            return Err(SchemaError::ImportCycle {
+                chain: self.describe_cycle(&name),
+            });
+        }
+        self.stack.push(frame);
+        let expanded_base = self.expand_property_def(def, &target)?;
+        self.stack.pop();
+
+        // Presence/ownership constraints (`required`, `generated`) describe the
+        // named type's role as a property in its *defining* file, not the
+        // reusable type — so they are stripped on inline. The use site supplies
+        // its own presence via import-site `(constraints)`.
+        let base = strip_top_level_presence(expanded_base);
+        apply_import_postfix(
+            base,
+            is_array,
+            constraints,
+            array_constraints,
+            description,
+            &name,
+            &reference,
+        )
+    }
+
+    /// Resolves the namespace named on the right of `@`. `this` targets the
+    /// current namespace; any other value is a `biscuit-file` reference resolved
+    /// relative to `current.base_dir` (mirroring `$schema` file-ref resolution).
+    fn resolve_namespace(
+        &mut self,
+        reference: &str,
+        current: &Namespace,
+    ) -> Result<Namespace, SchemaError> {
+        let trimmed = reference.trim();
+        if trimmed == "this" {
+            return Ok(Namespace {
+                key: current.key.clone(),
+                base_dir: current.base_dir.clone(),
+                named_types: current.named_types.clone(),
+            });
+        }
+        if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+            return Err(SchemaError::RemoteUnsupported {
+                reference: reference.to_string(),
+            });
+        }
+
+        let file_ref = FileReference::new(reference).map_err(|source| SchemaError::Unresolved {
+            reference: reference.to_string(),
+            source,
+        })?;
+        let path = file_ref
+            .resolve_from(&current.base_dir)
+            .map_err(|source| SchemaError::Unresolved {
+                reference: reference.to_string(),
+                source,
+            })?
+            .ok_or_else(|| SchemaError::Unresolved {
+                reference: reference.to_string(),
+                source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
+                    "no file matched `{reference}`"
+                )),
+            })?;
+
+        let canonical = canonical_path(&path);
+        self.dependencies.insert(canonical.clone());
+        let named_types = load_named_types(&path)?;
+        let base_dir = path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
+        Ok(Namespace {
+            key: NamespaceKey::File(canonical),
+            base_dir,
+            named_types,
+        })
+    }
+
+    /// Renders the current expansion stack as a `a -> b -> a` chain for the
+    /// cycle-error message.
+    fn describe_cycle(&self, repeat: &str) -> String {
+        let mut parts: Vec<&str> = self.stack.iter().map(|(_, n)| n.as_str()).collect();
+        parts.push(repeat);
+        parts.join(" -> ")
+    }
+}
+
+/// Canonicalizes `path` for stable cycle-detection identity, falling back to
+/// the given path when canonicalization fails (it should not, since the path
+/// was just resolved on disk).
+fn canonical_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Loads a file's top-level named types (its `$schema:` entries).
+///
+/// ## Errors
+///
+/// Returns [`SchemaError::AmbiguousReferenced`] when the file is not a
+/// SimplifiedSchema (raw JSON Schema, or a file without a `$schema:` mapping) —
+/// imports are only defined among a file's named types, so a raw JSON Schema
+/// has none to offer.
+fn load_named_types(path: &Path) -> Result<IndexMap<String, PropertyDef>, SchemaError> {
+    let bytes = fs::read(path).map_err(|source| SchemaError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let text = std::str::from_utf8(&bytes).map_err(|_| SchemaError::AmbiguousReferenced {
+        path: path.to_path_buf(),
+    })?;
+    let value: YamlValue =
+        serde_yaml_ng::from_str(text).map_err(|_| SchemaError::AmbiguousReferenced {
+            path: path.to_path_buf(),
+        })?;
+    // Named types live under a top-level `$schema:` mapping. A sequence (root
+    // union) or a raw JSON Schema file exposes no named types.
+    let schema_value = match &value {
+        YamlValue::Mapping(map) => map.get(YamlValue::String("$schema".into())),
+        _ => None,
+    };
+    let Some(YamlValue::Mapping(_)) = schema_value else {
+        return Err(SchemaError::AmbiguousReferenced {
+            path: path.to_path_buf(),
+        });
+    };
+    let schema_value = schema_value.expect("mapping matched above");
+    match parse_yaml_schema(schema_value)? {
+        SimplifiedSchema::Single(shape) => Ok(shape.properties),
+        SimplifiedSchema::Union(_) => Err(SchemaError::AmbiguousReferenced {
+            path: path.to_path_buf(),
+        }),
+    }
+}
+
+/// Removes the top-level `required` / `generated` constraints from an inlined
+/// named-type definition. Nested constraints (inside inline objects, array
+/// items) are untouched — only the outermost presence/ownership semantics are
+/// re-decided by the use site.
+fn strip_top_level_presence(def: PropertyDef) -> PropertyDef {
+    fn strip(mut atom: PropertyAtom) -> PropertyAtom {
+        atom.constraints
+            .retain(|c| !matches!(c, Constraint::Required | Constraint::Generated));
+        atom.array_constraints
+            .retain(|c| !matches!(c, Constraint::Required | Constraint::Generated));
+        atom
+    }
+    match def {
+        PropertyDef::Single(atom) => PropertyDef::Single(strip(atom)),
+        PropertyDef::Union(arms) => PropertyDef::Union(arms.into_iter().map(strip).collect()),
+    }
+}
+
+/// Applies the import-site postfix (`[]`, `(constraints)`, `-> description`) to
+/// an inlined base definition. Verbatim substitution when the site adds no
+/// postfix; otherwise the base must be a single atom (v1 does not compose
+/// postfix over a union-typed named type).
+fn apply_import_postfix(
+    base: PropertyDef,
+    is_array: bool,
+    constraints: Vec<Constraint>,
+    array_constraints: Vec<Constraint>,
+    description: Option<String>,
+    name: &str,
+    reference: &str,
+) -> Result<PropertyDef, SchemaError> {
+    if !is_array && constraints.is_empty() && array_constraints.is_empty() && description.is_none()
+    {
+        return Ok(base);
+    }
+
+    let base_atom = match base {
+        PropertyDef::Single(atom) => atom,
+        PropertyDef::Union(_) => {
+            return Err(SchemaError::Convert {
+                property: name.to_string(),
+                message: format!(
+                    "cannot apply `[]`/constraints to the union-typed named type `{name}@{reference}`"
+                ),
+            });
+        }
+    };
+
+    if is_array {
+        if base_atom.is_array {
+            return Err(SchemaError::Convert {
+                property: name.to_string(),
+                message: format!(
+                    "cannot apply `[]` to the already-array named type `{name}@{reference}`"
+                ),
+            });
+        }
+        // `Name[]@file` → array of the inlined base. Import-site `(...)` (which
+        // syntactically follows `[]`) applies at the array level.
+        let mut arr_constraints = array_constraints;
+        arr_constraints.extend(constraints);
+        Ok(PropertyDef::Single(PropertyAtom {
+            ty: base_atom.ty,
+            is_array: true,
+            constraints: base_atom.constraints,
+            array_constraints: arr_constraints,
+            description: description.or(base_atom.description),
+        }))
+    } else {
+        // `Name(constraints)@file` → constraints applied to the inlined value.
+        let mut merged = base_atom.constraints;
+        merged.extend(constraints);
+        Ok(PropertyDef::Single(PropertyAtom {
+            ty: base_atom.ty,
+            is_array: base_atom.is_array,
+            constraints: merged,
+            array_constraints: base_atom.array_constraints,
+            description: description.or(base_atom.description),
+        }))
+    }
+}
+
+// ── Import-tree traversal helpers (fast-path detection) ─────────────────────
+
+fn schema_has_imports(schema: &SimplifiedSchema) -> bool {
+    match schema {
+        SimplifiedSchema::Single(shape) => shape_has_imports(shape),
+        SimplifiedSchema::Union(arms) => arms.iter().any(|arm| match arm {
+            SchemaArm::Inline(shape) => shape_has_imports(shape),
+            SchemaArm::FileRef(_) => false,
+        }),
+    }
+}
+
+fn shape_has_imports(shape: &SchemaShape) -> bool {
+    shape.properties.values().any(def_has_imports)
+        || shape.pattern_keys.iter().any(|pk| def_has_imports(&pk.def))
+}
+
+fn def_has_imports(def: &PropertyDef) -> bool {
+    match def {
+        PropertyDef::Single(atom) => atom_has_imports(atom),
+        PropertyDef::Union(arms) => arms.iter().any(atom_has_imports),
+    }
+}
+
+fn atom_has_imports(atom: &PropertyAtom) -> bool {
+    match &atom.ty {
+        TypeExpr::Imported { .. } => true,
+        TypeExpr::InlineObject(shape) => shape_has_imports(shape),
+        TypeExpr::Primitive(_) => false,
+    }
+}
+
+// ── `example(...)` artifact resolution (Feature A) ──────────────────────────
+//
+// The converter emits `example(...)` constraints as an `x-darkmatter-example`
+// array of raw reference strings. This pass walks the compiled JSON Schema,
+// resolves each reference (relative to the schema's directory; `this` targets
+// the schema file), validates the referenced artifact at load time (fail-loud,
+// O-A2), and replaces the reference-string array with the resolved example
+// objects so downstream consumers read them without re-reading disk. Each
+// resolved file is recorded as a dependency edge.
+
+/// Resolves every `x-darkmatter-example` reference-string array in `json` into
+/// validated example objects. Returns the sorted, deduplicated set of resolved
+/// example file paths (dependency edges).
+///
+/// Fast path: a schema with no `x-darkmatter-example` annotation returns an
+/// empty `Vec` and leaves `json` byte-equivalent.
+fn resolve_document_examples(
+    json: &mut Value,
+    base_dir: &Path,
+    this_file: Option<&Path>,
+) -> Result<Vec<PathBuf>, SchemaError> {
+    let mut deps: BTreeSet<PathBuf> = BTreeSet::new();
+    resolve_examples_in_json(json, base_dir, this_file, &mut deps)?;
+    Ok(deps.into_iter().collect())
+}
+
+fn resolve_examples_in_json(
+    value: &mut Value,
+    base_dir: &Path,
+    this_file: Option<&Path>,
+    deps: &mut BTreeSet<PathBuf>,
+) -> Result<(), SchemaError> {
+    match value {
+        Value::Object(map) => {
+            // Resolve the annotation in place when it is still an array of
+            // reference strings (a resolved array holds objects, not strings).
+            if let Some(Value::Array(items)) = map.get("x-darkmatter-example")
+                && items.iter().all(Value::is_string)
+            {
+                let mut resolved = Vec::with_capacity(items.len());
+                for item in items {
+                    let reference = item.as_str().expect("all-string checked above");
+                    resolved.push(resolve_one_example(reference, base_dir, this_file, deps)?);
+                }
+                map.insert("x-darkmatter-example".into(), Value::Array(resolved));
+            }
+            // Recurse into the rest of the schema. The just-resolved annotation
+            // is skipped so resolved example *data* (which may itself carry a
+            // key literally named `x-darkmatter-example`) is never re-resolved.
+            for (key, child) in map.iter_mut() {
+                if key == "x-darkmatter-example" {
+                    continue;
+                }
+                resolve_examples_in_json(child, base_dir, this_file, deps)?;
+            }
+        }
+        Value::Array(items) => {
+            for item in items.iter_mut() {
+                resolve_examples_in_json(item, base_dir, this_file, deps)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Resolves one `example(...)` reference to a validated example object.
+///
+/// `this` targets the current schema file (`this_file`); every other value is a
+/// `biscuit-file` reference resolved relative to `base_dir` — the same
+/// resolution `$schema` file references use. The referenced file is validated
+/// against the example-artifact envelope with content-hash caching.
+fn resolve_one_example(
+    reference: &str,
+    base_dir: &Path,
+    this_file: Option<&Path>,
+    deps: &mut BTreeSet<PathBuf>,
+) -> Result<Value, SchemaError> {
+    let trimmed = reference.trim();
+    let path = if trimmed == "this" {
+        this_file
+            .map(Path::to_path_buf)
+            .ok_or_else(|| SchemaError::InvalidExample {
+                reference: reference.to_string(),
+                message: "`this` example reference has no target (the schema is inline, not a file)"
+                    .into(),
+            })?
+    } else {
+        if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+            return Err(SchemaError::RemoteUnsupported {
+                reference: reference.to_string(),
+            });
+        }
+        let file_ref =
+            FileReference::new(reference).map_err(|source| SchemaError::Unresolved {
+                reference: reference.to_string(),
+                source,
+            })?;
+        file_ref
+            .resolve_from(base_dir)
+            .map_err(|source| SchemaError::Unresolved {
+                reference: reference.to_string(),
+                source,
+            })?
+            .ok_or_else(|| SchemaError::Unresolved {
+                reference: reference.to_string(),
+                source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
+                    "no file matched `{reference}`"
+                )),
+            })?
+    };
+
+    let bytes = fs::read(&path).map_err(|source| SchemaError::Io {
+        path: path.clone(),
+        source,
+    })?;
+    let object = super::example::validate_example_bytes(reference, &bytes)?;
+    deps.insert(canonical_path(&path));
+    Ok(object)
 }
 
 /// Merges a baseline JSON Schema into a document JSON Schema using the
@@ -836,5 +1491,485 @@ mod tests {
             validator.is_valid(&json!({ "ctx": { "today": "2026-07-04" } })),
             "correctly-typed ctx.today must validate: merged={merged:?}"
         );
+    }
+}
+
+/// Tests for the schema-plus composition primitives
+/// (`darkmatter/features/2026-07-08-schema-plus/`): cross-file named-type
+/// imports (Feature B), `example(...)` resolution (Feature A), and end-to-end
+/// fixture validation of the acceptance corpus through the public resolve path.
+#[cfg(test)]
+mod schema_plus_phase1 {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn write(dir: &Path, name: &str, body: &str) {
+        std::fs::write(dir.join(name), body).unwrap();
+    }
+
+    /// Resolves the `$schema` block of a written schema file from its own dir.
+    fn resolve_file(dir: &Path, name: &str) -> Result<ResolvedSchema, SchemaError> {
+        let raw = std::fs::read_to_string(dir.join(name)).unwrap();
+        let fm: YamlValue = serde_yaml_ng::from_str(&raw).unwrap();
+        let schema_value = fm
+            .get("$schema")
+            .expect("schema file must have a `$schema` key");
+        resolve_yaml_schema(schema_value, dir)
+    }
+
+    // ── Feature B — `@` cross-file named-type import ─────────────────────
+
+    #[test]
+    fn expands_named_type_import() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "types.yaml",
+            "$schema:\n  type: 'enum(string, number; required)'\n",
+        );
+        write(
+            dir.path(),
+            "main.yaml",
+            "$schema:\n  value: type@./types.yaml\n",
+        );
+        let resolved = resolve_file(dir.path(), "main.yaml").expect("import must resolve");
+        // `value` is optional, so reach through the null wrapper to the arm
+        // that carries the inlined enum.
+        let value = &resolved.json_schema["properties"]["value"];
+        let arm = &value["anyOf"][1];
+        assert!(
+            arm["enum"].is_array(),
+            "`value` must inline the target's `type` enum: {value}"
+        );
+    }
+
+    #[test]
+    fn resolves_this_self_import() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "self.yaml",
+            "$schema:\n  type: 'enum(a, b; required)'\n  value: type@this\n",
+        );
+        let resolved = resolve_file(dir.path(), "self.yaml").expect("`@this` must resolve");
+        let arm = &resolved.json_schema["properties"]["value"]["anyOf"][1];
+        assert!(
+            arm["enum"].is_array(),
+            "`value` must inline the same-file `type` enum"
+        );
+    }
+
+    #[test]
+    fn expands_array_named_type_import() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "types.yaml",
+            "$schema:\n  parameter:\n    \"<string>\": any\n    $constraints:\n      min-keys: 1\n      max-keys: 1\n",
+        );
+        write(
+            dir.path(),
+            "main.yaml",
+            "$schema:\n  parameters: parameter[]@./types.yaml\n",
+        );
+        let resolved = resolve_file(dir.path(), "main.yaml").expect("array import must resolve");
+        let arm = &resolved.json_schema["properties"]["parameters"]["anyOf"][1];
+        assert_eq!(
+            arm["type"], "array",
+            "`parameter[]@file` must inline an array: {arm}"
+        );
+    }
+
+    #[test]
+    fn import_from_missing_file_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "main.yaml",
+            "$schema:\n  value: type@./nope.yaml\n",
+        );
+        let err = resolve_file(dir.path(), "main.yaml").expect_err("missing import file must error");
+        assert!(
+            !matches!(err, SchemaError::Grammar { .. }),
+            "a missing import target must be a resolution error, not a grammar error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn import_of_missing_type_name_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "types.yaml", "$schema:\n  type: 'enum(a, b)'\n");
+        write(
+            dir.path(),
+            "main.yaml",
+            "$schema:\n  value: missing@./types.yaml\n",
+        );
+        let err =
+            resolve_file(dir.path(), "main.yaml").expect_err("undefined named type must error");
+        assert!(
+            !matches!(err, SchemaError::Grammar { .. }),
+            "an undefined named type must be a resolution error, not a grammar error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn import_cycle_is_detected() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "a.yaml",
+            "$schema:\n  type: type@./b.yaml\n",
+        );
+        write(
+            dir.path(),
+            "b.yaml",
+            "$schema:\n  type: type@./a.yaml\n",
+        );
+        let err = resolve_file(dir.path(), "a.yaml").expect_err("import cycle must error");
+        assert!(
+            matches!(err, SchemaError::ImportCycle { .. }),
+            "an import cycle must be a structural recursion error, not a grammar error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn constrained_import_applies_use_site_constraint() {
+        // `Name(constraints)@file` applies the import-site constraint to the
+        // inlined value type. Here `type(required)@this` makes `value` required
+        // even though the named `type` definition's own `required` is stripped
+        // on inline.
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "self.yaml",
+            "$schema:\n  type: 'enum(a, b)'\n  value: type(required)@this\n",
+        );
+        let resolved = resolve_file(dir.path(), "self.yaml").expect("constrained import resolves");
+        // `value` is required, so it is not null-wrapped: the enum lives at the
+        // property root, not under an `anyOf` null wrapper.
+        let value = &resolved.json_schema["properties"]["value"];
+        assert!(
+            value["enum"].is_array(),
+            "constrained import must inline the enum at the property root: {value}"
+        );
+        let required = resolved.json_schema["required"]
+            .as_array()
+            .expect("required array");
+        assert!(
+            required.iter().any(|v| v == "value"),
+            "`type(required)@this` must mark `value` required: {required:?}"
+        );
+    }
+
+    #[test]
+    fn import_from_non_simplified_file_errors() {
+        // A raw JSON Schema file exposes no named types, so importing from it is
+        // an ambiguous-reference error, not a grammar error.
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "raw.json",
+            r#"{"type":"object","properties":{"x":{"type":"number"}}}"#,
+        );
+        write(
+            dir.path(),
+            "main.yaml",
+            "$schema:\n  value: type@./raw.json\n",
+        );
+        let err = resolve_file(dir.path(), "main.yaml")
+            .expect_err("import from a raw JSON Schema must error");
+        assert!(
+            matches!(err, SchemaError::AmbiguousReferenced { .. }),
+            "importing from a non-SimplifiedSchema file must be an ambiguous-reference error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn unresolved_import_reaching_conversion_is_a_convert_error() {
+        // The resolver is the only inliner: a `SimplifiedSchema` still carrying
+        // a `TypeExpr::Imported` at conversion time is a hard `Convert` error
+        // (parity with an unresolved root-union `FileRef`).
+        let atom = crate::markdown::schemas::simplified::grammar::parse_type_expr(
+            "value",
+            "type@./types.yaml",
+        )
+        .expect("import expression parses");
+        let mut shape = SchemaShape::new();
+        shape
+            .properties
+            .insert("value".into(), PropertyDef::Single(atom));
+        let err = to_json_schema(&SimplifiedSchema::Single(shape))
+            .expect_err("an unresolved import must not convert");
+        assert!(
+            matches!(err, SchemaError::Convert { .. }),
+            "an unresolved import reaching conversion must be a Convert error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn import_records_dependency_edge() {
+        // The resolved product records the imported file as a dependency edge so
+        // a warm cache / DMLS index can invalidate on imported-file change.
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "types.yaml",
+            "$schema:\n  type: 'enum(a, b)'\n",
+        );
+        write(
+            dir.path(),
+            "main.yaml",
+            "$schema:\n  value: type@./types.yaml\n",
+        );
+        let resolved = resolve_file(dir.path(), "main.yaml").expect("import resolves");
+        let expected = canonical_path(&dir.path().join("types.yaml"));
+        assert!(
+            resolved.imports.contains(&expected),
+            "resolved schema must record the imported file as a dependency edge: {:?}",
+            resolved.imports
+        );
+    }
+
+    // ── Feature A — `example(...)` resolution ────────────────────────────
+
+    /// A minimal valid example artifact (envelope-conformant).
+    const VALID_EXAMPLE: &str =
+        "kind: example\ninvocation: \"{{ ctx.today }}\"\nreturns: \"2024-12-25\"\ndescription: d\n";
+
+    #[test]
+    fn example_resolves_and_emits_resolved_object() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "today-example.yaml", VALID_EXAMPLE);
+        write(
+            dir.path(),
+            "main.yaml",
+            "$schema:\n  today: \"date(example(./today-example.yaml))\"\n",
+        );
+        let resolved = resolve_file(dir.path(), "main.yaml").expect("example must resolve");
+        // `today` is optional, so `x-darkmatter-example` rides on the outer
+        // (nullable) property wrapper, not the typed date arm.
+        let examples = &resolved.json_schema["properties"]["today"]["x-darkmatter-example"];
+        assert!(examples.is_array(), "expected resolved example array: {examples}");
+        assert_eq!(
+            examples[0]["kind"], "example",
+            "reference string must be replaced by the resolved example object: {examples}"
+        );
+        // And the resolved file is recorded as a dependency edge.
+        let expected = canonical_path(&dir.path().join("today-example.yaml"));
+        assert!(
+            resolved.examples.contains(&expected),
+            "resolved example file must be a dependency edge: {:?}",
+            resolved.examples
+        );
+    }
+
+    #[test]
+    fn multiple_examples_resolve_to_multiple_objects() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "a.yaml", VALID_EXAMPLE);
+        write(dir.path(), "b.yaml", VALID_EXAMPLE);
+        write(
+            dir.path(),
+            "main.yaml",
+            "$schema:\n  today: \"date(example(./a.yaml, ./b.yaml))\"\n",
+        );
+        let resolved = resolve_file(dir.path(), "main.yaml").expect("examples must resolve");
+        let examples = resolved.json_schema["properties"]["today"]["x-darkmatter-example"]
+            .as_array()
+            .expect("resolved example array");
+        assert_eq!(examples.len(), 2, "both examples must resolve: {examples:?}");
+    }
+
+    #[test]
+    fn example_resolves_relative_subdirectory_path() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("ctx")).unwrap();
+        write(dir.path(), "ctx/today-example.yaml", VALID_EXAMPLE);
+        write(
+            dir.path(),
+            "main.yaml",
+            "$schema:\n  today: \"date(example(./ctx/today-example.yaml))\"\n",
+        );
+        let resolved = resolve_file(dir.path(), "main.yaml").expect("subdir example resolves");
+        assert!(
+            resolved.json_schema["properties"]["today"]["x-darkmatter-example"][0]["kind"]
+                == "example"
+        );
+    }
+
+    #[test]
+    fn missing_example_file_is_a_schema_load_error() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "main.yaml",
+            "$schema:\n  today: \"date(example(./nope.yaml))\"\n",
+        );
+        let err = resolve_file(dir.path(), "main.yaml").expect_err("missing example must error");
+        assert!(
+            !matches!(err, SchemaError::Grammar { .. }),
+            "a missing example file must be a schema-load error, not a grammar error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn malformed_example_envelope_is_a_schema_load_error() {
+        let dir = tempfile::tempdir().unwrap();
+        // `kind` is required and must be the `example` enum; `sample` fails.
+        write(
+            dir.path(),
+            "bad-example.yaml",
+            "kind: sample\ninvocation: \"x\"\n",
+        );
+        write(
+            dir.path(),
+            "main.yaml",
+            "$schema:\n  today: \"date(example(./bad-example.yaml))\"\n",
+        );
+        let err =
+            resolve_file(dir.path(), "main.yaml").expect_err("malformed example must error");
+        assert!(
+            matches!(err, SchemaError::InvalidExample { .. }),
+            "a malformed example artifact must be an InvalidExample error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn invalid_inherited_parameters_is_a_schema_load_error() {
+        let dir = tempfile::tempdir().unwrap();
+        // A two-key parameter map violates the exact one-key arity (O-A4).
+        write(
+            dir.path(),
+            "bad-params.yaml",
+            "kind: example\nparameters:\n  - a: 1\n    b: 2\ninvocation: \"f(a, b)\"\nreturns: x\ndescription: d\n",
+        );
+        write(
+            dir.path(),
+            "main.yaml",
+            "$schema:\n  today: \"date(example(./bad-params.yaml))\"\n",
+        );
+        let err = resolve_file(dir.path(), "main.yaml")
+            .expect_err("invalid parameters must error");
+        match err {
+            SchemaError::InvalidExample { message, .. } => {
+                assert!(
+                    message.contains("parameters"),
+                    "error must name the parameters failure: {message}"
+                );
+            }
+            other => panic!("expected InvalidExample, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn example_this_targets_the_current_file() {
+        // `example(this)` targets the schema file itself. Here that file is a
+        // valid example artifact, so `this` resolution loads and validates it.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("self-example.yaml");
+        std::fs::write(&path, VALID_EXAMPLE).unwrap();
+
+        let mut json = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "demo": { "type": "string", "x-darkmatter-example": ["this"] }
+            }
+        });
+        let deps = resolve_document_examples(&mut json, dir.path(), Some(&path))
+            .expect("`this` example must resolve");
+        assert_eq!(
+            json["properties"]["demo"]["x-darkmatter-example"][0]["kind"],
+            "example"
+        );
+        assert!(deps.contains(&canonical_path(&path)));
+    }
+
+    #[test]
+    fn schema_without_examples_leaves_json_unchanged() {
+        // Fast path: a schema with no `example(...)` records no example edges
+        // and its compiled JSON is untouched.
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "main.yaml", "$schema:\n  today: date\n");
+        let resolved = resolve_file(dir.path(), "main.yaml").expect("resolves");
+        assert!(resolved.examples.is_empty());
+        assert!(
+            resolved.json_schema["properties"]["today"]
+                .get("x-darkmatter-example")
+                .is_none()
+        );
+    }
+
+    // ── Fixture validation (acceptance corpus) ───────────────────────────
+
+    fn feature_dir() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("features")
+            .join("2026-07-08-schema-plus")
+    }
+
+    fn fixture_json(name: &str) -> serde_json::Value {
+        let raw = std::fs::read_to_string(feature_dir().join(name)).expect("read fixture");
+        let y: YamlValue = serde_yaml_ng::from_str(&raw).expect("parse fixture yaml");
+        serde_json::to_value(&y).expect("fixture yaml -> json")
+    }
+
+    /// Validates a corpus fixture through the same example-artifact path a
+    /// schema load uses (envelope + `parameters` shape, with native-value
+    /// coercion for the `{ frontmatter: yaml }` arm).
+    fn assert_fixture_valid(name: &str) {
+        assert!(
+            feature_dir().join(name).exists(),
+            "fixture `{name}` must exist (path check to isolate harness issues from feature gaps)"
+        );
+        let doc = fixture_json(name);
+        super::super::example::validate_example_object(name, &doc)
+            .unwrap_or_else(|err| panic!("example envelope must validate fixture `{name}`: {err}"));
+    }
+
+    /// Drift guard: the on-disk `example.yaml` envelope fixture compiles to the
+    /// same JSON Schema as the built-in [`super::super::example::EXAMPLE_ENVELOPE_YAML`],
+    /// so the acceptance corpus and the runtime validator stay in lockstep.
+    #[test]
+    fn example_envelope_matches_fixture() {
+        let dir = feature_dir();
+        let raw = std::fs::read_to_string(dir.join("example.yaml")).expect("read example.yaml");
+        let fm: YamlValue = serde_yaml_ng::from_str(&raw).expect("parse example.yaml");
+        let schema_value = fm.get("$schema").expect("example.yaml has a `$schema` key");
+        let fixture_json =
+            resolve_yaml_schema(schema_value, &dir).expect("example.yaml envelope must resolve");
+
+        let builtin: YamlValue = serde_yaml_ng::from_str(
+            super::super::example::EXAMPLE_ENVELOPE_YAML,
+        )
+        .expect("built-in envelope parses");
+        let builtin_json =
+            to_json_schema(&parse_yaml_schema(&builtin).expect("built-in envelope parses"))
+                .expect("built-in envelope converts");
+
+        assert_eq!(
+            fixture_json.json_schema, builtin_json,
+            "on-disk example.yaml must match the built-in example envelope"
+        );
+    }
+
+    #[test]
+    fn example_validates_today_fixture() {
+        assert_fixture_valid("today-example.yaml");
+    }
+
+    #[test]
+    fn example_validates_as_unordered_list_fixture() {
+        assert_fixture_valid("as_unordered_list-example.yaml");
+    }
+
+    #[test]
+    fn example_validates_as_unordered_list_2_fixture() {
+        assert_fixture_valid("as_unordered_list-example-2.yaml");
+    }
+
+    #[test]
+    fn example_validates_as_unordered_list_fm_fixture() {
+        assert_fixture_valid("as_unordered_list-example-fm.yaml");
     }
 }

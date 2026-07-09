@@ -31,11 +31,14 @@
 use serde_json::{Map, Value, json};
 
 use super::types::{
-    Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType,
-    TypeExpr,
+    Constraint, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
+    SimplifiedType, TypeExpr,
 };
 use crate::markdown::schemas::errors::SchemaError;
-use crate::markdown::schemas::format::{DARKMATTER_FILE_FORMAT, DARKMATTER_FILE_REFERENCE_FORMAT};
+use crate::markdown::schemas::format::{
+    DARKMATTER_FILE_FORMAT, DARKMATTER_FILE_REFERENCE_FORMAT, DARKMATTER_JSON_FORMAT,
+    DARKMATTER_YAML_FORMAT,
+};
 
 /// Draft 2020-12 schema URI emitted on every generated root schema.
 pub const DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
@@ -84,24 +87,10 @@ pub fn to_json_schema(schema: &SimplifiedSchema) -> Result<Value, SchemaError> {
 // ── Shape & root union ────────────────────────────────────────────────────
 
 fn shape_to_object_schema(shape: &SchemaShape) -> Result<Map<String, Value>, SchemaError> {
-    let mut properties = Map::new();
-    let mut required = Vec::new();
-
-    for (name, def) in &shape.properties {
-        let (prop_schema, is_required) = property_def_to_schema(name, def)?;
-        if is_required {
-            required.push(Value::String(name.clone()));
-        }
-        properties.insert(name.clone(), prop_schema);
-    }
-
-    let mut obj = Map::new();
-    obj.insert("type".into(), Value::String("object".into()));
-    obj.insert("additionalProperties".into(), Value::Bool(true));
-    obj.insert("properties".into(), Value::Object(properties));
-    if !required.is_empty() {
-        obj.insert("required".into(), Value::Array(required));
-    }
+    // Root shapes default to open (`additionalProperties: true`); a pattern-keyed
+    // root switches to closed-object semantics inside `object_body_from_shape`.
+    let mut obj = object_body_from_shape("<root>", shape, Value::Bool(true))?;
+    apply_object_arity(&mut obj, &shape.constraints);
     Ok(obj)
 }
 
@@ -254,10 +243,12 @@ fn atom_to_schema(name: &str, atom: &PropertyAtom) -> Result<(Value, bool), Sche
     let mut default_val: Option<Value> = None;
     let mut description_val: Option<Value> = None;
     let mut generated_val: Option<Value> = None;
+    let mut example_val: Option<Value> = None;
     if let Value::Object(map) = &mut fragment {
         default_val = map.remove("default");
         description_val = map.remove("description");
         generated_val = map.remove("x-darkmatter-generated");
+        example_val = map.remove("x-darkmatter-example");
     }
 
     let is_optional_scalar_file = matches!(&atom.ty, TypeExpr::Primitive(SimplifiedType::File))
@@ -288,6 +279,9 @@ fn atom_to_schema(name: &str, atom: &PropertyAtom) -> Result<(Value, bool), Sche
         }
         if let Some(g) = generated_val {
             map.insert("x-darkmatter-generated".into(), g);
+        }
+        if let Some(e) = example_val {
+            map.insert("x-darkmatter-example".into(), e);
         }
     }
 
@@ -341,11 +335,17 @@ fn atom_fragment_without_null_wrap(
     let mut required = false;
     let mut generated = false;
     let mut default_val: Option<Value> = None;
+    // `example(...)` is documentation, not validation: the raw authored
+    // reference strings are hoisted onto the `x-darkmatter-example` annotation
+    // (resolved into example objects by `resolve.rs`) and never reach a type
+    // fragment builder as a constraint.
+    let mut examples: Vec<String> = Vec::new();
     for c in atom.constraints.iter().chain(atom.array_constraints.iter()) {
         match c {
             Constraint::Required => required = true,
             Constraint::Generated => generated = true,
             Constraint::Default(v) => default_val = Some(normalize_json_number(v.clone())),
+            Constraint::Example(refs) => examples.extend(refs.iter().cloned()),
             _ => {}
         }
     }
@@ -353,6 +353,22 @@ fn atom_fragment_without_null_wrap(
     let inner = match &atom.ty {
         TypeExpr::Primitive(ty) => type_fragment(name, *ty, &atom.constraints)?,
         TypeExpr::InlineObject(shape) => inline_object_fragment(name, shape, &atom.constraints)?,
+        // An imported type must be inline-expanded by the resolver before
+        // conversion, just as a root-union `FileRef` arm is. Reaching the
+        // converter with one unresolved is a hard error (resolution lands in
+        // Phase 4).
+        TypeExpr::Imported {
+            name: ty_name,
+            reference,
+        } => {
+            return Err(SchemaError::Convert {
+                property: name.to_string(),
+                message: format!(
+                    "imported type `{ty_name}@{reference}` must be resolved before \
+                     conversion (handled by the resolution layer)"
+                ),
+            });
+        }
     };
 
     // Decision A: a non-`required` scalar `file` field treats an empty string
@@ -393,6 +409,12 @@ fn atom_fragment_without_null_wrap(
         if generated {
             map.insert("x-darkmatter-generated".into(), Value::Bool(true));
         }
+        if !examples.is_empty() {
+            map.insert(
+                "x-darkmatter-example".into(),
+                Value::Array(examples.into_iter().map(Value::String).collect()),
+            );
+        }
     }
 
     Ok((fragment, required))
@@ -400,9 +422,12 @@ fn atom_fragment_without_null_wrap(
 
 /// Lowers an inline object `SchemaShape` to a Draft 2020-12 object fragment.
 ///
-/// The fragment always emits `additionalProperties: false` (Decision #7):
+/// The fragment defaults to `additionalProperties: false` (Decision #7):
 /// authors reach for an inline object specifically to constrain the shape,
-/// so silently accepting extra keys would defeat their intent. Nested
+/// so silently accepting extra keys would defeat their intent. A `<string>`
+/// catch-all pattern key (Feature C) overrides that default in
+/// `object_body_from_shape`, lowering `additionalProperties` to the catch-all's
+/// value schema instead. Nested
 /// `required` constraints live on the fragment, not the parent property, so
 /// `union_property_to_schema`'s hoisting logic cannot accidentally lift them
 /// out of an inline object arm (Risk Mitigation Checkpoint 4).
@@ -411,12 +436,18 @@ fn inline_object_fragment(
     shape: &SchemaShape,
     atom_constraints: &[Constraint],
 ) -> Result<Value, SchemaError> {
-    // Inline object atoms accept only the universal `required` / `default`
-    // constraints. Reject anything else with the same wording primitive
-    // fragment builders use.
+    // Inline object atoms accept the universal `required` / `default` /
+    // `generated` constraints (hoisted elsewhere) plus the object-arity
+    // `min-keys` / `max-keys` (Feature C / O-C3). Reject anything else with the
+    // same wording primitive fragment builders use.
     for c in atom_constraints {
         match c {
-            Constraint::Required | Constraint::Default(_) | Constraint::Generated => {}
+            Constraint::Required
+            | Constraint::Default(_)
+            | Constraint::Generated
+            | Constraint::Example(_)
+            | Constraint::MinKeys(_)
+            | Constraint::MaxKeys(_) => {}
             other => {
                 return Err(SchemaError::Convert {
                     property: name.to_string(),
@@ -429,9 +460,32 @@ fn inline_object_fragment(
         }
     }
 
+    let mut obj = object_body_from_shape(name, shape, Value::Bool(false))?;
+    // Object arity from both authoring surfaces desugars to the same emitted
+    // keys: the reserved `$constraints` block (`shape.constraints`) and the
+    // postfix `{ … }(min-keys(1))` form (`atom_constraints`).
+    apply_object_arity(&mut obj, &shape.constraints);
+    apply_object_arity(&mut obj, atom_constraints);
+    Ok(Value::Object(obj))
+}
+
+/// Builds the `type` / `additionalProperties` / `properties` /
+/// `patternProperties` / `required` portion of an object schema from a shape's
+/// literal and pattern keys (Feature C).
+///
+/// `default_additional` is the `additionalProperties` value used when the shape
+/// has **no** pattern keys (root shapes default to open `true`; inline objects
+/// default to closed `false`). When pattern keys are present the closed-object
+/// rule (O-C1) overrides it: a `<string>` catch-all lowers to
+/// `additionalProperties: <valueSchema>`, and any other pattern set lowers to
+/// `additionalProperties: false`.
+fn object_body_from_shape(
+    context: &str,
+    shape: &SchemaShape,
+    default_additional: Value,
+) -> Result<Map<String, Value>, SchemaError> {
     let mut properties = Map::new();
     let mut required = Vec::new();
-
     for (prop_name, def) in &shape.properties {
         let (prop_schema, is_required) = property_def_to_schema(prop_name, def)?;
         if is_required {
@@ -440,14 +494,176 @@ fn inline_object_fragment(
         properties.insert(prop_name.clone(), prop_schema);
     }
 
+    // Literal names feed the negative-lookahead exclusion so a key that also
+    // names a declared property is validated only by that property's schema
+    // (literal keys win — O-C1).
+    let literal_names: Vec<&str> = shape.properties.keys().map(String::as_str).collect();
+    let mut catch_all: Option<Value> = None;
+    let mut pattern_properties = Map::new();
+    for pk in &shape.pattern_keys {
+        match &pk.key {
+            PatternKey::CatchAll => {
+                catch_all = Some(pattern_value_schema(context, &pk.def)?);
+            }
+            other => {
+                let emitted = emitted_pattern_property(context, other, &literal_names)?;
+                let value_schema = pattern_value_schema(context, &pk.def)?;
+                pattern_properties.insert(emitted, value_schema);
+            }
+        }
+    }
+
+    let additional = if let Some(value) = catch_all {
+        value
+    } else if shape.pattern_keys.is_empty() {
+        default_additional
+    } else {
+        Value::Bool(false)
+    };
+
     let mut obj = Map::new();
     obj.insert("type".into(), Value::String("object".into()));
-    obj.insert("additionalProperties".into(), Value::Bool(false));
+    obj.insert("additionalProperties".into(), additional);
     obj.insert("properties".into(), Value::Object(properties));
+    if !pattern_properties.is_empty() {
+        obj.insert(
+            "patternProperties".into(),
+            Value::Object(pattern_properties),
+        );
+    }
     if !required.is_empty() {
         obj.insert("required".into(), Value::Array(required));
     }
-    Ok(Value::Object(obj))
+    Ok(obj)
+}
+
+/// Lowers a pattern-key value definition to its JSON Schema. Dictionary values
+/// are not "optional properties", so they emit the bare typed fragment (no
+/// nullable wrapper) — `<string>: number` yields `additionalProperties:
+/// { "type": "number" }`, not a null-tolerant `anyOf`.
+fn pattern_value_schema(context: &str, def: &PropertyDef) -> Result<Value, SchemaError> {
+    match def {
+        PropertyDef::Single(atom) => Ok(atom_fragment_without_null_wrap(context, atom, false)?.0),
+        PropertyDef::Union(arms) => {
+            let mut any_of = Vec::with_capacity(arms.len());
+            for atom in arms {
+                any_of.push(atom_fragment_without_null_wrap(context, atom, false)?.0);
+            }
+            Ok(json!({ "anyOf": any_of }))
+        }
+    }
+}
+
+/// Lowers a non-catch-all [`PatternKey`] to the ECMA-262 regex emitted under
+/// `patternProperties`, applying literal-key precedence (O-C1) by excluding any
+/// literal property names that could otherwise double-validate.
+///
+/// ## Errors
+///
+/// Returns [`SchemaError::Convert`] when the emitted pattern (after literal
+/// exclusion) is not a valid regex under the engine schema validation uses.
+fn emitted_pattern_property(
+    context: &str,
+    key: &PatternKey,
+    literal_names: &[&str],
+) -> Result<String, SchemaError> {
+    let core = match key {
+        PatternKey::Starting(prefix) => format!("^{}", regex::escape(prefix)),
+        PatternKey::Ending(suffix) => format!("{}$", regex::escape(suffix)),
+        PatternKey::Pattern(re) => re.clone(),
+        // The catch-all lowers to `additionalProperties`, never here.
+        PatternKey::CatchAll => unreachable!("catch-all handled before patternProperties"),
+    };
+    let emitted = wrap_literal_exclusion(&core, literal_names);
+    validate_emitted_pattern(context, key, &emitted)?;
+    Ok(emitted)
+}
+
+/// Wraps an emitted regex with a start-anchored negative lookahead that
+/// subtracts the literal key set, so a literal property never also matches a
+/// sibling pattern (O-C1). Returns `core` unchanged when there are no literal
+/// keys to exclude (keeping the lookaround-free pattern on the linear engine).
+fn wrap_literal_exclusion(core: &str, literal_names: &[&str]) -> String {
+    if literal_names.is_empty() {
+        return core.to_string();
+    }
+    let alternation = literal_names
+        .iter()
+        .map(|name| regex::escape(name))
+        .collect::<Vec<_>>()
+        .join("|");
+    let exclusion = format!("(?!(?:{alternation})$)");
+    match core.strip_prefix('^') {
+        // Start-anchored cores (`^PREFIX`) splice the exclusion after the
+        // anchor: `^(?!(?:LITS)$)PREFIX`.
+        Some(rest) => format!("^{exclusion}{rest}"),
+        // Search cores (`SUFFIX$`, a raw `<pattern::RE>`) keep their match-
+        // anywhere semantics: anchor the exclusion at the string start, then
+        // allow any prefix before the original pattern.
+        None => format!("^{exclusion}.*{core}"),
+    }
+}
+
+/// Verifies an emitted pattern compiles under the same regex engine schema
+/// validation uses: `fancy-regex` when the pattern carries a lookaround
+/// (Feature C literal precedence), otherwise the linear `regex` engine.
+fn validate_emitted_pattern(
+    context: &str,
+    key: &PatternKey,
+    emitted: &str,
+) -> Result<(), SchemaError> {
+    let compiles = if has_lookaround(emitted) {
+        fancy_regex::Regex::new(emitted).is_ok()
+    } else {
+        regex::Regex::new(emitted).is_ok()
+    };
+    if compiles {
+        Ok(())
+    } else {
+        Err(SchemaError::Convert {
+            property: context.to_string(),
+            message: format!(
+                "pattern key `{}` cannot be lowered into a valid `patternProperties` \
+                 regex `{emitted}`",
+                pattern_key_display(key)
+            ),
+        })
+    }
+}
+
+/// Reconstructs a pattern key's authored `<...>` spelling for error messages.
+fn pattern_key_display(key: &PatternKey) -> String {
+    match key {
+        PatternKey::CatchAll => "<string>".to_string(),
+        PatternKey::Starting(prefix) => format!("<starting::{prefix}>"),
+        PatternKey::Ending(suffix) => format!("<ending::{suffix}>"),
+        PatternKey::Pattern(re) => format!("<pattern::{re}>"),
+    }
+}
+
+/// Reports whether a regex string carries a lookaround construct
+/// (`(?!`, `(?=`, `(?<`). Such patterns require the backtracking `fancy-regex`
+/// engine; the default linear `regex` engine rejects them.
+pub(in crate::markdown::schemas) fn has_lookaround(pattern: &str) -> bool {
+    pattern.contains("(?!") || pattern.contains("(?=") || pattern.contains("(?<")
+}
+
+/// Emits `minProperties` / `maxProperties` from `min-keys` / `max-keys` object
+/// arity constraints (Feature C / O-C3). Other constraints are ignored here:
+/// they are hoisted (`required` / `default` / `generated`) or rejected on the
+/// per-type / array-level paths.
+fn apply_object_arity(obj: &mut Map<String, Value>, constraints: &[Constraint]) {
+    for c in constraints {
+        match c {
+            Constraint::MinKeys(n) => {
+                obj.insert("minProperties".into(), json!(*n));
+            }
+            Constraint::MaxKeys(n) => {
+                obj.insert("maxProperties".into(), json!(*n));
+            }
+            _ => {}
+        }
+    }
 }
 
 fn apply_array_constraints(
@@ -457,7 +673,10 @@ fn apply_array_constraints(
 ) -> Result<(), SchemaError> {
     for c in constraints {
         match c {
-            Constraint::Required | Constraint::Default(_) | Constraint::Generated => {
+            Constraint::Required
+            | Constraint::Default(_)
+            | Constraint::Generated
+            | Constraint::Example(_) => {
                 // Hoisted to the property level by `atom_to_schema`.
             }
             Constraint::MinItems(n) => {
@@ -504,6 +723,13 @@ fn type_fragment(
         SimplifiedType::Enum => enum_fragment(name, constraints),
         SimplifiedType::Url => url_fragment(name, constraints),
         SimplifiedType::Email => email_fragment(name, constraints),
+        // Content-format string types: a string whose content must parse as
+        // YAML / strict JSON. Lower to `{ "type": "string", "format": … }` so
+        // the custom format validators (`super::super::format`) parse the value;
+        // native mappings/sequences/scalars are serialized to a string by the
+        // coercion pass before validation.
+        SimplifiedType::Yaml => content_format_fragment(name, "yaml", DARKMATTER_YAML_FORMAT, constraints),
+        SimplifiedType::Json => content_format_fragment(name, "json", DARKMATTER_JSON_FORMAT, constraints),
         SimplifiedType::Any => any_fragment(name, constraints),
     }
 }
@@ -513,7 +739,10 @@ fn string_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, Sche
     m.insert("type".into(), Value::String("string".into()));
     for c in constraints {
         match c {
-            Constraint::Required | Constraint::Default(_) | Constraint::Generated => {}
+            Constraint::Required
+            | Constraint::Default(_)
+            | Constraint::Generated
+            | Constraint::Example(_) => {}
             Constraint::MinLen(n) => {
                 m.insert("minLength".into(), json!(*n));
             }
@@ -521,11 +750,12 @@ fn string_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, Sche
                 m.insert("maxLength".into(), json!(*n));
             }
             Constraint::NotEmpty => {
-                // Anchored, lookaround-free: any string containing at least
-                // one non-whitespace character. The Rust `regex` crate (used
-                // by jsonschema for ReDoS-safe pattern evaluation) rejects
-                // `(?!...)` lookahead, so the previous `^(?!\s*$).+` form is
-                // not portable.
+                // Lookaround-free: any string containing at least one
+                // non-whitespace character. A lookaround-free pattern keeps this
+                // schema on jsonschema's linear (ReDoS-safe) `regex` engine —
+                // only Feature C pattern-key literal precedence opts a schema
+                // into `fancy-regex` — so the previous `^(?!\s*$).+` form (which
+                // the linear engine rejects) is not portable and `\S` is used.
                 m.insert("pattern".into(), Value::String(r"\S".into()));
             }
             Constraint::Pattern(p) => {
@@ -551,7 +781,10 @@ fn number_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, Sche
     let mut is_integer = false;
     for c in constraints {
         match c {
-            Constraint::Required | Constraint::Default(_) | Constraint::Generated => {}
+            Constraint::Required
+            | Constraint::Default(_)
+            | Constraint::Generated
+            | Constraint::Example(_) => {}
             Constraint::Min(n) => {
                 m.insert("minimum".into(), number_to_json(*n));
             }
@@ -618,7 +851,10 @@ fn file_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, Schema
     m.insert("format".into(), Value::String(format.into()));
     for c in constraints {
         match c {
-            Constraint::Required | Constraint::Default(_) | Constraint::Generated => {}
+            Constraint::Required
+            | Constraint::Default(_)
+            | Constraint::Generated
+            | Constraint::Example(_) => {}
             // Consumed above to pick the format; nothing further to emit.
             Constraint::Eager => {}
             // `match(...)` is suggestion metadata only — it shapes completion
@@ -636,7 +872,10 @@ fn enum_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, Schema
     let mut members: Option<Vec<String>> = None;
     for c in constraints {
         match c {
-            Constraint::Required | Constraint::Default(_) | Constraint::Generated => {}
+            Constraint::Required
+            | Constraint::Default(_)
+            | Constraint::Generated
+            | Constraint::Example(_) => {}
             Constraint::Members(m) => members = Some(m.clone()),
             other => return Err(invalid_constraint(name, "enum", other)),
         }
@@ -659,7 +898,10 @@ fn url_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaE
     m.insert("format".into(), Value::String("uri".into()));
     for c in constraints {
         match c {
-            Constraint::Required | Constraint::Default(_) | Constraint::Generated => {}
+            Constraint::Required
+            | Constraint::Default(_)
+            | Constraint::Generated
+            | Constraint::Example(_) => {}
             Constraint::Scheme(schemes) => {
                 m.insert(
                     "x-darkmatter-url-scheme".into(),
@@ -677,6 +919,21 @@ fn email_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, Schem
     Ok(json!({ "type": "string", "format": "email" }))
 }
 
+/// Lowers a content-format string type (`yaml` / `json`) to a string carrying
+/// the darkmatter content-format seam. `type_label` is the SimplifiedSchema
+/// keyword used in constraint-rejection messages; `format` is the emitted
+/// `format` value the custom validator keys on. Constraints beyond the universal
+/// set are deferred (O-D2 `yaml(schema(...))` is future work).
+fn content_format_fragment(
+    name: &str,
+    type_label: &str,
+    format: &str,
+    constraints: &[Constraint],
+) -> Result<Value, SchemaError> {
+    reject_unsupported(name, type_label, constraints, &[])?;
+    Ok(json!({ "type": "string", "format": format }))
+}
+
 fn any_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
     reject_unsupported(name, "any", constraints, &[])?;
     Ok(Value::Object(Map::new()))
@@ -684,8 +941,9 @@ fn any_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaE
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
-/// For types that only accept the universal `required` / `default` constraints,
-/// reject anything else. `_extra_allowed` is reserved for future extensions.
+/// For types that only accept the universal `required` / `default` /
+/// `generated` / `example(...)` constraints, reject anything else.
+/// `_extra_allowed` is reserved for future extensions.
 fn reject_unsupported(
     name: &str,
     type_label: &str,
@@ -694,7 +952,10 @@ fn reject_unsupported(
 ) -> Result<(), SchemaError> {
     for c in constraints {
         match c {
-            Constraint::Required | Constraint::Default(_) | Constraint::Generated => {}
+            Constraint::Required
+            | Constraint::Default(_)
+            | Constraint::Generated
+            | Constraint::Example(_) => {}
             other => return Err(invalid_constraint(name, type_label, other)),
         }
     }
@@ -1886,5 +2147,275 @@ ctx_kind:
         fn drop(&mut self) {
             let _ = std::env::set_current_dir(&self.prior);
         }
+    }
+}
+
+/// Schema-plus composition primitives
+/// (`darkmatter/features/2026-07-08-schema-plus/`). These pin the JSON Schema
+/// lowering for pattern keys, object-arity constraints, and content-format
+/// types. The Feature C (pattern-key / object-arity) tests are active as of
+/// Phase 3; the Feature D (`yaml` / `json`) tests remain `#[ignore]`-gated
+/// until Phase 5 lands. Run the ignored ones with
+/// `cargo nextest run -p darkmatter --run-ignored ignored-only schema_plus`.
+#[cfg(test)]
+mod schema_plus_phase1 {
+    use super::*;
+    use crate::markdown::schemas::simplified::{grammar::parse_type_expr, parse_yaml_schema};
+
+    /// Parses one required inline/primitive type expression and lowers it to
+    /// its typed JSON Schema fragment (no optional-null wrapper).
+    fn atom_value(input: &str) -> Value {
+        let mut atom = parse_type_expr("test", input).expect("parse atom");
+        atom.constraints.push(Constraint::Required);
+        atom_to_schema("test", &atom).expect("convert").0
+    }
+
+    // ── Feature C — pattern keys + object arity ──────────────────────────
+
+    #[test]
+    fn catch_all_lowers_to_additional_properties() {
+        let v = atom_value("{ <string>: number }");
+        assert_eq!(v["type"], "object");
+        assert_eq!(
+            v["additionalProperties"]["type"], "number",
+            "catch-all value type must lower to additionalProperties: {v}"
+        );
+        let props = v["properties"].as_object();
+        assert!(
+            props.is_none_or(|p| p.is_empty()),
+            "catch-all key must not appear as a literal property: {v}"
+        );
+    }
+
+    #[test]
+    fn pattern_key_lowers_with_literal_precedence() {
+        let v = atom_value("{ x-kind: string, <pattern::[0-9]$>: number }");
+        // The literal key stays a declared property. `x-kind` is optional here,
+        // so its typed arm lives under the nullable `anyOf` wrapper.
+        assert_eq!(v["properties"]["x-kind"]["anyOf"][1]["type"], "string");
+        // The pattern lowers to patternProperties (with literal-key exclusion).
+        let pattern_props = v["patternProperties"]
+            .as_object()
+            .expect("pattern key must lower to patternProperties");
+        assert_eq!(pattern_props.len(), 1);
+        let (emitted, value_schema) = pattern_props.iter().next().unwrap();
+        // The emitted regex carries the negative-lookahead exclusion for the
+        // literal key set (`x-kind`), so a literal never double-validates.
+        assert!(
+            emitted.contains("(?!"),
+            "emitted pattern must exclude literal keys: {emitted}"
+        );
+        assert_eq!(value_schema["type"], "number");
+        // A pattern-keyed object without a catch-all is closed.
+        assert_eq!(v["additionalProperties"], false);
+    }
+
+    #[test]
+    fn object_arity_lowers_to_property_counts() {
+        let v = atom_value("{ <string>: any }(min-keys(1); max-keys(1))");
+        assert_eq!(v["minProperties"], 1);
+        assert_eq!(v["maxProperties"], 1);
+    }
+
+    #[test]
+    fn mixed_literal_and_pattern_keys_lower_together() {
+        // A literal property and a pattern key coexist: the literal stays under
+        // `properties`, the pattern under `patternProperties`, and the object is
+        // closed (no catch-all).
+        let v = atom_value("{ name: string(required), <starting::x->: number }");
+        assert_eq!(v["type"], "object");
+        assert_eq!(v["additionalProperties"], false);
+        assert_eq!(v["properties"]["name"]["type"], "string");
+        assert_eq!(v["required"], json!(["name"]));
+        let pattern_props = v["patternProperties"].as_object().unwrap();
+        assert_eq!(pattern_props.len(), 1);
+        let (emitted, schema) = pattern_props.iter().next().unwrap();
+        assert!(
+            emitted.contains("(?!"),
+            "emitted pattern must exclude the literal `name`: {emitted}"
+        );
+        assert_eq!(schema["type"], "number");
+    }
+
+    #[test]
+    fn multiple_pattern_keys_each_lower_to_pattern_properties() {
+        let v = atom_value("{ <starting::a->: string, <ending::-z>: number }");
+        let pattern_props = v["patternProperties"].as_object().unwrap();
+        assert_eq!(
+            pattern_props.len(),
+            2,
+            "each pattern key gets its own patternProperties entry: {v}"
+        );
+        assert_eq!(v["additionalProperties"], false);
+    }
+
+    #[test]
+    fn catch_all_plus_specific_pattern_key() {
+        // `<string>` catch-all lowers to additionalProperties; the specific
+        // pattern key still lowers to patternProperties.
+        let v = atom_value("{ <starting::x->: number, <string>: any }");
+        assert!(
+            v["additionalProperties"].as_object().unwrap().is_empty(),
+            "catch-all `any` lowers to additionalProperties: {{}}: {v}"
+        );
+        let pattern_props = v["patternProperties"].as_object().unwrap();
+        assert_eq!(pattern_props.len(), 1);
+        let (_, schema) = pattern_props.iter().next().unwrap();
+        assert_eq!(schema["type"], "number");
+    }
+
+    #[test]
+    fn invalid_pattern_wrapping_is_a_conversion_error() {
+        // A `<pattern::RE>` that is not a valid regex cannot be lowered into a
+        // `patternProperties` entry; conversion fails loudly rather than
+        // shipping a schema the validator would reject at build time.
+        let atom = parse_type_expr("dict", "{ <pattern::*>: string }").expect("parse");
+        let err = atom_to_schema("dict", &atom).unwrap_err();
+        match err {
+            SchemaError::Convert { message, .. } => {
+                assert!(message.contains("pattern key"), "{message}");
+            }
+            other => panic!("expected Convert, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn min_keys_on_non_object_atom_is_rejected() {
+        // Object arity is only meaningful on objects; `min-keys` on a scalar
+        // atom is a conversion error, mirroring the per-type constraint guard.
+        let atom = parse_type_expr("test", "string(min-keys(1))").expect("parse");
+        let err = atom_to_schema("test", &atom).unwrap_err();
+        match err {
+            SchemaError::Convert { message, .. } => {
+                assert!(message.contains("min-keys"), "{message}");
+                assert!(message.contains("string"), "{message}");
+            }
+            other => panic!("expected Convert, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn max_keys_at_array_level_is_rejected() {
+        // `max-keys` in an array-level constraint position is ambiguous and
+        // rejected — object arity attaches to object items, not the array.
+        let atom = parse_type_expr("test", "object[](max-keys(1))").expect("parse");
+        let err = atom_to_schema("test", &atom).unwrap_err();
+        match err {
+            SchemaError::Convert { message, .. } => {
+                assert!(message.contains("array level"), "{message}");
+            }
+            other => panic!("expected Convert, got {other:?}"),
+        }
+    }
+
+    // ── End-to-end validation checkpoint (Phase 3) ───────────────────────
+
+    /// Converts a full `$schema` document to compiled JSON Schema.
+    fn schema_of(yaml: &str) -> Value {
+        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).expect("yaml parse");
+        to_json_schema(&parse_yaml_schema(&value).expect("schema parse")).expect("convert")
+    }
+
+    fn validator_of(schema: &Value) -> jsonschema::Validator {
+        crate::markdown::schemas::validate::build_validator(schema, None, None)
+            .expect("build validator")
+    }
+
+    #[test]
+    fn catch_all_document_enforces_value_type() {
+        let schema = schema_of("dict:\n  \"<string>\": number");
+        let v = validator_of(&schema);
+        assert!(v.is_valid(&json!({ "dict": { "a": 1, "b": 2 } })), "any string key with a number value validates");
+        assert!(
+            !v.is_valid(&json!({ "dict": { "a": "x" } })),
+            "catch-all value type is enforced"
+        );
+    }
+
+    #[test]
+    fn pattern_only_document_stays_closed_and_typed() {
+        // No literal keys → no lookaround → the schema stays on the linear
+        // engine. `<ending::_id>` keys must carry string values; other keys are
+        // rejected (closed object).
+        let schema = schema_of("codes:\n  \"<ending::_id>\": string");
+        let pattern_props = schema["properties"]["codes"]["anyOf"][1]["patternProperties"]
+            .as_object()
+            .unwrap();
+        assert!(
+            pattern_props.keys().all(|k| !k.contains("(?!")),
+            "no literals → no lookahead wrapping: {schema}"
+        );
+        let v = validator_of(&schema);
+        assert!(v.is_valid(&json!({ "codes": { "user_id": "u1" } })));
+        assert!(!v.is_valid(&json!({ "codes": { "user_id": 5 } })), "value type enforced");
+        assert!(
+            !v.is_valid(&json!({ "codes": { "name": "x" } })),
+            "key not matching the pattern is rejected (closed object)"
+        );
+    }
+
+    #[test]
+    fn literal_precedence_document_validates_via_fancy_regex() {
+        // `x-kind` (a number property) would also match the `<starting::x->`
+        // string pattern; literal-key precedence excludes it so it is validated
+        // only by its own number schema, while other `x-` keys must be strings.
+        let schema = schema_of("config:\n  \"x-kind\": number\n  \"<starting::x->\": string");
+        let v = validator_of(&schema);
+        assert!(
+            v.is_valid(&json!({ "config": { "x-kind": 5 } })),
+            "literal key wins: `x-kind` is validated only as a number"
+        );
+        assert!(
+            v.is_valid(&json!({ "config": { "x-trace": "on" } })),
+            "a pattern-matched key satisfies the string pattern schema"
+        );
+        assert!(
+            !v.is_valid(&json!({ "config": { "x-trace": 5 } })),
+            "a pattern-matched key must satisfy the string pattern schema"
+        );
+        assert!(
+            !v.is_valid(&json!({ "config": { "other": 1 } })),
+            "a key matching neither literal nor pattern is rejected (closed)"
+        );
+    }
+
+    #[test]
+    fn exact_one_key_dictionary_validates_only_single_pairs() {
+        // The ratified `parameter` fixture shape: one `<string>: any` pair.
+        let schema = schema_of(
+            "parameter:\n  \"<string>\": any\n  $constraints:\n    min-keys: 1\n    max-keys: 1",
+        );
+        let inner = &schema["properties"]["parameter"]["anyOf"][1];
+        assert_eq!(inner["minProperties"], 1);
+        assert_eq!(inner["maxProperties"], 1);
+        let v = validator_of(&schema);
+        assert!(
+            v.is_valid(&json!({ "parameter": { "temperature": 0.7 } })),
+            "exactly one pair validates"
+        );
+        assert!(
+            !v.is_valid(&json!({ "parameter": {} })),
+            "zero keys fail min-keys"
+        );
+        assert!(
+            !v.is_valid(&json!({ "parameter": { "a": 1, "b": 2 } })),
+            "two keys fail max-keys"
+        );
+    }
+
+    // ── Feature D — content-format string types ──────────────────────────
+
+    #[test]
+    fn yaml_type_lowers_to_content_format() {
+        let v = atom_value("yaml");
+        assert_eq!(v["type"], "string");
+        assert_eq!(v["format"], "darkmatter-yaml");
+    }
+
+    #[test]
+    fn json_type_lowers_to_content_format() {
+        let v = atom_value("json");
+        assert_eq!(v["type"], "string");
+        assert_eq!(v["format"], "darkmatter-json");
     }
 }

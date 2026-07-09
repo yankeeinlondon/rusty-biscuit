@@ -1,6 +1,6 @@
 //! Custom format and keyword validators for the schemas subsystem.
 //!
-//! Two darkmatter-specific schema fragments require validators beyond the
+//! Several darkmatter-specific schema fragments require validators beyond the
 //! built-in JSON Schema vocabulary:
 //!
 //! - **`format: darkmatter-file`** (eager) — parses the value through
@@ -19,6 +19,11 @@
 //!   SimplifiedSchema bare `file`.
 //! - **`x-darkmatter-url-scheme`** — runs alongside `format: uri` and
 //!   restricts the URL scheme to a configured list (case-insensitive).
+//! - **`format: darkmatter-yaml` / `format: darkmatter-json`** (Feature D) —
+//!   the `yaml` / `json` content-format string types. The value must parse as
+//!   YAML (JSON accepted, being a YAML subset) or strict JSON respectively;
+//!   a native mapping/sequence/scalar is serialized to its target-format
+//!   string by the schema coercion pass before it reaches the validator.
 //!
 //! `darkmatter-file` / `darkmatter-file-reference` are `Format`s (they see
 //! only the string) and `x-darkmatter-url-scheme` is a custom `Keyword`
@@ -74,6 +79,15 @@ pub const DARKMATTER_FILE_REFERENCE_FORMAT: &str = "darkmatter-file-reference";
 /// Keyword name registered for `url(scheme(...))` constraints.
 pub const DARKMATTER_URL_SCHEME_KEYWORD: &str = "x-darkmatter-url-scheme";
 
+/// Format name registered for the `yaml` content-format string type (Feature
+/// D). The value must parse as valid YAML; because JSON is a YAML subset a JSON
+/// string is accepted too.
+pub const DARKMATTER_YAML_FORMAT: &str = "darkmatter-yaml";
+
+/// Format name registered for the `json` content-format string type (Feature
+/// D). The value must parse as strict JSON; YAML-only syntax is rejected.
+pub const DARKMATTER_JSON_FORMAT: &str = "darkmatter-json";
+
 /// Registers the `darkmatter-file` format on a `ValidationOptions` builder.
 ///
 /// `base_dir`, when `Some`, is the prompt document directory and is tried
@@ -113,6 +127,20 @@ pub fn register_darkmatter_formats(
             // Laziness defers *existence*, not *syntax*: a malformed reference
             // still fails.
             FileReference::new(value).is_ok()
+        })
+        // Content-format string types (Feature D). A `format` validator only
+        // ever sees a string, so a native (mapping/sequence/scalar) value is
+        // serialized to its target-format string by the schema coercion pass
+        // (`super::coerce`) before it reaches here.
+        .with_format(DARKMATTER_YAML_FORMAT, |value: &str| {
+            // `yaml` accepts any valid YAML; JSON is a YAML subset, so a JSON
+            // string parses too. biscuit-file's `Yaml` is the parsing seam.
+            biscuit_file::Yaml::from_str(value).is_ok()
+        })
+        .with_format(DARKMATTER_JSON_FORMAT, |value: &str| {
+            // `json` is strict: only well-formed JSON parses, so YAML-only
+            // syntax (e.g. `title: Foo`) is rejected.
+            serde_json::from_str::<Value>(value).is_ok()
         })
 }
 
@@ -656,5 +684,96 @@ mod tests {
             .err()
             .expect("expected factory error");
         assert!(err.to_string().contains("at least one scheme"));
+    }
+}
+
+/// End-to-end coverage for the schema-plus content-format string types
+/// (`darkmatter/features/2026-07-08-schema-plus/`, Feature D). Each exercises
+/// the public parse → convert → coerce → validate path — the same order
+/// [`crate::markdown::schemas::EffectiveSchema::validate`] runs, so a native
+/// value is serialized by the coercion pass before the `format` validator sees
+/// it.
+#[cfg(test)]
+mod schema_plus_content_formats {
+    use serde_json::{Value, json};
+
+    /// Runs the effective-schema validation path for a one-line SimplifiedSchema
+    /// body against `instance`: convert, coerce a transient copy, then validate.
+    /// Returns `true` when the coerced instance validates.
+    fn accepts(schema_yaml: &str, instance: &Value) -> bool {
+        let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(schema_yaml).expect("yaml");
+        let schema =
+            crate::markdown::schemas::simplified::parse_yaml_schema(&v).expect("parse schema");
+        let json = crate::markdown::schemas::simplified::to_json_schema(&schema).expect("convert");
+        let coerced = crate::markdown::schemas::coerce::coerce_frontmatter(&json, instance);
+        let validator = crate::markdown::schemas::validate::build_validator(&json, None, None)
+            .expect("build validator");
+        validator.is_valid(&coerced.value)
+    }
+
+    #[test]
+    fn yaml_accepts_yaml_string() {
+        assert!(accepts(
+            "frontmatter: yaml",
+            &json!({ "frontmatter": "title: Foo\ntags: [a, b]" })
+        ));
+    }
+
+    #[test]
+    fn yaml_accepts_json_string() {
+        assert!(accepts(
+            "frontmatter: yaml",
+            &json!({ "frontmatter": "{\"title\": \"Foo\"}" })
+        ));
+    }
+
+    #[test]
+    fn yaml_accepts_native_mapping() {
+        assert!(accepts(
+            "frontmatter: yaml",
+            &json!({ "frontmatter": { "title": "Foo", "tags": ["a", "b"] } })
+        ));
+    }
+
+    #[test]
+    fn yaml_rejects_malformed() {
+        assert!(!accepts(
+            "frontmatter: yaml",
+            &json!({ "frontmatter": "key: [unterminated" })
+        ));
+    }
+
+    #[test]
+    fn json_rejects_yaml_only() {
+        assert!(!accepts("config: json", &json!({ "config": "title: Foo" })));
+    }
+
+    #[test]
+    fn json_accepts_json_string() {
+        assert!(accepts(
+            "config: json",
+            &json!({ "config": "{\"title\": \"Foo\"}" })
+        ));
+    }
+
+    /// The `{ frontmatter: yaml }` union arm from `example.yaml`'s `invocation`
+    /// union (Phase 5 validation checkpoint): the string arm accepts a plain
+    /// expression string, and the inline-object arm accepts both an authored
+    /// YAML string and a native mapping (coerced to a YAML string).
+    #[test]
+    fn frontmatter_yaml_union_arm_accepts_string_and_native_mapping() {
+        let schema = "invocation:\n    - string(required)\n    - { frontmatter: yaml }\n";
+        // Plain string invocation → string arm.
+        assert!(accepts(schema, &json!({ "invocation": "as_csv(list)" })));
+        // Frontmatter block authored as a YAML string → inline-object arm.
+        assert!(accepts(
+            schema,
+            &json!({ "invocation": { "frontmatter": "list: [1, 2, 3]" } })
+        ));
+        // Frontmatter block as a native mapping → coerced to a YAML string.
+        assert!(accepts(
+            schema,
+            &json!({ "invocation": { "frontmatter": { "list": [1, 2, 3] } } })
+        ));
     }
 }

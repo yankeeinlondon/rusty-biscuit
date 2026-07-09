@@ -31,16 +31,93 @@ pub enum SimplifiedSchema {
 /// property definitions.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SchemaShape {
-    /// Declaration-order map of property name to definition. `IndexMap`
+    /// Declaration-order map of literal property name to definition. `IndexMap`
     /// preserves insertion order so generated JSON Schemas are deterministic
     /// and diff-friendly.
     pub properties: IndexMap<String, PropertyDef>,
+
+    /// Pattern / dictionary keys (`<string>`, `<starting::…>`, `<ending::…>`,
+    /// `<pattern::…>`) in declaration order (Feature C). Kept separate from the
+    /// literal [`SchemaShape::properties`] so literal keys retain precedence
+    /// when lowered to JSON Schema `patternProperties` (conversion is Phase 3).
+    pub pattern_keys: Vec<PatternKeyDef>,
+
+    /// Object-level constraints authored via the reserved `$constraints`
+    /// metadata key on a block-form schema object — currently `min-keys` /
+    /// `max-keys` object arity (O-C3). The postfix inline form
+    /// (`{ … }(min-keys(1))`) carries the equivalent constraints on the
+    /// enclosing [`PropertyAtom`] instead; both surfaces desugar to the same
+    /// canonical [`Constraint`] variants.
+    pub constraints: Vec<Constraint>,
 }
 
 impl SchemaShape {
     /// Creates an empty `SchemaShape`.
     pub fn new() -> Self {
         Self::default()
+    }
+}
+
+/// One pattern (dictionary) key of a schema object paired with its value
+/// definition (Feature C — `darkmatter/features/2026-07-08-schema-plus`).
+///
+/// Declaration order is preserved by storing these in a `Vec` on
+/// [`SchemaShape::pattern_keys`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct PatternKeyDef {
+    /// The parsed pattern-key form.
+    pub key: PatternKey,
+    /// The value definition applied to matching keys.
+    pub def: PropertyDef,
+}
+
+/// A pattern / dictionary key form (Feature C). Authored inside a schema
+/// object with `<...>` syntax; kept verbatim until conversion (Phase 3) lowers
+/// each form to JSON Schema `additionalProperties` / `patternProperties`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PatternKey {
+    /// `<string>` — matches any string key. Lowers to `additionalProperties`.
+    CatchAll,
+    /// `<starting::PREFIX>` — keys beginning with the literal string `PREFIX`.
+    /// Desugars to the anchored regex `^PREFIX`.
+    Starting(String),
+    /// `<ending::SUFFIX>` — keys ending with the literal string `SUFFIX`.
+    /// Desugars to the regex `SUFFIX$`.
+    Ending(String),
+    /// `<pattern::RE>` — a raw ECMA-262 regex escape hatch.
+    Pattern(String),
+}
+
+impl PatternKey {
+    /// Returns `true` if `key` uses the `<...>` pattern-key syntax.
+    pub fn is_pattern_key(key: &str) -> bool {
+        key.len() >= 2 && key.starts_with('<') && key.ends_with('>')
+    }
+
+    /// Parses a `<...>` pattern-key string. `key` must already satisfy
+    /// [`PatternKey::is_pattern_key`].
+    ///
+    /// ## Errors
+    ///
+    /// Returns `Err` with a human-readable reason when the inner form is not
+    /// one of the four recognized shapes (`<string>`, `<starting::…>`,
+    /// `<ending::…>`, `<pattern::…>`).
+    pub fn parse(key: &str) -> Result<PatternKey, String> {
+        let inner = &key[1..key.len() - 1];
+        if inner == "string" {
+            Ok(PatternKey::CatchAll)
+        } else if let Some(prefix) = inner.strip_prefix("starting::") {
+            Ok(PatternKey::Starting(prefix.to_string()))
+        } else if let Some(suffix) = inner.strip_prefix("ending::") {
+            Ok(PatternKey::Ending(suffix.to_string()))
+        } else if let Some(re) = inner.strip_prefix("pattern::") {
+            Ok(PatternKey::Pattern(re.to_string()))
+        } else {
+            Err(format!(
+                "unknown pattern key `{key}`; expected `<string>`, \
+                 `<starting::…>`, `<ending::…>`, or `<pattern::…>`"
+            ))
+        }
     }
 }
 
@@ -66,25 +143,39 @@ pub enum PropertyDef {
     Union(Vec<PropertyAtom>),
 }
 
-/// A type expression is either a primitive type keyword or an inline object
-/// literal declared with `{ ... }` syntax.
+/// A type expression is a primitive type keyword, an inline object literal
+/// declared with `{ ... }` syntax, or a cross-file named-type import
+/// (`Name@fileref`).
 ///
-/// `TypeExpr` is `Clone` but not `Copy` because the inline-object arm carries
-/// an owned [`SchemaShape`]. Call sites that previously matched on
+/// `TypeExpr` is `Clone` but not `Copy` because the inline-object and import
+/// arms carry owned data. Call sites that previously matched on
 /// `atom.ty: SimplifiedType` now match on `atom.ty: TypeExpr` and handle the
-/// `Primitive` / `InlineObject` arms.
+/// `Primitive` / `InlineObject` / `Imported` arms.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeExpr {
     /// Built-in primitive type keyword (`string`, `number`, `object`, etc.).
     Primitive(SimplifiedType),
     /// Inline object literal: `{ foo: string, bar: number }`.
     InlineObject(SchemaShape),
+    /// Cross-file named-type import: `Name@fileref` (Feature B). Left of `@`
+    /// is the named type to inline; right is the file reference (`this` = the
+    /// current file). Postfix `[]` and `(constraints)` ride on the enclosing
+    /// [`PropertyAtom`] (`is_array` / `constraints`), so this variant only
+    /// carries the two parts that survive until resolution. The resolver
+    /// (Phase 4) inline-expands imports before conversion; `to_json_schema`
+    /// rejects any unresolved import that reaches it.
+    Imported {
+        /// The named type to inline (left of `@`).
+        name: String,
+        /// The raw file reference (right of `@`); `"this"` is the current file.
+        reference: String,
+    },
 }
 
 /// One arm of a property-level union (or the body of a non-union property).
 #[derive(Debug, Clone, PartialEq)]
 pub struct PropertyAtom {
-    /// The type expression for this atom (primitive or inline object).
+    /// The type expression for this atom (primitive, inline object, or import).
     pub ty: TypeExpr,
 
     /// Whether the type was suffixed with `[]`.
@@ -155,6 +246,10 @@ pub enum SimplifiedType {
     Url,
     /// Email address (RFC 5322 addr-spec).
     Email,
+    /// A string whose content parses as valid YAML (accepts JSON too).
+    Yaml,
+    /// A string whose content parses as strict JSON.
+    Json,
     /// Anything.
     Any,
 }
@@ -176,6 +271,8 @@ impl SimplifiedType {
             SimplifiedType::Enum => "enum",
             SimplifiedType::Url => "url",
             SimplifiedType::Email => "email",
+            SimplifiedType::Yaml => "yaml",
+            SimplifiedType::Json => "json",
             SimplifiedType::Any => "any",
         }
     }
@@ -196,6 +293,8 @@ impl SimplifiedType {
             "enum" => SimplifiedType::Enum,
             "url" => SimplifiedType::Url,
             "email" => SimplifiedType::Email,
+            "yaml" => SimplifiedType::Yaml,
+            "json" => SimplifiedType::Json,
             "any" => SimplifiedType::Any,
             _ => return None,
         })
@@ -273,6 +372,23 @@ pub enum Constraint {
 
     /// Maximum number of items in an array. Only legal in `array_constraints`.
     MaxItems(usize),
+
+    // ── object arity ───────────────────────────────────────────────────────
+    /// Minimum number of object properties (`min-keys`). Object-analog of
+    /// [`Constraint::MinItems`]; lowers to JSON Schema `minProperties`
+    /// (Feature C / O-C3).
+    MinKeys(usize),
+
+    /// Maximum number of object properties (`max-keys`). Object-analog of
+    /// [`Constraint::MaxItems`]; lowers to JSON Schema `maxProperties`.
+    MaxKeys(usize),
+
+    // ── documentation ──────────────────────────────────────────────────────
+    /// One or more example artifact file references (`example(...)`, Feature
+    /// A). Non-validating for the annotated property — each referenced file is
+    /// itself validated at schema-load time. Raw authored reference strings are
+    /// preserved here; resolution is deferred to `resolve.rs` (Phase 6).
+    Example(Vec<String>),
 }
 
 impl Constraint {
@@ -296,6 +412,9 @@ impl Constraint {
             Constraint::Unique => "unique",
             Constraint::MinItems(_) => "min",
             Constraint::MaxItems(_) => "max",
+            Constraint::MinKeys(_) => "min-keys",
+            Constraint::MaxKeys(_) => "max-keys",
+            Constraint::Example(_) => "example",
         }
     }
 }
@@ -320,6 +439,8 @@ mod tests {
             SimplifiedType::Enum,
             SimplifiedType::Url,
             SimplifiedType::Email,
+            SimplifiedType::Yaml,
+            SimplifiedType::Json,
             SimplifiedType::Any,
         ] {
             let kw = ty.as_keyword();

@@ -54,6 +54,7 @@ pub mod coerce;
 pub mod completion;
 pub mod detect;
 pub mod errors;
+pub mod example;
 pub mod format;
 pub mod resolve;
 pub mod rewrite;
@@ -1105,6 +1106,7 @@ mod tests {
                 );
                 m
             },
+            ..Default::default()
         });
         let api = DarkmatterSchemas::new().with_baseline(baseline).unwrap();
         let report = api.validate(&md).unwrap();
@@ -1135,6 +1137,7 @@ mod tests {
                 );
                 m
             },
+            ..Default::default()
         });
         let api = DarkmatterSchemas::new().with_baseline(baseline).unwrap();
         let report = api.validate(&md).unwrap();
@@ -1210,6 +1213,7 @@ mod tests {
                 );
                 m
             },
+            ..Default::default()
         });
         let api = DarkmatterSchemas::new().with_baseline(baseline).unwrap();
         let report = api.validate(&md).unwrap();

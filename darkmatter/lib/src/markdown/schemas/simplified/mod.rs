@@ -17,8 +17,8 @@ pub mod types;
 pub use convert::{DRAFT_2020_12, to_json_schema};
 pub use serialize::serialize_property_atom;
 pub use types::{
-    Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType,
-    TypeExpr,
+    Constraint, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
+    SimplifiedSchema, SimplifiedType, TypeExpr,
 };
 
 use indexmap::IndexMap;
@@ -95,16 +95,125 @@ fn parse_schema_shape(context: &str, value: &YamlValue) -> Result<SchemaShape, S
     })?;
 
     let mut properties: IndexMap<String, PropertyDef> = IndexMap::with_capacity(map.len());
+    let mut pattern_keys: Vec<types::PatternKeyDef> = Vec::new();
+    let mut constraints: Vec<Constraint> = Vec::new();
     for (key, val) in map {
         let key_str = key.as_str().ok_or_else(|| SchemaError::Grammar {
             property: context.to_string(),
             message: "property names must be strings".into(),
             span: 0..0,
         })?;
+        // `$constraints` is reserved schema metadata (object arity, O-C3): it is
+        // stripped before shape assembly and never participates in property
+        // matching. It is reserved only inside authored schema objects, so it
+        // imposes no restriction on user frontmatter data.
+        if key_str == "$constraints" {
+            constraints.append(&mut parse_dollar_constraints(context, val)?);
+            continue;
+        }
+        // Pattern / dictionary keys (`<string>`, `<starting::…>`, …) collect
+        // separately from literal properties (Feature C).
+        if types::PatternKey::is_pattern_key(key_str) {
+            let pattern = types::PatternKey::parse(key_str).map_err(|message| {
+                SchemaError::Grammar {
+                    property: context.to_string(),
+                    message,
+                    span: 0..0,
+                }
+            })?;
+            let def = parse_property_def(key_str, val)?;
+            pattern_keys.push(types::PatternKeyDef { key: pattern, def });
+            continue;
+        }
         let def = parse_property_def(key_str, val)?;
         properties.insert(key_str.to_string(), def);
     }
-    Ok(SchemaShape { properties })
+    Ok(SchemaShape {
+        properties,
+        pattern_keys,
+        constraints,
+    })
+}
+
+/// Parses a reserved `$constraints` metadata mapping (block-form object arity,
+/// O-C3) into canonical [`Constraint`]s — the same variants the postfix
+/// `(min-keys(1); …)` form produces. Numeric entries carry an integer argument;
+/// flag entries are written `name: true`.
+fn parse_dollar_constraints(
+    context: &str,
+    value: &YamlValue,
+) -> Result<Vec<Constraint>, SchemaError> {
+    let map = value.as_mapping().ok_or_else(|| SchemaError::Grammar {
+        property: context.to_string(),
+        message: "`$constraints` must be a mapping of constraint keywords to values".into(),
+        span: 0..0,
+    })?;
+    let mut out = Vec::with_capacity(map.len());
+    for (k, v) in map {
+        let key = k.as_str().ok_or_else(|| SchemaError::Grammar {
+            property: context.to_string(),
+            message: "`$constraints` keys must be strings".into(),
+            span: 0..0,
+        })?;
+        let constraint = match key {
+            "min-keys" => Constraint::MinKeys(constraints_usize(context, key, v)?),
+            "max-keys" => Constraint::MaxKeys(constraints_usize(context, key, v)?),
+            "min-items" => Constraint::MinItems(constraints_usize(context, key, v)?),
+            "max-items" => Constraint::MaxItems(constraints_usize(context, key, v)?),
+            "required" => {
+                constraints_flag(context, key, v)?;
+                Constraint::Required
+            }
+            "not-empty" => {
+                constraints_flag(context, key, v)?;
+                Constraint::NotEmpty
+            }
+            "unique" => {
+                constraints_flag(context, key, v)?;
+                Constraint::Unique
+            }
+            "generated" => {
+                constraints_flag(context, key, v)?;
+                Constraint::Generated
+            }
+            "integer" => {
+                constraints_flag(context, key, v)?;
+                Constraint::Integer
+            }
+            other => {
+                return Err(SchemaError::Grammar {
+                    property: context.to_string(),
+                    message: format!("unknown `$constraints` key `{other}`"),
+                    span: 0..0,
+                });
+            }
+        };
+        out.push(constraint);
+    }
+    Ok(out)
+}
+
+fn constraints_usize(context: &str, key: &str, value: &YamlValue) -> Result<usize, SchemaError> {
+    value
+        .as_u64()
+        .and_then(|n| usize::try_from(n).ok())
+        .ok_or_else(|| SchemaError::Grammar {
+            property: context.to_string(),
+            message: format!("`$constraints.{key}` requires a non-negative integer"),
+            span: 0..0,
+        })
+}
+
+fn constraints_flag(context: &str, key: &str, value: &YamlValue) -> Result<(), SchemaError> {
+    if value.as_bool() == Some(true) {
+        Ok(())
+    } else {
+        Err(SchemaError::Grammar {
+            property: context.to_string(),
+            message: format!("`$constraints.{key}` is a flag constraint and must be `true`"),
+            span: 0..0,
+        })
+    }
 }
 
 fn parse_property_def(name: &str, value: &YamlValue) -> Result<PropertyDef, SchemaError> {
@@ -703,5 +812,113 @@ mod tests {
             "custom user ctx keys are not part of the generated context schema",
         );
         assert_invalid(&validator, json!({ "ctx": "hello" }), "ctx must remain an object");
+    }
+}
+
+/// Phase 1 (TDD scaffolding) for the schema-plus composition primitives
+/// (`darkmatter/features/2026-07-08-schema-plus/`). These exercise the
+/// YAML-shape layer: pattern keys and the reserved `$constraints` metadata key
+/// authored as block-form mapping keys (the form the fixtures use). Each is
+/// `#[ignore]`-gated until its phase lands. Run with
+/// `cargo nextest run -p darkmatter --run-ignored ignored-only schema_plus`.
+#[cfg(test)]
+mod schema_plus_phase1 {
+    use super::*;
+
+    fn yaml(input: &str) -> YamlValue {
+        serde_yaml_ng::from_str(input).expect("yaml parse failed")
+    }
+
+    fn single_shape(input: &str) -> SchemaShape {
+        match parse_yaml_schema(&yaml(input)).expect("schema must parse") {
+            SimplifiedSchema::Single(s) => s,
+            other => panic!("expected Single, got {other:?}"),
+        }
+    }
+
+    /// Reaches the inline-object shape rooted at `key` inside `shape`.
+    fn inner_inline<'a>(shape: &'a SchemaShape, key: &str) -> &'a SchemaShape {
+        match shape.properties.get(key) {
+            Some(PropertyDef::Single(a)) => match &a.ty {
+                TypeExpr::InlineObject(s) => s,
+                other => panic!("expected inline object at `{key}`, got {other:?}"),
+            },
+            other => panic!("expected single property `{key}`, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn catch_all_key_is_not_a_literal_property() {
+        let shape = single_shape("parameter:\n  \"<string>\": any");
+        let param = inner_inline(&shape, "parameter");
+        assert!(
+            !param.properties.contains_key("<string>"),
+            "`<string>` must be recognized as a catch-all pattern key, not a literal property"
+        );
+        assert_eq!(param.pattern_keys.len(), 1);
+        assert_eq!(param.pattern_keys[0].key, PatternKey::CatchAll);
+    }
+
+    #[test]
+    fn starting_key_is_not_a_literal_property() {
+        let shape = single_shape("headers:\n  \"<starting::x-509>\": string");
+        let headers = inner_inline(&shape, "headers");
+        assert!(
+            !headers.properties.contains_key("<starting::x-509>"),
+            "`<starting::…>` must be recognized as a pattern key"
+        );
+        assert_eq!(
+            headers.pattern_keys[0].key,
+            PatternKey::Starting("x-509".into())
+        );
+    }
+
+    #[test]
+    fn ending_key_is_not_a_literal_property() {
+        let shape = single_shape("assets:\n  \"<ending::.md>\": string");
+        let assets = inner_inline(&shape, "assets");
+        assert!(
+            !assets.properties.contains_key("<ending::.md>"),
+            "`<ending::…>` must be recognized as a pattern key"
+        );
+        assert_eq!(assets.pattern_keys[0].key, PatternKey::Ending(".md".into()));
+    }
+
+    #[test]
+    fn regex_pattern_key_is_not_a_literal_property() {
+        let shape = single_shape("codes:\n  \"<pattern::[0-9_]$>\": number");
+        let codes = inner_inline(&shape, "codes");
+        assert!(
+            !codes.properties.contains_key("<pattern::[0-9_]$>"),
+            "`<pattern::…>` must be recognized as a pattern key"
+        );
+        assert_eq!(
+            codes.pattern_keys[0].key,
+            PatternKey::Pattern("[0-9_]$".into())
+        );
+    }
+
+    #[test]
+    fn dollar_constraints_block_is_parsed_and_stripped() {
+        // Matches the `types.yaml` fixture: a pattern-keyed dictionary with a
+        // reserved `$constraints` metadata mapping carrying object-arity
+        // constraints. `$constraints` must parse (its values are numbers, not
+        // type-expression strings) and must not survive as a literal property.
+        let res = parse_yaml_schema(&yaml(
+            "parameter:\n  \"<string>\": any\n  $constraints:\n    min-keys: 1\n    max-keys: 1",
+        ));
+        assert!(
+            res.is_ok(),
+            "`$constraints` block form should parse, got {res:?}"
+        );
+        let shape = match res.unwrap() {
+            SimplifiedSchema::Single(s) => s,
+            other => panic!("expected Single, got {other:?}"),
+        };
+        let param = inner_inline(&shape, "parameter");
+        assert!(
+            !param.properties.contains_key("$constraints"),
+            "`$constraints` is schema metadata and must not be a literal property"
+        );
     }
 }

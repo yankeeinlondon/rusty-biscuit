@@ -229,14 +229,44 @@ impl ValidatorCache {
 /// validation agree with expression-side `file_exists`/`frontmatter`
 /// resolution: a `file` value beside the prompt resolves even after the
 /// wrapper has `chdir`'d away from the launch area.
+/// Reports whether any `patternProperties` key in the compiled JSON Schema
+/// carries a regex lookaround (Feature C literal precedence). Such schemas need
+/// the backtracking `fancy-regex` engine; everything else stays on the linear
+/// `regex` engine.
+fn schema_uses_lookaround(schema: &Value) -> bool {
+    match schema {
+        Value::Object(map) => {
+            if let Some(Value::Object(pattern_props)) = map.get("patternProperties")
+                && pattern_props
+                    .keys()
+                    .any(|key| super::simplified::convert::has_lookaround(key))
+            {
+                return true;
+            }
+            map.values().any(schema_uses_lookaround)
+        }
+        Value::Array(items) => items.iter().any(schema_uses_lookaround),
+        _ => false,
+    }
+}
+
 pub(super) fn build_validator(
     schema: &Value,
     base_dir: Option<&Path>,
     file_ref_fallback_dir: Option<&Path>,
 ) -> Result<Validator, SchemaError> {
-    let opts = jsonschema::options()
-        .with_draft(Draft::Draft202012)
-        .with_pattern_options(PatternOptions::regex());
+    // Feature C literal-precedence emits negative-lookahead `patternProperties`
+    // keys, which the linear `regex` engine rejects. Opt such schemas into the
+    // backtracking `fancy-regex` engine while keeping every lookaround-free
+    // schema on the ReDoS-safe linear engine (byte-identical to prior behavior).
+    // The two `PatternOptions` values are distinct types, so the branch is on
+    // the builder call, not a shared binding.
+    let base = jsonschema::options().with_draft(Draft::Draft202012);
+    let opts = if schema_uses_lookaround(schema) {
+        base.with_pattern_options(PatternOptions::fancy_regex())
+    } else {
+        base.with_pattern_options(PatternOptions::regex())
+    };
     let opts = format::register_darkmatter_formats(
         opts,
         base_dir.map(PathBuf::from),
