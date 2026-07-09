@@ -1,8 +1,9 @@
 ---
 $schema:
-    spec: file(required)
+    spec: file(required;eager)
     design: file
     iteration: number
+    review: file
 description: "Reviews a _feature specification_ to make sure that the specification has been fully implemented. This prompt is also aware of the likelihood of more than one review being necessary and therefore names the reviews `review-{iteration}.md` in the same folder where the feature was specified.\n\nThe caller can pass in the **iteration** number but it should be detected automatically."
 initialize: 
     info: "spec [{{spec}}]: {{file_exists(spec)}}"
@@ -11,6 +12,7 @@ dir: "{{dirname(spec)}}"
 design: "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}"
 iteration: "{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1  : 1   }}"
 review_file: "{{dir}}/review-{{iteration}}.md"
+review: "{{ dirname(spec) + '/review-' + iteration + '.md' }}"
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 start:
     message: "👓 starting {{feature_or_fix}} review #{{iteration}} of `{{parent_dir(spec)}}` (_in the **{{ctx.area}}** package area_)"
@@ -24,7 +26,7 @@ success:
               - effect: small-group-cheer
         - when: "frontmatter(review_file,'ready') != true"
           action:
-              - warn: "{{feature_or_fix}} review {{iteration}} in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready"
+              - warn: "{{feature_or_fix}} review {{iteration}} in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready: <blue>{{link(review)}}</blue>"
               - message: "⚠️  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed but was deemed NOT production ready"
               - effect: sad-trombone
 failure:
@@ -34,7 +36,7 @@ failure:
 ---
 # Review of {{title_case(without_date(parent_dir(spec)))}}
 > - {{capitalize(feature_or_fix)}}: `{{parent_dir(spec)}}`
-> - Review File (_output_): `@{{review_file}}`
+> - Review File (_output_): `@{{review}}`
 > - Review Iteration: #{{iteration}}
 
 ::file _senior-reviewer.md
@@ -44,10 +46,10 @@ failure:
 You are performing a review of the functionality defined by the following document(s):
 
 ::block when="spec"
-- **Specification:** "@{{ctx.area}}/{{spec}}"
+- **Specification:** "@{{spec}}"
 ::end-block
 ::block when="design"
-- **Technical Design:** "@{{ctx.area}}/{{design}}"
+- **Technical Design:** "@{{design}}"
 ::end-block
 
 ::block when="And(spec, design)"
@@ -98,7 +100,7 @@ test is at the wrong level under "Findings" with severity at least "high".
 
 ## Closure
 
-- Save your review suggestions to "@{{review_file}}"
+- Save your review suggestions to "@{{review}}"
 - Save the following frontmatter properties on "@{{review_file}}":
     - based on your review suggestions indicate whether you think this feature is **ready for production** by setting the `ready` frontmatter property to `true` or `false`
     - set the `agent` frontmatter property to "{{ctx.agent}}/{{ctx.model}}" 
