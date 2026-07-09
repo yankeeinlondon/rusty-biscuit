@@ -1,6 +1,4 @@
 kind: example
-type: string
-parameters: null
 invocation:
     frontmatter:
         list:

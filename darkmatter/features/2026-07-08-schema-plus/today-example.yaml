@@ -1,6 +1,4 @@
 kind: example
-parameters: null
-type: date
 invocation: "{{ ctx.today }}"
 returns: "2024-12-25"
 description: |-
