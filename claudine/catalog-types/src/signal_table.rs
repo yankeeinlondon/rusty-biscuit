@@ -47,12 +47,39 @@ pub struct DetectionRecord {
     pub extractions: &'static [ExtractionSpec],
 }
 
+/// How a detection record reads one field's raw value from the payload.
+///
+/// The source is provider-neutral at the type level: each provider's research
+/// declares the strategy that fits its wire format. `Path` is the common case;
+/// `Literal` pins a research-declared constant (e.g. a decomposed cap axis when
+/// the provider bundles several into one token); `Regex` / `StartStopTokens`
+/// carve a value out of a string field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtractStrategy {
+    /// Dot/bracket path into the JSON payload.
+    Path(&'static str),
+    /// First capture group of `pattern` applied to the string at `path`.
+    Regex {
+        path: &'static str,
+        pattern: &'static str,
+    },
+    /// Substring of the string at `path` between `start` and `stop` (exclusive).
+    StartStopTokens {
+        path: &'static str,
+        start: &'static str,
+        stop: &'static str,
+    },
+    /// A constant value declared by research, independent of the payload.
+    Literal(&'static str),
+}
+
 /// One payload extraction site for a detection record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExtractionSpec {
     /// Normalized field name in the signal's typed payload.
     pub field: &'static str,
-    pub path: &'static str,
+    /// How the raw value is read from the payload.
+    pub source: ExtractStrategy,
     pub unit: Option<Unit>,
     pub zone: Option<Zone>,
 }

@@ -33,8 +33,8 @@ pub use offering::{
 pub use platform_kind::PlatformKind;
 pub use resume_support::ResumeSupport;
 pub use signal::{
-    DetectionMode, DriftObservation, MatchOp, Quantity, SignalEvent, SignalKind, SignalSource,
-    UsageWindow,
+    DetectionMode, DriftObservation, MatchOp, Quantity, QwenLoopType, SignalEvent, SignalKind,
+    SignalSource, UsageWindow,
 };
-pub use signal_table::{DetectionRecord, ExtractionSpec, ProviderSignalTable};
+pub use signal_table::{DetectionRecord, ExtractStrategy, ExtractionSpec, ProviderSignalTable};
 pub use vocab::{Confidence, Unit, Zone};

@@ -191,6 +191,9 @@ pub enum SignalEvent {
     },
     NoFunds {
         message: Option<String>,
+        /// Provider-supplied URL for adding credits, when present — a
+        /// lifecycle rule can point the user straight at it.
+        top_up_url: Option<String>,
     },
     AuthInvalid {
         auth_kind: Option<String>,
@@ -212,6 +215,14 @@ pub enum SignalEvent {
         input: Option<Quantity>,
         output: Option<Quantity>,
         total: Option<Quantity>,
+        /// Tokens served from the provider's prompt cache.
+        cache_read: Option<Quantity>,
+        /// Tokens written to the provider's prompt cache this turn.
+        cache_write: Option<Quantity>,
+        /// Billed cost for the turn, when the provider reports it.
+        cost: Option<Quantity>,
+        /// Reasoning/thinking tokens, when reported separately from output.
+        reasoning: Option<Quantity>,
     },
     ModelResolved {
         requested: Option<String>,
@@ -246,6 +257,7 @@ pub enum SignalEvent {
         wait: Option<Quantity>,
         error_type: Option<String>,
         status_code: Option<u16>,
+        message: Option<String>,
     },
     StalledGeneration {
         message: Option<String>,
@@ -277,6 +289,7 @@ pub enum SignalEvent {
     },
     TurnLimitReached {
         limit: Option<u32>,
+        message: Option<String>,
     },
     SessionTimeLimitReached {
         limit: Option<Quantity>,
@@ -340,9 +353,50 @@ impl SignalEvent {
     }
 }
 
+/// Qwen's provider-native loop-detection vocabulary — the `LoopType` token
+/// embedded in a `runaway_repetition` terminal error `result`.
+///
+/// Canonical source for the tokens the qwen bespoke guard scans for; the
+/// research record `stream-runaway_repetition-result-loop` mirrors this list
+/// as its `vocabulary:` (guarded by a mirror test). The token wire form is
+/// SCREAMING_SNAKE (e.g. `CONSECUTIVE_IDENTICAL_TOOL_CALLS`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, EnumIter, IntoStaticStr, VariantNames)]
+#[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
+pub enum QwenLoopType {
+    ConsecutiveIdenticalToolCalls,
+    ChantingIdenticalSentences,
+    RepetitiveThoughts,
+    ReadFileLoop,
+    ActionStagnation,
+    ShellCommandStagnation,
+    GlobalToolCallDuplicate,
+    AlternatingToolCallPattern,
+    TurnToolCallCap,
+    InvalidToolParamsStagnation,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn qwen_loop_type_tokens_are_screaming_snake() {
+        assert_eq!(
+            QwenLoopType::VARIANTS,
+            &[
+                "CONSECUTIVE_IDENTICAL_TOOL_CALLS",
+                "CHANTING_IDENTICAL_SENTENCES",
+                "REPETITIVE_THOUGHTS",
+                "READ_FILE_LOOP",
+                "ACTION_STAGNATION",
+                "SHELL_COMMAND_STAGNATION",
+                "GLOBAL_TOOL_CALL_DUPLICATE",
+                "ALTERNATING_TOOL_CALL_PATTERN",
+                "TURN_TOOL_CALL_CAP",
+                "INVALID_TOOL_PARAMS_STAGNATION",
+            ]
+        );
+    }
 
     #[test]
     fn kind_matches_payload_variant() {
