@@ -1,7 +1,7 @@
 ---
 status: ready for planning and implementation
 reviewed: true
-review_iterations: 1
+review_iterations: 4
 depends_on:
   - ../2026-07-08-schema-plus/spec.md
 inputs:
