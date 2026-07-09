@@ -1626,7 +1626,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/profile/pi.rs",
-      "line": 22,
+      "line": 23,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [

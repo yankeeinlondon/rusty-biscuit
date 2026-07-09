@@ -1,7 +1,7 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-08
-last_updated: 2026-07-08
+last_updated: 2026-07-09
 agent: codex
 model: default
 docs: https://antigravity.google/docs/cli-statusline
@@ -39,7 +39,7 @@ records:
     signal: provider_version
     source: app_log
     locator: "--log-file <path>; line contains `Language server version:`"
-    detection: bespoke
+    detection: documentation
     priority: 10
     distinguish: "The app log's language-server boot line is runtime version metadata. It is distinct from `agy --version`, although both reported 1.1.0 in the current local capture."
     vocabulary: ["Language server version"]
@@ -50,7 +50,7 @@ records:
     signal: auth_invalid
     source: app_log
     locator: "--log-file <path>; token-source/cache failures"
-    detection: bespoke
+    detection: documentation
     priority: 20
     distinguish: "Repeated `You are not logged into Antigravity` token-source failures are auth diagnostics emitted while startup managers poll experiments, user info, quota, and available models. They should not be classified as provider overload or model-resolution failure."
     vocabulary: ["You are not logged into Antigravity", "Failed to poll FetchAvailableModels", "quotaRefreshLoop: skipped (not logged in)"]
