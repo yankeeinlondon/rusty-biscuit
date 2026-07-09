@@ -395,9 +395,9 @@ mod tests {
 
     /// Drift guard (spec acceptance criterion 2): the projected catalog must
     /// agree with the authored base schema on every `ctx.*` key's name, type,
-    /// description, `generated` / `required` flags, and declaration order. This
-    /// walks the schema atoms independently of the projection helpers, so a
-    /// projection bug (reading the wrong field) fails here.
+    /// description, `generated` / `required` / `default` flags, and declaration
+    /// order. This walks the schema atoms independently of the projection
+    /// helpers, so a projection bug (reading the wrong field) fails here.
     #[test]
     fn projected_descriptors_match_base_schema() {
         use crate::markdown::schemas::darkmatter_base_schema;
@@ -459,7 +459,34 @@ mod tests {
                 .any(|c| matches!(c, Constraint::Generated));
             assert_eq!(d.required, expected_required, "ctx.{name} required flag");
             assert_eq!(d.generated, expected_generated, "ctx.{name} generated flag");
+
+            let expected_default = atom.constraints.iter().find_map(|c| match c {
+                Constraint::Default(value) => Some(value.clone()),
+                _ => None,
+            });
+            assert_eq!(d.default, expected_default, "ctx.{name} default");
         }
+    }
+
+    /// Positive coverage for the `default` projection path. No `ctx.*` property
+    /// authors a `default(...)` today, so the drift guard above only ever
+    /// compares `None == None`; this drives a synthetic atom carrying a default
+    /// through [`project_one`] to prove the constraint reaches the descriptor.
+    #[test]
+    fn project_one_carries_default_constraint() {
+        use crate::markdown::schemas::PropertyAtom;
+
+        let value = serde_json::json!("fallback");
+        let def = PropertyDef::Single(PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::String),
+            is_array: false,
+            constraints: vec![Constraint::Default(value.clone())],
+            array_constraints: Vec::new(),
+            description: None,
+        });
+
+        let descriptor = project_one(0, "with_default", &def);
+        assert_eq!(descriptor.default, Some(value));
     }
 
     /// Grouping totality (spec acceptance criterion 3): every projected key has
