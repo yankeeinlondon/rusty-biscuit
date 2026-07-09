@@ -126,8 +126,10 @@ Rules:
 - **`as_unordered_list` / `as_ordered_list` auto-nest.** When an element is itself
   a list, it renders as an indented sublist, recursively. This makes nesting a
   property of the *data*, so no `NestedMarkdownList` type and no dedicated
-  `as_nested_*` function are needed. (Open item O3 revisits this if a
-  force-flatten mode is ever wanted.)
+  `as_nested_*` function are needed. **Auto-nesting is the only rendering mode in
+  v1** — there is no force-flatten variant (O3): the list functions never flatten
+  nested data, and no `as_flat_*` function or `flatten:` option is added until a
+  concrete caller can define the expected ordering and lossiness.
 
 ### D5 — Feed the catalog from the YAML
 
@@ -422,26 +424,13 @@ Migration rules:
 
 ## Open questions
 
-- **O3 — Force-flatten list function.** Do we ever want `as_unordered_list` to
-  *not* nest? Default is auto-nest; add `as_flat_*` only on demand.
-
-  Suggested solutions:
-
-  1. **No force-flatten function in this spec (recommended).**
-     Pros: keeps the function surface small, matches the data-shape-driven design,
-     and avoids adding behavior without a known caller. Cons: a future caller that
-     wants flattening must add a new function later.
-  2. **Add `as_flat_unordered_list` / `as_flat_ordered_list` now.**
-     Pros: makes both rendering modes explicit up front. Cons: doubles the list
-     formatting API before there is evidence that flattened nested data is useful.
-  3. **Add an options argument, e.g. `as_unordered_list(list, flatten: true)`.**
-     Pros: avoids extra function names. Cons: current expression functions do not
-     have named options, so this would expand the function-call convention for a
-     marginal case.
-
-  Recommendation: choose solution 1. Auto-nesting is the right default because it
-  preserves structure; flattening should wait until a real caller can define the
-  expected ordering and lossiness.
+- **O3 — Force-flatten list function.** ✅ Resolved: **no force-flatten in v1**
+  (see D4). `as_unordered_list` / `as_ordered_list` always auto-nest; structure is
+  a property of the data. Rejected alternatives: adding
+  `as_flat_unordered_list` / `as_flat_ordered_list` now (doubles the list API
+  before any caller needs flattening) and a `flatten:` named option (expands the
+  function-call convention — no expression function takes named options today).
+  Both wait for a concrete caller that can pin the expected ordering and lossiness.
 
 ## Out of scope
 

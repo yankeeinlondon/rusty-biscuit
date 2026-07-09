@@ -1,0 +1,12 @@
+kind: example
+parameters:
+    - list:
+        - a
+        - b
+        - c
+invocation: "as_csv(list)"
+returns: "a, b, c"
+description: |-
+    `as_csv(list)` joins a list into a comma-separated string. It reproduces the
+    historical pre-rendered CSV form of the collapsed `ctx.*` variables, so a
+    caller that relied on the old comma output writes `{{ as_csv(ctx.foo) }}`.

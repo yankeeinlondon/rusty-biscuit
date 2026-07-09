@@ -1,0 +1,10 @@
+kind: example
+parameters:
+    - list:
+        - a
+        - b
+        - c
+invocation: "as_tsv(list)"
+returns: "a\tb\tc"
+description: |-
+    `as_tsv(list)` joins a list into a tab-separated string, one row of columns.
