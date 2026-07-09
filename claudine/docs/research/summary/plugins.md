@@ -1,23 +1,28 @@
 ---
 $schema:
-    file: file
+    file: file(required;eager)
 file: docs/research/summary/plugins.md
 sequence:
-- name: draft
-- name: iterate
-- name: finalize
-prompt: "Subagent definitions — named, specialized agents that a session can delegate work to, often with their own prompt, model, and tool restrictions — vary widely across agentic CLIs, from first-class definition files to nothing at all. Claudine links agent definitions across providers and also has to reason about subagent observability during wrapped runs.\n\n## Task\n\nYour task is to report on \"plugin\" support across the Agentic CLI providers. Plugins -- unfortunately -- are even less of a \"standard\" than agent definitions and slash commands.\n\n- your report should start by outlining why plugins matter to agentic processes\n- and then shift its focus to how providers differ: \n    - definition format and metadata, \n    - user/repo scopes, model and tool restriction support, \n    - configuration files and schemas\n    - invocation mechanics (CLI influences, ENV influences, config influences)\n    - asset types that can be included in a plugin\n- in the \"plugin\" space Claude Code is seen as the leader and \"standard bearer\", so:\n    - when looking at Claude Code competitors always take the time to describe how it varies from Claude Code\n\nAs background material we have plugin research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/plugins/*.md`.\n\nImportant: your final response is saved verbatim as the body of this summary document, so it must be the complete document text and nothing else — no preamble, no commentary. Never write to this document yourself.\n\n::block when=\"state.name == 'draft'\"\n- Iterate over the first three research documents to develop a point of view on how to write this document and then produce an initial draft of the document\n::end-block\n::block when=\"state.name == 'iterate'\"\n\n- Note: the initial draft has already been created — it is the body of `@claudine/docs/research/summary/subagents.md` (everything below the frontmatter); read it from there\n- Act as an orchestrator and iterate over each remaining provider's research document:\n    - provide the subagent the current draft and ask them to return an improved draft based on the research document they've been assigned\n- Once every remaining provider has been incorporated, your final response is the fully updated draft\n::end-block\n\n::block when=\"state.name == 'finalize'\"\n\nThe document has now gone through several rounds of improvement and your task is just to make sure the document is consistent in tone and detail and that nothing looks incorrect or incomplete. The current draft is the body of `@claudine/docs/research/summary/plugins.md` (everything below the frontmatter); read it from there, make any adjustments, and your final response will be considered the finalized summary document.\n::end-block"
+    - name: draft
+    - name: iterate
+    - name: finalize
+prompt: |-
+    Subagent definitions — named, specialized agents that a session can delegate work to, often with their own prompt, model, and tool restrictions — vary widely across agentic CLIs, from first-class definition files to nothing at all. Claudine links agent definitions across providers and also has to reason about subagent observability during wrapped runs.
+
+    ## Task
+
+    Your task is to report on \"plugin\" support across the Agentic CLI providers. Plugins -- unfortunately -- are even less of a \"standard\" than agent definitions and slash commands.\n\n- your report should start by outlining why plugins matter to agentic processes\n- and then shift its focus to how providers differ: \n    - definition format and metadata, \n    - user/repo scopes, model and tool restriction support, \n    - configuration files and schemas\n    - invocation mechanics (CLI influences, ENV influences, config influences)\n    - asset types that can be included in a plugin\n- in the \"plugin\" space Claude Code is seen as the leader and \"standard bearer\", so:\n    - when looking at Claude Code competitors always take the time to describe how it varies from Claude Code\n\nAs background material we have plugin research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/plugins/*.md`.\n\nImportant: your final response is saved verbatim as the body of this summary document, so it must be the complete document text and nothing else — no preamble, no commentary. Never write to this document yourself.\n\n::block when=\"state.name == 'draft'\"\n- Iterate over the first three research documents to develop a point of view on how to write this document and then produce an initial draft of the document\n::end-block\n::block when=\"state.name == 'iterate'\"\n\n- Note: the initial draft has already been created — it is the body of `@claudine/docs/research/summary/subagents.md` (everything below the frontmatter); read it from there\n- Act as an orchestrator and iterate over each remaining provider's research document:\n    - provide the subagent the current draft and ask them to return an improved draft based on the research document they've been assigned\n- Once every remaining provider has been incorporated, your final response is the fully updated draft\n::end-block\n\n::block when=\"state.name == 'finalize'\"\n\nThe document has now gone through several rounds of improvement and your task is just to make sure the document is consistent in tone and detail and that nothing looks incorrect or incomplete. The current draft is the body of `@claudine/docs/research/summary/plugins.md` (everything below the frontmatter); read it from there, make any adjustments, and your final response will be considered the finalized summary document.\n::end-block"
 success:
     stack:
         - when: "state.name == 'finalize'"
           action:
-              message: "Summary research for **plugins** completed!"
-              success: 'Summary research for **plugins** is now complete: `./docs/research/summary/plugins.md`'
+              - message: "🚀  summary research for **plugins** completed!"
+              - success: 'Summary research for **plugins** is now complete: `./docs/research/summary/plugins.md`'
         - when: "state.name != 'finalize'"
           action:
-              
+              - message: "👓  Summary research for **plugins** completed the _{{state.name}}_ stage"
 failure:
-  message: 'The summary research for **plugins** failed to complete: {{ err.message }}'
+    message: 'The summary research for **plugins** failed to complete: {{ err.message }}'
 last_updated: 2026-07-09
 hash: 61b61bb5ca4dfa9f-c25a7f1f0ebc0f2e
 ---
