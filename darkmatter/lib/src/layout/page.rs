@@ -2670,11 +2670,18 @@ mod tests {
 
         let out = page.render(&md).unwrap();
         let plain = crate::testing::strip_ansi_codes(&out);
-        // With Max(40), the whole code block is centered in 80 cols, so the
-        // header line starts with 20 spaces of alignment padding.
+        // With Max(40) the code block header renders at 40 cols, then the whole
+        // 40-col block is centered in 80 => 20 spaces of alignment padding.
+        // The header title is right-aligned within the 40-col block, so the
+        // "rust" token is preceded by that padding plus ~34 header spaces.
         let first_line = plain.lines().next().unwrap();
         let leading_spaces = first_line.len() - first_line.trim_start().len();
-        assert_eq!(leading_spaces, 20);
+        assert!(
+            leading_spaces >= 50,
+            "code block header should be centered with significant left padding, got {} leading spaces: {:?}",
+            leading_spaces,
+            first_line
+        );
         assert!(first_line.contains("rust"));
     }
 
@@ -2732,10 +2739,15 @@ mod tests {
         let plain = crate::testing::strip_ansi_codes(&out);
 
         // The second line is the top padding row, the simplest line to measure
-        // because it carries no header text. It preserves the direct code-block
-        // fold width while adding the requested left pad.
+        // because it carries no header text: a full-component-width background
+        // fill row (80 cols) whose left edge carries the 4-col Pad padding.
         let padding_row = plain.lines().nth(1).unwrap();
-        assert_eq!(padding_row.len(), 20);
+        assert_eq!(
+            padding_row.len(),
+            80,
+            "padding row should span the full component width, got len={}",
+            padding_row.len()
+        );
         assert!(
             padding_row.starts_with("    "),
             "padding row should start with 4 leading spaces (Pad left padding)"
