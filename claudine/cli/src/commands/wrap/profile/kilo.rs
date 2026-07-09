@@ -47,24 +47,6 @@ impl WrapperProfile for KiloWrapper {
         Ok(super::YoloOutcome::applied())
     }
 
-    fn apply_model(
-        &self,
-        args: &mut Vec<String>,
-        env_overrides: &mut Vec<(String, String)>,
-        model: &str,
-    ) -> Option<String> {
-        // Kilo selects the model via the `--model` flag (catalog
-        // model_cli_flag). Keep the MODEL env override for Claudine's own
-        // templating/reporting surfaces.
-        let has_model_flag = args.iter().any(|a| a == "--model" || a == "-m");
-        if !has_model_flag {
-            args.push("--model".to_string());
-            args.push(model.to_string());
-        }
-        env_overrides.push(("MODEL".to_string(), model.to_string()));
-        None
-    }
-
     fn prompt_delivery(
         &self,
         _args: &[String],

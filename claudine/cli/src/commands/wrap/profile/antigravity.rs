@@ -24,24 +24,6 @@ impl WrapperProfile for AntigravityWrapper {
         Provider::Antigravity
     }
 
-    fn apply_model(
-        &self,
-        args: &mut Vec<String>,
-        env_overrides: &mut Vec<(String, String)>,
-        model: &str,
-    ) -> Option<String> {
-        // agy selects the model with `--model "<catalog label>"` (values carry
-        // spaces, e.g. "Gemini 3.5 Flash (Low)"). Guard against a passthrough
-        // `--model` so it is never emitted twice; keep the generic MODEL env
-        // override for Claudine's templating/reporting.
-        if !has_flag(args, "--model") {
-            args.push("--model".to_string());
-            args.push(model.to_string());
-        }
-        env_overrides.push(("MODEL".to_string(), model.to_string()));
-        None
-    }
-
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         // agy's structured format is `--output-format json` (a single buffered
         // envelope). The catalog records it as `OutputFormat::Json`, so the

@@ -370,20 +370,21 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// Map the universal `--model <value>` to provider-specific flags/env.
     ///
     /// Returns `Some(warning)` if the provider doesn't support model selection.
-    /// Default implementation pushes `--model <value>` for child-CLI delivery
-    /// and exports the generic `MODEL` env var that Claudine's wrapper contract
-    /// guarantees (consumed by composition templates, hook dispatch, and
-    /// reporting — independent of how the provider itself reads the model).
+    /// Default implementation reads the provider's catalog `model_cli_flag`
+    /// (the authoritative delivery flag, e.g. `--model`): when present it is
+    /// pushed with the model value (skipped if the user already passed it, or
+    /// the conventional short alias `-m`); when absent a warning is returned
+    /// (a provider with non-flag delivery must override this method). The
+    /// generic `MODEL` env var is always exported — Claudine's wrapper
+    /// contract, consumed by composition templates, hook dispatch, and
+    /// reporting independent of how the provider itself reads the model.
     fn apply_model(
         &self,
         args: &mut Vec<String>,
         env_overrides: &mut Vec<(String, String)>,
         model: &str,
     ) -> Option<String> {
-        args.push("--model".to_string());
-        args.push(model.to_string());
-        env_overrides.push(("MODEL".to_string(), model.to_string()));
-        None
+        apply::apply_model(self.provider(), args, env_overrides, model)
     }
 
     // -- Universal --output flag ---------------------------------------------

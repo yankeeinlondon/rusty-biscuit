@@ -13,30 +13,14 @@ use super::{PromptDelivery, WrapperProfile};
 /// `--mode json` NDJSON (the headless determinism flags ride as its catalog
 /// companion flags), the system prompt is delivered via `--append-system-prompt`
 /// / `--system-prompt` file flags, and there is no YOLO mode (Pi is permissive
-/// by default). Only prompt delivery, model-flag de-duplication, and the resume
+/// by default). Model selection (`--model`) is catalog-driven via the default
+/// `apply_model`. Only prompt delivery, system-prompt delivery, and the resume
 /// selector need Pi-specific handling.
 pub(crate) struct PiWrapper;
 
 impl WrapperProfile for PiWrapper {
     fn provider(&self) -> Provider {
         Provider::Pi
-    }
-
-    fn apply_model(
-        &self,
-        args: &mut Vec<String>,
-        env_overrides: &mut Vec<(String, String)>,
-        model: &str,
-    ) -> Option<String> {
-        // Pi selects the model with `--model` (catalog model_cli_flag). Guard
-        // against a passthrough `--model` so we never emit it twice. Keep the
-        // generic MODEL env override for Claudine's templating/reporting.
-        if !args.iter().any(|a| a == "--model") {
-            args.push("--model".to_string());
-            args.push(model.to_string());
-        }
-        env_overrides.push(("MODEL".to_string(), model.to_string()));
-        None
     }
 
     fn prompt_delivery(
