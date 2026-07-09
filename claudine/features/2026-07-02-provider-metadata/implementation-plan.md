@@ -750,8 +750,9 @@ report (closeout well underway).
   **single-provider all-topics research sweep** (temp-pilot-roster technique; this
   milestone is the standing argument for the `claudine sequence` per-item selector) →
   evaluation subagents → generate → behavior half → wired provider.
-  ► **CHECKPOINT H3 (Ken):** end-to-end retro; this is the spec's Goal-1 acceptance
-  test.
+  ► **CHECKPOINT H3 (Ken): APPROVED 2026-07-08.** End-to-end retro accepted; the
+  spec's Goal-1 acceptance test is met (see `m-antigravity-graduation.md`). Phase
+  H closed.
 
 ## Phase I — lock-in
 

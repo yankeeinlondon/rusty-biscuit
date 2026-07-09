@@ -300,8 +300,9 @@ Plus two findings only a live run surfaces:
 
 ---
 
-**HOLD at ► CHECKPOINT H3 (Ken).** Goal-1 acceptance test delivered: a genuinely
-new provider (the first buffered-JSON shape) graduated end to end through the
-research → codegen → behavior → live-smoke pipeline, with a from-scratch
-parser/adapter/configurator and zero render-path change. Not rolling into Phase
-I. Nothing committed.
+**► CHECKPOINT H3 — APPROVED (Ken, 2026-07-08).** Goal-1 acceptance test
+delivered and accepted: a genuinely new provider (the first buffered-JSON shape)
+graduated end to end through the research → codegen → behavior → live-smoke
+pipeline, with a from-scratch parser/adapter/configurator and zero render-path
+change. Phase H closed; the recommended follow-ups above are tracked separately
+(see the `more-struture` kickoff Workstream B).
