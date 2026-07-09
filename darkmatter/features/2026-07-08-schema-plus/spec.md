@@ -1,7 +1,7 @@
 ---
 status: ready for planning and implementation
 reviewed: true
-review_iterations: 0
+review_iterations: 1
 inputs:
   - ../../lib/src/markdown/schemas/simplified/types.rs
   - ../../lib/src/markdown/schemas/simplified/grammar.rs
