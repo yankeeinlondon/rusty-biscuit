@@ -1,0 +1,4 @@
+$schema:
+    type: enum(string,number,boolean,date,time,datetime,any; required)
+    parameter:
+        "<string>": any

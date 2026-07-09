@@ -1,0 +1,9 @@
+$schema:
+    kind: enum(example; required)
+    type: type@./types.yaml
+    parameters: parameter[]@./types.yaml
+    invocation:
+        - string(required)
+        - { frontmatter: yaml }
+    returns: any
+    description: string
