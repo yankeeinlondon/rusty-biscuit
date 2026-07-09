@@ -137,7 +137,10 @@ struct ProviderReport {
     records: usize,
     positives_passed: usize,
     negatives_passed: usize,
-    bespoke_skipped: Vec<String>,
+    /// Records cataloged with `detection: documentation` — no runtime detector
+    /// is wired yet, so they cannot fire. Tolerated (their evidence fixture is
+    /// still required), unlike a replayer-less bespoke record, which fails.
+    documentation_only: Vec<String>,
     exclusions_applied: Vec<String>,
     failures: Vec<String>,
 }
@@ -149,7 +152,7 @@ struct FleetReport {
     records: usize,
     positives_passed: usize,
     negatives_passed: usize,
-    bespoke_skipped: usize,
+    documentation_only: usize,
     exclusions_applied: usize,
     failures: usize,
 }
@@ -223,7 +226,7 @@ fn run_check(args: CheckArgs) -> Result<()> {
         records: providers.iter().map(|p| p.records).sum(),
         positives_passed: providers.iter().map(|p| p.positives_passed).sum(),
         negatives_passed: providers.iter().map(|p| p.negatives_passed).sum(),
-        bespoke_skipped: providers.iter().map(|p| p.bespoke_skipped.len()).sum(),
+        documentation_only: providers.iter().map(|p| p.documentation_only.len()).sum(),
         exclusions_applied: providers.iter().map(|p| p.exclusions_applied.len()).sum(),
         failures: providers.iter().map(|p| p.failures.len()).sum(),
         unused_exclusions,
@@ -245,16 +248,18 @@ fn run_check(args: CheckArgs) -> Result<()> {
 fn render_fleet(fleet: &FleetReport) {
     for provider in &fleet.providers {
         log::data(&format!(
-            "{} — {} records: positives {}, negatives {}, bespoke skipped {}, exclusions {}",
+            "{} — {} records: positives {}, negatives {}, documentation-only {}, exclusions {}",
             provider.provider,
             provider.records,
             provider.positives_passed,
             provider.negatives_passed,
-            provider.bespoke_skipped.len(),
+            provider.documentation_only.len(),
             provider.exclusions_applied.len(),
         ));
-        for skipped in &provider.bespoke_skipped {
-            log::data(&format!("  [SKIP] {skipped} (bespoke, pending emitter)"));
+        for doc_only in &provider.documentation_only {
+            log::data(&format!(
+                "  [DOC-ONLY] {doc_only} (cataloged, no runtime detector wired)"
+            ));
         }
         for info in &provider.exclusions_applied {
             log::data(&format!("  [INFO] exclusion: {info}"));
@@ -267,11 +272,11 @@ fn render_fleet(fleet: &FleetReport) {
         log::data(&format!("[INFO] unused exclusion: {unused}"));
     }
     log::data(&format!(
-        "fleet: {} records checked — positives {} passed, negatives {} passed, bespoke {} skipped, exclusions {} applied, failures {}",
+        "fleet: {} records checked — positives {} passed, negatives {} passed, documentation-only {}, exclusions {} applied, failures {}",
         fleet.records,
         fleet.positives_passed,
         fleet.negatives_passed,
-        fleet.bespoke_skipped,
+        fleet.documentation_only,
         fleet.exclusions_applied,
         fleet.failures,
     ));
@@ -347,26 +352,41 @@ fn check_provider(
             ));
             continue;
         }
-        if record.mode == DetectionMode::Bespoke {
-            // A bespoke record without a registered replayer reports as an
-            // explicit SKIP instead of being silently ignored.
-            match bespoke_replayer(record.id) {
-                Some(replay) => {
-                    let Some(payloads) = payloads_for(evidence, &mut report.failures) else {
-                        continue;
-                    };
-                    if replay(&payloads) {
-                        report.positives_passed += 1;
-                    } else {
-                        report.failures.push(format!(
-                            "record `{}`: bespoke replayer did not detect its evidence {evidence}",
-                            record.id
-                        ));
-                    }
-                }
-                None => report.bespoke_skipped.push(record.id.to_string()),
+        match record.mode {
+            // Cataloged but unwired: no runtime detector, so it cannot fire.
+            // Tolerated (its evidence fixture existence was verified above),
+            // reported distinctly — never counted as a pass or a failure.
+            DetectionMode::Documentation => {
+                report.documentation_only.push(record.id.to_string());
+                continue;
             }
-            continue;
+            DetectionMode::Bespoke => {
+                match bespoke_replayer(record.id) {
+                    Some(replay) => {
+                        let Some(payloads) = payloads_for(evidence, &mut report.failures) else {
+                            continue;
+                        };
+                        if replay(&payloads) {
+                            report.positives_passed += 1;
+                        } else {
+                            report.failures.push(format!(
+                                "record `{}`: bespoke replayer did not detect its evidence {evidence}",
+                                record.id
+                            ));
+                        }
+                    }
+                    // A bespoke record with no runtime detector wired is a
+                    // regression, not a benign skip: it claims a hand-written
+                    // emitter that does not exist.
+                    None => report.failures.push(format!(
+                        "record `{}`: bespoke record has no registered replayer — \
+                         wire a runtime detector/replayer or mark `detection: documentation`",
+                        record.id
+                    )),
+                }
+                continue;
+            }
+            DetectionMode::Declarative => {}
         }
 
         let Some(payloads) = payloads_for(evidence, &mut report.failures) else {
@@ -704,12 +724,12 @@ fn load_fixture_payloads(fixtures_dir: &Path, key: &str, slug: &str) -> Result<V
             .collect()),
         // Other providers' `.txt` fixtures are opaque plaintext side-channels —
         // e.g. Antigravity's glog-style app log, whose records are
-        // `detection: bespoke` and stay `[SKIP]` until a log-line classifier is
-        // wired (`requires_claudine_update`). Load each non-empty line as an
-        // opaque string payload: evidence-existence and negative-overlap checks
-        // pass without a classifier (no declarative record's match path
-        // navigates into a bare string, so nothing false-fires), and a future
-        // bespoke replayer receives the raw lines to parse.
+        // `detection: documentation` and stay `[DOC-ONLY]` until a log-line
+        // classifier is wired (`requires_claudine_update`). Load each non-empty
+        // line as an opaque string payload: evidence-existence and
+        // negative-overlap checks pass without a classifier (no declarative
+        // record's match path navigates into a bare string, so nothing
+        // false-fires), and a future detector receives the raw lines to parse.
         "txt" => Ok(text
             .lines()
             .filter(|line| !line.trim().is_empty())
@@ -773,6 +793,40 @@ mod tests {
             "opencode/stream-start-1178.txt"
         );
         assert!(fixture_key(doc, "r", "./elsewhere/file.jsonl").is_err());
+    }
+
+    #[test]
+    fn antigravity_app_log_records_report_documentation_only_without_failure() {
+        // Real-corpus classification: the two `detection: documentation`
+        // Antigravity app-log records land in `documentation_only` (evidence
+        // existence still enforced by check_provider) and are NOT failures —
+        // the escape hatch a replayer-less bespoke record no longer gets.
+        let area = resolve_area().expect("rusty-biscuit checkout");
+        let signals_dir = area.join("docs/research/signals");
+        let fixtures_dir = signals_dir.join("fixtures");
+        let table = all_detection_tables()
+            .iter()
+            .copied()
+            .find(|table| table.slug == "antigravity")
+            .expect("antigravity table");
+        let mut used = BTreeSet::new();
+        let report = check_provider(table, &signals_dir, &fixtures_dir, &[], &mut used)
+            .expect("check_provider succeeds");
+        for id in [
+            "app_log-provider_version-language-server",
+            "app_log-auth_invalid-not-logged-in",
+        ] {
+            assert!(
+                report.documentation_only.iter().any(|doc| doc == id),
+                "`{id}` missing from documentation_only: {:?}",
+                report.documentation_only
+            );
+        }
+        assert!(
+            report.failures.is_empty(),
+            "unexpected failures: {:?}",
+            report.failures
+        );
     }
 
     #[test]
