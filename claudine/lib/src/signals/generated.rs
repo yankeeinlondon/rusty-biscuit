@@ -18,8 +18,8 @@
 //! Slug-keyed static signal-detection tables (generated).
 
 use claudine_catalog_types::{
-    DetectionMode, DetectionRecord, ExtractionSpec, MatchOp, ProviderSignalTable,
-    SignalKind, SignalSource, Unit, Zone,
+    DetectionMode, DetectionRecord, ExtractStrategy, ExtractionSpec, MatchOp,
+    ProviderSignalTable, SignalKind, SignalSource, Unit, Zone,
 };
 
 pub(super) static ANTIGRAVITY_SIGNALS: ProviderSignalTable = ProviderSignalTable {
@@ -68,7 +68,7 @@ pub(super) static ANTIGRAVITY_SIGNALS: ProviderSignalTable = ProviderSignalTable
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "stdout_tail",
+                    source: ExtractStrategy::Path("stdout_tail"),
                     unit: None,
                     zone: None,
                 },
@@ -89,7 +89,7 @@ pub(super) static ANTIGRAVITY_SIGNALS: ProviderSignalTable = ProviderSignalTable
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "stdout_tail",
+                    source: ExtractStrategy::Path("stdout_tail"),
                     unit: None,
                     zone: None,
                 },
@@ -116,13 +116,13 @@ pub(super) static CLAUDE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "resets_at",
-                    path: "rate_limit_info.resetsAt",
+                    source: ExtractStrategy::Path("rate_limit_info.resetsAt"),
                     unit: Some(Unit::UnixSeconds),
                     zone: Some(Zone::Utc),
                 },
                 ExtractionSpec {
                     field: "window",
-                    path: "rate_limit_info.rateLimitType",
+                    source: ExtractStrategy::Path("rate_limit_info.rateLimitType"),
                     unit: None,
                     zone: None,
                 },
@@ -143,13 +143,13 @@ pub(super) static CLAUDE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "resets_at",
-                    path: "rate_limit_info.resetsAt",
+                    source: ExtractStrategy::Path("rate_limit_info.resetsAt"),
                     unit: Some(Unit::UnixSeconds),
                     zone: Some(Zone::Utc),
                 },
                 ExtractionSpec {
                     field: "window",
-                    path: "rate_limit_info.rateLimitType",
+                    source: ExtractStrategy::Path("rate_limit_info.rateLimitType"),
                     unit: None,
                     zone: None,
                 },
@@ -170,13 +170,13 @@ pub(super) static CLAUDE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "retry_after",
-                    path: "retry_after_ms",
+                    source: ExtractStrategy::Path("retry_after_ms"),
                     unit: Some(Unit::DurationMillis),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "message",
-                    path: "message",
+                    source: ExtractStrategy::Path("message"),
                     unit: None,
                     zone: None,
                 },
@@ -197,7 +197,7 @@ pub(super) static CLAUDE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "error.message",
+                    source: ExtractStrategy::Path("error.message"),
                     unit: None,
                     zone: None,
                 },
@@ -218,7 +218,7 @@ pub(super) static CLAUDE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "error.message",
+                    source: ExtractStrategy::Path("error.message"),
                     unit: None,
                     zone: None,
                 },
@@ -239,7 +239,7 @@ pub(super) static CLAUDE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "message.content[0].text",
+                    source: ExtractStrategy::Path("message.content[0].text"),
                     unit: None,
                     zone: None,
                 },
@@ -260,7 +260,7 @@ pub(super) static CLAUDE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "resolved",
-                    path: "model",
+                    source: ExtractStrategy::Path("model"),
                     unit: None,
                     zone: None,
                 },
@@ -281,7 +281,7 @@ pub(super) static CLAUDE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "auth_kind",
-                    path: "apiKeySource",
+                    source: ExtractStrategy::Path("apiKeySource"),
                     unit: None,
                     zone: None,
                 },
@@ -302,25 +302,25 @@ pub(super) static CLAUDE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "input",
-                    path: "usage.input_tokens",
+                    source: ExtractStrategy::Path("usage.input_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "output",
-                    path: "usage.output_tokens",
+                    source: ExtractStrategy::Path("usage.output_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "cache_read",
-                    path: "usage.cache_read_input_tokens",
+                    source: ExtractStrategy::Path("usage.cache_read_input_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "cost",
-                    path: "total_cost_usd",
+                    source: ExtractStrategy::Path("total_cost_usd"),
                     unit: Some(Unit::Usd),
                     zone: None,
                 },
@@ -341,25 +341,25 @@ pub(super) static CLAUDE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "input",
-                    path: "usage.input_tokens",
+                    source: ExtractStrategy::Path("usage.input_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "output",
-                    path: "usage.output_tokens",
+                    source: ExtractStrategy::Path("usage.output_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "cache_read",
-                    path: "usage.cache_read_input_tokens",
+                    source: ExtractStrategy::Path("usage.cache_read_input_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "cost",
-                    path: "cost_usd",
+                    source: ExtractStrategy::Path("cost_usd"),
                     unit: Some(Unit::Usd),
                     zone: None,
                 },
@@ -400,7 +400,7 @@ pub(super) static CODEX_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "error.message",
+                    source: ExtractStrategy::Path("error.message"),
                     unit: None,
                     zone: None,
                 },
@@ -421,7 +421,7 @@ pub(super) static CODEX_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "error_message",
+                    source: ExtractStrategy::Path("error_message"),
                     unit: None,
                     zone: None,
                 },
@@ -442,7 +442,7 @@ pub(super) static CODEX_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "error_message",
+                    source: ExtractStrategy::Path("error_message"),
                     unit: None,
                     zone: None,
                 },
@@ -463,25 +463,25 @@ pub(super) static CODEX_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "input",
-                    path: "usage.input_tokens",
+                    source: ExtractStrategy::Path("usage.input_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "cache_read",
-                    path: "usage.cached_input_tokens",
+                    source: ExtractStrategy::Path("usage.cached_input_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "output",
-                    path: "usage.output_tokens",
+                    source: ExtractStrategy::Path("usage.output_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "reasoning_output",
-                    path: "usage.reasoning_output_tokens",
+                    source: ExtractStrategy::Path("usage.reasoning_output_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
@@ -502,7 +502,7 @@ pub(super) static CODEX_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "session_id",
-                    path: "thread_id",
+                    source: ExtractStrategy::Path("thread_id"),
                     unit: None,
                     zone: None,
                 },
@@ -529,13 +529,13 @@ pub(super) static GEMINI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "resolved",
-                    path: "model",
+                    source: ExtractStrategy::Path("model"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "session_id",
-                    path: "session_id",
+                    source: ExtractStrategy::Path("session_id"),
                     unit: None,
                     zone: None,
                 },
@@ -556,7 +556,7 @@ pub(super) static GEMINI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "error.message",
+                    source: ExtractStrategy::Path("error.message"),
                     unit: None,
                     zone: None,
                 },
@@ -577,31 +577,31 @@ pub(super) static GEMINI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "total",
-                    path: "stats.total_tokens",
+                    source: ExtractStrategy::Path("stats.total_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "input",
-                    path: "stats.input_tokens",
+                    source: ExtractStrategy::Path("stats.input_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "output",
-                    path: "stats.output_tokens",
+                    source: ExtractStrategy::Path("stats.output_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "cache_read",
-                    path: "stats.cached",
+                    source: ExtractStrategy::Path("stats.cached"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "uncached_input",
-                    path: "stats.input",
+                    source: ExtractStrategy::Path("stats.input"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
@@ -628,13 +628,13 @@ pub(super) static GOOSE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "message.content[0].msg",
+                    source: ExtractStrategy::Path("message.content[0].msg"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "top_up_url",
-                    path: "message.content[0].data.top_up_url",
+                    source: ExtractStrategy::Path("message.content[0].data.top_up_url"),
                     unit: None,
                     zone: None,
                 },
@@ -655,7 +655,7 @@ pub(super) static GOOSE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "message.content[0].text",
+                    source: ExtractStrategy::Path("message.content[0].text"),
                     unit: None,
                     zone: None,
                 },
@@ -676,7 +676,7 @@ pub(super) static GOOSE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "message.content[0].text",
+                    source: ExtractStrategy::Path("message.content[0].text"),
                     unit: None,
                     zone: None,
                 },
@@ -697,7 +697,7 @@ pub(super) static GOOSE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "message.content[0].text",
+                    source: ExtractStrategy::Path("message.content[0].text"),
                     unit: None,
                     zone: None,
                 },
@@ -718,19 +718,19 @@ pub(super) static GOOSE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "total",
-                    path: "total_tokens",
+                    source: ExtractStrategy::Path("total_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "input",
-                    path: "input_tokens",
+                    source: ExtractStrategy::Path("input_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "output",
-                    path: "output_tokens",
+                    source: ExtractStrategy::Path("output_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
@@ -765,43 +765,43 @@ pub(super) static GOOSE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "total",
-                    path: "total_tokens",
+                    source: ExtractStrategy::Path("total_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "input",
-                    path: "input_tokens",
+                    source: ExtractStrategy::Path("input_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "output",
-                    path: "output_tokens",
+                    source: ExtractStrategy::Path("output_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "cache_read",
-                    path: "cache_read_tokens",
+                    source: ExtractStrategy::Path("cache_read_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "cache_write",
-                    path: "cache_write_tokens",
+                    source: ExtractStrategy::Path("cache_write_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "cost",
-                    path: "cost",
+                    source: ExtractStrategy::Path("cost"),
                     unit: Some(Unit::Usd),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "timestamp",
-                    path: "created_timestamp",
+                    source: ExtractStrategy::Path("created_timestamp"),
                     unit: Some(Unit::UnixSeconds),
                     zone: Some(Zone::Utc),
                 },
@@ -828,7 +828,7 @@ pub(super) static KILO_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "payload.properties.error.data.responseBody",
+                    source: ExtractStrategy::Path("payload.properties.error.data.responseBody"),
                     unit: None,
                     zone: None,
                 },
@@ -849,7 +849,7 @@ pub(super) static KILO_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "payload.properties.error.data.responseBody",
+                    source: ExtractStrategy::Path("payload.properties.error.data.responseBody"),
                     unit: None,
                     zone: None,
                 },
@@ -870,7 +870,7 @@ pub(super) static KILO_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "payload.properties.error.data.responseBody",
+                    source: ExtractStrategy::Path("payload.properties.error.data.responseBody"),
                     unit: None,
                     zone: None,
                 },
@@ -891,19 +891,19 @@ pub(super) static KILO_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "payload.properties.status.message",
+                    source: ExtractStrategy::Path("payload.properties.status.message"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "attempt",
-                    path: "payload.properties.status.attempt",
+                    source: ExtractStrategy::Path("payload.properties.status.attempt"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "next",
-                    path: "payload.properties.status.next",
+                    source: ExtractStrategy::Path("payload.properties.status.next"),
                     unit: Some(Unit::UnixMillis),
                     zone: Some(Zone::Unspecified),
                 },
@@ -924,19 +924,19 @@ pub(super) static KILO_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "payload.properties.status.message",
+                    source: ExtractStrategy::Path("payload.properties.status.message"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "attempt",
-                    path: "payload.properties.status.attempt",
+                    source: ExtractStrategy::Path("payload.properties.status.attempt"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "next",
-                    path: "payload.properties.status.next",
+                    source: ExtractStrategy::Path("payload.properties.status.next"),
                     unit: Some(Unit::UnixMillis),
                     zone: Some(Zone::Unspecified),
                 },
@@ -957,13 +957,13 @@ pub(super) static KILO_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "attempt",
-                    path: "payload.properties.attempt",
+                    source: ExtractStrategy::Path("payload.properties.attempt"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "message",
-                    path: "payload.properties.error.message",
+                    source: ExtractStrategy::Path("payload.properties.error.message"),
                     unit: None,
                     zone: None,
                 },
@@ -984,13 +984,13 @@ pub(super) static KILO_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "request_id",
-                    path: "payload.properties.status.requestID",
+                    source: ExtractStrategy::Path("payload.properties.status.requestID"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "prompt",
-                    path: "payload.properties.status.message",
+                    source: ExtractStrategy::Path("payload.properties.status.message"),
                     unit: None,
                     zone: None,
                 },
@@ -1011,7 +1011,7 @@ pub(super) static KILO_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "payload.properties.error.data.message",
+                    source: ExtractStrategy::Path("payload.properties.error.data.message"),
                     unit: None,
                     zone: None,
                 },
@@ -1032,25 +1032,25 @@ pub(super) static KILO_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "provider",
-                    path: "payload.properties.model.providerID",
+                    source: ExtractStrategy::Path("payload.properties.model.providerID"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "resolved",
-                    path: "payload.properties.model.id",
+                    source: ExtractStrategy::Path("payload.properties.model.id"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "variant",
-                    path: "payload.properties.model.variant",
+                    source: ExtractStrategy::Path("payload.properties.model.variant"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "occurred_at",
-                    path: "payload.properties.timestamp",
+                    source: ExtractStrategy::Path("payload.properties.timestamp"),
                     unit: Some(Unit::Iso8601),
                     zone: Some(Zone::Utc),
                 },
@@ -1071,37 +1071,37 @@ pub(super) static KILO_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "input",
-                    path: "payload.properties.tokens.input",
+                    source: ExtractStrategy::Path("payload.properties.tokens.input"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "output",
-                    path: "payload.properties.tokens.output",
+                    source: ExtractStrategy::Path("payload.properties.tokens.output"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "reasoning",
-                    path: "payload.properties.tokens.reasoning",
+                    source: ExtractStrategy::Path("payload.properties.tokens.reasoning"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "cache_read",
-                    path: "payload.properties.tokens.cache.read",
+                    source: ExtractStrategy::Path("payload.properties.tokens.cache.read"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "cache_write",
-                    path: "payload.properties.tokens.cache.write",
+                    source: ExtractStrategy::Path("payload.properties.tokens.cache.write"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "cost",
-                    path: "payload.properties.cost",
+                    source: ExtractStrategy::Path("payload.properties.cost"),
                     unit: Some(Unit::Usd),
                     zone: None,
                 },
@@ -1122,43 +1122,43 @@ pub(super) static KILO_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "total",
-                    path: "row.data.tokens.total",
+                    source: ExtractStrategy::Path("row.data.tokens.total"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "input",
-                    path: "row.data.tokens.input",
+                    source: ExtractStrategy::Path("row.data.tokens.input"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "output",
-                    path: "row.data.tokens.output",
+                    source: ExtractStrategy::Path("row.data.tokens.output"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "reasoning",
-                    path: "row.data.tokens.reasoning",
+                    source: ExtractStrategy::Path("row.data.tokens.reasoning"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "cache_read",
-                    path: "row.data.tokens.cache.read",
+                    source: ExtractStrategy::Path("row.data.tokens.cache.read"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "cache_write",
-                    path: "row.data.tokens.cache.write",
+                    source: ExtractStrategy::Path("row.data.tokens.cache.write"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "cost",
-                    path: "row.data.cost",
+                    source: ExtractStrategy::Path("row.data.cost"),
                     unit: Some(Unit::Usd),
                     zone: None,
                 },
@@ -1179,13 +1179,13 @@ pub(super) static KILO_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "provider",
-                    path: "row.data.model.providerID",
+                    source: ExtractStrategy::Path("row.data.model.providerID"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "resolved",
-                    path: "row.data.model.modelID",
+                    source: ExtractStrategy::Path("row.data.model.modelID"),
                     unit: None,
                     zone: None,
                 },
@@ -1206,7 +1206,7 @@ pub(super) static KILO_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "row.data.error.data.message",
+                    source: ExtractStrategy::Path("row.data.error.data.message"),
                     unit: None,
                     zone: None,
                 },
@@ -1233,13 +1233,13 @@ pub(super) static KIMI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "version",
-                    path: "result.server.version",
+                    source: ExtractStrategy::Path("result.server.version"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "protocol_version",
-                    path: "result.protocol_version",
+                    source: ExtractStrategy::Path("result.protocol_version"),
                     unit: None,
                     zone: None,
                 },
@@ -1260,7 +1260,7 @@ pub(super) static KIMI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "error.message",
+                    source: ExtractStrategy::Path("error.message"),
                     unit: None,
                     zone: None,
                 },
@@ -1281,31 +1281,31 @@ pub(super) static KIMI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "attempt",
-                    path: "params.payload.next_attempt",
+                    source: ExtractStrategy::Path("params.payload.next_attempt"),
                     unit: Some(Unit::Requests),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "max_attempts",
-                    path: "params.payload.max_attempts",
+                    source: ExtractStrategy::Path("params.payload.max_attempts"),
                     unit: Some(Unit::Requests),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "retry_after",
-                    path: "params.payload.wait_s",
+                    source: ExtractStrategy::Path("params.payload.wait_s"),
                     unit: Some(Unit::DurationSecs),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "status_code",
-                    path: "params.payload.status_code",
+                    source: ExtractStrategy::Path("params.payload.status_code"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "error_type",
-                    path: "params.payload.error_type",
+                    source: ExtractStrategy::Path("params.payload.error_type"),
                     unit: None,
                     zone: None,
                 },
@@ -1326,31 +1326,31 @@ pub(super) static KIMI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "attempt",
-                    path: "params.payload.next_attempt",
+                    source: ExtractStrategy::Path("params.payload.next_attempt"),
                     unit: Some(Unit::Requests),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "max_attempts",
-                    path: "params.payload.max_attempts",
+                    source: ExtractStrategy::Path("params.payload.max_attempts"),
                     unit: Some(Unit::Requests),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "wait",
-                    path: "params.payload.wait_s",
+                    source: ExtractStrategy::Path("params.payload.wait_s"),
                     unit: Some(Unit::DurationSecs),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "error_type",
-                    path: "params.payload.error_type",
+                    source: ExtractStrategy::Path("params.payload.error_type"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "status_code",
-                    path: "params.payload.status_code",
+                    source: ExtractStrategy::Path("params.payload.status_code"),
                     unit: None,
                     zone: None,
                 },
@@ -1371,43 +1371,43 @@ pub(super) static KIMI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "input_other",
-                    path: "params.payload.token_usage.input_other",
+                    source: ExtractStrategy::Path("params.payload.token_usage.input_other"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "output",
-                    path: "params.payload.token_usage.output",
+                    source: ExtractStrategy::Path("params.payload.token_usage.output"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "cache_read",
-                    path: "params.payload.token_usage.input_cache_read",
+                    source: ExtractStrategy::Path("params.payload.token_usage.input_cache_read"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "cache_creation",
-                    path: "params.payload.token_usage.input_cache_creation",
+                    source: ExtractStrategy::Path("params.payload.token_usage.input_cache_creation"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "context_tokens",
-                    path: "params.payload.context_tokens",
+                    source: ExtractStrategy::Path("params.payload.context_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "max_context_tokens",
-                    path: "params.payload.max_context_tokens",
+                    source: ExtractStrategy::Path("params.payload.max_context_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "message_id",
-                    path: "params.payload.message_id",
+                    source: ExtractStrategy::Path("params.payload.message_id"),
                     unit: None,
                     zone: None,
                 },
@@ -1428,7 +1428,7 @@ pub(super) static KIMI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "status",
-                    path: "result.status",
+                    source: ExtractStrategy::Path("result.status"),
                     unit: None,
                     zone: None,
                 },
@@ -1449,7 +1449,7 @@ pub(super) static KIMI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "limit",
-                    path: "result.steps",
+                    source: ExtractStrategy::Path("result.steps"),
                     unit: Some(Unit::Requests),
                     zone: None,
                 },
@@ -1470,13 +1470,13 @@ pub(super) static KIMI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "request_id",
-                    path: "params.payload.id",
+                    source: ExtractStrategy::Path("params.payload.id"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "tool_call_id",
-                    path: "params.payload.tool_call_id",
+                    source: ExtractStrategy::Path("params.payload.tool_call_id"),
                     unit: None,
                     zone: None,
                 },
@@ -1503,7 +1503,7 @@ pub(super) static OPENCODE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "message",
+                    source: ExtractStrategy::Path("message"),
                     unit: None,
                     zone: None,
                 },
@@ -1524,25 +1524,25 @@ pub(super) static OPENCODE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "provider_error",
+                    source: ExtractStrategy::Path("provider_error"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "provider",
-                    path: "provider_id",
+                    source: ExtractStrategy::Path("provider_id"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "model",
-                    path: "model_id",
+                    source: ExtractStrategy::Path("model_id"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "lifts_at",
-                    path: "reset_at",
+                    source: ExtractStrategy::Path("reset_at"),
                     unit: Some(Unit::Iso8601),
                     zone: Some(Zone::Utc),
                 },
@@ -1563,25 +1563,25 @@ pub(super) static OPENCODE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "provider_error",
+                    source: ExtractStrategy::Path("provider_error"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "provider",
-                    path: "provider_id",
+                    source: ExtractStrategy::Path("provider_id"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "model",
-                    path: "model_id",
+                    source: ExtractStrategy::Path("model_id"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "lifts_at",
-                    path: "reset_at",
+                    source: ExtractStrategy::Path("reset_at"),
                     unit: Some(Unit::Iso8601),
                     zone: Some(Zone::Utc),
                 },
@@ -1602,19 +1602,19 @@ pub(super) static OPENCODE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "provider_error",
+                    source: ExtractStrategy::Path("provider_error"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "provider",
-                    path: "provider_id",
+                    source: ExtractStrategy::Path("provider_id"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "model",
-                    path: "model_id",
+                    source: ExtractStrategy::Path("model_id"),
                     unit: None,
                     zone: None,
                 },
@@ -1635,19 +1635,19 @@ pub(super) static OPENCODE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "provider_error",
+                    source: ExtractStrategy::Path("provider_error"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "provider",
-                    path: "provider_id",
+                    source: ExtractStrategy::Path("provider_id"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "model",
-                    path: "model_id",
+                    source: ExtractStrategy::Path("model_id"),
                     unit: None,
                     zone: None,
                 },
@@ -1668,19 +1668,19 @@ pub(super) static OPENCODE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "provider_error",
+                    source: ExtractStrategy::Path("provider_error"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "provider",
-                    path: "provider_id",
+                    source: ExtractStrategy::Path("provider_id"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "model",
-                    path: "model_id",
+                    source: ExtractStrategy::Path("model_id"),
                     unit: None,
                     zone: None,
                 },
@@ -1701,7 +1701,7 @@ pub(super) static OPENCODE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "version",
-                    path: "version",
+                    source: ExtractStrategy::Path("version"),
                     unit: None,
                     zone: None,
                 },
@@ -1722,13 +1722,13 @@ pub(super) static OPENCODE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "provider",
-                    path: "provider_id",
+                    source: ExtractStrategy::Path("provider_id"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "resolved",
-                    path: "model_id",
+                    source: ExtractStrategy::Path("model_id"),
                     unit: None,
                     zone: None,
                 },
@@ -1755,7 +1755,7 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "message.errorMessage",
+                    source: ExtractStrategy::Path("message.errorMessage"),
                     unit: None,
                     zone: None,
                 },
@@ -1776,7 +1776,7 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "message.errorMessage",
+                    source: ExtractStrategy::Path("message.errorMessage"),
                     unit: None,
                     zone: None,
                 },
@@ -1797,7 +1797,7 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "message.errorMessage",
+                    source: ExtractStrategy::Path("message.errorMessage"),
                     unit: None,
                     zone: None,
                 },
@@ -1818,7 +1818,7 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "message.errorMessage",
+                    source: ExtractStrategy::Path("message.errorMessage"),
                     unit: None,
                     zone: None,
                 },
@@ -1839,7 +1839,7 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "message.errorMessage",
+                    source: ExtractStrategy::Path("message.errorMessage"),
                     unit: None,
                     zone: None,
                 },
@@ -1860,7 +1860,7 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "message.errorMessage",
+                    source: ExtractStrategy::Path("message.errorMessage"),
                     unit: None,
                     zone: None,
                 },
@@ -1881,7 +1881,7 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "message.errorMessage",
+                    source: ExtractStrategy::Path("message.errorMessage"),
                     unit: None,
                     zone: None,
                 },
@@ -1902,31 +1902,31 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "input",
-                    path: "message.usage.input",
+                    source: ExtractStrategy::Path("message.usage.input"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "output",
-                    path: "message.usage.output",
+                    source: ExtractStrategy::Path("message.usage.output"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "cache_read",
-                    path: "message.usage.cacheRead",
+                    source: ExtractStrategy::Path("message.usage.cacheRead"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "cache_write",
-                    path: "message.usage.cacheWrite",
+                    source: ExtractStrategy::Path("message.usage.cacheWrite"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "total",
-                    path: "message.usage.totalTokens",
+                    source: ExtractStrategy::Path("message.usage.totalTokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
@@ -1947,25 +1947,25 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "attempt",
-                    path: "attempt",
+                    source: ExtractStrategy::Path("attempt"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "max_attempts",
-                    path: "maxAttempts",
+                    source: ExtractStrategy::Path("maxAttempts"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "wait",
-                    path: "delayMs",
+                    source: ExtractStrategy::Path("delayMs"),
                     unit: Some(Unit::DurationMillis),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "message",
-                    path: "errorMessage",
+                    source: ExtractStrategy::Path("errorMessage"),
                     unit: None,
                     zone: None,
                 },
@@ -2000,19 +2000,19 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "request_id",
-                    path: "id",
+                    source: ExtractStrategy::Path("id"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "method",
-                    path: "method",
+                    source: ExtractStrategy::Path("method"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "prompt",
-                    path: "message",
+                    source: ExtractStrategy::Path("message"),
                     unit: None,
                     zone: None,
                 },
@@ -2033,19 +2033,19 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "provider",
-                    path: "provider",
+                    source: ExtractStrategy::Path("provider"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "resolved",
-                    path: "modelId",
+                    source: ExtractStrategy::Path("modelId"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "timestamp",
-                    path: "timestamp",
+                    source: ExtractStrategy::Path("timestamp"),
                     unit: Some(Unit::Iso8601),
                     zone: Some(Zone::Utc),
                 },
@@ -2066,31 +2066,31 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "input",
-                    path: "message.usage.input",
+                    source: ExtractStrategy::Path("message.usage.input"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "output",
-                    path: "message.usage.output",
+                    source: ExtractStrategy::Path("message.usage.output"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "cache_read",
-                    path: "message.usage.cacheRead",
+                    source: ExtractStrategy::Path("message.usage.cacheRead"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "cache_write",
-                    path: "message.usage.cacheWrite",
+                    source: ExtractStrategy::Path("message.usage.cacheWrite"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "total",
-                    path: "message.usage.totalTokens",
+                    source: ExtractStrategy::Path("message.usage.totalTokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
@@ -2111,19 +2111,19 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "session_id",
-                    path: "id",
+                    source: ExtractStrategy::Path("id"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "created_at",
-                    path: "timestamp",
+                    source: ExtractStrategy::Path("timestamp"),
                     unit: Some(Unit::Iso8601),
                     zone: Some(Zone::Utc),
                 },
                 ExtractionSpec {
                     field: "cwd",
-                    path: "cwd",
+                    source: ExtractStrategy::Path("cwd"),
                     unit: None,
                     zone: None,
                 },
@@ -2144,7 +2144,7 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "stderr_tail",
+                    source: ExtractStrategy::Path("stderr_tail"),
                     unit: None,
                     zone: None,
                 },
@@ -2171,13 +2171,13 @@ pub(super) static QWEN_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "resolved",
-                    path: "model",
+                    source: ExtractStrategy::Path("model"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "session_id",
-                    path: "session_id",
+                    source: ExtractStrategy::Path("session_id"),
                     unit: None,
                     zone: None,
                 },
@@ -2198,13 +2198,13 @@ pub(super) static QWEN_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "resolved",
-                    path: "model",
+                    source: ExtractStrategy::Path("model"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "session_id",
-                    path: "session_id",
+                    source: ExtractStrategy::Path("session_id"),
                     unit: None,
                     zone: None,
                 },
@@ -2225,13 +2225,13 @@ pub(super) static QWEN_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "resolved",
-                    path: "model",
+                    source: ExtractStrategy::Path("model"),
                     unit: None,
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "session_id",
-                    path: "session_id",
+                    source: ExtractStrategy::Path("session_id"),
                     unit: None,
                     zone: None,
                 },
@@ -2252,7 +2252,7 @@ pub(super) static QWEN_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "error.message",
+                    source: ExtractStrategy::Path("error.message"),
                     unit: None,
                     zone: None,
                 },
@@ -2273,7 +2273,7 @@ pub(super) static QWEN_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "message",
-                    path: "error.message",
+                    source: ExtractStrategy::Path("error.message"),
                     unit: None,
                     zone: None,
                 },
@@ -2308,13 +2308,13 @@ pub(super) static QWEN_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "input",
-                    path: "usage.input_tokens",
+                    source: ExtractStrategy::Path("usage.input_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "output",
-                    path: "usage.output_tokens",
+                    source: ExtractStrategy::Path("usage.output_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
@@ -2335,13 +2335,13 @@ pub(super) static QWEN_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             extractions: &[
                 ExtractionSpec {
                     field: "input",
-                    path: "token_usage.input_tokens",
+                    source: ExtractStrategy::Path("token_usage.input_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
                 ExtractionSpec {
                     field: "output",
-                    path: "token_usage.output_tokens",
+                    source: ExtractStrategy::Path("token_usage.output_tokens"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },

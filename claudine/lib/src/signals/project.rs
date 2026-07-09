@@ -91,6 +91,7 @@ mod tests {
             source: SignalSource::Stream,
             first_seen: Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
             occurrences: 1,
+            context: Default::default(),
         }
     }
 
@@ -103,6 +104,7 @@ mod tests {
     fn unrelated_signals_project_to_none() {
         let signals = vec![observed(SignalEvent::NoFunds {
             message: Some("no credits".into()),
+            top_up_url: None,
         })];
         assert_eq!(rate_limit_info(&signals), None);
     }

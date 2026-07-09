@@ -25,7 +25,8 @@ use serde::Serialize;
 use serde_json::Value;
 
 use claudine::signals::{
-    DetectionMode, DetectionRecord, ProviderSignalTable, SignalEngine, all_detection_tables,
+    DetectionMode, DetectionRecord, ExtractStrategy, ProviderSignalTable, SignalEngine,
+    all_detection_tables,
 };
 use claudine::stream::logs::opencode::{ParsedOpenCodeStderrLine, classify, classify_raw, parse_line};
 
@@ -380,7 +381,7 @@ fn check_provider(
             PositiveOutcome::Unresolved(fields) => {
                 let detail = fields
                     .iter()
-                    .map(|(field, path)| format!("`{field}` (path `{path}`)"))
+                    .map(|(field, source)| format!("`{field}` (source `{source}`)"))
                     .collect::<Vec<_>>()
                     .join(", ");
                 report.failures.push(format!(
@@ -490,7 +491,7 @@ enum PositiveOutcome {
     NeverFired,
     /// Fired somewhere, but no firing payload resolved every extraction —
     /// carries the smallest unresolved (field, path) set seen.
-    Unresolved(Vec<(&'static str, &'static str)>),
+    Unresolved(Vec<(&'static str, String)>),
 }
 
 fn replay_positive(
@@ -499,7 +500,7 @@ fn replay_positive(
     payloads: &[Value],
 ) -> PositiveOutcome {
     let engine = replay_engine(table, record);
-    let mut best_unresolved: Option<Vec<(&'static str, &'static str)>> = None;
+    let mut best_unresolved: Option<Vec<(&'static str, String)>> = None;
     for payload in payloads {
         let observations = engine.observe_detailed(record.source, payload);
         let Some(observation) = observations
@@ -508,11 +509,11 @@ fn replay_positive(
         else {
             continue;
         };
-        let unresolved: Vec<(&'static str, &'static str)> = record
+        let unresolved: Vec<(&'static str, String)> = record
             .extractions
             .iter()
             .filter(|spec| !observation.resolved_fields.contains(&spec.field))
-            .map(|spec| (spec.field, spec.path))
+            .map(|spec| (spec.field, describe_extract_source(&spec.source)))
             .collect();
         if unresolved.is_empty() {
             return PositiveOutcome::Passed;
@@ -527,6 +528,19 @@ fn replay_positive(
     match best_unresolved {
         Some(fields) => PositiveOutcome::Unresolved(fields),
         None => PositiveOutcome::NeverFired,
+    }
+}
+
+/// Human-readable one-line description of an extraction strategy for the
+/// `signals check` unresolved-field diagnostic.
+fn describe_extract_source(source: &ExtractStrategy) -> String {
+    match source {
+        ExtractStrategy::Path(path) => format!("path `{path}`"),
+        ExtractStrategy::Literal(value) => format!("literal `{value}`"),
+        ExtractStrategy::Regex { path, pattern } => format!("regex `{pattern}` on `{path}`"),
+        ExtractStrategy::StartStopTokens { path, start, stop } => {
+            format!("tokens `{start}`..`{stop}` on `{path}`")
+        }
     }
 }
 

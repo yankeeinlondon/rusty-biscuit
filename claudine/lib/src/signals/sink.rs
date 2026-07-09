@@ -2,6 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use claudine_catalog_types::{SignalEvent, SignalSource};
+use std::collections::BTreeMap;
 use std::time::Duration;
 use tracing::debug;
 
@@ -10,6 +11,12 @@ use tracing::debug;
 /// provider event (the same throttle can arrive on stdout AND in a session
 /// log within moments) into a single signal with a bumped counter.
 pub const CORRELATION_WINDOW: Duration = Duration::from_secs(5);
+
+/// Extraction fields a fired record resolved but the typed [`SignalEvent`]
+/// variant has no slot for — held as observation provenance (more-struture
+/// Cat 1B) instead of debug-dropped. Keyed by the corpus `field` name (e.g.
+/// `provider`, `model`, `session_id`); values are display strings.
+pub type SignalContext = BTreeMap<&'static str, String>;
 
 /// One deduplicated signal observation.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -20,6 +27,11 @@ pub struct ObservedSignal {
     pub first_seen: DateTime<Utc>,
     /// Emissions folded into this observation, including the first.
     pub occurrences: u32,
+    /// Supplementary extraction fields with no variant slot, from the FIRST
+    /// event (first-event-wins, mirroring the other fields). Empty for
+    /// bespoke emissions and records whose fields all landed in the variant.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub context: SignalContext,
 }
 
 /// Collects emitted [`SignalEvent`]s for one wrapped run.
@@ -42,8 +54,30 @@ impl SignalSink {
         self.emit_at(event, source, Utc::now());
     }
 
+    /// Record `event` with its supplementary [`SignalContext`] (the declarative
+    /// engine path). Bespoke emissions use [`emit`](Self::emit) (empty context).
+    pub fn emit_with_context(
+        &mut self,
+        event: SignalEvent,
+        context: SignalContext,
+        source: SignalSource,
+    ) {
+        self.emit_at_with_context(event, context, source, Utc::now());
+    }
+
     /// Clock-injected form of [`emit`](Self::emit) for deterministic tests.
     pub(crate) fn emit_at(&mut self, event: SignalEvent, source: SignalSource, at: DateTime<Utc>) {
+        self.emit_at_with_context(event, SignalContext::new(), source, at);
+    }
+
+    /// Clock-injected form of [`emit_with_context`](Self::emit_with_context).
+    pub(crate) fn emit_at_with_context(
+        &mut self,
+        event: SignalEvent,
+        context: SignalContext,
+        source: SignalSource,
+        at: DateTime<Utc>,
+    ) {
         let kind = event.kind();
         let window = chrono::Duration::from_std(CORRELATION_WINDOW)
             .expect("CORRELATION_WINDOW fits chrono::Duration");
@@ -68,6 +102,7 @@ impl SignalSink {
             source,
             first_seen: at,
             occurrences: 1,
+            context,
         });
     }
 
@@ -129,6 +164,7 @@ mod tests {
         sink.emit_at(
             SignalEvent::NoFunds {
                 message: Some("no credits".to_string()),
+                top_up_url: None,
             },
             SignalSource::Stream,
             at(0),

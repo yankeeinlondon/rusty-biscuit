@@ -26,6 +26,7 @@ use tracing::{debug, warn};
 
 use super::event_builder::{build_event, resolve_extractions};
 use super::path::walk;
+use super::sink::SignalContext;
 use super::version::{self, ParsedVersion};
 
 /// One declarative record with its regex compiled once at engine
@@ -112,8 +113,24 @@ impl SignalEngine {
     }
 
     /// Evaluate one payload from `source`, returning at most one event per
-    /// signal kind (per-kind first-match-wins).
+    /// signal kind (per-kind first-match-wins). Drops the supplementary
+    /// context — use [`observe_with_context`](Self::observe_with_context) when
+    /// the caller feeds a sink.
     pub fn observe(&mut self, source: SignalSource, payload: &Value) -> Vec<SignalEvent> {
+        self.observe_with_context(source, payload)
+            .into_iter()
+            .map(|(event, _context)| event)
+            .collect()
+    }
+
+    /// [`observe`](Self::observe) with each event's supplementary context map
+    /// (extraction fields with no variant slot). The sink path uses this so no
+    /// resolved research is dropped (more-struture Cat 1B).
+    pub(crate) fn observe_with_context(
+        &mut self,
+        source: SignalSource,
+        payload: &Value,
+    ) -> Vec<(SignalEvent, SignalContext)> {
         self.fired_records(source, payload)
             .into_iter()
             .filter_map(|record| build_event(record, payload))

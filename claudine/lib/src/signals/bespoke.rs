@@ -8,8 +8,9 @@
 //! [`bespoke_replayer`]. Semantics authority: each record's
 //! `bespoke_rationale:` / notes in `docs/research/signals/<provider>.md`.
 
-use claudine_catalog_types::{SignalEvent, SignalSource};
+use claudine_catalog_types::{QwenLoopType, SignalEvent, SignalSource};
 use serde_json::{Value, json};
+use strum::IntoEnumIterator;
 
 use crate::stream::protocol::kimi::SUPPORTED_WIRE_PROTOCOL_VERSIONS;
 
@@ -278,23 +279,6 @@ impl BespokeDetector for PiRetriesExhausted {
 // qwen — stream-runaway_repetition-result-loop
 // ---------------------------------------------------------------------------
 
-/// Qwen's native `LoopType` vocabulary (qwen.md record
-/// `stream-runaway_repetition-result-loop`). The terminal error `result`
-/// carries only a formatted prose message; the loop type is embedded as one
-/// of these tokens.
-const QWEN_LOOP_TYPES: [&str; 10] = [
-    "CONSECUTIVE_IDENTICAL_TOOL_CALLS",
-    "CHANTING_IDENTICAL_SENTENCES",
-    "REPETITIVE_THOUGHTS",
-    "READ_FILE_LOOP",
-    "ACTION_STAGNATION",
-    "SHELL_COMMAND_STAGNATION",
-    "GLOBAL_TOOL_CALL_DUPLICATE",
-    "ALTERNATING_TOOL_CALL_PATTERN",
-    "TURN_TOOL_CALL_CAP",
-    "INVALID_TOOL_PARAMS_STAGNATION",
-];
-
 /// Qwen's provider-native loop guard mapped onto Claudine's
 /// `runaway_repetition` taxonomy member. The native payload carries no
 /// cycle-length or repeat counts (only prose + the `LoopType` token), so
@@ -315,7 +299,7 @@ impl BespokeDetector for QwenLoopDetected {
             return None;
         }
         let message = payload.pointer("/error/message").and_then(Value::as_str)?;
-        if !QWEN_LOOP_TYPES.iter().any(|token| message.contains(token)) {
+        if !QwenLoopType::iter().any(|token| message.contains(<&str>::from(token))) {
             return None;
         }
         self.fired = true;
@@ -345,7 +329,10 @@ impl BespokeDetector for QwenExitCode {
             return None;
         }
         let event = match payload.get("exit_code").and_then(Value::as_i64) {
-            Some(53) => SignalEvent::TurnLimitReached { limit: None },
+            Some(53) => SignalEvent::TurnLimitReached {
+                limit: None,
+                message: None,
+            },
             Some(55) => SignalEvent::SessionTimeLimitReached { limit: None },
             Some(130) => SignalEvent::Interrupted { message: None },
             _ => return None,
@@ -522,6 +509,20 @@ mod tests {
                 repeats: 0,
             }]
         );
+    }
+
+    /// Mirror gate: every `QwenLoopType` token the guard scans for must be
+    /// documented in the qwen research record's `vocabulary:` list, so the
+    /// enum (the single source) and the corpus cannot drift.
+    #[test]
+    fn qwen_loop_type_enum_mirrors_the_research_vocabulary() {
+        const QWEN_DOC: &str = include_str!("../../../docs/research/signals/qwen.md");
+        for token in QwenLoopType::iter().map(<&str>::from) {
+            assert!(
+                QWEN_DOC.contains(token),
+                "QwenLoopType::{token} is not documented in qwen.md vocabulary"
+            );
+        }
     }
 
     #[test]

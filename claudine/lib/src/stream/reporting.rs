@@ -788,6 +788,7 @@ mod tests {
             source: SignalSource::Wrapper,
             first_seen: Utc.with_ymd_and_hms(2026, 7, 6, 12, 0, 0).unwrap(),
             occurrences: 2,
+            context: Default::default(),
         }];
 
         let meta = summary_to_event_meta_with_context(

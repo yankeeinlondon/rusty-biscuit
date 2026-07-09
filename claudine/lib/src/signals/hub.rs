@@ -91,13 +91,13 @@ impl SignalHub {
         let inner = &mut *inner;
         let mut fired = false;
         if let Some(engine) = inner.engine.as_mut() {
-            let events = engine.observe(source, payload);
-            for event in events {
+            let observations = engine.observe_with_context(source, payload);
+            for (event, context) in observations {
                 fired = true;
                 if let SignalEvent::ProviderVersion { version } = &event {
                     engine.observe_provider_version(version);
                 }
-                inner.sink.emit(event, source);
+                inner.sink.emit_with_context(event, context, source);
             }
         }
         // Table-less hubs have an empty chain, so this preserves the
@@ -229,6 +229,7 @@ mod tests {
             hub_b.emit_bespoke(
                 SignalEvent::NoFunds {
                     message: Some("no credits".into()),
+                    top_up_url: None,
                 },
                 SignalSource::StderrPromoted,
             );

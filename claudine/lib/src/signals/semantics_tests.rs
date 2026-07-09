@@ -92,6 +92,51 @@ fn claude_cost_field_fallback_prefers_total_cost_usd() {
     );
 }
 
+/// The `cache_read` and `cost` extractions now land on the typed
+/// `TokensConsumed` event instead of the debug-drop path (more-struture
+/// Cat 1A).
+#[test]
+fn tokens_consumed_event_carries_cache_read_and_cost() {
+    let mut engine = engine("claude");
+    let events = engine.observe(SignalSource::Stream, &line(CLAUDE_RESULT_COSTS, 1));
+    let carried = events.iter().any(|event| {
+        matches!(
+            event,
+            SignalEvent::TokensConsumed {
+                cache_read: Some(Quantity { value: cr, unit: Unit::Tokens }),
+                cost: Some(Quantity { value: c, unit: Unit::Usd }),
+                ..
+            } if *cr == 200.0 && *c == 0.0042
+        )
+    });
+    assert!(
+        carried,
+        "TokensConsumed should carry cache_read and cost; got {events:?}"
+    );
+}
+
+/// Extraction fields with no variant slot (`provider`, `model`) ride on the
+/// observation as supplementary context instead of being debug-dropped
+/// (more-struture Cat 1B).
+#[test]
+fn unmapped_fields_ride_as_supplementary_context() {
+    let mut engine = engine("opencode");
+    let payload = serde_json::json!({
+        "kind": "RateLimited",
+        "provider_error": "429 Too Many Requests",
+        "provider_id": "zai-coding-plan",
+        "model_id": "glm-5.1",
+    });
+    let observations = engine.observe_with_context(SignalSource::StderrPromoted, &payload);
+    let context = observations
+        .iter()
+        .find(|(event, _)| matches!(event, SignalEvent::RateLimited { .. }))
+        .map(|(_, context)| context)
+        .expect("rate_limited fires on the stderr-promoted 429 shape");
+    assert_eq!(context.get("provider"), Some(&"zai-coding-plan".to_string()));
+    assert_eq!(context.get("model"), Some(&"glm-5.1".to_string()));
+}
+
 /// Coercion pins: eq against a JSON boolean, regex against JSON numbers
 /// (`-32004` keeps its sign, `429` serializes without a decimal point).
 #[test]
@@ -186,6 +231,7 @@ fn walker_reaches_bracket_indexed_message_text() {
     let events = engine.observe(SignalSource::Stream, &line(CLAUDE_BILLING_SYNTHETIC, 0));
     assert!(events.contains(&SignalEvent::NoFunds {
         message: Some("Credit balance is too low".to_string()),
+        top_up_url: None,
     }));
 }
 

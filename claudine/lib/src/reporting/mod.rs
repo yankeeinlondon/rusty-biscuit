@@ -353,6 +353,7 @@ mod tests {
             source: SignalSource::Wrapper,
             first_seen: Utc.with_ymd_and_hms(2026, 3, 9, 11, 59, 0).unwrap(),
             occurrences: 3,
+            context: Default::default(),
         }];
         let stamp = FamilyLatestStamp {
             alias: "opus".to_string(),
