@@ -188,7 +188,7 @@ fn atom_prefers_string(atom: &PropertyAtom) -> bool {
     }
     let primitive = match &atom.ty {
         TypeExpr::Primitive(p) => *p,
-        TypeExpr::InlineObject(_) => return false,
+        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } => return false,
     };
     matches!(
         primitive,
