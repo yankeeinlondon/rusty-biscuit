@@ -721,6 +721,153 @@ pub fn terminal(args: &[Value]) -> Result<Value, String> {
     Ok(Value::String(Prose::new(s).render_optimistic(None)))
 }
 
+// ── List formatting ─────────────────────────────────────────────────
+//
+// Each function takes a list (`Value::Array`) and renders it to a string. A
+// `null` argument propagates as `Value::Null`; a non-array argument is a type
+// error (`… requires an array argument`). The flat joiners render each
+// top-level element via [`scalar_string`]; the Markdown-list renderers recurse
+// into nested arrays and object-array shapes (`depends_on` / `used_by`).
+
+/// Renders each top-level element of `items` to its scalar string form.
+fn list_element_strings(items: &[Value]) -> Vec<String> {
+    items.iter().map(scalar_string).collect()
+}
+
+/// Shared body for the flat joiners: null-propagate, require an array, join.
+fn join_list(name: &str, args: &[Value], sep: &str) -> Result<Value, String> {
+    require_args(name, args, 1)?;
+    if args[0].is_null() {
+        return Ok(Value::Null);
+    }
+    let items = require_array(name, &args[0])?;
+    Ok(Value::String(list_element_strings(items).join(sep)))
+}
+
+/// `as_line_separated(list)` — newline-joined; the explicit form of the default
+/// bare-array rendering.
+pub fn as_line_separated(args: &[Value]) -> Result<Value, String> {
+    join_list("as_line_separated", args, "\n")
+}
+
+/// `as_csv(list)` — comma-separated. Uses `", "` so it reproduces the historical
+/// pre-rendered CSV form of the collapsed `ctx.*` variables byte-for-byte.
+pub fn as_csv(args: &[Value]) -> Result<Value, String> {
+    join_list("as_csv", args, ", ")
+}
+
+/// `as_tsv(list)` — tab-separated.
+pub fn as_tsv(args: &[Value]) -> Result<Value, String> {
+    join_list("as_tsv", args, "\t")
+}
+
+/// `as_space_separated(list)` — space-separated.
+pub fn as_space_separated(args: &[Value]) -> Result<Value, String> {
+    join_list("as_space_separated", args, " ")
+}
+
+/// Indentation for a Markdown-list nesting level (two spaces per level).
+fn list_indent(depth: usize) -> String {
+    "  ".repeat(depth)
+}
+
+/// The bullet marker for the `n`-th item at a level.
+fn list_marker(ordered: bool, n: usize) -> String {
+    if ordered {
+        format!("{n}.")
+    } else {
+        "-".to_string()
+    }
+}
+
+/// Renders one object element as a bullet plus recursive sublists.
+///
+/// Scalar-valued fields form the bullet label (joined by a space, in key order);
+/// array- and object-valued fields become indented sublists. This models the
+/// `depends_on` / `used_by` object-array shape — `{ package, dependencies }`
+/// renders `package` as the bullet and each dependency as a sub-bullet — without
+/// any hard-coded field names.
+fn render_object_item(
+    map: &serde_json::Map<String, Value>,
+    ordered: bool,
+    depth: usize,
+    n: usize,
+    out: &mut Vec<String>,
+) {
+    let mut label_parts = Vec::new();
+    let mut containers = Vec::new();
+    for (_key, value) in map {
+        match value {
+            Value::Array(_) | Value::Object(_) => containers.push(value),
+            scalar => label_parts.push(scalar_string(scalar)),
+        }
+    }
+    out.push(format!(
+        "{}{} {}",
+        list_indent(depth),
+        list_marker(ordered, n),
+        label_parts.join(" ")
+    ));
+    for container in containers {
+        match container {
+            Value::Array(children) => render_list_level(children, ordered, depth + 1, out),
+            Value::Object(child) => render_object_item(child, ordered, depth + 1, 1, out),
+            _ => {}
+        }
+    }
+}
+
+/// Recursively renders the items at one nesting level into `out`.
+///
+/// A scalar element becomes a bullet; an object element delegates to
+/// [`render_object_item`]; an array element renders its contents as an indented
+/// sublist one level deeper (auto-nesting — nesting is a property of the data,
+/// not a separate function).
+fn render_list_level(items: &[Value], ordered: bool, depth: usize, out: &mut Vec<String>) {
+    let mut counter = 0usize;
+    for item in items {
+        match item {
+            Value::Array(children) => render_list_level(children, ordered, depth + 1, out),
+            Value::Object(map) => {
+                counter += 1;
+                render_object_item(map, ordered, depth, counter, out);
+            }
+            scalar => {
+                counter += 1;
+                out.push(format!(
+                    "{}{} {}",
+                    list_indent(depth),
+                    list_marker(ordered, counter),
+                    scalar_string(scalar)
+                ));
+            }
+        }
+    }
+}
+
+/// Shared body for the Markdown-list renderers.
+fn render_markdown_list(name: &str, args: &[Value], ordered: bool) -> Result<Value, String> {
+    require_args(name, args, 1)?;
+    if args[0].is_null() {
+        return Ok(Value::Null);
+    }
+    let items = require_array(name, &args[0])?;
+    let mut lines = Vec::new();
+    render_list_level(items, ordered, 0, &mut lines);
+    Ok(Value::String(lines.join("\n")))
+}
+
+/// `as_unordered_list(list)` — Markdown unordered list with recursive
+/// auto-nesting of nested arrays and object-array shapes.
+pub fn as_unordered_list(args: &[Value]) -> Result<Value, String> {
+    render_markdown_list("as_unordered_list", args, false)
+}
+
+/// `as_ordered_list(list)` — Markdown ordered list with recursive auto-nesting.
+pub fn as_ordered_list(args: &[Value]) -> Result<Value, String> {
+    render_markdown_list("as_ordered_list", args, true)
+}
+
 /// Parses a strict ISO date `YYYY-MM-DD`.
 pub fn parse_iso_date(s: &str) -> Option<NaiveDate> {
     if s.len() != 10 {
@@ -1979,6 +2126,13 @@ pub const PURE_FUNCTIONS: &[PureFunction] = &[
     PureFunction { canonical: "replace", aliases: &[], signatures: &["replace(x, find, replacement)"], handler: replace },
     PureFunction { canonical: "replace_first", aliases: &["replacefirst"], signatures: &["replace_first(x, find, replacement)"], handler: replace_first },
     PureFunction { canonical: "replace_last", aliases: &["replacelast"], signatures: &["replace_last(x, find, replacement)"], handler: replace_last },
+    // List formatting
+    PureFunction { canonical: "as_line_separated", aliases: &["aslineseparated"], signatures: &["as_line_separated(list)"], handler: as_line_separated },
+    PureFunction { canonical: "as_csv", aliases: &["ascsv"], signatures: &["as_csv(list)"], handler: as_csv },
+    PureFunction { canonical: "as_tsv", aliases: &["astsv"], signatures: &["as_tsv(list)"], handler: as_tsv },
+    PureFunction { canonical: "as_space_separated", aliases: &["asspaceseparated"], signatures: &["as_space_separated(list)"], handler: as_space_separated },
+    PureFunction { canonical: "as_unordered_list", aliases: &["asunorderedlist"], signatures: &["as_unordered_list(list)"], handler: as_unordered_list },
+    PureFunction { canonical: "as_ordered_list", aliases: &["asorderedlist"], signatures: &["as_ordered_list(list)"], handler: as_ordered_list },
     // Rendering
     PureFunction { canonical: "terminal", aliases: &["terminal"], signatures: &["terminal(string)"], handler: terminal },
     // Date formatting
@@ -2172,6 +2326,103 @@ mod tests {
 
     fn vv(a: Value, b: Value) -> Vec<Value> {
         vec![a, b]
+    }
+
+    mod fn_list_formatting {
+        use super::*;
+
+        fn s(value: &Value) -> String {
+            match value {
+                Value::String(text) => text.clone(),
+                other => panic!("expected a string result, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn flat_joiners_render_scalar_elements() {
+            let list = v(json!(["a", "b", "c"]));
+            assert_eq!(s(&as_line_separated(&list).unwrap()), "a\nb\nc");
+            assert_eq!(s(&as_csv(&list).unwrap()), "a, b, c");
+            assert_eq!(s(&as_tsv(&list).unwrap()), "a\tb\tc");
+            assert_eq!(s(&as_space_separated(&list).unwrap()), "a b c");
+        }
+
+        #[test]
+        fn mixed_scalar_types_render_via_scalar_string() {
+            let list = v(json!(["a", 2, true, null]));
+            // `null` renders as an empty element; a number drops its `.0`.
+            assert_eq!(s(&as_csv(&list).unwrap()), "a, 2, true, ");
+            assert_eq!(s(&as_space_separated(&list).unwrap()), "a 2 true ");
+        }
+
+        #[test]
+        fn empty_array_renders_empty_string() {
+            let empty = v(json!([]));
+            assert_eq!(s(&as_line_separated(&empty).unwrap()), "");
+            assert_eq!(s(&as_csv(&empty).unwrap()), "");
+            assert_eq!(s(&as_unordered_list(&empty).unwrap()), "");
+            assert_eq!(s(&as_ordered_list(&empty).unwrap()), "");
+        }
+
+        #[test]
+        fn null_argument_propagates() {
+            assert_eq!(as_csv(&v(json!(null))).unwrap(), json!(null));
+            assert_eq!(as_unordered_list(&v(json!(null))).unwrap(), json!(null));
+        }
+
+        #[test]
+        fn non_array_argument_is_a_type_error() {
+            let err = as_csv(&v(json!("scalar"))).unwrap_err();
+            assert!(err.contains("array argument"), "unexpected error: {err}");
+            let err = as_unordered_list(&v(json!(42))).unwrap_err();
+            assert!(err.contains("array argument"), "unexpected error: {err}");
+        }
+
+        #[test]
+        fn unordered_list_renders_flat_scalars() {
+            let list = v(json!(["1", "2", "3"]));
+            assert_eq!(s(&as_unordered_list(&list).unwrap()), "- 1\n- 2\n- 3");
+        }
+
+        #[test]
+        fn ordered_list_renders_flat_scalars() {
+            let list = v(json!(["a", "b", "c"]));
+            assert_eq!(s(&as_ordered_list(&list).unwrap()), "1. a\n2. b\n3. c");
+        }
+
+        #[test]
+        fn nested_arrays_auto_nest_as_sublists() {
+            let list = v(json!(["first", ["a", "b"], "second"]));
+            assert_eq!(
+                s(&as_ordered_list(&list).unwrap()),
+                "1. first\n  1. a\n  2. b\n2. second"
+            );
+            assert_eq!(
+                s(&as_unordered_list(&list).unwrap()),
+                "- first\n  - a\n  - b\n- second"
+            );
+        }
+
+        #[test]
+        fn object_array_dependency_shape_renders_as_nested_bullets() {
+            let list = v(json!([
+                { "package": "darkmatter", "dependencies": ["biscuit-terminal", "renderable"] },
+                { "package": "renderable", "dependencies": [] },
+            ]));
+            assert_eq!(
+                s(&as_unordered_list(&list).unwrap()),
+                "- darkmatter\n  - biscuit-terminal\n  - renderable\n- renderable"
+            );
+        }
+
+        #[test]
+        fn deeply_nested_arrays_recurse() {
+            let list = v(json!(["a", ["b", ["c", "d"]]]));
+            assert_eq!(
+                s(&as_unordered_list(&list).unwrap()),
+                "- a\n  - b\n    - c\n    - d"
+            );
+        }
     }
 
     mod fn_type_predicates {

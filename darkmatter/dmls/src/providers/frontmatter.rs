@@ -290,7 +290,7 @@ fn ctx_hover(ctx: &DocumentContext, entry: &FmEntry) -> Option<Hover> {
             .find(|descriptor| descriptor.name == entry.key);
         match descriptor {
             Some(descriptor) => format!(
-                "**`ctx.{}`** ({:?}) — read-only, Darkmatter-owned\n\n{}",
+                "**`ctx.{}`** ({}) — read-only, Darkmatter-owned\n\n{}",
                 descriptor.name, descriptor.display_type, descriptor.description
             ),
             None => format!("**`ctx.{}`** — Darkmatter-generated (read-only)", entry.key),

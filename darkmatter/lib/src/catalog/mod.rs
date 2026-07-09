@@ -441,7 +441,7 @@ mod tests {
 
         let mut failures = Vec::new();
         check(
-            crate::markdown::compose::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS,
+            &crate::markdown::compose::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS,
             "context",
             &mut failures,
         );
