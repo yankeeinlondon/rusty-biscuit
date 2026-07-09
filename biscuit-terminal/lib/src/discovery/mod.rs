@@ -19,7 +19,10 @@
 //! - [`fonts`] - Font detection utilities (font name, size, ligatures)
 //!   (Per-terminal parsers under `wezterm`, `kitty`, `alacritty`, `ghostty`, `iterm2`,
 //!   plus `nerd`, `window_size`, `parser`, and `types` modules.)
+//! - [`app_metadata`] - Per-app config-location and environment metadata model
+//!   (`&'static` facts + OS-target resolution + portable path-template expansion).
 
+pub mod app_metadata;
 pub mod clipboard;
 pub mod config_paths;
 pub mod cursor_position;

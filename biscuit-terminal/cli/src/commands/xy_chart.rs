@@ -1,6 +1,6 @@
 use crate::args::LayoutArgs;
 use crate::commands::mermaid::{build_mermaid_diagram, display_mermaid};
-use crate::commands::shared::print_example_command;
+use crate::commands::shared::{print_example_command_with_terminal, terminal_for_render};
 use crate::commands::{CliContext, Run};
 use clap::Args as ClapArgs;
 use std::io::Write;
@@ -82,6 +82,7 @@ impl Run for BarChartArgs {
             self.meta,
             &self.data,
             ctx.json,
+            ctx.plain,
         )
     }
 }
@@ -148,6 +149,7 @@ impl Run for LineChartArgs {
             self.meta,
             &self.data,
             ctx.json,
+            ctx.plain,
         )
     }
 }
@@ -170,6 +172,7 @@ pub fn render_xy_chart(
     meta: bool,
     data: &[String],
     json: bool,
+    plain: bool,
 ) -> color_eyre::Result<()> {
     let _ = std::io::stdout().flush();
 
@@ -302,14 +305,23 @@ pub fn render_xy_chart(
         XyChartType::Bar => "bar chart",
         XyChartType::Line => "line chart",
     };
-    display_mermaid(&diagram, &instructions, chart_name, layout, meta, false)?;
+    let terminal = terminal_for_render(plain);
+    display_mermaid(
+        &diagram,
+        &instructions,
+        chart_name,
+        layout,
+        meta,
+        false,
+        &terminal,
+    )?;
 
     if example {
         let cmd = match chart_type {
             XyChartType::Bar => BAR_CHART_EXAMPLE_CMD,
             XyChartType::Line => LINE_CHART_EXAMPLE_CMD,
         };
-        print_example_command(cmd);
+        print_example_command_with_terminal(cmd, &terminal);
     }
 
     Ok(())

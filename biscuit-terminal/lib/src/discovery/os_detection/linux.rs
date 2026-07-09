@@ -245,6 +245,57 @@ pub fn is_wsl1() -> bool {
     })
 }
 
+/// Check if the process is running inside WSL 2 (Windows Subsystem for Linux, version 2).
+///
+/// Unlike WSL 1, WSL 2 runs a genuine Linux kernel inside a lightweight VM, so it does not
+/// suffer the cooked-mode terminal-probe hazard that motivates [`is_wsl1`]. This detector
+/// exists for *config-location* resolution: under WSL the relevant terminal config often
+/// lives on the Windows filesystem (reached via `/mnt/c`), so callers need to distinguish
+/// WSL 2 from native Linux, and WSL 1 from WSL 2 (their IPC/interop surfaces differ).
+///
+/// ## Detection contract
+///
+/// This is a best-effort heuristic, not a guarantee. A result of `true` is treated as
+/// "very likely WSL 2"; `false` means "no WSL 2 signature found", which on an exotic setup
+/// could be a false negative. Detection is Linux-only and returns `false` when the WSL 1
+/// signature is present (WSL 1 takes precedence). It looks for:
+///
+/// 1. `microsoft` (or `wsl2`) in `/proc/version`, the marker Microsoft ships in the WSL 2
+///    kernel build string.
+/// 2. Failing that, the `WSL_INTEROP` or `WSL_DISTRO_NAME` environment variables, which the
+///    WSL 2 runtime exports into the distro.
+///
+/// The result is cached per-process via `OnceLock`.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::discovery::os_detection::is_wsl2;
+///
+/// if is_wsl2() {
+///     println!("WSL 2 detected — config may live on the Windows filesystem");
+/// }
+/// ```
+pub fn is_wsl2() -> bool {
+    static CACHED: OnceLock<bool> = OnceLock::new();
+    *CACHED.get_or_init(|| {
+        if detect_os_type() != OsType::Linux {
+            return false;
+        }
+        // WSL 1 and WSL 2 are mutually exclusive; WSL 1's signature wins.
+        if is_wsl1() {
+            return false;
+        }
+        if let Ok(version) = fs::read_to_string("/proc/version") {
+            let lower = version.to_lowercase();
+            if lower.contains("microsoft") || lower.contains("wsl2") {
+                return true;
+            }
+        }
+        std::env::var("WSL_INTEROP").is_ok() || std::env::var("WSL_DISTRO_NAME").is_ok()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -533,5 +584,23 @@ DISTRIB_RELEASE=22.04
 
         #[cfg(not(target_os = "linux"))]
         assert!(!first, "is_wsl1 must be false on non-Linux platforms");
+    }
+
+    #[test]
+    fn test_is_wsl2_does_not_panic_and_is_cached() {
+        let first = is_wsl2();
+        let second = is_wsl2();
+        assert_eq!(first, second, "is_wsl2 result should be cached");
+
+        #[cfg(not(target_os = "linux"))]
+        assert!(!first, "is_wsl2 must be false on non-Linux platforms");
+    }
+
+    #[test]
+    fn test_wsl1_and_wsl2_are_mutually_exclusive() {
+        assert!(
+            !(is_wsl1() && is_wsl2()),
+            "a host cannot be both WSL 1 and WSL 2"
+        );
     }
 }

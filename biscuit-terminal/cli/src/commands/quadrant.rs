@@ -1,6 +1,8 @@
 use crate::args::LayoutArgs;
 use crate::commands::mermaid::{build_mermaid_diagram, display_mermaid};
-use crate::commands::shared::{format_axis_label, print_example_command};
+use crate::commands::shared::{
+    format_axis_label, print_example_command_with_terminal, terminal_for_render,
+};
 use crate::commands::{CliContext, Run};
 use biscuit_terminal::components::mermaid::QuadrantTheme;
 use clap::Args as ClapArgs;
@@ -218,6 +220,7 @@ impl Run for QuadrantArgs {
             &self.layout,
         )?
         .with_config(config);
+        let terminal = terminal_for_render(ctx.plain);
         display_mermaid(
             &diagram,
             &instructions,
@@ -225,10 +228,11 @@ impl Run for QuadrantArgs {
             &self.layout,
             self.meta,
             false,
+            &terminal,
         )?;
 
         if self.example {
-            print_example_command(QUADRANT_EXAMPLE_CMD);
+            print_example_command_with_terminal(QUADRANT_EXAMPLE_CMD, &terminal);
         }
 
         Ok(())

@@ -1,8 +1,8 @@
 use crate::args::LayoutArgs;
+use crate::commands::shared::terminal_for_render;
 use crate::commands::{CliContext, Run};
 use biscuit_terminal::components::filesystem::FileSystem;
 use biscuit_terminal::components::renderable::TerminalRenderable;
-use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Length, TargetValue};
 use clap::Args as ClapArgs;
 use renderable::browser::BrowserRenderable;
@@ -68,7 +68,7 @@ pub struct DirArgs {
 }
 
 impl Run for DirArgs {
-    fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
+    fn run(self, ctx: &CliContext) -> color_eyre::Result<()> {
         let path = if self.example {
             DIR_EXAMPLE_PATH
         } else {
@@ -113,7 +113,15 @@ impl Run for DirArgs {
             return Ok(());
         }
 
-        render_dir(path, depth, &filter, self.skip_root, &self.layout, &options)?;
+        render_dir(
+            path,
+            depth,
+            &filter,
+            self.skip_root,
+            &self.layout,
+            &options,
+            ctx.plain,
+        )?;
 
         if self.example {
             crate::commands::shared::print_example_command(DIR_EXAMPLE_CMD);
@@ -211,6 +219,7 @@ pub fn render_dir(
     skip_root: bool,
     layout: &LayoutArgs,
     options: &DirOptions,
+    plain: bool,
 ) -> color_eyre::Result<()> {
     let mut fs = FileSystem::new_with_formatting(path)?;
 
@@ -251,7 +260,7 @@ pub fn render_dir(
 
     fs.ensure_tree_built();
 
-    let term = Terminal::new();
+    let term = terminal_for_render(plain);
     let output = fs.render(&term);
 
     let top = layout.margin_top.unwrap_or(1);

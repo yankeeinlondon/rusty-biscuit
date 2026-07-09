@@ -62,6 +62,13 @@ pub struct Args {
     #[arg(long, global = true, display_order = 104)]
     pub silent: bool,
 
+    /// Output plain text without ANSI escape codes.
+    ///
+    /// Forces color depth to none and overrides FORCE_COLOR / CLICOLOR_FORCE.
+    /// NO_COLOR is still honored when --plain is absent.
+    #[arg(long, global = true, display_order = 105)]
+    pub plain: bool,
+
     /// Generate shell completions and exit.
     #[arg(long, value_name = "SHELL", global = true, display_order = 102)]
     pub completions: Option<ShellType>,
@@ -79,6 +86,9 @@ pub struct Args {
 #[command(disable_help_subcommand = true)]
 #[allow(clippy::large_enum_variant)]
 pub enum Command {
+    #[command(display_order = 0)]
+    About(about::AboutArgs),
+
     #[command(display_order = 1)]
     Image(image::ImageArgs),
 

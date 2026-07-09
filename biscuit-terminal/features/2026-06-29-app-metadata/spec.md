@@ -1,5 +1,6 @@
 ---
 clarified: "claude/claude-opus-4-8[1m]"
+review_iterations: 9
 ---
 
 # Spec: Terminal App Configuration & Environment Metadata

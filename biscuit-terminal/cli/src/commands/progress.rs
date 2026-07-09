@@ -1,5 +1,5 @@
 use crate::commands::color_parse::parse_color;
-use crate::commands::shared::{detect_terminal_honoring_force_color, print_example_command};
+use crate::commands::shared::{print_example_command, terminal_for_render};
 use crate::commands::{CliContext, Run};
 use biscuit_terminal::components::progress::Progress;
 use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
@@ -63,7 +63,7 @@ pub struct ProgressArgs {
 }
 
 impl Run for ProgressArgs {
-    fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
+    fn run(self, ctx: &CliContext) -> color_eyre::Result<()> {
         let percent = self.percent.unwrap_or(PROGRESS_EXAMPLE_PERCENT);
         if percent > 100 {
             return Err(color_eyre::eyre::eyre!(
@@ -106,7 +106,7 @@ impl Run for ProgressArgs {
         } else if self.md_plus {
             println!("{}", progress.render_markdown_plus());
         } else {
-            let term = detect_terminal_honoring_force_color();
+            let term = terminal_for_render(ctx.plain);
             println!("{}", progress.render(&term));
         }
 

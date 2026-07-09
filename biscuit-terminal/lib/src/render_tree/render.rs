@@ -1085,8 +1085,8 @@ impl Writer<'_> {
                         let open = style::text_appearance_sgr(&child_effective, term);
                         // Reset, then restore the ancestor appearance so the
                         // run after the span keeps the inherited color/emphasis.
-                        // An empty `open` (e.g. a no-color terminal) closes to
-                        // nothing rather than a stray reset.
+                        // An empty `open` closes to nothing rather than a
+                        // stray reset.
                         let close = style::appearance_close(&open, effective, term);
                         Ok(format!("{open}{styled}{close}"))
                     }
@@ -3453,6 +3453,7 @@ mod render_tree_tests {
     fn no_osc_opts(width: u32) -> TerminalRenderOptions {
         let term = Terminal::builder()
             .width(width)
+            .color_depth(ColorDepth::TrueColor)
             .osc_link_support(false)
             .build();
         TerminalRenderOptions::new(&term, RenderStrictness::Warn)

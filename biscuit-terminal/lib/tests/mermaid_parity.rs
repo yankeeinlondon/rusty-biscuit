@@ -31,6 +31,9 @@ mod parity_helpers;
 use biscuit_terminal::components::mermaid::MermaidDiagram;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::terminal_image::{ImageWidth, TerminalImage};
+use biscuit_terminal::discovery::detection::{ImageSupport, TerminalApp};
+use biscuit_terminal::discovery::fonts::CellSize;
+use biscuit_terminal::terminal::Terminal;
 use renderable::layout::{
     Alignment, Edges, Layout, Length, TargetValue, Width, WordWrap,
 };
@@ -242,6 +245,101 @@ fn mermaid_diagram_renders_non_empty_at_parity_widths() {
             "MermaidDiagram render at width {width} produced empty output"
         );
     }
+}
+
+#[test]
+fn git_graph_diagram_uses_source_png_aspect_even_with_stale_scaled_artifact() {
+    let diagram = MermaidDiagram::new("gitGraph\n    commit id: \"abc1234\"")
+        .with_width(ImageWidth::Characters(40));
+    let term = wezterm_kitty_terminal();
+
+    match diagram.try_render(&term) {
+        Ok(result) => {
+            let stale_scaled_path = scaled_png_sibling(&result.png_path);
+            let source_image = image::open(&result.png_path).expect("source Mermaid PNG should load");
+            let stale_image = image::DynamicImage::new_rgba8(
+                source_image.width().max(1),
+                (source_image.height() * 2).max(1),
+            );
+            stale_image
+                .save(&stale_scaled_path)
+                .expect("stale scaled image fixture should save");
+
+            let rerendered = diagram
+                .try_render(&term)
+                .expect("second Mermaid render should use cached source PNG");
+            let rows = kitty_rows(&rerendered.output).expect("Kitty output should include r=");
+            let rendered_image =
+                image::open(&rerendered.png_path).expect("rendered Mermaid PNG should load");
+            let expected_rows = (rerendered.width_cells as f32
+                * (rendered_image.height() as f32 / rendered_image.width() as f32)
+                * (8.0 / 16.0))
+                .ceil() as u32;
+
+            assert_eq!(rerendered.png_path, result.png_path);
+            assert!(!rerendered.png_path.to_string_lossy().contains("-h125.png"));
+            assert_eq!(rows, expected_rows.max(1));
+        }
+        Err(e) => {
+            eprintln!("Mermaid render unavailable in integration-test env: {e}");
+        }
+    }
+}
+
+#[test]
+fn non_git_graph_diagram_keeps_source_aspect_kitty_row_geometry() {
+    let diagram = MermaidDiagram::new("pie\n    A: 1").with_width(ImageWidth::Characters(40));
+    let term = wezterm_kitty_terminal();
+
+    match diagram.try_render(&term) {
+        Ok(result) => {
+            let rows = kitty_rows(&result.output).expect("Kitty output should include r=");
+            let image = image::open(&result.png_path).expect("cached Mermaid PNG should load");
+            let expected_rows = (result.width_cells as f32
+                * (image.height() as f32 / image.width() as f32)
+                * (8.0 / 16.0))
+                .ceil() as u32;
+
+            assert_eq!(rows, expected_rows.max(1));
+        }
+        Err(e) => {
+            eprintln!("Mermaid render unavailable in integration-test env: {e}");
+        }
+    }
+}
+
+fn wezterm_kitty_terminal() -> Terminal {
+    Terminal::builder()
+        .app(TerminalApp::Wezterm)
+        .is_tty(true)
+        .image_support(ImageSupport::Kitty)
+        .width(80)
+        .cell_size(CellSize {
+            width: 8,
+            height: 16,
+        })
+        .build()
+}
+
+fn kitty_rows(output: &str) -> Option<u32> {
+    output
+        .split('\x1b')
+        .find_map(|segment| segment.strip_prefix("_G"))
+        .and_then(|header_and_data| header_and_data.split_once(';').map(|(header, _)| header))
+        .and_then(|header| {
+            header
+                .split(',')
+                .find_map(|part| part.strip_prefix("r="))
+                .and_then(|rows| rows.parse().ok())
+        })
+}
+
+fn scaled_png_sibling(path: &std::path::Path) -> std::path::PathBuf {
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .expect("path should have a UTF-8 stem");
+    path.with_file_name(format!("{stem}-h125.png"))
 }
 
 // ---------------------------------------------------------------------------

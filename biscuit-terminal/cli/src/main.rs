@@ -9,7 +9,6 @@
 
 use biscuit_terminal::{
     discovery::{clipboard, eval, fonts, mode_2027, osc_queries},
-    terminal::Terminal,
     utils::escape_codes,
 };
 
@@ -19,7 +18,7 @@ pub mod output;
 pub mod types;
 
 use args::*;
-use commands::{CliContext, Run};
+use commands::{shared::terminal_for_render, CliContext, Run};
 use output::*;
 
 use clap::{CommandFactory, Parser};
@@ -46,7 +45,10 @@ fn main() -> color_eyre::Result<()> {
         return handle_completions(shell_arg);
     }
 
-    let ctx = CliContext { json: args.json };
+    let ctx = CliContext {
+        json: args.json,
+        plain: args.plain,
+    };
 
     // Handle subcommands
     if let Some(cmd) = args.command {
@@ -66,7 +68,8 @@ fn main() -> color_eyre::Result<()> {
         if args.json {
             println!("{}", serde_json::to_string_pretty(&analysis)?);
         } else {
-            print_content_analysis(&analysis);
+            let term = terminal_for_render(args.plain);
+            print_content_analysis(&analysis, &term);
         }
         return Ok(());
     }
@@ -80,7 +83,8 @@ fn main() -> color_eyre::Result<()> {
             println!("{}", serde_json::to_string_pretty(&metadata)?);
         }
     } else if !quiet {
-        print_pretty(&metadata, args.verbose);
+        let term = terminal_for_render(args.plain);
+        print_pretty(&metadata, args.verbose, &term);
     }
 
     Ok(())
@@ -144,6 +148,7 @@ pub fn image_completer() -> PathCompleter {
 impl Run for Command {
     fn run(self, ctx: &CliContext) -> color_eyre::Result<()> {
         match self {
+            Command::About(args) => args.run(ctx),
             Command::Image(args) => args.run(ctx),
             Command::Flowchart(args) => args.run(ctx),
             Command::Quadrant(args) => args.run(ctx),

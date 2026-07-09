@@ -1,7 +1,7 @@
 use crate::args::LayoutArgs;
 use crate::commands::shared::{
-    apply_renderable_layout, detect_terminal_honoring_force_color, emit_vertical_margins,
-    print_example_command, render_markdown_with_layout_frontmatter,
+    apply_renderable_layout, emit_vertical_margins, print_example_command,
+    render_markdown_with_layout_frontmatter, terminal_for_render,
 };
 use crate::commands::{CliContext, Run};
 use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
@@ -64,7 +64,7 @@ pub struct SectionArgs {
 }
 
 impl Run for SectionArgs {
-    fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
+    fn run(self, ctx: &CliContext) -> color_eyre::Result<()> {
         let title = if self.example {
             SECTION_EXAMPLE_TITLE.to_string()
         } else {
@@ -128,7 +128,7 @@ impl Run for SectionArgs {
         }
 
         // Terminal (default).
-        let term = detect_terminal_honoring_force_color();
+        let term = terminal_for_render(ctx.plain);
         let output = section.render(&term);
         emit_vertical_margins(&self.layout, || {
             println!("{}", output);
