@@ -173,26 +173,24 @@ properties are computed.
 | `ctx.current_package_area` | Current package area; null if not in a monorepo area |
 | `ctx.area` | Scope name (package or area); empty string at root |
 | `ctx.area_description` | Human-readable scope description |
-| `ctx.current_packages` | Markdown bullet list of packages under CWD |
-| `ctx.depends_on` | Markdown list of internal dependencies |
-| `ctx.used_by` | Markdown list of internal dependents |
-| `ctx.packages` | Comma-separated package names |
-| `ctx.package_areas` | Comma-separated package area names |
-| `ctx.dirty_files` | Comma-separated dirty file paths |
-| `ctx.staged_files` | Comma-separated staged file paths |
-| `ctx.untracked_files` | Comma-separated untracked file paths |
-| `ctx.dirty_files_list` | Markdown bullet list of dirty files |
-| `ctx.staged_files_list` | Markdown bullet list of staged files |
-| `ctx.dirty_packages` | Comma-separated dirty package names |
-| `ctx.staged_packages` | Comma-separated staged package names |
+| `ctx.current_packages` | `string[]` of packages under CWD (`name (relative)`) |
+| `ctx.depends_on` | `object[]` of internal dependencies (`{ package, dependencies }`) |
+| `ctx.used_by` | `object[]` of internal dependents (`{ package, users }`) |
+| `ctx.packages` | `string[]` of package names |
+| `ctx.package_areas` | `string[]` of package area names |
+| `ctx.dirty_files` | `string[]` of dirty file paths |
+| `ctx.staged_files` | `string[]` of staged file paths |
+| `ctx.untracked_files` | `string[]` of untracked file paths |
+| `ctx.dirty_packages` | `string[]` of dirty package names |
+| `ctx.staged_packages` | `string[]` of staged package names |
 | `ctx.current_package_has_dirty_files` | Whether current package has dirty files |
 | `ctx.current_package_has_staged_files` | Whether current package has staged files |
-| `ctx.programming_languages_in_repo` | Comma-separated unique languages; null if not in a repo |
+| `ctx.programming_languages_in_repo` | `string[]` of unique languages; null if not in a repo |
 | `ctx.programming_language` | Context-sensitive primary language |
 | `ctx.package_manager` | Context-sensitive package manager |
-| `ctx.docs_readme` | Comma-separated README paths, scope-filtered |
-| `ctx.docs_blast_radius` | Comma-separated docs with blast_radius frontmatter |
-| `ctx.docs_drift` | Comma-separated docs at risk of drift |
+| `ctx.docs_readme` | `string[]` of README paths, scope-filtered |
+| `ctx.docs_blast_radius` | `string[]` of docs with blast_radius frontmatter |
+| `ctx.docs_drift` | `string[]` of docs at risk of drift |
 | `ctx.docs_skill` | Repo-relative path to best matching SKILL.md; null if none |
 | `ctx.os` | "Windows", "macOS", or "Linux"; null for other |
 | `ctx.os_distro` | Linux distribution name; empty on macOS/Windows |
@@ -211,6 +209,14 @@ All date/time variables have `_utc` variants (e.g., `today_utc`, `day_utc`,
 `year_utc`). Week boundary variables are also available:
 `start_of_week_sun`, `end_of_week_sun`, `start_of_week_mon`, `end_of_week_mon`
 (plus UTC variants).
+
+List-valued variables (`string[]` / `object[]`) are real arrays. A bare
+`{{ ctx.foo }}` renders an array **line-separated** (one element per line). For
+other shapes use the list-formatting functions: `as_csv`, `as_tsv`,
+`as_space_separated`, `as_line_separated`, `as_unordered_list`, and
+`as_ordered_list` (the Markdown-list renderers auto-nest nested arrays and the
+`depends_on` / `used_by` object shape). The former `_list` twin variables (e.g.
+`ctx.dirty_files_list`) are removed — use `{{ as_unordered_list(ctx.dirty_files) }}`.
 
 Full specification lives in `darkmatter/docs/topics/context-variables.md`.
 
