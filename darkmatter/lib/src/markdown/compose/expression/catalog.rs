@@ -1852,8 +1852,8 @@ mod list_formatting_example_files {
     #[test]
     fn example_files_evaluate_to_their_declared_returns() {
         let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let dir =
-            manifest_dir.join("../features/2026-07-08-single-sourcing-schema/examples");
+        let dir = manifest_dir
+            .join("../features/_completed/2026-07-08-single-sourcing-schema/examples");
         let files = [
             "as_line_separated.yaml",
             "as_csv.yaml",
