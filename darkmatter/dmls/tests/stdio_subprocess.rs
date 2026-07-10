@@ -64,7 +64,7 @@ fn await_response(reader: &mut impl BufRead, id: i64) -> Option<Value> {
 }
 
 #[test]
-fn native_binary_speaks_lsp_over_real_stdio() {
+fn native_binary_speaks_lsp_over_stdio() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_dmls"))
         // `--stdio` is a no-op the binary accepts for editor compatibility.
         .arg("--stdio")
