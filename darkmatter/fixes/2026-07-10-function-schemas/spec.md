@@ -1,5 +1,6 @@
 ---
-status: draft
+status: ready for planning and implementation
+reviewed: true
 created: 2026-07-10
 area: darkmatter
 packages:
@@ -90,18 +91,19 @@ docs/schemas/expression-functions.yaml
 The file is checked into the crate, embedded with `include_str!`, parsed once,
 and cached. Reading the catalog performs no filesystem or network I/O.
 
-The authored document MUST use ordinary YAML shapes and MUST carry a
-SimplifiedSchema declaration that validates the catalog data. The exact
-constraint spelling should be finalized during planning against the grammar
-available after Godless Beauty, but the semantic shape is:
+The authored document MUST use ordinary YAML shapes and MUST carry a complete
+SimplifiedSchema declaration for its nested structural shape. The current
+grammar supports inline object arrays, so functions, overloads, parameters,
+returns, and examples MUST NOT be left as opaque `object` values. The dedicated
+catalog parser additionally owns closed-field and cross-field invariants that
+SimplifiedSchema cannot express:
 
 ```yaml
 kind: expression-function-catalog
 
 $schema:
-  kind: string(required)
-  functions:
-    - object(required)
+  kind: enum(expression-function-catalog; required)
+  functions: "{ name: string(not-empty; required), category: string(not-empty; required), order: number(integer; required), description: string(not-empty; required), overloads: { parameters: { name: string(not-empty; required), type: string(not-empty; required), array: boolean, optional: boolean, variadic: boolean }[], returns: { type: string(not-empty; required), array: boolean, fallible: boolean }, example: { expression: string(not-empty; required), result: string(required), verification: enum(executable, display-only; required), reason: string(not-empty) } }[](min(1); required) }[](min(1); required)"
 
 functions:
   - name: as_csv
@@ -111,21 +113,33 @@ functions:
     overloads:
       - parameters:
           - name: list
-            type: any[]
-        returns: string | error
+            type: any
+            array: true
+        returns:
+          type: string
+          fallible: true
         example:
           expression: as_csv(["a", "b"])
           result: "a, b"
           verification: executable
 ```
 
-The illustrative `$schema` above is intentionally abbreviated; the implemented
-schema MUST validate every catalog field and nested shape rather than accepting
-an unconstrained object. If the current SimplifiedSchema grammar cannot express
-a necessary catalog invariant, keep the nearest structural validation in the
-authored schema and enforce the remaining semantic invariant in the
-function-catalog parser. Do not extend frontmatter's type vocabulary merely to
-make this catalog more convenient.
+The long inline declaration MAY be formatted using the grammar's multiline
+inline-object form if that improves readability. The parser MUST reject unknown fields at every catalog level so misspellings do
+not silently become ignored metadata. It MUST also require `kind`, require at
+least one function, and apply the nested field rules described below. Do not add
+function types or `error` to SimplifiedSchema merely to make this catalog more
+convenient.
+
+Type shapes MUST be represented structurally rather than parsed from display
+strings. A parameter has `type`, with optional `array: true`, `optional: true`,
+or `variadic: true` flags. A return has `type`, optional `array: true`, and
+optional `fallible: true`. Omitted flags mean `false`. This avoids inventing a
+second mini-language for whitespace, union, and suffix parsing; display forms
+such as `any[]` and `string | error` are projections only. Every overload MUST
+carry exactly one example. `verification` is either `executable` or
+`display-only`; a display-only example MUST carry a non-empty `reason`, while an
+executable example MUST NOT carry one.
 
 Canonical function names belong at function level. Overloads carry parameters,
 returns, and any overload-specific example. Category and order are authored
@@ -157,33 +171,52 @@ The following exclusions MUST remain structural:
 - a variadic parameter is last and cannot also be optional; and
 - parameter names within one overload are unique.
 
+Names MUST match `[a-z][a-z0-9_]*`. Function names are globally unique;
+parameter names are unique within an overload. Categories MUST be non-empty,
+descriptions MUST be non-empty, and `order` MUST be unique across the complete
+catalog. Global uniqueness preserves the existing total display order without
+making category spelling part of the sorting algorithm. YAML declaration order
+is preserved for diagnostics and source review, but public descriptors are
+sorted by `order`; overloads with the same canonical name retain their authored
+order.
+
 `DataType`, `ParamType`, and `ReturnType` may remain as public descriptor-facing
 projection types if preserving them avoids an unnecessary API break. They MUST
 no longer be independently authored authorities.
 
 ### Parsing and caching
 
-Expose a library accessor appropriate to the existing schema API, for example:
+Keep the existing descriptor accessor as the public compatibility surface:
 
 ```rust
-pub fn expression_function_catalog() -> &'static ExpressionFunctionCatalog
+pub fn expression_function_descriptors() -> &'static [ExpressionFunctionDescriptor]
 ```
 
-The accessor embeds the authored YAML and initializes a `OnceLock` or
-`LazyLock`. Invalid checked-in catalog data is a library-build/repository defect,
-so the infallible embedded accessor MAY panic with a precise message, matching
-`darkmatter_base_schema()`. The underlying parser SHOULD be separately exposed
-or test-visible as a fallible function so malformed fixtures can produce
-structured errors without panicking.
+The richer `ExpressionFunctionCatalog` and its accessor remain crate-private
+until a concrete external consumer needs source-level catalog details. The
+implementation embeds the YAML and initializes one `OnceLock` or `LazyLock`.
+Invalid checked-in catalog data is a library-build/repository defect, so the
+infallible descriptor accessor MAY panic with a precise message, matching
+`darkmatter_base_schema()`. A crate-visible fallible parser accepts `&str` so
+malformed fixtures produce structured errors without panicking.
+
+**Reader's note — descriptor lifetime decision.** The established public
+descriptor contains `&'static str` and `&'static [ParamType]` fields and is
+`Copy`. Changing it to owned strings would cascade into the shared `Described`
+contract and workspace consumers for no user-visible benefit. Catalog
+initialization therefore allocates and intentionally leaks exactly one bounded
+set of strings and parameter slices, after the entire catalog has validated.
+The allocation occurs once per process and has the same process lifetime as the
+previous compiled constants. Malformed input MUST be rejected before anything
+is leaked, and fixture parsing MUST use owned intermediate values without leaks.
 
 Errors MUST identify the function, overload, and field where possible. Parsing
 must reject duplicate function names, duplicate rendered signatures, unknown
 type keywords, illegal `error` placement, invalid parameter ordering, and
 unknown verification modes.
 
-Declaration order in YAML is preserved. Explicit `order` remains the stable
-display contract if existing consumers depend on it; ties and duplicate order
-values MUST have a documented deterministic rule or be rejected.
+Declaration order in YAML is preserved in the catalog AST. Explicit unique
+`order` values remain the public descriptor display contract.
 
 ### Runtime binding after Godless Beauty
 
@@ -195,6 +228,7 @@ equivalent to:
 struct FunctionBinding {
     canonical: &'static str,
     aliases: &'static [&'static str],
+    evaluation: EvaluationMode,
     handler: FunctionHandler,
 }
 ```
@@ -208,11 +242,16 @@ This leaves two intentionally different sources:
 1. authored YAML says what a function is to callers; and
 2. Rust says how that function executes.
 
-Their join is unavoidable because YAML cannot contain a function pointer. Exact
-bidirectional parity MUST be checked during tests and SHOULD be checked during
-registry initialization if that can be done without changing normal dispatch
-costs. A catalog entry without a binding and a binding without a catalog entry
-are both errors.
+Their join is unavoidable because YAML cannot contain a function pointer.
+Registry initialization MUST perform exact bidirectional canonical-name parity,
+reject alias/canonical collisions, and build dispatch entries for every authored
+overload. Dispatch arity selection is derived from catalog parameter shapes;
+Rust bindings MUST NOT repeat signature strings or arity tables. The handler
+retains its defensive argument validation and Rust-owned evaluation mode, but
+the registry decides whether an authored overload is eligible before invoking
+it. Initialization work is cached and does not change per-call dispatch cost.
+A catalog entry without a binding and a binding without a catalog entry are both
+library defects.
 
 Aliases remain Rust-authored because they are dispatch compatibility behavior,
 not part of the canonical documented signature. If aliases are later shown in
@@ -284,8 +323,9 @@ catalog in a separate reviewable change or clearly separated commit.
    created by Godless Beauty.
 6. Every catalog function MUST have exactly one runtime binding, and every
    runtime binding MUST have exactly one catalog function.
-7. Every authored overload MUST be accepted by its bound runtime handler at the
-   declared arity.
+7. Dispatch arity matching MUST be derived from authored parameter shapes, and
+   every authored overload MUST be accepted by its bound handler at its minimum
+   and maximum arity (or representative arities for an unbounded variadic).
 8. Public descriptor ordering, typed-signature rendering, DMLS presentation,
    and evaluator behavior MUST remain stable through the migration.
 9. Generated documentation and verified examples MUST consume the parsed
@@ -309,6 +349,9 @@ catalog in a separate reviewable change or clearly separated commit.
   return members, required parameters after optional parameters, non-final
   variadics, duplicate parameter names, duplicate signatures, and unknown
   primitive keywords.
+- Fixtures reject unknown fields, invalid identifiers, empty descriptions or
+  categories, duplicate global order values, display-only examples without a
+  reason, and executable examples with a reason.
 - `SimplifiedType::from_keyword("error")` and
   `SimplifiedType::from_keyword("function")` remain `None`.
 - Catalog loading executes no expressions, filesystem probes, shell commands,
@@ -330,6 +373,8 @@ catalog in a separate reviewable change or clearly separated commit.
 - Assert that the authored document validates against its SimplifiedSchema.
 - Assert descriptor projection preserves descriptions, categories, examples,
   verification policies, and typed signatures.
+- Assert malformed fixture parsing performs no process-lifetime leaks; only the
+  successfully validated embedded catalog is promoted to static descriptors.
 
 ### Level 1 — runtime parity
 
@@ -376,16 +421,7 @@ derived artifacts.
 
 ## Open Questions
 
-1. Should `expression_function_catalog()` be public, or should the existing
-   descriptor accessor remain the only public surface while the richer AST stays
-   crate-private?
-2. Should explicit `order` be required, or is YAML declaration order sufficient
-   as the long-term display contract? Preserving the current explicit order is
-   the safer migration default.
-3. Should examples remain attached to overloads, or should functions with one
-   overload allow a shorthand function-level example? A single canonical shape
-   is preferable unless the shorthand materially improves authoring.
-4. Can the current SimplifiedSchema grammar fully validate the nested catalog
-   shape, or does it need a narrowly scoped, generally useful enhancement? Any
-   enhancement must remain in the data-schema domain and must not add function
-   or `error` property types.
+None. This review keeps the richer catalog private, requires globally unique
+explicit order values, keeps one example on every overload, uses inline object
+arrays for authored structural validation, and assigns closed-field and
+cross-field invariants to the dedicated parser.

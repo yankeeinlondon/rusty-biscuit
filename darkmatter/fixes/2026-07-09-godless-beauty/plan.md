@@ -2,7 +2,7 @@
 agent: codex/
 total_phases: 7
 created: 2026-07-09
-phase: 5
+phase: 6
 yolo: false
 spec: darkmatter/fixes/2026-07-09-godless-beauty/spec.md
 source_files_during_phase_1:
@@ -15,8 +15,6 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1:
   - darkmatter/fixes/2026-07-09-godless-beauty/phase-1-baseline.md
 skills_files_updated_during_phase_1: []
-packages:
-  - darkmatter
 source_files_during_phase_2:
   - darkmatter/lib/src/render/image_ref.rs
   - darkmatter/lib/src/render/link.rs
@@ -96,6 +94,44 @@ docs_created_during_phase_5:
   - darkmatter/fixes/2026-07-09-godless-beauty/phase-5-baseline.md
 skills_files_updated_during_phase_5:
   - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_6:
+  - darkmatter/lib/src/catalog/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/args.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/predicates.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/collections.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/strings.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/dates.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/skills.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/markdown_docs.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/terminal.rs
+  - darkmatter/lib/src/markdown/compose/expression/mod.rs
+  - darkmatter/lib/src/markdown/compose/remote.rs
+  - darkmatter/dmls/src/overlay/expressions.rs
+  - claudine/lib/src/composition/lifecycle_actions.rs
+  - claudine/lib/src/composition/schema_validation.rs
+  - claudine/lib/src/composition/select.rs
+  - claudine/cli/src/commands/context.rs
+docs_updated_during_phase_6:
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - darkmatter/fixes/2026-07-09-godless-beauty/plan.md
+  - claudine/docs/topics/context/drift.md
+  - claudine/docs/topics/context/expression-engine.md
+  - claudine/docs/topics/context/index.md
+docs_created_during_phase_6:
+  - darkmatter/fixes/2026-07-09-godless-beauty/phase-6-inventory.md
+skills_files_updated_during_phase_6:
+  - .claude/skills/darkmatter/SKILL.md
+  - .claude/skills/darkmatter/compose.md
+packages:
+  - darkmatter
+  - darkmatter-cli
+  - dmls
+  - claudine
+  - claudine-cli
 ---
 
 # Godless Beauty — Execution Plan
@@ -331,58 +367,58 @@ Claudine library, and Claudine CLI. Do not leave old and new catalog authorities
 - [x] Inventory every pure, context-aware, and lazy callable; canonical name; alias; overload;
   descriptor; handler; evaluator path; and workspace consumer of
   `EXPRESSION_FUNCTION_DESCRIPTORS`, `PURE_FUNCTIONS`, and `FS_FUNCTIONS`.
-- [ ] Define crate-private `FunctionRegistration` and `FunctionHandler::{Pure, Context, Lazy}` in
+- [x] Define crate-private `FunctionRegistration` and `FunctionHandler::{Pure, Context, Lazy}` in
   `compose/expression/functions/mod.rs`, keeping `ExpressionFunctionDescriptor` public and
   handler-free in `catalog.rs`.
-- [ ] Split handlers and their directly owned tests into `functions/args.rs`, `predicates.rs`,
+- [x] Split handlers and their directly owned tests into `functions/args.rs`, `predicates.rs`,
   `collections.rs`, `strings.rs`, `dates.rs`, `paths.rs`, `skills.rs`, `markdown_docs.rs`, and
   `terminal.rs`; use explicit imports and keep shared helpers private to `functions` unless an
   existing public path requires otherwise.
-- [ ] Define one const registration slice per domain beside its handlers, representing overloads
+- [x] Define one const registration slice per domain beside its handlers, representing overloads
   as multiple descriptors on one registration and representing aliases only on that registration.
-- [ ] Aggregate domain registrations in `functions/mod.rs` and derive runtime dispatch,
+- [x] Aggregate domain registrations in `functions/mod.rs` and derive runtime dispatch,
   context-aware dispatch, lazy dispatch metadata, canonical-name enumeration, callable signatures,
   and catalog projection from that aggregation.
-- [ ] Back `expression_function_descriptors() -> &'static [ExpressionFunctionDescriptor]` with one
+- [x] Back `expression_function_descriptors() -> &'static [ExpressionFunctionDescriptor]` with one
   `LazyLock<Vec<_>>`; remove the public raw `EXPRESSION_FUNCTION_DESCRIPTORS`, `PURE_FUNCTIONS`,
   and `FS_FUNCTIONS` constants without introducing compatibility constants of changed types.
-- [ ] Update Darkmatter evaluator errors/suggestions, catalog helpers,
+- [x] Update Darkmatter evaluator errors/suggestions, catalog helpers,
   `darkmatter/lib/src/catalog/mod.rs`, generated documentation inputs, and internal comments to use
   the accessor or registration projection as appropriate.
 
 ### Workspace-wide consumer migration
 
-- [ ] Update DMLS hover, completion, and lookup code in
+- [x] Update DMLS hover, completion, and lookup code in
   `darkmatter/dmls/src/overlay/expressions.rs` to consume
   `expression_function_descriptors()` while preserving result ordering and content.
-- [ ] Update Claudine library and CLI source/tests—including lifecycle-action expression
+- [x] Update Claudine library and CLI source/tests—including lifecycle-action expression
   validation and context command output—to consume the accessor and preserve their public output.
-- [ ] Update active Darkmatter and Claudine expression architecture, engine, drift, and authoring
+- [x] Update active Darkmatter and Claudine expression architecture, engine, drift, and authoring
   documentation to describe domain-owned registrations and the accessor as the sole public catalog
   API; leave historical completed specifications intact unless they are presented as current
   guidance.
-- [ ] Update `.claude/skills/darkmatter/SKILL.md` and its expression reference material so future
+- [x] Update `.claude/skills/darkmatter/SKILL.md` and its expression reference material so future
   work registers a callable in one domain slice and reads descriptors through
   `expression_function_descriptors()`.
 
 ### Registry invariants and behavior coverage
 
-- [ ] Add invariant tests proving canonical names are unique; aliases collide with no canonical or
+- [x] Add invariant tests proving canonical names are unique; aliases collide with no canonical or
   alias; every registration has descriptors; every descriptor signature begins with its
   registration's canonical name; descriptor signatures are unique; overloads share one handler;
   and Pure, Context, and Lazy handlers dispatch through the intended path.
-- [ ] Preserve and run behavior tests for aliases, arity, local-only versus remote path rules,
+- [x] Preserve and run behavior tests for aliases, arity, local-only versus remote path rules,
   injectable date behavior, and lazy `and`/`or` evaluation.
-- [ ] Regenerate expression-function documentation with `just regen-expr-doc` from `darkmatter/`
+- [x] Regenerate expression-function documentation with `just regen-expr-doc` from `darkmatter/`
   and review the diff for expected structural wording only; require the callable set, signatures,
   ordering, descriptions, and examples to remain unchanged.
 
 ### Phase 6 validation checkpoint
 
-- [ ] Run checks and nextest suites for `darkmatter`, `dmls`, `claudine`, and `claudine-cli`, then
+- [x] Run checks and nextest suites for `darkmatter`, `dmls`, `claudine`, and `claudine-cli`, then
   run `just test` and `just lint` from `darkmatter/` and the canonical test/lint recipes from
   `claudine/`.
-- [ ] Search active source and docs for the three removed constant names and require zero remaining
+- [x] Search active source and docs for the three removed constant names and require zero remaining
   consumers; permit occurrences only in historical specifications, reviews, or an explicit
   migration note.
 
