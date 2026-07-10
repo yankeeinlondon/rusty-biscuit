@@ -801,15 +801,26 @@ pub fn render_git_section(
     }
 
     // === Worktrees Section ===
-    // Always rendered — even with zero linked worktrees — so the "0 other
-    // active worktrees" summary is shown (Case B's required output).
+    // The dedicated Worktrees section is only rendered when the repo has at
+    // least one linked worktree. When we are in the main worktree and none are
+    // defined there is nothing to enumerate, so instead of an empty section two
+    // trailing bullets are appended to the Status list above (a blank-line-
+    // separated repo-location line and a "no worktrees" note).
     //
     // Case selection is by *physical location* (`in_worktree`): are we running
     // inside the main worktree or a linked one? Branch spelling (`== "main"`)
     // misclassifies detached HEAD, `master`-default repos, and any non-main
     // branch checked out in the main worktree — none of which have a usable
-    // entry in the linked-worktree-only `worktrees` map.
-    {
+    // entry in the linked-worktree-only `worktrees` map. Running inside a linked
+    // worktree (`in_worktree`) always implies at least one worktree exists.
+    if !git.in_worktree && git.worktrees.is_empty() {
+        out.push('\n');
+        let repo_link = worktree_path_link_absolute(&git.repo_root);
+        let mut extra = UnorderedList::empty();
+        extra.add(Prose::new(format!("this repo is located at {repo_link}")));
+        extra.add(Prose::new("no <i>worktrees</i> are defined".to_string()));
+        writeln!(out, "{}", extra.render(&terminal)).unwrap();
+    } else {
         out.push('\n');
         writeln!(out, "{}", render_header("Worktrees", &terminal)).unwrap();
         out.push('\n');
@@ -1768,10 +1779,10 @@ mod tests {
         }
 
         #[test]
-        fn git_status_no_worktrees_still_renders_case_b_with_zero_count() {
-            // A repo with no linked worktrees is the common case. Case B must
-            // still render the current (main) worktree and a zero "other" count
-            // rather than omitting the section entirely.
+        fn git_status_no_worktrees_omits_section_and_adds_status_bullets() {
+            // A repo with no linked worktrees is the common case. The dedicated
+            // Worktrees section is suppressed; the repo location and a "no
+            // worktrees" note are appended as trailing Status bullets instead.
             let mut git = make_git_info(vec![]);
             git.worktrees = HashMap::new();
             git.current_branch = Some("main".to_string());
@@ -1780,16 +1791,22 @@ mod tests {
             let output = render_git_section(&git, 10, 0, false, None, None);
 
             assert!(
-                output.contains("Worktrees"),
-                "Worktrees section must render even with no linked worktrees"
+                !output.contains("Worktrees"),
+                "Worktrees section must be omitted with no linked worktrees: {output}"
             );
             assert!(
-                output.contains("Current Worktree:"),
-                "Case B must show the current worktree"
+                !output.contains("Current Worktree:"),
+                "no Current Worktree heading when the section is omitted: {output}"
             );
             assert!(
-                output.contains("there are 0 other active worktrees in this repo"),
-                "Case B must report a zero other-worktree count: {output}"
+                output.contains("this repo is located at"),
+                "repo location bullet is present: {output}"
+            );
+            // "worktrees" carries `<i>…</i>` markup, so assert the surrounding
+            // plain fragments rather than the styled word.
+            assert!(
+                output.contains("are defined"),
+                "'no worktrees are defined' bullet is present: {output}"
             );
             assert!(
                 output.contains("Status"),
@@ -2044,12 +2061,30 @@ mod tests {
         #[test]
         fn git_status_main_worktree_on_non_main_branch_is_case_b() {
             // Regression: a non-main branch checked out in the MAIN worktree
-            // (in_worktree == false) must render Case B, not vanish. Selecting
-            // by branch spelling produced empty output here.
+            // (in_worktree == false) must render Case B, not vanish and not be
+            // misclassified as Case A. Selecting by branch spelling produced
+            // empty output here. A linked worktree is present so the Worktrees
+            // section renders (the empty case is covered separately).
             let mut git = make_git_info(vec![]);
             git.repo_root = PathBuf::from("/repo");
             git.in_worktree = false;
             git.current_branch = Some("feature-x".to_string());
+            git.worktrees.insert(
+                "linked".to_string(),
+                sniff::filesystem::git::WorktreeInfo {
+                    branch: "linked".to_string(),
+                    filepath: PathBuf::from("/repo-linked"),
+                    sha: "abc123".to_string(),
+                    dirty: false,
+                    ahead: 0,
+                    behind: 0,
+                    base_branch: "main".to_string(),
+                    has_conflicts: false,
+                    merged: false,
+                    changed_files: 0,
+                    is_current: false,
+                },
+            );
 
             let output = render_git_section(&git, 10, 0, false, None, None);
 
@@ -2058,7 +2093,7 @@ mod tests {
                 "main worktree on a non-main branch must still show Case B: {output}"
             );
             assert!(
-                output.contains("there are 0 other active worktrees in this repo"),
+                output.contains("there are 1 other active worktrees in this repo"),
                 "must report the other-worktree count: {output}"
             );
             assert!(
@@ -2070,11 +2105,28 @@ mod tests {
         #[test]
         fn git_status_master_default_main_worktree_is_case_b() {
             // A repository whose primary branch is `master` is still the main
-            // worktree (in_worktree == false) and must render Case B.
+            // worktree (in_worktree == false) and must render Case B. A linked
+            // worktree is present so the Worktrees section renders.
             let mut git = make_git_info(vec![]);
             git.repo_root = PathBuf::from("/repo");
             git.in_worktree = false;
             git.current_branch = Some("master".to_string());
+            git.worktrees.insert(
+                "linked".to_string(),
+                sniff::filesystem::git::WorktreeInfo {
+                    branch: "linked".to_string(),
+                    filepath: PathBuf::from("/repo-linked"),
+                    sha: "abc123".to_string(),
+                    dirty: false,
+                    ahead: 0,
+                    behind: 0,
+                    base_branch: "master".to_string(),
+                    has_conflicts: false,
+                    merged: false,
+                    changed_files: 0,
+                    is_current: false,
+                },
+            );
 
             let output = render_git_section(&git, 10, 0, false, None, None);
 
