@@ -340,13 +340,13 @@ This phase is parallelizable with Phase 4 after Phase 3 is complete.
   `context/capture/`.
 - [x] Create `capture/mod.rs` as the crate-private facade for group selection and population
   sequencing; preserve the existing capture entry points and always-on local datetime behavior.
-- [ ] Move `ContextGroup`, `all`, demand scanning, and `for_key` delegation to `capture/groups.rs`;
+- [x] Move `ContextGroup`, `all`, demand scanning, and `for_key` delegation to `capture/groups.rs`;
   have each domain own a `KEYS` slice or equivalent `owns_key` predicate instead of repeating a
   central key match.
-- [ ] Move `ContextCapture::new` and concurrent sniff orchestration to `capture/snapshot.rs`,
+- [x] Move `ContextCapture::new` and concurrent sniff orchestration to `capture/snapshot.rs`,
   preserving repo-before-document discovery, overlap of independent probes, stable diagnostic and
   timing labels, and the rule that unrequested probes do not run.
-- [ ] Move population code and owned keys into `datetime.rs`, `repo.rs`, `changes.rs`,
+- [x] Move population code and owned keys into `datetime.rs`, `repo.rs`, `changes.rs`,
   `languages.rs`, `docs.rs`, `host.rs`, and `agent.rs` according to the specification; retain
   `sniff` as the authority for repository, filesystem, OS, hardware, and GPU discovery on macOS,
   Windows, and Linux.
@@ -363,12 +363,12 @@ This phase is parallelizable with Phase 4 after Phase 3 is complete.
 - [x] Add or retain tests proving content with no relevant `ctx.*` reference performs only the
   documented datetime work and each requested group triggers only its dependency-minimal probe
   set.
-- [ ] Move existing tests to their owning capture modules without changing names or assertions and
+- [x] Move existing tests to their owning capture modules without changing names or assertions and
   compare the context-capture nextest inventory before and after.
 
 ### Phase 5 validation checkpoint
 
-- [ ] Run focused context-capture tests with nextest, then run `cargo check -p darkmatter`,
+- [x] Run focused context-capture tests with nextest, then run `cargo check -p darkmatter`,
   `just test`, and `just lint` from `darkmatter/`; require stable diagnostics/timing labels and no
   behavior change beyond GPU-only capture.
 

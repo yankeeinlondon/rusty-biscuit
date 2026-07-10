@@ -37,8 +37,48 @@ The broad Claudine CLI test target was stopped after it exceeded the non-interac
 per-command time limit while continuing to pass. Phase 6 had already recorded its canonical
 package checks; Phase 7 changed only whitespace in Darkmatter source and plan documentation.
 
-## Deferred Phase 5 structure
+## Post-review addendum — Phase 5 capture split (Review 3)
 
-The Phase 5 commit extracted per-domain key ownership but left capture orchestration, population,
-and most tests in `capture/mod.rs`. The corresponding Phase 5 plan tasks remain unchecked rather
-than being misreported as complete.
+Review 3 found that the capture split was fully implemented in source but the plan checkboxes and
+this closeout still described it as deferred. The records have since been corrected. The actual
+post-split source layout is:
+
+- `capture/mod.rs` — 113-line crate-private facade for group selection and population sequencing.
+- `capture/groups.rs` — `ContextGroup`, `all`, demand scanning, and `for_key` delegation with
+  per-domain `KEYS` ownership.
+- `capture/snapshot.rs` — `ContextCapture::new` and concurrent sniff probe orchestration.
+- `capture/{datetime,repo,changes,languages,docs,host,agent}.rs` — population code and owned keys
+  per domain, with `sniff` retained as the discovery authority.
+
+### Capture test relocation inventory (15 pre-move → 19 post-move)
+
+The 15 pre-move tests all lived under `markdown::compose::context::capture::tests`. After the split
+they were distributed to their owning domain modules without name or assertion changes, and four
+intentional regression/invariant tests were added:
+
+| Post-move module | Test name | Origin |
+|---|---|---|
+| `agent::tests` | `capture_runtime_context_includes_agent_group` | pre-move |
+| `agent::tests` | `populate_agent_defaults_when_missing_or_empty` | pre-move |
+| `agent::tests` | `populate_agent_uses_env_values_with_trim` | pre-move |
+| `datetime::tests` | `day_of_month_suffixed_formats_correctly` | pre-move |
+| `datetime::tests` | `populate_datetime_includes_utc_time_variants` | pre-move |
+| `datetime::tests` | `populate_datetime_populates_documented_aliases` | pre-move |
+| `datetime::tests` | `populate_datetime_produces_all_expected_keys` | pre-move |
+| `datetime::tests` | `season_determination` | pre-move |
+| `repo::tests` | `area_vars_empty_when_not_monorepo` | pre-move |
+| `repo::tests` | `current_packages_captured_as_string_array` | pre-move |
+| `repo::tests` | `depends_on_captured_as_object_array_scoped_to_area` | pre-move |
+| `repo::tests` | `repo_root_has_no_trailing_slash` | pre-move |
+| `repo::tests` | `strip_trailing_sep_removes_single_separator` | pre-move |
+| `repo::tests` | `used_by_captured_as_object_array_with_empty_users` | pre-move |
+| `capture::tests` | `content_without_runtime_context_only_populates_datetime` | pre-move |
+| `host::tests` | `gpu_only_population_does_not_require_hardware_capture` | **added** — GPU-only regression |
+| `groups::tests` | `aliases_are_allowlisted_and_unknown_keys_have_no_group` | **added** — group-ownership invariant |
+| `groups::tests` | `every_generated_descriptor_maps_to_one_group_or_explicit_alias` | **added** — group-ownership invariant |
+| `groups::tests` | `every_owned_key_has_exactly_one_group` | **added** — group-ownership invariant |
+
+No pre-move test name was dropped or renamed; `#[serial]` groups on the agent tests were preserved.
+The four additions are the GPU-only capture regression (verifying `ctx.gpu` population without the
+hardware probe) and three group-ownership invariants (unique group per descriptor, allowlisted
+aliases, and unknown-key rejection).
