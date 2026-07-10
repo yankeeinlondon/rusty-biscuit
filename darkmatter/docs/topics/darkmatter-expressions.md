@@ -29,10 +29,9 @@ surface that runs it:
 | Claudine hook conditions | `when=` |
 
 This is the **availability invariant**: a read-side function or `doc.*`
-reference resolves on every surface above. (The historical asymmetry — where
-read-side functions worked only in body interpolation — is gone.) The single
-documented exception is the `markdown::transform` pipeline, which uses a bare
-state and is not in scope.
+reference resolves on every surface above. The historical asymmetry — where
+read-side functions worked only in body interpolation — is gone; the compose
+pipeline and public condition API use the same evaluation contract.
 
 > Earlier docs called this "Boolean Conditional Logic". The language is now
 > general-purpose and supports arithmetic, member/index access, type

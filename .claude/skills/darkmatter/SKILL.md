@@ -1,7 +1,7 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-1f127b636f3f000d
+hash: 87f17662fa397abe-6461c42470661700
 last_updated: 2026-07-10
 ---
 
@@ -43,6 +43,20 @@ Other entry points:
 - Use `biscuit-terminal` components for rich terminal UI outside ordinary
   parsed Markdown rendering.
 
+## Cleanup Pipeline
+
+`darkmatter::markdown::cleanup` is the source-compatible public facade. Its
+`cleanup_content_internal` orchestrator explicitly preserves the two-stage pass
+order: event-stream passes (list-marker capture, emphasis placeholders, empty
+fence language, table alignment, cmark serialization), then string passes
+(emphasis restoration/unescaping, list spacing, blockquotes, list markers and
+indentation, brackets, trailing-newline normalization).
+
+Domain implementation lives under `markdown/cleanup/` in `emphasis.rs`,
+`tables.rs`, `lists.rs`, `blockquote.rs`, `brackets.rs`, and `reflow.rs`.
+Keep the facade paths stable and the pass calls explicit; do not introduce a
+pass trait or implicit chaining.
+
 ## Responsibility Split
 
 | Need | Owner |
@@ -55,6 +69,14 @@ Other entry points:
 | HTML and terminal Markdown renderers | `darkmatter` |
 | Terminal capability detection, images, Mermaid, graph adapters | `biscuit-terminal` |
 | Shared render tree and target-agnostic layout/style types | `renderable` |
+
+## Demand-Driven Context Capture
+
+Runtime `ctx.*` capture is grouped under `markdown/compose/context/capture/`. Domain modules own
+their recognized key lists, while the facade preserves capture sequencing and always-on local
+datetime values. Repository, filesystem, OS, hardware, and GPU discovery must continue to use
+`sniff`. GPU population is independent of CPU/memory population, so a `ctx.gpu`-only request does
+not require the hardware-summary probe.
 
 ## Grammar Authority
 
