@@ -159,6 +159,24 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: SimplifiedType) {
             write_arg(out, p);
             out.push(')');
         }
+        Constraint::Suggest(candidates) => {
+            out.push_str("suggest(");
+            for (i, candidate) in candidates.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                let value = if matches!(ty, SimplifiedType::Number) {
+                    candidate
+                        .canonical_decimal
+                        .as_deref()
+                        .unwrap_or(&candidate.decoded)
+                } else {
+                    &candidate.decoded
+                };
+                write_arg(out, value);
+            }
+            out.push(')');
+        }
         Constraint::Members(members) => {
             // Members are positional, no keyword.
             for (i, m) in members.iter().enumerate() {

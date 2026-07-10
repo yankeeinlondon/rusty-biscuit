@@ -49,13 +49,13 @@
 //! Errors surface as [`SchemaError::Grammar`] with the byte span of the
 //! offending token.
 
-use std::ops::Range;
+use std::{ops::Range, str::FromStr};
 
 use crate::markdown::schemas::errors::SchemaError;
 
 use super::types::{
     Constraint, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaShape, SimplifiedType,
-    TypeExpr,
+    SuggestionCandidate, TypeExpr,
 };
 
 /// Hard maximum number of nested inline object levels the parser will accept.
@@ -165,8 +165,12 @@ impl<'a> Lexer<'a> {
                 self.pos += 1;
                 return Ok((out, start..self.pos));
             } else {
-                out.push(b as char);
-                self.pos += 1;
+                let ch = self.src[self.pos..]
+                    .chars()
+                    .next()
+                    .expect("peek_byte established remaining source");
+                out.push(ch);
+                self.pos += ch.len_utf8();
             }
         }
     }
@@ -284,6 +288,7 @@ struct Parser<'a> {
     property: &'a str,
     src: &'a str,
     lex: Lexer<'a>,
+    defer_suggestion_target: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -292,6 +297,7 @@ impl<'a> Parser<'a> {
             property,
             src,
             lex: Lexer::new(src),
+            defer_suggestion_target: false,
         }
     }
 
@@ -468,7 +474,7 @@ impl<'a> Parser<'a> {
         self.lex.skip_ws();
         if self.lex.peek_byte() == Some(b'(') {
             self.lex.pos += 1;
-            value_constraints = self.parse_constraint_list(SimplifiedType::String, false)?;
+            value_constraints = self.parse_constraint_list(SimplifiedType::Any, false)?;
             self.expect(Tok::RParen)?;
         }
 
@@ -488,7 +494,7 @@ impl<'a> Parser<'a> {
             self.lex.skip_ws();
             if self.lex.peek_byte() == Some(b'(') {
                 self.lex.pos += 1;
-                array_constraints = self.parse_constraint_list(SimplifiedType::String, true)?;
+                array_constraints = self.parse_constraint_list(SimplifiedType::Any, true)?;
                 self.expect(Tok::RParen)?;
             }
         }
@@ -926,7 +932,9 @@ impl<'a> Parser<'a> {
         self.lex.skip_ws();
         if self.lex.peek_byte() == Some(b'(') {
             self.lex.pos += 1;
-            constraints = self.parse_constraint_list(SimplifiedType::Any, false)?;
+            self.defer_suggestion_target = !is_array;
+            constraints = self.parse_constraint_list(SimplifiedType::Any, is_array)?;
+            self.defer_suggestion_target = false;
             self.expect(Tok::RParen)?;
         }
 
@@ -1017,7 +1025,18 @@ impl<'a> Parser<'a> {
 
         loop {
             self.lex.skip_ws();
+            let constraint_start = self.lex.pos;
             let constraint = self.parse_one_constraint(ty, is_array_level)?;
+            if matches!(constraint, Constraint::Suggest(_))
+                && constraints
+                    .iter()
+                    .any(|existing| matches!(existing, Constraint::Suggest(_)))
+            {
+                return self.err(
+                    "a property definition may contain at most one `suggest` constraint",
+                    constraint_start..self.lex.pos,
+                );
+            }
             constraints.push(constraint);
             self.lex.skip_ws();
             match self.lex.peek_byte() {
@@ -1301,6 +1320,46 @@ impl<'a> Parser<'a> {
                 }
                 Constraint::Pattern(args[0].lex.clone())
             }
+            ("suggest", true) => {
+                self.lex.pos += 1;
+                let args = self.parse_arglist()?;
+                self.expect(Tok::RParen)?;
+                if args.is_empty() {
+                    return self.err(
+                        "`suggest` requires at least one candidate",
+                        kw_span.start..self.lex.pos,
+                    );
+                }
+                let deferred_import = self.defer_suggestion_target && matches!(ty, SimplifiedType::Any);
+                if is_array_level
+                    || (!deferred_import
+                        && !matches!(ty, SimplifiedType::String | SimplifiedType::Number))
+                {
+                    return self.err(
+                        format!("`suggest` is not valid on `{}`", ty.as_keyword()),
+                        kw_span.start..self.lex.pos,
+                    );
+                }
+
+                let mut candidates = Vec::with_capacity(args.len());
+                for arg in args {
+                    let candidate = interpret_suggestion(
+                        &arg,
+                        if deferred_import {
+                            SimplifiedType::String
+                        } else {
+                            ty
+                        },
+                    );
+                    if candidates.iter().any(|existing: &SuggestionCandidate| {
+                        existing.interpreted == candidate.interpreted
+                    }) {
+                        return self.err("duplicate suggestion candidate", candidate.span);
+                    }
+                    candidates.push(candidate);
+                }
+                Constraint::Suggest(candidates)
+            }
             ("match", true) => {
                 self.lex.pos += 1;
                 let args = self.parse_arglist()?;
@@ -1374,7 +1433,7 @@ impl<'a> Parser<'a> {
                 })?;
                 Constraint::MaxKeys(number_to_usize(n, "max-keys", &args[0], self.property)?)
             }
-            ("min-keys" | "max-keys" | "example", false) => {
+            ("min-keys" | "max-keys" | "example" | "suggest", false) => {
                 return self.err(format!("`{keyword}` requires arguments"), kw_span);
             }
             (other, has_args_) => {
@@ -1456,6 +1515,145 @@ struct Arg {
 
 fn arg_to_number(arg: &Arg) -> Option<f64> {
     arg.number.or_else(|| arg.lex.parse().ok())
+}
+
+fn interpret_suggestion(arg: &Arg, ty: SimplifiedType) -> SuggestionCandidate {
+    interpret_suggestion_parts(&arg.lex, arg.span.clone(), ty)
+}
+
+fn interpret_suggestion_parts(
+    decoded: &str,
+    span: Range<usize>,
+    ty: SimplifiedType,
+) -> SuggestionCandidate {
+    if matches!(ty, SimplifiedType::String) {
+        return SuggestionCandidate {
+            decoded: decoded.to_string(),
+            interpreted: serde_json::Value::String(decoded.to_string()),
+            canonical_decimal: None,
+            span,
+        };
+    }
+
+    let Some(canonical) = normalize_simple_decimal(decoded) else {
+        return SuggestionCandidate {
+            decoded: decoded.to_string(),
+            interpreted: serde_json::Value::String(decoded.to_string()),
+            canonical_decimal: None,
+            span,
+        };
+    };
+    let interpreted = serde_json::Number::from_str(&canonical)
+        .ok()
+        .filter(|number| {
+            expand_json_number(&number.to_string())
+                .and_then(|serialized| normalize_simple_decimal(&serialized))
+                .as_deref()
+                == Some(canonical.as_str())
+        })
+        .map(serde_json::Value::Number)
+        .unwrap_or_else(|| serde_json::Value::String(canonical.clone()));
+
+    SuggestionCandidate {
+        decoded: decoded.to_string(),
+        interpreted,
+        canonical_decimal: Some(canonical),
+        span,
+    }
+}
+
+pub(crate) fn reinterpret_suggestion_candidates(
+    candidates: &mut [SuggestionCandidate],
+    ty: SimplifiedType,
+    property: &str,
+) -> Result<(), SchemaError> {
+    for index in 0..candidates.len() {
+        let candidate = interpret_suggestion_parts(
+            &candidates[index].decoded,
+            candidates[index].span.clone(),
+            ty,
+        );
+        if candidates[..index]
+            .iter()
+            .any(|existing| existing.interpreted == candidate.interpreted)
+        {
+            return Err(SchemaError::Grammar {
+                property: property.to_string(),
+                message: "duplicate suggestion candidate".into(),
+                span: candidate.span,
+            });
+        }
+        candidates[index] = candidate;
+    }
+    Ok(())
+}
+
+/// Normalizes the feature's simple-decimal grammar without converting through
+/// a machine numeric type.
+pub fn normalize_simple_decimal(input: &str) -> Option<String> {
+    let (negative, unsigned) = match input.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, input),
+    };
+    let (integer, fraction) = match unsigned.split_once('.') {
+        Some((integer, fraction)) => (integer, Some(fraction)),
+        None => (unsigned, None),
+    };
+    if integer.is_empty()
+        || !integer.bytes().all(|byte| byte.is_ascii_digit())
+        || fraction.is_some_and(|value| {
+            value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit())
+        })
+    {
+        return None;
+    }
+
+    let integer = integer.trim_start_matches('0');
+    let integer = if integer.is_empty() { "0" } else { integer };
+    let fraction = fraction.map(|value| value.trim_end_matches('0'));
+    let is_zero = integer == "0" && fraction.is_none_or(str::is_empty);
+    let mut canonical = String::new();
+    if negative && !is_zero {
+        canonical.push('-');
+    }
+    canonical.push_str(integer);
+    if let Some(fraction) = fraction.filter(|value| !value.is_empty()) {
+        canonical.push('.');
+        canonical.push_str(fraction);
+    }
+    Some(canonical)
+}
+
+fn expand_json_number(input: &str) -> Option<String> {
+    let Some(exponent_at) = input.find(['e', 'E']) else {
+        return Some(input.to_string());
+    };
+    let (mantissa, exponent) = input.split_at(exponent_at);
+    let exponent: i64 = exponent[1..].parse().ok()?;
+    let (sign, mantissa) = mantissa
+        .strip_prefix('-')
+        .map_or(("", mantissa), |rest| ("-", rest));
+    let decimal_at = mantissa.find('.').unwrap_or(mantissa.len());
+    let digits: String = mantissa.chars().filter(|ch| *ch != '.').collect();
+    let decimal_at = i64::try_from(decimal_at).ok()?.checked_add(exponent)?;
+
+    let mut expanded = String::from(sign);
+    if decimal_at <= 0 {
+        expanded.push_str("0.");
+        expanded.extend(std::iter::repeat_n('0', usize::try_from(-decimal_at).ok()?));
+        expanded.push_str(&digits);
+    } else {
+        let decimal_at = usize::try_from(decimal_at).ok()?;
+        if decimal_at >= digits.len() {
+            expanded.push_str(&digits);
+            expanded.extend(std::iter::repeat_n('0', decimal_at - digits.len()));
+        } else {
+            expanded.push_str(&digits[..decimal_at]);
+            expanded.push('.');
+            expanded.push_str(&digits[decimal_at..]);
+        }
+    }
+    Some(expanded)
 }
 
 fn number_to_usize(

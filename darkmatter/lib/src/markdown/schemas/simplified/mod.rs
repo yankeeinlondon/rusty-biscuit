@@ -11,14 +11,22 @@
 
 pub mod convert;
 pub mod grammar;
+mod lint;
 mod serialize;
+mod source;
+mod standalone;
 pub mod types;
 
 pub use convert::{DRAFT_2020_12, to_json_schema};
+pub use lint::{SuggestionLintProblem, SuggestionLintReason, lint_suggestions};
 pub use serialize::serialize_property_atom;
+pub use source::{parse_yaml_schema_with_source, project_suggestion_spans};
+pub use standalone::{
+    StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,
+};
 pub use types::{
     Constraint, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
-    SimplifiedSchema, SimplifiedType, TypeExpr,
+    SimplifiedSchema, SimplifiedType, SuggestionCandidate, TypeExpr,
 };
 
 use indexmap::IndexMap;
@@ -261,6 +269,22 @@ fn parse_property_def(name: &str, value: &YamlValue) -> Result<PropertyDef, Sche
                     property: name.to_string(),
                     message: "property-level union must have at least one arm".into(),
                     span: 0..0,
+                });
+            }
+            if let Some(candidate) = arms
+                .iter()
+                .flat_map(|atom| atom.constraints.iter())
+                .filter_map(|constraint| match constraint {
+                    Constraint::Suggest(candidates) => candidates.first(),
+                    _ => None,
+                })
+                .nth(1)
+            {
+                return Err(SchemaError::Grammar {
+                    property: name.to_string(),
+                    message: "a property definition may contain at most one `suggest` constraint"
+                        .into(),
+                    span: candidate.span.clone(),
                 });
             }
             Ok(PropertyDef::Union(arms))

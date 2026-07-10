@@ -9,10 +9,10 @@
 //!   String items are file references (resolved here); mapping items are
 //!   inline arms.
 //! - **String scalar** — interpreted as a `biscuit-file` reference to a YAML
-//!   or JSON file. The referenced file is disambiguated using the rule in
-//!   the spec: YAML files whose root holds a `$schema:` mapping are
-//!   SimplifiedSchemas; everything else is raw JSON Schema. JSON files are
-//!   always raw JSON Schema.
+//!   or JSON file. YAML SimplifiedSchemas are recognized by the pure
+//!   (`$schema` as the sole top-level key) and tagged (`kind: schema` plus
+//!   `types`) content envelopes; everything else remains raw JSON Schema.
+//!   JSON files are always raw JSON Schema.
 //!
 //! After resolution, a baseline schema (if configured) is merged with the
 //! document schema using property-keyed deep merge — the document side wins
@@ -36,8 +36,10 @@ use super::{
     SchemaArm, SchemaOrigin, SchemaShape, SimplifiedSchema,
     errors::SchemaError,
     simplified::{
-        parse_yaml_schema, to_json_schema,
-        types::{Constraint, PatternKeyDef, PropertyAtom, PropertyDef, TypeExpr},
+        parse_standalone_schema_document, parse_yaml_schema, to_json_schema,
+        types::{
+            Constraint, PatternKeyDef, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr,
+        },
     },
 };
 
@@ -275,38 +277,8 @@ fn parse_yaml_referenced_file(path: &Path, bytes: &[u8]) -> Result<ResolvedSchem
     let text = std::str::from_utf8(bytes).map_err(|_| SchemaError::AmbiguousReferenced {
         path: path.to_path_buf(),
     })?;
-    let value: YamlValue =
-        serde_yaml_ng::from_str(text).map_err(|_| SchemaError::AmbiguousReferenced {
-            path: path.to_path_buf(),
-        })?;
-
-    // SimplifiedSchema disambiguation: root has `$schema:` that is a mapping
-    // or a sequence (i.e. an authored SimplifiedSchema). Otherwise treat as
-    // raw JSON Schema.
-    if let YamlValue::Mapping(map) = &value
-        && let Some(schema_value) = map.get(YamlValue::String("$schema".into()))
-        && matches!(schema_value, YamlValue::Mapping(_) | YamlValue::Sequence(_))
-    {
-        let parsed = parse_yaml_schema(schema_value)?;
-        // Named-type imports inside a referenced schema file resolve relative
-        // to that file's directory, and its `@this` targets the file itself.
-        let file_dir = path.parent().unwrap_or_else(|| Path::new("."));
-        let key = NamespaceKey::File(canonical_path(path));
-        let (parsed, imports) = expand_document_imports(parsed, file_dir, key)?;
-        let mut json = to_json_schema(&parsed)?;
-        // `example(this)` inside a referenced schema file targets the file itself.
-        let examples = resolve_document_examples(&mut json, file_dir, Some(path))?;
-        return Ok(ResolvedSchema {
-            simplified: Some(parsed),
-            json_schema: json,
-            // `resolve_reference` overwrites this with the file path.
-            origin: SchemaOrigin::document(),
-            imports,
-            examples,
-            // The reference itself is recorded by `resolve_reference`, which
-            // wraps this loader; the file path is added there.
-            referenced_files: Vec::new(),
-        });
+    if let Some(document) = parse_standalone_schema_document(text, path)? {
+        return resolve_standalone_schema(document.schema, path);
     }
 
     // Treat the file's contents as a raw JSON Schema serialised in YAML.
@@ -326,6 +298,97 @@ fn parse_yaml_referenced_file(path: &Path, bytes: &[u8]) -> Result<ResolvedSchem
         imports: Vec::new(),
         examples: Vec::new(),
         referenced_files: Vec::new(),
+    })
+}
+
+fn resolve_standalone_schema(
+    schema: SimplifiedSchema,
+    path: &Path,
+) -> Result<ResolvedSchema, SchemaError> {
+    let file_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let key = NamespaceKey::File(canonical_path(path));
+    match schema {
+        SimplifiedSchema::Single(_) => {
+            let (schema, imports) = expand_document_imports(schema, file_dir, key)?;
+            let mut json_schema = to_json_schema(&schema)?;
+            let examples = resolve_document_examples(&mut json_schema, file_dir, Some(path))?;
+            Ok(ResolvedSchema {
+                simplified: Some(schema),
+                json_schema,
+                origin: SchemaOrigin::document(),
+                imports,
+                examples,
+                referenced_files: Vec::new(),
+            })
+        }
+        SimplifiedSchema::Union(arms) => {
+            resolve_standalone_root_union(arms, file_dir, path)
+        }
+    }
+}
+
+fn resolve_standalone_root_union(
+    arms: Vec<SchemaArm>,
+    base_dir: &Path,
+    path: &Path,
+) -> Result<ResolvedSchema, SchemaError> {
+    let mut any_of = Vec::with_capacity(arms.len());
+    let mut simplified_arms = Vec::with_capacity(arms.len());
+    let mut all_simplified = true;
+    let mut imports = BTreeSet::new();
+    let mut examples = BTreeSet::new();
+    let mut referenced_files = BTreeSet::new();
+
+    for arm in arms {
+        match arm {
+            SchemaArm::Inline(shape) => {
+                let schema = SimplifiedSchema::Single(shape);
+                let (schema, arm_imports) = expand_document_imports(
+                    schema,
+                    base_dir,
+                    NamespaceKey::File(canonical_path(path)),
+                )?;
+                imports.extend(arm_imports);
+                let SimplifiedSchema::Single(shape) = schema else {
+                    unreachable!("single root-union arm remains single")
+                };
+                let mut arm_json = to_json_schema(&SimplifiedSchema::Single(shape.clone()))?;
+                examples.extend(resolve_document_examples(
+                    &mut arm_json,
+                    base_dir,
+                    Some(path),
+                )?);
+                simplified_arms.push(SchemaArm::Inline(shape));
+                any_of.push(strip_schema_uri(arm_json));
+            }
+            SchemaArm::FileRef(reference) => {
+                let resolved = resolve_reference(&reference, base_dir)?;
+                imports.extend(resolved.imports.iter().cloned());
+                examples.extend(resolved.examples.iter().cloned());
+                referenced_files.extend(resolved.referenced_files.iter().cloned());
+                if let Some(SimplifiedSchema::Single(shape)) = resolved.simplified {
+                    simplified_arms.push(SchemaArm::Inline(shape));
+                } else {
+                    all_simplified = false;
+                }
+                any_of.push(strip_schema_uri(resolved.json_schema));
+            }
+        }
+    }
+
+    let mut root = Map::new();
+    root.insert(
+        "$schema".into(),
+        Value::String(super::simplified::DRAFT_2020_12.into()),
+    );
+    root.insert("anyOf".into(), Value::Array(any_of));
+    Ok(ResolvedSchema {
+        simplified: all_simplified.then_some(SimplifiedSchema::Union(simplified_arms)),
+        json_schema: Value::Object(root),
+        origin: SchemaOrigin::document(),
+        imports: imports.into_iter().collect(),
+        examples: examples.into_iter().collect(),
+        referenced_files: referenced_files.into_iter().collect(),
     })
 }
 
@@ -673,12 +736,12 @@ fn canonical_path(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
-/// Loads a file's top-level named types (its `$schema:` entries).
+/// Loads a standalone schema file's mapping payload as named types.
 ///
 /// ## Errors
 ///
 /// Returns [`SchemaError::AmbiguousReferenced`] when the file is not a
-/// SimplifiedSchema (raw JSON Schema, or a file without a `$schema:` mapping) —
+/// SimplifiedSchema mapping (raw JSON Schema or a root union) —
 /// imports are only defined among a file's named types, so a raw JSON Schema
 /// has none to offer.
 fn load_named_types(path: &Path) -> Result<IndexMap<String, PropertyDef>, SchemaError> {
@@ -689,26 +752,16 @@ fn load_named_types(path: &Path) -> Result<IndexMap<String, PropertyDef>, Schema
     let text = std::str::from_utf8(&bytes).map_err(|_| SchemaError::AmbiguousReferenced {
         path: path.to_path_buf(),
     })?;
-    let value: YamlValue =
-        serde_yaml_ng::from_str(text).map_err(|_| SchemaError::AmbiguousReferenced {
-            path: path.to_path_buf(),
-        })?;
-    // Named types live under a top-level `$schema:` mapping. A sequence (root
-    // union) or a raw JSON Schema file exposes no named types.
-    let schema_value = match &value {
-        YamlValue::Mapping(map) => map.get(YamlValue::String("$schema".into())),
-        _ => None,
-    };
-    let Some(YamlValue::Mapping(_)) = schema_value else {
+    let Some(document) = parse_standalone_schema_document(text, path)? else {
         return Err(SchemaError::AmbiguousReferenced {
             path: path.to_path_buf(),
         });
     };
-    let schema_value = schema_value.expect("mapping matched above");
-    match parse_yaml_schema(schema_value)? {
+    match document.schema {
         SimplifiedSchema::Single(shape) => Ok(shape.properties),
-        SimplifiedSchema::Union(_) => Err(SchemaError::AmbiguousReferenced {
+        SimplifiedSchema::Union(_) => Err(SchemaError::SchemaDocument {
             path: path.to_path_buf(),
+            message: "root-union schema documents cannot supply named imports".into(),
         }),
     }
 }
@@ -738,7 +791,7 @@ fn strip_top_level_presence(def: PropertyDef) -> PropertyDef {
 fn apply_import_postfix(
     base: PropertyDef,
     is_array: bool,
-    constraints: Vec<Constraint>,
+    mut constraints: Vec<Constraint>,
     array_constraints: Vec<Constraint>,
     description: Option<String>,
     name: &str,
@@ -760,6 +813,79 @@ fn apply_import_postfix(
             });
         }
     };
+
+    if is_array
+        && constraints
+            .iter()
+            .any(|constraint| matches!(constraint, Constraint::Suggest(_)))
+    {
+        return Err(SchemaError::Grammar {
+            property: name.to_string(),
+            message: "`suggest` is not valid at the array level".into(),
+            span: constraints
+                .iter()
+                .find_map(|constraint| match constraint {
+                    Constraint::Suggest(candidates) => candidates.first().map(|candidate| candidate.span.clone()),
+                    _ => None,
+                })
+                .unwrap_or(0..0),
+        });
+    }
+
+    if constraints
+        .iter()
+        .any(|constraint| matches!(constraint, Constraint::Suggest(_)))
+    {
+        let TypeExpr::Primitive(ty @ (SimplifiedType::String | SimplifiedType::Number)) =
+            &base_atom.ty
+        else {
+            return Err(SchemaError::Grammar {
+                property: name.to_string(),
+                message: format!(
+                    "`suggest` on imported type `{name}@{reference}` requires an exact `string` or `number` target"
+                ),
+                span: constraints
+                    .iter()
+                    .find_map(|constraint| match constraint {
+                        Constraint::Suggest(candidates) => {
+                            candidates.first().map(|candidate| candidate.span.clone())
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(0..0),
+            });
+        };
+        for constraint in &mut constraints {
+            if let Constraint::Suggest(candidates) = constraint {
+                super::simplified::grammar::reinterpret_suggestion_candidates(
+                    candidates,
+                    *ty,
+                    name,
+                )?;
+            }
+        }
+    }
+
+    let suggestion_count = base_atom
+        .constraints
+        .iter()
+        .chain(constraints.iter())
+        .filter(|constraint| matches!(constraint, Constraint::Suggest(_)))
+        .count();
+    if suggestion_count > 1 {
+        let span = constraints
+            .iter()
+            .find_map(|constraint| match constraint {
+                Constraint::Suggest(candidates) => candidates.first().map(|candidate| candidate.span.clone()),
+                _ => None,
+            })
+            .unwrap_or(0..0);
+        return Err(SchemaError::Grammar {
+            property: name.to_string(),
+            message: "a property definition may contain at most one `suggest` constraint".into(),
+            span,
+        });
+    }
 
     if is_array {
         if base_atom.is_array {

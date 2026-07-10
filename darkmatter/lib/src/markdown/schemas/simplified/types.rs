@@ -15,6 +15,8 @@
 
 use indexmap::IndexMap;
 
+use crate::markdown::span::SourceSpan;
+
 /// A SimplifiedSchema is either a single object shape or a root-level union of
 /// object shapes.
 #[derive(Debug, Clone, PartialEq)]
@@ -346,6 +348,10 @@ pub enum Constraint {
     /// ECMA-262 regex the value must match.
     Pattern(String),
 
+    /// Ordered, non-validating completion candidates authored with
+    /// `suggest(...)`.
+    Suggest(Vec<SuggestionCandidate>),
+
     // ── enum ─────────────────────────────────────────────────────────────
     /// Enumerated members.
     Members(Vec<String>),
@@ -405,6 +411,7 @@ impl Constraint {
             Constraint::MaxLen(_) => "max",
             Constraint::NotEmpty => "not-empty",
             Constraint::Pattern(_) => "pattern",
+            Constraint::Suggest(_) => "suggest",
             Constraint::Members(_) => "<members>",
             Constraint::Match(_) => "match",
             Constraint::Eager => "eager",
@@ -417,6 +424,27 @@ impl Constraint {
             Constraint::Example(_) => "example",
         }
     }
+}
+
+/// One interpreted argument from a `suggest(...)` constraint.
+///
+/// `span` is a byte range into the source handed to the relevant parser. The
+/// string grammar initially records a range into its type-expression string;
+/// source-aware YAML parsing projects it into the complete YAML or Markdown
+/// document without normalizing line endings.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SuggestionCandidate {
+    /// Argument text after SimplifiedSchema quote and escape processing.
+    pub decoded: String,
+    /// Target-directed value retained as suggestion metadata.
+    pub interpreted: serde_json::Value,
+    /// Normalized simple-decimal spelling for numeric candidates.
+    ///
+    /// This is also populated when a syntactically valid decimal cannot be
+    /// represented losslessly by the supported JSON number model.
+    pub canonical_decimal: Option<String>,
+    /// Exact authored argument byte span, including argument quotes.
+    pub span: SourceSpan,
 }
 
 #[cfg(test)]
