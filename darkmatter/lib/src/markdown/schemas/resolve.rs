@@ -2035,6 +2035,7 @@ mod schema_plus_phase1 {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("features")
+            .join("_completed")
             .join("2026-07-08-schema-plus")
     }
 
