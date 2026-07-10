@@ -1228,6 +1228,59 @@ mod tests {
     }
 
     #[test]
+    fn ctx_hover_surfaces_through_index_access() {
+        // `ctx.packages[0]` parses as
+        // `Index { base: Variable("ctx.packages"), index: NumberLiteral(0) }` —
+        // the lexer keeps the dotted `ctx.packages` as one Variable token, so the
+        // ctx variable is the root through index access (D2). The catalog block,
+        // the rendered type, and the compose-time note must all surface, with no
+        // captured frontmatter value.
+        let packages = expressions::ctx_descriptor("packages").unwrap();
+        let block = expressions::format_ctx_hover_block(packages);
+
+        // Offset 5 lands on `a` inside `packages` — within the ctx-rooted base.
+        let markdown = interpolation_hover_markdown("ctx.packages[0]", 5, no_frontmatter);
+        assert!(markdown.contains(&block), "catalog block on base: {markdown}");
+        assert!(markdown.contains("string[]"), "rendered array type: {markdown}");
+        assert!(markdown.contains("_compose_ time"), "compose-time note: {markdown}");
+        assert!(!markdown.contains("Static value"), "no captured value: {markdown}");
+
+        // Cursor on the `[` bracket (byte 12) — a structural position of the
+        // Index construct rather than the `ctx.packages` text — still resolves to
+        // the ctx-rooted expression, confirming the Index-rooted expression is
+        // handled end-to-end at the bracket offset.
+        let markdown = interpolation_hover_markdown("ctx.packages[0]", 12, no_frontmatter);
+        assert!(markdown.contains(&block), "catalog block on `[`: {markdown}");
+        assert!(markdown.contains("_compose_ time"), "compose-time note on `[`: {markdown}");
+    }
+
+    #[test]
+    fn ctx_hover_surfaces_through_member_access_chain() {
+        // `ctx.packages[0].first` parses as
+        // `MemberAccess { base: Index { base: Variable("ctx.packages"), index: 0 },
+        //                  name: "first" }` — the postfix dot only follows `]`, so
+        // the chain is rooted at the ctx variable (D2).
+        let packages = expressions::ctx_descriptor("packages").unwrap();
+        let block = expressions::format_ctx_hover_block(packages);
+
+        // Cursor on the `ctx.packages` base (offset 5 on `a`): the catalog block
+        // and compose-time note surface.
+        let markdown = interpolation_hover_markdown("ctx.packages[0].first", 5, no_frontmatter);
+        assert!(markdown.contains(&block), "catalog block on base: {markdown}");
+        assert!(markdown.contains("string[]"), "rendered array type: {markdown}");
+        assert!(markdown.contains("_compose_ time"), "compose-time note: {markdown}");
+
+        // Cursor on the `first` member name (offset 17 on `i`): the deepest
+        // sub-expression under the cursor is the MemberAccess node, so
+        // `root_identifier` must recurse MemberAccess -> Index -> Variable to
+        // reach `ctx.packages`. This is the genuine root-recursion proof through
+        // both member-access and index nodes.
+        let markdown = interpolation_hover_markdown("ctx.packages[0].first", 17, no_frontmatter);
+        assert!(markdown.contains(&block), "catalog block on member name: {markdown}");
+        assert!(markdown.contains("_compose_ time"), "compose-time note on member name: {markdown}");
+    }
+
+    #[test]
     fn frontmatter_variable_inside_function_call_shows_static_value() {
         // Offset 7 is on `i` in `title` — the argument, not the name.
         let markdown = interpolation_hover_markdown("upper(title)", 7, |name| {

@@ -1882,6 +1882,60 @@ fn interpolation_ctx_hover_matches_frontmatter_block() {
     fixture.shutdown();
 }
 
+/// A document whose body interpolates `ctx.packages` reached through index
+/// access (`ctx.packages[0]`), so the D2 hover contract is verified end-to-end
+/// for a ctx variable that is the root of an `Index` node — not just a direct
+/// `ctx.packages` reference.
+const INDEX_CTX_DOC: &str =
+    "---\nctx:\n  packages: []\n---\n\n# Doc\n\nItem: {{ ctx.packages[0] }}\n";
+
+#[test]
+fn interpolation_ctx_hover_surfaces_through_index_access() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc.md"), INDEX_CTX_DOC).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), INDEX_CTX_DOC);
+
+    let block = expressions::format_ctx_hover_block(
+        expressions::ctx_descriptor("packages").expect("`packages` is a known context variable"),
+    );
+
+    // Hover on the `packages` portion of `ctx.packages[0]` (line 7). The body
+    // line is `Item: {{ ctx.packages[0] }}`: `Item: ` is 6 columns, `{{ ` lands
+    // at columns 6-8, so `ctx` begins at column 9 and `packages` at column 13.
+    // The negotiated encoding is UTF-8, so byte offsets equal character columns.
+    let hover = fixture
+        .request(
+            "textDocument/hover",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 7, "character": 13 }
+            }),
+        )
+        .result
+        .expect("interpolation hover");
+    let text = hover["contents"]["value"].as_str().unwrap_or_default();
+    assert!(text.contains("string[]"), "catalog type surfaces: {text}");
+    assert!(
+        text.contains(&block),
+        "catalog-backed block must be the shared formatter's bytes: {text}"
+    );
+    assert!(
+        text.contains("_compose_ time"),
+        "passive compose-time note must be appended: {text}"
+    );
+
+    // The hover range spans the complete `{{ ctx.packages[0] }}` expression
+    // (D2): `{{` opens at column 6 and `}}` closes at column 27 (exclusive).
+    assert_eq!(hover["range"]["start"], json!({ "line": 7, "character": 6 }));
+    assert_eq!(hover["range"]["end"], json!({ "line": 7, "character": 27 }));
+
+    fixture.shutdown();
+}
+
 /// An astral character (💡, two UTF-16 units) precedes the open interpolation,
 /// so the negotiated UTF-16 position path is exercised: `ctx.pa` spans UTF-16
 /// columns 6..12 even though its byte span starts at 8.

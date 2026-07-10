@@ -1,6 +1,7 @@
 ---
 features:
 - 2026-07-04-dmls
+- 2026-07-08-modal-and-autocomplete
 ---
 # DMLS Hover Effects
 
@@ -46,6 +47,37 @@ Hovering a schema-declared frontmatter property renders its type, whether it is 
 The mental model: **box = the thing being described; bold = its type; italic = its example/enum/default values.** (An earlier idea — blue type, dim default — was dropped because color and dim are not expressible in hover Markdown.)
 
 The body is assembled by the pure `schema_hover_body` function in `src/providers/frontmatter.rs`, kept free of any LSP session state so the rule is unit-testable in isolation.
+
+## Formatting rule: interpolation `ctx.*` hover
+
+Inside a `{{ … }}` body interpolation, a cursor on an explicitly `ctx.`-qualified variable renders the shared catalog-backed block followed by an interpolation-only note. The variable counts as the root through member access and index access too (for example `ctx.packages[0].first`), because the lexer keeps a dotted `ctx.packages` as a single token.
+
+The catalog-backed block is single-sourced through one adapter, `overlay::expressions::format_ctx_hover_block`, which the frontmatter `ctx.*` hover also renders — so the two surfaces produce the same bytes. The block carries the qualified name, the rendered type, the read-only / Darkmatter-owned ownership note, and the description:
+
+| Element      | Markup                                         | Rationale                                        |
+|--------------|------------------------------------------------|--------------------------------------------------|
+| the variable | `` `ctx.<name>` ``(inline-code box) + `(type)` | the box marks the subject; the type rides inline |
+| ownership    | `read-only, Darkmatter-owned` (plain)          | a passive reminder, not a captured value         |
+| description  | plain paragraph                                | the prose the catalog author wrote               |
+
+After the block, the interpolation surface appends one interpolation-only line:
+
+> The `ctx` variable is evaluated at _compose_ time (rather than now).
+
+The frontmatter surface does not emit that note — it is DMLS-owned because it describes passive editor behavior (DMLS never captures host context or evaluates the expression to build hover content).
+
+Classification requires an explicit `ctx.` prefix (the D2 rule): a bare `{{ today }}` is a **frontmatter** variable even when `today` is also a known context-variable tail, and an unknown `ctx.<name>` keeps the generic expression hover without borrowing a similarly named bare key's value. The hover range remains the complete `{{ … }}` expression.
+
+## Formatting rule: function-call hover
+
+A cursor on a known function-name identifier — the name token of a `FunctionCall` such as `as_csv(...)` — renders the catalog typed signature and description through `overlay::expressions::format_function_block`.
+
+| Element      | Markup                                     | Rationale                          |
+|--------------|--------------------------------------------|------------------------------------|
+| the function | `` `<typed signature>` ``(inline-code box) | the box marks the subject          |
+| description  | plain paragraph                            | the prose the catalog author wrote |
+
+Cursor precedence: the function name wins on its own name identifier; an offset on an argument, parenthesis, or comma falls through to that inner expression's `ctx.*` or frontmatter hover (`function_call_at` declines on a non-name offset, so `expression_at` serves the argument). Unknown functions keep the generic `**Expression**` hover. The hover range remains the complete `{{ … }}` expression.
 
 ## What answers a hover
 

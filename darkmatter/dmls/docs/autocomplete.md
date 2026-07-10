@@ -70,12 +70,24 @@ Inside an interpolation, the DSL provider offers three candidate families:
 Matching is **prefix-based and case-sensitive**. `{{ ctx.pa }}` offers matching
 `ctx.*` variables; it does not offer the removed `*_list` aliases.
 
-### `ctx.` requires an explicit prefix
+### `ctx.*` candidate discovery
 
-A `ctx.*` variable is only offered/annotated when the cursor is on an explicitly
-`ctx.`-qualified expression. A bare `{{ today }}` is treated as a **frontmatter**
-variable, even when `today` is also a known context-variable tail — the two
-namespaces never bleed into each other.
+A `ctx.*` variable is offered whenever its fully qualified name is a
+case-sensitive prefix match of the current partial — including an empty partial.
+`{{ ` (empty), `{{ ctx`, and `{{ ctx.pa` all offer matching `ctx.*` variables, so
+`{{ ctx.pa }}` offers `ctx.packages`. This is the same prefix rule
+(`starts_with(partial)`) the frontmatter-key and function families use in
+`interpolation_candidates`.
+
+The two namespaces never bleed into each other, but each can be offered
+independently when its prefix matches: a bare `today` candidate is the
+**frontmatter** key `today`, not an alias for `ctx.today`, while the qualified
+`ctx.today` is a separate candidate offered whenever the `ctx.t…` prefix matches.
+
+The explicit-`ctx.`-prefix requirement is a **hover classification** rule, not a
+completion restriction: a bare `{{ today }}` must not receive `ctx.today` *hover*
+metadata even when `today` is a known context-variable tail. See
+[Hover](./hover.md) for that classification.
 
 ## Completion item metadata
 

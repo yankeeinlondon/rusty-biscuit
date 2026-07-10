@@ -1,7 +1,7 @@
 ---
 status: ready for planning and implementation
 reviewed: true
-review_iterations: 2
+review_iterations: 4
 depends_on:
   - ../_completed/2026-07-08-single-sourcing-schema/spec.md
 inputs:
