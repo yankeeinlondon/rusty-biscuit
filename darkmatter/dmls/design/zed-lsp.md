@@ -326,20 +326,20 @@ To make DMLS visible in Zed's extension UI:
 4. Add the extension repository as an HTTPS Git submodule under `extensions/{extension-id}`.
 5. Add an entry to the top-level `extensions.toml`:
 
-```toml
-[darkmatter]
-submodule = "extensions/darkmatter"
-version = "0.0.1"
-```
+   ```toml
+   [darkmatter]
+   submodule = "extensions/darkmatter"
+   version = "0.0.1"
+   ```
 
-If the Zed extension lives in a subdirectory of the repository, include `path`:
+   If the Zed extension lives in a subdirectory of the repository, include `path`:
 
-```toml
-[darkmatter]
-submodule = "extensions/darkmatter"
-path = "packages/zed"
-version = "0.0.1"
-```
+   ```toml
+   [darkmatter]
+   submodule = "extensions/darkmatter"
+   path = "packages/zed"
+   version = "0.0.1"
+   ```
 
 6. Run `pnpm sort-extensions` in the `zed-industries/extensions` checkout.
 7. Open a pull request.
