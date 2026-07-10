@@ -129,6 +129,17 @@ lint:
     @just _lint {{ CLI }}
     @just _lint {{ DMLS }}
 
+# installs the DMLS binary into binary path
+install-dmls:
+    @cargo install --path ./dmls --force
+
+install-vscode-package:
+    @echo
+    @echo "Will install the VSCode extension as dmls-0.0.1.vsix"
+    @echo
+    @cd ./dmls/vscode-dmls && npx @vscode/vsce package --allow-missing-repository
+    @cd ./dmls/vscode-dmls && code --install-extension dmls-0.0.1.vsix
+
 # Report CLI source/test files over the ~500-line review soft cap.
 #
 # Files listed in `ACCEPTED_OVERCAP` below are documented exceptions
@@ -226,8 +237,6 @@ all:
     @just test-browser
 
 # ----------------------------------------------------------------------------
-
-
 
 # Install the CLI
 install *args="":
