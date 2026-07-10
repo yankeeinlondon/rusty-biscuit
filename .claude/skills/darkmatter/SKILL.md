@@ -446,6 +446,18 @@ AD-2 verdict — full repo (3,141 files) ~1.9 s cold, `vault-5k` ~0.5 s, both
 inside the R-6 budget — so the v1 in-memory-only model stands and no warm-start
 cache is built. See `darkmatter/features/2026-07-04-dmls/plan.md`.
 
+## Expression Function Registrations
+
+Expression callables are registered once in the owning module under
+`markdown/compose/expression/functions/`. A `FunctionRegistration` contains the
+canonical name, aliases, every overload descriptor, and a `FunctionHandler`
+kind (`Pure`, `Context`, or `Lazy`). Add a callable or overload to that domain
+slice; do not create a parallel dispatch or descriptor table.
+
+Public consumers must read the projected, handler-free catalog through
+`expression_function_descriptors()`. The accessor is backed by one `LazyLock`
+and is the sole public expression-function catalog API.
+
 ## Common Entry Points
 
 ```rust
