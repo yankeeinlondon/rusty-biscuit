@@ -6,6 +6,8 @@
 
 pub mod image_ref;
 pub mod link;
+pub(crate) mod metadata_codec;
+pub(crate) mod reference_parse;
 pub mod stylesheet;
 
 pub use image_ref::{
