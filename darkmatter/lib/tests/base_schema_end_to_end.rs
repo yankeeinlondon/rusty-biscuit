@@ -12,6 +12,10 @@ fn base_api() -> DarkmatterSchemas {
         .expect("base schema must be baseline-compatible")
 }
 
+fn claudine_schema_path() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/schemas/claudine.yaml")
+}
+
 fn validate_with_base(frontmatter: &str) -> darkmatter::markdown::schemas::ValidationReport {
     let md: Markdown = format!("---\n{frontmatter}---\nBody\n").as_str().into();
     base_api().validate(&md).expect("validation must run")
@@ -43,6 +47,66 @@ fn base_schema_file_parses_and_converts() {
             .and_then(|v| v.as_object())
             .is_some_and(|properties| properties.contains_key("ctx")),
         "base JSON Schema must expose ctx"
+    );
+}
+
+#[test]
+fn claudine_schema_file_resolves_as_baseline() {
+    DarkmatterSchemas::new()
+        .with_baseline_from_file(claudine_schema_path())
+        .expect("Claudine schema must resolve imports and remain baseline-compatible");
+
+    let raw = std::fs::read_to_string(claudine_schema_path()).expect("schema must be readable");
+    let yaml: YamlValue = serde_yaml_ng::from_str(&raw).expect("schema YAML must parse");
+    let properties = yaml
+        .get("$schema")
+        .and_then(YamlValue::as_mapping)
+        .expect("schema must declare a property mapping");
+    assert!(properties.contains_key("max_turns"));
+    assert!(!properties.contains_key("maxTurns"));
+}
+
+#[test]
+fn claudine_schema_accepts_typed_lifecycle_stack() {
+    let md: Markdown = "---\nstart:\n  info: Starting\n  stack:\n    - when: env.CI == 'true'\n      action:\n        - message: Build started\n        - action: shell\n          command: cargo test\n          no_error: true\n---\nBody\n".into();
+    let report = DarkmatterSchemas::new()
+        .with_baseline_from_file(claudine_schema_path())
+        .expect("Claudine schema must load")
+        .validate(&md)
+        .expect("validation must run");
+
+    assert!(
+        report.valid,
+        "valid lifecycle stack must pass: {:?}",
+        report.problems
+    );
+}
+
+#[test]
+fn claudine_schema_rejects_malformed_lifecycle_stack() {
+    let md: Markdown = "---\nstart:\n  stack: run-now\n---\nBody\n".into();
+    let report = DarkmatterSchemas::new()
+        .with_baseline_from_file(claudine_schema_path())
+        .expect("Claudine schema must load")
+        .validate(&md)
+        .expect("validation must run");
+
+    assert!(!report.valid, "a lifecycle stack must be an array");
+}
+
+#[test]
+fn claudine_schema_accepts_loop_controls_and_lifecycle_concerns_together() {
+    let md: Markdown = "---\nloop:\n  while: step < 3\n  action:\n    op: increment\n    prop: step\n  info: Iteration complete\n  stack:\n    - action: stop\n---\nBody\n".into();
+    let report = DarkmatterSchemas::new()
+        .with_baseline_from_file(claudine_schema_path())
+        .expect("Claudine schema must load")
+        .validate(&md)
+        .expect("validation must run");
+
+    assert!(
+        report.valid,
+        "loop controls and lifecycle concerns must compose: {:?}",
+        report.problems
     );
 }
 

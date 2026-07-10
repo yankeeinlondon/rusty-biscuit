@@ -1,15 +1,7 @@
 # Baseline SimplifiedSchema for Claudine-owned Markdown frontmatter.
-# This file intentionally uses the proposed nested object syntax described in
-# claudine/features/2026-07-05-claudine-base-schema/spec.md.
+# Darkmatter-owned properties are inherited through the effective baseline and
+# intentionally are not redeclared here.
 $schema:
-  '$schema': "any -> Declares a document-local schema. Claudine validates this through Darkmatter before Claudine-specific interpretation."
-
-  title: "string -> Human-readable prompt title used in dry-run output, diagnostics, and reports."
-  description: "string -> Human-readable prompt summary used in dry-run output and missing-property diagnostics."
-  last_updated: "date -> Auto-managed date stamp updated by inline-compose closure."
-  hash: "any -> Darkmatter content hash auto-stamped by inline-compose closure."
-  metadata: "object -> Arbitrary metadata preserved for linking, documentation, and downstream tools."
-
   prompt: "string -> Inline composition prompt. Required for inline-compose; composed through Darkmatter before being sent to the provider."
   agent:
     - "string -> Preferred agentic CLI provider."
@@ -20,42 +12,21 @@ $schema:
   interactive: "boolish -> Default interactive session mode for compose and inline-compose. Rejected for sequence automation."
   fail_fast: "boolish(default(true)) -> Sequence and loop error policy. true stops after the first failure; false runs all steps and returns failure if any step failed."
   sequence:
-    - "string -> File reference to external sequence state."
+    - "file -> File reference to external sequence state."
     - "any[] -> Inline sequence steps. Each step may be a scalar or object state value."
 
-  # `loop` is both a lifecycle event and the repeated-execution configuration
-  # object. The effective parser distinguishes by fields.
-  loop:
-    - while: "string -> Boolean expression evaluated before each iteration; loop continues while truthy."
-      until: "string -> Boolean expression evaluated before each iteration; loop continues until truthy."
-      action: "any -> Single frontmatter mutation action applied after each successful iteration."
-      actions: "any -> One or more frontmatter mutation actions applied after each successful iteration."
-      max: "number(integer; min(1); default(100)) -> Maximum iteration count."
-      fail_fast: "boolish(default(true)) -> Per-loop failure policy."
-      on_rate_limit: "enum(pause, abort, continue; default(pause)) -> Rate-limit handling policy."
-    - &lifecycle-event
-      say: "string -> Text spoken with TTS when the lifecycle event fires. Mutually exclusive with say_first."
-      say_first: "string -> Text spoken before sound effects. Mutually exclusive with say."
-      effect: "string -> Built-in sound effect name."
-      message: "string -> Message sent through the configured messenger route."
-      stderr: "string -> Statusless text written to stderr."
-      stdout: "string -> Statusless text written to stdout."
-      info: "string -> Info status line written to stderr."
-      warn: "string -> Warning status line written to stderr."
-      success: "string -> Success status line written to stderr."
-      notify: "string -> Desktop notification title."
-      stack: "any[] -> Ordered lifecycle action stack. Detailed action validation is owned by Claudine's lifecycle parser."
+  loop: "loop-event@./claudine-types.yaml -> Repeated-execution controls and post-finalize lifecycle concerns."
 
   operation: "string -> Composition operation label supplied by the caller or CLI."
   output: "enum(json, text, stream) -> Requested machine/user output mode where supported."
   yolo: "boolish -> Explicitly allow high-trust execution mode when the caller has opted into it."
 
-  initialize: *lifecycle-event
-  start: *lifecycle-event
-  blocked: *lifecycle-event
-  success: *lifecycle-event
-  failure: *lifecycle-event
-  finalize: *lifecycle-event
+  initialize: "lifecycle-event@./claudine-types.yaml -> Lifecycle concerns emitted before schema validation and shell pre-flight."
+  start: "lifecycle-event@./claudine-types.yaml -> Lifecycle concerns emitted immediately before provider invocation."
+  blocked: "lifecycle-event@./claudine-types.yaml -> Lifecycle concerns emitted when execution stops before provider launch."
+  success: "lifecycle-event@./claudine-types.yaml -> Lifecycle concerns emitted after a successful provider session."
+  failure: "lifecycle-event@./claudine-types.yaml -> Lifecycle concerns emitted after a provider-session error."
+  finalize: "lifecycle-event@./claudine-types.yaml -> Lifecycle concerns emitted once after each terminal event."
 
   timeout: "string(not-empty) -> Optional wall-clock timeout duration for the provider run."
   step_timeout: "string(not-empty) -> Stream-silence timeout duration. Defaults to 30m when not otherwise configured."
@@ -64,9 +35,8 @@ $schema:
   stall_timeout: "string(not-empty) -> OpenCode stalled-generation timeout. 0s disables the OpenCode-specific guard."
 
   exit_expressions:
-    - "any[] -> Bare array of exit-expression entries; frontmatter array shorthand merges with lower layers."
-    - mode: "enum(merge, override) -> Combine mode for this exit-expression layer."
-      rules: "any[] -> Exit-expression rule entries. Each entry supports pattern or patterns, kind, ignore_case, and scope."
+    - "exit-expression[]@./claudine-types.yaml -> Bare rule array; the frontmatter layer merges with lower-precedence rules."
+    - "exit-expression-layer@./claudine-types.yaml"
 
   guard_settings:
     repetition:
@@ -90,21 +60,20 @@ $schema:
   disable-model-invocation: "boolish -> Provider-specific flag preventing model-initiated invocation."
   argument-hint: "string -> Slash-command argument hint."
   max_turns: "number(integer; min(1)) -> Maximum turns for providers that use snake_case frontmatter."
-  maxTurns: "number(integer; min(1)) -> Maximum turns for providers that use camelCase frontmatter."
 
   verbosity: "enum(silent, quiet, verbose) -> Prompt-reporting verbosity for system-prompt documents."
   mode: "string -> Context-specific mode. System-prompt discovery narrows this to append or replace; slash-command providers may use other values."
 
-  state: "any -> Current sequence step state injected as a reserved frontmatter override."
-  previous_state: "any -> Previous sequence step state, or null for the first step."
-  next_state: "any -> Next sequence step state, or null for the last step."
-  is_first: "boolean -> true when the current sequence step is first."
-  is_last: "boolean -> true when the current sequence step is last."
-  step: "number(integer; min(1)) -> 1-based sequence step index."
-  total_steps: "number(integer; min(1)) -> Total number of sequence steps."
+  state: "any(generated; required) -> Current sequence step state injected as a reserved frontmatter override."
+  previous_state: "any(generated) -> Previous sequence step state, or null for the first step."
+  next_state: "any(generated) -> Next sequence step state, or null for the last step."
+  is_first: "boolean(generated; required) -> true when the current sequence step is first."
+  is_last: "boolean(generated; required) -> true when the current sequence step is last."
+  step: "number(integer; min(1); generated; required) -> 1-based sequence step index."
+  total_steps: "number(integer; min(1); generated; required) -> Total number of sequence steps."
 
-  _loop_count: "number(integer; min(1)) -> 1-based loop iteration counter."
-  _loop_is_first: "boolean -> true on the first loop iteration."
-  _loop_is_last: "boolean -> true when the current loop iteration is expected to be final."
-  _loop_last_output: "string -> Captured output from the previous loop iteration. Empty on the first iteration."
-  _loop_last_exit_code: "number(integer) -> Exit code from the previous loop iteration. 0 on the first iteration."
+  _loop_count: "number(integer; min(1); generated; required) -> 1-based loop iteration counter."
+  _loop_is_first: "boolean(generated; required) -> true on the first loop iteration."
+  _loop_is_last: "boolean(generated; required) -> true when the current loop iteration is expected to be final."
+  _loop_last_output: "string(generated; required) -> Captured output from the previous loop iteration. Empty on the first iteration."
+  _loop_last_exit_code: "number(integer; generated; required) -> Exit code from the previous loop iteration. 0 on the first iteration."
