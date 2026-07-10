@@ -73,6 +73,14 @@ details do not belong here.
   left behind and report or commit them as appropriate.
 - Run commands from the inherited worktree root. Do not change to a guessed
   repository path, and do not push commits.
+- **In zsh, never use `status` as a shell variable name in commit wrappers
+  (2026-07-10 darkmatter suggest_constraint batch).** `status` is a read-only
+  zsh special parameter; assigning to it in a wrapper that wraps `git commit`
+  raises an error *after* the commit has already succeeded, so the wrapper
+  fails to print the captured `[branch hash] subject` line — leaving the
+  subagent with a successful commit on disk but no way to capture its hash
+  for verification. Use `commit_status` (or similar) instead. The
+  underlying commit is unaffected; the fix is to rename the local variable.
 - **Never run `git commit --amend` after a successful commit in a concurrent
   batch (2026-07-09 dmls + darkmatter batch, stray `7873a9a05`).** Once
   `git commit` returns zero, treat the commit as final for that invocation.
