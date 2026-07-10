@@ -1,5 +1,6 @@
 ---
 clarified: codex/gpt-5
+review_iterations: 2
 ---
 
 # Suggested Values for SimplifiedSchema
@@ -577,6 +578,6 @@ The feature is done when:
   ranges in open schema documents;
 - completion works at every position and union behavior listed above;
 - raw JSON Schema regression coverage confirms its distinct existing behavior;
-- relevant Darkmatter and DMLS unit tests pass with `just test`;
-- relevant DMLS integration tests pass with `just test-l2`; and
+- relevant Darkmatter unit tests and in-memory DMLS integration tests pass with
+  `just test`; and
 - the package-area lint recipe passes with `just lint`.
