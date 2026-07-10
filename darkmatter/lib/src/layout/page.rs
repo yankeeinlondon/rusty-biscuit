@@ -2665,13 +2665,16 @@ mod tests {
         let mut policy = max_width_policy(40);
         policy.layout.alignment = renderable::layout::Alignment::Center;
         let page = DarkmatterPage::new(&term)
+            .with_max_width(80)
             .with_component_policy(PageComponent::CodeBlocks, policy);
         let md: Markdown = "```rust\nfn main() {}\n```\n".into();
 
         let out = page.render(&md).unwrap();
         let plain = crate::testing::strip_ansi_codes(&out);
-        // With Max(40) the code block header renders at 40 cols, then the whole
-        // 40-col block is centered in 80 => 20 spaces of alignment padding.
+        // The explicit 80-column page frame makes the component's containing
+        // width independent of ambient terminal detection. With Max(40), the
+        // code block header renders at 40 cols, then the whole 40-col block is
+        // centered in 80 => 20 spaces of alignment padding.
         // The header title is right-aligned within the 40-col block, so the
         // "rust" token is preceded by that padding plus ~34 header spaces.
         let first_line = plain.lines().next().unwrap();
@@ -2732,15 +2735,18 @@ mod tests {
     fn render_code_block_with_pad_fill() {
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term)
+            .with_max_width(80)
             .with_component_policy(PageComponent::CodeBlocks, pad_policy(4));
         let md: Markdown = "```rust\nfn main() {}\n```\n".into();
 
         let out = page.render(&md).unwrap();
         let plain = crate::testing::strip_ansi_codes(&out);
 
-        // The second line is the top padding row, the simplest line to measure
-        // because it carries no header text: a full-component-width background
-        // fill row (80 cols) whose left edge carries the 4-col Pad padding.
+        // The explicit 80-column page frame makes the component's containing
+        // width independent of ambient terminal detection. The second line is
+        // the top padding row, the simplest line to measure because it carries
+        // no header text: a full-component-width background fill row whose left
+        // edge carries the 4-col Pad padding.
         let padding_row = plain.lines().nth(1).unwrap();
         assert_eq!(
             padding_row.len(),
