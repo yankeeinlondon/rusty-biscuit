@@ -6,8 +6,8 @@
 //! diagnostics range the parent mapping (a real visible range, not zero-width);
 //! unknown-key diagnostics range the offending key; type/constraint/file
 //! diagnostics range the value; `relatedInformation` points at the schema
-//! origin. Pending `$(...)` values are reported for information and never
-//! executed.
+//! origin. Deferred `$(...)` / `{{ … }}` values are never diagnosed (their
+//! passivity is explained on hover, not as a per-value squiggle).
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::schemas::{
@@ -98,10 +98,12 @@ fn schema_problem_diagnostics(
     );
 
     for problem in &report.problems {
+        let Some((code_value, severity)) = classify(problem.code, ctx.config.schema.strict) else {
+            continue;
+        };
         let Some(range) = problem_range(ast, ctx.source_map, problem) else {
             continue;
         };
-        let (code_value, severity) = classify(problem.code, ctx.config.schema.strict);
         let mut diagnostic = diagnostic(
             range,
             severity,
@@ -113,23 +115,11 @@ fn schema_problem_diagnostics(
         out.push(diagnostic);
     }
 
-    // Deferred-composition values, reported for information (never executed).
-    for pending in &report.pending {
-        let span = ast.value_range(&pending.path.as_pointer_string());
-        let Some(range) = ctx.source_map.byte_range_to_lsp(span) else {
-            continue;
-        };
-        out.push(diagnostic(
-            range,
-            DiagnosticSeverity::INFORMATION,
-            source::SCHEMA,
-            code::SCHEMA_PENDING_SHELL_VALUE,
-            format!(
-                "`{}` holds a deferred value; DMLS never executes it",
-                pending.key
-            ),
-        ));
-    }
+    // Deferred-composition values (`$(...)` / `{{ … }}`) are intentionally NOT
+    // diagnosed: an informational squiggle on every interpolated property is
+    // pure noise. The passive "never executed" guarantee is surfaced on hover
+    // (schema description for the key; policy verdict for `$()` shell), not as a
+    // per-value diagnostic. `report.pending` stays populated but unconsumed.
 }
 
 /// The concrete range for one validation problem (R-5 ranging rules).
@@ -216,9 +206,25 @@ fn style_diagnostics(ctx: &DocumentContext, ast: &FrontmatterAst, out: &mut Vec<
 }
 
 /// The `(code, severity)` for a validation-problem category.
-fn classify(code: ValidationProblemCode, strict: bool) -> (&'static str, DiagnosticSeverity) {
-    match code {
+/// Maps a validation problem to its stable code + severity, or `None` when the
+/// problem should not be diagnosed at edit time.
+///
+/// `MissingRequired` is `None` outside strict mode: `required` is a
+/// **compose-time** contract (the value arrives via CLI `--set`, seed values, or
+/// Claudine's interactive prompt), so a statically-absent required key is not an
+/// editor error — the same "resolved at compose time, don't diagnose here" rule
+/// the deferred `{{ }}` / `$(...)` values follow. `md compose` / `md schema
+/// validate` still catch genuine omissions with the injected values present. In
+/// strict mode it is an opt-in `ERROR`, mirroring how `UnknownKey` escalates.
+fn classify(
+    code: ValidationProblemCode,
+    strict: bool,
+) -> Option<(&'static str, DiagnosticSeverity)> {
+    Some(match code {
         ValidationProblemCode::MissingRequired => {
+            if !strict {
+                return None;
+            }
             (code::SCHEMA_MISSING_REQUIRED, DiagnosticSeverity::ERROR)
         }
         ValidationProblemCode::TypeMismatch => {
@@ -238,7 +244,7 @@ fn classify(code: ValidationProblemCode, strict: bool) -> (&'static str, Diagnos
         ValidationProblemCode::InvalidFileReference => {
             (code::SCHEMA_INVALID_FILE_REFERENCE, DiagnosticSeverity::ERROR)
         }
-    }
+    })
 }
 
 /// Builds a diagnostic with a stable source + code.
@@ -263,4 +269,44 @@ fn diagnostic(
 /// convert).
 fn zero_range() -> Range {
     Range::default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_required_is_off_by_default_and_error_in_strict() {
+        // `required` is a compose-time contract: no edit-time diagnostic unless
+        // the workspace opts into strict schema mode.
+        assert_eq!(classify(ValidationProblemCode::MissingRequired, false), None);
+        assert_eq!(
+            classify(ValidationProblemCode::MissingRequired, true),
+            Some((code::SCHEMA_MISSING_REQUIRED, DiagnosticSeverity::ERROR)),
+        );
+    }
+
+    #[test]
+    fn unknown_key_warns_in_non_strict_and_errors_in_strict() {
+        assert_eq!(
+            classify(ValidationProblemCode::UnknownKey, false),
+            Some((code::SCHEMA_UNKNOWN_KEY, DiagnosticSeverity::WARNING)),
+        );
+        assert_eq!(
+            classify(ValidationProblemCode::UnknownKey, true),
+            Some((code::SCHEMA_UNKNOWN_KEY, DiagnosticSeverity::ERROR)),
+        );
+    }
+
+    #[test]
+    fn value_problems_are_errors_in_either_mode() {
+        for code in [
+            ValidationProblemCode::TypeMismatch,
+            ValidationProblemCode::ConstraintViolation,
+            ValidationProblemCode::InvalidFileReference,
+        ] {
+            assert_eq!(classify(code, false).unwrap().1, DiagnosticSeverity::ERROR);
+            assert_eq!(classify(code, true).unwrap().1, DiagnosticSeverity::ERROR);
+        }
+    }
 }

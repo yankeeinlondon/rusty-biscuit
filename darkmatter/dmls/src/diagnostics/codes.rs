@@ -83,9 +83,6 @@ pub mod code {
     pub const SCHEMA_DEPRECATED_KEY: &str = "dm.schema.deprecated_key";
     /// A `file(...)`-typed value failed to parse, resolve, or match a file.
     pub const SCHEMA_INVALID_FILE_REFERENCE: &str = "dm.schema.invalid_file_reference";
-    /// A value still holds a `$(...)` / `{{ … }}` deferred-composition
-    /// construct — reported for information, never executed.
-    pub const SCHEMA_PENDING_SHELL_VALUE: &str = "dm.schema.pending_shell_value";
 
     /// A `style:` key the style schema does not recognize.
     pub const STYLE_UNKNOWN_KEY: &str = "dm.style.unknown_key";
