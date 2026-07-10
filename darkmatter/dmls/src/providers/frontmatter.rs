@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::schemas::{
     Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
-    darkmatter_base_schema,
+    darkmatter_base_schema, suggestions_for_path,
 };
 use darkmatter::markdown::span::SourceSpan;
 use lsp_types::{
@@ -36,7 +36,7 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
 // ── Completion ────────────────────────────────────────────────────────────
 
 /// Completion inside the frontmatter block: schema keys, enum values, boolish
-/// scaffolds, file paths, and `style.*` keys.
+/// scaffolds, file paths, `style.*` keys, and `suggest(...)` candidates.
 pub fn completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
     let Some(ast) = overlay_ast(ctx) else {
         return Vec::new();
@@ -56,7 +56,12 @@ pub fn completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
             value_completions(ctx, offset, &ancestors, &key, value_partial)
         }
         None if indent == 0 => top_level_key_completions(ctx, ast, offset, trimmed),
-        None => nested_key_completions(ctx, ast, offset, line_start, indent, trimmed),
+        None => {
+            if let Some(items) = block_array_suggestions(ctx, offset, line_start, indent, trimmed) {
+                return items;
+            }
+            nested_key_completions(ctx, ast, offset, line_start, indent, trimmed)
+        }
     }
 }
 
@@ -140,9 +145,9 @@ fn present_child_keys<'a>(ast: &'a FrontmatterAst, ancestors: &[String]) -> Vec<
         .collect()
 }
 
-/// Enum members, boolish scaffolds, or file paths for a key's value. `ancestors`
-/// is the parent mapping path (empty at the top level); the leaf atom is
-/// resolved by descending inline objects.
+/// Enum members, boolish scaffolds, file paths, or `suggest(...)` candidates for
+/// a key's value. `ancestors` is the parent mapping path (empty at the top
+/// level); the leaf atom is resolved by descending inline objects.
 fn value_completions(
     ctx: &DocumentContext,
     offset: usize,
@@ -151,9 +156,23 @@ fn value_completions(
     partial: &str,
 ) -> Vec<CompletionItem> {
     let start = offset - partial.len();
-    let shape = known_shape(ctx);
     let mut path: Vec<&str> = ancestors.iter().map(String::as_str).collect();
     path.push(key);
+
+    // Flow-array item: `key: [partial_or_empty, more]`
+    if partial.trim_start().starts_with('[') {
+        let (element_partial, element_start) = flow_array_element(partial, start);
+        return suggestion_completions(ctx, &path, element_start, offset, &element_partial)
+            .unwrap_or_default();
+    }
+
+    // Suggestion candidates for scalar values (checked before enum/boolish/file
+    // so a suggest-bearing union arm wins per the spec).
+    if let Some(items) = suggestion_completions(ctx, &path, start, offset, partial) {
+        return items;
+    }
+
+    let shape = known_shape(ctx);
     let Some(atom) = def_at_path(&shape, &path).and_then(completable_atom) else {
         return Vec::new();
     };
@@ -205,6 +224,90 @@ fn file_path_completions(ctx: &DocumentContext, offset: usize, partial: &str) ->
         }
     }
     out
+}
+
+// ── Suggestion completion ──────────────────────────────────────────────────
+
+/// The document's own SimplifiedSchema (when available from the effective
+/// schema). Raw JSON Schema documents yield `None`, so suggestion completion
+/// never activates for them.
+fn document_simplified_schema<'a>(ctx: &'a DocumentContext<'a>) -> Option<&'a SimplifiedSchema> {
+    ctx.overlay
+        .and_then(|overlay| overlay.bundle())
+        .and_then(|bundle| bundle.effective.simplified.as_ref())
+}
+
+/// Builds suggestion completion items for a property path, filtered by `prefix`.
+/// Returns `None` when the property has no `suggest(...)` constraint or no
+/// SimplifiedSchema is available.
+fn suggestion_completions(
+    ctx: &DocumentContext,
+    property_path: &[&str],
+    start: usize,
+    offset: usize,
+    prefix: &str,
+) -> Option<Vec<CompletionItem>> {
+    let schema = document_simplified_schema(ctx)?;
+    let query = suggestions_for_path(schema, property_path)?;
+    let items: Vec<CompletionItem> = query
+        .items
+        .iter()
+        .filter(|suggestion| suggestion.label.starts_with(prefix))
+        .filter_map(|suggestion| {
+            item(
+                ctx,
+                start,
+                offset,
+                &suggestion.label,
+                &suggestion.insert_text,
+                CompletionItemKind::VALUE,
+                None,
+            )
+        })
+        .collect();
+    Some(items)
+}
+
+/// Detects a block-sequence item (`- value`) and returns suggestion completions
+/// when the enclosing property is suggestion-eligible.
+fn block_array_suggestions(
+    ctx: &DocumentContext,
+    offset: usize,
+    line_start: usize,
+    indent: usize,
+    trimmed: &str,
+) -> Option<Vec<CompletionItem>> {
+    let after_dash = trimmed.strip_prefix("- ").or_else(|| {
+        if trimmed == "-" {
+            Some("")
+        } else {
+            None
+        }
+    })?;
+    let ancestors = enclosing_path(ctx.text, line_start, indent);
+    let path: Vec<&str> = ancestors.iter().map(String::as_str).collect();
+    let item_start = line_start + indent + 2;
+    suggestion_completions(ctx, &path, item_start, offset, after_dash)
+}
+
+/// Extracts the current element text and its byte-offset start from a flow-array
+/// value partial (the text after `key:` up to the cursor, starting with `[`).
+///
+/// Returns `(element_partial, element_start_byte)` where `element_partial` is
+/// the text of the element being typed (possibly empty) and `element_start_byte`
+/// is the absolute byte offset where a text edit should begin.
+fn flow_array_element(value_partial: &str, value_start: usize) -> (String, usize) {
+    let last_sep = value_partial.rfind([',', '[']);
+    match last_sep {
+        Some(pos) => {
+            let after_sep = &value_partial[pos + 1..];
+            let trimmed_element = after_sep.trim_start();
+            let leading_ws = after_sep.len() - trimmed_element.len();
+            let element_start = value_start + pos + 1 + leading_ws;
+            (trimmed_element.to_string(), element_start)
+        }
+        None => (value_partial.to_string(), value_start),
+    }
 }
 
 /// `style.*` container keys from the style descriptor catalog.
@@ -964,5 +1067,47 @@ mod tests {
         assert!(settings.properties.contains_key("mode"));
         // And `def_at_path` reaches the nested leaf through the same union arm.
         assert!(def_at_path(&root, &["settings", "mode"]).is_some());
+    }
+
+    // ── Suggestion completion helper tests ──
+
+    #[test]
+    fn test_flow_array_element_empty_after_comma() {
+        // `[0.,` with cursor after the comma — element is empty.
+        let (element, start) = flow_array_element("[0.,", 100);
+        assert_eq!(element, "");
+        assert_eq!(start, 104); // 100 + 3 (comma pos) + 1 = 104
+    }
+
+    #[test]
+    fn test_flow_array_element_first_element() {
+        // `[red` — cursor inside the first element.
+        let (element, start) = flow_array_element("[red", 0);
+        assert_eq!(element, "red");
+        assert_eq!(start, 1); // after `[`
+    }
+
+    #[test]
+    fn test_flow_array_element_after_bracket() {
+        // `[` alone — cursor right after opening bracket.
+        let (element, start) = flow_array_element("[", 0);
+        assert_eq!(element, "");
+        assert_eq!(start, 1);
+    }
+
+    #[test]
+    fn test_flow_array_element_partial_after_comma() {
+        // `[a, b` — cursor inside the second element.
+        let (element, start) = flow_array_element("[a, b", 0);
+        assert_eq!(element, "b");
+        assert_eq!(start, 4); // after `, `
+    }
+
+    #[test]
+    fn test_flow_array_element_with_spaces() {
+        // `[a,    b` — multiple spaces after comma.
+        let (element, start) = flow_array_element("[a,    b", 0);
+        assert_eq!(element, "b");
+        assert_eq!(start, 7); // after `,    `
     }
 }
