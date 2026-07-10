@@ -790,6 +790,46 @@ mod tests {
     }
 
     #[test]
+    fn test_base_style_schema_exposes_nested_completion_shapes() {
+        let darkmatter::markdown::schemas::SimplifiedSchema::Single(root) =
+            darkmatter::markdown::schemas::darkmatter_base_schema()
+        else {
+            panic!("base schema must be a single object shape");
+        };
+
+        let block_quote = nested_shape(&root, &["style", "block-quote"])
+            .expect("block-quote must be a typed style bucket");
+        for key in [
+            "width",
+            "max-width",
+            "alignment",
+            "color",
+            "bg-color",
+            "margin",
+            "padding",
+            "border",
+            "emphasis",
+            "word-wrap",
+        ] {
+            assert!(
+                block_quote.properties.contains_key(key),
+                "style.block-quote must complete `{key}`"
+            );
+        }
+
+        let emphasis = nested_shape(&root, &["style", "block-quote", "emphasis"])
+            .expect("compound emphasis must expose nested keys");
+        assert!(emphasis.properties.contains_key("italic"));
+        assert!(emphasis.properties.contains_key("underline"));
+
+        let alignment = def_at_path(&root, &["style", "block-quote", "alignment"])
+            .and_then(completable_atom)
+            .and_then(enum_members)
+            .expect("alignment must offer enum values");
+        assert_eq!(alignment, ["left", "center", "right"]);
+    }
+
+    #[test]
     fn test_nested_shape_missing_segment_is_none() {
         let root = nested_fixture();
         assert!(nested_shape(&root, &["absent"]).is_none());
