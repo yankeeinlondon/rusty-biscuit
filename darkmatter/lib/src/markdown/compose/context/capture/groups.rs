@@ -1,6 +1,42 @@
-use super::{ContextGroup, agent, changes, datetime, docs, host, languages, repo};
+use std::collections::HashSet;
 
-pub(super) fn group_for_key(key: &str) -> Option<ContextGroup> {
+use super::{agent, changes, datetime, docs, host, languages, repo};
+
+/// Independently captured runtime-context domains.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum ContextGroup {
+    DateTime,
+    Repo,
+    FileChanges,
+    Languages,
+    Documents,
+    Os,
+    Hardware,
+    Gpu,
+    Agent,
+}
+
+impl ContextGroup {
+    pub(crate) fn all() -> [Self; 9] {
+        [
+            Self::DateTime,
+            Self::Repo,
+            Self::FileChanges,
+            Self::Languages,
+            Self::Documents,
+            Self::Os,
+            Self::Hardware,
+            Self::Gpu,
+            Self::Agent,
+        ]
+    }
+
+    pub(crate) fn for_key(key: &str) -> Option<Self> {
+        group_for_key(key)
+    }
+}
+
+fn group_for_key(key: &str) -> Option<ContextGroup> {
     [
         (ContextGroup::DateTime, datetime::KEYS),
         (ContextGroup::Repo, repo::KEYS),
@@ -15,6 +51,26 @@ pub(super) fn group_for_key(key: &str) -> Option<ContextGroup> {
     .into_iter()
     .find_map(|(group, keys)| keys.contains(&key).then_some(group))
     .or_else(|| datetime::ALIASES.contains(&key).then_some(ContextGroup::DateTime))
+}
+
+/// Finds the runtime-context domains referenced by `ctx.KEY` expressions.
+pub(crate) fn scan_needed_groups(content: &str) -> HashSet<ContextGroup> {
+    let mut groups = HashSet::new();
+    let mut pos = 0;
+
+    while let Some(offset) = content[pos..].find("ctx.") {
+        let start = pos + offset + 4;
+        let key_end = content[start..]
+            .find(|c: char| !c.is_alphanumeric() && c != '_')
+            .map(|offset| start + offset)
+            .unwrap_or(content.len());
+        if let Some(group) = ContextGroup::for_key(&content[start..key_end]) {
+            groups.insert(group);
+        }
+        pos = key_end;
+    }
+
+    groups
 }
 
 #[cfg(test)]
