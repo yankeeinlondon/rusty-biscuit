@@ -98,10 +98,12 @@ _lint pkg:
 
     duration=$SECONDS
     commit_hash=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
-    if [[ $exit_code -eq 0 ]]; then
-        echo "{\"duration\": $duration, \"result\": \"pass\", \"last_commit\": \"$commit_hash\"}" >> "lint-{{ pkg }}-timing.jsonl"
-    else
-        echo "{\"duration\": $duration, \"result\": \"fail\", \"last_commit\": \"$commit_hash\"}" >> "lint-{{ pkg }}-timing.jsonl"
+    if [[ "${BISCUIT_LINT_RECORD_TIMING:-0}" == "1" ]]; then
+        if [[ $exit_code -eq 0 ]]; then
+            echo "{\"duration\": $duration, \"result\": \"pass\", \"last_commit\": \"$commit_hash\"}" >> "lint-{{ pkg }}-timing.jsonl"
+        else
+            echo "{\"duration\": $duration, \"result\": \"fail\", \"last_commit\": \"$commit_hash\"}" >> "lint-{{ pkg }}-timing.jsonl"
+        fi
     fi
 
     if [[ $exit_code -ne 0 ]]; then
@@ -177,7 +179,7 @@ _test pkg *args="":
         *) result="fail" ;;
     esac
 
-    if [[ "${BISCUIT_TEST_RECORD_TIMING:-1}" != "0" ]]; then
+    if [[ "${BISCUIT_TEST_RECORD_TIMING:-0}" == "1" ]]; then
         if [[ -n "{{ args }}" ]]; then
             params_json=$(to_json_array {{ args }})
             echo "{\"duration\": $duration, \"result\": \"$result\", \"last_commit\": \"$commit_hash\", \"params\": $params_json}" >> "test-{{ pkg }}-timing.jsonl"
