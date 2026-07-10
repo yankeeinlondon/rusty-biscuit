@@ -2,7 +2,8 @@
 $schema:
     spec: file(required;match(**/*spec*.md);eager)
     design: file(match(**/*design*.md))
-    plan: file(required)
+    plan: "file(required) -> the plan file this prompt will create"
+    area: "string() -> the package area (or package in some cases) where the work is being done"
     
 description: "Creates a multi-phase, high confidence plan from a _feature_ or _fix_"
 root: "{{ctx.repo_root}}"
