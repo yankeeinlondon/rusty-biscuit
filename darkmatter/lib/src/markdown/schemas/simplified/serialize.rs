@@ -50,6 +50,22 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
                 out.push(')');
             }
         }
+        // Imported type reference: `name ('[]')? ('(' constraints ')')? '@' ref`
+        // — the terminal-`@` grammar (O-B1). Postfix `[]`/constraints ride on
+        // the enclosing atom.
+        TypeExpr::Imported { name, reference } => {
+            out.push_str(name);
+            if atom.is_array {
+                out.push_str("[]");
+            }
+            if !atom.constraints.is_empty() {
+                out.push('(');
+                write_constraints(&mut out, &atom.constraints, SimplifiedType::Any);
+                out.push(')');
+            }
+            out.push('@');
+            out.push_str(reference);
+        }
     }
 
     if let Some(desc) = &atom.description {
@@ -111,6 +127,7 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: SimplifiedType) {
         Constraint::NotEmpty => out.push_str("not-empty"),
         Constraint::Integer => out.push_str("integer"),
         Constraint::Unique => out.push_str("unique"),
+        Constraint::Generated => out.push_str("generated"),
 
         Constraint::Min(n) => {
             let _ = write!(out, "min({})", format_number(*n));
@@ -129,6 +146,12 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: SimplifiedType) {
         }
         Constraint::MaxItems(n) => {
             let _ = write!(out, "max({n})");
+        }
+        Constraint::MinKeys(n) => {
+            let _ = write!(out, "min-keys({n})");
+        }
+        Constraint::MaxKeys(n) => {
+            let _ = write!(out, "max-keys({n})");
         }
 
         Constraint::Pattern(p) => {
@@ -162,6 +185,16 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: SimplifiedType) {
                     out.push(',');
                 }
                 write_arg(out, s);
+            }
+            out.push(')');
+        }
+        Constraint::Example(refs) => {
+            out.push_str("example(");
+            for (i, r) in refs.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                write_arg(out, r);
             }
             out.push(')');
         }
@@ -246,6 +279,28 @@ mod tests {
             ty: TypeExpr::Primitive(SimplifiedType::String),
             is_array: false,
             constraints: vec![Constraint::Required],
+            array_constraints: vec![],
+            description: None,
+        });
+    }
+
+    #[test]
+    fn round_trip_generated_string() {
+        round_trip(PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::String),
+            is_array: false,
+            constraints: vec![Constraint::Generated],
+            array_constraints: vec![],
+            description: None,
+        });
+    }
+
+    #[test]
+    fn round_trip_generated_with_required() {
+        round_trip(PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::String),
+            is_array: false,
+            constraints: vec![Constraint::Generated, Constraint::Required],
             array_constraints: vec![],
             description: None,
         });

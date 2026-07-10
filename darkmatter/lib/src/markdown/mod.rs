@@ -46,6 +46,7 @@ pub mod output;
 pub mod reference;
 pub mod render_tree;
 pub mod schemas;
+pub mod span;
 pub mod toc;
 mod types;
 pub mod yaml_block;
@@ -55,7 +56,9 @@ pub use delta::{
     FrontmatterChange, MarkdownDelta, MovedSection, SectionId, SectionPath,
 };
 pub use code_block::{CodeBlock, CodeBlockError};
-pub use frontmatter::{Frontmatter, MergeStrategy};
+pub use frontmatter::{
+    Frontmatter, FrontmatterExtraction, MergeStrategy, extract_frontmatter_block,
+};
 pub use hash::{
     ComputedHash, DetailedValue, FmHashPair, MdHashKind, MdHashOptions, ParseMdHashKindError,
     SectionTuple,
@@ -68,11 +71,15 @@ pub use normalize::{
 pub use reference::file_tree::{FileTree, FileTreeError};
 pub use reference::{
     ReferenceError, ReferenceGraph, ReferenceGraphOptions, ReferenceKind, ReferenceRecord,
-    ReferenceSet, TransclusionRef,
+    ReferenceSet, TransclusionRef, extract_document_references,
 };
 #[allow(deprecated)]
 pub use render_tree::TerminalCodeRenderer;
-pub use toc::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode};
+pub use span::{SourceSpan, Spanned, line_col_of_offset, line_of_offset};
+pub use toc::{
+    CodeBlockInfo, HeadingRecord, InternalLinkInfo, MarkdownToc, MarkdownTocNode,
+    extract_headings, generate_heading_slug,
+};
 pub use types::{FrontmatterMap, MarkdownError, MarkdownResult, SourceRef};
 #[allow(deprecated)]
 pub use yaml_block::{YamlBlock, YamlBlockError};
@@ -691,10 +698,9 @@ impl Markdown {
     /// through the wired [`TerminalCodeRenderer`] hook. This is the only HTML
     /// render path; the legacy event-stream serializer has been deleted.
     ///
-    /// When `options.hr_defaults` is unset, a document's deprecated top-level
-    /// `hr:` frontmatter still seeds bare-rule defaults — restoring the bespoke
-    /// serializer's direct-API fallback so `as_html(HtmlOptions::default())`
-    /// honors it without routing through a [`DarkmatterPage`](crate::layout::DarkmatterPage).
+    /// Bare-rule defaults come from [`HtmlOptions::hr_defaults`]. Document
+    /// frontmatter is honored only when callers parse `style.hr.*` and project
+    /// it into those options or a [`DarkmatterPage`](crate::layout::DarkmatterPage).
     ///
     /// ## Examples
     ///
@@ -722,9 +728,9 @@ impl Markdown {
     /// styled headings, and formatted block elements including inline images
     /// (via Kitty/iTerm2 protocols through biscuit-terminal).
     ///
-    /// When `options.hr_defaults` is unset, a document's deprecated top-level
-    /// `hr:` frontmatter still seeds bare-rule defaults — the direct-API
-    /// counterpart to the [`as_html`](Self::as_html) fallback.
+    /// Bare-rule defaults come from [`TerminalOptions::hr_defaults`](output::TerminalOptions::hr_defaults).
+    /// Document frontmatter is honored only when callers parse `style.hr.*` and
+    /// project it into those options or a [`DarkmatterPage`](crate::layout::DarkmatterPage).
     ///
     /// ## Examples
     ///

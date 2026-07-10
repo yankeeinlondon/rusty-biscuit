@@ -26,7 +26,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
 
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
@@ -433,34 +432,22 @@ fn run_file_array_chooser_test<H: KeySender>(harness: &mut H) {
         prompt.starts_with("attachments: "),
         "composed prompt must begin with 'attachments: '; prompt:\n{prompt}"
     );
+    // Bare array interpolation renders line-separated (spec D4): one selected
+    // file path per line, no JSON brackets.
     let value = prompt.trim_start_matches("attachments: ").trim();
-    assert!(
-        value.starts_with('[') && value.ends_with(']'),
-        "multi-select file value must be a JSON array; value: {value}"
-    );
-    let parsed: Value = serde_json::from_str(value)
-        .unwrap_or_else(|_| panic!("multi-select value must be valid JSON; value: {value}"));
-    let arr = parsed.as_array().unwrap_or_else(|| {
-        panic!("multi-select file value must be a JSON array; value: {value}")
-    });
+    let lines: Vec<&str> = value.lines().map(str::trim).collect();
     assert_eq!(
-        arr.len(),
+        lines.len(),
         2,
-        "must have selected exactly two files; array: {arr:?}"
-    );
-    for item in arr {
-        assert!(
-            item.is_string(),
-            "each selected file must be a string; item: {item}"
-        );
-    }
-    assert!(
-        arr.iter().any(|v| v.as_str().unwrap().contains("notes.md")),
-        "notes.md must be selected; array: {arr:?}"
+        "must have selected exactly two files; value: {value}"
     );
     assert!(
-        arr.iter().any(|v| v.as_str().unwrap().contains("readme.md")),
-        "readme.md must be selected; array: {arr:?}"
+        lines.iter().any(|line| line.contains("notes.md")),
+        "notes.md must be selected; value: {value}"
+    );
+    assert!(
+        lines.iter().any(|line| line.contains("readme.md")),
+        "readme.md must be selected; value: {value}"
     );
 }
 

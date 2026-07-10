@@ -389,6 +389,12 @@ The table below is generated from [`EXPRESSION_FUNCTION_DESCRIPTORS`](../../lib/
 | Filesystem | `has_command(cmd)` | Returns true when the command is found on PATH or is an existing executable absolute path. |  |
 | Context | `has_skill(name)` | Returns true when a skill directory exists in a user-scoped or local-scoped skill root. |  |
 | Context | `has_local_skill(name)` | Returns true when a skill directory exists in a local-scoped skill root. |  |
+| List Formatting | `as_line_separated(list)` | Joins a list into a newline-separated string (the default bare-array rendering). |  |
+| List Formatting | `as_csv(list)` | Joins a list into a comma-separated string. | `as_csv(items)` ⇒ `1, 2, 3` |
+| List Formatting | `as_tsv(list)` | Joins a list into a tab-separated string. |  |
+| List Formatting | `as_space_separated(list)` | Joins a list into a space-separated string. | `as_space_separated(items)` ⇒ `1 2 3` |
+| List Formatting | `as_unordered_list(list)` | Renders a list as a Markdown unordered list, auto-nesting nested arrays and object-array shapes as indented sublists. |  |
+| List Formatting | `as_ordered_list(list)` | Renders a list as a Markdown ordered list, auto-nesting nested arrays and object-array shapes as indented sublists. |  |
 <!-- END GENERATED FUNCTION TABLE -->
 
 ### `date()` format tokens

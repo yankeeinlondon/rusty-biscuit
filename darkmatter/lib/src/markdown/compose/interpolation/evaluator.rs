@@ -74,7 +74,7 @@
 use crate::catalog::{describe_for_error, suggest};
 use crate::markdown::compose::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS;
 use crate::markdown::compose::expression::{
-    EvaluationLookup, Expr, ExpressionError, evaluate, scalar_string,
+    EvaluationLookup, Expr, ExpressionError, evaluate, interpolation_output_string,
 };
 use crate::markdown::compose::ComposeWarning;
 use serde_json::Value;
@@ -237,7 +237,12 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
 
         // Preserve debug/trace logging for variable resolution
         if let Expr::Variable(name) = expr {
-            let value = self.state.get_string(name);
+            // Bare array interpolation renders line-separated (spec D4); every
+            // other type keeps `get_string`'s byte-identical scalar coercion.
+            let value = match self.state.get(name) {
+                Some(array @ Value::Array(_)) => interpolation_output_string(&array),
+                _ => self.state.get_string(name),
+            };
             if value.is_empty() {
                 debug!(variable = %name, "interpolation: unresolved variable");
             } else {
@@ -247,7 +252,7 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
         }
 
         match evaluate(expr, self.state) {
-            Ok(value) => EvalResult::Value(scalar_string(&value)),
+            Ok(value) => EvalResult::Value(interpolation_output_string(&value)),
             Err(error) => EvalResult::Error {
                 error,
                 original: expr.to_string(),
@@ -304,7 +309,7 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
                 return;
             }
             let mut message = format!("unknown context variable '{}'", raw);
-            if let Some(descriptor) = suggest(CONTEXT_VARIABLE_DESCRIPTORS, name, 1).first() {
+            if let Some(descriptor) = suggest(&CONTEXT_VARIABLE_DESCRIPTORS, name, 1).first() {
                 message.push_str("\n  did you mean: ");
                 message.push_str(&describe_for_error(*descriptor));
             }
@@ -708,6 +713,95 @@ mod tests {
             match evaluator.eval(&expr) {
                 EvalResult::Value(s) => assert_eq!(s, ""),
                 _ => panic!("Expected empty Value"),
+            }
+        }
+    }
+
+    mod eval_array_interpolation {
+        use super::*;
+
+        /// Bare array interpolation renders line-separated (spec D4 default),
+        /// so `{{ items }}` ≡ `{{ as_line_separated(items) }}`.
+        #[test]
+        fn bare_array_renders_line_separated() {
+            let state = create_test_state(json!({"items": ["a", "b", "c"]}));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse("items").unwrap();
+
+            match evaluator.eval(&expr) {
+                EvalResult::Value(s) => assert_eq!(s, "a\nb\nc"),
+                EvalResult::Error { error, .. } => panic!("Expected Value, got error: {error}"),
+            }
+        }
+
+        #[test]
+        fn empty_array_renders_empty() {
+            let state = create_test_state(json!({"items": []}));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse("items").unwrap();
+
+            match evaluator.eval(&expr) {
+                EvalResult::Value(s) => assert_eq!(s, ""),
+                _ => panic!("Expected Value"),
+            }
+        }
+
+        /// `as_csv` reproduces the historical comma-joined bare-name output of
+        /// the collapsed `ctx.*` list variables (spec criterion 7).
+        #[test]
+        fn as_csv_reproduces_comma_output() {
+            let state = create_test_state(json!({"items": ["a", "b", "c"]}));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse("as_csv(items)").unwrap();
+
+            match evaluator.eval(&expr) {
+                EvalResult::Value(s) => assert_eq!(s, "a, b, c"),
+                _ => panic!("Expected Value"),
+            }
+        }
+
+        /// `as_unordered_list` reproduces the old `_list` twin's bullet output.
+        #[test]
+        fn as_unordered_list_reproduces_bullets() {
+            let state = create_test_state(json!({"items": ["a", "b"]}));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse("as_unordered_list(items)").unwrap();
+
+            match evaluator.eval(&expr) {
+                EvalResult::Value(s) => assert_eq!(s, "- a\n- b"),
+                _ => panic!("Expected Value"),
+            }
+        }
+
+        /// The `depends_on` / `used_by` object-array shape renders as nested
+        /// bullets (spec criterion 9).
+        #[test]
+        fn as_unordered_list_renders_object_array_nested() {
+            let state = create_test_state(json!({
+                "depends_on": [
+                    { "package": "alpha", "dependencies": ["beta", "gamma"] }
+                ]
+            }));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse("as_unordered_list(depends_on)").unwrap();
+
+            match evaluator.eval(&expr) {
+                EvalResult::Value(s) => assert_eq!(s, "- alpha\n  - beta\n  - gamma"),
+                _ => panic!("Expected Value"),
+            }
+        }
+
+        /// Equality comparison keeps `scalar_string`'s JSON-array form, so the
+        /// interpolation output change does not leak into `==` (spec criterion 8).
+        #[test]
+        fn equality_comparison_unaffected_by_line_separated_output() {
+            let state = create_test_state(json!({"items": ["a", "b"]}));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse(r#"items == '["a","b"]' ? "yes" : "no""#).unwrap();
+
+            match evaluator.eval(&expr) {
+                EvalResult::Value(s) => assert_eq!(s, "yes"),
+                _ => panic!("Expected Value"),
             }
         }
     }

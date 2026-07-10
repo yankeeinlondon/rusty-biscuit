@@ -116,9 +116,7 @@ impl ContextGroup {
             | "package_root"
             | "package_area_root"
             | "packages"
-            | "packages_list"
             | "package_areas"
-            | "package_areas_list"
             | "current_package"
             | "current_package_area"
             | "area"
@@ -130,21 +128,13 @@ impl ContextGroup {
 
             // FileChanges
             "dirty_files"
-            | "dirty_files_list"
             | "dirty_source_code_files"
-            | "dirty_source_code_files_list"
             | "staged_files"
-            | "staged_files_list"
             | "untracked_files"
-            | "untracked_files_list"
             | "dirty_packages"
-            | "dirty_packages_list"
             | "dirty_package_areas"
-            | "dirty_package_areas_list"
             | "staged_packages"
-            | "staged_packages_list"
             | "staged_package_areas"
-            | "staged_package_areas_list"
             | "current_package_has_staged_files"
             | "current_package_area_has_staged_files"
             | "current_package_has_dirty_files"
@@ -839,6 +829,15 @@ fn populate_datetime_aliases(values: &mut Map<String, Value>) {
 
 // ── Repo context ──────────────────────────────────────────────────
 
+/// Wraps a list of strings as a JSON string array.
+///
+/// List-valued `ctx.*` variables are captured as first-class arrays (spec D6);
+/// callers pick a rendering with the D4 formatting functions (`as_csv`,
+/// `as_unordered_list`, …). A bare `{{ ctx.some_list }}` renders line-separated.
+fn string_array(items: Vec<String>) -> Value {
+    Value::Array(items.into_iter().map(Value::String).collect())
+}
+
 /// Removes a single trailing path separator so `repo_root` is join-safe and
 /// matches `sniff repo root` (which also omits the trailing `/`).
 fn strip_trailing_sep(s: &str) -> String {
@@ -893,14 +892,7 @@ fn populate_repo(cap: &ContextCapture, values: &mut Map<String, Value>) {
             .and_then(|r| r.packages.as_ref())
             .map(|pkgs| pkgs.iter().map(|p| p.name.clone()).collect())
             .unwrap_or_default();
-        values.insert(
-            "packages".into(),
-            Value::String(format::format_csv(&packages)),
-        );
-        values.insert(
-            "packages_list".into(),
-            Value::String(format::format_md_list(&packages)),
-        );
+        values.insert("packages".into(), string_array(packages));
 
         let areas: Vec<String> = repo
             .and_then(|r| r.packages.as_ref())
@@ -911,14 +903,7 @@ fn populate_repo(cap: &ContextCapture, values: &mut Map<String, Value>) {
                 areas
             })
             .unwrap_or_default();
-        values.insert(
-            "package_areas".into(),
-            Value::String(format::format_csv(&areas)),
-        );
-        values.insert(
-            "package_areas_list".into(),
-            Value::String(format::format_md_list(&areas)),
-        );
+        values.insert("package_areas".into(), string_array(areas));
 
         values.insert(
             "current_package".into(),
@@ -936,9 +921,7 @@ fn populate_repo(cap: &ContextCapture, values: &mut Map<String, Value>) {
         values.insert("package_root".into(), Value::Null);
         values.insert("package_area_root".into(), Value::Null);
         values.insert("packages".into(), Value::Null);
-        values.insert("packages_list".into(), Value::Null);
         values.insert("package_areas".into(), Value::Null);
-        values.insert("package_areas_list".into(), Value::Null);
         values.insert("current_package".into(), Value::Null);
         values.insert("current_package_area".into(), Value::Null);
     }
@@ -994,18 +977,18 @@ fn populate_monorepo_area(cap: &ContextCapture, values: &mut Map<String, Value>)
     values.insert("area_description".into(), Value::String(area_description));
     values.insert("area_root".into(), Value::String(area_root));
 
-    // current_packages: Markdown bullet list of packages under the cwd.
-    let current_packages = repo
+    // current_packages: array of packages under the cwd, each `name (relative)`.
+    // `{{ as_unordered_list(ctx.current_packages) }}` reproduces the old bullets.
+    let current_packages: Vec<String> = repo
         .and_then(|r| r.packages.as_ref())
         .map(|pkgs| {
             pkgs.iter()
                 .filter(|p| p.path.starts_with(&cap.base_dir))
-                .map(|p| format!("- {} ({})", p.name, p.relative))
-                .collect::<Vec<_>>()
-                .join("\n")
+                .map(|p| format!("{} ({})", p.name, p.relative))
+                .collect()
         })
         .unwrap_or_default();
-    values.insert("current_packages".into(), Value::String(current_packages));
+    values.insert("current_packages".into(), string_array(current_packages));
 
     // depends_on / used_by are scoped to the current `area`: the current
     // package when in one, all packages in the area when in an area, else all.
@@ -1021,46 +1004,38 @@ fn populate_monorepo_area(cap: &ContextCapture, values: &mut Map<String, Value>)
             .unwrap_or_default()
     };
 
-    let depends_on = render_dependency_list(
-        &scope,
-        |p| p.depends_on.as_slice(),
-        "depends on",
-        |name| format!("- '{name}' has no dependencies on other packages in this monorepo"),
-    );
-    values.insert("depends_on".into(), Value::String(depends_on));
+    let depends_on = render_dependency_objects(&scope, |p| p.depends_on.as_slice(), "dependencies");
+    values.insert("depends_on".into(), depends_on);
 
-    let used_by = render_dependency_list(
-        &scope,
-        |p| p.used_by.as_slice(),
-        "is used by",
-        |name| format!("- '{name}' is not used by other packages in this monorepo"),
-    );
-    values.insert("used_by".into(), Value::String(used_by));
+    let used_by = render_dependency_objects(&scope, |p| p.used_by.as_slice(), "users");
+    values.insert("used_by".into(), used_by);
 }
 
-/// Render a nested Markdown dependency listing for the scoped packages.
+/// Build the object-array shape for `depends_on` / `used_by` (spec Group 3).
 ///
-/// `edges` yields the related package names; `verb` and `empty_line` supply the
-/// wording (e.g. "depends on" / "has no dependencies …").
-fn render_dependency_list(
+/// Each scoped package becomes `{ package: <name>, <list_field>: [<edges>] }`.
+/// `list_field` is `dependencies` for `depends_on` and `users` for `used_by`,
+/// matching the base schema's documented object shape. Rendering (nested bullets
+/// via `as_unordered_list`, line-separated by default) is the caller's choice;
+/// the composed verb wording of the old pre-rendered form is dropped (spec).
+fn render_dependency_objects(
     scope: &[&Package],
     edges: impl Fn(&Package) -> &[String],
-    verb: &str,
-    empty_line: impl Fn(&str) -> String,
-) -> String {
-    let mut out = Vec::new();
-    for &pkg in scope {
-        let deps = edges(pkg);
-        if deps.is_empty() {
-            out.push(empty_line(&pkg.name));
-        } else {
-            out.push(format!("- '{}' {verb}:", pkg.name));
-            for d in deps {
-                out.push(format!("    - {d}"));
-            }
-        }
-    }
-    out.join("\n")
+    list_field: &str,
+) -> Value {
+    let items: Vec<Value> = scope
+        .iter()
+        .map(|&pkg| {
+            let mut obj = Map::new();
+            obj.insert("package".into(), Value::String(pkg.name.clone()));
+            obj.insert(
+                list_field.into(),
+                string_array(edges(pkg).iter().map(|d| d.to_string()).collect()),
+            );
+            Value::Object(obj)
+        })
+        .collect();
+    Value::Array(items)
 }
 
 // ── File changes context ──────────────────────────────────────────
@@ -1073,14 +1048,6 @@ fn populate_file_changes(cap: &ContextCapture, values: &mut Map<String, Value>) 
         .map(|p| p.to_string_lossy().to_string())
         .collect();
     dirty.sort();
-    values.insert(
-        "dirty_files".into(),
-        Value::String(format::format_csv(&dirty)),
-    );
-    values.insert(
-        "dirty_files_list".into(),
-        Value::String(format::format_md_list(&dirty)),
-    );
 
     // Dirty source code files
     let dirty_source: Vec<String> = dirty
@@ -1088,14 +1055,6 @@ fn populate_file_changes(cap: &ContextCapture, values: &mut Map<String, Value>) 
         .filter(|p| blast_radius::is_source_code_path(Path::new(p.as_str())))
         .cloned()
         .collect();
-    values.insert(
-        "dirty_source_code_files".into(),
-        Value::String(format::format_csv(&dirty_source)),
-    );
-    values.insert(
-        "dirty_source_code_files_list".into(),
-        Value::String(format::format_md_list(&dirty_source)),
-    );
 
     // Staged files
     let mut staged: Vec<String> = cap
@@ -1104,14 +1063,6 @@ fn populate_file_changes(cap: &ContextCapture, values: &mut Map<String, Value>) 
         .map(|p| p.to_string_lossy().to_string())
         .collect();
     staged.sort();
-    values.insert(
-        "staged_files".into(),
-        Value::String(format::format_csv(&staged)),
-    );
-    values.insert(
-        "staged_files_list".into(),
-        Value::String(format::format_md_list(&staged)),
-    );
 
     // Untracked files
     let mut untracked: Vec<String> = cap
@@ -1120,14 +1071,14 @@ fn populate_file_changes(cap: &ContextCapture, values: &mut Map<String, Value>) 
         .map(|p| p.to_string_lossy().to_string())
         .collect();
     untracked.sort();
+
+    values.insert("dirty_files".into(), string_array(dirty));
     values.insert(
-        "untracked_files".into(),
-        Value::String(format::format_csv(&untracked)),
+        "dirty_source_code_files".into(),
+        string_array(dirty_source),
     );
-    values.insert(
-        "untracked_files_list".into(),
-        Value::String(format::format_md_list(&untracked)),
-    );
+    values.insert("staged_files".into(), string_array(staged));
+    values.insert("untracked_files".into(), string_array(untracked));
 }
 
 // ── Package/area dirty/staged context ─────────────────────────────
@@ -1138,21 +1089,11 @@ fn populate_package_changes(cap: &ContextCapture, values: &mut Map<String, Value
     let is_mono = repo.is_some_and(|r| r.is_monorepo);
 
     if !is_mono || packages.is_none() {
-        // Default boolean flags to false
-        values.insert("dirty_packages".into(), Value::String(String::new()));
-        values.insert("dirty_packages_list".into(), Value::String(String::new()));
-        values.insert("dirty_package_areas".into(), Value::String(String::new()));
-        values.insert(
-            "dirty_package_areas_list".into(),
-            Value::String(String::new()),
-        );
-        values.insert("staged_packages".into(), Value::String(String::new()));
-        values.insert("staged_packages_list".into(), Value::String(String::new()));
-        values.insert("staged_package_areas".into(), Value::String(String::new()));
-        values.insert(
-            "staged_package_areas_list".into(),
-            Value::String(String::new()),
-        );
+        // No packages: empty arrays (the variables are required, so not null).
+        values.insert("dirty_packages".into(), string_array(Vec::new()));
+        values.insert("dirty_package_areas".into(), string_array(Vec::new()));
+        values.insert("staged_packages".into(), string_array(Vec::new()));
+        values.insert("staged_package_areas".into(), string_array(Vec::new()));
         values.insert(
             "current_package_has_staged_files".into(),
             Value::Bool(false),
@@ -1195,21 +1136,10 @@ fn populate_package_changes(cap: &ContextCapture, values: &mut Map<String, Value
     dirty_area_names.sort();
     dirty_area_names.dedup();
 
-    values.insert(
-        "dirty_packages".into(),
-        Value::String(format::format_csv(&dirty_pkg_names)),
-    );
-    values.insert(
-        "dirty_packages_list".into(),
-        Value::String(format::format_md_list(&dirty_pkg_names)),
-    );
+    values.insert("dirty_packages".into(), string_array(dirty_pkg_names.clone()));
     values.insert(
         "dirty_package_areas".into(),
-        Value::String(format::format_csv(&dirty_area_names)),
-    );
-    values.insert(
-        "dirty_package_areas_list".into(),
-        Value::String(format::format_md_list(&dirty_area_names)),
+        string_array(dirty_area_names.clone()),
     );
 
     // Staged packages
@@ -1231,19 +1161,11 @@ fn populate_package_changes(cap: &ContextCapture, values: &mut Map<String, Value
 
     values.insert(
         "staged_packages".into(),
-        Value::String(format::format_csv(&staged_pkg_names)),
-    );
-    values.insert(
-        "staged_packages_list".into(),
-        Value::String(format::format_md_list(&staged_pkg_names)),
+        string_array(staged_pkg_names.clone()),
     );
     values.insert(
         "staged_package_areas".into(),
-        Value::String(format::format_csv(&staged_area_names)),
-    );
-    values.insert(
-        "staged_package_areas_list".into(),
-        Value::String(format::format_md_list(&staged_area_names)),
+        string_array(staged_area_names.clone()),
     );
 
     // Current package/area boolean flags
@@ -1302,7 +1224,7 @@ fn populate_languages(cap: &ContextCapture, values: &mut Map<String, Value>) {
         if all_langs.is_empty() {
             Value::Null
         } else {
-            Value::String(format::format_csv(&all_langs))
+            string_array(all_langs.clone())
         },
     );
 
@@ -1322,7 +1244,7 @@ fn populate_languages(cap: &ContextCapture, values: &mut Map<String, Value>) {
                     .collect();
                 area_langs.sort();
                 area_langs.dedup();
-                format::format_csv(&area_langs)
+                area_langs.join(", ")
             })
         } else {
             // In monorepo root but not in a package/area
@@ -1439,10 +1361,7 @@ fn populate_docs(cap: &ContextCapture, values: &mut Map<String, Value>) {
                 .collect()
         })
         .unwrap_or_default();
-    values.insert(
-        "docs_readme".into(),
-        Value::String(format::format_csv(&readmes)),
-    );
+    values.insert("docs_readme".into(), string_array(readmes));
 
     // docs_blast_radius: docs with blast_radius frontmatter
     let blast_radius_docs: Vec<String> = docs
@@ -1457,7 +1376,7 @@ fn populate_docs(cap: &ContextCapture, values: &mut Map<String, Value>) {
         .unwrap_or_default();
     values.insert(
         "docs_blast_radius".into(),
-        Value::String(format::format_csv(&blast_radius_docs)),
+        string_array(blast_radius_docs),
     );
 
     // docs_drift: docs whose blast_radius intersects dirty source set.
@@ -1486,10 +1405,7 @@ fn populate_docs(cap: &ContextCapture, values: &mut Map<String, Value>) {
                 .collect()
         })
         .unwrap_or_default();
-    values.insert(
-        "docs_drift".into(),
-        Value::String(format::format_csv(&drift_docs)),
-    );
+    values.insert("docs_drift".into(), string_array(drift_docs));
 }
 
 // ── Skill context ─────────────────────────────────────────────────
@@ -1904,7 +1820,7 @@ mod tests {
     }
 
     #[test]
-    fn current_packages_lists_packages_under_cwd_as_markdown() {
+    fn current_packages_captured_as_string_array() {
         let cap = ContextCapture::for_test_monorepo_with_packages(&[
             ("alpha", "alpha/lib"),
             ("alpha-cli", "alpha/cli"),
@@ -1913,38 +1829,56 @@ mod tests {
         populate_repo(&cap, &mut values);
         let listing = values
             .get("current_packages")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        assert!(listing.contains("- alpha (alpha/lib)"), "got: {listing}");
+            .and_then(Value::as_array)
+            .expect("current_packages must be an array");
         assert!(
-            listing.contains("- alpha-cli (alpha/cli)"),
-            "got: {listing}"
+            listing.contains(&Value::String("alpha (alpha/lib)".into())),
+            "got: {listing:?}"
+        );
+        assert!(
+            listing.contains(&Value::String("alpha-cli (alpha/cli)".into())),
+            "got: {listing:?}"
         );
     }
 
     #[test]
-    fn depends_on_renders_nested_list_scoped_to_area() {
+    fn depends_on_captured_as_object_array_scoped_to_area() {
         let cap = ContextCapture::for_test_monorepo_in_package("alpha", &["beta", "gamma"], &[]);
         let mut values = Map::new();
         populate_repo(&cap, &mut values);
-        let s = values
+        let items = values
             .get("depends_on")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        assert!(s.contains("'alpha' depends on:"), "got: {s}");
-        assert!(s.contains("    - beta"), "got: {s}");
-        assert!(s.contains("    - gamma"), "got: {s}");
+            .and_then(Value::as_array)
+            .expect("depends_on must be an array");
+        assert_eq!(items.len(), 1, "got: {items:?}");
+        let obj = items[0].as_object().expect("item must be an object");
+        assert_eq!(obj.get("package"), Some(&Value::String("alpha".into())));
+        assert_eq!(
+            obj.get("dependencies").and_then(Value::as_array),
+            Some(&vec![
+                Value::String("beta".into()),
+                Value::String("gamma".into()),
+            ]),
+            "got: {obj:?}"
+        );
     }
 
     #[test]
-    fn used_by_renders_empty_message_when_no_dependents() {
+    fn used_by_captured_as_object_array_with_empty_users() {
         let cap = ContextCapture::for_test_monorepo_in_package("alpha", &[], &[]);
         let mut values = Map::new();
         populate_repo(&cap, &mut values);
-        let s = values.get("used_by").and_then(Value::as_str).unwrap_or("");
-        assert!(
-            s.contains("'alpha' is not used by other packages in this monorepo"),
-            "got: {s}"
+        let items = values
+            .get("used_by")
+            .and_then(Value::as_array)
+            .expect("used_by must be an array");
+        assert_eq!(items.len(), 1, "got: {items:?}");
+        let obj = items[0].as_object().expect("item must be an object");
+        assert_eq!(obj.get("package"), Some(&Value::String("alpha".into())));
+        assert_eq!(
+            obj.get("users").and_then(Value::as_array),
+            Some(&Vec::new()),
+            "got: {obj:?}"
         );
     }
 

@@ -1,0 +1,1772 @@
+//! Level-2 integration tests: full LSP conversations over an in-memory
+//! connection pair (`lsp_server::Connection::memory()`), the fixture shape
+//! ported from `iwes/tests/fixture.rs` (Apache-2.0, IWE project).
+//!
+//! These sessions are in-memory (no real terminal or network resource), so
+//! they run ungated — the `level2_` prefix routes them to `just test-l2`.
+
+use std::sync::mpsc;
+use std::time::Duration;
+
+use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
+use serde_json::{Value, json};
+
+/// Client-side driver over the in-memory pair; joins the server thread on
+/// drop-free shutdown so protocol failures surface as test failures.
+struct ClientFixture {
+    client: Connection,
+    server_outcome: mpsc::Receiver<Result<(), String>>,
+    next_id: i32,
+    /// Server → client notifications buffered while awaiting a response (the
+    /// server pushes `publishDiagnostics` out-of-band).
+    notifications: Vec<Notification>,
+}
+
+impl ClientFixture {
+    fn start() -> Self {
+        let (server_side, client_side) = Connection::memory();
+        let (outcome_tx, outcome_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let result = dmls::run_server(server_side, dmls::RunOptions::default())
+                .map_err(|error| error.to_string());
+            let _ = outcome_tx.send(result);
+        });
+        Self {
+            client: client_side,
+            server_outcome: outcome_rx,
+            next_id: 0,
+            notifications: Vec::new(),
+        }
+    }
+
+    fn request(&mut self, method: &str, params: Value) -> Response {
+        self.next_id += 1;
+        let id = RequestId::from(self.next_id);
+        self.send_request_with_id(id.clone(), method, params);
+        self.expect_response(id)
+    }
+
+    fn send_request_with_id(&self, id: RequestId, method: &str, params: Value) {
+        self.client
+            .sender
+            .send(Message::Request(Request::new(id, method.to_string(), params)))
+            .expect("send request");
+    }
+
+    fn notify(&self, method: &str, params: Value) {
+        self.client
+            .sender
+            .send(Message::Notification(Notification::new(
+                method.to_string(),
+                params,
+            )))
+            .expect("send notification");
+    }
+
+    fn expect_response(&mut self, id: RequestId) -> Response {
+        loop {
+            let message = self
+                .client
+                .receiver
+                .recv_timeout(Duration::from_secs(10))
+                .expect("response before timeout");
+            match message {
+                Message::Response(response) if response.id == id => return response,
+                Message::Notification(notification) => self.notifications.push(notification),
+                // Server-initiated requests (progress create, watcher
+                // registration) are fire-and-forget; ignore them.
+                Message::Request(_) => {}
+                other => panic!("unexpected message while waiting for response: {other:?}"),
+            }
+        }
+    }
+
+    /// Waits for the latest `publishDiagnostics` for `uri`, returning its
+    /// `diagnostics` array. Drains buffered notifications first.
+    fn wait_for_diagnostics(&mut self, uri: &str) -> Vec<Value> {
+        loop {
+            if let Some(diagnostics) = self.take_buffered_diagnostics(uri) {
+                return diagnostics;
+            }
+            let message = self
+                .client
+                .receiver
+                .recv_timeout(Duration::from_secs(10))
+                .expect("diagnostics before timeout");
+            match message {
+                Message::Notification(notification) => self.notifications.push(notification),
+                Message::Request(_) => {}
+                other => panic!("unexpected message while waiting for diagnostics: {other:?}"),
+            }
+        }
+    }
+
+    fn take_buffered_diagnostics(&mut self, uri: &str) -> Option<Vec<Value>> {
+        let position = self.notifications.iter().rposition(|notification| {
+            notification.method == "textDocument/publishDiagnostics"
+                && notification.params["uri"] == json!(uri)
+        })?;
+        let notification = self.notifications.remove(position);
+        Some(
+            notification.params["diagnostics"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default(),
+        )
+    }
+
+    /// Drains messages until the startup-index `workDoneProgress` `end` arrives,
+    /// guaranteeing the background disk walk has finished. Only usable when the
+    /// client advertised `window.workDoneProgress`.
+    fn wait_for_startup_complete(&mut self) {
+        let is_end = |notification: &Notification| {
+            notification.method == "$/progress"
+                && notification.params["token"] == json!("dmls/startup-index")
+                && notification.params["value"]["kind"] == json!("end")
+        };
+        loop {
+            if let Some(position) = self.notifications.iter().position(is_end) {
+                self.notifications.remove(position);
+                return;
+            }
+            let message = self
+                .client
+                .receiver
+                .recv_timeout(Duration::from_secs(10))
+                .expect("startup progress before timeout");
+            match message {
+                Message::Notification(notification) => self.notifications.push(notification),
+                Message::Request(_) => {}
+                other => panic!("unexpected message while waiting for startup: {other:?}"),
+            }
+        }
+    }
+
+    fn initialize(&mut self, params: Value) -> Value {
+        let response = self.request("initialize", params);
+        assert!(
+            response.error.is_none(),
+            "initialize failed: {:?}",
+            response.error
+        );
+        self.notify("initialized", json!({}));
+        response.result.expect("initialize result")
+    }
+
+    fn shutdown(self) {
+        let mut fixture = self;
+        let response = fixture.request("shutdown", Value::Null);
+        assert!(
+            response.error.is_none(),
+            "shutdown failed: {:?}",
+            response.error
+        );
+        fixture.notify("exit", Value::Null);
+        let outcome = fixture
+            .server_outcome
+            .recv_timeout(Duration::from_secs(10))
+            .expect("server thread finished");
+        assert_eq!(outcome, Ok(()), "server exited with error");
+    }
+}
+
+fn neovim_like_initialize_params(root: &std::path::Path) -> Value {
+    let root_uri = url::Url::from_directory_path(root).unwrap();
+    json!({
+        "processId": null,
+        "clientInfo": { "name": "Neovim", "version": "0.11.0" },
+        "capabilities": {
+            "general": { "positionEncodings": ["utf-8", "utf-16", "utf-32"] },
+            "workspace": { "configuration": true },
+            "textDocument": { "foldingRange": { "lineFoldingOnly": true } }
+        },
+        "workspaceFolders": [
+            { "uri": root_uri.as_str(), "name": "scratch" }
+        ]
+    })
+}
+
+#[test]
+fn level2_initialize_open_change_shutdown() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(
+        workspace.path().join(".dmls.toml"),
+        "[diagnostics]\ndebounce_ms = 150\n",
+    )
+    .unwrap();
+
+    let mut fixture = ClientFixture::start();
+    let result = fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    // Negotiation: first client-offered encoding DMLS supports.
+    assert_eq!(result["capabilities"]["positionEncoding"], json!("utf-8"));
+    // Full document sync with open/close.
+    assert_eq!(
+        result["capabilities"]["textDocumentSync"]["change"],
+        json!(1)
+    );
+    assert_eq!(
+        result["capabilities"]["textDocumentSync"]["openClose"],
+        json!(true)
+    );
+    assert_eq!(result["serverInfo"]["name"], json!("dmls"));
+
+    // Open → change → close a scratch document (full-sync lifecycle).
+    let doc_uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    fixture.notify(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": doc_uri.as_str(),
+                "languageId": "markdown",
+                "version": 1,
+                "text": "---\ntitle: Scratch\n---\n\n# Hello\n"
+            }
+        }),
+    );
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": doc_uri.as_str(), "version": 2 },
+            "contentChanges": [ { "text": "# Hello 💡\n" } ]
+        }),
+    );
+    fixture.notify(
+        "textDocument/didSave",
+        json!({ "textDocument": { "uri": doc_uri.as_str() } }),
+    );
+    fixture.notify(
+        "textDocument/didClose",
+        json!({ "textDocument": { "uri": doc_uri.as_str() } }),
+    );
+
+    // Configuration reload path stays alive mid-session.
+    fixture.notify(
+        "workspace/didChangeConfiguration",
+        json!({ "settings": { "dmls": { "schema": { "strict": true } } } }),
+    );
+
+    // Hover is implemented now; the document was just closed, so it answers a
+    // successful null (not MethodNotFound, not a hang).
+    let response = fixture.request(
+        "textDocument/hover",
+        json!({
+            "textDocument": { "uri": doc_uri.as_str() },
+            "position": { "line": 0, "character": 0 }
+        }),
+    );
+    assert!(response.error.is_none(), "hover must not error: {:?}", response.error);
+    assert_eq!(response.result, Some(Value::Null));
+
+    // A genuinely unimplemented method still answers MethodNotFound. Range
+    // formatting is explicitly post-v1 (only whole-document formatting ships).
+    let response = fixture.request(
+        "textDocument/rangeFormatting",
+        json!({
+            "textDocument": { "uri": doc_uri.as_str() },
+            "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 0 } },
+            "options": { "tabSize": 2, "insertSpaces": true }
+        }),
+    );
+    assert_eq!(response.error.expect("rangeFormatting unimplemented").code, -32601);
+
+    fixture.shutdown();
+}
+
+#[test]
+fn level2_default_negotiation_is_utf16() {
+    let mut fixture = ClientFixture::start();
+    let result = fixture.initialize(json!({
+        "processId": null,
+        "capabilities": {}
+    }));
+    assert_eq!(result["capabilities"]["positionEncoding"], json!("utf-16"));
+    fixture.shutdown();
+}
+
+const DOC_A: &str = "---\ntitle: A\n---\n\n# Overview\n\nSee [top](#overview) and [b](b.md#target) and [missing](nope.md).\n\n## Details\n\n- one\n- two\n";
+const DOC_B: &str = "# Target\n";
+
+fn open(fixture: &ClientFixture, uri: &str, text: &str) {
+    fixture.notify(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": uri,
+                "languageId": "markdown",
+                "version": 1,
+                "text": text
+            }
+        }),
+    );
+}
+
+#[test]
+fn level2_layer0_provider_round_trips() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("a.md"), DOC_A).unwrap();
+    std::fs::write(workspace.path().join("b.md"), DOC_B).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let a_uri = url::Url::from_file_path(workspace.path().join("a.md")).unwrap();
+    let b_uri = url::Url::from_file_path(workspace.path().join("b.md")).unwrap();
+    // Open both buffers so the graph holds them regardless of startup timing.
+    open(&fixture, b_uri.as_str(), DOC_B);
+    open(&fixture, a_uri.as_str(), DOC_A);
+
+    // documentSymbol: Overview (H1) with Details (H2) nested inside it.
+    let symbols = fixture
+        .request(
+            "textDocument/documentSymbol",
+            json!({ "textDocument": { "uri": a_uri.as_str() } }),
+        )
+        .result
+        .expect("symbols");
+    let symbols = symbols.as_array().expect("nested symbols");
+    assert_eq!(symbols.len(), 1);
+    assert_eq!(symbols[0]["name"], json!("Overview"));
+    assert_eq!(symbols[0]["children"][0]["name"], json!("Details"));
+
+    // definition on `[b](b.md#target)` → a location in b.md.
+    let definition = fixture
+        .request(
+            "textDocument/definition",
+            json!({
+                "textDocument": { "uri": a_uri.as_str() },
+                "position": { "line": 6, "character": 30 }
+            }),
+        )
+        .result
+        .expect("definition");
+    let locations = definition.as_array().expect("definition array");
+    assert_eq!(locations.len(), 1);
+    assert!(
+        locations[0]["uri"].as_str().unwrap().ends_with("b.md"),
+        "definition should point at b.md: {:?}",
+        locations[0]
+    );
+
+    // references on the self-anchor link `[top](#overview)` → the link itself.
+    let references = fixture
+        .request(
+            "textDocument/references",
+            json!({
+                "textDocument": { "uri": a_uri.as_str() },
+                "position": { "line": 6, "character": 12 },
+                "context": { "includeDeclaration": false }
+            }),
+        )
+        .result
+        .expect("references");
+    assert!(!references.as_array().unwrap().is_empty(), "expected backlinks");
+
+    // documentLink: at least the three in-body links resolve to targets.
+    let links = fixture
+        .request(
+            "textDocument/documentLink",
+            json!({ "textDocument": { "uri": a_uri.as_str() } }),
+        )
+        .result
+        .expect("links");
+    assert!(links.as_array().unwrap().len() >= 2);
+
+    // foldingRange: frontmatter fold present (line 0 → 2).
+    let folds = fixture
+        .request(
+            "textDocument/foldingRange",
+            json!({ "textDocument": { "uri": a_uri.as_str() } }),
+        )
+        .result
+        .expect("folds");
+    let folds = folds.as_array().expect("fold array");
+    assert!(
+        folds.iter().any(|f| f["startLine"] == json!(0)),
+        "expected a frontmatter fold at line 0: {folds:?}"
+    );
+
+    // completion: anchor completion after `b.md#` offers b.md's heading slug.
+    let completions = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": a_uri.as_str() },
+                "position": { "line": 6, "character": 34 }
+            }),
+        )
+        .result
+        .expect("completions");
+    let items = completions.as_array().expect("completion array");
+    assert!(
+        items.iter().any(|item| item["label"] == json!("target")),
+        "expected `target` anchor completion: {items:?}"
+    );
+
+    // hover on `[b](b.md#target)` previews b.md's title/heading.
+    let hover = fixture
+        .request(
+            "textDocument/hover",
+            json!({
+                "textDocument": { "uri": a_uri.as_str() },
+                "position": { "line": 6, "character": 30 }
+            }),
+        )
+        .result
+        .expect("hover");
+    assert!(
+        hover["contents"]["value"]
+            .as_str()
+            .unwrap()
+            .contains("Target"),
+        "hover should mention the target: {hover:?}"
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn level2_broken_link_diagnostic_updates_on_edit() {
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let uri = url::Url::from_file_path(workspace.path().join("notes.md")).unwrap();
+    // A same-document anchor (resolves) plus a broken relative path.
+    open(
+        &fixture,
+        uri.as_str(),
+        "# Heading\n\n[ok](#heading) and [bad](nope.md)\n",
+    );
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert_eq!(diagnostics.len(), 1, "expected one broken-link diagnostic: {diagnostics:?}");
+    assert_eq!(diagnostics[0]["code"], json!("dm.links.broken_path"));
+    assert_eq!(diagnostics[0]["source"], json!("darkmatter.links"));
+
+    // Fix the broken link; diagnostics clear.
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [ { "text": "# Heading\n\n[ok](#heading) and [good](#heading)\n" } ]
+        }),
+    );
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(diagnostics.is_empty(), "diagnostics should clear: {diagnostics:?}");
+
+    fixture.shutdown();
+}
+
+#[test]
+fn level2_server_rescan_fallback_tracks_unopened_files_on_save() {
+    // Spec acceptance criterion 2 for watcher-less clients: a ServerRescan
+    // client (Neovim-on-Linux shape — no reliable file watcher) must still see
+    // an unopened file's create/delete. Its only trigger is a save, so a
+    // `didSave` drives a workspace rescan that reconciles the graph.
+    let workspace = tempfile::tempdir().unwrap();
+    let a_path = workspace.path().join("a.md");
+    let b_path = workspace.path().join("b.md");
+    let a_text = "# A\n\n[to b](b.md)\n";
+    // a.md links to b.md, which does not exist yet.
+    std::fs::write(&a_path, a_text).unwrap();
+
+    // Advertise workDoneProgress so the test can wait for the startup disk walk
+    // to finish; otherwise the background scan could adopt b.md itself and mask
+    // the save-driven rescan under test. Neovim's keyed defaults still select
+    // `ServerRescan` regardless of the progress capability.
+    let mut init = neovim_like_initialize_params(workspace.path());
+    init["capabilities"]["window"] = json!({ "workDoneProgress": true });
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(init);
+    fixture.wait_for_startup_complete();
+
+    let a_uri = url::Url::from_file_path(&a_path).unwrap();
+    open(&fixture, a_uri.as_str(), a_text);
+
+    // The unopened, absent b.md makes the link broken.
+    let diagnostics = fixture.wait_for_diagnostics(a_uri.as_str());
+    assert!(
+        diagnostics.iter().any(|d| d["code"] == json!("dm.links.broken_path")),
+        "expected a broken-link diagnostic while b.md is absent: {diagnostics:?}"
+    );
+
+    // Create b.md on disk (never opened) and save a.md: the rescan adopts it and
+    // the link resolves.
+    std::fs::write(&b_path, "# B\n").unwrap();
+    fixture.notify(
+        "textDocument/didSave",
+        json!({ "textDocument": { "uri": a_uri.as_str() } }),
+    );
+    let diagnostics = fixture.wait_for_diagnostics(a_uri.as_str());
+    assert!(
+        diagnostics.is_empty(),
+        "creating b.md on disk should clear the broken link after a save: {diagnostics:?}"
+    );
+
+    // Delete b.md and save again: the rescan drops it and the link breaks anew.
+    std::fs::remove_file(&b_path).unwrap();
+    fixture.notify(
+        "textDocument/didSave",
+        json!({ "textDocument": { "uri": a_uri.as_str() } }),
+    );
+    let diagnostics = fixture.wait_for_diagnostics(a_uri.as_str());
+    assert!(
+        diagnostics.iter().any(|d| d["code"] == json!("dm.links.broken_path")),
+        "deleting b.md on disk should re-break the link after a save: {diagnostics:?}"
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn level2_wiki_link_navigation_diagnostics_and_completion() {
+    let workspace = tempfile::tempdir().unwrap();
+    let notes = workspace.path().join("notes");
+    std::fs::create_dir_all(&notes).unwrap();
+    std::fs::write(notes.join("Target.md"), "# Target\n\n## Section\n").unwrap();
+    let source = "# Source\n\n[[Target]] and [[Target#Section]] and [[No Such Note]]\n";
+    std::fs::write(notes.join("Source.md"), source).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let source_uri = url::Url::from_file_path(notes.join("Source.md")).unwrap();
+    let target_uri = url::Url::from_file_path(notes.join("Target.md")).unwrap();
+    open(&fixture, target_uri.as_str(), "# Target\n\n## Section\n");
+    open(&fixture, source_uri.as_str(), source);
+
+    // definition on `[[Target]]` → Target.md.
+    let definition = fixture
+        .request(
+            "textDocument/definition",
+            json!({
+                "textDocument": { "uri": source_uri.as_str() },
+                "position": { "line": 2, "character": 4 }
+            }),
+        )
+        .result
+        .expect("definition");
+    let locations = definition.as_array().expect("definition array");
+    assert_eq!(locations.len(), 1);
+    assert!(locations[0]["uri"].as_str().unwrap().ends_with("Target.md"));
+
+    // The unresolved wiki target publishes a `wiki.unresolved-target` warning.
+    let diagnostics = fixture.wait_for_diagnostics(source_uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d["code"] == json!("wiki.unresolved-target")
+                && d["source"] == json!("darkmatter.wiki")),
+        "expected an unresolved wiki diagnostic: {diagnostics:?}"
+    );
+
+    // completion inside `[[Ta` offers the Target document.
+    let completions = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": source_uri.as_str() },
+                "position": { "line": 2, "character": 4 }
+            }),
+        )
+        .result
+        .expect("completions");
+    assert!(
+        completions
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["label"] == json!("Target")),
+        "expected a Target completion: {completions:?}"
+    );
+
+    // hover on `[[Target#Section]]` mentions the resolved target.
+    let hover = fixture
+        .request(
+            "textDocument/hover",
+            json!({
+                "textDocument": { "uri": source_uri.as_str() },
+                "position": { "line": 2, "character": 20 }
+            }),
+        )
+        .result
+        .expect("hover");
+    assert!(
+        hover["contents"]["value"].as_str().unwrap().contains("Section"),
+        "hover should mention the heading: {hover:?}"
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn level2_config_reload_reindexes_wiki_roots() {
+    // A `workspace/didChangeConfiguration` that narrows `wiki.wiki_root` must
+    // rebuild the wiki resolution universe and re-publish diagnostics without a
+    // server restart: a link that resolves under the default roots becomes
+    // unresolved once the root is narrowed.
+    let workspace = tempfile::tempdir().unwrap();
+    let notes = workspace.path().join("notes");
+    std::fs::create_dir_all(&notes).unwrap();
+    std::fs::write(notes.join("Target.md"), "# Target\n").unwrap();
+    // A root-relative link whose two segments only match Target's canonical path
+    // while the wiki root is the workspace folder (`notes/Target`).
+    let source = "# Source\n\n[[/notes/Target]]\n";
+    std::fs::write(notes.join("Source.md"), source).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let source_uri = url::Url::from_file_path(notes.join("Source.md")).unwrap();
+    let target_uri = url::Url::from_file_path(notes.join("Target.md")).unwrap();
+    open(&fixture, target_uri.as_str(), "# Target\n");
+    open(&fixture, source_uri.as_str(), source);
+
+    // Default wiki roots (the workspace folder) resolve the root-relative link,
+    // so no unresolved-wiki diagnostic is published.
+    let diagnostics = fixture.wait_for_diagnostics(source_uri.as_str());
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d["code"] == json!("wiki.unresolved-target")),
+        "link should resolve under default wiki roots: {diagnostics:?}"
+    );
+
+    // Narrow `wiki.wiki_root` to `notes`: Target's canonical path shortens to
+    // `Target`, so the two-segment root-relative link no longer matches.
+    fixture.notify(
+        "workspace/didChangeConfiguration",
+        json!({ "settings": { "dmls": { "wiki": { "wiki_root": "notes" } } } }),
+    );
+
+    // The reload rebuilds the graph and re-publishes: the link is now unresolved.
+    let diagnostics = fixture.wait_for_diagnostics(source_uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d["code"] == json!("wiki.unresolved-target")
+                && d["source"] == json!("darkmatter.wiki")),
+        "narrowing wiki_root without restart should break the link: {diagnostics:?}"
+    );
+
+    fixture.shutdown();
+}
+
+/// A frontmatter document with an inline `$schema` declaring a required
+/// `title` and an enum `status`; `title` is intentionally missing.
+const SCHEMA_DOC: &str = "---\n$schema:\n  title: string(required)\n  status: enum(draft, published)\nstatus: draft\n---\n\n# Doc\n";
+
+#[test]
+fn level2_frontmatter_schema_intelligence() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc.md"), SCHEMA_DOC).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), SCHEMA_DOC);
+
+    // Criterion 5-precision: the missing required `title` is diagnosed with a
+    // stable code, ranged against the concrete frontmatter (not a line map).
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d["code"] == json!("dm.schema.missing_required")
+                && d["source"] == json!("darkmatter.schema")),
+        "expected a missing-required diagnostic: {diagnostics:?}"
+    );
+
+    // Key completion offers the schema-declared `title` (a required key).
+    let completions = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 4, "character": 0 }
+            }),
+        )
+        .result
+        .expect("completions");
+    assert!(
+        completions
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["label"] == json!("title")),
+        "expected a `title` key completion: {completions:?}"
+    );
+
+    // Value completion after `status:` offers the enum members.
+    let values = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 4, "character": 8 }
+            }),
+        )
+        .result
+        .expect("value completions");
+    assert!(
+        values
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["label"] == json!("published")),
+        "expected enum value completion: {values:?}"
+    );
+
+    // Hover on the `status` key describes the enum.
+    let hover = fixture
+        .request(
+            "textDocument/hover",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 4, "character": 2 }
+            }),
+        )
+        .result
+        .expect("hover");
+    assert!(
+        hover["contents"]["value"].as_str().unwrap().contains("draft"),
+        "hover should describe the enum: {hover:?}"
+    );
+
+    fixture.shutdown();
+}
+
+/// A document whose inline `$schema` declares a nested inline object
+/// (`settings`), exercising completion and hover for keys nested one level
+/// under a mapping. `level` is intentionally absent from the authored
+/// `settings` mapping so key completion has something to offer.
+const NESTED_SCHEMA_DOC: &str = "---\n$schema:\n  settings:\n    mode: enum(dev, prod)\n    path: file\n    level: number\nsettings:\n  mode: dev\n  path: other.md\n---\n\n# Doc\n";
+
+#[test]
+fn level2_frontmatter_nested_schema_intelligence() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc.md"), NESTED_SCHEMA_DOC).unwrap();
+    // A sibling document so the nested `file(...)` value completion has a target.
+    std::fs::write(workspace.path().join("other.md"), "# Other\n").unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), NESTED_SCHEMA_DOC);
+
+    // Nested key completion: on the indented `mode` key line (line 7), the
+    // enclosing `settings` inline object offers its not-yet-present `level` key.
+    let keys = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 7, "character": 2 }
+            }),
+        )
+        .result
+        .expect("nested key completions");
+    assert!(
+        keys.as_array().unwrap().iter().any(|item| item["label"] == json!("level")),
+        "expected a nested `level` key completion: {keys:?}"
+    );
+
+    // Nested enum value completion: after `mode: ` (line 7) offer the enum
+    // members declared on the nested `mode` atom.
+    let enum_values = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 7, "character": 8 }
+            }),
+        )
+        .result
+        .expect("nested enum value completions");
+    assert!(
+        enum_values.as_array().unwrap().iter().any(|item| item["label"] == json!("prod")),
+        "expected a nested enum value completion: {enum_values:?}"
+    );
+
+    // Nested `file(...)` value completion: after `path: ` (line 8) offer the
+    // sibling workspace document.
+    let file_values = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 8, "character": 8 }
+            }),
+        )
+        .result
+        .expect("nested file value completions");
+    assert!(
+        file_values.as_array().unwrap().iter().any(|item| item["label"] == json!("other.md")),
+        "expected a nested file-path value completion: {file_values:?}"
+    );
+
+    // Nested hover: on the `mode` key (line 7) describes the enum, resolved
+    // through the `settings` inline object.
+    let hover = fixture
+        .request(
+            "textDocument/hover",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 7, "character": 4 }
+            }),
+        )
+        .result
+        .expect("nested hover");
+    assert!(
+        hover["contents"]["value"].as_str().unwrap_or_default().contains("dev"),
+        "nested hover should describe the enum: {hover:?}"
+    );
+
+    fixture.shutdown();
+}
+
+/// A document whose inline `$schema` declares a top-level `file` property and a
+/// nested inline object (`settings`) with its own `file` property, so both a
+/// top-level and a nested frontmatter value are `file(...)`-typed and navigable.
+const FILE_NAV_DOC: &str = "---\n$schema:\n  home: file\n  settings:\n    doc: file\nhome: top.md\nsettings:\n  doc: nested.md\n---\n\n# Doc\n";
+
+#[test]
+fn level2_frontmatter_nested_file_navigation() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc.md"), FILE_NAV_DOC).unwrap();
+    std::fs::write(workspace.path().join("top.md"), "# Top\n").unwrap();
+    std::fs::write(workspace.path().join("nested.md"), "# Nested\n").unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), FILE_NAV_DOC);
+
+    // definition on the NESTED `settings.doc` value (line 7, `doc: nested.md`)
+    // resolves through the `settings` inline object to nested.md.
+    let definition = fixture
+        .request(
+            "textDocument/definition",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 7, "character": 10 }
+            }),
+        )
+        .result
+        .expect("nested definition");
+    let locations = definition.as_array().expect("definition array");
+    assert_eq!(locations.len(), 1, "nested file definition: {locations:?}");
+    assert!(
+        locations[0]["uri"].as_str().unwrap().ends_with("nested.md"),
+        "nested definition should reach nested.md: {locations:?}"
+    );
+
+    // The existing top-level `file(...)` navigation (line 5, `home: top.md`)
+    // still resolves through the same code path.
+    let definition = fixture
+        .request(
+            "textDocument/definition",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 5, "character": 8 }
+            }),
+        )
+        .result
+        .expect("top-level definition");
+    let locations = definition.as_array().expect("definition array");
+    assert!(
+        locations.iter().any(|loc| loc["uri"].as_str().unwrap().ends_with("top.md")),
+        "top-level definition should reach top.md: {locations:?}"
+    );
+
+    // documentLink yields a link over the nested value's span (targeting
+    // nested.md) alongside the top-level one.
+    let links = fixture
+        .request(
+            "textDocument/documentLink",
+            json!({ "textDocument": { "uri": uri.as_str() } }),
+        )
+        .result
+        .expect("links");
+    let links = links.as_array().expect("link array");
+    let nested_link = links.iter().find(|link| {
+        link["target"].as_str().is_some_and(|target| target.ends_with("nested.md"))
+    });
+    let nested_link = nested_link.expect("a document link over the nested file value");
+    // The link's range sits on the nested value line (line 7), not a stray line.
+    assert_eq!(nested_link["range"]["start"]["line"], json!(7), "{nested_link:?}");
+    assert!(
+        links
+            .iter()
+            .any(|link| link["target"].as_str().is_some_and(|t| t.ends_with("top.md"))),
+        "top-level file link must still be produced: {links:?}"
+    );
+
+    fixture.shutdown();
+}
+
+/// A document whose inline `$schema` types `license` as `file` and whose value
+/// is a bare extensionless filename (`LICENSE`). A dot/slash heuristic would drop
+/// it; once the schema confirms the `file` type it must navigate.
+const EXTENSIONLESS_FILE_DOC: &str =
+    "---\n$schema:\n  license: file\nlicense: LICENSE\n---\n\n# Doc\n";
+
+#[test]
+fn level2_frontmatter_extensionless_file_navigation() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc.md"), EXTENSIONLESS_FILE_DOC).unwrap();
+    // The extensionless target must exist so resolution has something to reach.
+    std::fs::write(workspace.path().join("LICENSE"), "All rights reserved.\n").unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), EXTENSIONLESS_FILE_DOC);
+
+    // definition on the `license` value (line 3, `license: LICENSE`) resolves to
+    // the extensionless LICENSE file.
+    let definition = fixture
+        .request(
+            "textDocument/definition",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 3, "character": 12 }
+            }),
+        )
+        .result
+        .expect("extensionless definition");
+    let locations = definition.as_array().expect("definition array");
+    assert_eq!(locations.len(), 1, "extensionless file definition: {locations:?}");
+    assert!(
+        locations[0]["uri"].as_str().unwrap().ends_with("LICENSE"),
+        "definition should reach the LICENSE file: {locations:?}"
+    );
+
+    // documentLink yields a link over the value's span targeting LICENSE.
+    let links = fixture
+        .request(
+            "textDocument/documentLink",
+            json!({ "textDocument": { "uri": uri.as_str() } }),
+        )
+        .result
+        .expect("links");
+    let links = links.as_array().expect("link array");
+    let license_link = links
+        .iter()
+        .find(|link| link["target"].as_str().is_some_and(|target| target.ends_with("LICENSE")))
+        .expect("a document link over the extensionless file value");
+    assert_eq!(license_link["range"]["start"]["line"], json!(3), "{license_link:?}");
+
+    fixture.shutdown();
+}
+
+/// A document whose inline `$schema` declares `asset` as a property-level union
+/// whose completable arm (`file`) is *second*. The single-atom `primary_atom`
+/// path would resolve only the first (`string`) arm and offer no completion, so
+/// this exercises capability-specific arm selection for value completion.
+const UNION_VALUE_DOC: &str =
+    "---\n$schema:\n  asset:\n    - string\n    - file\nasset: \n---\n\n# Doc\n";
+
+#[test]
+fn level2_frontmatter_union_value_completion() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc.md"), UNION_VALUE_DOC).unwrap();
+    // A sibling document so the `file(...)` arm's value completion has a target.
+    std::fs::write(workspace.path().join("other.md"), "# Other\n").unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), UNION_VALUE_DOC);
+
+    // Value completion after `asset: ` (line 5) offers the sibling document,
+    // driven by the union's *second* (`file`) arm.
+    let values = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 5, "character": 7 }
+            }),
+        )
+        .result
+        .expect("value completions");
+    assert!(
+        values.as_array().unwrap().iter().any(|item| item["label"] == json!("other.md")),
+        "expected a file-path value completion from the second union arm: {values:?}"
+    );
+
+    fixture.shutdown();
+}
+
+/// A document whose inline `$schema` declares `home` as a property-level union
+/// whose `file` arm is *second*, so a file value is only navigable if
+/// navigation consults every arm rather than just the first.
+const UNION_FILE_NAV_DOC: &str =
+    "---\n$schema:\n  home:\n    - string\n    - file\nhome: top.md\n---\n\n# Doc\n";
+
+#[test]
+fn level2_frontmatter_union_file_navigation() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc.md"), UNION_FILE_NAV_DOC).unwrap();
+    std::fs::write(workspace.path().join("top.md"), "# Top\n").unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), UNION_FILE_NAV_DOC);
+
+    // definition on `home: top.md` (line 5) resolves through the second union
+    // (`file`) arm to top.md.
+    let definition = fixture
+        .request(
+            "textDocument/definition",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 5, "character": 8 }
+            }),
+        )
+        .result
+        .expect("definition");
+    let locations = definition.as_array().expect("definition array");
+    assert!(
+        locations.iter().any(|loc| loc["uri"].as_str().unwrap().ends_with("top.md")),
+        "union file arm definition should reach top.md: {locations:?}"
+    );
+
+    // documentLink produces a link over the value targeting top.md.
+    let links = fixture
+        .request("textDocument/documentLink", json!({ "textDocument": { "uri": uri.as_str() } }))
+        .result
+        .expect("links");
+    assert!(
+        links
+            .as_array()
+            .expect("link array")
+            .iter()
+            .any(|link| link["target"].as_str().is_some_and(|t| t.ends_with("top.md"))),
+        "union file arm should produce a document link: {links:?}"
+    );
+
+    fixture.shutdown();
+}
+
+/// A document whose inline `$schema` declares `settings` as a property-level
+/// union whose inline-object arm is *second*. Nested-key intelligence must
+/// descend that arm even though the first arm (`string`) is not an object.
+const UNION_NESTED_DOC: &str = "---\n$schema:\n  settings:\n    - string\n    - mode: enum(dev, prod)\n      path: file\n      level: number\nsettings:\n  mode: dev\n  path: nested.md\n---\n\n# Doc\n";
+
+#[test]
+fn level2_frontmatter_union_nested_schema_intelligence() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc.md"), UNION_NESTED_DOC).unwrap();
+    std::fs::write(workspace.path().join("nested.md"), "# Nested\n").unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), UNION_NESTED_DOC);
+
+    // Nested key completion: on the `mode` line (line 8), the second-arm inline
+    // object offers its not-yet-present `level` key.
+    let keys = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 8, "character": 2 }
+            }),
+        )
+        .result
+        .expect("nested key completions");
+    assert!(
+        keys.as_array().unwrap().iter().any(|item| item["label"] == json!("level")),
+        "expected a nested `level` key completion through the union arm: {keys:?}"
+    );
+
+    // Nested enum value completion: after `mode: ` (line 8) offers the enum
+    // members declared on the second-arm inline object's `mode` atom.
+    let enum_values = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 8, "character": 8 }
+            }),
+        )
+        .result
+        .expect("nested enum value completions");
+    assert!(
+        enum_values.as_array().unwrap().iter().any(|item| item["label"] == json!("prod")),
+        "expected a nested enum value completion through the union arm: {enum_values:?}"
+    );
+
+    // Nested `file(...)` value completion: after `path: ` (line 9) offers the
+    // sibling document.
+    let file_values = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 9, "character": 8 }
+            }),
+        )
+        .result
+        .expect("nested file value completions");
+    assert!(
+        file_values.as_array().unwrap().iter().any(|item| item["label"] == json!("nested.md")),
+        "expected a nested file-path value completion through the union arm: {file_values:?}"
+    );
+
+    // Nested definition on `path: nested.md` (line 9) resolves through the
+    // union's inline-object arm to nested.md.
+    let definition = fixture
+        .request(
+            "textDocument/definition",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 9, "character": 10 }
+            }),
+        )
+        .result
+        .expect("nested definition");
+    assert!(
+        definition
+            .as_array()
+            .expect("definition array")
+            .iter()
+            .any(|loc| loc["uri"].as_str().unwrap().ends_with("nested.md")),
+        "nested union-arm definition should reach nested.md: {definition:?}"
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn level2_claudine_extension_is_pure_config() {
+    // Criterion 6: a Claudine prompt activates a schema baseline through
+    // configuration alone — no Claudine-specific code path exists in DMLS.
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(
+        workspace.path().join(".dmls.toml"),
+        "[schema.extensions.claudine]\npath = \"claudine.yaml\"\nglobs = [\".claude/**\"]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        workspace.path().join("claudine.yaml"),
+        "$schema:\n  provider: enum(claude, openai; required)\n  model: string\n",
+    )
+    .unwrap();
+    let claude_dir = workspace.path().join(".claude");
+    std::fs::create_dir_all(&claude_dir).unwrap();
+    let prompt = "---\nprovider: bogus\n---\n\n# Prompt\n";
+    std::fs::write(claude_dir.join("prompt.md"), prompt).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let uri = url::Url::from_file_path(claude_dir.join("prompt.md")).unwrap();
+    open(&fixture, uri.as_str(), prompt);
+
+    // The extension baseline validates the prompt: `provider: bogus` is not an
+    // enum member, so a `darkmatter.schema` diagnostic is published.
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics.iter().any(|d| d["source"] == json!("darkmatter.schema")),
+        "expected an extension-schema diagnostic: {diagnostics:?}"
+    );
+
+    // Completion offers the extension-declared `model` key (present keys are
+    // excluded, so only the not-yet-typed `model` from Claudine shows).
+    let completions = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 1, "character": 0 }
+            }),
+        )
+        .result
+        .expect("completions");
+    assert!(
+        completions
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["label"] == json!("model")),
+        "expected the Claudine `model` key completion: {completions:?}"
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn level2_cancelled_request_answers_request_cancelled() {
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(json!({ "processId": null, "capabilities": {} }));
+
+    // A cancellation that beats its request: the router's ledger answers
+    // the request with RequestCanceled (-32800) instead of dispatching it.
+    fixture.notify("$/cancelRequest", json!({ "id": 99 }));
+    let id = RequestId::from(99);
+    fixture.send_request_with_id(id.clone(), "textDocument/hover", json!({}));
+    let response = fixture.expect_response(id);
+    let error = response.error.expect("cancelled request answers an error");
+    assert_eq!(error.code, -32800);
+
+    fixture.shutdown();
+}
+
+/// Layer-3 Darkmatter DSL overlay: directive hover + navigation, interpolation
+/// hover with a static frontmatter-backed value, and the DSL diagnostic family
+/// (unknown directive, broken transclusion, unknown fenced language).
+const DSL_DOC: &str = "---\ntitle: Guide\n---\n\n# Guide\n\n::file ./intro.md\n\n::file ./missing.md\n\n::frobnicate x\n\nHello {{ title }}.\n\n```nosuchlang\ncode\n```\n";
+const INTRO_DOC: &str = "# Intro\n\nWelcome.\n";
+
+#[test]
+fn level2_dsl_overlay_navigation_hover_and_diagnostics() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("guide.md"), DSL_DOC).unwrap();
+    std::fs::write(workspace.path().join("intro.md"), INTRO_DOC).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    let guide_uri = url::Url::from_file_path(workspace.path().join("guide.md")).unwrap();
+    let intro_uri = url::Url::from_file_path(workspace.path().join("intro.md")).unwrap();
+    open(&fixture, intro_uri.as_str(), INTRO_DOC);
+    open(&fixture, guide_uri.as_str(), DSL_DOC);
+
+    // Directive hover on the `::file ./intro.md` target (line 6) describes the
+    // directive and resolves its target.
+    let hover = fixture
+        .request(
+            "textDocument/hover",
+            json!({
+                "textDocument": { "uri": guide_uri.as_str() },
+                "position": { "line": 6, "character": 10 }
+            }),
+        )
+        .result
+        .expect("hover");
+    let hover_text = hover["contents"]["value"].as_str().unwrap_or_default();
+    assert!(hover_text.contains("::file"), "directive hover: {hover_text}");
+    assert!(hover_text.contains("intro.md"), "resolved target: {hover_text}");
+
+    // Definition on the same target jumps into intro.md.
+    let definition = fixture
+        .request(
+            "textDocument/definition",
+            json!({
+                "textDocument": { "uri": guide_uri.as_str() },
+                "position": { "line": 6, "character": 10 }
+            }),
+        )
+        .result
+        .expect("definition");
+    let locations = definition.as_array().expect("definition array");
+    assert!(
+        locations.iter().any(|loc| loc["uri"] == json!(intro_uri.as_str())),
+        "definition should reach intro.md: {locations:?}"
+    );
+
+    // Interpolation hover on `{{ title }}` (line 12) shows the static value.
+    let hover = fixture
+        .request(
+            "textDocument/hover",
+            json!({
+                "textDocument": { "uri": guide_uri.as_str() },
+                "position": { "line": 12, "character": 9 }
+            }),
+        )
+        .result
+        .expect("interpolation hover");
+    let hover_text = hover["contents"]["value"].as_str().unwrap_or_default();
+    assert!(hover_text.contains("Guide"), "static value from frontmatter: {hover_text}");
+
+    // Diagnostics: unknown directive, broken transclusion, unknown fence language.
+    let diagnostics = fixture.wait_for_diagnostics(guide_uri.as_str());
+    let codes: Vec<&str> = diagnostics
+        .iter()
+        .filter_map(|diagnostic| diagnostic["code"].as_str())
+        .collect();
+    assert!(codes.contains(&"dm.directive.unknown"), "codes: {codes:?}");
+    assert!(codes.contains(&"dm.transclusion.broken_path"), "codes: {codes:?}");
+    assert!(codes.contains(&"dm.fence.unknown_language"), "codes: {codes:?}");
+
+    fixture.shutdown();
+}
+
+/// Compose-parity: a directive-name completion after `::` offers the catalog.
+#[test]
+fn level2_dsl_directive_name_completion() {
+    let workspace = tempfile::tempdir().unwrap();
+    let text = "# Doc\n\n::fi\n";
+    std::fs::write(workspace.path().join("doc.md"), text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let completion = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 2, "character": 4 }
+            }),
+        )
+        .result
+        .expect("completion");
+    let items = completion.as_array().expect("completion array");
+    let labels: Vec<&str> = items.iter().filter_map(|item| item["label"].as_str()).collect();
+    assert!(labels.contains(&"::file"), "labels: {labels:?}");
+    assert!(labels.contains(&"::file-links"), "labels: {labels:?}");
+
+    fixture.shutdown();
+}
+
+/// Compose-parity (no false positives): a document whose directives,
+/// interpolation, block pairing, and fenced language are all valid emits **no**
+/// Layer-3 DSL diagnostic. Only brokenness `md compose` would also reject is
+/// flagged.
+const VALID_DSL_DOC: &str = "---\ntitle: Guide\n---\n\n# Guide\n\n::file ./intro.md\n\n::block when=\"true\"\ncontent\n::end-block\n\nHello {{ title }} on {{ ctx.today }}.\n\n```rust\nfn main() {}\n```\n";
+
+#[test]
+fn level2_dsl_valid_document_has_no_dsl_diagnostics() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("guide.md"), VALID_DSL_DOC).unwrap();
+    std::fs::write(workspace.path().join("intro.md"), INTRO_DOC).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let guide_uri = url::Url::from_file_path(workspace.path().join("guide.md")).unwrap();
+    let intro_uri = url::Url::from_file_path(workspace.path().join("intro.md")).unwrap();
+    open(&fixture, intro_uri.as_str(), INTRO_DOC);
+    open(&fixture, guide_uri.as_str(), VALID_DSL_DOC);
+
+    let diagnostics = fixture.wait_for_diagnostics(guide_uri.as_str());
+    let dsl_codes: Vec<&str> = diagnostics
+        .iter()
+        .filter_map(|diagnostic| diagnostic["code"].as_str())
+        .filter(|code| {
+            code.starts_with("dm.directive.")
+                || code.starts_with("dm.transclusion.")
+                || code.starts_with("dm.expression.")
+                || code.starts_with("dm.security.")
+                || code.starts_with("dm.fence.")
+        })
+        .collect();
+    assert!(dsl_codes.is_empty(), "valid doc must have no DSL diagnostics: {dsl_codes:?}");
+
+    fixture.shutdown();
+}
+
+/// Layer-3 shell awareness reaches into `::shell-block` bodies: a disallowed
+/// command inside the block is flagged with `dm.security.disallowed_command`,
+/// ranged on the offending body line, while a benign sibling line is not — and
+/// hovering a body command line shows the command with a policy verdict.
+const SHELL_BLOCK_DOC: &str =
+    "---\ntitle: Shell\n---\n\n# Shell\n\n::shell-block\necho hello\nrm -rf /tmp/danger\n::end-block\n";
+
+#[test]
+fn level2_dsl_shell_block_body_disallowed_command_is_diagnosed() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc.md"), SHELL_BLOCK_DOC).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), SHELL_BLOCK_DOC);
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    let security: Vec<&Value> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["code"] == json!("dm.security.disallowed_command"))
+        .collect();
+    assert_eq!(security.len(), 1, "one shell-block line is disallowed: {diagnostics:?}");
+    // Ranged on the `rm -rf` body line (0-indexed line 8), not the benign echo.
+    assert_eq!(
+        security[0]["range"]["start"]["line"],
+        json!(8),
+        "diagnostic must sit on the offending body line: {:?}",
+        security[0]
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn level2_dsl_shell_block_body_hover_shows_policy_verdict() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc.md"), SHELL_BLOCK_DOC).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), SHELL_BLOCK_DOC);
+
+    // Hover on the `echo hello` body line (line 7) shows the command + verdict.
+    let hover = fixture
+        .request(
+            "textDocument/hover",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 7, "character": 2 }
+            }),
+        )
+        .result
+        .expect("shell-block body hover");
+    let hover_text = hover["contents"]["value"].as_str().unwrap_or_default();
+    assert!(hover_text.contains("Shell command"), "hover: {hover_text}");
+    assert!(hover_text.contains("echo hello"), "hover command: {hover_text}");
+    assert!(hover_text.contains("Policy:"), "hover verdict: {hover_text}");
+
+    fixture.shutdown();
+}
+
+/// A `::shell-block` whose body lines are all benign emits no security
+/// diagnostic — no false positive on valid shell scripts.
+const BENIGN_SHELL_BLOCK_DOC: &str =
+    "---\ntitle: Shell\n---\n\n# Shell\n\n::shell-block\necho hello\ngit status\n::end-block\n";
+
+#[test]
+fn level2_dsl_shell_block_benign_body_has_no_security_diagnostic() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc.md"), BENIGN_SHELL_BLOCK_DOC).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), BENIGN_SHELL_BLOCK_DOC);
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    let has_security = diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic["code"] == json!("dm.security.disallowed_command"));
+    assert!(!has_security, "benign shell block must not be flagged: {diagnostics:?}");
+
+    fixture.shutdown();
+}
+
+/// A block-quoted `::shell-block` still exposes its real command to policy: the
+/// shared library splitter strips the `> ` marker, so a disallowed command
+/// inside a quoted block is flagged (a naive line split would classify the `>`
+/// marker as the executable and miss it).
+const QUOTED_SHELL_BLOCK_DOC: &str =
+    "---\ntitle: Shell\n---\n\n# Shell\n\n> ::shell-block\n> rm -rf /tmp/danger\n> ::end-block\n";
+
+#[test]
+fn level2_dsl_quoted_shell_block_body_disallowed_command_is_diagnosed() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc.md"), QUOTED_SHELL_BLOCK_DOC).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), QUOTED_SHELL_BLOCK_DOC);
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    let security: Vec<&Value> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["code"] == json!("dm.security.disallowed_command"))
+        .collect();
+    assert_eq!(
+        security.len(),
+        1,
+        "quoted shell-block command must be classified past the `>` marker: {diagnostics:?}"
+    );
+
+    fixture.shutdown();
+}
+
+// ── Phase 10: rename, code actions, formatting ──
+
+/// A VS Code-like client: resource operations, file operations, rename prepare
+/// support, and completion — the full editing surface.
+fn vscode_like_initialize_params(root: &std::path::Path) -> Value {
+    let root_uri = url::Url::from_directory_path(root).unwrap();
+    json!({
+        "processId": null,
+        "clientInfo": { "name": "Visual Studio Code", "version": "1.90.0" },
+        "capabilities": {
+            "general": { "positionEncodings": ["utf-16"] },
+            "workspace": {
+                "configuration": true,
+                "workspaceEdit": {
+                    "documentChanges": true,
+                    "resourceOperations": ["create", "rename", "delete"]
+                },
+                "fileOperations": { "willRename": true }
+            },
+            "textDocument": {
+                "rename": { "prepareSupport": true },
+                "codeAction": {},
+                "foldingRange": {}
+            }
+        },
+        "workspaceFolders": [ { "uri": root_uri.as_str(), "name": "scratch" } ]
+    })
+}
+
+/// Every `newText` in a WorkspaceEdit result, from `documentChanges` or `changes`.
+fn collect_new_texts(edit: &Value) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(ops) = edit["documentChanges"].as_array() {
+        for op in ops {
+            if let Some(edits) = op["edits"].as_array() {
+                out.extend(edits.iter().filter_map(|e| e["newText"].as_str().map(str::to_string)));
+            }
+        }
+    }
+    if let Some(changes) = edit["changes"].as_object() {
+        for edits in changes.values() {
+            if let Some(edits) = edits.as_array() {
+                out.extend(edits.iter().filter_map(|e| e["newText"].as_str().map(str::to_string)));
+            }
+        }
+    }
+    out
+}
+
+/// Every document URI touched by a WorkspaceEdit result.
+fn collect_edit_uris(edit: &Value) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(ops) = edit["documentChanges"].as_array() {
+        for op in ops {
+            if let Some(uri) = op["textDocument"]["uri"].as_str() {
+                out.push(uri.to_string());
+            }
+        }
+    }
+    if let Some(changes) = edit["changes"].as_object() {
+        out.extend(changes.keys().cloned());
+    }
+    out
+}
+
+#[test]
+fn level2_formatting_is_byte_equivalent_to_library_cleanup() {
+    let workspace = tempfile::tempdir().unwrap();
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(vscode_like_initialize_params(workspace.path()));
+
+    let doc_uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    let source = "# Title\nParagraph one.\n## Sub\nMore text.\n";
+    open(&fixture, doc_uri.as_str(), source);
+
+    let edits = fixture
+        .request(
+            "textDocument/formatting",
+            json!({
+                "textDocument": { "uri": doc_uri.as_str() },
+                "options": { "tabSize": 2, "insertSpaces": true }
+            }),
+        )
+        .result
+        .expect("formatting");
+    let edits = edits.as_array().expect("formatting edits");
+    assert_eq!(edits.len(), 1, "whole-document replacement expected");
+
+    // Spec criterion 8: the edit is exactly the library cleanup output.
+    let mut md: darkmatter::markdown::Markdown = source.into();
+    md.cleanup();
+    let expected = md.as_string();
+    assert_eq!(edits[0]["newText"], json!(expected));
+
+    fixture.shutdown();
+}
+
+#[test]
+fn level2_code_action_creates_missing_wiki_note() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("note.md"), "See [[NewNote]].\n").unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(vscode_like_initialize_params(workspace.path()));
+
+    let note_uri = url::Url::from_file_path(workspace.path().join("note.md")).unwrap();
+    open(&fixture, note_uri.as_str(), "See [[NewNote]].\n");
+
+    // The unresolved-target diagnostic drives the create action.
+    let diagnostics = fixture.wait_for_diagnostics(note_uri.as_str());
+    let unresolved = diagnostics
+        .iter()
+        .find(|d| d["code"] == json!("wiki.unresolved-target"))
+        .expect("unresolved wiki diagnostic")
+        .clone();
+
+    let actions = fixture
+        .request(
+            "textDocument/codeAction",
+            json!({
+                "textDocument": { "uri": note_uri.as_str() },
+                "range": unresolved["range"],
+                "context": { "diagnostics": [unresolved] }
+            }),
+        )
+        .result
+        .expect("code actions");
+    let actions = actions.as_array().expect("action array");
+    let creates_note = actions.iter().any(|action| {
+        action["edit"]["documentChanges"]
+            .as_array()
+            .is_some_and(|ops| {
+                ops.iter().any(|op| {
+                    op["kind"] == json!("create")
+                        && op["uri"].as_str().is_some_and(|uri| uri.ends_with("NewNote.md"))
+                })
+            })
+    });
+    assert!(creates_note, "expected a create-wiki-note action: {actions:?}");
+
+    fixture.shutdown();
+}
+
+const RENAME_DOC_A: &str = "# Overview\n\n[top](#overview)\n";
+const RENAME_DOC_B: &str = "See [[doc_a#Overview]].\n";
+
+#[test]
+fn level2_heading_rename_rewrites_references() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc_a.md"), RENAME_DOC_A).unwrap();
+    std::fs::write(workspace.path().join("doc_b.md"), RENAME_DOC_B).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(vscode_like_initialize_params(workspace.path()));
+
+    let a_uri = url::Url::from_file_path(workspace.path().join("doc_a.md")).unwrap();
+    let b_uri = url::Url::from_file_path(workspace.path().join("doc_b.md")).unwrap();
+    open(&fixture, b_uri.as_str(), RENAME_DOC_B);
+    open(&fixture, a_uri.as_str(), RENAME_DOC_A);
+
+    // prepareRename on the heading returns its text range and current title.
+    let prepared = fixture
+        .request(
+            "textDocument/prepareRename",
+            json!({
+                "textDocument": { "uri": a_uri.as_str() },
+                "position": { "line": 0, "character": 4 }
+            }),
+        )
+        .result
+        .expect("prepareRename");
+    assert_eq!(prepared["placeholder"], json!("Overview"));
+
+    // rename rewrites the heading, the slug anchor, and the wiki reference.
+    let edit = fixture
+        .request(
+            "textDocument/rename",
+            json!({
+                "textDocument": { "uri": a_uri.as_str() },
+                "position": { "line": 0, "character": 4 },
+                "newName": "Summary"
+            }),
+        )
+        .result
+        .expect("rename edit");
+    let new_texts = collect_new_texts(&edit);
+    // Text-form links (heading + wiki exact text) get the new title; the
+    // Markdown slug anchor gets the new slug.
+    assert!(new_texts.contains(&"Summary".to_string()), "{new_texts:?}");
+    assert!(new_texts.contains(&"summary".to_string()), "{new_texts:?}");
+    let uris = collect_edit_uris(&edit);
+    assert!(
+        uris.iter().any(|uri| uri.ends_with("doc_b.md")),
+        "cross-document wiki reference must be rewritten: {uris:?}"
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn level2_rename_refuses_ambiguous_heading() {
+    let workspace = tempfile::tempdir().unwrap();
+    let source = "# Same\n\ntext\n\n# Same\n";
+    std::fs::write(workspace.path().join("dup.md"), source).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(vscode_like_initialize_params(workspace.path()));
+
+    let uri = url::Url::from_file_path(workspace.path().join("dup.md")).unwrap();
+    open(&fixture, uri.as_str(), source);
+
+    // prepareRename refuses (null) on an ambiguous heading.
+    let prepared = fixture
+        .request(
+            "textDocument/prepareRename",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 0, "character": 3 }
+            }),
+        )
+        .result
+        .expect("prepareRename result");
+    assert_eq!(prepared, Value::Null);
+
+    // rename returns an error rather than a partial edit (spec criterion 9).
+    let response = fixture.request(
+        "textDocument/rename",
+        json!({
+            "textDocument": { "uri": uri.as_str() },
+            "position": { "line": 0, "character": 3 },
+            "newName": "Renamed"
+        }),
+    );
+    assert!(response.error.is_some(), "ambiguous rename must error");
+
+    fixture.shutdown();
+}
+
+#[test]
+fn level2_will_rename_files_updates_and_refuses() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("note1.md"), "See [[note2]].\n").unwrap();
+    std::fs::write(workspace.path().join("note2.md"), "# Note Two\n").unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(vscode_like_initialize_params(workspace.path()));
+
+    let note1 = url::Url::from_file_path(workspace.path().join("note1.md")).unwrap();
+    let note2 = url::Url::from_file_path(workspace.path().join("note2.md")).unwrap();
+    open(&fixture, note1.as_str(), "See [[note2]].\n");
+    open(&fixture, note2.as_str(), "# Note Two\n");
+
+    // Safe rename: `[[note2]]` becomes `[[renamed]]`.
+    let renamed = url::Url::from_file_path(workspace.path().join("renamed.md")).unwrap();
+    let edit = fixture
+        .request(
+            "workspace/willRenameFiles",
+            json!({
+                "files": [ { "oldUri": note2.as_str(), "newUri": renamed.as_str() } ]
+            }),
+        )
+        .result
+        .expect("willRenameFiles edit");
+    let new_texts = collect_new_texts(&edit);
+    assert!(new_texts.contains(&"renamed".to_string()), "{new_texts:?}");
+
+    // Conflict: renaming onto an existing tracked document refuses (null).
+    let response = fixture
+        .request(
+            "workspace/willRenameFiles",
+            json!({
+                "files": [ { "oldUri": note2.as_str(), "newUri": note1.as_str() } ]
+            }),
+        )
+        .result
+        .expect("willRenameFiles result");
+    assert_eq!(response, Value::Null, "rename onto an existing file must refuse");
+
+    fixture.shutdown();
+}

@@ -54,6 +54,7 @@ pub mod coerce;
 pub mod completion;
 pub mod detect;
 pub mod errors;
+pub mod example;
 pub mod format;
 pub mod resolve;
 pub mod rewrite;
@@ -86,6 +87,68 @@ pub use simplified::{
     SimplifiedType, TypeExpr, parse_yaml_schema, to_json_schema,
 };
 pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
+
+static BASE_SCHEMA: std::sync::OnceLock<SimplifiedSchema> = std::sync::OnceLock::new();
+static BASE_JSON_SCHEMA: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+
+/// Returns the Darkmatter baseline frontmatter schema as a [`SimplifiedSchema`].
+///
+/// Loads the authored schema from `darkmatter/docs/schemas/darkmatter.yaml` via
+/// `include_str!` and parses it at first call. The result is cached so repeated
+/// calls are cheap.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::schemas::darkmatter_base_schema;
+///
+/// let schema = darkmatter_base_schema();
+/// ```
+///
+/// ## Panics
+///
+/// Panics if the checked-in `darkmatter.yaml` cannot be parsed. This is a
+/// library bug or repository corruption, not an author error.
+pub fn darkmatter_base_schema() -> SimplifiedSchema {
+    BASE_SCHEMA
+        .get_or_init(|| {
+            let raw = include_str!("../../../../docs/schemas/darkmatter.yaml");
+            let frontmatter: serde_yaml_ng::Value =
+                serde_yaml_ng::from_str(raw).expect("baseline yaml must parse");
+            let schema_value = frontmatter
+                .get("$schema")
+                .expect("baseline file must have a `$schema` key");
+            parse_yaml_schema(schema_value).expect("baseline schema must parse")
+        })
+        .clone()
+}
+
+/// Returns the Darkmatter baseline frontmatter schema as a compiled Draft
+/// 2020-12 JSON Schema value.
+///
+/// The result is derived from [`darkmatter_base_schema`] and cached so repeated
+/// calls do not re-pay the conversion cost.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::schemas::darkmatter_base_json_schema;
+///
+/// let json = darkmatter_base_json_schema();
+/// assert_eq!(json.get("type").and_then(|v| v.as_str()), Some("object"));
+/// ```
+///
+/// ## Panics
+///
+/// Panics if the checked-in `darkmatter.yaml` cannot be converted to JSON
+/// Schema. This is a library bug or repository corruption, not an author error.
+pub fn darkmatter_base_json_schema() -> Value {
+    BASE_JSON_SCHEMA
+        .get_or_init(|| {
+            to_json_schema(&darkmatter_base_schema()).expect("baseline schema must convert")
+        })
+        .clone()
+}
 
 /// Top-level entry point for the schemas subsystem.
 ///
@@ -224,13 +287,33 @@ impl DarkmatterSchemas {
         // the same order the expression path uses for `file_exists`/`frontmatter`.
         let validator = self.cache.validator_for(&merged_json, Some(&base_dir))?;
         let arm_validators = build_arm_validators(&merged_json, &self.cache, &base_dir)?;
+        let origins = build_origin_map(resolved.as_ref(), &merged_json);
+        // Read the import/example dependency edges before the `resolved` value is
+        // consumed by the `.and_then(|r| r.simplified)` move below.
+        let dependencies = resolved
+            .as_ref()
+            .map(|r| {
+                let mut deps: Vec<PathBuf> = r
+                    .imports
+                    .iter()
+                    .chain(r.examples.iter())
+                    .chain(r.referenced_files.iter())
+                    .cloned()
+                    .collect();
+                deps.sort();
+                deps.dedup();
+                deps
+            })
+            .unwrap_or_default();
         Ok(Some(EffectiveSchema {
             simplified: resolved.and_then(|r| r.simplified),
             json_schema: merged_json,
+            origins,
             validator,
             arm_validators,
             base_dir: Some(base_dir),
             file_ref_fallback_dir: self.cache.file_ref_fallback_dir().map(Path::to_path_buf),
+            dependencies,
         }))
     }
 
@@ -255,6 +338,7 @@ impl DarkmatterSchemas {
             None => Ok(ValidationReport {
                 valid: true,
                 problems: Vec::new(),
+                pending: Vec::new(),
             }),
         }
     }
@@ -281,6 +365,11 @@ pub struct EffectiveSchema {
     pub simplified: Option<SimplifiedSchema>,
     /// The final Draft 2020-12 JSON Schema used by the validator.
     pub json_schema: Value,
+    /// Per-top-level-property origins (document vs baseline vs referenced
+    /// file), so diagnostics can point `relatedInformation` at the schema
+    /// source (R-5 Priority 2). Empty for root-union schemas, whose per-arm
+    /// property provenance is not modelled in v1.
+    pub origins: SchemaOriginMap,
     validator: Arc<Validator>,
     /// Per-arm validators when `json_schema` is a root `anyOf` union.
     /// `None` for ordinary schemas.
@@ -292,9 +381,33 @@ pub struct EffectiveSchema {
     /// Captured launch-area fallback the validator was built with, the second
     /// anchor for `format: darkmatter-file` re-resolution.
     file_ref_fallback_dir: Option<PathBuf>,
+    /// Resolved paths of the files this schema depends on: the sorted,
+    /// deduplicated union of the document `$schema`'s `Name@file`/`@this` imports
+    /// (Feature B), its `example(...)` artifacts (Feature A), and the referenced
+    /// schema files themselves (`$schema: ./schema.yaml` and each root-union
+    /// string arm). Empty when the document has an inline `$schema` mapping with
+    /// no imports/examples, or no `$schema` at all.
+    ///
+    /// Contract: these are dependency edges of the effective schema — a change to
+    /// any listed file's *content* (with the document text and schema config
+    /// otherwise unchanged) must invalidate a cached [`EffectiveSchema`]. The DMLS
+    /// overlay cache content-hashes each entry to honor this.
+    dependencies: Vec<PathBuf>,
 }
 
 impl EffectiveSchema {
+    /// The files this schema depends on (imports + examples + the referenced
+    /// schema files themselves), as resolved absolute/canonical paths, sorted and
+    /// deduplicated. Empty when the document has an inline `$schema` mapping with
+    /// no imports/examples, or no `$schema` at all.
+    ///
+    /// A change to any of these files' content invalidates this effective schema;
+    /// consumers that cache an [`EffectiveSchema`] keyed on document text must
+    /// also track these paths' content to stay correct.
+    pub fn dependencies(&self) -> &[PathBuf] {
+        &self.dependencies
+    }
+
     /// Validates a frontmatter JSON value against this schema. Equivalent to
     /// [`Self::validate_with_positions`] with an empty position map (problems
     /// will carry no line/column information).
@@ -354,7 +467,46 @@ impl EffectiveSchema {
         ValidationReport {
             valid: problems.is_empty(),
             problems,
+            pending: Vec::new(),
         }
+    }
+
+    /// Validates like [`Self::validate_with_positions`], then applies the
+    /// compose-parity deferral rules from `options` as data (R-5 Priority 3).
+    ///
+    /// Top-level values still holding a `$(...)` shell expression or an
+    /// unresolved `{{ ... }}` template are collected into
+    /// [`ValidationReport::pending`]. With [`PendingPolicy::Defer`] (the
+    /// default), problems attributable to a pending key are dropped from the
+    /// report — mirroring compose, which lets a later shell-expansion pass
+    /// re-validate the resolved value. Keys in `options.excluded_keys` have
+    /// their problems dropped unconditionally (caller-owned keys).
+    ///
+    /// Nothing here executes a shell command, reads the environment, or
+    /// touches the network: pending values are recognised lexically only.
+    pub fn validate_with_options(
+        &self,
+        frontmatter: &Value,
+        positions: &PositionMap,
+        options: &ValidationOptions,
+    ) -> ValidationReport {
+        let mut report = self.validate_with_positions(frontmatter, positions);
+        let pending = scan_pending_values(frontmatter);
+        let pending_keys: HashSet<&str> = pending.iter().map(|p| p.key.as_str()).collect();
+        let defer = matches!(options.pending_policy, PendingPolicy::Defer);
+
+        report.problems.retain(|problem| {
+            let Some(key) = attributable_top_level_key(problem) else {
+                return true;
+            };
+            if options.excluded_keys.contains(&key) {
+                return false;
+            }
+            !(defer && pending_keys.contains(key.as_str()))
+        });
+        report.valid = report.problems.is_empty();
+        report.pending = pending;
+        report
     }
 
     /// Returns the compiled validator. Mainly for advanced callers; the
@@ -458,6 +610,13 @@ pub struct ValidationReport {
     pub valid: bool,
     /// Individual problems, in `iter_errors` order.
     pub problems: Vec<ValidationProblem>,
+    /// Top-level values that could not be validated yet because they still
+    /// hold a `$(...)` shell expression or an unresolved `{{ ... }}` template
+    /// (R-5 Priority 3). Always empty for [`EffectiveSchema::validate`] /
+    /// [`EffectiveSchema::validate_with_positions`]; populated only by
+    /// [`EffectiveSchema::validate_with_options`], which mirrors the compose
+    /// deferral rules without executing anything.
+    pub pending: Vec<PendingValue>,
 }
 
 /// Coarse classification of a validation problem.
@@ -503,7 +662,240 @@ pub struct ValidationProblem {
     /// `description` keyword authored in a referenced JSON Schema file).
     /// `None` when the property declares no description.
     pub description: Option<String>,
+    /// Fine-grained failure classification (R-5 Priority 1). Unlike the coarse
+    /// [`ValidationProblemKind`], this separates constraint violations, unknown
+    /// keys, and file-reference failures so span-aware consumers (DMLS) can
+    /// pick a ranging rule per category.
+    pub code: ValidationProblemCode,
+    /// The [`path`](Self::path) parsed into decoded JSON-Pointer segments, so
+    /// consumers walk a frontmatter AST without re-parsing `~0`/`~1` escapes.
+    pub instance_path: JsonPointer,
+    /// Location of the failing keyword within the compiled JSON Schema, parsed
+    /// into JSON-Pointer segments. `None` when the validator reported no schema
+    /// path.
+    pub schema_path: Option<JsonPointer>,
+    /// The specific undeclared key for an `additionalProperties` /
+    /// unknown-key failure. `None` for every other category. The failure's
+    /// [`path`](Self::path) points at the *parent* object in this case, so this
+    /// is the only way to recover the offending key.
+    pub offending_property: Option<String>,
+    /// Structured cause of a `format: darkmatter-file` /
+    /// `darkmatter-file-reference` failure (R-5 Priority 4). `Some` only when
+    /// [`code`](Self::code) is [`ValidationProblemCode::InvalidFileReference`];
+    /// [`message`](Self::message) still carries the same rendered text.
+    pub file_reference: Option<FileReferenceDiagnostic>,
 }
+
+/// Fine-grained classification of a [`ValidationProblem`] (R-5 Priority 1).
+///
+/// Finer than [`ValidationProblemKind`]: constraint violations, unknown keys,
+/// and file-reference failures each get their own variant so a diagnostic
+/// surface can choose the correct ranging rule (value node, key node, whole
+/// entry) without substring-matching the message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValidationProblemCode {
+    /// A required property is absent.
+    MissingRequired,
+    /// The instance value's type did not match the declared type.
+    TypeMismatch,
+    /// A non-type constraint failed (range, length, pattern, enum, format
+    /// other than a file reference, …).
+    ConstraintViolation,
+    /// A key not declared by the schema was present under
+    /// `additionalProperties: false`.
+    UnknownKey,
+    /// A `format: darkmatter-file` / `darkmatter-file-reference` value failed
+    /// to parse, resolve, or match an existing file.
+    InvalidFileReference,
+}
+
+/// A parsed RFC 6901 JSON Pointer.
+///
+/// [`ValidationProblem::path`] carries the raw pointer string (`/tags/2`); this
+/// is the decoded segment view (`["tags", "2"]`) span-aware consumers walk
+/// without re-parsing the `~0`/`~1` escapes.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct JsonPointer {
+    segments: Vec<String>,
+}
+
+impl JsonPointer {
+    /// Parses a JSON-Pointer string into its decoded segments. An empty string
+    /// (the document root) yields an empty pointer.
+    pub fn parse(pointer: &str) -> Self {
+        if pointer.is_empty() {
+            return Self::default();
+        }
+        let body = pointer.strip_prefix('/').unwrap_or(pointer);
+        let segments = body.split('/').map(decode_pointer_segment).collect();
+        Self { segments }
+    }
+
+    /// The decoded segments, outermost first.
+    pub fn segments(&self) -> &[String] {
+        &self.segments
+    }
+
+    /// `true` for the document-root pointer (no segments).
+    pub fn is_empty(&self) -> bool {
+        self.segments.is_empty()
+    }
+
+    /// The first (top-level) segment, if any.
+    pub fn first(&self) -> Option<&str> {
+        self.segments.first().map(String::as_str)
+    }
+
+    /// Re-encodes the pointer to its canonical RFC 6901 string form.
+    pub fn as_pointer_string(&self) -> String {
+        if self.segments.is_empty() {
+            return String::new();
+        }
+        let mut out = String::new();
+        for segment in &self.segments {
+            out.push('/');
+            out.push_str(&segment.replace('~', "~0").replace('/', "~1"));
+        }
+        out
+    }
+}
+
+fn decode_pointer_segment(segment: &str) -> String {
+    segment.replace("~1", "/").replace("~0", "~")
+}
+
+/// Structured cause of a file-reference validation failure (R-5 Priority 4).
+///
+/// Replaces the previous opaque substituted message string with a typed cause
+/// so consumers can offer the right remediation (fix the syntax, fix the
+/// resolution context, or point at the missing file) and range the diagnostic
+/// against the resolved-from directory when known.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FileReferenceDiagnostic {
+    /// The value is not a parseable file reference.
+    InvalidSyntax {
+        /// The offending raw value.
+        raw: String,
+    },
+    /// The reference parsed but could not be resolved against the filesystem
+    /// or environment.
+    ResolutionFailed {
+        /// The offending raw value.
+        raw: String,
+    },
+    /// The reference parsed and resolved, but no file exists at the resolved
+    /// path.
+    NoMatch {
+        /// The offending raw value.
+        raw: String,
+        /// The directory resolution was anchored at, when known.
+        resolved_from: Option<PathBuf>,
+    },
+}
+
+/// A top-level frontmatter value that cannot be validated yet because it holds
+/// a deferred composition construct (R-5 Priority 3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingValue {
+    /// The top-level frontmatter key.
+    pub key: String,
+    /// JSON Pointer to the pending value (`/{key}`).
+    pub path: JsonPointer,
+    /// Why the value is pending.
+    pub reason: PendingValueReason,
+}
+
+/// Why a [`PendingValue`] is deferred.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingValueReason {
+    /// The value holds a `$(...)` shell expression that has not run.
+    ShellExpression,
+    /// The value holds an unresolved `{{ ... }}` template.
+    UnresolvedTemplate,
+}
+
+/// How [`EffectiveSchema::validate_with_options`] treats pending values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingPolicy {
+    /// Drop problems attributable to a pending top-level key (mirrors compose
+    /// when shell expansion will re-validate the value downstream).
+    Defer,
+    /// Keep every problem; pending values are still listed on
+    /// [`ValidationReport::pending`] but do not suppress diagnostics.
+    Report,
+}
+
+/// Options controlling [`EffectiveSchema::validate_with_options`] (R-5
+/// Priority 3). Mirrors the compose deferral rules without executing anything.
+#[derive(Debug, Clone)]
+pub struct ValidationOptions {
+    /// How to treat top-level values still holding `$(...)` / `{{ ... }}`.
+    pub pending_policy: PendingPolicy,
+    /// Top-level keys whose problems are dropped entirely (caller-owned keys,
+    /// mirroring compose's `exclude_keys`).
+    pub excluded_keys: HashSet<String>,
+}
+
+impl Default for ValidationOptions {
+    fn default() -> Self {
+        Self {
+            pending_policy: PendingPolicy::Defer,
+            excluded_keys: HashSet::new(),
+        }
+    }
+}
+
+/// Where an effective-schema property came from (R-5 Priority 2), so a
+/// diagnostic can point `relatedInformation` at the schema source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SchemaOriginKind {
+    /// An inline `$schema` mapping/sequence in the document frontmatter.
+    Document,
+    /// A `$schema` file reference.
+    ReferencedFile,
+    /// The configured baseline schema.
+    Baseline,
+}
+
+/// The origin of one effective-schema property.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaOrigin {
+    /// Which layer the property's schema came from.
+    pub kind: SchemaOriginKind,
+    /// The referenced schema file, when [`kind`](Self::kind) is
+    /// [`SchemaOriginKind::ReferencedFile`].
+    pub uri: Option<PathBuf>,
+}
+
+impl SchemaOrigin {
+    /// An inline-document origin.
+    pub fn document() -> Self {
+        Self {
+            kind: SchemaOriginKind::Document,
+            uri: None,
+        }
+    }
+
+    /// A baseline-schema origin.
+    pub fn baseline() -> Self {
+        Self {
+            kind: SchemaOriginKind::Baseline,
+            uri: None,
+        }
+    }
+
+    /// A referenced-file origin carrying the resolved path.
+    pub fn referenced_file(path: impl Into<PathBuf>) -> Self {
+        Self {
+            kind: SchemaOriginKind::ReferencedFile,
+            uri: Some(path.into()),
+        }
+    }
+}
+
+/// Per-top-level-property schema origins for an [`EffectiveSchema`], keyed by
+/// property name in schema declaration order.
+pub type SchemaOriginMap = indexmap::IndexMap<String, SchemaOrigin>;
 
 fn build_arm_validators(
     schema: &Value,
@@ -519,6 +911,93 @@ fn build_arm_validators(
         out.push(cache.validator_for(&arm_schema, Some(base_dir))?);
     }
     Ok(Some(out))
+}
+
+/// The top-level frontmatter key a problem is attributable to, mirroring the
+/// compose-time deferral rule: a missing-required failure is keyed by the
+/// missing property (its path points at the parent), everything else by the
+/// first pointer segment.
+fn attributable_top_level_key(problem: &ValidationProblem) -> Option<String> {
+    if problem.code == ValidationProblemCode::MissingRequired {
+        return problem.property.clone();
+    }
+    problem.instance_path.first().map(str::to_string)
+}
+
+/// Scans a frontmatter instance for top-level values that hold a deferred
+/// composition construct (`$(...)` shell expression or `{{ ... }}` template),
+/// mirroring compose's `value_pending_composition` — lexically only, never
+/// executing anything. `$schema` is skipped (a control key, not data).
+fn scan_pending_values(frontmatter: &Value) -> Vec<PendingValue> {
+    let Value::Object(map) = frontmatter else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (key, value) in map {
+        if key == "$schema" {
+            continue;
+        }
+        if let Some(reason) = pending_reason(value) {
+            out.push(PendingValue {
+                key: key.clone(),
+                path: JsonPointer::parse(&format!(
+                    "/{}",
+                    key.replace('~', "~0").replace('/', "~1")
+                )),
+                reason,
+            });
+        }
+    }
+    out
+}
+
+/// Classifies a value's deferral reason. A `$(...)` shell expression takes
+/// precedence over a `{{ ... }}` template when both appear (the shell value is
+/// what a later pass resolves first), matching compose's ordering.
+fn pending_reason(value: &Value) -> Option<PendingValueReason> {
+    if value_contains_marker(value, "$(") {
+        Some(PendingValueReason::ShellExpression)
+    } else if value_contains_marker(value, "{{") {
+        Some(PendingValueReason::UnresolvedTemplate)
+    } else {
+        None
+    }
+}
+
+fn value_contains_marker(value: &Value, marker: &str) -> bool {
+    match value {
+        Value::String(s) => s.contains(marker),
+        Value::Array(items) => items.iter().any(|v| value_contains_marker(v, marker)),
+        Value::Object(map) => map.values().any(|v| value_contains_marker(v, marker)),
+        _ => false,
+    }
+}
+
+/// Builds the per-top-level-property origin map for an effective schema.
+///
+/// A property present in the resolved *document* schema is attributed to that
+/// schema's origin (inline document, or the referenced file); every other
+/// merged property came from the baseline. Root-union schemas (no top-level
+/// `properties`) yield an empty map — per-arm provenance is not modelled in v1.
+fn build_origin_map(resolved: Option<&resolve::ResolvedSchema>, merged: &Value) -> SchemaOriginMap {
+    let mut out = SchemaOriginMap::new();
+    let Some(props) = merged.get("properties").and_then(Value::as_object) else {
+        return out;
+    };
+    let doc_props = resolved
+        .map(|r| &r.json_schema)
+        .and_then(|s| s.get("properties"))
+        .and_then(Value::as_object);
+    for key in props.keys() {
+        let origin = match doc_props {
+            Some(doc) if doc.contains_key(key) => resolved
+                .map(|r| r.origin.clone())
+                .unwrap_or_else(SchemaOrigin::document),
+            _ => SchemaOrigin::baseline(),
+        };
+        out.insert(key.clone(), origin);
+    }
+    out
 }
 
 fn positions_for(source: &Markdown) -> PositionMap {
@@ -669,6 +1148,7 @@ mod tests {
                 );
                 m
             },
+            ..Default::default()
         });
         let api = DarkmatterSchemas::new().with_baseline(baseline).unwrap();
         let report = api.validate(&md).unwrap();
@@ -699,6 +1179,7 @@ mod tests {
                 );
                 m
             },
+            ..Default::default()
         });
         let api = DarkmatterSchemas::new().with_baseline(baseline).unwrap();
         let report = api.validate(&md).unwrap();
@@ -774,6 +1255,7 @@ mod tests {
                 );
                 m
             },
+            ..Default::default()
         });
         let api = DarkmatterSchemas::new().with_baseline(baseline).unwrap();
         let report = api.validate(&md).unwrap();
@@ -1317,5 +1799,397 @@ mod tests {
             input, snapshot,
             "validate must not mutate root-union eager-file input",
         );
+    }
+
+    // ── `generated` baseline integration (Phase 2) ─────────────────────────
+    //
+    // End-to-end at the public `DarkmatterSchemas` API: an authored document
+    // omitting a baseline `ctx.today` `generated; required` property validates
+    // cleanly (spec semantics point 1), while a wrongly-typed `ctx.today`
+    // value fails type validation (point 3).
+
+    /// Builds a baseline `SimplifiedSchema` from a YAML body.
+    fn baseline_from_yaml(yaml_body: &str) -> SimplifiedSchema {
+        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml_body).expect("yaml parse");
+        super::simplified::parse_yaml_schema(&value).expect("baseline schema parse")
+    }
+
+    #[test]
+    fn baseline_generated_ctx_validates_when_authored_doc_omits_ctx() {
+        let baseline = baseline_from_yaml(
+            "ctx:\n  today: \"date(generated; required) -> today's date, host-supplied\"",
+        );
+        let api = DarkmatterSchemas::new()
+            .with_baseline(baseline)
+            .expect("baseline converts");
+
+        // Authored document omits `ctx` entirely — validates (spec point 1).
+        let md = md_with_schema("title: Hello\n");
+        let report = api.validate(&md).expect("validate");
+        assert!(
+            report.valid,
+            "authored doc omitting generated ctx must validate: {:?}",
+            report.problems,
+        );
+    }
+
+    #[test]
+    fn baseline_generated_ctx_type_checks_wrongly_typed_value() {
+        let baseline = baseline_from_yaml(
+            "ctx:\n  today: \"date(generated; required) -> today's date, host-supplied\"",
+        );
+        let api = DarkmatterSchemas::new()
+            .with_baseline(baseline)
+            .expect("baseline converts");
+
+        // Host supplies a wrongly-typed `ctx.today` — fails validation
+        // (spec point 3: the non-nullable type semantics of `required` are
+        // preserved even though static presence is suppressed). A numeric
+        // value against `date` (`{ type: "string", format: "date" }`) is
+        // rejected by the format/type check.
+        let md = md_with_schema("ctx:\n  today: 42\n");
+        let report = api.validate(&md).expect("validate");
+        assert!(
+            !report.valid,
+            "wrongly-typed ctx.today must fail validation: {:?}",
+            report.problems,
+        );
+        assert!(
+            report
+                .problems
+                .iter()
+                .any(|p| p.path == "/ctx/today"),
+            "expected a problem on /ctx/today: {:?}",
+            report.problems,
+        );
+    }
+
+    #[test]
+    fn baseline_generated_ctx_accepts_correctly_typed_value() {
+        let baseline = baseline_from_yaml(
+            "ctx:\n  today: \"date(generated; required) -> today's date, host-supplied\"",
+        );
+        let api = DarkmatterSchemas::new()
+            .with_baseline(baseline)
+            .expect("baseline converts");
+
+        // Host supplies a correctly-typed `ctx.today` — validates.
+        let md = md_with_schema("ctx:\n  today: 2026-07-04\n");
+        let report = api.validate(&md).expect("validate");
+        assert!(
+            report.valid,
+            "correctly-typed ctx.today must validate: {:?}",
+            report.problems,
+        );
+    }
+
+    // ── Phase 4: library base-schema accessors ───────────────────────────
+
+    /// `darkmatter_base_schema()` returns a non-empty baseline schema with the
+    /// expected top-level properties present (spec testing requirement 1).
+    #[test]
+    fn darkmatter_base_schema_returns_expected_properties() {
+        let schema = super::darkmatter_base_schema();
+        let shape = match schema {
+            super::SimplifiedSchema::Single(s) => s,
+            other => panic!("expected Single, got {other:?}"),
+        };
+        assert!(
+            !shape.properties.is_empty(),
+            "baseline schema must declare properties"
+        );
+        for key in ["$schema", "title", "ctx"] {
+            assert!(
+                shape.properties.contains_key(key),
+                "baseline schema missing property `{key}`"
+            );
+        }
+    }
+
+    /// `darkmatter_base_json_schema()` returns a compiled JSON Schema that
+    /// validates known-good frontmatter and rejects a wrongly-typed `title`
+    /// (spec testing requirements 3 and 4).
+    #[test]
+    fn darkmatter_base_json_schema_validates_known_samples() {
+        let json = super::darkmatter_base_json_schema();
+        let validator = jsonschema::options()
+            .with_draft(jsonschema::Draft::Draft202012)
+            .build(&json)
+            .expect("compiled baseline must build a validator");
+
+        let valid = serde_json::json!({
+            "title": "Hello",
+            "draft": false,
+            "tags": ["a", "b"],
+        });
+        assert!(
+            validator.is_valid(&valid),
+            "known-good frontmatter must validate"
+        );
+
+        let invalid_title = serde_json::json!({ "title": 42 });
+        assert!(
+            !validator.is_valid(&invalid_title),
+            "wrongly-typed title must be rejected"
+        );
+    }
+
+    /// `darkmatter_base_json_schema()` caches the converted value so repeated
+    /// calls return an equivalent schema without re-parsing the YAML.
+    #[test]
+    fn darkmatter_base_json_schema_is_cached() {
+        let a = super::darkmatter_base_json_schema();
+        let b = super::darkmatter_base_json_schema();
+        assert_eq!(a, b, "cached JSON schemas must be equal");
+    }
+
+    /// The compiled baseline allows unknown user-defined frontmatter keys
+    /// (Non-Goal 1; spec testing requirement 5).
+    #[test]
+    fn darkmatter_base_json_schema_allows_unknown_keys() {
+        let json = super::darkmatter_base_json_schema();
+        let validator = jsonschema::options()
+            .with_draft(jsonschema::Draft::Draft202012)
+            .build(&json)
+            .expect("compiled baseline must build a validator");
+
+        let with_unknown = serde_json::json!({
+            "custom_key": 42,
+            "my_custom_namespace": { "nested": true },
+        });
+        assert!(
+            validator.is_valid(&with_unknown),
+            "unknown user keys must remain accepted"
+        );
+    }
+
+    /// Document-level `$schema` definitions override baseline properties on
+    /// conflict (Non-Goal 5; spec testing requirement 6).
+    #[test]
+    fn document_schema_overrides_baseline_title() {
+        let api = DarkmatterSchemas::new()
+            .with_baseline(super::darkmatter_base_schema())
+            .expect("baseline converts");
+
+        // Baseline says `title` is a string. The document redeclares it as a
+        // number and supplies a number; validation must follow the document
+        // schema, so this is valid.
+        let md = md_with_schema("$schema:\n  title: number\ntitle: 42\n");
+        let report = api.validate(&md).expect("validate");
+        assert!(
+            report.valid,
+            "document schema should override baseline title type: {:?}",
+            report.problems
+        );
+    }
+
+    // ── R-5 Priority 3: validate_with_options pending + deferral ─────────
+
+    fn effective_number_field() -> EffectiveSchema {
+        let md = md_with_schema("$schema:\n  n: number\n");
+        DarkmatterSchemas::new()
+            .effective_for(&md)
+            .expect("effective_for")
+            .expect("schema present")
+    }
+
+    #[test]
+    fn validate_with_options_defers_shell_pending_value() {
+        let effective = effective_number_field();
+        let instance = serde_json::json!({ "n": "$(echo 1)" });
+        let report = effective.validate_with_options(
+            &instance,
+            &PositionMap::new(),
+            &ValidationOptions::default(),
+        );
+        assert!(report.valid, "shell-pending value deferred: {:?}", report.problems);
+        assert_eq!(report.pending.len(), 1);
+        assert_eq!(report.pending[0].key, "n");
+        assert_eq!(report.pending[0].reason, PendingValueReason::ShellExpression);
+        assert_eq!(report.pending[0].path.segments(), ["n"]);
+    }
+
+    #[test]
+    fn validate_with_options_classifies_template_pending_value() {
+        let effective = effective_number_field();
+        let instance = serde_json::json!({ "n": "{{ x }}" });
+        let report = effective.validate_with_options(
+            &instance,
+            &PositionMap::new(),
+            &ValidationOptions::default(),
+        );
+        assert!(report.valid, "template-pending value deferred: {:?}", report.problems);
+        assert_eq!(report.pending.len(), 1);
+        assert_eq!(report.pending[0].reason, PendingValueReason::UnresolvedTemplate);
+    }
+
+    #[test]
+    fn validate_with_options_report_policy_keeps_pending_problem() {
+        let effective = effective_number_field();
+        let instance = serde_json::json!({ "n": "$(echo 1)" });
+        let options = ValidationOptions {
+            pending_policy: PendingPolicy::Report,
+            excluded_keys: HashSet::new(),
+        };
+        let report =
+            effective.validate_with_options(&instance, &PositionMap::new(), &options);
+        assert!(!report.valid, "Report policy keeps the type problem");
+        assert!(report.problems.iter().any(|p| p.path == "/n"));
+        // The pending value is still surfaced as data.
+        assert_eq!(report.pending.len(), 1);
+    }
+
+    #[test]
+    fn validate_with_options_excludes_caller_owned_key() {
+        let effective = effective_number_field();
+        let instance = serde_json::json!({ "n": "not-a-number" });
+        let options = ValidationOptions {
+            pending_policy: PendingPolicy::Defer,
+            excluded_keys: ["n".to_string()].into_iter().collect(),
+        };
+        let report =
+            effective.validate_with_options(&instance, &PositionMap::new(), &options);
+        assert!(report.valid, "excluded key's problem is dropped: {:?}", report.problems);
+        // Excluded, not pending — the raw value holds no `$(...)`/`{{ }}`.
+        assert!(report.pending.is_empty());
+    }
+
+    #[test]
+    fn validate_with_options_coerced_value_passes_with_no_pending() {
+        let effective = effective_number_field();
+        // A coercible string is not pending and validates after coercion.
+        let instance = serde_json::json!({ "n": "42" });
+        let report = effective.validate_with_options(
+            &instance,
+            &PositionMap::new(),
+            &ValidationOptions::default(),
+        );
+        assert!(report.valid, "{:?}", report.problems);
+        assert!(report.pending.is_empty());
+    }
+
+    #[test]
+    fn plain_validate_report_has_empty_pending() {
+        // Compose-parity: the non-options entry points never populate `pending`.
+        let effective = effective_number_field();
+        let report = effective.validate(&serde_json::json!({ "n": 1 }));
+        assert!(report.pending.is_empty());
+    }
+
+    // ── R-5 Priority 2: schema origins ──────────────────────────────────
+
+    #[test]
+    fn origins_attribute_document_and_baseline_properties() {
+        let md = md_with_schema("$schema:\n  title: 'string(required)'\ntitle: hi\n");
+        let baseline = baseline_from_yaml("owner: 'string(required)'");
+        let api = DarkmatterSchemas::new().with_baseline(baseline).unwrap();
+        let effective = api.effective_for(&md).unwrap().unwrap();
+        assert_eq!(
+            effective.origins.get("title").map(|o| o.kind),
+            Some(SchemaOriginKind::Document),
+        );
+        assert_eq!(
+            effective.origins.get("owner").map(|o| o.kind),
+            Some(SchemaOriginKind::Baseline),
+        );
+    }
+
+    #[test]
+    fn origins_referenced_file_carries_uri() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("schema.yaml"),
+            "$schema:\n  title: 'string(required)'\n",
+        )
+        .unwrap();
+        let doc_path = dir.path().join("doc.md");
+        std::fs::write(
+            &doc_path,
+            "---\n$schema: ./schema.yaml\ntitle: Hello\n---\nbody\n",
+        )
+        .unwrap();
+        let md = Markdown::try_from(doc_path.as_path()).unwrap();
+        let effective = DarkmatterSchemas::new()
+            .effective_for(&md)
+            .unwrap()
+            .unwrap();
+        let origin = effective.origins.get("title").expect("title origin");
+        assert_eq!(origin.kind, SchemaOriginKind::ReferencedFile);
+        assert!(
+            origin.uri.as_ref().map(|p| p.ends_with("schema.yaml")).unwrap_or(false),
+            "expected the referenced file path, got {:?}",
+            origin.uri,
+        );
+    }
+
+    #[test]
+    fn dependencies_surface_import_and_example_edges() {
+        // A `$schema` that pulls in a `Name@file` import and an `example(...)`
+        // artifact surfaces both resolved paths on `EffectiveSchema::dependencies`
+        // so a warm cache can invalidate the schema when either file changes.
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("types.yaml"), "$schema:\n  type: 'enum(a, b)'\n")
+            .expect("write types");
+        std::fs::write(
+            dir.path().join("today-example.yaml"),
+            "kind: example\ninvocation: \"{{ ctx.today }}\"\nreturns: \"2024-12-25\"\ndescription: d\n",
+        )
+        .expect("write example");
+        let md = prompt_with_source(
+            dir.path(),
+            "$schema:\n  value: type@./types.yaml\n  today: \"date(example(./today-example.yaml))\"\nvalue: a\n",
+        );
+        let effective = DarkmatterSchemas::new()
+            .effective_for(&md)
+            .unwrap()
+            .unwrap();
+        let deps = effective.dependencies();
+        assert!(
+            deps.iter().any(|p| p.ends_with("types.yaml")),
+            "import edge missing: {deps:?}",
+        );
+        assert!(
+            deps.iter().any(|p| p.ends_with("today-example.yaml")),
+            "example edge missing: {deps:?}",
+        );
+        // The union is sorted and deduplicated.
+        let mut expected = deps.to_vec();
+        expected.sort();
+        expected.dedup();
+        assert_eq!(deps, expected.as_slice());
+    }
+
+    #[test]
+    fn dependencies_surface_referenced_schema_file() {
+        // A `$schema: ./schema.yaml` document depends on that file's content —
+        // editing the referenced schema's own type must invalidate a warm cache,
+        // so the resolved file surfaces on `EffectiveSchema::dependencies`.
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("schema.yaml"),
+            "$schema:\n  title: 'string(required)'\n",
+        )
+        .expect("write schema");
+        let md = prompt_with_source(dir.path(), "$schema: ./schema.yaml\ntitle: hi\n");
+        let effective = DarkmatterSchemas::new()
+            .effective_for(&md)
+            .unwrap()
+            .unwrap();
+        let deps = effective.dependencies();
+        assert!(
+            deps.iter().any(|p| p.ends_with("schema.yaml")),
+            "referenced schema file missing: {deps:?}",
+        );
+    }
+
+    #[test]
+    fn dependencies_empty_without_imports_or_examples() {
+        // The no-dependency fast path: a plain inline `$schema` records no edges.
+        let md = md_with_schema("$schema:\n  title: 'string(required)'\ntitle: hi\n");
+        let effective = DarkmatterSchemas::new()
+            .effective_for(&md)
+            .unwrap()
+            .unwrap();
+        assert!(effective.dependencies().is_empty());
     }
 }

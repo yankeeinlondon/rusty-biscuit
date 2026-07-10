@@ -112,6 +112,13 @@ md schema validate post.md --schema ./schemas/baseline.yaml
 md schema validate post.md          # falls back to $BASELINE_SCHEMA
 ```
 
+`md compose` has its own baseline default: it injects the Darkmatter base
+frontmatter schema unless you pass `--no-baseline-schema` or set
+`DARKMATTER_NO_BASELINE_SCHEMA=1`. Pass `--baseline-schema <path>` to replace
+that default with a custom SimplifiedSchema YAML baseline. `md schema validate`
+does not inject the Darkmatter base schema by default; it keeps the explicit
+`--schema` / `BASELINE_SCHEMA` behavior shown above.
+
 ```rust
 let api = DarkmatterSchemas::new()
     .with_baseline_from_file("./schemas/baseline.yaml")?;
@@ -176,12 +183,22 @@ This placement is deliberate:
 - It runs **after** `--set` / `--state` and interpolation, so a schema-required field can be satisfied by an override or a template. A document with `spec: ""` plus `--set spec=design.md` validates fine — validation sees the *effective* frontmatter.
 - It runs **before** shell expansion, preserving fail-fast: an invalid schema aborts the run before any side-effecting `$(...)` command executes.
 
-When a document declares no `$schema` and no baseline is configured, the stage is a complete no-op. Library callers can inject a workspace-wide baseline without a CLI flag:
+By default, `md compose` validates documents with no `$schema` against the
+Darkmatter base frontmatter schema. Use `--no-baseline-schema` or
+`DARKMATTER_NO_BASELINE_SCHEMA=1` for raw compose behavior; with no document
+`$schema` and no baseline, the stage is a complete no-op. Use
+`--baseline-schema <path>` to replace the default baseline for that invocation.
+Library callers can inject a workspace-wide baseline directly:
 
 ```rust
 let opts = ComposeOptions::default()
     .with_baseline_schema(my_baseline);   // SimplifiedSchema
 ```
+
+This means `md compose` and `md schema validate` can intentionally diverge when a
+document has no `$schema`: compose sees the default Darkmatter base schema, while
+schema validation is vacuously valid unless `--schema` or `BASELINE_SCHEMA` is
+provided.
 
 ### The shell-deferral contract
 

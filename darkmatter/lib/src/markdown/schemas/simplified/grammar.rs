@@ -8,27 +8,39 @@
 //! type_expr_string := type_expr ( "->" description )?
 //! type_expr        := simple_type
 //!                   | inline_object
+//!                   | import
 //! simple_type      := type_name ( "(" item_constraints ")" )?
 //!                                ( "[]" ( "(" arr_constraints ")" )? )?
 //! inline_object    := "{" ws* property_list? ws* "}"
 //!                     ( "(" item_constraints ")"
 //!                     | "[]" ( "(" arr_constraints ")" )?
 //!                     )?
+//! import           := identifier ( "[]" )? ( "(" item_constraints ")" )?
+//!                     "@" fileref                             (Feature B, O-B1)
 //! property_list    := property_def ( "," ws* property_def )* ","?
-//! property_def     := identifier ws* ":" ws* type_expr_string
+//! property_def     := ( identifier | pattern_key ) ws* ":" ws* type_expr_string
+//! pattern_key      := "<" pattern_body ">"                   (Feature C)
 //! ws               := <whitespace or line-break>
 //! identifier       := ( ASCII_ALNUM | "-" | "_" )+
 //! type_name        := "string" | "date" | "datetime" | "time" | "number"
 //!                   | "numberlike" | "boolean" | "boolish" | "object"
-//!                   | "file" | "enum" | "url" | "email" | "any"
+//!                   | "file" | "enum" | "url" | "email" | "yaml" | "json"
+//!                   | "any"
 //! item_constraints := constraint ( ";" constraint )*
 //! arr_constraints  := constraint ( ";" constraint )*
 //! constraint       := IDENT
 //!                   | IDENT "(" arglist ")"
 //! arglist          := arg ( "," arg )*
 //! arg              := NUMBER | BARE_WORD | SQUOTED | DQUOTED
+//! fileref          := <biscuit-file file reference> | "this"
 //! description      := <rest-of-top-level-field, trimmed>
 //! ```
+//!
+//! An `import` (`Name@fileref`) inlines a named type from another schema file
+//! and is represented as [`TypeExpr::Imported`] until the resolver expands it.
+//! A `pattern_key` (`<string>`, `<starting::P>`, `<ending::S>`, `<pattern::RE>`)
+//! keys a dictionary/pattern-keyed object; see [`PatternKey`]. Both are
+//! additive — a schema using neither parses exactly as before.
 //!
 //! Inside an `inline_object`, `description` consumes text only until the
 //! next top-level comma or closing brace (Decision #9). Inline object
@@ -41,7 +53,10 @@ use std::ops::Range;
 
 use crate::markdown::schemas::errors::SchemaError;
 
-use super::types::{Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedType, TypeExpr};
+use super::types::{
+    Constraint, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaShape, SimplifiedType,
+    TypeExpr,
+};
 
 /// Hard maximum number of nested inline object levels the parser will accept.
 /// Exceeding this depth is a grammar error (Decision #11).
@@ -519,29 +534,46 @@ impl<'a> Parser<'a> {
         // Consume opening `{`.
         self.expect_byte(b'{', "expected `{` to start an inline object")?;
         let mut properties = indexmap::IndexMap::new();
+        // Pattern (dictionary) keys are collected separately so literal keys
+        // retain precedence during conversion (Feature C).
+        let mut pattern_keys: Vec<PatternKeyDef> = Vec::new();
         self.lex.skip_ws();
         // Empty object `{}` is legal.
         if self.lex.peek_byte() == Some(b'}') {
             self.lex.pos += 1;
-            return Ok(SchemaShape { properties });
+            return Ok(SchemaShape {
+                properties,
+                pattern_keys,
+                ..Default::default()
+            });
         }
         loop {
             self.lex.skip_ws();
-            // Read property name (unquoted identifier per Decision #8).
-            let (name, name_span) = self.read_inline_object_ident()?;
-            if name.is_empty() {
-                return self.err("expected an inline object property name", name_span);
-            }
-            self.lex.skip_ws();
-            self.expect_byte(b':', "expected `:` after inline object property name")?;
-            self.lex.skip_ws();
-            // Read the property's type expression string (recursively).
-            let def = self.parse_inline_object_property_value(depth)?;
-            if properties.insert(name.clone(), def).is_some() {
-                return self.err(
-                    format!("duplicate property `{name}` in inline object"),
-                    name_span,
-                );
+            // A key is either a `<...>` pattern key or a literal identifier
+            // (unquoted, per Decision #8).
+            if self.lex.peek_byte() == Some(b'<') {
+                let (key, _key_span) = self.read_inline_pattern_key()?;
+                self.lex.skip_ws();
+                self.expect_byte(b':', "expected `:` after inline object pattern key")?;
+                self.lex.skip_ws();
+                let def = self.parse_inline_object_property_value(depth)?;
+                pattern_keys.push(PatternKeyDef { key, def });
+            } else {
+                let (name, name_span) = self.read_inline_object_ident()?;
+                if name.is_empty() {
+                    return self.err("expected an inline object property name", name_span);
+                }
+                self.lex.skip_ws();
+                self.expect_byte(b':', "expected `:` after inline object property name")?;
+                self.lex.skip_ws();
+                // Read the property's type expression string (recursively).
+                let def = self.parse_inline_object_property_value(depth)?;
+                if properties.insert(name.clone(), def).is_some() {
+                    return self.err(
+                        format!("duplicate property `{name}` in inline object"),
+                        name_span,
+                    );
+                }
             }
             self.lex.skip_ws();
             match self.lex.peek_byte() {
@@ -551,12 +583,20 @@ impl<'a> Parser<'a> {
                     // Trailing comma is legal: `{ foo: string, }`.
                     if self.lex.peek_byte() == Some(b'}') {
                         self.lex.pos += 1;
-                        return Ok(SchemaShape { properties });
+                        return Ok(SchemaShape {
+                            properties,
+                            pattern_keys,
+                            ..Default::default()
+                        });
                     }
                 }
                 Some(b'}') => {
                     self.lex.pos += 1;
-                    return Ok(SchemaShape { properties });
+                    return Ok(SchemaShape {
+                        properties,
+                        pattern_keys,
+                        ..Default::default()
+                    });
                 }
                 Some(other) => {
                     let span = self.lex.pos..self.lex.pos + 1;
@@ -595,6 +635,28 @@ impl<'a> Parser<'a> {
         }
         let name = self.src[start..self.lex.pos].to_string();
         Ok((name, start..self.lex.pos))
+    }
+
+    /// Reads a `<...>` pattern-key token starting at the current `<` and parses
+    /// it into a [`PatternKey`] (Feature C). The body runs to the first `>`.
+    fn read_inline_pattern_key(&mut self) -> Result<(PatternKey, Range<usize>), SchemaError> {
+        let start = self.lex.pos; // positioned at `<`
+        let mut pos = start + 1;
+        while pos < self.lex.bytes.len() && self.lex.bytes[pos] != b'>' {
+            pos += 1;
+        }
+        if pos >= self.lex.bytes.len() {
+            return self.err("unterminated pattern key (missing `>`)", start..pos);
+        }
+        pos += 1; // consume `>`
+        let raw = &self.src[start..pos];
+        let key = PatternKey::parse(raw).map_err(|message| SchemaError::Grammar {
+            property: self.property.to_string(),
+            message,
+            span: start..pos,
+        })?;
+        self.lex.pos = pos;
+        Ok((key, start..pos))
     }
 
     /// Parses a single property value inside an inline object: the
@@ -728,6 +790,15 @@ impl<'a> Parser<'a> {
                 );
             }
         };
+        // A cross-file named-type import (`Name@fileref`, Feature B) is
+        // detected here: after the base name the grammar is
+        // `('[]')? ('(' constraints ')')? '@' fileref` (O-B1). The base name
+        // is an arbitrary named type, not a built-in keyword, so import
+        // detection runs *before* the `SimplifiedType::from_keyword` check.
+        if self.looks_like_import_suffix() {
+            return self.parse_import(name);
+        }
+
         let ty = SimplifiedType::from_keyword(&name).ok_or_else(|| SchemaError::Grammar {
             property: self.property.to_string(),
             message: format!("unknown type `{name}`"),
@@ -780,6 +851,122 @@ impl<'a> Parser<'a> {
             array_constraints,
             description: None,
         })
+    }
+
+    /// Pure lookahead: returns `true` when the token stream immediately after
+    /// the base identifier matches the import postfix
+    /// `('[]')? ('(' … ')')?` followed by `@`. Does not consume input and does
+    /// not interpret constraint contents (so it never raises spurious errors on
+    /// non-import expressions like `enum(a, b, c)`).
+    fn looks_like_import_suffix(&self) -> bool {
+        let bytes = self.lex.bytes;
+        let mut pos = self.lex.pos;
+        let skip_ws = |pos: &mut usize| {
+            while *pos < bytes.len() && bytes[*pos].is_ascii_whitespace() {
+                *pos += 1;
+            }
+        };
+        skip_ws(&mut pos);
+        // optional `[]`
+        if bytes.get(pos) == Some(&b'[') {
+            if bytes.get(pos + 1) == Some(&b']') {
+                pos += 2;
+                skip_ws(&mut pos);
+            } else {
+                return false;
+            }
+        }
+        // optional balanced `(...)`, quote-aware
+        if bytes.get(pos) == Some(&b'(') {
+            pos += 1;
+            let mut depth = 1usize;
+            let mut quote: Option<u8> = None;
+            while pos < bytes.len() && depth > 0 {
+                let b = bytes[pos];
+                match quote {
+                    Some(q) => {
+                        if b == b'\\' {
+                            pos += 1;
+                        } else if b == q {
+                            quote = None;
+                        }
+                    }
+                    None => match b {
+                        b'\'' | b'"' => quote = Some(b),
+                        b'(' => depth += 1,
+                        b')' => depth -= 1,
+                        _ => {}
+                    },
+                }
+                pos += 1;
+            }
+            if depth != 0 {
+                return false;
+            }
+            skip_ws(&mut pos);
+        }
+        bytes.get(pos) == Some(&b'@')
+    }
+
+    /// Parses the import postfix after the base `name` has been read:
+    /// `('[]')? ('(' constraints ')')? '@' fileref` (O-B1). Postfix `[]` and
+    /// constraints ride on the enclosing [`PropertyAtom`]; the constraints are
+    /// re-interpreted against the resolved type in Phase 4, so they are parsed
+    /// here with a neutral type.
+    fn parse_import(&mut self, name: String) -> Result<PropertyAtom, SchemaError> {
+        let mut is_array = false;
+        self.lex.skip_ws();
+        if self.lex.peek_byte() == Some(b'[') {
+            self.lex.pos += 1;
+            self.expect(Tok::RBracket)?;
+            is_array = true;
+        }
+
+        let mut constraints = Vec::new();
+        self.lex.skip_ws();
+        if self.lex.peek_byte() == Some(b'(') {
+            self.lex.pos += 1;
+            constraints = self.parse_constraint_list(SimplifiedType::Any, false)?;
+            self.expect(Tok::RParen)?;
+        }
+
+        self.lex.skip_ws();
+        self.expect_byte(b'@', "expected `@` in an imported type reference")?;
+        let reference = self.read_fileref()?;
+
+        Ok(PropertyAtom {
+            ty: TypeExpr::Imported { name, reference },
+            is_array,
+            constraints,
+            array_constraints: Vec::new(),
+            description: None,
+        })
+    }
+
+    /// Reads the file reference to the right of `@`. Runs to the end of the
+    /// current sub-expression: stops at `->` (description arrow), a top-level
+    /// `,` or `}` (inline-object terminators), or end of input.
+    fn read_fileref(&mut self) -> Result<String, SchemaError> {
+        self.lex.skip_ws();
+        let start = self.lex.pos;
+        let bytes = self.lex.bytes;
+        let mut pos = start;
+        while pos < bytes.len() {
+            let b = bytes[pos];
+            if b == b',' || b == b'}' {
+                break;
+            }
+            if b == b'-' && bytes.get(pos + 1) == Some(&b'>') {
+                break;
+            }
+            pos += 1;
+        }
+        let raw = self.src[start..pos].trim();
+        if raw.is_empty() {
+            return self.err("expected a file reference after `@`", start..pos);
+        }
+        self.lex.pos = pos;
+        Ok(raw.to_string())
     }
 
     fn expect(&mut self, expected: Tok) -> Result<Token, SchemaError> {
@@ -1030,11 +1217,15 @@ impl<'a> Parser<'a> {
             ("not-empty", false) => Constraint::NotEmpty,
             ("integer", false) => Constraint::Integer,
             ("unique", false) => Constraint::Unique,
+            ("generated", false) => Constraint::Generated,
             ("required", true) => {
                 return self.err("`required` does not take arguments", kw_span);
             }
             ("eager", true) => {
                 return self.err("`eager` does not take arguments", kw_span);
+            }
+            ("generated", true) => {
+                return self.err("`generated` does not take arguments", kw_span);
             }
             ("default", true) => {
                 self.lex.pos += 1; // consume (
@@ -1132,6 +1323,59 @@ impl<'a> Parser<'a> {
                     .map(|a| a.lex.to_ascii_lowercase())
                     .collect();
                 Constraint::Scheme(schemes)
+            }
+            ("example", true) => {
+                self.lex.pos += 1;
+                let args = self.parse_arglist()?;
+                self.expect(Tok::RParen)?;
+                if args.is_empty() {
+                    return self.err("`example` requires at least one file reference", kw_span);
+                }
+                let refs = args.into_iter().map(|a| a.lex).collect();
+                Constraint::Example(refs)
+            }
+            ("min-keys", true) => {
+                self.lex.pos += 1;
+                let args = self.parse_arglist()?;
+                self.expect(Tok::RParen)?;
+                if args.len() != 1 {
+                    return self.err(
+                        format!("`min-keys` takes exactly 1 argument, got {}", args.len()),
+                        kw_span,
+                    );
+                }
+                let n = arg_to_number(&args[0]).ok_or_else(|| SchemaError::Grammar {
+                    property: self.property.to_string(),
+                    message: format!(
+                        "`min-keys` requires a numeric argument, got `{}`",
+                        args[0].lex
+                    ),
+                    span: args[0].span.clone(),
+                })?;
+                Constraint::MinKeys(number_to_usize(n, "min-keys", &args[0], self.property)?)
+            }
+            ("max-keys", true) => {
+                self.lex.pos += 1;
+                let args = self.parse_arglist()?;
+                self.expect(Tok::RParen)?;
+                if args.len() != 1 {
+                    return self.err(
+                        format!("`max-keys` takes exactly 1 argument, got {}", args.len()),
+                        kw_span,
+                    );
+                }
+                let n = arg_to_number(&args[0]).ok_or_else(|| SchemaError::Grammar {
+                    property: self.property.to_string(),
+                    message: format!(
+                        "`max-keys` requires a numeric argument, got `{}`",
+                        args[0].lex
+                    ),
+                    span: args[0].span.clone(),
+                })?;
+                Constraint::MaxKeys(number_to_usize(n, "max-keys", &args[0], self.property)?)
+            }
+            ("min-keys" | "max-keys" | "example", false) => {
+                return self.err(format!("`{keyword}` requires arguments"), kw_span);
             }
             (other, has_args_) => {
                 let suffix = if has_args_ { "(...)" } else { "" };
@@ -1309,6 +1553,8 @@ mod tests {
             SimplifiedType::File,
             SimplifiedType::Url,
             SimplifiedType::Email,
+            SimplifiedType::Yaml,
+            SimplifiedType::Json,
             SimplifiedType::Any,
         ] {
             let atom = parse(ty.as_keyword());
@@ -1329,6 +1575,38 @@ mod tests {
     fn parses_required_constraint() {
         let atom = parse("string(required)");
         assert_eq!(atom.constraints, vec![Constraint::Required]);
+    }
+
+    #[test]
+    fn parses_generated_constraint() {
+        let atom = parse("string(generated)");
+        assert_eq!(atom.constraints, vec![Constraint::Generated]);
+    }
+
+    #[test]
+    fn parses_generated_with_required() {
+        // `generated` and `required` are orthogonal: `generated` describes
+        // ownership/supply semantics; `required` controls type/nullability.
+        // Both constraints must survive parsing in either order.
+        let atom = parse("string(generated; required)");
+        assert_eq!(
+            atom.constraints,
+            vec![Constraint::Generated, Constraint::Required]
+        );
+        let atom_rev = parse("string(required; generated)");
+        assert_eq!(
+            atom_rev.constraints,
+            vec![Constraint::Required, Constraint::Generated]
+        );
+    }
+
+    #[test]
+    fn generated_takes_no_args() {
+        let err = parse_err("string(generated())");
+        let SchemaError::Grammar { message, .. } = err else {
+            panic!("expected Grammar error, got {err:?}")
+        };
+        assert!(message.contains("does not take arguments"));
     }
 
     #[test]
@@ -1899,5 +2177,139 @@ mod tests {
         let atom = parse(value);
         let shape = inline_shape(&atom);
         assert_eq!(shape.properties.len(), 2);
+    }
+}
+
+/// Phase 1 (TDD scaffolding) for the schema-plus composition primitives
+/// (`darkmatter/features/2026-07-08-schema-plus/`).
+///
+/// Each test pins the target parse behavior for a not-yet-implemented feature
+/// and is `#[ignore]`-gated so `just test` stays green until the feature lands.
+/// The `#[ignore]` reason names the phase that will implement it; remove the
+/// attribute in that phase. Confirm they fail for the expected missing feature
+/// with:
+///
+/// ```text
+/// cargo nextest run -p darkmatter --run-ignored ignored-only schema_plus
+/// ```
+#[cfg(test)]
+mod schema_plus_phase1 {
+    use super::*;
+
+    // ── Feature A — `example()` constraint ───────────────────────────────
+
+    #[test]
+    fn parses_example_constraint_single_file() {
+        let atom = parse_type_expr(
+            "today",
+            "date(generated; required; example(./today-example.yaml))",
+        )
+        .expect("`example(...)` should parse as a constraint");
+        assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::Date));
+        assert!(
+            atom.constraints
+                .contains(&Constraint::Example(vec!["./today-example.yaml".into()])),
+            "expected an Example constraint: {:?}",
+            atom.constraints
+        );
+    }
+
+    #[test]
+    fn parses_example_constraint_multiple_files() {
+        let atom = parse_type_expr("x", "string(example(./a.yaml, ./b.yaml))")
+            .expect("`example(...)` should accept comma-separated file references");
+        assert!(
+            atom.constraints.contains(&Constraint::Example(vec![
+                "./a.yaml".into(),
+                "./b.yaml".into()
+            ])),
+            "expected a two-file Example constraint: {:?}",
+            atom.constraints
+        );
+    }
+
+    // ── Feature B — `@` cross-file named-type import ─────────────────────
+
+    #[test]
+    fn parses_named_type_import() {
+        let atom = parse_type_expr("type", "type@./types.yaml")
+            .expect("`type@./types.yaml` should parse as an imported type");
+        assert_eq!(
+            atom.ty,
+            TypeExpr::Imported {
+                name: "type".into(),
+                reference: "./types.yaml".into(),
+            }
+        );
+        assert!(!atom.is_array);
+    }
+
+    #[test]
+    fn parses_array_named_type_import() {
+        let atom = parse_type_expr("parameters", "parameter[]@./types.yaml")
+            .expect("`parameter[]@./types.yaml` should parse");
+        assert!(atom.is_array, "postfix `[]` binds to the imported name");
+        assert_eq!(
+            atom.ty,
+            TypeExpr::Imported {
+                name: "parameter".into(),
+                reference: "./types.yaml".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_constrained_self_import() {
+        let atom = parse_type_expr("value", "type(required)@this")
+            .expect("`type(required)@this` should parse");
+        assert_eq!(
+            atom.ty,
+            TypeExpr::Imported {
+                name: "type".into(),
+                reference: "this".into(),
+            }
+        );
+        assert_eq!(atom.constraints, vec![Constraint::Required]);
+    }
+
+    // ── Feature C — inline-object pattern/dictionary keys ────────────────
+
+    #[test]
+    fn parses_inline_catch_all_key() {
+        let atom = parse_type_expr("parameter", "{ <string>: any }")
+            .expect("`<string>` catch-all key should parse in an inline object");
+        let TypeExpr::InlineObject(shape) = &atom.ty else {
+            panic!("expected inline object, got {:?}", atom.ty);
+        };
+        assert!(shape.properties.is_empty(), "catch-all is not a literal key");
+        assert_eq!(shape.pattern_keys.len(), 1);
+        assert_eq!(shape.pattern_keys[0].key, PatternKey::CatchAll);
+    }
+
+    #[test]
+    fn parses_inline_regex_pattern_key() {
+        let atom = parse_type_expr("dict", "{ <pattern::[0-9]$>: number }")
+            .expect("`<pattern::[0-9]$>` pattern key should parse in an inline object");
+        let TypeExpr::InlineObject(shape) = &atom.ty else {
+            panic!("expected inline object, got {:?}", atom.ty);
+        };
+        assert_eq!(
+            shape.pattern_keys[0].key,
+            PatternKey::Pattern("[0-9]$".into())
+        );
+    }
+
+    // ── Feature D — content-format string types ──────────────────────────
+
+    #[test]
+    fn parses_yaml_type_keyword() {
+        let atom = parse_type_expr("frontmatter", "yaml").expect("`yaml` should parse as a type");
+        assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::Yaml));
+    }
+
+    #[test]
+    fn parses_json_type_keyword() {
+        let atom = parse_type_expr("config", "json").expect("`json` should parse as a type");
+        assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::Json));
     }
 }

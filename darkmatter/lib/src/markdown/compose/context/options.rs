@@ -936,6 +936,26 @@ impl ComposeOptions {
         self
     }
 
+    /// Attaches the Darkmatter baseline frontmatter schema as the baseline.
+    ///
+    /// This is a convenience wrapper around
+    /// [`with_baseline_schema`](Self::with_baseline_schema) that loads the
+    /// authored schema from `darkmatter/docs/schemas/darkmatter.yaml`. When both
+    /// the baseline and the document `$schema` declare the same property, the
+    /// document side wins.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::compose::ComposeOptions;
+    ///
+    /// let options = ComposeOptions::new().with_darkmatter_baseline_schema();
+    /// ```
+    #[must_use]
+    pub fn with_darkmatter_baseline_schema(self) -> Self {
+        self.with_baseline_schema(crate::markdown::schemas::darkmatter_base_schema())
+    }
+
     /// Internal builder: toggles parent-wins behavior for the `replace` map.
     #[must_use]
     pub(crate) fn with_replace_parent_wins(mut self, enabled: bool) -> Self {
@@ -1335,5 +1355,51 @@ mod tests {
     #[allow(dead_code)]
     fn file_ref_fallback_dir_accepts_pathbuf() {
         let _: PathBuf = PathBuf::from("/tmp/x");
+    }
+
+    /// `with_darkmatter_baseline_schema()` injects the authored baseline schema
+    /// into the compose options (Phase 4).
+    #[test]
+    fn with_darkmatter_baseline_schema_injects_baseline() {
+        let options = ComposeOptions::new().with_darkmatter_baseline_schema();
+        assert!(
+            options.baseline_schema.is_some(),
+            "baseline schema must be injected"
+        );
+    }
+
+    /// The baseline-injected options still allow unknown user frontmatter keys
+    /// (Non-Goal 1; spec testing requirement 5) and preserve document `$schema`
+    /// precedence (Non-Goal 5; spec testing requirement 6).
+    #[test]
+    fn darkmatter_baseline_compose_allows_unknown_keys_and_preserves_document_schema() {
+        use crate::markdown::schemas::DarkmatterSchemas;
+        use crate::markdown::Markdown;
+
+        let options = ComposeOptions::new().with_darkmatter_baseline_schema();
+        let baseline = options
+            .baseline_schema
+            .expect("baseline schema must be set");
+        let api = DarkmatterSchemas::new()
+            .with_baseline(baseline)
+            .expect("baseline must convert");
+
+        // Unknown keys are allowed by the baseline.
+        let md_unknown: Markdown = "---\ncustom_key: 42\n---\nbody\n".into();
+        let report = api.validate(&md_unknown).expect("validate");
+        assert!(
+            report.valid,
+            "unknown user keys must remain accepted: {:?}",
+            report.problems
+        );
+
+        // Document `$schema` wins over baseline.
+        let md_override: Markdown = "---\n$schema:\n  title: number\ntitle: 42\n---\nbody\n".into();
+        let report = api.validate(&md_override).expect("validate");
+        assert!(
+            report.valid,
+            "document schema should override baseline title type: {:?}",
+            report.problems
+        );
     }
 }

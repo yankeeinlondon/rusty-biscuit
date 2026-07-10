@@ -3,6 +3,7 @@
 use biscuit_file::YamlParseError;
 use biscuit_terminal::errors::SourceContext;
 
+use super::span::SourceSpan;
 use super::types::{FrontmatterMap, MarkdownError, MarkdownResult};
 use biscuit_file::serde_yaml_ng;
 use serde::Serialize;
@@ -311,6 +312,128 @@ pub(super) fn parse_frontmatter(
         Frontmatter::from_map_with_source(frontmatter_map, yaml_content),
         remaining_content,
     ))
+}
+
+/// Byte-accurate location of a document's frontmatter block.
+///
+/// Produced by [`extract_frontmatter_block`]. All spans index into the exact
+/// source text passed in — original line endings (including CRLF) are
+/// preserved, unlike [`Frontmatter::raw_source`], whose lines are re-joined
+/// with `\n`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontmatterExtraction<'a> {
+    /// Raw YAML text between the delimiters: every complete source line after
+    /// the opening `---` up to (not including) the closing `---` line,
+    /// terminators intact. Empty for empty frontmatter.
+    pub yaml: &'a str,
+    /// Byte span of [`Self::yaml`] within the source.
+    pub yaml_span: SourceSpan,
+    /// Byte span of the whole frontmatter block, from the start of the
+    /// opening `---` line through the closing `---` line's terminator (or end
+    /// of input when the closing delimiter is the final line).
+    pub block_span: SourceSpan,
+    /// Byte span of the document body following the block: everything from
+    /// `block_span.end` to the end of the source. Empty for body-less
+    /// documents.
+    pub body_span: SourceSpan,
+    /// 1-indexed source line of the opening `---` delimiter (always `1`).
+    pub opening_line: usize,
+    /// 1-indexed source line of the closing `---` delimiter.
+    pub closing_line: usize,
+    /// 1-indexed source line of the first YAML line (`2` for ordinary
+    /// frontmatter, since line 1 is the opening delimiter). This is the base
+    /// line for projecting YAML-relative positions back into the document.
+    pub yaml_base_line: usize,
+}
+
+/// Locates a document's frontmatter block without parsing the YAML.
+///
+/// This is the span-aware companion to the internal `parse_frontmatter`: it
+/// applies the same delimiter rules (frontmatter must start at line 1 with a
+/// trimmed `---`; the closing delimiter is the next trimmed `---`; a missing
+/// closing delimiter means the document has no frontmatter) but reports byte
+/// spans against the original source instead of parsed values.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::extract_frontmatter_block;
+///
+/// let source = "---\ntitle: Hello\n---\n\n# Body\n";
+/// let extraction = extract_frontmatter_block(source).unwrap().unwrap();
+/// assert_eq!(extraction.yaml, "title: Hello\n");
+/// assert_eq!(extraction.yaml_base_line, 2);
+/// assert_eq!(&source[extraction.body_span.clone()], "\n# Body\n");
+/// ```
+///
+/// ## Returns
+///
+/// `Ok(None)` when the document has no frontmatter block (it does not start
+/// with `---`, or the closing delimiter is missing).
+///
+/// ## Errors
+///
+/// Returns [`MarkdownError::FrontmatterFenceMismatch`] for the same
+/// near-miss fences `parse_frontmatter` rejects (a leading dash-only run of
+/// length >= 4 enclosing a non-empty YAML mapping).
+pub fn extract_frontmatter_block(
+    source: &str,
+) -> MarkdownResult<Option<FrontmatterExtraction<'_>>> {
+    // (start, end) byte spans per line, `end` including the `\n` terminator.
+    let mut line_spans: Vec<(usize, usize)> = Vec::new();
+    let mut pos = 0;
+    for segment in source.split_inclusive('\n') {
+        line_spans.push((pos, pos + segment.len()));
+        pos += segment.len();
+    }
+
+    // Line content with terminator stripped, mirroring `str::lines`.
+    let line_content = |idx: usize| -> &str {
+        let (start, end) = line_spans[idx];
+        let raw = &source[start..end];
+        match raw.strip_suffix('\n') {
+            Some(without_newline) => without_newline
+                .strip_suffix('\r')
+                .unwrap_or(without_newline),
+            None => raw,
+        }
+    };
+
+    if line_spans.is_empty() || line_content(0).trim() != "---" {
+        let lines: Vec<&str> = source.lines().collect();
+        if let Some(fence) = detect_near_miss_frontmatter_fence(&lines) {
+            let ctx = SourceContext::new(
+                std::path::PathBuf::from("unknown"),
+                std::path::PathBuf::from("unknown"),
+                source,
+            );
+            return Err(MarkdownError::FrontmatterFenceMismatch {
+                ctx,
+                found: fence,
+                line: 1,
+            });
+        }
+        return Ok(None);
+    }
+
+    let Some(closing_idx) = (1..line_spans.len()).find(|&idx| line_content(idx).trim() == "---")
+    else {
+        return Ok(None);
+    };
+
+    let yaml_span = line_spans[1].0..line_spans[closing_idx].0;
+    let block_span = 0..line_spans[closing_idx].1;
+    let body_span = block_span.end..source.len();
+
+    Ok(Some(FrontmatterExtraction {
+        yaml: &source[yaml_span.clone()],
+        yaml_span,
+        block_span,
+        body_span,
+        opening_line: 1,
+        closing_line: closing_idx + 1,
+        yaml_base_line: 2,
+    }))
 }
 
 // UTF-8-boundary audit (2026-04-24): the byte-indexed scanners in this file
@@ -670,6 +793,110 @@ mod tests {
         let author: Option<String> = fm.get("author").unwrap();
         assert_eq!(title, Some("My Document".to_string()));
         assert_eq!(author, Some("Anonymous".to_string()));
+    }
+
+    #[test]
+    fn test_extract_block_no_frontmatter() {
+        assert_eq!(extract_frontmatter_block("# Hi\n\nBody.\n").unwrap(), None);
+        assert_eq!(extract_frontmatter_block("").unwrap(), None);
+    }
+
+    #[test]
+    fn test_extract_block_ordinary() {
+        let source = "---\ntitle: X\n---\n\n# Hi\n";
+        let extraction = extract_frontmatter_block(source).unwrap().unwrap();
+
+        assert_eq!(extraction.yaml, "title: X\n");
+        assert_eq!(extraction.yaml_span, 4..13);
+        assert_eq!(&source[extraction.yaml_span.clone()], extraction.yaml);
+        assert_eq!(extraction.block_span, 0..17);
+        assert_eq!(extraction.body_span, 17..source.len());
+        assert_eq!(&source[extraction.body_span.clone()], "\n# Hi\n");
+        assert_eq!(extraction.opening_line, 1);
+        assert_eq!(extraction.closing_line, 3);
+        assert_eq!(extraction.yaml_base_line, 2);
+    }
+
+    #[test]
+    fn test_extract_block_empty_frontmatter() {
+        let source = "---\n---\nbody\n";
+        let extraction = extract_frontmatter_block(source).unwrap().unwrap();
+
+        assert_eq!(extraction.yaml, "");
+        assert_eq!(extraction.yaml_span, 4..4);
+        assert_eq!(extraction.block_span, 0..8);
+        assert_eq!(&source[extraction.body_span.clone()], "body\n");
+        assert_eq!(extraction.closing_line, 2);
+        assert_eq!(extraction.yaml_base_line, 2);
+    }
+
+    #[test]
+    fn test_extract_block_crlf_delimiters() {
+        let source = "---\r\ntitle: X\r\n---\r\nbody";
+        let extraction = extract_frontmatter_block(source).unwrap().unwrap();
+
+        assert_eq!(extraction.yaml, "title: X\r\n");
+        assert_eq!(extraction.yaml_span, 5..15);
+        assert_eq!(extraction.block_span, 0..20);
+        assert_eq!(&source[extraction.body_span.clone()], "body");
+        assert_eq!(extraction.opening_line, 1);
+        assert_eq!(extraction.closing_line, 3);
+    }
+
+    #[test]
+    fn test_extract_block_near_miss_fence() {
+        let source = "----\na: 1\n----\nbody";
+        let err = extract_frontmatter_block(source).unwrap_err();
+        match err {
+            MarkdownError::FrontmatterFenceMismatch { found, line, .. } => {
+                assert_eq!(found, "----");
+                assert_eq!(line, 1);
+            }
+            other => panic!("expected FrontmatterFenceMismatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_extract_block_missing_closing_delimiter() {
+        assert_eq!(
+            extract_frontmatter_block("---\ntitle: X\n").unwrap(),
+            None
+        );
+        assert_eq!(extract_frontmatter_block("---").unwrap(), None);
+    }
+
+    #[test]
+    fn test_extract_block_bodyless_document() {
+        let source = "---\na: 1\n---";
+        let extraction = extract_frontmatter_block(source).unwrap().unwrap();
+
+        assert_eq!(extraction.yaml, "a: 1\n");
+        assert_eq!(extraction.yaml_span, 4..9);
+        assert_eq!(extraction.block_span, 0..source.len());
+        assert_eq!(extraction.body_span, source.len()..source.len());
+        assert_eq!(extraction.closing_line, 3);
+    }
+
+    #[test]
+    fn test_extract_block_agrees_with_parse_frontmatter_presence() {
+        // Both APIs must classify frontmatter presence identically.
+        let with_frontmatter = "---\ntitle: X\n---\nbody\n";
+        let without = ["# Hi\n", "---\nunclosed\n", "text\n---\nx\n---\n"];
+
+        assert!(
+            extract_frontmatter_block(with_frontmatter)
+                .unwrap()
+                .is_some()
+        );
+        let (fm, _) = parse_frontmatter(with_frontmatter).unwrap();
+        assert!(!fm.is_empty());
+
+        for source in without {
+            assert_eq!(extract_frontmatter_block(source).unwrap(), None);
+            let (fm, remaining) = parse_frontmatter(source).unwrap();
+            assert!(fm.is_empty());
+            assert_eq!(remaining, source.to_string());
+        }
     }
 
     #[test]

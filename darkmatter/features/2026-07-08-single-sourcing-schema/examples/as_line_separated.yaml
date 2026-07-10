@@ -1,0 +1,15 @@
+kind: example
+parameters:
+    - list:
+        - a
+        - b
+        - c
+invocation: "as_line_separated(list)"
+returns: |-
+    a
+    b
+    c
+description: |-
+    `as_line_separated(list)` joins a list into a newline-separated string. This is
+    the explicit form of the default bare-array interpolation rendering, so
+    `{{ ctx.some_list }}` and `{{ as_line_separated(ctx.some_list) }}` are equivalent.

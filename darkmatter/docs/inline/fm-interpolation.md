@@ -168,7 +168,10 @@ The `ctx.*` namespace provides 70+ runtime variables organized into demand-drive
 | Hardware | `memory_total`, `memory_used`, `memory_avail`, `cpu_cores`, `cpu_arch` |
 | Gpu | `gpu` |
 
-Each group also provides `_list` variants (markdown bullet list) alongside CSV variants where applicable (e.g., `dirty_files` vs `dirty_files_list`). DateTime variables have `_utc` counterparts.
+List-valued variables (e.g. `packages`, `dirty_files`) are captured as real
+arrays; render them with the list-formatting functions (`as_csv`,
+`as_unordered_list`, `as_ordered_list`, …) or rely on the default line-separated
+rendering of a bare `{{ ctx.foo }}`. DateTime variables have `_utc` counterparts.
 
 ## Supported Value Shapes
 

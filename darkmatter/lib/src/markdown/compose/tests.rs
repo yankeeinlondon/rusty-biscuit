@@ -3445,7 +3445,10 @@ mod schema_validation_integration {
                     description: None,
                 }),
             );
-            SimplifiedSchema::Single(SchemaShape { properties })
+            SimplifiedSchema::Single(SchemaShape {
+                properties,
+                ..Default::default()
+            })
         }
 
         let dir = tempfile::tempdir().unwrap();

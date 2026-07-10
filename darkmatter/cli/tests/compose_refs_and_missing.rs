@@ -6,7 +6,7 @@ use predicates::prelude::*;
 #[test]
 fn test_compose_scalar_ctx_without_allow_override_fails() {
     md_cmd()
-        .args(["compose", "-"])
+        .args(["compose", "-", "--no-baseline-schema"])
         .write_stdin("---\nctx: hello\n---\n# Test {{ ctx.today }}")
         .assert()
         .failure()
@@ -18,7 +18,7 @@ fn test_compose_scalar_ctx_without_allow_override_fails() {
 fn test_compose_scalar_ctx_with_allow_override_succeeds() {
     // --allow-ctx-override downgrades the error to a warning
     md_cmd()
-        .args(["compose", "-", "--allow-ctx-override"])
+        .args(["compose", "-", "--allow-ctx-override", "--no-baseline-schema"])
         .write_stdin("---\nctx: hello\n---\n# Test")
         .assert()
         .success()
@@ -30,7 +30,7 @@ fn test_compose_object_ctx_collision_emits_warning() {
     // A document with an object ctx that collides with runtime keys should
     // succeed but emit a collision warning on stderr.
     md_cmd()
-        .args(["compose", "-"])
+        .args(["compose", "-", "--no-baseline-schema"])
         .write_stdin("---\nctx:\n  today: custom-value\n---\n# Test")
         .assert()
         .success()
@@ -86,4 +86,3 @@ fn test_block_rendering_transclusion_cycle_non_tty() {
         "stderr should contain hint from rendered block in non-TTY mode\nstderr:\n{stderr}"
     );
 }
-

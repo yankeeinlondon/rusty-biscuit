@@ -48,6 +48,28 @@
 - `darkmatter/lib` enables `biscuit-file/fetch` and uses `reqwest`, `tokio`,
   and `url` for remote URL composition, persistent remote cache revalidation,
   and side-effect `http_post` host-policy enforcement.
+- `darkmatter/lib` takes a direct `fancy-regex` dependency (already in the tree
+  transitively via `jsonschema`) so SimplifiedSchema pattern-key literal
+  precedence (Feature C) can emit negative-lookahead `patternProperties`: such
+  schemas opt into `jsonschema`'s backtracking `fancy-regex` engine, while every
+  lookaround-free schema stays on the linear (ReDoS-safe) `regex` engine.
+- `darkmatter/dmls` (`dmls`) is the Darkmatter Language Server. Protocol
+  stack: `lsp-server` (stdio framing, in-memory test connections) +
+  `lsp-types` (LSP 3.17 types) + `crossbeam-channel` (the channel family
+  `lsp-server` exposes; worker pool later). `line-index` (rust-analyzer's
+  crate) backs the source-map module and never leaks past it; `rlsp-yaml-parser`
+  (lossless byte-span YAML) backs the Phase-7 `FrontmatterAst` overlay and
+  likewise never leaks past it; `url` supplies
+  file-URI ↔ path conversion (`lsp-types` 0.97's `Uri` has none); `toml`
+  parses `.dmls.toml`; `tracing`/`tracing-subscriber` log to stderr or
+  `--log-file` only (stdout is reserved for LSP framing). Workspace discovery
+  (Phase 3) uses `ignore` (gitignore-aware walk, symlinks not followed) +
+  `globset` (include/exclude globs). Wiki-link resolution (Phase 5 / R-8) uses
+  `unicode-normalization` for NFC so a vault resolves identically across OSes.
+  Semantic authorities: `darkmatter` (lib),
+  `biscuit-file` (`file-reference` feature, default features off), and
+  `biscuit-hash` (xxHash content-hash identity for graph invalidation). See
+  [`darkmatter/docs/dependencies.md`](./darkmatter/docs/dependencies.md).
 
 ## Structure
 
@@ -69,6 +91,7 @@ This is a Rust workspace with the following modules:
 - `claudine/cli/Cargo.toml` - Hook manager CLI (`claudine`)
 - `darkmatter/lib/Cargo.toml` - Markdown parsing, rendering, syntax highlighting
 - `darkmatter/cli/Cargo.toml` - Markdown renderer CLI (`md`)
+- `darkmatter/dmls/Cargo.toml` - Darkmatter Language Server (`dmls`) (lsp-server, lsp-types, line-index, rlsp-yaml-parser, ignore, globset, unicode-normalization, biscuit-hash)
 - `homelab/lib/Cargo.toml` - Homelab device control library
 - `homelab/cli/Cargo.toml` - Homelab CLI (`homey`)
 - `model-citizen/lib/Cargo.toml` - Local LLM model management library
@@ -199,6 +222,12 @@ This is a Rust workspace with the following modules:
     _Themed markdown renderer for terminal and HTML output._
 
     _Tags: workspace, cli, markdown_
+
+- [dmls](./darkmatter/dmls) _v0.1.0_
+
+    _Darkmatter Language Server: LSP 3.17 over stdio for Markdown, Darkmatter DSL, and SimplifiedSchema frontmatter._
+
+    _Tags: workspace, cli, lsp, markdown_
 
 - [homelab](./homelab) _v0.1.0_
 
@@ -896,6 +925,10 @@ This is a Rust workspace with the following modules:
     _Word wrapping and indenting text with optimal-fit algorithm. Supports Unicode, emojis, and hyphenation._
 
     _Tags: text, wrapping, formatting_
+
+- [unicode-normalization](https://crates.io/crates/unicode-normalization) _v0.1_
+
+    _Unicode normalization forms (NFC/NFD/NFKC/NFKD). DMLS normalizes wiki-link targets and logical paths to NFC for cross-platform-identical resolution._
 
 - [unicode-width](https://crates.io/crates/unicode-width) _v0.2_
 

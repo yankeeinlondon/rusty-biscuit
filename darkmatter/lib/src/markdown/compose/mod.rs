@@ -86,6 +86,7 @@ mod util;
 mod type_tests;
 
 pub mod block_pairs;
+pub mod directives_api;
 pub mod expression;
 pub mod file_links;
 pub(crate) mod inline;
@@ -112,6 +113,10 @@ pub use remote::{
     resolve_remote_concurrency,
 };
 pub use remote_fetch::RemoteFetchStats;
+pub use frontmatter_shell_expansion::{
+    FrontmatterShellAction, FrontmatterShellBody, FrontmatterShellPipeline, FrontmatterShellSuffix,
+    FrontmatterShellTernary, FrontmatterShellValue, parse_frontmatter_shell_value_spanned,
+};
 pub use preflight::{ComposePreflightApprovals, ComposePreflightReport, PreflightApprovalStats, collect_shell_commands};
 pub use shell_blocks::ShellBlockError;
 pub use shell_expansion::ShellCommandOrigin;

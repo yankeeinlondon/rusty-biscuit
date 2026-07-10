@@ -30,7 +30,10 @@ use jsonschema::{Draft, PatternOptions, Validator, error::ValidationErrorKind};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use super::{ValidationProblem, ValidationProblemKind, errors::SchemaError, format};
+use super::{
+    FileReferenceDiagnostic, JsonPointer, ValidationProblem, ValidationProblemCode,
+    ValidationProblemKind, errors::SchemaError, format,
+};
 
 /// Map of top-level frontmatter key → 1-based `(line, column)` within the
 /// serialised frontmatter YAML, used to annotate [`ValidationProblem`] sites
@@ -226,14 +229,44 @@ impl ValidatorCache {
 /// validation agree with expression-side `file_exists`/`frontmatter`
 /// resolution: a `file` value beside the prompt resolves even after the
 /// wrapper has `chdir`'d away from the launch area.
+/// Reports whether any `patternProperties` key in the compiled JSON Schema
+/// carries a regex lookaround (Feature C literal precedence). Such schemas need
+/// the backtracking `fancy-regex` engine; everything else stays on the linear
+/// `regex` engine.
+fn schema_uses_lookaround(schema: &Value) -> bool {
+    match schema {
+        Value::Object(map) => {
+            if let Some(Value::Object(pattern_props)) = map.get("patternProperties")
+                && pattern_props
+                    .keys()
+                    .any(|key| super::simplified::convert::has_lookaround(key))
+            {
+                return true;
+            }
+            map.values().any(schema_uses_lookaround)
+        }
+        Value::Array(items) => items.iter().any(schema_uses_lookaround),
+        _ => false,
+    }
+}
+
 pub(super) fn build_validator(
     schema: &Value,
     base_dir: Option<&Path>,
     file_ref_fallback_dir: Option<&Path>,
 ) -> Result<Validator, SchemaError> {
-    let opts = jsonschema::options()
-        .with_draft(Draft::Draft202012)
-        .with_pattern_options(PatternOptions::regex());
+    // Feature C literal-precedence emits negative-lookahead `patternProperties`
+    // keys, which the linear `regex` engine rejects. Opt such schemas into the
+    // backtracking `fancy-regex` engine while keeping every lookaround-free
+    // schema on the ReDoS-safe linear engine (byte-identical to prior behavior).
+    // The two `PatternOptions` values are distinct types, so the branch is on
+    // the builder call, not a shared binding.
+    let base = jsonschema::options().with_draft(Draft::Draft202012);
+    let opts = if schema_uses_lookaround(schema) {
+        base.with_pattern_options(PatternOptions::fancy_regex())
+    } else {
+        base.with_pattern_options(PatternOptions::regex())
+    };
     let opts = format::register_darkmatter_formats(
         opts,
         base_dir.map(PathBuf::from),
@@ -409,12 +442,22 @@ fn build_problem(
         _ => None,
     };
     let kind = classify_kind(err.kind());
+    let code = classify_code(err.kind());
+    let offending_property = offending_property_of(err.kind());
     let (line, column) = key
         .as_deref()
         .and_then(|k| positions.get(k).copied())
         .map(|(l, c)| (Some(l), Some(c)))
         .unwrap_or((None, None));
-    let message = darkmatter_file_format_message(err, anchors).unwrap_or_else(|| err.to_string());
+    let (message, file_reference) = match darkmatter_file_reference_outcome(err, anchors) {
+        Some((message, diagnostic)) => (message, Some(diagnostic)),
+        None => (err.to_string(), None),
+    };
+    let instance_path = JsonPointer::parse(&path);
+    let schema_path = {
+        let raw = err.schema_path().as_str();
+        (!raw.is_empty()).then(|| JsonPointer::parse(raw))
+    };
     ValidationProblem {
         path,
         message,
@@ -424,6 +467,43 @@ fn build_problem(
         column,
         arm_index,
         description: None,
+        code,
+        instance_path,
+        schema_path,
+        offending_property,
+        file_reference,
+    }
+}
+
+/// Maps a `jsonschema::ValidationErrorKind` onto the fine-grained
+/// [`ValidationProblemCode`] (R-5 Priority 1). Unlike [`classify_kind`], this
+/// separates unknown keys and file-reference failures from the generic
+/// constraint bucket.
+fn classify_code(kind: &ValidationErrorKind) -> ValidationProblemCode {
+    match kind {
+        ValidationErrorKind::Required { .. } => ValidationProblemCode::MissingRequired,
+        ValidationErrorKind::Type { .. } => ValidationProblemCode::TypeMismatch,
+        ValidationErrorKind::AdditionalProperties { .. }
+        | ValidationErrorKind::UnevaluatedProperties { .. } => ValidationProblemCode::UnknownKey,
+        ValidationErrorKind::Format { format } if is_darkmatter_file_format_name(format) => {
+            ValidationProblemCode::InvalidFileReference
+        }
+        _ => ValidationProblemCode::ConstraintViolation,
+    }
+}
+
+fn is_darkmatter_file_format_name(format: &str) -> bool {
+    format == format::DARKMATTER_FILE_FORMAT || format == format::DARKMATTER_FILE_REFERENCE_FORMAT
+}
+
+/// The specific undeclared key for an `additionalProperties` /
+/// `unevaluatedProperties` failure, whose instance path points at the *parent*
+/// object. `None` for every other error kind.
+fn offending_property_of(kind: &ValidationErrorKind) -> Option<String> {
+    match kind {
+        ValidationErrorKind::AdditionalProperties { unexpected }
+        | ValidationErrorKind::UnevaluatedProperties { unexpected } => unexpected.first().cloned(),
+        _ => None,
     }
 }
 
@@ -441,10 +521,13 @@ pub(super) struct FileRefAnchors<'a> {
     pub fallback: Option<&'a Path>,
 }
 
-/// Returns a substituted message for `format: darkmatter-file` (eager) and
-/// `format: darkmatter-file-reference` (lazy) failures so users see a targeted
-/// diagnostic instead of the generic `"<value>" is not a "<format>"` text
-/// produced by `jsonschema`.
+/// Returns the substituted message *and* the structured
+/// [`FileReferenceDiagnostic`] classification for `format: darkmatter-file`
+/// (eager) and `format: darkmatter-file-reference` (lazy) failures, so users
+/// see a targeted diagnostic instead of the generic `"<value>" is not a
+/// "<format>"` text produced by `jsonschema`. The message is preserved
+/// byte-for-byte; the classification rides alongside on the problem (R-5
+/// Priority 4).
 ///
 /// The two formats fail for different reasons, so the substitution differs:
 ///
@@ -462,10 +545,10 @@ pub(super) struct FileRefAnchors<'a> {
 /// produced the `false`. Returns `None` for non-string instances, unrelated
 /// formats, or any other error kind so the caller falls back to
 /// `err.to_string()`.
-fn darkmatter_file_format_message(
+fn darkmatter_file_reference_outcome(
     err: &jsonschema::ValidationError<'_>,
     anchors: FileRefAnchors<'_>,
-) -> Option<String> {
+) -> Option<(String, FileReferenceDiagnostic)> {
     let ValidationErrorKind::Format { format } = err.kind() else {
         return None;
     };
@@ -476,7 +559,10 @@ fn darkmatter_file_format_message(
     if format == format::DARKMATTER_FILE_FORMAT {
         return match format::resolve_file_reference(value, anchors.base_dir, anchors.fallback) {
             Ok(_) => None,
-            Err(failure) => Some(failure.to_string()),
+            // The rendered `message` is preserved byte-for-byte from the
+            // failure's `Display`; the structured classification rides
+            // alongside on the problem (R-5 Priority 4).
+            Err(failure) => Some((failure.to_string(), file_reference_diagnostic(&failure))),
         };
     }
     if format == format::DARKMATTER_FILE_REFERENCE_FORMAT {
@@ -485,10 +571,32 @@ fn darkmatter_file_format_message(
         // filesystem.
         return match biscuit_file::FileReference::new(value) {
             Ok(_) => None,
-            Err(err) => Some(format!("`{value}` is not a valid file reference: {err}")),
+            Err(err) => Some((
+                format!("`{value}` is not a valid file reference: {err}"),
+                FileReferenceDiagnostic::InvalidSyntax {
+                    raw: value.to_string(),
+                },
+            )),
         };
     }
     None
+}
+
+/// Maps the crate-private [`format::FileReferenceFailure`] to the public
+/// [`FileReferenceDiagnostic`] classification.
+fn file_reference_diagnostic(failure: &format::FileReferenceFailure) -> FileReferenceDiagnostic {
+    match failure {
+        format::FileReferenceFailure::InvalidSyntax { raw, .. } => {
+            FileReferenceDiagnostic::InvalidSyntax { raw: raw.clone() }
+        }
+        format::FileReferenceFailure::Resolution { raw, .. } => {
+            FileReferenceDiagnostic::ResolutionFailed { raw: raw.clone() }
+        }
+        format::FileReferenceFailure::NoMatch { raw, cwd } => FileReferenceDiagnostic::NoMatch {
+            raw: raw.clone(),
+            resolved_from: cwd.clone(),
+        },
+    }
 }
 
 /// Maps a `jsonschema::ValidationErrorKind` onto the coarse
@@ -1423,6 +1531,11 @@ mod tests {
             column: None,
             arm_index,
             description: None,
+            code: ValidationProblemCode::ConstraintViolation,
+            instance_path: JsonPointer::parse(path),
+            schema_path: None,
+            offending_property: None,
+            file_reference: None,
         }
     }
 
@@ -1707,5 +1820,110 @@ mod tests {
             resolve_problem_description(&root, &p).as_deref(),
             Some("arm 1 doc")
         );
+    }
+
+    // --- R-5 Priority 1/4: fine-grained code, parsed paths, offending key ---
+
+    #[test]
+    fn code_and_instance_path_populated_for_type_mismatch() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "count": { "type": "number" } }
+        });
+        let v = build_validator(&schema, None, None).unwrap();
+        let problems = collect_problems(&v, &json!({ "count": "nope" }), &PositionMap::new());
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        let p = &problems[0];
+        assert_eq!(p.code, ValidationProblemCode::TypeMismatch);
+        assert_eq!(p.instance_path.segments(), ["count"]);
+        assert!(p.schema_path.is_some(), "type mismatch should carry a schema path");
+        assert_eq!(p.offending_property, None);
+        assert_eq!(p.file_reference, None);
+    }
+
+    #[test]
+    fn code_missing_required_and_nested_instance_path() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "author": {
+                    "type": "object",
+                    "properties": { "name": { "type": "string" } },
+                    "required": ["name"]
+                }
+            }
+        });
+        let v = build_validator(&schema, None, None).unwrap();
+        let problems = collect_problems(&v, &json!({ "author": {} }), &PositionMap::new());
+        let missing = problems
+            .iter()
+            .find(|p| p.code == ValidationProblemCode::MissingRequired)
+            .expect("missing-required problem");
+        // The path points at the parent object; the missing name is `property`.
+        assert_eq!(missing.instance_path.segments(), ["author"]);
+        assert_eq!(missing.property.as_deref(), Some("name"));
+    }
+
+    #[test]
+    fn unknown_key_code_and_offending_property() {
+        let schema = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "known": { "type": "string" } }
+        });
+        let v = build_validator(&schema, None, None).unwrap();
+        let problems = collect_problems(
+            &v,
+            &json!({ "known": "x", "bogus": 1 }),
+            &PositionMap::new(),
+        );
+        let unknown = problems
+            .iter()
+            .find(|p| p.code == ValidationProblemCode::UnknownKey)
+            .expect("unknown-key problem");
+        assert_eq!(unknown.offending_property.as_deref(), Some("bogus"));
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn file_reference_diagnostic_classifies_no_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd = FileFormatCwdGuard::enter(dir.path());
+        let v = build_validator(&darkmatter_file_schema(), None, None).unwrap();
+        let problems =
+            collect_problems(&v, &json!({ "doc": "./missing.md" }), &PositionMap::new());
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        let p = &problems[0];
+        assert_eq!(p.code, ValidationProblemCode::InvalidFileReference);
+        match &p.file_reference {
+            Some(FileReferenceDiagnostic::NoMatch { raw, .. }) => {
+                assert_eq!(raw, "./missing.md");
+            }
+            other => panic!("expected NoMatch classification, got {other:?}"),
+        }
+        // The rendered message is unchanged by the added classification.
+        assert!(p.message.contains("no existing file matched reference"));
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn file_reference_diagnostic_classifies_invalid_syntax() {
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd = FileFormatCwdGuard::enter(dir.path());
+        let v = build_validator(&darkmatter_file_schema(), None, None).unwrap();
+        let problems = collect_problems(&v, &json!({ "doc": "" }), &PositionMap::new());
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        match &problems[0].file_reference {
+            Some(FileReferenceDiagnostic::InvalidSyntax { raw }) => assert_eq!(raw, ""),
+            other => panic!("expected InvalidSyntax classification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn json_pointer_round_trips_escaped_segments() {
+        let p = JsonPointer::parse("/a~1b~0c/2");
+        assert_eq!(p.segments(), ["a/b~c", "2"]);
+        assert_eq!(p.as_pointer_string(), "/a~1b~0c/2");
+        assert!(JsonPointer::parse("").is_empty());
     }
 }

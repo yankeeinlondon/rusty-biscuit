@@ -30,6 +30,7 @@
 //! assert!(matches!(&tokens[2], Token::StringLiteral(s) if s == "unknown"));
 //! ```
 
+use crate::markdown::span::Spanned;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::fmt;
 use tracing::debug;
@@ -797,6 +798,36 @@ impl<'a> Lexer<'a> {
             _ => Token::Variable(name),
         })
     }
+}
+
+/// Tokenizes `input` into a vector of byte-spanned tokens.
+///
+/// Each [`Spanned<Token>`] carries the half-open byte range `[start, end)` of
+/// the token in `input` (whitespace between tokens is not part of any span).
+/// The final entry is always a zero-width `Token::Eof` at `input.len()`. This
+/// is the span-aware companion to [`Lexer::tokenize_all`]: the recursive-descent
+/// parser consumes this vector so every AST node can carry a source span, and
+/// so parse errors report a byte offset rather than a token index.
+///
+/// ## Errors
+///
+/// Returns the first [`LexerError`] encountered, exactly as
+/// [`Lexer::tokenize_all`] would.
+pub fn lex_spanned(input: &str, mode: ParseMode) -> Result<Vec<Spanned<Token>>, LexerError> {
+    let mut lexer = Lexer::with_mode(input, mode);
+    let mut tokens = Vec::new();
+    loop {
+        lexer.skip_whitespace();
+        let start = lexer.pos;
+        let token = lexer.next_token()?;
+        let end = lexer.pos;
+        let is_eof = matches!(token, Token::Eof);
+        tokens.push(Spanned::new(token, start..end));
+        if is_eof {
+            break;
+        }
+    }
+    Ok(tokens)
 }
 
 /// Checks if a character can start an identifier.
@@ -1632,6 +1663,55 @@ After code {{ end }}."#;
         fn error_display() {
             let err = LexerError::new("Test error", 5);
             assert_eq!(err.to_string(), "Test error at position 5");
+        }
+    }
+
+    mod spanned_lexing {
+        use super::*;
+
+        #[test]
+        fn spans_are_byte_ranges_excluding_whitespace() {
+            let tokens = lex_spanned("  foo  ||  bar  ", ParseMode::Interpolation).unwrap();
+            // foo, ||, bar, Eof
+            assert_eq!(tokens.len(), 4);
+            assert_eq!(tokens[0].span, 2..5);
+            assert!(matches!(&tokens[0].value, Token::Variable(v) if v == "foo"));
+            assert_eq!(tokens[1].span, 7..9);
+            assert!(matches!(&tokens[1].value, Token::Pipe));
+            assert_eq!(tokens[2].span, 11..14);
+            assert!(matches!(&tokens[2].value, Token::Variable(v) if v == "bar"));
+        }
+
+        #[test]
+        fn trailing_eof_is_zero_width_at_input_end() {
+            let input = "foo";
+            let tokens = lex_spanned(input, ParseMode::Interpolation).unwrap();
+            let last = tokens.last().unwrap();
+            assert!(matches!(last.value, Token::Eof));
+            assert_eq!(last.span, input.len()..input.len());
+        }
+
+        #[test]
+        fn multibyte_variable_span_is_byte_accurate() {
+            // "é" is two bytes, so the following `.foo` folds into one Variable
+            // whose span runs from byte 0 to the input length.
+            let input = "café.foo";
+            let tokens = lex_spanned(input, ParseMode::Interpolation).unwrap();
+            assert!(matches!(&tokens[0].value, Token::Variable(v) if v == "café.foo"));
+            assert_eq!(tokens[0].span, 0..input.len());
+        }
+
+        #[test]
+        fn condition_mode_double_pipe_spans_two_bytes() {
+            let tokens = lex_spanned("a || b", ParseMode::Condition).unwrap();
+            assert!(matches!(&tokens[1].value, Token::OrOr));
+            assert_eq!(tokens[1].span, 2..4);
+        }
+
+        #[test]
+        fn propagates_lexer_error() {
+            let err = lex_spanned("@bad", ParseMode::Interpolation).unwrap_err();
+            assert!(err.message.contains("Unexpected character"));
         }
     }
 

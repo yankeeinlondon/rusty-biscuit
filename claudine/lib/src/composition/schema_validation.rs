@@ -979,8 +979,14 @@ fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<InteractiveShape> {
                 patterns,
             })
         }
-        TypeExpr::Primitive(SimplifiedType::Object | SimplifiedType::Any)
-        | TypeExpr::InlineObject(_) => None,
+        TypeExpr::Primitive(
+            SimplifiedType::Object
+            | SimplifiedType::Any
+            | SimplifiedType::Yaml
+            | SimplifiedType::Json,
+        )
+        | TypeExpr::InlineObject(_)
+        | TypeExpr::Imported { .. } => None,
     }
 }
 
@@ -1025,6 +1031,7 @@ fn type_label_for_atom(atom: &PropertyAtom) -> String {
         }
         TypeExpr::Primitive(ty) => format!("{base}{suffix}", base = ty.as_keyword()),
         TypeExpr::InlineObject(_) => format!("object{suffix}"),
+        TypeExpr::Imported { name, reference } => format!("{name}{suffix}@{reference}"),
     }
 }
 

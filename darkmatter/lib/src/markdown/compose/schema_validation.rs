@@ -346,7 +346,10 @@ mod tests {
                 description: None,
             }),
         );
-        SimplifiedSchema::Single(SchemaShape { properties })
+        SimplifiedSchema::Single(SchemaShape {
+            properties,
+            ..Default::default()
+        })
     }
 
     // ── No-op cases ───────────────────────────────────────────────────
@@ -456,6 +459,28 @@ mod tests {
             md.frontmatter().as_map().get("n"),
             Some(&serde_json::json!(42))
         );
+    }
+
+    #[test]
+    fn write_back_serializes_native_value_for_yaml_content_format() {
+        // A native mapping under a `yaml` content-format field is serialized to
+        // its YAML string and written back (the write-back is the only surface
+        // that exposes the serialized form; validation-only stays non-mutating).
+        let mut md =
+            md_with_schema("$schema:\n  frontmatter: yaml\nfrontmatter:\n  title: Foo\n  n: 1\n");
+        let options = ComposeOptions::new();
+        assert!(run(&mut md, &options).is_ok());
+        let stored = md.frontmatter().as_map().get("frontmatter").cloned();
+        let yaml = match stored {
+            Some(serde_json::Value::String(yaml)) => yaml,
+            other => panic!("expected a serialized YAML string, got {other:?}"),
+        };
+        // The written-back string parses back to the original native mapping.
+        let round_trip: serde_json::Value = biscuit_file::Yaml::from_str(&yaml)
+            .expect("valid yaml")
+            .as_json()
+            .expect("as_json");
+        assert_eq!(round_trip, serde_json::json!({ "title": "Foo", "n": 1 }));
     }
 
     #[test]
@@ -601,6 +626,7 @@ mod tests {
         );
         let baseline = SimplifiedSchema::Single(SchemaShape {
             properties: baseline_props,
+            ..Default::default()
         });
 
         let mut md = md_with_schema("$schema:\n  spec: 'number(required)'\nspec: 42\n");
@@ -1081,7 +1107,10 @@ mod tests {
                 description: None,
             }),
         );
-        SimplifiedSchema::Single(SchemaShape { properties })
+        SimplifiedSchema::Single(SchemaShape {
+            properties,
+            ..Default::default()
+        })
     }
 
     #[test]

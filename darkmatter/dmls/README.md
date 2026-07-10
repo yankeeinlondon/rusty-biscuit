@@ -1,3 +1,107 @@
-# Darkmatter Langauage Server (DMLS)
+# Darkmatter Language Server (DMLS)
 
-The function of a LSP server is to provide guard rails and DX for developers in an editor to work with the LSP's language. The **DMLS** is a language server for Darkmatter documents (aka, Markdown documents plus the Darkmatter DSL).
+`dmls` is the editor-facing language server for Markdown, with first-class
+intelligence for the Darkmatter DSL, SimplifiedSchema-driven frontmatter, and
+wiki-style links. It speaks standard **LSP 3.17 over stdio** (`lsp-server` +
+`lsp-types`) and uses the `darkmatter` library as its sole semantic authority —
+it never re-implements parsing, compose, schema, style, `LanguageGrammar`,
+cleanup, or Markdown-aware hashing rules.
+
+It serves two audiences at once:
+
+1. **Ordinary Markdown authors** — a credible, standalone Markdown LSP for
+   documents that use no Darkmatter features.
+2. **Darkmatter and Claudine authors** — schema-validated frontmatter, directive
+   and interpolation intelligence, transclusion navigation, and safety-aware
+   (read-only, never-executing) handling of shell and remote content.
+
+## Safety: passive by construction
+
+DMLS runs inside editors and agents. Passive requests parse anything and resolve
+local files, but they **never** execute shell commands (`$(...)`, `::shell`),
+fetch remote URLs, mutate files, or run side-effecting compose phases. Shell and
+remote surfaces are *explained* statically (hover + diagnostics report what
+compose would do and whether policy allows it). This is proven by
+[`tests/no_side_effects.rs`](tests/no_side_effects.rs) (spec acceptance
+criterion 7).
+
+## Feature layers (v1)
+
+| Layer | Capabilities |
+|-------|--------------|
+| **0 — Markdown baseline** | go-to-definition, references/backlinks, document + workspace symbols, document links, folding, hover, path/anchor/fence-language completion, broken-link/anchor and duplicate-heading diagnostics. |
+| **1 — Wiki links** | `[[target]]` / `[[target#heading]]` / `[[target\|alias]]` completion, definition, references, hover, and the full `wiki.*` diagnostic taxonomy (case-sensitive matching, basename/path-suffix/root-relative resolution, ambiguity + portability collisions). |
+| **2 — Frontmatter intelligence** | effective-schema (base + configured extensions + document `$schema`) diagnostics with precise key/value ranges, key/enum/`file(...)`/`style.*` completion, type/constraint/`->`-description hover, `$schema`/`file(...)` navigation, frontmatter folding + symbols. Claudine activates as **pure config** (globs → baseline schema), no server-side special cases. |
+| **3 — Darkmatter DSL** | directive (`::file`/`::code`/`::shell`/`::block`/disclosure …) name/option completion, hover, folding, and diagnostics; transclusion links + definition + cycle detection + broken-path; interpolation (`{{ }}`) completion/hover/definition + malformed/unknown diagnostics; read-only shell-policy hover + `darkmatter.security.*`; fenced-language diagnostics. |
+| **Editing** | file + heading rename with workspace-wide reference updates (refusing ambiguous/unsafe edits atomically), the v1 code-action set, and `Markdown::cleanup`-backed formatting (byte-equivalent to `md clean`). |
+
+For exact v1 scope and out-of-scope items see
+[spec.md](../features/2026-07-04-dmls/spec.md); for architecture see
+[design.md](../features/2026-07-04-dmls/design.md).
+
+## Architecture
+
+- **One workspace graph** (`dmls::graph`): a single arena carrying every node
+  kind and eight edge kinds (`references`, `includes`, `transcludes`,
+  `uses_schema`, `uses_file`, `uses_variable`, `defines_anchor`,
+  `defines_symbol`) with one reverse index and a wiki basename `KeyIndex`. Every
+  navigation/diagnostic/refactor feature is a projection of that graph.
+- **Source-map discipline** (`dmls::source_map`): all positions convert through
+  one `line-index`-backed API (byte offsets ↔ negotiated UTF-8/UTF-16 LSP
+  positions, frontmatter-relative → document ranges; CRLF + lone-CR aware).
+- **Provider registry** (`dmls::providers`): each capability is an ordered
+  provider chain (substrate Markdown first, overlay providers appending) with a
+  per-provider `catch_unwind` boundary and deterministic merge policies.
+- **Concurrency** (AD-3): a main protocol thread plus a crossbeam worker pool
+  for indexing/diagnostics, with immutable generation-stamped snapshot swaps —
+  no async runtime.
+- **Extension model**: baseline schema extensions activate by config + globs
+  (the generic mechanism Claudine is the first consumer of).
+
+## CLI
+
+```
+dmls [--stdio] [--config <path>] [--log-level <level>] [--log-file <path>]
+dmls --version
+dmls --bench-index <dir> [--json]        # R-6 stage timings, graph counts, peak RSS
+dmls --gen-corpus <tier> <dir>           # deterministic synthetic corpus
+```
+
+Logs go to stderr or `--log-file` only; stdout is reserved for LSP framing.
+
+## Configuration
+
+`.dmls.toml` at the workspace root (also the editor root marker), layered under
+LSP `workspace/configuration` and reloadable without restart. Keys cover wiki
+behavior, baseline schema extensions, strict schema/style modes, shell policy
+discovery, code-action categories, formatting, and diagnostics debounce. See
+[spec.md](../features/2026-07-04-dmls/spec.md) § Configuration.
+
+## Editor setup
+
+Per-editor guides (VS Code, Zed, Neovim, Helix) plus a manual smoke checklist
+live in [`docs/editors/`](docs/editors/). The Zed extension is a thin WASM shim
+launching the native binary; a ready-to-extract scaffold is in
+[`zed-dmls/`](zed-dmls/) (workspace-excluded).
+
+## Packaging
+
+`just dist` (in `darkmatter/justfile`) builds a release archive for the host,
+named per the cross-platform distribution matrix
+(`dmls-<version>-macos-universal.tar.gz`, `…-linux-x86_64.tar.gz`,
+`…-linux-aarch64.tar.gz`, `…-windows-x86_64.zip`) that the Zed extension resolves
+against. CI wires the full per-target build.
+
+## Testing
+
+From the `darkmatter/` package area:
+
+```
+just test        # L1 (unit) across lib, cli, dmls
+just test-l2     # L2 in-memory LSP-session integration tests
+just lint
+```
+
+Testing follows `.claude/skills/rust-testing/SKILL.md` (nextest, L1 default, L2
+gated where real resources are involved — DMLS L2 is in-memory, so it stays
+ungated).

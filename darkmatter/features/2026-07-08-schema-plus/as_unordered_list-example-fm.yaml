@@ -1,0 +1,18 @@
+kind: example
+invocation:
+    frontmatter:
+        list:
+            - 1
+            - 2
+            - 3
+        output: "{{ as_unordered_list(list) }}"
+
+returns: |-
+    - 1
+    - 2
+    - 3
+description: |-
+    The `as_unordered_list(list)` function is designed to take _any_ array of values
+    or a CSV string. In this example we're passing in a native numeric array. This
+    example illustrates how a Frontmatter property can reference the data array in an
+    _interpolation_ block in another property.

@@ -647,7 +647,10 @@ mod tests {
                 description: None,
             }),
         );
-        let schema_a = SimplifiedSchema::Single(SchemaShape { properties: props_a });
+        let schema_a = SimplifiedSchema::Single(SchemaShape {
+            properties: props_a,
+            ..Default::default()
+        });
 
         let mut props_b = IndexMap::new();
         props_b.insert(
@@ -660,7 +663,10 @@ mod tests {
                 description: None,
             }),
         );
-        let schema_b = SimplifiedSchema::Single(SchemaShape { properties: props_b });
+        let schema_b = SimplifiedSchema::Single(SchemaShape {
+            properties: props_b,
+            ..Default::default()
+        });
 
         let with_a = ComposeOptions::new().with_baseline_schema(schema_a);
         let with_b = ComposeOptions::new().with_baseline_schema(schema_b);

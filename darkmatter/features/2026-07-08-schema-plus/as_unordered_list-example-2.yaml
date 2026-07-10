@@ -1,0 +1,15 @@
+kind: example
+parameters:
+    - list: |-
+          - 1
+          - 2
+          - 3
+invocation: "as_unordered_list(list)"
+returns: |-
+    - 1
+    - 2
+    - 3
+description: |-
+    The `as_unordered_list(list)` function is designed to take _any_ array of values or a CSV
+    string. In this example we're passing in an unordered-list string. Its base return type is
+    a string but it is rendered in the form of a Markdown unordered list.

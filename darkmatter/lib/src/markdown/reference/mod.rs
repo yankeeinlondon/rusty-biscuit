@@ -95,6 +95,25 @@ fn map_reference_parse_error(err: crate::markdown::compose::TransclusionError) -
     }
 }
 
+/// Extracts every reference in a single document's `content` with byte-span
+/// provenance, without composing.
+///
+/// Pure syntactic extraction: no transclusion following, no shell execution,
+/// no network — so it is safe to run over an open buffer on every keystroke.
+/// This is the span-carrying, side-effect-free entry point DMLS's substrate
+/// indexer builds `references` edges from; the composing
+/// [`Markdown::composed_references`] is the wrong shape for a passive analyzer.
+///
+/// ## Returns
+///
+/// A [`ReferenceSet`] whose records carry byte-offset spans
+/// ([`ReferenceOrigin::span`]) into `content` (not the full document — pass the
+/// frontmatter-stripped body and offset the spans if document coordinates are
+/// needed).
+pub fn extract_document_references(content: &str) -> ReferenceSet {
+    graph::extract_all_references(content, &ComposeSource::Unknown)
+}
+
 impl Markdown {
     /// Returns `true` if this document contains any transclusion directives
     /// (`::file`, `::code`, `::url`, `::toc-linking`, `::file-links`, `prologue`, or `epilogue`).

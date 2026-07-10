@@ -38,11 +38,252 @@ use super::shell_expansion::types::{
 use super::shell_expansion::{PreparedShellDirective, execute_prepared_directive, prepare_directive};
 use super::{ComposeOptions, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
+use crate::markdown::span::{SourceSpan, Spanned};
 use crate::markdown::types::MarkdownResult;
 use biscuit_terminal::errors::SourceContext;
 use rayon::prelude::*;
 use serde_json::Value;
 use std::collections::HashMap;
+
+/// A recognized trailing suffix on a frontmatter `$(...)` value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FrontmatterShellSuffix {
+    /// `::timeout:N` — a per-directive timeout in whole seconds.
+    Timeout(u64),
+    /// `::no-cache` — bypass the per-compose command cache.
+    NoCache,
+}
+
+/// One chain action of a spanned frontmatter `$(...)` pipeline (the segments
+/// between top-level `&&` / `||` operators).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontmatterShellAction {
+    /// Byte span of the action's text (trimmed).
+    pub span: SourceSpan,
+    /// Byte spans of the action's whitespace-delimited tokens (quote/paren
+    /// aware). The first token is the executable position.
+    pub tokens: Vec<SourceSpan>,
+}
+
+/// A spanned frontmatter `$(...)` command pipeline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontmatterShellPipeline {
+    /// Byte span of the whole inner command (excluding delimiters/suffixes).
+    pub span: SourceSpan,
+    /// One entry per chain action, in source order.
+    pub actions: Vec<FrontmatterShellAction>,
+}
+
+/// A spanned frontmatter `$(...)` ternary `COND ? THEN : ELSE`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontmatterShellTernary {
+    /// Byte span of the condition expression (trimmed).
+    pub condition_span: SourceSpan,
+    /// Byte span of the then-branch (trimmed).
+    pub then_span: SourceSpan,
+    /// Byte span of the else-branch (trimmed).
+    pub else_span: SourceSpan,
+}
+
+/// The parsed body of a spanned frontmatter `$(...)` value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FrontmatterShellBody {
+    /// A bare command pipeline.
+    Pipeline(FrontmatterShellPipeline),
+    /// A conditional `COND ? THEN : ELSE`.
+    Ternary(FrontmatterShellTernary),
+}
+
+/// A read-only, span-carrying mirror of a frontmatter `$(...)` shell value.
+///
+/// Produced by [`parse_frontmatter_shell_value_spanned`]. Every span is a byte
+/// offset into the original value string. This is a *description*, not a runnable
+/// directive: it exposes no execution surface, so a language server can offer
+/// hover, folding, and command-token navigation over a `$(...)` value without any
+/// risk of running it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontmatterShellValue {
+    /// Byte span of the whole `$(...)` value including delimiters and suffixes.
+    pub span: SourceSpan,
+    /// Byte span of the opening `$(`.
+    pub open_span: SourceSpan,
+    /// Byte span of the closing `)`.
+    pub close_span: SourceSpan,
+    /// Byte span of the inner command text between `$(` and `)`.
+    pub inner_span: SourceSpan,
+    /// Recognized trailing suffixes with their spans, in source order.
+    pub suffixes: Vec<Spanned<FrontmatterShellSuffix>>,
+    /// The parsed body — a pipeline or a ternary.
+    pub body: FrontmatterShellBody,
+}
+
+/// Parses a frontmatter string value into a read-only, span-carrying
+/// [`FrontmatterShellValue`], or `None` when the value is not a whole-value
+/// `$( … )` shell expression.
+///
+/// The whole-value `$( … )` rule is defined on the trimmed value (so a padded
+/// `"  $(echo ok)  "` parses identically), and all reported spans are byte
+/// offsets into the *original* `value` — leading whitespace is accounted for.
+/// The parse is lenient and never executes: a value that opens `$(` but never
+/// closes it, or carries an unrecognized suffix, still yields the spans that
+/// could be recovered (unrecognized trailing content simply ends suffix
+/// scanning). It shares the executor's [`unquoted_closing_paren_offset`],
+/// [`split_top_level_ternary`], and [`split_at_chain_operators`] helpers so its
+/// view of structure never drifts from the run-time path.
+pub fn parse_frontmatter_shell_value_spanned(value: &str) -> Option<FrontmatterShellValue> {
+    let base = value.len() - value.trim_start().len();
+    let trimmed = value.trim();
+
+    let rest = trimmed.strip_prefix("$(")?;
+    let close_rel = unquoted_closing_paren_offset(rest)?;
+
+    // Offsets are computed relative to `trimmed`, then shifted by `base` to land
+    // in the original `value`.
+    let inner_start = base + 2;
+    let inner_end = inner_start + close_rel;
+    let close_pos = inner_end; // the `)` byte
+    let open_span = base..base + 2;
+    let close_span = close_pos..close_pos + 1;
+    let inner_span = inner_start..inner_end;
+    let inner = &rest[..close_rel];
+
+    let after_close = &rest[close_rel + 1..];
+    let suffix_base = close_pos + 1;
+    let suffixes = scan_suffix_spans(after_close, suffix_base);
+
+    let body = match split_top_level_ternary(inner) {
+        Some((cond, then_b, else_b)) => FrontmatterShellBody::Ternary(FrontmatterShellTernary {
+            condition_span: trimmed_subspan(inner, inner_start, cond),
+            then_span: trimmed_subspan(inner, inner_start, then_b),
+            else_span: trimmed_subspan(inner, inner_start, else_b),
+        }),
+        None => {
+            let actions = split_at_chain_operators(inner)
+                .into_iter()
+                .map(|segment| {
+                    let seg_offset = inner_start + subslice_offset(inner, segment);
+                    let span = trimmed_subspan(inner, inner_start, segment);
+                    let tokens = shell_token_spans(segment)
+                        .into_iter()
+                        .map(|r| seg_offset + r.start..seg_offset + r.end)
+                        .collect();
+                    FrontmatterShellAction { span, tokens }
+                })
+                .collect();
+            FrontmatterShellBody::Pipeline(FrontmatterShellPipeline {
+                span: inner_span.clone(),
+                actions,
+            })
+        }
+    };
+
+    Some(FrontmatterShellValue {
+        span: base..base + trimmed.len(),
+        open_span,
+        close_span,
+        inner_span,
+        suffixes,
+        body,
+    })
+}
+
+/// Byte offset of `child` within `parent`; `child` must be a subslice of
+/// `parent` (as produced by the shared split helpers).
+fn subslice_offset(parent: &str, child: &str) -> usize {
+    child.as_ptr() as usize - parent.as_ptr() as usize
+}
+
+/// Span of `child` (trimmed) within `parent`, shifted to absolute coordinates
+/// by adding `parent_base`. `child` must be a subslice of `parent`.
+fn trimmed_subspan(parent: &str, parent_base: usize, child: &str) -> SourceSpan {
+    let offset = subslice_offset(parent, child);
+    let leading = child.len() - child.trim_start().len();
+    let trimmed = child.trim();
+    let start = parent_base + offset + leading;
+    start..start + trimmed.len()
+}
+
+/// Scans the text after the closing `)` for `::timeout:N` / `::no-cache`
+/// suffixes, returning each recognized suffix with its span (base-shifted).
+///
+/// Lenient: scanning stops at the first unrecognized token rather than erroring,
+/// because this is a passive analyzer.
+fn scan_suffix_spans(after_close: &str, base: usize) -> Vec<Spanned<FrontmatterShellSuffix>> {
+    let mut out = Vec::new();
+    let mut suffix = after_close;
+    let mut offset = base;
+
+    while !suffix.is_empty() {
+        if let Some(rest) = suffix.strip_prefix("::no-cache") {
+            let len = suffix.len() - rest.len();
+            out.push(Spanned::new(FrontmatterShellSuffix::NoCache, offset..offset + len));
+            offset += len;
+            suffix = rest;
+        } else if let Some(rest) = suffix.strip_prefix("::timeout:") {
+            let digits_end = rest.find("::").unwrap_or(rest.len());
+            let digits = &rest[..digits_end];
+            match digits.parse::<u64>() {
+                Ok(value) => {
+                    let len = suffix.len() - rest.len() + digits_end;
+                    out.push(Spanned::new(
+                        FrontmatterShellSuffix::Timeout(value),
+                        offset..offset + len,
+                    ));
+                    offset += len;
+                    suffix = &rest[digits_end..];
+                }
+                Err(_) => break,
+            }
+        } else {
+            break;
+        }
+    }
+
+    out
+}
+
+/// Byte spans of the whitespace-delimited tokens in a shell action, respecting
+/// single/double quotes and backslash escapes. Offsets are relative to `s`.
+fn shell_token_spans(s: &str) -> Vec<SourceSpan> {
+    let mut spans = Vec::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    let mut start: Option<usize> = None;
+
+    for (idx, ch) in s.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' if !in_single => {
+                start.get_or_insert(idx);
+                escaped = true;
+            }
+            '\'' if !in_double => {
+                start.get_or_insert(idx);
+                in_single = !in_single;
+            }
+            '"' if !in_single => {
+                start.get_or_insert(idx);
+                in_double = !in_double;
+            }
+            c if c.is_whitespace() && !in_single && !in_double => {
+                if let Some(st) = start.take() {
+                    spans.push(st..idx);
+                }
+            }
+            _ => {
+                start.get_or_insert(idx);
+            }
+        }
+    }
+    if let Some(st) = start.take() {
+        spans.push(st..s.len());
+    }
+    spans
+}
 
 /// Parsed shape of a `$(...)` frontmatter shell expression.
 ///
@@ -1721,6 +1962,24 @@ fn find_unquoted_closing_paren(
     key: &str,
     ctx: &SourceContext,
 ) -> Result<usize, ShellExpansionError> {
+    unquoted_closing_paren_offset(rest).ok_or_else(|| {
+        frontmatter_parse_error(
+            key,
+            ctx,
+            "Missing closing ')' in frontmatter shell expression",
+        )
+    })
+}
+
+/// Returns the byte offset of the top-level, unquoted `)` that closes a
+/// `$(...)` body opened at the start of `rest`, or `None` when the body is
+/// never closed.
+///
+/// Shared by [`find_unquoted_closing_paren`] (which adds error context) and the
+/// read-only span parser [`parse_frontmatter_shell_value_spanned`], so both
+/// agree on what "top-level" means: outside single/double quotes and outside any
+/// nested `( … )` pair.
+fn unquoted_closing_paren_offset(rest: &str) -> Option<usize> {
     let mut in_single = false;
     let mut in_double = false;
     let mut escaped = false;
@@ -1743,16 +2002,12 @@ fn find_unquoted_closing_paren(
             '"' if !in_single => in_double = !in_double,
             '(' if !in_single && !in_double => paren_depth += 1,
             ')' if !in_single && !in_double && paren_depth > 0 => paren_depth -= 1,
-            ')' if !in_single && !in_double => return Ok(idx),
+            ')' if !in_single && !in_double => return Some(idx),
             _ => {}
         }
     }
 
-    Err(frontmatter_parse_error(
-        key,
-        ctx,
-        "Missing closing ')' in frontmatter shell expression",
-    ))
+    None
 }
 
 fn first_token_portion(input: &str) -> &str {
@@ -1781,6 +2036,94 @@ fn first_token_portion(input: &str) -> &str {
     }
 
     trimmed
+}
+
+#[cfg(test)]
+mod spanned_value_tests {
+    use super::*;
+
+    #[test]
+    fn returns_none_for_non_shell_value() {
+        assert!(parse_frontmatter_shell_value_spanned("plain text").is_none());
+        assert!(parse_frontmatter_shell_value_spanned("").is_none());
+    }
+
+    #[test]
+    fn parses_simple_pipeline_delimiters_and_tokens() {
+        let value = "$(echo hi)";
+        let parsed = parse_frontmatter_shell_value_spanned(value).unwrap();
+        assert_eq!(&value[parsed.open_span.clone()], "$(");
+        assert_eq!(&value[parsed.close_span.clone()], ")");
+        assert_eq!(&value[parsed.inner_span.clone()], "echo hi");
+        assert_eq!(parsed.span, 0..value.len());
+        let FrontmatterShellBody::Pipeline(pipeline) = &parsed.body else {
+            panic!("expected pipeline, got {:?}", parsed.body);
+        };
+        assert_eq!(pipeline.actions.len(), 1);
+        let tokens = &pipeline.actions[0].tokens;
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(&value[tokens[0].clone()], "echo");
+        assert_eq!(&value[tokens[1].clone()], "hi");
+    }
+
+    #[test]
+    fn leading_whitespace_is_reflected_in_spans() {
+        let value = "  $(date)  ";
+        let parsed = parse_frontmatter_shell_value_spanned(value).unwrap();
+        assert_eq!(&value[parsed.open_span.clone()], "$(");
+        assert_eq!(&value[parsed.inner_span.clone()], "date");
+        assert_eq!(&value[parsed.close_span.clone()], ")");
+    }
+
+    #[test]
+    fn parses_chain_operator_actions() {
+        let value = "$(a && b || c)";
+        let parsed = parse_frontmatter_shell_value_spanned(value).unwrap();
+        let FrontmatterShellBody::Pipeline(pipeline) = &parsed.body else {
+            panic!("expected pipeline");
+        };
+        assert_eq!(pipeline.actions.len(), 3);
+        assert_eq!(&value[pipeline.actions[0].span.clone()], "a");
+        assert_eq!(&value[pipeline.actions[1].span.clone()], "b");
+        assert_eq!(&value[pipeline.actions[2].span.clone()], "c");
+    }
+
+    #[test]
+    fn parses_ternary_branch_spans() {
+        let value = "$( file_exists('x') ? cat x : echo none )";
+        let parsed = parse_frontmatter_shell_value_spanned(value).unwrap();
+        let FrontmatterShellBody::Ternary(t) = &parsed.body else {
+            panic!("expected ternary, got {:?}", parsed.body);
+        };
+        assert_eq!(&value[t.condition_span.clone()], "file_exists('x')");
+        assert_eq!(&value[t.then_span.clone()], "cat x");
+        assert_eq!(&value[t.else_span.clone()], "echo none");
+    }
+
+    #[test]
+    fn parses_suffix_spans() {
+        let value = "$(slow)::timeout:30::no-cache";
+        let parsed = parse_frontmatter_shell_value_spanned(value).unwrap();
+        assert_eq!(parsed.suffixes.len(), 2);
+        assert_eq!(parsed.suffixes[0].value, FrontmatterShellSuffix::Timeout(30));
+        assert_eq!(&value[parsed.suffixes[0].span.clone()], "::timeout:30");
+        assert_eq!(parsed.suffixes[1].value, FrontmatterShellSuffix::NoCache);
+        assert_eq!(&value[parsed.suffixes[1].span.clone()], "::no-cache");
+        // The whole-value span includes the suffixes.
+        assert_eq!(parsed.span, 0..value.len());
+    }
+
+    #[test]
+    fn unclosed_paren_yields_none() {
+        assert!(parse_frontmatter_shell_value_spanned("$(echo hi").is_none());
+    }
+
+    #[test]
+    fn nested_parens_do_not_close_early() {
+        let value = "$(echo (a b))";
+        let parsed = parse_frontmatter_shell_value_spanned(value).unwrap();
+        assert_eq!(&value[parsed.inner_span.clone()], "echo (a b)");
+    }
 }
 
 #[cfg(test)]

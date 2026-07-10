@@ -4,4 +4,60 @@ description = "Darkmatter Language Server"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "dmls"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dmls"
+path = "src/main.rs"
+
 [dependencies]
+# LSP protocol stack (stdio framing + LSP 3.17 types)
+lsp-server = "0.8"
+lsp-types = "0.97"
+# Same channel family lsp-server's Connection exposes; also the worker-pool
+# channel for later phases.
+crossbeam-channel = "0.5"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "1.0"
+
+# Error handling
+thiserror = "2.0"
+
+# Tracing (stderr / file only; stdout is reserved for LSP framing)
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Line/offset index behind the source_map module (rust-analyzer's crate;
+# never exposed outside `source_map`).
+line-index = "0.1"
+
+# Position-aware YAML parse behind the FrontmatterAst facade (AD-4 / R-3):
+# lossless byte spans on every node, comment/anchor preservation, no panics on
+# malformed input. Never exposed outside `overlay::frontmatter`.
+rlsp-yaml-parser = "0.11"
+
+# File-URI <-> path conversion (battle-tested `to_file_path` handling for
+# Windows drive letters and percent-encoding; lsp-types 0.97's `Uri` has none).
+url = "2.5"
+
+# Workspace discovery (gitignore-aware walk) and include/exclude globs.
+ignore = "0.4"
+globset = "0.4"
+
+# Wiki-link resolution (R-8): NFC normalization so the same vault resolves
+# identically on macOS/Windows/Linux. Already in the tree via `url`/`idna`.
+unicode-normalization = "0.1"
+
+# Semantic authorities
+darkmatter = { path = "../lib" }
+biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["file-reference"] }
+# xxHash content-hash identity for invalidation (design "Invalidation").
+biscuit-hash = { path = "../../biscuit-hash/lib" }
+
+[dev-dependencies]
+tempfile = "3"

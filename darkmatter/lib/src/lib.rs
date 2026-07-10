@@ -82,3 +82,6 @@ pub mod style;
 pub mod terminal;
 
 pub mod testing;
+
+pub use markdown::schemas::{darkmatter_base_json_schema, darkmatter_base_schema};
+pub use markdown::span::{SourceSpan, Spanned, line_col_of_offset, line_of_offset};

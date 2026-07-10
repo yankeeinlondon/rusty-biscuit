@@ -2,10 +2,13 @@
 //!
 //! Renders a human-readable reference for the SimplifiedSchema authoring
 //! language from the typed descriptor catalog in
-//! `darkmatter::markdown::schemas`. The command is documentation-only — it
-//! performs no document parsing, no context capture, no `EffectEngine`
-//! construction, no file resolution, and no network access. The only
-//! observable side effect is printing to stdout.
+//! `darkmatter::markdown::schemas`, plus (under `--verbose`) the derived
+//! `ctx.*` context-variable catalog and the typed expression-function
+//! signatures. All three surfaces are read from compiled-in descriptor
+//! catalogs, so the command stays documentation-only — it performs no document
+//! parsing, no context capture, no `EffectEngine` construction, no file
+//! resolution, and no network access. The only observable side effect is
+//! printing to stdout.
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
@@ -16,6 +19,8 @@ use biscuit_terminal::discovery::detection::ColorMode as TerminalColorMode;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;
 use color_eyre::eyre::Result;
+use darkmatter::markdown::compose::context::context_variable_descriptors;
+use darkmatter::markdown::compose::expression::expression_function_descriptors;
 use darkmatter::markdown::highlighting::CodeBlockMode;
 use darkmatter::markdown::highlighting::ColorMode as MarkdownColorMode;
 use darkmatter::markdown::Markdown;
@@ -51,6 +56,8 @@ pub fn run_about(verbose: bool, code_block_mode: CodeBlockMode) -> Result<()> {
         report.inline_object_rules(inline_object_rule_descriptors())?;
         report.coercion_rules(coercion_rule_descriptors())?;
         report.validation_behavior(validation_behavior_descriptors())?;
+        report.context_variables()?;
+        report.expression_functions()?;
     } else {
         report.verbose_hint();
     }
@@ -261,6 +268,28 @@ In this example, constraints are added to a string, a number, and an array of st
         Ok(())
     }
 
+    fn context_variables(&mut self) -> Result<()> {
+        self.heading("Context Variables");
+        self.markdown(
+            "`ctx.*` variables are captured at compose time and available in `{{ }}` \
+             interpolation and expressions. Types and descriptions are projected from the base \
+             frontmatter schema, so this list stays in step with validation.",
+        )?;
+        self.markdown(context_catalog_markdown())?;
+        Ok(())
+    }
+
+    fn expression_functions(&mut self) -> Result<()> {
+        self.heading("Expression Functions");
+        self.markdown(
+            "Read-side functions callable in `{{ }}` interpolation and `$( )` frontmatter values. \
+             Each signature shows its parameter and return types; a fallible function returns a \
+             `... | error` union.",
+        )?;
+        self.markdown(expression_function_signatures_markdown())?;
+        Ok(())
+    }
+
     fn heading(&mut self, title: &str) {
         self.blank();
         self.prose(format!("<b>{}</b>", title));
@@ -355,6 +384,69 @@ In this example, constraints are added to a string, a number, and an array of st
             self.previous_blank = true;
         }
     }
+}
+
+/// Renders the derived `ctx.*` catalog as a Markdown reference.
+///
+/// Descriptors arrive in YAML declaration order; each `category` (and its
+/// `subsection`) runs contiguously, so a running boundary check groups them
+/// without buffering. The type comes from the descriptor's `Display`
+/// (`datetime`, `string[]`, `number(integer)`, …).
+fn context_catalog_markdown() -> String {
+    let mut out = String::new();
+    let mut current_category = "";
+    let mut current_subsection = "";
+    for descriptor in context_variable_descriptors() {
+        if descriptor.category != current_category {
+            out.push_str(&format!("\n**{}**\n\n", escape_markdown(descriptor.category)));
+            current_category = descriptor.category;
+            current_subsection = "";
+        }
+        if descriptor.subsection != current_subsection {
+            current_subsection = descriptor.subsection;
+            if !current_subsection.is_empty() {
+                out.push_str(&format!("- _{}_\n", escape_markdown(current_subsection)));
+            }
+        }
+        let indent = if descriptor.subsection.is_empty() { "" } else { "  " };
+        let optionality = if descriptor.required { "" } else { " _(optional)_" };
+        out.push_str(&format!(
+            "{indent}- **ctx.{}** — `{}`{optionality} — {}\n",
+            escape_markdown(descriptor.name),
+            descriptor.display_type,
+            descriptor.description,
+        ));
+    }
+    out
+}
+
+/// Renders the typed expression-function signatures as a Markdown reference.
+///
+/// Function categories are not contiguous in the catalog, so this groups by
+/// category in first-appearance order and orders each group by the descriptor's
+/// intra-category `order`.
+fn expression_function_signatures_markdown() -> String {
+    let descriptors = expression_function_descriptors();
+    let mut categories: Vec<&str> = Vec::new();
+    for descriptor in descriptors {
+        if !categories.contains(&descriptor.category) {
+            categories.push(descriptor.category);
+        }
+    }
+    let mut out = String::new();
+    for category in categories {
+        out.push_str(&format!("\n**{}**\n\n", escape_markdown(category)));
+        let mut group: Vec<_> = descriptors.iter().filter(|d| d.category == category).collect();
+        group.sort_by_key(|d| d.order);
+        for descriptor in group {
+            out.push_str(&format!(
+                "- `{}` — {}\n",
+                descriptor.typed_signature(),
+                descriptor.description,
+            ));
+        }
+    }
+    out
 }
 
 fn prose_cell<T: Into<String>>(text: T) -> TableCellContent {
@@ -595,6 +687,105 @@ mod tests {
             string_value.r,
             string_value.g,
             string_value.b,
+        );
+    }
+
+    const CTX_DOC_BEGIN_MARKER: &str =
+        "<!-- BEGIN GENERATED: ctx catalog (source: md schema about / context_catalog_markdown) -->";
+    const CTX_DOC_END_MARKER: &str = "<!-- END GENERATED: ctx catalog -->";
+
+    /// The per-variable catalog reference in `docs/topics/context-variables.md`
+    /// must be the exact `context_catalog_markdown()` output — the same renderer
+    /// `md schema about --verbose` uses — so the doc can never drift from the
+    /// schema-derived catalog. The generated block lives between the BEGIN/END
+    /// marker comments; on mismatch this prints the expected block so a developer
+    /// can paste it back between the markers to regenerate.
+    #[test]
+    fn context_variables_doc_matches_generated_catalog() {
+        let doc = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/topics/context-variables.md"
+        ));
+
+        let generated = context_catalog_markdown();
+
+        // Cross-check the generated catalog carries the migrated types and drops
+        // the retired `_list` twins before comparing byte-for-byte with the doc.
+        for (name, ty) in [
+            ("ctx.now", "datetime"),
+            ("ctx.today", "date"),
+            ("ctx.packages", "string[]"),
+            ("ctx.timestamp", "number(integer)"),
+        ] {
+            let entry = generated
+                .lines()
+                .find(|line| line.contains(&format!("**{name}**")))
+                .unwrap_or_else(|| panic!("generated catalog missing {name}:\n{generated}"));
+            assert!(
+                entry.contains(ty),
+                "generated {name} must be typed `{ty}`: {entry}"
+            );
+        }
+        for list_twin in ["packages_list", "dirty_files_list"] {
+            assert!(
+                !generated.contains(list_twin),
+                "generated catalog must not contain retired `_list` row {list_twin}:\n{generated}"
+            );
+        }
+
+        let begin = doc.find(CTX_DOC_BEGIN_MARKER).unwrap_or_else(|| {
+            panic!("context-variables.md missing BEGIN marker: {CTX_DOC_BEGIN_MARKER}")
+        });
+        let after_begin = doc[begin..]
+            .find('\n')
+            .map(|nl| begin + nl + 1)
+            .expect("BEGIN marker line must be newline-terminated");
+        let end = doc[after_begin..]
+            .find(CTX_DOC_END_MARKER)
+            .map(|offset| after_begin + offset)
+            .unwrap_or_else(|| {
+                panic!("context-variables.md missing END marker after BEGIN: {CTX_DOC_END_MARKER}")
+            });
+        let doc_block = &doc[after_begin..end];
+
+        assert_eq!(
+            doc_block.trim(),
+            generated.trim(),
+            "context-variables.md generated catalog is stale. Replace the content between the \
+             markers with the regenerated block below.\n\n\
+             ===== BEGIN REGENERATED BLOCK =====\n{}\n===== END REGENERATED BLOCK =====",
+            generated.trim(),
+        );
+    }
+
+    #[test]
+    fn context_catalog_renders_migrated_variables_with_types() {
+        let catalog = context_catalog_markdown();
+
+        let now_line = catalog
+            .lines()
+            .find(|line| line.contains("**ctx.now**"))
+            .expect("ctx.now entry");
+        assert!(now_line.contains("datetime"), "ctx.now type: {now_line}");
+
+        let packages_line = catalog
+            .lines()
+            .find(|line| line.contains("**ctx.packages**"))
+            .expect("ctx.packages entry");
+        assert!(packages_line.contains("string[]"), "ctx.packages type: {packages_line}");
+
+        assert!(
+            !catalog.contains("packages_list"),
+            "removed twin packages_list must be absent:\n{catalog}"
+        );
+    }
+
+    #[test]
+    fn expression_function_signatures_render_typed_list_formatters() {
+        let signatures = expression_function_signatures_markdown();
+        assert!(
+            signatures.contains("as_csv(list: any[]) -> string | error"),
+            "missing typed as_csv signature:\n{signatures}"
         );
     }
 

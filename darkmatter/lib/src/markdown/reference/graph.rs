@@ -743,7 +743,7 @@ fn build_node(
 ///
 /// Avoids repeated extraction passes over the same HTML (rec #17) by
 /// extracting style blocks once and reusing them for CSS/font extraction.
-fn extract_all_references(content: &str, source: &ComposeSource) -> ReferenceSet {
+pub(super) fn extract_all_references(content: &str, source: &ComposeSource) -> ReferenceSet {
     let mut records = Vec::new();
 
     // Markdown-native references

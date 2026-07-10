@@ -1,0 +1,7 @@
+$schema:
+    type: enum(string,number,boolean,date,time,datetime,any; required)
+    parameter:
+        "<string>": any
+        $constraints:
+            min-keys: 1
+            max-keys: 1

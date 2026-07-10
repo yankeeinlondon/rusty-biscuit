@@ -2,17 +2,17 @@
 $schema:
     spec: file(required;match(**/*spec*.md);eager)
     design: file(match(**/*design*.md))
-    plan: file
+    plan: file(required)
     
 description: "Creates a multi-phase, high confidence plan from a _feature_ or _fix_"
 root: "{{ctx.repo_root}}"
-area: "{{ctx.current_package_area == 'root' ? ctx.current_package || '' : ctx.current_package_area}}"
-plan: "{{ dirname(spec) + '/spec.md' }}"
+area: "{{ctx.area }}"
+plan: "{{ dirname(spec) + '/plan.md' }}"
 start:
     message: "🖊️ creating a plan for the `{{spec}}` specification"
 success:
-    stderr: "The `{{plan}}` _plan_ has been created"
-    message: "✅  the _plan_ for the spec `{{spec}}` was created _at_ {{ctx.time}}"
+    stderr: "The `{{link(plan)}}` _plan_ has been created"
+    message: "✅  the _plan_ for the spec `{{parent_dir(spec)}}` was created _at_ {{ctx.time}}"
 failure:
     message: "❌️  the _plan_ for the spec `{{spec}}` failed to complete!"
 ---
@@ -40,11 +40,11 @@ You are a planning agent. Convert the following documents into a high confidence
 
 ## Closure
 
-- Save the plan as "{{ctx.repo_root}}/{{area}}/{{dir}}/{{plan}}"
+- Save the plan as "{{plan}}"
 - Add frontmatter to the plan document and set:
     - `agent` set this to "{{env.AGENT}}"
-    - `phases` property to the number of phases defined in this plan
+    - `total_phases` property to the number of phases defined in this plan
     - `created` add the date in YYYY-MM-DD format
-    - `start_phase` set this to the starting phase number; usually 1 but may be 0 sometimes
+    - `phase` set this to the starting phase number; usually 1 but may be 0 sometimes
     - `agent` set this to "{{ env.AGENT }}/{{ env.MODEL || default }}"
     - `yolo` set this to "{{ env.YOLO }}"

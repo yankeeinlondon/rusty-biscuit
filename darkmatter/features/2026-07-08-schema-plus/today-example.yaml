@@ -1,0 +1,7 @@
+kind: example
+invocation: "{{ ctx.today }}"
+returns: "2024-12-25"
+description: |-
+    The date is always of the YYYY-MM-DD format and is resolved into an actual
+    date when the a document is _composed_. The actual date is calculated using
+    the host's local timezone.

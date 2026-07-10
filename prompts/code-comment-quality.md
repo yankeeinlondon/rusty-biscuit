@@ -24,4 +24,4 @@ while performing the "code-comments" task so that you can benefit from others wh
 This task is about improving the quality of the code comments in source code but this is a large monorepo and you
 should not tackle all of it in one go. Instead YOUR focus is exclusively on the following packages:
 
-{{ctx.current_packages}}
+{{ as_unordered_list(ctx.current_packages) }}

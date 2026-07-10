@@ -1,62 +1,91 @@
-//! Typed descriptor catalog for runtime context variables.
+//! Derived descriptor catalog for runtime context variables.
 //!
 //! Each [`ContextVariableDescriptor`] describes a single variable that may be
-//! captured into `ComposeContext` at runtime. The catalog is a static,
-//! compile-time constant — constructing or reading it performs no host probes,
-//! no I/O, and no runtime context capture.
-use crate::catalog::{Described, Example, ExampleVerification};
+//! captured into `ComposeContext` at runtime. The catalog is **projected from
+//! the authored base schema** (`darkmatter/docs/schemas/darkmatter.yaml`) rather
+//! than hand-declared: `name`, type, `description`, and the `generated` /
+//! `required` / `default` flags all come from parsing the base schema's `ctx`
+//! block once via [`crate::markdown::schemas::darkmatter_base_schema`]. This
+//! makes the YAML the single source of truth (spec D1/D5) so the schema and the
+//! catalog can never drift.
+//!
+//! Only two pieces of catalog metadata are not schema data and stay in Rust:
+//! the presentation grouping ([`CONTEXT_VARIABLE_GROUPING`], `category` /
+//! `subsection`) and — deferred — verified examples. Reading the catalog parses
+//! the checked-in YAML on first access but performs no host probe, no runtime
+//! context capture, and no network or filesystem I/O beyond the compiled-in
+//! schema string.
+use std::fmt;
+use std::sync::LazyLock;
 
+use crate::catalog::{Described, Example};
+use crate::markdown::schemas::{
+    Constraint, PropertyDef, SimplifiedSchema, SimplifiedType, TypeExpr, darkmatter_base_schema,
+};
 
-/// Display type for a context variable's runtime value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ContextValueType {
-    /// ISO-8601 date string (`YYYY-MM-DD`).
-    Date,
-    /// ISO-8601 datetime string (`YYYY-MM-DDTHH:MM:SS`).
-    DateTime,
-    /// Time string (`HH:MM` or `HH:MM AM/PM`).
-    Time,
-    /// Timezone abbreviation or IANA name.
-    Timezone,
-    /// Integer number.
-    Integer,
-    /// Floating-point number.
-    Number,
-    /// Boolean (`true`/`false`).
-    Boolean,
-    /// Plain string (possibly empty).
-    String,
-    /// Comma-separated values.
-    Csv,
-    /// Markdown bullet list.
-    MarkdownList,
-    /// Nested Markdown list (dependencies, etc.).
-    NestedMarkdownList,
-    /// Object/map shape.
-    Object,
-    /// Value of the inner type that may be `null` when unavailable.
-    Nullable(&'static ContextValueType),
+/// SimplifiedSchema type of a context variable, projected from the base schema.
+///
+/// Replaces the retired presentation-only enum. After the Group 1–3 collapse
+/// (spec D3/D6), every `ctx.*` type is a real SimplifiedSchema type, so this
+/// carries only genuine type shape: the primitive keyword, whether it is an
+/// array, and whether a `number` is integer-constrained. Optionality is a
+/// *flag* ([`ContextVariableDescriptor::required`]), not a type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextValueType {
+    /// Projected primitive type keyword (`string`, `datetime`, `object`, …).
+    pub base: SimplifiedType,
+    /// Whether the schema types the value as an array (`[]`).
+    pub is_array: bool,
+    /// Whether a `number` value is integer-constrained (`number(integer)`).
+    pub integer: bool,
+}
+
+impl fmt::Display for ContextValueType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let keyword = self.base.as_keyword();
+        if self.is_array {
+            write!(f, "{keyword}[]")
+        } else if self.integer && self.base == SimplifiedType::Number {
+            write!(f, "number(integer)")
+        } else {
+            write!(f, "{keyword}")
+        }
+    }
 }
 
 /// Descriptor for a single runtime context variable.
+///
+/// The `name`, `display_type`, `description`, and the three schema flags are
+/// projected from the base schema; `category` / `subsection` come from
+/// [`CONTEXT_VARIABLE_GROUPING`]; `order` is the YAML declaration index.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContextVariableDescriptor {
-
     /// Canonical variable name (used in `ctx.NAME`).
     pub name: &'static str,
-    /// Human-readable type for display.
+    /// Projected SimplifiedSchema type.
     pub display_type: ContextValueType,
-    /// Short description of the variable's meaning.
+    /// Short description of the variable's meaning (schema `-> {description}`).
     pub description: &'static str,
-    /// Top-level grouping category.
+    /// Top-level grouping category (presentation-only).
     pub category: &'static str,
-    /// Sub-section within the category (may be empty).
+    /// Sub-section within the category (presentation-only, may be empty).
     pub subsection: &'static str,
-    /// Stable display order within the subsection.
+    /// Stable display order: the variable's YAML declaration index (1-based).
     pub order: usize,
-    /// Optional verified example.
+    /// Whether the value is host-supplied (`generated`). Uniformly `true` for
+    /// `ctx.*`, kept as a projected flag for fidelity and drift-guarding.
+    pub generated: bool,
+    /// Whether the property is required (non-nullable). `false` means the value
+    /// may be captured as `null` when unavailable.
+    pub required: bool,
+    /// Declared default value, if the schema supplied one.
+    pub default: Option<serde_json::Value>,
+    /// Optional verified example. Currently `None`: example artifacts move to
+    /// schema-plus `example()` files, deferred until the embedded base schema
+    /// gains a runtime filesystem anchor (spec E3).
     pub example: Option<Example>,
 }
+
 impl Described for ContextVariableDescriptor {
     fn key(&self) -> &'static str {
         self.name
@@ -75,1178 +104,225 @@ impl Described for ContextVariableDescriptor {
     }
 }
 
-
-/// All context variable descriptors, in display order.
-pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
+/// Presentation grouping (`category`, `subsection`) for each `ctx.*` variable.
+///
+/// Deliberately kept out of the validation schema (spec D5): grouping is
+/// documentation taxonomy, not schema semantics. Ordered to mirror YAML
+/// declaration order for readability. Must stay **total** — every projected
+/// `ctx.*` key needs an entry and every entry must name a live key. The
+/// `grouping_map_is_total` test fails if the YAML adds or removes a key without
+/// a matching grouping edit.
+const CONTEXT_VARIABLE_GROUPING: &[(&str, &str, &str)] = &[
     // ── Date and Time ───────────────────────────────────────────────
-    ContextVariableDescriptor {
-        name: "now",
-        display_type: ContextValueType::DateTime,
-        description: "Local date and time in ISO-8601 format.",
-        category: "Date and Time",
-        subsection: "",
-        order: 1,
-
-        example: Some(Example { invocation: "ctx.now", result: "2024-06-15T10:30:00", verification: ExampleVerification::TypeShapeOnly }),
- },
-    ContextVariableDescriptor {
-
-        name: "now_utc",
-        display_type: ContextValueType::DateTime,
-        description: "UTC date and time in ISO-8601 format.",
-        category: "Date and Time",
-        subsection: "",
-        order: 2,
-
-        example: Some(Example { invocation: "ctx.now_utc", result: "2024-06-15T17:30:00Z", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "today",
-        display_type: ContextValueType::Date,
-        description: "Local date in ISO-8601 format.",
-        category: "Date and Time",
-        subsection: "",
-        order: 3,
-
-        example: Some(Example { invocation: "ctx.today", result: "2024-06-15", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "today_utc",
-        display_type: ContextValueType::Date,
-        description: "UTC date in ISO-8601 format.",
-        category: "Date and Time",
-        subsection: "",
-        order: 4,
-
-        example: Some(Example { invocation: "ctx.today_utc", result: "2024-06-15", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "yesterday",
-        display_type: ContextValueType::Date,
-        description: "Local date for yesterday in ISO-8601 format.",
-        category: "Date and Time",
-        subsection: "",
-        order: 5,
-
-        example: Some(Example { invocation: "ctx.yesterday", result: "2024-06-14", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "yesterday_utc",
-        display_type: ContextValueType::Date,
-        description: "UTC date for yesterday in ISO-8601 format.",
-        category: "Date and Time",
-        subsection: "",
-        order: 6,
-
-        example: Some(Example { invocation: "ctx.yesterday_utc", result: "2024-06-14", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "tomorrow",
-        display_type: ContextValueType::Date,
-        description: "Local date for tomorrow in ISO-8601 format.",
-        category: "Date and Time",
-        subsection: "",
-        order: 7,
-
-        example: Some(Example { invocation: "ctx.tomorrow", result: "2024-06-16", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "tomorrow_utc",
-        display_type: ContextValueType::Date,
-        description: "UTC date for tomorrow in ISO-8601 format.",
-        category: "Date and Time",
-        subsection: "",
-        order: 8,
-
-        example: Some(Example { invocation: "ctx.tomorrow_utc", result: "2024-06-16", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "day",
-        display_type: ContextValueType::String,
-        description: "Full day of week name (local).",
-        category: "Date and Time",
-        subsection: "",
-        order: 9,
-
-        example: Some(Example { invocation: "ctx.day", result: "Saturday", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "day_utc",
-        display_type: ContextValueType::String,
-        description: "Full day of week name (UTC).",
-        category: "Date and Time",
-        subsection: "",
-        order: 10,
-
-        example: Some(Example { invocation: "ctx.day_utc", result: "Saturday", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "day_abbr",
-        display_type: ContextValueType::String,
-        description: "Abbreviated day of week name (local).",
-        category: "Date and Time",
-        subsection: "",
-        order: 11,
-
-        example: Some(Example { invocation: "ctx.day_abbr", result: "Sat", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "day_abbr_utc",
-        display_type: ContextValueType::String,
-        description: "Abbreviated day of week name (UTC).",
-        category: "Date and Time",
-        subsection: "",
-        order: 12,
-
-        example: Some(Example { invocation: "ctx.day_abbr_utc", result: "Sat", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-        name: "year",
-        display_type: ContextValueType::String,
-        description: "Current year (local).",
-        category: "Date and Time",
-        subsection: "",
-        order: 13,
-
-
-        example: Some(Example { invocation: "ctx.year", result: "2024", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-        name: "year_utc",
-        display_type: ContextValueType::String,
-        description: "Current year (UTC).",
-        category: "Date and Time",
-        subsection: "",
-        order: 14,
-
-
-        example: Some(Example { invocation: "ctx.year_utc", result: "2024", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-        name: "month",
-        display_type: ContextValueType::String,
-        description: "Current month as zero-padded number (local).",
-        category: "Date and Time",
-        subsection: "",
-        order: 15,
-
-
-        example: Some(Example { invocation: "ctx.month", result: "06", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "month_name",
-        display_type: ContextValueType::String,
-        description: "Full month name (local).",
-        category: "Date and Time",
-        subsection: "",
-        order: 16,
-
-        example: Some(Example { invocation: "ctx.month_name", result: "June", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "month_name_abbr",
-        display_type: ContextValueType::String,
-        description: "Abbreviated month name (local).",
-        category: "Date and Time",
-        subsection: "",
-        order: 17,
-
-        example: Some(Example { invocation: "ctx.month_name_abbr", result: "Jun", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-        name: "day_of_month",
-        display_type: ContextValueType::String,
-        description: "Day of month as number (local).",
-        category: "Date and Time",
-        subsection: "",
-        order: 18,
-
-
-        example: Some(Example { invocation: "ctx.day_of_month", result: "15", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "day_of_month_suffixed",
-        display_type: ContextValueType::String,
-        description: "Day of month with English ordinal suffix (local).",
-        category: "Date and Time",
-        subsection: "",
-        order: 19,
-
-        example: Some(Example { invocation: "ctx.day_of_month_suffixed", result: "15th", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "time",
-        display_type: ContextValueType::Time,
-        description: "Current local time in 12-hour format with AM/PM.",
-        category: "Date and Time",
-        subsection: "",
-        order: 20,
-
-        example: Some(Example { invocation: "ctx.time", result: "10:30 AM", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "time_military",
-        display_type: ContextValueType::Time,
-        description: "Current local time in 24-hour format.",
-        category: "Date and Time",
-        subsection: "",
-        order: 21,
-
-        example: Some(Example { invocation: "ctx.time_military", result: "10:30", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "time_utc",
-        display_type: ContextValueType::Time,
-        description: "Current UTC time in 12-hour format with AM/PM.",
-        category: "Date and Time",
-        subsection: "",
-        order: 22,
-
-        example: Some(Example { invocation: "ctx.time_utc", result: "05:30 PM (UTC)", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "time_military_utc",
-        display_type: ContextValueType::Time,
-        description: "Current UTC time in 24-hour format.",
-        category: "Date and Time",
-        subsection: "",
-        order: 23,
-
-        example: Some(Example { invocation: "ctx.time_military_utc", result: "17:30 (UTC)", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "timezone",
-        display_type: ContextValueType::Timezone,
-        description: "Local timezone abbreviation (e.g., PST, EST).",
-        category: "Date and Time",
-        subsection: "",
-        order: 24,
-
-        example: Some(Example { invocation: "ctx.timezone", result: "PDT", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "timezone_offset",
-        display_type: ContextValueType::String,
-        description: "Local timezone offset (e.g., -0800).",
-        category: "Date and Time",
-        subsection: "",
-        order: 25,
-
-        example: Some(Example { invocation: "ctx.timezone_offset", result: "-0700", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "timezone_iana",
-        display_type: ContextValueType::Timezone,
-        description: "Local timezone IANA identifier (e.g., America/Los_Angeles).",
-        category: "Date and Time",
-        subsection: "",
-        order: 26,
-
-        example: Some(Example { invocation: "ctx.timezone_iana", result: "America/Los_Angeles", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "start_of_week_sun",
-        display_type: ContextValueType::Date,
-        description: "Date of Sunday-start week boundary (local).",
-        category: "Date and Time",
-        subsection: "",
-        order: 27,
-
-        example: Some(Example { invocation: "ctx.start_of_week_sun", result: "2024-06-09", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "end_of_week_sun",
-        display_type: ContextValueType::Date,
-        description: "Date of Sunday-start week end (local).",
-        category: "Date and Time",
-        subsection: "",
-        order: 28,
-
-        example: Some(Example { invocation: "ctx.end_of_week_sun", result: "2024-06-15", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "start_of_week_mon",
-        display_type: ContextValueType::Date,
-        description: "Date of Monday-start week boundary (local).",
-        category: "Date and Time",
-        subsection: "",
-        order: 29,
-
-        example: Some(Example { invocation: "ctx.start_of_week_mon", result: "2024-06-10", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "end_of_week_mon",
-        display_type: ContextValueType::Date,
-        description: "Date of Monday-start week end (local).",
-        category: "Date and Time",
-        subsection: "",
-        order: 30,
-
-        example: Some(Example { invocation: "ctx.end_of_week_mon", result: "2024-06-16", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "start_of_week_sun_utc",
-        display_type: ContextValueType::Date,
-        description: "Date of Sunday-start week boundary (UTC).",
-        category: "Date and Time",
-        subsection: "",
-        order: 31,
-
-        example: Some(Example { invocation: "ctx.start_of_week_sun_utc", result: "2024-06-09", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "end_of_week_sun_utc",
-        display_type: ContextValueType::Date,
-        description: "Date of Sunday-start week end (UTC).",
-        category: "Date and Time",
-        subsection: "",
-        order: 32,
-
-        example: Some(Example { invocation: "ctx.end_of_week_sun_utc", result: "2024-06-15", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "start_of_week_mon_utc",
-        display_type: ContextValueType::Date,
-        description: "Date of Monday-start week boundary (UTC).",
-        category: "Date and Time",
-        subsection: "",
-        order: 33,
-
-        example: Some(Example { invocation: "ctx.start_of_week_mon_utc", result: "2024-06-10", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "end_of_week_mon_utc",
-        display_type: ContextValueType::Date,
-        description: "Date of Monday-start week end (UTC).",
-        category: "Date and Time",
-        subsection: "",
-        order: 34,
-
-        example: Some(Example { invocation: "ctx.end_of_week_mon_utc", result: "2024-06-16", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "season",
-        display_type: ContextValueType::String,
-        description: "Current meteorological season.",
-        category: "Date and Time",
-        subsection: "",
-        order: 35,
-
-        example: Some(Example { invocation: "ctx.season", result: "Summer", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "timestamp",
-        display_type: ContextValueType::Integer,
-        description: "Unix timestamp in seconds (UTC).",
-        category: "Date and Time",
-        subsection: "",
-        order: 36,
-
-        example: Some(Example { invocation: "ctx.timestamp", result: "1718458200", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "timestamp_ms",
-        display_type: ContextValueType::Integer,
-        description: "Unix timestamp in milliseconds (UTC).",
-        category: "Date and Time",
-        subsection: "",
-        order: 37,
-
-        example: Some(Example { invocation: "ctx.timestamp_ms", result: "1718458200000", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    // ── Date and Time aliases ───────────────────────────────────────
-    // Backward-compatible aliases inserted by `populate_datetime_aliases`.
-    // Each mirrors a canonical key; kept so existing documents that use the
-    // older spelling keep resolving. Grouped into their own subsection so the
-    // report makes the redundancy explicit rather than scattering duplicates
-    // among the canonical rows.
-    ContextVariableDescriptor {
-
-        name: "utc",
-        display_type: ContextValueType::DateTime,
-        description: "Alias of `now_utc`: UTC date and time in ISO-8601 format.",
-        category: "Date and Time",
-        subsection: "Aliases",
-        order: 1,
-
-        example: Some(Example { invocation: "ctx.utc", result: "2024-06-15T17:30:00Z", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "dow",
-        display_type: ContextValueType::String,
-        description: "Alias of `day`: full day of week name (local).",
-        category: "Date and Time",
-        subsection: "Aliases",
-        order: 2,
-
-        example: Some(Example { invocation: "ctx.dow", result: "Saturday", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "dow_abbr",
-        display_type: ContextValueType::String,
-        description: "Alias of `day_abbr`: abbreviated day of week name (local).",
-        category: "Date and Time",
-        subsection: "Aliases",
-        order: 3,
-
-        example: Some(Example { invocation: "ctx.dow_abbr", result: "Sat", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
+    ("now", "Date and Time", ""),
+    ("now_utc", "Date and Time", ""),
+    ("today", "Date and Time", ""),
+    ("today_utc", "Date and Time", ""),
+    ("yesterday", "Date and Time", ""),
+    ("yesterday_utc", "Date and Time", ""),
+    ("tomorrow", "Date and Time", ""),
+    ("tomorrow_utc", "Date and Time", ""),
+    ("day", "Date and Time", ""),
+    ("day_utc", "Date and Time", ""),
+    ("day_abbr", "Date and Time", ""),
+    ("day_abbr_utc", "Date and Time", ""),
+    ("year", "Date and Time", ""),
+    ("year_utc", "Date and Time", ""),
+    ("month", "Date and Time", ""),
+    ("month_name", "Date and Time", ""),
+    ("month_name_abbr", "Date and Time", ""),
+    ("day_of_month", "Date and Time", ""),
+    ("day_of_month_suffixed", "Date and Time", ""),
+    ("time", "Date and Time", ""),
+    ("time_military", "Date and Time", ""),
+    ("time_utc", "Date and Time", ""),
+    ("time_military_utc", "Date and Time", ""),
+    ("timezone", "Date and Time", ""),
+    ("timezone_offset", "Date and Time", ""),
+    ("timezone_iana", "Date and Time", ""),
+    ("start_of_week_sun", "Date and Time", ""),
+    ("end_of_week_sun", "Date and Time", ""),
+    ("start_of_week_mon", "Date and Time", ""),
+    ("end_of_week_mon", "Date and Time", ""),
+    ("start_of_week_sun_utc", "Date and Time", ""),
+    ("end_of_week_sun_utc", "Date and Time", ""),
+    ("start_of_week_mon_utc", "Date and Time", ""),
+    ("end_of_week_mon_utc", "Date and Time", ""),
+    ("season", "Date and Time", ""),
+    ("timestamp", "Date and Time", ""),
+    ("timestamp_ms", "Date and Time", ""),
+    ("utc", "Date and Time", "Aliases"),
+    ("dow", "Date and Time", "Aliases"),
+    ("dow_abbr", "Date and Time", "Aliases"),
     // ── Repository ──────────────────────────────────────────────────
-    ContextVariableDescriptor {
-
-        name: "repo",
-        display_type: ContextValueType::String,
-        description: "Repository name from preferred remote URL.",
-        category: "Repository",
-        subsection: "",
-        order: 1,
-
-        example: Some(Example { invocation: "ctx.repo", result: "rusty-biscuit", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "repo_root",
-        display_type: ContextValueType::String,
-        description: "Absolute path to repository root.",
-        category: "Repository",
-        subsection: "",
-        order: 2,
-
-        example: Some(Example { invocation: "ctx.repo_root", result: "/Users/ken/rusty-biscuit", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "is_monorepo",
-        display_type: ContextValueType::Boolean,
-        description: "Whether the repository is a monorepo.",
-        category: "Repository",
-        subsection: "",
-        order: 3,
-
-        example: Some(Example { invocation: "ctx.is_monorepo", result: "true", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "package_root",
-        display_type: ContextValueType::Nullable(&ContextValueType::String),
-        description: "Absolute path to current package root (monorepo only).",
-        category: "Repository",
-        subsection: "Packages",
-        order: 1,
-
-        example: Some(Example { invocation: "ctx.package_root", result: "claudine/lib", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "package_area_root",
-        display_type: ContextValueType::Nullable(&ContextValueType::String),
-        description: "Absolute path to current package area root (monorepo only).",
-        category: "Repository",
-        subsection: "Packages",
-        order: 2,
-
-        example: Some(Example { invocation: "ctx.package_area_root", result: "claudine", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "packages",
-        display_type: ContextValueType::Csv,
-        description: "Comma-separated list of all packages in the monorepo.",
-        category: "Repository",
-        subsection: "Packages",
-        order: 3,
-
-        example: Some(Example { invocation: "ctx.packages", result: "biscuit-hash, claudine, darkmatter", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "packages_list",
-        display_type: ContextValueType::MarkdownList,
-        description: "Markdown bullet list of all packages in the monorepo.",
-        category: "Repository",
-        subsection: "Packages",
-        order: 4,
-
-        example: Some(Example { invocation: "ctx.packages_list", result: "- biscuit-hash\\n- claudine\\n- darkmatter", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "package_areas",
-        display_type: ContextValueType::Csv,
-        description: "Comma-separated list of all package areas.",
-        category: "Repository",
-        subsection: "Packages",
-        order: 5,
-
-        example: Some(Example { invocation: "ctx.package_areas", result: "biscuit, claudine", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "package_areas_list",
-        display_type: ContextValueType::MarkdownList,
-        description: "Markdown bullet list of all package areas.",
-        category: "Repository",
-        subsection: "Packages",
-        order: 6,
-
-        example: Some(Example { invocation: "ctx.package_areas_list", result: "- biscuit\\n- claudine", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "current_package",
-        display_type: ContextValueType::Nullable(&ContextValueType::String),
-        description: "Name of the package containing the current working directory.",
-        category: "Repository",
-        subsection: "Packages",
-        order: 7,
-
-        example: Some(Example { invocation: "ctx.current_package", result: "claudine", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "current_package_area",
-        display_type: ContextValueType::Nullable(&ContextValueType::String),
-        description: "Name of the package area containing the current working directory.",
-        category: "Repository",
-        subsection: "Packages",
-        order: 8,
-
-        example: Some(Example { invocation: "ctx.current_package_area", result: "claudine", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "area",
-        display_type: ContextValueType::String,
-        description: "Scoped area name: package name, area name, or empty.",
-        category: "Repository",
-        subsection: "Scope",
-        order: 1,
-
-        example: Some(Example { invocation: "ctx.area", result: "claudine", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "area_description",
-        display_type: ContextValueType::String,
-        description: "Human-readable description of the scoped area.",
-        category: "Repository",
-        subsection: "Scope",
-        order: 2,
-
-        example: Some(Example { invocation: "ctx.area_description", result: "claudine package area", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "area_root",
-        display_type: ContextValueType::String,
-        description: "Absolute path to the scoped area root.",
-        category: "Repository",
-        subsection: "Scope",
-        order: 3,
-
-        example: Some(Example { invocation: "ctx.area_root", result: "/Users/ken/rusty-biscuit/claudine", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "current_packages",
-        display_type: ContextValueType::MarkdownList,
-        description: "Markdown list of packages under the current working directory.",
-        category: "Repository",
-        subsection: "Scope",
-        order: 4,
-
-        example: Some(Example { invocation: "ctx.current_packages", result: "- claudine (claudine/lib)\\n- claudine-cli (claudine/cli)", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "depends_on",
-        display_type: ContextValueType::NestedMarkdownList,
-        description: "Nested Markdown list of dependencies for the scoped area.",
-        category: "Repository",
-        subsection: "Scope",
-        order: 5,
-
-        example: Some(Example { invocation: "ctx.depends_on", result: "- 'claudine' depends on:\\n    - biscuit-terminal", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "used_by",
-        display_type: ContextValueType::NestedMarkdownList,
-        description: "Nested Markdown list of packages that depend on the scoped area.",
-        category: "Repository",
-        subsection: "Scope",
-        order: 6,
-
-        example: Some(Example { invocation: "ctx.used_by", result: "- 'claudine' is used by:\\n    - claudine-cli", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
+    ("repo", "Repository", ""),
+    ("repo_root", "Repository", ""),
+    ("is_monorepo", "Repository", ""),
+    ("package_root", "Repository", "Packages"),
+    ("package_area_root", "Repository", "Packages"),
+    ("packages", "Repository", "Packages"),
+    ("package_areas", "Repository", "Packages"),
+    ("current_package", "Repository", "Packages"),
+    ("current_package_area", "Repository", "Packages"),
+    ("area", "Repository", "Scope"),
+    ("area_description", "Repository", "Scope"),
+    ("area_root", "Repository", "Scope"),
+    ("current_packages", "Repository", "Scope"),
+    ("depends_on", "Repository", "Scope"),
+    ("used_by", "Repository", "Scope"),
     // ── File Changes ────────────────────────────────────────────────
-    ContextVariableDescriptor {
-
-        name: "dirty_files",
-        display_type: ContextValueType::Csv,
-        description: "Comma-separated list of files with uncommitted changes.",
-        category: "File Changes",
-        subsection: "",
-        order: 1,
-
-        example: Some(Example { invocation: "ctx.dirty_files", result: "Cargo.toml, src/lib.rs", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "dirty_files_list",
-        display_type: ContextValueType::MarkdownList,
-        description: "Markdown bullet list of files with uncommitted changes.",
-        category: "File Changes",
-        subsection: "",
-        order: 2,
-
-        example: Some(Example { invocation: "ctx.dirty_files_list", result: "- Cargo.toml\\n- src/lib.rs", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "dirty_source_code_files",
-        display_type: ContextValueType::Csv,
-        description: "Comma-separated list of dirty source code files.",
-        category: "File Changes",
-        subsection: "",
-        order: 3,
-
-        example: Some(Example { invocation: "ctx.dirty_source_code_files", result: "src/lib.rs", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "dirty_source_code_files_list",
-        display_type: ContextValueType::MarkdownList,
-        description: "Markdown bullet list of dirty source code files.",
-        category: "File Changes",
-        subsection: "",
-        order: 4,
-
-        example: Some(Example { invocation: "ctx.dirty_source_code_files_list", result: "- src/lib.rs", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "staged_files",
-        display_type: ContextValueType::Csv,
-        description: "Comma-separated list of staged files.",
-        category: "File Changes",
-        subsection: "",
-        order: 5,
-
-        example: Some(Example { invocation: "ctx.staged_files", result: "src/lib.rs", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "staged_files_list",
-        display_type: ContextValueType::MarkdownList,
-        description: "Markdown bullet list of staged files.",
-        category: "File Changes",
-        subsection: "",
-        order: 6,
-
-        example: Some(Example { invocation: "ctx.staged_files_list", result: "- src/lib.rs", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "untracked_files",
-        display_type: ContextValueType::Csv,
-        description: "Comma-separated list of untracked files.",
-        category: "File Changes",
-        subsection: "",
-        order: 7,
-
-        example: Some(Example { invocation: "ctx.untracked_files", result: "new.md", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "untracked_files_list",
-        display_type: ContextValueType::MarkdownList,
-        description: "Markdown bullet list of untracked files.",
-        category: "File Changes",
-        subsection: "",
-        order: 8,
-
-        example: Some(Example { invocation: "ctx.untracked_files_list", result: "- new.md", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "dirty_packages",
-        display_type: ContextValueType::Csv,
-        description: "Comma-separated list of packages with dirty files.",
-        category: "File Changes",
-        subsection: "Packages",
-        order: 1,
-
-        example: Some(Example { invocation: "ctx.dirty_packages", result: "claudine", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "dirty_packages_list",
-        display_type: ContextValueType::MarkdownList,
-        description: "Markdown bullet list of packages with dirty files.",
-        category: "File Changes",
-        subsection: "Packages",
-        order: 2,
-
-        example: Some(Example { invocation: "ctx.dirty_packages_list", result: "- claudine", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "dirty_package_areas",
-        display_type: ContextValueType::Csv,
-        description: "Comma-separated list of package areas with dirty files.",
-        category: "File Changes",
-        subsection: "Packages",
-        order: 3,
-
-        example: Some(Example { invocation: "ctx.dirty_package_areas", result: "claudine", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "dirty_package_areas_list",
-        display_type: ContextValueType::MarkdownList,
-        description: "Markdown bullet list of package areas with dirty files.",
-        category: "File Changes",
-        subsection: "Packages",
-        order: 4,
-
-        example: Some(Example { invocation: "ctx.dirty_package_areas_list", result: "- claudine", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "staged_packages",
-        display_type: ContextValueType::Csv,
-        description: "Comma-separated list of packages with staged files.",
-        category: "File Changes",
-        subsection: "Packages",
-        order: 5,
-
-        example: Some(Example { invocation: "ctx.staged_packages", result: "claudine", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "staged_packages_list",
-        display_type: ContextValueType::MarkdownList,
-        description: "Markdown bullet list of packages with staged files.",
-        category: "File Changes",
-        subsection: "Packages",
-        order: 6,
-
-        example: Some(Example { invocation: "ctx.staged_packages_list", result: "- claudine", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "staged_package_areas",
-        display_type: ContextValueType::Csv,
-        description: "Comma-separated list of package areas with staged files.",
-        category: "File Changes",
-        subsection: "Packages",
-        order: 7,
-
-        example: Some(Example { invocation: "ctx.staged_package_areas", result: "claudine", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "staged_package_areas_list",
-        display_type: ContextValueType::MarkdownList,
-        description: "Markdown bullet list of package areas with staged files.",
-        category: "File Changes",
-        subsection: "Packages",
-        order: 8,
-
-        example: Some(Example { invocation: "ctx.staged_package_areas_list", result: "- claudine", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "current_package_has_staged_files",
-        display_type: ContextValueType::Boolean,
-        description: "Whether the current package has staged files.",
-        category: "File Changes",
-        subsection: "Flags",
-        order: 1,
-
-        example: Some(Example { invocation: "ctx.current_package_has_staged_files", result: "false", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "current_package_area_has_staged_files",
-        display_type: ContextValueType::Boolean,
-        description: "Whether the current package area has staged files.",
-        category: "File Changes",
-        subsection: "Flags",
-        order: 2,
-
-        example: Some(Example { invocation: "ctx.current_package_area_has_staged_files", result: "false", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "current_package_has_dirty_files",
-        display_type: ContextValueType::Boolean,
-        description: "Whether the current package has dirty files.",
-        category: "File Changes",
-        subsection: "Flags",
-        order: 3,
-
-        example: Some(Example { invocation: "ctx.current_package_has_dirty_files", result: "true", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "current_package_area_has_dirty_files",
-        display_type: ContextValueType::Boolean,
-        description: "Whether the current package area has dirty files.",
-        category: "File Changes",
-        subsection: "Flags",
-        order: 4,
-
-        example: Some(Example { invocation: "ctx.current_package_area_has_dirty_files", result: "true", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
+    ("dirty_files", "File Changes", ""),
+    ("dirty_source_code_files", "File Changes", ""),
+    ("staged_files", "File Changes", ""),
+    ("untracked_files", "File Changes", ""),
+    ("dirty_packages", "File Changes", "Packages"),
+    ("dirty_package_areas", "File Changes", "Packages"),
+    ("staged_packages", "File Changes", "Packages"),
+    ("staged_package_areas", "File Changes", "Packages"),
+    ("current_package_has_staged_files", "File Changes", "Flags"),
+    ("current_package_area_has_staged_files", "File Changes", "Flags"),
+    ("current_package_has_dirty_files", "File Changes", "Flags"),
+    ("current_package_area_has_dirty_files", "File Changes", "Flags"),
     // ── Languages ───────────────────────────────────────────────────
-    ContextVariableDescriptor {
-        name: "programming_languages_in_repo",
-        display_type: ContextValueType::Nullable(&ContextValueType::Csv),
-        description: "Comma-separated list of all programming languages in the repository.",
-        category: "Languages",
-        subsection: "",
-        order: 1,
-
-
-        example: Some(Example { invocation: "ctx.programming_languages_in_repo", result: "Rust, TypeScript", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "programming_language",
-        display_type: ContextValueType::Nullable(&ContextValueType::String),
-        description: "Primary programming language for the current scope.",
-        category: "Languages",
-        subsection: "",
-        order: 2,
-
-        example: Some(Example { invocation: "ctx.programming_language", result: "Rust", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "package_manager",
-        display_type: ContextValueType::Nullable(&ContextValueType::String),
-        description: "Primary package manager for the current scope.",
-        category: "Languages",
-        subsection: "",
-        order: 3,
-
-        example: Some(Example { invocation: "ctx.package_manager", result: "cargo", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
+    ("programming_languages_in_repo", "Languages", ""),
+    ("programming_language", "Languages", ""),
+    ("package_manager", "Languages", ""),
     // ── Documents ───────────────────────────────────────────────────
-    ContextVariableDescriptor {
-
-        name: "docs_readme",
-        display_type: ContextValueType::Csv,
-        description: "Comma-separated list of README files in scope.",
-        category: "Documents",
-        subsection: "",
-        order: 1,
-
-        example: Some(Example { invocation: "ctx.docs_readme", result: "README.md, claudine/README.md", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "docs_blast_radius",
-        display_type: ContextValueType::Csv,
-        description: "Comma-separated list of documents with blast_radius frontmatter.",
-        category: "Documents",
-        subsection: "",
-        order: 2,
-
-        example: Some(Example { invocation: "ctx.docs_blast_radius", result: "claudine/features/plan.md", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "docs_drift",
-        display_type: ContextValueType::Csv,
-        description: "Comma-separated list of documents whose blast_radius intersects dirty source files.",
-        category: "Documents",
-        subsection: "",
-        order: 3,
-
-        example: Some(Example { invocation: "ctx.docs_drift", result: "claudine/features/plan.md", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "docs_skill",
-        display_type: ContextValueType::Nullable(&ContextValueType::String),
-        description: "Path to the best-matching skill file for the current scope.",
-        category: "Documents",
-        subsection: "",
-        order: 4,
-
-        example: Some(Example { invocation: "ctx.docs_skill", result: ".claude/skills/claudine/SKILL.md", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
+    ("docs_readme", "Documents", ""),
+    ("docs_blast_radius", "Documents", ""),
+    ("docs_drift", "Documents", ""),
+    ("docs_skill", "Documents", ""),
     // ── Operating System ────────────────────────────────────────────
-    ContextVariableDescriptor {
-
-        name: "os",
-        display_type: ContextValueType::Nullable(&ContextValueType::String),
-        description: "Operating system name (Windows, macOS, Linux).",
-        category: "Operating System",
-        subsection: "",
-        order: 1,
-
-        example: Some(Example { invocation: "ctx.os", result: "macOS", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "os_distro",
-        display_type: ContextValueType::String,
-        description: "OS distribution name.",
-        category: "Operating System",
-        subsection: "",
-        order: 2,
-
-        example: Some(Example { invocation: "ctx.os_distro", result: "macOS", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "os_package_manager",
-        display_type: ContextValueType::Nullable(&ContextValueType::String),
-        description: "Primary system package manager.",
-        category: "Operating System",
-        subsection: "",
-        order: 3,
-
-        example: Some(Example { invocation: "ctx.os_package_manager", result: "brew", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "os_version",
-        display_type: ContextValueType::String,
-        description: "OS version string.",
-        category: "Operating System",
-        subsection: "",
-        order: 4,
-
-        example: Some(Example { invocation: "ctx.os_version", result: "14.5", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
+    ("os", "Operating System", ""),
+    ("os_distro", "Operating System", ""),
+    ("os_package_manager", "Operating System", ""),
+    ("os_version", "Operating System", ""),
     // ── Hardware ────────────────────────────────────────────────────
-    ContextVariableDescriptor {
-
-        name: "memory_total",
-        display_type: ContextValueType::Nullable(&ContextValueType::String),
-        description: "Total system memory as human-readable string.",
-        category: "Hardware",
-        subsection: "",
-        order: 1,
-
-        example: Some(Example { invocation: "ctx.memory_total", result: "32 GB", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "memory_used",
-        display_type: ContextValueType::Nullable(&ContextValueType::String),
-        description: "Percentage of memory currently in use.",
-        category: "Hardware",
-        subsection: "",
-        order: 2,
-
-        example: Some(Example { invocation: "ctx.memory_used", result: "45%", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "memory_avail",
-        display_type: ContextValueType::Nullable(&ContextValueType::String),
-        description: "Available memory as human-readable string.",
-        category: "Hardware",
-        subsection: "",
-        order: 3,
-
-        example: Some(Example { invocation: "ctx.memory_avail", result: "18 GB", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "cpu_cores",
-        display_type: ContextValueType::Nullable(&ContextValueType::Integer),
-        description: "Number of logical CPU cores.",
-        category: "Hardware",
-        subsection: "",
-        order: 4,
-
-        example: Some(Example { invocation: "ctx.cpu_cores", result: "12", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "cpu_arch",
-        display_type: ContextValueType::Nullable(&ContextValueType::String),
-        description: "CPU architecture string.",
-        category: "Hardware",
-        subsection: "",
-        order: 5,
-
-        example: Some(Example { invocation: "ctx.cpu_arch", result: "arm64", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "gpu",
-        display_type: ContextValueType::Nullable(&ContextValueType::String),
-        description: "GPU name(s) or null when unavailable.",
-        category: "Hardware",
-        subsection: "",
-        order: 6,
-
-        example: Some(Example { invocation: "ctx.gpu", result: "Apple M3 Max", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
+    ("memory_total", "Hardware", ""),
+    ("memory_used", "Hardware", ""),
+    ("memory_avail", "Hardware", ""),
+    ("cpu_cores", "Hardware", ""),
+    ("cpu_arch", "Hardware", ""),
+    ("gpu", "Hardware", ""),
     // ── Agent ───────────────────────────────────────────────────────
-    ContextVariableDescriptor {
-
-        name: "agent",
-        display_type: ContextValueType::String,
-        description: "Name of the executing agentic CLI, trimmed from the AGENT env var; defaults to \"unknown\".",
-        category: "Agent",
-        subsection: "",
-        order: 1,
-
-        example: Some(Example { invocation: "ctx.agent", result: "opencode", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
-    ContextVariableDescriptor {
-
-        name: "model",
-        display_type: ContextValueType::String,
-        description: "Active model identifier, trimmed from the MODEL env var; defaults to \"default\".",
-        category: "Agent",
-        subsection: "",
-        order: 2,
-
-        example: Some(Example { invocation: "ctx.model", result: "kimi-for-coding/k2p7", verification: ExampleVerification::TypeShapeOnly }),
-
-    },
+    ("agent", "Agent", ""),
+    ("model", "Agent", ""),
 ];
+
+/// All context variable descriptors, projected from the base schema in YAML
+/// declaration order. Private: external consumers use
+/// [`context_variable_descriptors`]; in-crate consumers may read this static
+/// directly.
+pub(crate) static CONTEXT_VARIABLE_DESCRIPTORS: LazyLock<Vec<ContextVariableDescriptor>> =
+    LazyLock::new(project_descriptors);
 
 /// Returns all context variable descriptors in display order.
 pub fn context_variable_descriptors() -> &'static [ContextVariableDescriptor] {
-    CONTEXT_VARIABLE_DESCRIPTORS
+    &CONTEXT_VARIABLE_DESCRIPTORS
+}
+
+/// Projects the descriptor catalog from the authored base schema's `ctx` block.
+///
+/// Runs once through [`CONTEXT_VARIABLE_DESCRIPTORS`]'s `LazyLock`. The `ctx`
+/// shape's `IndexMap` preserves YAML declaration order, so descriptor order and
+/// `order` indices match the authored document.
+fn project_descriptors() -> Vec<ContextVariableDescriptor> {
+    let schema = darkmatter_base_schema();
+    let ctx_shape = ctx_shape(&schema);
+    ctx_shape
+        .properties
+        .iter()
+        .enumerate()
+        .map(|(index, (name, def))| project_one(index, name, def))
+        .collect()
+}
+
+/// Extracts the inline-object shape rooted at the base schema's `ctx` property.
+fn ctx_shape(schema: &SimplifiedSchema) -> &crate::markdown::schemas::SchemaShape {
+    let SimplifiedSchema::Single(root) = schema else {
+        panic!("darkmatter base schema must be a single object shape");
+    };
+    let ctx = root
+        .properties
+        .get("ctx")
+        .expect("base schema must declare a `ctx` property");
+    let atom = match ctx {
+        PropertyDef::Single(atom) => atom,
+        PropertyDef::Union(atoms) => atoms.first().expect("`ctx` union must be non-empty"),
+    };
+    match &atom.ty {
+        TypeExpr::InlineObject(shape) => shape,
+        _ => panic!("base schema `ctx` must be an inline object shape"),
+    }
+}
+
+/// Projects one `ctx.*` property atom into a descriptor.
+fn project_one(index: usize, name: &str, def: &PropertyDef) -> ContextVariableDescriptor {
+    let atom = match def {
+        PropertyDef::Single(atom) => atom,
+        PropertyDef::Union(atoms) => atoms.first().expect("`ctx` property union must be non-empty"),
+    };
+
+    let base = match &atom.ty {
+        TypeExpr::Primitive(ty) => *ty,
+        // `ctx.*` never authors an inline object or import; fall back defensively.
+        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } => SimplifiedType::Object,
+    };
+
+    let required = atom
+        .constraints
+        .iter()
+        .any(|c| matches!(c, Constraint::Required));
+    let generated = atom
+        .constraints
+        .iter()
+        .any(|c| matches!(c, Constraint::Generated));
+    let integer = atom
+        .constraints
+        .iter()
+        .any(|c| matches!(c, Constraint::Integer));
+    let default = atom.constraints.iter().find_map(|c| match c {
+        Constraint::Default(value) => Some(value.clone()),
+        _ => None,
+    });
+
+    let (category, subsection) = grouping_for(name);
+
+    ContextVariableDescriptor {
+        name: leak(name),
+        display_type: ContextValueType {
+            base,
+            is_array: atom.is_array,
+            integer,
+        },
+        description: leak(atom.description.as_deref().unwrap_or("")),
+        category,
+        subsection,
+        order: index + 1,
+        generated,
+        required,
+        default,
+        example: None,
+    }
+}
+
+/// Looks up a variable's presentation grouping. A missing entry projects to the
+/// empty group; the `grouping_map_is_total` test — not a runtime panic — is the
+/// enforcement surface for grouping totality.
+fn grouping_for(name: &str) -> (&'static str, &'static str) {
+    CONTEXT_VARIABLE_GROUPING
+        .iter()
+        .find(|(key, _, _)| *key == name)
+        .map(|(_, category, subsection)| (*category, *subsection))
+        .unwrap_or(("", ""))
+}
+
+/// Leaks a short catalog string to `'static`. The projected catalog is built
+/// once behind a `LazyLock` and lives for the program's lifetime, so the ~86
+/// leaked names/descriptions are a bounded, one-time cost that keeps the public
+/// descriptor fields `&'static str` (matching [`Described`]).
+fn leak(text: &str) -> &'static str {
+    Box::leak(text.to_string().into_boxed_str())
 }
 
 #[cfg(test)]
@@ -1255,47 +331,46 @@ mod tests {
     use crate::markdown::compose::ComposeContext;
     use std::collections::HashSet;
 
-    /// The catalog must describe exactly the variables the runtime produces.
-    ///
-    /// The "runtime" side is a real [`ComposeContext::capture`] rather than a
-    /// hand-maintained name list, so adding, removing, or renaming an inserted
-    /// key (including the backward-compatible `utc`/`dow`/`dow_abbr` aliases)
-    /// breaks this test until its descriptor is updated. Capture inserts a
-    /// fixed key set in every environment (unavailable values become `null`),
-    /// so the produced set is stable regardless of where the test runs.
+    /// Catalog descriptors and captured runtime keys must be in exact
+    /// correspondence: every descriptor has a runtime key and no runtime key
+    /// lacks a descriptor. Phase 5 migrated capture to arrays and dropped the
+    /// ten `_list` twins, so the Phase 3–5 transitional tolerance is gone.
     #[test]
-    fn descriptor_name_set_equals_captured_runtime_key_set() {
-        let descriptor_names: HashSet<&str> = CONTEXT_VARIABLE_DESCRIPTORS
+    fn every_descriptor_has_a_captured_runtime_key() {
+        let descriptor_names: HashSet<&str> = context_variable_descriptors()
             .iter()
             .map(|d| d.name)
             .collect();
 
         let ctx = ComposeContext::capture_for_dir(&std::env::temp_dir());
-        let runtime_names: HashSet<&str> =
-            ctx.values().keys().map(|k| k.as_str()).collect();
+        let runtime_names: HashSet<String> = ctx.values().keys().cloned().collect();
 
-        let missing_descriptors: Vec<_> =
-            runtime_names.difference(&descriptor_names).collect();
-        let extra_descriptors: Vec<_> =
-            descriptor_names.difference(&runtime_names).collect();
-
+        let missing: Vec<&&str> = descriptor_names
+            .iter()
+            .filter(|name| !runtime_names.contains(**name))
+            .collect();
         assert!(
-            missing_descriptors.is_empty(),
-            "Runtime keys without descriptors: {missing_descriptors:?}"
+            missing.is_empty(),
+            "descriptors without runtime keys: {missing:?}"
         );
+
+        let extra: Vec<&String> = runtime_names
+            .iter()
+            .filter(|name| !descriptor_names.contains(name.as_str()))
+            .collect();
         assert!(
-            extra_descriptors.is_empty(),
-            "Descriptor names without runtime keys: {extra_descriptors:?}"
+            extra.is_empty(),
+            "runtime keys without a descriptor: {extra:?}"
         );
     }
 
     #[test]
     fn descriptor_traversal_order_is_deterministic() {
-        let names: Vec<&str> = CONTEXT_VARIABLE_DESCRIPTORS
+        let names: Vec<&str> = context_variable_descriptors()
             .iter()
             .map(|d| d.name)
             .collect();
-        let names_again: Vec<&str> = CONTEXT_VARIABLE_DESCRIPTORS
+        let names_again: Vec<&str> = context_variable_descriptors()
             .iter()
             .map(|d| d.name)
             .collect();
@@ -1305,126 +380,276 @@ mod tests {
     #[test]
     fn descriptor_names_are_unique() {
         let mut seen = HashSet::new();
-        for d in CONTEXT_VARIABLE_DESCRIPTORS {
-            assert!(
-                seen.insert(d.name),
-                "Duplicate descriptor name: {}",
-                d.name
-            );
+        for d in context_variable_descriptors() {
+            assert!(seen.insert(d.name), "Duplicate descriptor name: {}", d.name);
         }
     }
 
     #[test]
     fn catalog_access_performs_no_capture() {
-        // Reading the catalog is pure static metadata access: no host probe,
-        // no I/O, no runtime capture. (The parity test above is the only place
-        // that intentionally captures, and it lives in the test module.)
+        // Reading the catalog parses the compiled-in base schema once but does
+        // no host probe, no I/O, and no runtime context capture. (The parity
+        // test above is the only place that intentionally captures.)
         let _ = context_variable_descriptors();
-        // If we reach here without panicking or hanging, the test passes.
     }
 
-    /// Context-variable examples illustrate shape only: live values are
-    /// environment-dependent, so every example must declare `TypeShapeOnly`.
+    /// Drift guard (spec acceptance criterion 2): the projected catalog must
+    /// agree with the authored base schema on every `ctx.*` key's name, type,
+    /// description, `generated` / `required` / `default` flags, and declaration
+    /// order. This walks the schema atoms independently of the projection
+    /// helpers, so a projection bug (reading the wrong field) fails here.
     #[test]
-    fn every_context_example_is_type_shape_only() {
-        use crate::catalog::ExampleVerification;
-        let mut offenders = Vec::new();
-        for d in CONTEXT_VARIABLE_DESCRIPTORS {
-            match d.example() {
-                Some(example)
-                    if matches!(example.verification, ExampleVerification::TypeShapeOnly) => {}
-                Some(_) => offenders.push(d.name),
-                None => offenders.push(d.name),
-            }
-        }
-        assert!(
-            offenders.is_empty(),
-            "context descriptors must use TypeShapeOnly examples: {offenders:?}"
+    fn projected_descriptors_match_base_schema() {
+        use crate::markdown::schemas::darkmatter_base_schema;
+
+        let schema = darkmatter_base_schema();
+        let SimplifiedSchema::Single(root) = &schema else {
+            panic!("base schema must be a single object shape");
+        };
+        let PropertyDef::Single(ctx_atom) =
+            root.properties.get("ctx").expect("ctx property present")
+        else {
+            panic!("ctx must be a single atom");
+        };
+        let TypeExpr::InlineObject(ctx_shape) = &ctx_atom.ty else {
+            panic!("ctx must be an inline object");
+        };
+
+        let descriptors = context_variable_descriptors();
+        assert_eq!(
+            descriptors.len(),
+            ctx_shape.properties.len(),
+            "descriptor count must equal schema ctx key count"
         );
+
+        for (index, (name, def)) in ctx_shape.properties.iter().enumerate() {
+            let PropertyDef::Single(atom) = def else {
+                panic!("ctx.{name} must be a single atom");
+            };
+            let d = &descriptors[index];
+
+            assert_eq!(d.name, name.as_str(), "name/order mismatch at index {index}");
+            assert_eq!(d.order, index + 1, "order must be the declaration index");
+
+            let expected_base = match &atom.ty {
+                TypeExpr::Primitive(ty) => *ty,
+                other => panic!("ctx.{name} has unexpected type expr: {other:?}"),
+            };
+            assert_eq!(d.display_type.base, expected_base, "ctx.{name} base type");
+            assert_eq!(d.display_type.is_array, atom.is_array, "ctx.{name} array");
+            let expected_integer = atom
+                .constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::Integer));
+            assert_eq!(d.display_type.integer, expected_integer, "ctx.{name} integer");
+
+            assert_eq!(
+                d.description,
+                atom.description.as_deref().unwrap_or(""),
+                "ctx.{name} description"
+            );
+
+            let expected_required = atom
+                .constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::Required));
+            let expected_generated = atom
+                .constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::Generated));
+            assert_eq!(d.required, expected_required, "ctx.{name} required flag");
+            assert_eq!(d.generated, expected_generated, "ctx.{name} generated flag");
+
+            let expected_default = atom.constraints.iter().find_map(|c| match c {
+                Constraint::Default(value) => Some(value.clone()),
+                _ => None,
+            });
+            assert_eq!(d.default, expected_default, "ctx.{name} default");
+        }
+    }
+
+    /// Positive coverage for the `default` projection path. No `ctx.*` property
+    /// authors a `default(...)` today, so the drift guard above only ever
+    /// compares `None == None`; this drives a synthetic atom carrying a default
+    /// through [`project_one`] to prove the constraint reaches the descriptor.
+    #[test]
+    fn project_one_carries_default_constraint() {
+        use crate::markdown::schemas::PropertyAtom;
+
+        let value = serde_json::json!("fallback");
+        let def = PropertyDef::Single(PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::String),
+            is_array: false,
+            constraints: vec![Constraint::Default(value.clone())],
+            array_constraints: Vec::new(),
+            description: None,
+        });
+
+        let descriptor = project_one(0, "with_default", &def);
+        assert_eq!(descriptor.default, Some(value));
+    }
+
+    /// Grouping totality (spec acceptance criterion 3): every projected key has
+    /// a grouping entry, and every grouping entry names a live key.
+    #[test]
+    fn grouping_map_is_total() {
+        let catalog_names: HashSet<&str> = context_variable_descriptors()
+            .iter()
+            .map(|d| d.name)
+            .collect();
+        let grouping_names: HashSet<&str> =
+            CONTEXT_VARIABLE_GROUPING.iter().map(|(name, _, _)| *name).collect();
+
+        let ungrouped: Vec<&&str> = catalog_names.difference(&grouping_names).collect();
+        assert!(
+            ungrouped.is_empty(),
+            "ctx keys with no grouping entry: {ungrouped:?}"
+        );
+
+        let orphan_grouping: Vec<&&str> = grouping_names.difference(&catalog_names).collect();
+        assert!(
+            orphan_grouping.is_empty(),
+            "grouping entries with no live ctx key: {orphan_grouping:?}"
+        );
+
+        // The projected category/subsection must equal the grouping map entry.
+        for d in context_variable_descriptors() {
+            let entry = CONTEXT_VARIABLE_GROUPING
+                .iter()
+                .find(|(name, _, _)| *name == d.name)
+                .unwrap();
+            assert_eq!(
+                (d.category, d.subsection),
+                (entry.1, entry.2),
+                "projected grouping mismatch for {}",
+                d.name
+            );
+        }
+    }
+
+    /// The Group 1 `_list` twins are dropped from the catalog (spec D6 / criterion 10).
+    #[test]
+    fn removed_list_twins_are_absent() {
+        let names: HashSet<&str> = context_variable_descriptors()
+            .iter()
+            .map(|d| d.name)
+            .collect();
+        for removed in [
+            "packages_list",
+            "package_areas_list",
+            "dirty_files_list",
+            "dirty_source_code_files_list",
+            "staged_files_list",
+            "untracked_files_list",
+            "dirty_packages_list",
+            "dirty_package_areas_list",
+            "staged_packages_list",
+            "staged_package_areas_list",
+        ] {
+            assert!(!names.contains(removed), "removed `_list` twin still present: {removed}");
+        }
+    }
+
+    /// Temporal types are corrected (spec D2 / criterion 4): the datetime keys
+    /// are `datetime`, and the `today`-family stays `date`.
+    #[test]
+    fn temporal_types_are_correct() {
+        let by_name: std::collections::HashMap<&str, &ContextValueType> =
+            context_variable_descriptors()
+                .iter()
+                .map(|d| (d.name, &d.display_type))
+                .collect();
+
+        for datetime_key in ["now", "now_utc", "utc"] {
+            assert_eq!(
+                by_name[datetime_key].base,
+                SimplifiedType::DateTime,
+                "{datetime_key} must be datetime"
+            );
+        }
+        for date_key in ["today", "today_utc", "yesterday", "tomorrow"] {
+            assert_eq!(
+                by_name[date_key].base,
+                SimplifiedType::Date,
+                "{date_key} must stay date"
+            );
+        }
+    }
+
+    /// The Group 1/2/3 list variables are arrays (spec criterion 9 precondition).
+    #[test]
+    fn collapsed_list_variables_are_arrays() {
+        let by_name: std::collections::HashMap<&str, &ContextValueType> =
+            context_variable_descriptors()
+                .iter()
+                .map(|d| (d.name, &d.display_type))
+                .collect();
+
+        for array_key in [
+            "packages",
+            "package_areas",
+            "dirty_files",
+            "current_packages",
+            "docs_readme",
+            "programming_languages_in_repo",
+            "depends_on",
+            "used_by",
+        ] {
+            assert!(
+                by_name[array_key].is_array,
+                "{array_key} must be an array type"
+            );
+        }
+        assert_eq!(by_name["depends_on"].base, SimplifiedType::Object);
+        assert_eq!(by_name["packages"].base, SimplifiedType::String);
     }
 }
 
 #[cfg(test)]
-mod phase2_tests {
+mod capture_shape_tests {
     use super::*;
     use crate::markdown::compose::ComposeContext;
     use serde_json::Value;
 
-    fn value_shape_matches(value: &Value, shape: &ContextValueType) -> bool {
-        match shape {
-            ContextValueType::Nullable(inner) => {
-                value.is_null() || value_shape_matches(value, inner)
-            }
-            ContextValueType::Date
-            | ContextValueType::DateTime
-            | ContextValueType::Time
-            | ContextValueType::Timezone
-            | ContextValueType::String
-            | ContextValueType::Csv
-            | ContextValueType::MarkdownList
-            | ContextValueType::NestedMarkdownList => value.is_string(),
-            ContextValueType::Integer | ContextValueType::Number => value.is_number(),
-            ContextValueType::Boolean => value.is_boolean(),
-            ContextValueType::Object => value.is_object(),
-        }
-    }
-
-    fn parse_example_result(result: &str, shape: &ContextValueType) -> Value {
-        match shape {
-            ContextValueType::Nullable(inner) => {
-                if result == "null" {
-                    Value::Null
-                } else {
-                    parse_example_result(result, inner)
-                }
-            }
-            ContextValueType::Integer | ContextValueType::Number => {
-                if let Ok(n) = result.parse::<i64>() {
-                    Value::Number(n.into())
-                } else {
-                    Value::Number(
-                        serde_json::Number::from_f64(result.parse::<f64>().unwrap()).unwrap(),
-                    )
-                }
-            }
-            ContextValueType::Boolean => Value::Bool(result.parse::<bool>().unwrap()),
-            ContextValueType::Object => serde_json::from_str(result).unwrap(),
-            _ => Value::String(result.to_string()),
-        }
-    }
-
+    /// Captured `ctx.*` values must match their projected SimplifiedSchema
+    /// type — scalars as their scalar kind, array types as JSON arrays (Phase 5
+    /// migrated list capture off pre-rendered strings), and `object[]`
+    /// variables as arrays of objects.
     #[test]
-    fn capture_value_shape_matches_display_type() {
+    fn capture_shape_matches_projected_type() {
         let repo_root = crate::markdown::compose::find_git_root_from(std::path::Path::new("."))
             .unwrap_or_else(|| std::path::PathBuf::from("."));
         let ctx = ComposeContext::capture_for_dir(&repo_root);
         let mut failures = Vec::new();
-        for d in CONTEXT_VARIABLE_DESCRIPTORS {
+        for d in context_variable_descriptors() {
+            let ty = &d.display_type;
             let value = ctx.values().get(d.name).unwrap_or(&Value::Null);
-            if !value_shape_matches(value, &d.display_type) {
-                failures.push((d.name, d.display_type, value.clone()));
+            // Optional variables (generated without `required`) may capture null.
+            if value.is_null() && !d.required {
+                continue;
             }
-        }
-        assert!(
-            failures.is_empty(),
-            "context value shapes do not match display_type: {failures:?}"
-        );
-    }
-
-    #[test]
-    fn context_example_results_are_type_consistent() {
-        let mut failures = Vec::new();
-        for d in CONTEXT_VARIABLE_DESCRIPTORS {
-            if let Some(example) = d.example() {
-                let expected = parse_example_result(example.result, &d.display_type);
-                if !value_shape_matches(&expected, &d.display_type) {
-                    failures.push((d.name, d.display_type, example.result, expected));
+            let ok = if ty.is_array {
+                // `object[]` items must be objects; other arrays hold scalars.
+                value.as_array().is_some_and(|items| {
+                    ty.base != SimplifiedType::Object
+                        || items.iter().all(Value::is_object)
+                })
+            } else {
+                match ty.base {
+                    SimplifiedType::Number => value.is_number(),
+                    SimplifiedType::Boolean => value.is_boolean(),
+                    SimplifiedType::Object => value.is_object(),
+                    // date/datetime/time/string are captured as string scalars.
+                    _ => value.is_string(),
                 }
+            };
+            if !ok {
+                failures.push((d.name, ty.clone(), value.clone()));
             }
         }
         assert!(
             failures.is_empty(),
-            "example results are not type-consistent with display_type: {failures:?}"
+            "capture shapes do not match projected type: {failures:?}"
         );
     }
 }

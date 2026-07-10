@@ -279,6 +279,40 @@ fn schema_about_verbose_prints_advanced_sections_as_readable_lists() {
 }
 
 #[test]
+fn schema_about_verbose_prints_context_and_expression_sections() {
+    let output = md_cmd()
+        .args(["--verbose", "schema", "about"])
+        .output()
+        .expect("run verbose md schema about");
+    assert!(output.status.success());
+
+    let plain = strip_ansi_codes(&String::from_utf8_lossy(&output.stdout));
+
+    // The derived `ctx.*` catalog and typed expression-function signatures are
+    // only reachable through `report.context_variables()` /
+    // `report.expression_functions()`; asserting them at the binary level guards
+    // against routing regressions the helper-level unit tests cannot catch.
+    for needle in [
+        "Context Variables",
+        "ctx.now",
+        "datetime",
+        "ctx.packages",
+        "string[]",
+        "Expression Functions",
+        "as_csv(list: any[]) -> string | error",
+    ] {
+        assert!(plain.contains(needle), "verbose schema about missing `{needle}`");
+    }
+
+    for retired in ["packages_list", "dirty_files_list"] {
+        assert!(
+            !plain.contains(retired),
+            "verbose schema about must not surface retired `_list` catalog variable `{retired}`"
+        );
+    }
+}
+
+#[test]
 fn schema_about_accepts_code_block_flag() {
     md_cmd()
         .args(["schema", "about", "--code-block", "light"])

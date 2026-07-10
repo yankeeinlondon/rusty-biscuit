@@ -1,22 +1,5 @@
 //! Formatting helpers for context values.
 
-/// Joins items with `", "`.
-pub(crate) fn format_csv(items: &[impl AsRef<str>]) -> String {
-    items
-        .iter()
-        .map(|i| i.as_ref())
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// Joins items as a markdown bullet list (`"- item\n"` per entry).
-pub(crate) fn format_md_list(items: &[impl AsRef<str>]) -> String {
-    items
-        .iter()
-        .map(|i| format!("- {}\n", i.as_ref()))
-        .collect::<String>()
-}
-
 /// Formats a byte count as a human-readable string (e.g., "128 GB").
 ///
 /// Uses binary units (GiB thresholds) but labels as GB/MB/KB for
@@ -75,21 +58,6 @@ pub(crate) fn determine_season(month: u32, _day: u32) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_format_csv() {
-        assert_eq!(format_csv(&["a", "b", "c"]), "a, b, c");
-        let empty: &[&str] = &[];
-        assert_eq!(format_csv(empty), "");
-        assert_eq!(format_csv(&["only"]), "only");
-    }
-
-    #[test]
-    fn test_format_md_list() {
-        assert_eq!(format_md_list(&["a", "b"]), "- a\n- b\n");
-        let empty: &[&str] = &[];
-        assert_eq!(format_md_list(empty), "");
-    }
 
     #[test]
     fn test_ordinal_suffix() {

@@ -163,6 +163,8 @@ pub fn run_compose(
     allow_ctx_override: bool,
     allow_invalid_frontmatter_assignment: bool,
     allow_reassigned_frontmatter_property: bool,
+    baseline_schema: Option<&PathBuf>,
+    no_baseline_schema: bool,
     timeout_secs: Option<u64>,
     allow_shell_timeout: bool,
     shell_report: bool,
@@ -215,6 +217,7 @@ pub fn run_compose(
     // can resolve user-provided variables during the validation pass.
     let opts_start = perf.then(Instant::now);
     let mut options = ComposeOptions::new_with_context(shared_context);
+    options = apply_compose_baseline_schema(options, baseline_schema, no_baseline_schema)?;
 
     // Parse --state as JSON or JSON5
     if let Some(json_str) = state_json {
@@ -612,6 +615,47 @@ pub fn run_compose(
     drop(options_ctx_ref);
 
     Ok(())
+}
+
+fn apply_compose_baseline_schema(
+    options: ComposeOptions,
+    baseline_schema: Option<&PathBuf>,
+    no_baseline_schema: bool,
+) -> Result<ComposeOptions> {
+    if no_baseline_schema {
+        return Ok(options);
+    }
+
+    if let Some(path) = baseline_schema {
+        let resolved = resolve_file_path(path)?;
+        let raw = std::fs::read_to_string(&resolved)
+            .wrap_err_with(|| format!("Failed to read baseline schema: {}", resolved.display()))?;
+        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&raw).wrap_err_with(|| {
+            format!(
+                "Failed to parse baseline schema YAML: {}",
+                resolved.display()
+            )
+        })?;
+        let schema_value = yaml.get("$schema").unwrap_or(&yaml);
+        let schema = darkmatter::markdown::schemas::parse_yaml_schema(schema_value)
+            .wrap_err_with(|| format!("Invalid baseline schema: {}", resolved.display()))?;
+        return Ok(options.with_baseline_schema(schema));
+    }
+
+    if env_disables_baseline_schema() {
+        return Ok(options);
+    }
+
+    Ok(options.with_darkmatter_baseline_schema())
+}
+
+fn env_disables_baseline_schema() -> bool {
+    matches!(
+        std::env::var("DARKMATTER_NO_BASELINE_SCHEMA")
+            .ok()
+            .as_deref(),
+        Some("1" | "true" | "TRUE" | "yes" | "YES")
+    )
 }
 
 fn print_shell_command_report(

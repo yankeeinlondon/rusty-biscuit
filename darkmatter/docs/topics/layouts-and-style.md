@@ -234,7 +234,7 @@ decoding.
 
 ## Horizontal Rules
 
-Use `hr` to style every Markdown horizontal rule:
+Use `style.hr` to style every Markdown horizontal rule:
 
 ```yaml
 style:
