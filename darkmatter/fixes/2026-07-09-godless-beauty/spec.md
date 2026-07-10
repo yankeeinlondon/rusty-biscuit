@@ -1,7 +1,7 @@
 ---
 status: ready for planning and implementation
 reviewed: true
-review_iterations: 3
+review_iterations: 4
 created: 2026-07-09
 area: darkmatter
 packages:
