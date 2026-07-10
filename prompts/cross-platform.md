@@ -24,7 +24,7 @@ success:
               - message: "⚠️ **cross-platform** review completed successfully but was deemed to have code issues that need addressing: `{{review}}`"
               - effect: phase-jump-3
 failure:
-    message: "💥 failed to complete the **cross-platform** review in **{{ctx.area}}**. Error: {{err.message}}."
+    message: "💥 failed to complete the **cross-platform** review in **{{ctx.area}}**. Error: {{err.msg}}."
     effect: sad-trombone
 ---
 # Ensuring Cross Platform Support
