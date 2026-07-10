@@ -247,18 +247,30 @@ fn schema_hover(ctx: &DocumentContext, entry: &FmEntry) -> Option<Hover> {
     let shape = known_shape(ctx);
     let path: Vec<&str> = entry.dotted.split('.').collect();
     let def = def_at_path(&shape, &path)?;
+    let body = schema_hover_body(&entry.key, def)?;
+    markup_hover(ctx, entry.key_span.clone(), body)
+}
+
+/// The Markdown body for a schema-declared property's hover.
+///
+/// Style rule — bounded by what LSP-Markdown can express (color and dim are the
+/// editor theme's decision, not ours; see `docs/hover.md`): inline-code box =
+/// the property being described; **bold** = its type; _italic_ = its enum and
+/// default values. Kept pure (no `DocumentContext`) so the formatting rule is
+/// unit-testable without an LSP session.
+pub(crate) fn schema_hover_body(key: &str, def: &PropertyDef) -> Option<String> {
     let atom = primary_atom(def)?;
-    let mut lines = vec![format!("**`{}`**", entry.key)];
+    let mut lines = vec![format!("**`{key}`**")];
 
     let type_line = match &atom.ty {
         TypeExpr::Primitive(ty) => {
             let suffix = if atom.is_array { "[]" } else { "" };
-            format!("Type: `{}{}`", ty.as_keyword(), suffix)
+            format!("Type: **{}{}**", ty.as_keyword(), suffix)
         }
-        TypeExpr::InlineObject(_) => "Type: `object`".to_string(),
+        TypeExpr::InlineObject(_) => "Type: **object**".to_string(),
         TypeExpr::Imported { name, reference } => {
             let suffix = if atom.is_array { "[]" } else { "" };
-            format!("Type: `{name}{suffix}@{reference}`")
+            format!("Type: **{name}{suffix}@{reference}**")
         }
     };
     lines.push(type_line);
@@ -267,16 +279,17 @@ fn schema_hover(ctx: &DocumentContext, entry: &FmEntry) -> Option<Hover> {
         lines.push("Required".to_string());
     }
     if let Some(members) = enum_members(atom) {
-        lines.push(format!("Values: {}", members.join(", ")));
+        let italicized: Vec<String> = members.iter().map(|m| format!("_{m}_")).collect();
+        lines.push(format!("Values: {}", italicized.join(", ")));
     }
     if let Some(default) = default_value(atom) {
-        lines.push(format!("Default: `{default}`"));
+        lines.push(format!("Default: _{default}_"));
     }
     if let Some(description) = &atom.description {
         lines.push(String::new());
         lines.push(description.clone());
     }
-    markup_hover(ctx, entry.key_span.clone(), lines.join("\n\n"))
+    Some(lines.join("\n\n"))
 }
 
 /// Hover content for a `ctx.*` generated key (read-only, Darkmatter-owned).
@@ -697,6 +710,36 @@ fn markup_hover(ctx: &DocumentContext, span: SourceSpan, value: String) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_schema_hover_body_applies_style_rules() {
+        // The rule from docs/hover.md, bounded by LSP-Markdown (no color, no
+        // dim): property being described → inline-code box; type → bold (never
+        // inline code); enum members and default → italic.
+        let mut atom = PropertyAtom::bare(SimplifiedType::Enum);
+        atom.constraints = vec![
+            Constraint::Members(vec!["draft".to_string(), "published".to_string()]),
+            Constraint::Default(serde_json::Value::from("draft")),
+        ];
+        atom.description = Some("the publication state".to_string());
+        let def = PropertyDef::Single(atom);
+
+        let body = schema_hover_body("status", &def).expect("hover body");
+
+        assert!(body.contains("**`status`**"), "property → inline-code box: {body}");
+        assert!(body.contains("Type: **"), "type → bold: {body}");
+        assert!(!body.contains("Type: `"), "type must not be inline code: {body}");
+        assert!(body.contains("Values: _draft_, _published_"), "enum → italic: {body}");
+        assert!(body.contains("Default: _\"draft\"_"), "default → italic: {body}");
+        assert!(body.contains("the publication state"), "description verbatim: {body}");
+    }
+
+    #[test]
+    fn test_schema_hover_body_bare_type_is_bold() {
+        let def = PropertyDef::Single(PropertyAtom::bare(SimplifiedType::String));
+        let body = schema_hover_body("title", &def).expect("hover body");
+        assert_eq!(body, "**`title`**\n\nType: **string**", "{body}");
+    }
 
     #[test]
     fn test_line_prefix() {
