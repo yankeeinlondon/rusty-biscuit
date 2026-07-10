@@ -412,6 +412,7 @@ mod tests {
     fn suggestion_message_covers_each_reason() {
         let problem = |reason| SuggestionLintProblem {
             property: "x".into(),
+            property_path: vec!["x".into()],
             root_arm: None,
             property_arm: None,
             decoded: "bad".into(),

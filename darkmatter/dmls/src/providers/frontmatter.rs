@@ -252,7 +252,7 @@ fn suggestion_completions(
     let items: Vec<CompletionItem> = query
         .items
         .iter()
-        .filter(|suggestion| suggestion.label.starts_with(prefix))
+        .filter(|suggestion| suggestion.decoded.starts_with(prefix))
         .filter_map(|suggestion| {
             item(
                 ctx,
@@ -277,16 +277,16 @@ fn block_array_suggestions(
     indent: usize,
     trimmed: &str,
 ) -> Option<Vec<CompletionItem>> {
-    let after_dash = trimmed.strip_prefix("- ").or_else(|| {
-        if trimmed == "-" {
-            Some("")
-        } else {
-            None
-        }
-    })?;
+    let (after_dash, marker_len) = if let Some(after_dash) = trimmed.strip_prefix("- ") {
+        (after_dash, 2)
+    } else if trimmed == "-" {
+        ("", 1)
+    } else {
+        return None;
+    };
     let ancestors = enclosing_path(ctx.text, line_start, indent);
     let path: Vec<&str> = ancestors.iter().map(String::as_str).collect();
-    let item_start = line_start + indent + 2;
+    let item_start = line_start + indent + marker_len;
     suggestion_completions(ctx, &path, item_start, offset, after_dash)
 }
 

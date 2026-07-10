@@ -54,10 +54,15 @@ pub fn inline_lints(text: &str, ast: Option<&FrontmatterAst>) -> SuggestionState
     let Some(schema_value) = yaml_value.get("$schema") else {
         return SuggestionState::Inactive;
     };
+    // Scope the span-projection source to just the `$schema` value's subtree so
+    // a decoy frontmatter field before `$schema` carrying identical expression
+    // text cannot capture the diagnostic span.
+    let value_span = schema_entry.value_span.clone();
+    let schema_yaml_source = &text[value_span.start..value_span.end];
     let schema = match parse_yaml_schema_with_source(
         schema_value,
-        extraction.yaml,
-        extraction.yaml_span.start,
+        schema_yaml_source,
+        value_span.start,
     ) {
         Ok(schema) => schema,
         Err(_) => return SuggestionState::Inactive,
@@ -167,6 +172,42 @@ mod tests {
     }
 
     #[test]
+    fn inline_nested_inline_object_resolves_with_exact_candidate_span() {
+        let text = "---\n$schema:\n  settings: \"{ mode: string(min(5); suggest(no, valid)) }\"\nsettings:\n  mode: valid\n---\n";
+        let ast = FrontmatterAst::parse(text).unwrap().ast.unwrap();
+        let problems = match inline_lints(text, Some(&ast)) {
+            SuggestionState::Inline(problems) => problems,
+            other => panic!("expected active inline suggestions, got {other:?}"),
+        };
+        assert_eq!(problems.len(), 1);
+        let expected = text.find("no").unwrap();
+        assert_eq!(problems[0].decoded, "no");
+        assert_eq!(problems[0].span, expected..expected + 2);
+    }
+
+    #[test]
+    fn inline_decoy_field_does_not_steal_diagnostic_span() {
+        let text = "---\ndecoy: number(suggest(1, many, 2))\n$schema:\n  count: number(min(0); suggest(1, many, 2))\ncount: 1\n---\n\nbody\n";
+        let ast = FrontmatterAst::parse(text).unwrap().ast.unwrap();
+        let problems = match inline_lints(text, Some(&ast)) {
+            SuggestionState::Inline(p) => p,
+            other => panic!("expected Inline, got {other:?}"),
+        };
+        assert_eq!(problems.len(), 1);
+        let problem = &problems[0];
+        assert_eq!(problem.decoded, "many");
+        // The span must point at `many` inside $schema, NOT inside the decoy field.
+        assert_eq!(&text[problem.span.start..problem.span.end], "many");
+        // Verify it's after the decoy field by checking it's on the $schema line.
+        let line_start = text[..problem.span.start].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let line = &text[line_start..problem.span.end];
+        assert!(
+            line.contains("count:"),
+            "span should be on the count property line, got: {line:?}"
+        );
+    }
+
+    #[test]
     fn standalone_pure_envelope_produces_lints() {
         let text = "$schema:\n  count: number(min(0); suggest(1, many, 2))\n";
         let state = standalone_lints(text, Path::new("/w/pure.yaml")).unwrap();
@@ -195,6 +236,33 @@ mod tests {
                 assert_eq!(&text[problems[0].span.start..problems[0].span.end], "many");
             }
             other => panic!("expected Standalone, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn standalone_nested_inline_objects_resolve_with_exact_candidate_spans() {
+        for (text, path, expected_envelope) in [
+            (
+                "$schema:\n  settings: \"{ mode: string(min(5); suggest(no, valid)) }\"\n",
+                "/w/pure.yaml",
+                StandaloneSchemaEnvelope::Pure,
+            ),
+            (
+                "kind: schema\ntypes:\n  settings: \"{ mode: string(min(5); suggest(no, valid)) }\"\n",
+                "/w/tagged.yaml",
+                StandaloneSchemaEnvelope::Tagged,
+            ),
+        ] {
+            let state = standalone_lints(text, Path::new(path)).unwrap();
+            let SuggestionState::Standalone { envelope, problems, error } = state else {
+                panic!("expected active standalone suggestions");
+            };
+            assert_eq!(envelope, expected_envelope);
+            assert!(error.is_none());
+            assert_eq!(problems.len(), 1);
+            let expected = text.find("no").unwrap();
+            assert_eq!(problems[0].decoded, "no");
+            assert_eq!(problems[0].span, expected..expected + 2);
         }
     }
 
