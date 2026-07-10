@@ -134,8 +134,7 @@ pub(crate) fn resolve_timeouts(
 }
 
 /// Resolve the OpenCode stalled-generation backstop budget following the
-/// documented precedence chain (CLI flag > frontmatter > env-var >
-/// built-in `10m`).
+/// documented precedence chain (CLI flag > env-var > built-in `10m`).
 ///
 /// Each source is a clean three-state check against the canonical grammar
 /// ([`claudine::harness::parse_timeout_allow_zero`]), disabling the guard only
@@ -147,8 +146,6 @@ pub(crate) fn resolve_timeouts(
 ///   [`crate::commands::compose::SharedComposeArgs::stall_timeout_secs`], so an
 ///   `Err` here is unreachable; a zero returns `None`, a positive returns
 ///   `Some`, and a (defensive) `Err` falls through.
-/// - **Frontmatter** (`HarnessPlan.stall_timeout`): a `Some(Duration::ZERO)`
-///   sentinel disables; a positive value is used directly.
 /// - **Env** (`CLAUDINE_OPENCODE_STALL_TIMEOUT`): a zero disables; a positive
 ///   is used; an invalid value falls through to the built-in.
 /// - **Built-in**: `10m`.
@@ -156,21 +153,14 @@ pub(crate) fn resolve_timeouts(
 /// ## Returns
 ///
 /// `Some(duration)` when the guard is active for this run, or `None` when
-/// the guard is disabled by an explicit zero at the CLI, frontmatter, or env
-/// layer.
-pub(crate) fn resolve_stall_timeout(
-    cli: Option<String>,
-    frontmatter: Option<std::time::Duration>,
-) -> Option<std::time::Duration> {
+/// the guard is disabled by an explicit zero at the CLI or env layer.
+pub(crate) fn resolve_stall_timeout(cli: Option<String>) -> Option<std::time::Duration> {
     // CLI is pre-validated upstream, so the `Ok` arm is the real path; an
     // `Err` is unreachable and falls through rather than being relied upon.
     if let Some(raw) = cli
         && let Ok(d) =
             claudine::harness::parse_timeout_allow_zero(&raw, std::path::Path::new("<cli>"))
     {
-        return if d.is_zero() { None } else { Some(d) };
-    }
-    if let Some(d) = frontmatter {
         return if d.is_zero() { None } else { Some(d) };
     }
     if let Ok(raw) = std::env::var("CLAUDINE_OPENCODE_STALL_TIMEOUT") {
@@ -279,15 +269,15 @@ mod stall_timeout_tests {
     #[serial_test::serial]
     fn env_zero_literal_disables_the_guard() {
         let _guard = EnvGuard::set(ENV, "0s");
-        assert_eq!(resolve_stall_timeout(None, None), None);
+        assert_eq!(resolve_stall_timeout(None), None);
     }
 
     #[test]
     #[serial_test::serial]
-    fn unset_env_with_no_cli_or_frontmatter_resolves_to_built_in_10m() {
+    fn unset_env_with_no_cli_resolves_to_built_in_10m() {
         let _guard = EnvGuard::clear(ENV);
         assert_eq!(
-            resolve_stall_timeout(None, None),
+            resolve_stall_timeout(None),
             Some(Duration::from_secs(10 * 60))
         );
     }
@@ -297,18 +287,8 @@ mod stall_timeout_tests {
     fn cli_beats_env() {
         let _guard = EnvGuard::set(ENV, "5m");
         assert_eq!(
-            resolve_stall_timeout(Some("2m".to_string()), None),
+            resolve_stall_timeout(Some("2m".to_string())),
             Some(Duration::from_secs(120))
-        );
-    }
-
-    #[test]
-    #[serial_test::serial]
-    fn frontmatter_beats_env() {
-        let _guard = EnvGuard::set(ENV, "5m");
-        assert_eq!(
-            resolve_stall_timeout(None, Some(Duration::from_secs(90))),
-            Some(Duration::from_secs(90))
         );
     }
 
@@ -316,7 +296,7 @@ mod stall_timeout_tests {
     #[serial_test::serial]
     fn cli_zero_literal_disables_even_with_env_set() {
         let _guard = EnvGuard::set(ENV, "5m");
-        assert_eq!(resolve_stall_timeout(Some("0s".to_string()), None), None);
+        assert_eq!(resolve_stall_timeout(Some("0s".to_string())), None);
     }
 
     #[test]
@@ -324,7 +304,7 @@ mod stall_timeout_tests {
     fn cli_fractional_resolves_to_millis() {
         let _guard = EnvGuard::clear(ENV);
         assert_eq!(
-            resolve_stall_timeout(Some("0.5s".to_string()), None),
+            resolve_stall_timeout(Some("0.5s".to_string())),
             Some(Duration::from_millis(500))
         );
     }
@@ -334,23 +314,16 @@ mod stall_timeout_tests {
     fn env_fractional_resolves_to_millis() {
         let _guard = EnvGuard::set(ENV, "0.5s");
         assert_eq!(
-            resolve_stall_timeout(None, None),
+            resolve_stall_timeout(None),
             Some(Duration::from_millis(500))
         );
     }
 
     #[test]
     #[serial_test::serial]
-    fn frontmatter_zero_sentinel_disables_the_guard() {
-        let _guard = EnvGuard::set(ENV, "5m");
-        assert_eq!(resolve_stall_timeout(None, Some(Duration::ZERO)), None);
-    }
-
-    #[test]
-    #[serial_test::serial]
     fn env_zero_seconds_disables_the_guard() {
         let _guard = EnvGuard::set(ENV, "0s");
-        assert_eq!(resolve_stall_timeout(None, None), None);
+        assert_eq!(resolve_stall_timeout(None), None);
     }
 
     #[test]

@@ -9,7 +9,7 @@ use tracing::debug;
 
 use crate::harness::error::HarnessError;
 use crate::harness::model::HarnessPlan;
-use crate::harness::timeout::{format_duration, parse_timeout, parse_timeout_allow_zero};
+use crate::harness::timeout::{format_duration, parse_timeout};
 
 /// Harness-relevant frontmatter keys.
 const HARNESS_KEYS: &[&str] = &[
@@ -17,13 +17,12 @@ const HARNESS_KEYS: &[&str] = &[
     "step_timeout",
     "timeout_warn",
     "step_timeout_warn",
-    "stall_timeout",
 ];
 
 /// Check whether composed frontmatter contains any harness-relevant keys.
 ///
-/// Returns `true` if any of `timeout`, `step_timeout`, `timeout_warn`,
-/// `step_timeout_warn`, or `stall_timeout` is present.
+/// Returns `true` if any of `timeout`, `step_timeout`, `timeout_warn`, or
+/// `step_timeout_warn` is present.
 pub fn has_harness_properties(frontmatter: &Value) -> bool {
     let Some(obj) = frontmatter.as_object() else {
         return false;
@@ -161,29 +160,12 @@ pub fn parse_harness_plan(
         });
     }
 
-    // Parse stall_timeout (OpenCode stalled-generation backstop budget).
-    // Same grammar as `timeout`, but `0s` is a valid disable sentinel rather
-    // than an error, so this uses `parse_timeout_allow_zero`. Independent of
-    // the wall-clock/step rules: no relational validation, because it bounds
-    // progress-silence for the retry-churn guard, not the overall run.
-    let stall_timeout = if let Some(v) = obj.get("stall_timeout") {
-        let raw = v.as_str().ok_or_else(|| HarnessError::InvalidFrontmatter {
-            source_path: source_path.to_path_buf(),
-            property: "stall_timeout".to_string(),
-            detail: "stall_timeout must be a string (e.g. \"30s\", \"10m\")".to_string(),
-        })?;
-        Some(parse_timeout_allow_zero(raw, source_path)?)
-    } else {
-        None
-    };
-
     let plan = HarnessPlan {
         source_path: source_path.to_path_buf(),
         timeout,
         step_timeout,
         timeout_warn,
         step_timeout_warn,
-        stall_timeout,
     };
     debug!(
         source = %source_path.display(),
@@ -212,7 +194,6 @@ mod tests {
             step_timeout: None,
             timeout_warn: None,
             step_timeout_warn: None,
-            stall_timeout: None,
         }
     }
 
@@ -228,6 +209,17 @@ mod tests {
     }
 
     #[test]
+    fn stall_timeout_is_not_a_frontmatter_property() {
+        let source = test_source_path();
+        let frontmatter_value = json!({ "stall_timeout": "1s" });
+
+        assert!(!has_harness_properties(&frontmatter_value));
+        let plan = parse_harness_plan(&frontmatter_value, &source).unwrap();
+        assert_eq!(plan.timeout, None);
+        assert_eq!(plan.step_timeout, None);
+    }
+
+    #[test]
     fn parses_timeouts() {
         let source = test_source_path();
         let frontmatter_value = json!({
@@ -235,7 +227,6 @@ mod tests {
             "step_timeout": "30s",
             "timeout_warn": "1m",
             "step_timeout_warn": "10s",
-            "stall_timeout": "8m",
         });
 
         let plan = parse_harness_plan(&frontmatter_value, &source)
@@ -244,57 +235,6 @@ mod tests {
         assert_eq!(plan.step_timeout, Some(std::time::Duration::from_secs(30)));
         assert_eq!(plan.timeout_warn, Some(std::time::Duration::from_secs(60)));
         assert_eq!(plan.step_timeout_warn, Some(std::time::Duration::from_secs(10)));
-        assert_eq!(plan.stall_timeout, Some(std::time::Duration::from_secs(480)));
-    }
-
-    #[test]
-    fn stall_timeout_is_independent_of_step_and_wall_clock() {
-        let source = test_source_path();
-        // A stall_timeout larger than the wall-clock timeout is allowed —
-        // it bounds progress-silence for the retry-churn guard, not the run.
-        let frontmatter_value = json!({
-            "timeout": "30s",
-            "stall_timeout": "10m",
-        });
-
-        let plan =
-            parse_harness_plan(&frontmatter_value, &source).expect("stall_timeout should parse");
-        assert_eq!(plan.stall_timeout, Some(std::time::Duration::from_secs(600)));
-    }
-
-    #[test]
-    fn stall_timeout_zero_literal_parses_to_zero_sentinel() {
-        let source = test_source_path();
-        let frontmatter_value = json!({ "stall_timeout": "0s" });
-
-        let plan =
-            parse_harness_plan(&frontmatter_value, &source).expect("0s should parse, not error");
-        assert_eq!(plan.stall_timeout, Some(std::time::Duration::ZERO));
-    }
-
-    #[test]
-    fn stall_timeout_fractional_parses_to_millis() {
-        let source = test_source_path();
-        let frontmatter_value = json!({ "stall_timeout": "0.5s" });
-
-        let plan =
-            parse_harness_plan(&frontmatter_value, &source).expect("0.5s should parse");
-        assert_eq!(
-            plan.stall_timeout,
-            Some(std::time::Duration::from_millis(500))
-        );
-    }
-
-    #[test]
-    fn stall_timeout_invalid_string_errors() {
-        let source = test_source_path();
-        let frontmatter_value = json!({ "stall_timeout": "nope" });
-
-        let err = parse_harness_plan(&frontmatter_value, &source).unwrap_err();
-        assert!(
-            matches!(err, HarnessError::InvalidTimeout { .. }),
-            "expected InvalidTimeout, got {err:?}"
-        );
     }
 
     #[test]

@@ -20,7 +20,6 @@ pub(crate) fn build_harness_launch(
     cli_step_timeout: Option<String>,
     plan_step_timeout: Option<std::time::Duration>,
     cli_stall_timeout: Option<String>,
-    plan_stall_timeout: Option<std::time::Duration>,
 ) -> Result<AttemptLaunch> {
     let mut args = if let Some(session_id) = state.next_resume_session_id.take() {
         let mut args = super::super::resume::normalize_resume_args(
@@ -60,12 +59,10 @@ pub(crate) fn build_harness_launch(
     let step_timeout_user_configured =
         step_timeout_user_configured(cli_step_timeout.as_deref(), plan_step_timeout);
 
-    let stall_timeout = super::super::composition::resolve_stall_timeout(
-        cli_stall_timeout.clone(),
-        plan_stall_timeout,
-    );
+    let stall_timeout =
+        super::super::composition::resolve_stall_timeout(cli_stall_timeout.clone());
     let stall_timeout_user_configured =
-        stall_timeout_user_configured(cli_stall_timeout.as_deref(), plan_stall_timeout);
+        stall_timeout_user_configured(cli_stall_timeout.as_deref());
 
     Ok(AttemptLaunch {
         args,
@@ -80,11 +77,11 @@ pub(crate) fn build_harness_launch(
 }
 
 /// Mirror of [`step_timeout_user_configured`] for the stalled-generation
-/// backstop: `true` when the budget came from the CLI flag, frontmatter, or a
-/// valid non-zero `CLAUDINE_OPENCODE_STALL_TIMEOUT` env value rather than the
-/// built-in `10m` default.
-fn stall_timeout_user_configured(cli: Option<&str>, frontmatter: Option<Duration>) -> bool {
-    if cli.is_some() || frontmatter.is_some() {
+/// backstop: `true` when the budget came from the CLI flag or a valid non-zero
+/// `CLAUDINE_OPENCODE_STALL_TIMEOUT` env value rather than the built-in `10m`
+/// default.
+fn stall_timeout_user_configured(cli: Option<&str>) -> bool {
+    if cli.is_some() {
         return true;
     }
     let Ok(raw) = std::env::var("CLAUDINE_OPENCODE_STALL_TIMEOUT") else {
@@ -201,13 +198,13 @@ mod tests {
     #[serial_test::serial]
     fn fractional_env_stall_timeout_is_user_configured() {
         let _guard = EnvGuard::set("CLAUDINE_OPENCODE_STALL_TIMEOUT", "0.5s");
-        assert!(stall_timeout_user_configured(None, None));
+        assert!(stall_timeout_user_configured(None));
     }
 
     #[test]
     #[serial_test::serial]
     fn zero_env_stall_timeout_is_not_user_configured() {
         let _guard = EnvGuard::set("CLAUDINE_OPENCODE_STALL_TIMEOUT", "0s");
-        assert!(!stall_timeout_user_configured(None, None));
+        assert!(!stall_timeout_user_configured(None));
     }
 }

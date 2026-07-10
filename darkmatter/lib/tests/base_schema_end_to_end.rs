@@ -64,6 +64,13 @@ fn claudine_schema_file_resolves_as_baseline() {
         .expect("schema must declare a property mapping");
     assert!(properties.contains_key("max_turns"));
     assert!(!properties.contains_key("maxTurns"));
+    assert!(!properties.contains_key("output"));
+    assert!(!properties.contains_key("stall_timeout"));
+    assert_eq!(
+        properties.get("mode").and_then(YamlValue::as_str),
+        Some("enum(append, replace) -> Delivery mode for automatically discovered system-prompt documents.")
+    );
+    assert!(!raw.contains("boolish"));
 }
 
 #[test]

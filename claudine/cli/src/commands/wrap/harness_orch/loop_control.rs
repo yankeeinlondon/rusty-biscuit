@@ -2114,7 +2114,6 @@ pub(crate) fn run_harness_loop(
             cli_step_timeout.clone(),
             plan.step_timeout,
             cli_stall_timeout.clone(),
-            plan.stall_timeout,
         )
         .map_err(|e| {
             let err_info = LifecycleErrorInfo::from_action_failure("harness_launch", e.to_string());
