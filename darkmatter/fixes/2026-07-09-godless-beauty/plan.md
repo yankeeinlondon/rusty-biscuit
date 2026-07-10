@@ -2,9 +2,100 @@
 agent: codex/
 total_phases: 7
 created: 2026-07-09
-phase: 1
+phase: 5
 yolo: false
 spec: darkmatter/fixes/2026-07-09-godless-beauty/spec.md
+source_files_during_phase_1:
+  - darkmatter/lib/src/markdown/transform/mod.rs
+  - darkmatter/lib/src/markdown/transform/types.rs
+docs_updated_during_phase_1:
+  - darkmatter/docs/inline/text-replacement.md
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - darkmatter/fixes/2026-07-09-godless-beauty/plan.md
+docs_created_during_phase_1:
+  - darkmatter/fixes/2026-07-09-godless-beauty/phase-1-baseline.md
+skills_files_updated_during_phase_1: []
+packages:
+  - darkmatter
+source_files_during_phase_2:
+  - darkmatter/lib/src/render/image_ref.rs
+  - darkmatter/lib/src/render/link.rs
+  - darkmatter/lib/src/render/metadata_codec.rs
+  - darkmatter/lib/src/render/mod.rs
+  - darkmatter/lib/src/render/reference_parse.rs
+docs_updated_during_phase_2:
+  - darkmatter/fixes/2026-07-09-godless-beauty/plan.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/src/layout/page/tests.rs
+  - darkmatter/lib/src/layout/page/snapshots/darkmatter__layout__page__tests__pronounced_background_snapshot.snap
+  - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/execution_tests.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/spanned_value_tests.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/tests.rs
+  - darkmatter/lib/src/markdown/compose/tests/mod.rs
+  - darkmatter/lib/src/markdown/compose/tests/caching.rs
+  - darkmatter/lib/src/markdown/compose/tests/fixtures.rs
+  - darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+  - darkmatter/lib/src/markdown/compose/tests/preflight.rs
+  - darkmatter/lib/src/markdown/compose/tests/rendering.rs
+  - darkmatter/lib/src/markdown/compose/tests/schema.rs
+  - darkmatter/lib/src/markdown/compose/tests/shell.rs
+  - darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+  - darkmatter/lib/tests/level2_render_tree_terminal.rs
+  - darkmatter/lib/tests/level2_render_tree_terminal/basic_spans.rs
+  - darkmatter/lib/tests/level2_render_tree_terminal/code_panel.rs
+  - darkmatter/lib/tests/level2_render_tree_terminal/file_links.rs
+  - darkmatter/lib/tests/level2_render_tree_terminal/images.rs
+  - darkmatter/lib/tests/level2_render_tree_terminal/layout_policy.rs
+  - darkmatter/lib/tests/level2_render_tree_terminal/public_entry_points.rs
+  - darkmatter/lib/tests/level2_render_tree_terminal/support/mod.rs
+docs_updated_during_phase_3:
+  - darkmatter/fixes/2026-07-09-godless-beauty/plan.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - darkmatter/lib/src/markdown/cleanup.rs
+  - darkmatter/lib/src/markdown/cleanup/mod.rs
+  - darkmatter/lib/src/markdown/cleanup/blockquote.rs
+  - darkmatter/lib/src/markdown/cleanup/brackets.rs
+  - darkmatter/lib/src/markdown/cleanup/emphasis.rs
+  - darkmatter/lib/src/markdown/cleanup/lists.rs
+  - darkmatter/lib/src/markdown/cleanup/reflow.rs
+  - darkmatter/lib/src/markdown/cleanup/tables.rs
+  - darkmatter/lib/src/markdown/cleanup/tests/mod.rs
+  - darkmatter/lib/src/markdown/cleanup/tests/blockquote.rs
+  - darkmatter/lib/src/markdown/cleanup/tests/brackets.rs
+  - darkmatter/lib/src/markdown/cleanup/tests/emphasis.rs
+  - darkmatter/lib/src/markdown/cleanup/tests/lists.rs
+  - darkmatter/lib/src/markdown/cleanup/tests/reflow.rs
+  - darkmatter/lib/src/markdown/cleanup/tests/tables.rs
+  - darkmatter/lib/tests/level2_render_tree_terminal/support/mod.rs
+docs_updated_during_phase_4:
+  - darkmatter/fixes/2026-07-09-godless-beauty/plan.md
+docs_created_during_phase_4:
+  - darkmatter/fixes/2026-07-09-godless-beauty/phase-4-baseline.md
+skills_files_updated_during_phase_4:
+  - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_5:
+  - darkmatter/lib/src/markdown/compose/context/capture/mod.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/agent.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/changes.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/datetime.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/docs.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/groups.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/host.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/languages.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/repo.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/snapshot.rs
+docs_updated_during_phase_5:
+  - darkmatter/fixes/2026-07-09-godless-beauty/plan.md
+docs_created_during_phase_5:
+  - darkmatter/fixes/2026-07-09-godless-beauty/phase-5-baseline.md
+skills_files_updated_during_phase_5:
+  - .claude/skills/darkmatter/SKILL.md
 ---
 
 # Godless Beauty — Execution Plan
@@ -25,34 +116,34 @@ compete with the lower-risk file moves. Phase 7 is the final integration gate.
 
 ### Baseline and inventory
 
-- [ ] Capture `git status --short` and preserve all unrelated worktree changes; do not edit or
+- [x] Capture `git status --short` and preserve all unrelated worktree changes; do not edit or
   discard pre-existing changes in the specification, render-tree parity tests, schema resolver, or
   local settings.
-- [ ] Record the pre-change Darkmatter test inventory with `cargo nextest list -p darkmatter` and
+- [x] Record the pre-change Darkmatter test inventory with `cargo nextest list -p darkmatter` and
   the Level-2 target inventory with
   `cargo nextest list -p darkmatter --test level2_render_tree_terminal` under this fix directory so
   later mechanical moves can be compared by test name and count.
-- [ ] Run the package-area baseline from `darkmatter/`: `cargo check -p darkmatter`, `just test`,
+- [x] Run the package-area baseline from `darkmatter/`: `cargo check -p darkmatter`, `just test`,
   and `just lint`; record any pre-existing failure before implementation instead of attributing it
   to the refactor.
-- [ ] Inventory references to `markdown::transform`, `TransformReport`, `TransformOptions`,
+- [x] Inventory references to `markdown::transform`, `TransformReport`, `TransformOptions`,
   `TransformContext`, `.transform()`, and `.transform_with()` across source and current
   documentation, distinguishing historical specifications from active architectural guidance.
 
 ### Improvement 1 implementation
 
-- [ ] Delete `darkmatter/lib/src/markdown/transform/mod.rs` and
+- [x] Delete `darkmatter/lib/src/markdown/transform/mod.rs` and
   `darkmatter/lib/src/markdown/transform/types.rs` without copying their implementation or stale
   tests into the live compose tree.
-- [ ] Update active documentation that describes the retired transform pipeline—especially
+- [x] Update active documentation that describes the retired transform pipeline—especially
   `darkmatter/docs/topics/darkmatter-expressions.md`—to name the current compose pipeline and its
   live APIs; leave ordinary English uses of “transform” and historical records unchanged.
-- [ ] Search compiled source and active docs again and prove no reference to the deleted module or
+- [x] Search compiled source and active docs again and prove no reference to the deleted module or
   API remains; confirm `darkmatter/lib/src/markdown/mod.rs` still has no transform declaration.
 
 ### Phase 1 validation checkpoint
 
-- [ ] Run `cargo check -p darkmatter`, `just test`, and `just lint` from `darkmatter/`; require all
+- [x] Run `cargo check -p darkmatter`, `just test`, and `just lint` from `darkmatter/`; require all
   three to pass with no live compose implementation changes and no loss from the recorded test
   inventory.
 
@@ -60,41 +151,41 @@ compete with the lower-risk file moves. Phase 7 is the final integration gate.
 
 ### Characterization and shared boundaries
 
-- [ ] Inventory the duplicated helpers, caller-specific drivers, error construction, snapshots,
+- [x] Inventory the duplicated helpers, caller-specific drivers, error construction, snapshots,
   metadata environment variables, and tests in `darkmatter/lib/src/render/link.rs`,
   `darkmatter/lib/src/render/image_ref.rs`, and `darkmatter/lib/tests/error_snapshots/{link,image_ref}.rs`.
-- [ ] Add table-driven parity tests that feed equivalent Markdown and HTML reference cases through
+- [x] Add table-driven parity tests that feed equivalent Markdown and HTML reference cases through
   `Link` and `ImageRef`: non-ASCII display/alt/title text, escaped quotes and backslashes, nested
   parentheses, malformed or unclosed input, uppercase ASCII HTML attributes, inline/strip/lossless
   metadata modes, and metadata encode/decode round trips.
-- [ ] Pin existing `LinkError` and `ImageRefError` caret positions, messages, and `AsBlockError`
+- [x] Pin existing `LinkError` and `ImageRefError` caret positions, messages, and `AsBlockError`
   status blocks with byte-exact assertions before moving helpers.
 
 ### Shared parsing and metadata modules
 
-- [ ] Add crate-private `darkmatter/lib/src/render/reference_parse.rs` and declare it in
+- [x] Add crate-private `darkmatter/lib/src/render/reference_parse.rs` and declare it in
   `render/mod.rs`; move HTML-attribute parsing, bracket/parenthesis scanners, URL/title codecs,
   structured-property tokenization, ANSI stripping, escaping, and normalization helpers into it.
-- [ ] Implement every text scanner with `char_indices` or `Chars`; return neutral parsed values or
+- [x] Implement every text scanner with `char_indices` or `Chars`; return neutral parsed values or
   byte offsets proven to be UTF-8 boundaries, and canonicalize HTML attribute names with
   `to_ascii_lowercase()`.
-- [ ] Keep structured-property parsing generic through a per-type apply closure so link-only
+- [x] Keep structured-property parsing generic through a per-type apply closure so link-only
   `prompt`/`target` behavior and image-only `srcset`/width behavior remain in their owning modules.
-- [ ] Add crate-private `darkmatter/lib/src/render/metadata_codec.rs` and declare it in
+- [x] Add crate-private `darkmatter/lib/src/render/metadata_codec.rs` and declare it in
   `render/mod.rs`; move base64, generic serde encode/decode, and `MetadataPolicy` into it, with the
   caller supplying `LINK_METADATA` or `IMAGE_REF_METADATA`.
-- [ ] Replace the local helper copies in `link.rs` and `image_ref.rs` with the shared APIs while
+- [x] Replace the local helper copies in `link.rs` and `image_ref.rs` with the shared APIs while
   retaining caller-owned `LinkError`/`ImageRefError` construction and all genuinely distinct
   link/image behavior.
-- [ ] Remove the duplicate helper implementations and add focused regression assertions proving
+- [x] Remove the duplicate helper implementations and add focused regression assertions proving
   multibyte title text is no longer corrupted or skipped; treat this UTF-8 correction as an
   explicit behavior change, separate from the mechanical extraction.
 
 ### Phase 2 validation checkpoint
 
-- [ ] Run focused link/image unit and snapshot targets with nextest, then run `cargo check -p
+- [x] Run focused link/image unit and snapshot targets with nextest, then run `cargo check -p
   darkmatter`, `just test`, `just lint`, and `just test-l2` from `darkmatter/`.
-- [ ] Require all pre-existing snapshots and status blocks to remain byte-identical, with changes
+- [x] Require all pre-existing snapshots and status blocks to remain byte-identical, with changes
   limited to the new UTF-8 regression expectations, and confirm both metadata environment
   variables still select the same modes independently.
 
@@ -102,52 +193,52 @@ compete with the lower-risk file moves. Phase 7 is the final integration gate.
 
 ### Standalone inline-suite extraction
 
-- [ ] Record the exact pre-move nextest names and counts for the `layout::page` and
+- [x] Record the exact pre-move nextest names and counts for the `layout::page` and
   `frontmatter_shell_expansion` unit suites; retain the Phase 1 full-crate inventory for the final
   comparison.
-- [ ] Move the inline `layout/page.rs` test module to `layout/page/tests.rs` (or an equivalent
+- [x] Move the inline `layout/page.rs` test module to `layout/page/tests.rs` (or an equivalent
   explicit path) and replace it with only `#[cfg(test)] mod tests;`, preserving private-item access,
   test names, snapshots, and assertions.
-- [ ] Move the inline `compose/frontmatter_shell_expansion.rs` test module to a sibling test file
+- [x] Move the inline `compose/frontmatter_shell_expansion.rs` test module to a sibling test file
   and replace it with only its `#[cfg(test)]` declaration, preserving serial annotations,
   environment guards, ignored flags, temporary-directory lifetimes, and all assertions.
-- [ ] Compare the two post-move inventories to their baselines by name and count, then run each
+- [x] Compare the two post-move inventories to their baselines by name and count, then run each
   moved suite directly with nextest.
 
 ### Compose unit-test tree
 
-- [ ] Classify every test in `compose/tests.rs` into `frontmatter`, `schema`, `shell`,
+- [x] Classify every test in `compose/tests.rs` into `frontmatter`, `schema`, `shell`,
   `transclusion`, `caching`, `preflight`, or `rendering`, recording the original test name exactly
   once before moving it.
-- [ ] Replace `compose/tests.rs` with a `compose/tests/mod.rs` tree containing those seven domain
+- [x] Replace `compose/tests.rs` with a `compose/tests/mod.rs` tree containing those seven domain
   modules plus a small `fixtures.rs`; extract only genuinely shared temp-repository builders and
   give fixtures the narrowest working `pub(super)` visibility.
-- [ ] Preserve test names where feasible and preserve every assertion, `#[serial]` group, ignore
+- [x] Preserve test names where feasible and preserve every assertion, `#[serial]` group, ignore
   marker, environment guard, cache/security setup, and temporary-resource lifetime; do not mix
   production edits into this relocation.
-- [ ] Compare the post-split compose inventory with the recorded names and counts and run the
+- [x] Compare the post-split compose inventory with the recorded names and counts and run the
   compose test modules directly with nextest.
 
 ### Level-2 integration target tree
 
-- [ ] Inventory `level2_render_tree_terminal` tests by name, count, test-level requirement, harness
+- [x] Inventory `level2_render_tree_terminal` tests by name, count, test-level requirement, harness
   dependency, and helper usage before moving them.
-- [ ] Keep `lib/tests/level2_render_tree_terminal.rs` as a thin integration-target module root and
+- [x] Keep `lib/tests/level2_render_tree_terminal.rs` as a thin integration-target module root and
   split tests below `lib/tests/level2_render_tree_terminal/` into code panel, images, file links,
   layout policy/page geometry, public entry points, and basic spans modules using explicit `#[path]`
   declarations where Rust integration-target resolution requires them.
-- [ ] Create a target-local `support/` tree for harness, render-probe, ANSI, and image helpers;
+- [x] Create a target-local `support/` tree for harness, render-probe, ANSI, and image helpers;
   preserve executable discovery, real-terminal semantics, and
   `BISCUIT_TEST_LEVEL_REQUIRED` behavior without introducing a workspace-wide abstraction.
-- [ ] Compare the target's post-move nextest inventory by exact name and count and run
+- [x] Compare the target's post-move nextest inventory by exact name and count and run
   `cargo nextest run -p darkmatter --test level2_render_tree_terminal`.
 
 ### Phase 3 validation checkpoint
 
-- [ ] Review the `src/` diff and require production changes to be limited to test-module
+- [x] Review the `src/` diff and require production changes to be limited to test-module
   declarations and removal of moved test bodies; require zero assertion edits and zero missing or
   duplicated tests.
-- [ ] Run `cargo check -p darkmatter`, `just test`, `just lint`, and `just test-l2` from
+- [x] Run `cargo check -p darkmatter`, `just test`, `just lint`, and `just test-l2` from
   `darkmatter/`; compare the full Darkmatter nextest inventory with the Phase 1 baseline.
 
 ## Phase 4 — Split cleanup into an explicit two-stage pass pipeline
@@ -156,34 +247,34 @@ This phase is parallelizable with Phase 5 after Phase 3 is complete.
 
 ### Cleanup module extraction
 
-- [ ] Characterize the current public cleanup entry points, re-exports, exact Phase A/Phase B pass
+- [x] Characterize the current public cleanup entry points, re-exports, exact Phase A/Phase B pass
   order, emphasis-placeholder state, list-marker state, and the DMLS formatting parity test before
   converting `markdown/cleanup.rs` into `markdown/cleanup/`.
-- [ ] Create `cleanup/mod.rs` as the source-compatible public facade and keep
+- [x] Create `cleanup/mod.rs` as the source-compatible public facade and keep
   `cleanup_content_internal` there as one plainly readable orchestrator that explicitly invokes
   every pass in the existing order.
-- [ ] Move emphasis preservation/restoration and related unescaping to `cleanup/emphasis.rs`,
+- [x] Move emphasis preservation/restoration and related unescaping to `cleanup/emphasis.rs`,
   keeping the coupled placeholder lifecycle within that module.
-- [ ] Move table stream alignment, `CellWidthCalculator`, and single-table processing to
+- [x] Move table stream alignment, `CellWidthCalculator`, and single-table processing to
   `cleanup/tables.rs`.
-- [ ] Move list-marker extraction/restoration, spacing normalization, and indentation correction to
+- [x] Move list-marker extraction/restoration, spacing normalization, and indentation correction to
   `cleanup/lists.rs`; move blockquote and bracket passes to `cleanup/blockquote.rs` and
   `cleanup/brackets.rs` respectively.
-- [ ] Move incidental-newline stripping, fixed-width reflow, wrapping, prefix/line metadata, and
+- [x] Move incidental-newline stripping, fixed-width reflow, wrapping, prefix/line metadata, and
   HTML-block state to `cleanup/reflow.rs` without changing display-column, code-protection, line
   ending, or trailing-newline behavior.
-- [ ] Move pass-specific characterization tests beside their owning modules and retain
+- [x] Move pass-specific characterization tests beside their owning modules and retain
   ordering-dependent end-to-end tests under `cleanup/tests/` for emphasis through reflow, list
   markers in blockquotes, tables adjacent to lists, fenced/indented code, HTML blocks, CRLF,
   Unicode display width, and trailing-newline modes.
-- [ ] Prove `markdown::cleanup` and every existing cleanup re-export/import path remains
+- [x] Prove `markdown::cleanup` and every existing cleanup re-export/import path remains
   source-compatible; do not introduce a pass trait or implicit pass chaining.
 
 ### Phase 4 validation checkpoint
 
-- [ ] Compare cleanup test names and counts before and after the move, run the cleanup tests with
+- [x] Compare cleanup test names and counts before and after the move, run the cleanup tests with
   nextest, and run the DMLS formatting parity test to prove byte-equivalence with `md clean`.
-- [ ] Run `cargo check -p darkmatter -p dmls`, `just test`, and `just lint` from `darkmatter/`;
+- [x] Run `cargo check -p darkmatter -p dmls`, `just test`, and `just lint` from `darkmatter/`;
   require no cleanup output or snapshot changes.
 
 ## Phase 5 — Split demand-driven context capture by capture group
@@ -192,11 +283,11 @@ This phase is parallelizable with Phase 4 after Phase 3 is complete.
 
 ### Capture facade and group ownership
 
-- [ ] Characterize `ContextGroup::all`, `ContextGroup::for_key`,
+- [x] Characterize `ContextGroup::all`, `ContextGroup::for_key`,
   `scan_needed_groups`, `ContextCapture::new`, population order, sniff probe dependencies,
   diagnostics/timing labels, aliases, and existing tests before converting `context/capture.rs` to
   `context/capture/`.
-- [ ] Create `capture/mod.rs` as the crate-private facade for group selection and population
+- [x] Create `capture/mod.rs` as the crate-private facade for group selection and population
   sequencing; preserve the existing capture entry points and always-on local datetime behavior.
 - [ ] Move `ContextGroup`, `all`, demand scanning, and `for_key` delegation to `capture/groups.rs`;
   have each domain own a `KEYS` slice or equivalent `owns_key` predicate instead of repeating a
@@ -208,17 +299,17 @@ This phase is parallelizable with Phase 4 after Phase 3 is complete.
   `languages.rs`, `docs.rs`, `host.rs`, and `agent.rs` according to the specification; retain
   `sniff` as the authority for repository, filesystem, OS, hardware, and GPU discovery on macOS,
   Windows, and Linux.
-- [ ] Separate `populate_gpu` from hardware population and invoke it for `ContextGroup::Gpu` so a
+- [x] Separate `populate_gpu` from hardware population and invoke it for `ContextGroup::Gpu` so a
   `ctx.gpu`-only request inserts the GPU value without forcing CPU/memory capture.
 
 ### Context invariants and regression coverage
 
-- [ ] Add a host-independent GPU-only regression test using injected or constructed capture data;
+- [x] Add a host-independent GPU-only regression test using injected or constructed capture data;
   assert the GPU value is populated and hardware probing is not required.
-- [ ] Add invariant tests proving every generated context descriptor maps to exactly one group,
+- [x] Add invariant tests proving every generated context descriptor maps to exactly one group,
   documented backward-compatible aliases are handled by an explicit allowlist, and unknown keys
   map to no group.
-- [ ] Add or retain tests proving content with no relevant `ctx.*` reference performs only the
+- [x] Add or retain tests proving content with no relevant `ctx.*` reference performs only the
   documented datetime work and each requested group triggers only its dependency-minimal probe
   set.
 - [ ] Move existing tests to their owning capture modules without changing names or assertions and
@@ -237,7 +328,7 @@ Claudine library, and Claudine CLI. Do not leave old and new catalog authorities
 
 ### Registration model and domain split
 
-- [ ] Inventory every pure, context-aware, and lazy callable; canonical name; alias; overload;
+- [x] Inventory every pure, context-aware, and lazy callable; canonical name; alias; overload;
   descriptor; handler; evaluator path; and workspace consumer of
   `EXPRESSION_FUNCTION_DESCRIPTORS`, `PURE_FUNCTIONS`, and `FS_FUNCTIONS`.
 - [ ] Define crate-private `FunctionRegistration` and `FunctionHandler::{Pure, Context, Lazy}` in
