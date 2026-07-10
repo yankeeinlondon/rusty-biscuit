@@ -29,7 +29,7 @@
 //!   functions invoked for their result.
 
 use darkmatter::effects::EFFECT_DESCRIPTORS;
-use darkmatter::markdown::compose::expression::{EXPRESSION_FUNCTION_DESCRIPTORS, Expr};
+use darkmatter::markdown::compose::expression::{expression_function_descriptors, Expr};
 
 use super::lifecycle::LifecycleSignal;
 
@@ -587,7 +587,7 @@ fn is_lifecycle_control_verb(verb: &str) -> bool {
 
 /// Returns `true` when `verb` names a known Darkmatter expression function.
 fn is_known_expression_function_verb(verb: &str) -> bool {
-    EXPRESSION_FUNCTION_DESCRIPTORS
+    expression_function_descriptors()
         .iter()
         .any(|d| parsed_verb_of(d.signature) == Some(verb))
 }
@@ -604,11 +604,11 @@ fn parsed_verb_of(signature: &str) -> Option<&str> {
 
 /// Positional signature for a known Darkmatter expression-function verb.
 ///
-/// Derived from [`EXPRESSION_FUNCTION_DESCRIPTORS`]. Overloaded functions are
+/// Derived from [`expression_function_descriptors`]. Overloaded functions are
 /// merged so that parameters present only in longer overloads are marked as
 /// optional tail parameters.
 pub fn expression_function_signature(verb: &str) -> Option<Signature> {
-    let sigs: Vec<Signature> = EXPRESSION_FUNCTION_DESCRIPTORS
+    let sigs: Vec<Signature> = expression_function_descriptors()
         .iter()
         .filter_map(|d| {
             let sig = parse_signature(d.signature)?;
@@ -650,7 +650,7 @@ pub fn all_lifecycle_verbs() -> Vec<&'static str> {
             verbs.push(verb);
         }
     }
-    for desc in EXPRESSION_FUNCTION_DESCRIPTORS {
+    for desc in expression_function_descriptors() {
         if let Some(verb) = parsed_verb_of(desc.signature) {
             verbs.push(verb);
         }

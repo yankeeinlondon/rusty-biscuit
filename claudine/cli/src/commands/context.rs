@@ -112,7 +112,7 @@ fn display_property(name: &str) -> String {
     format!("ctx.{name}")
 }
 
-fn format_context_value_type(ty: ContextValueType, term: &Terminal) -> String {
+fn format_context_value_type(ty: &ContextValueType, term: &Terminal) -> String {
     Prose::new(context_value_type_markup(ty)).render(term)
 }
 
@@ -121,50 +121,15 @@ fn format_context_value_type(ty: ContextValueType, term: &Terminal) -> String {
 /// `Nullable(inner)` wraps the inner type's own colored markup in grey
 /// `Nullable(…)` so the report shows `Nullable(String)`, `Nullable(Integer)`,
 /// etc. rather than a bare `Nullable`.
-fn context_value_type_markup(ty: ContextValueType) -> String {
-    match ty {
-        ContextValueType::Nullable(inner) => {
-            format!(
-                "<grey>Nullable(</grey>{}<grey>)</grey>",
-                context_value_type_markup(*inner)
-            )
-        }
-        ContextValueType::String
-        | ContextValueType::Csv
-        | ContextValueType::MarkdownList
-        | ContextValueType::NestedMarkdownList => {
-            format!("<blue>{}</blue>", context_value_type_label(ty))
-        }
-        ContextValueType::Number | ContextValueType::Integer => {
-            format!("<green>{}</green>", context_value_type_label(ty))
-        }
-        ContextValueType::Boolean => format!("<orange>{}</orange>", context_value_type_label(ty)),
-        ContextValueType::Date
-        | ContextValueType::DateTime
-        | ContextValueType::Time
-        | ContextValueType::Timezone => {
-            format!("<violet>{}</violet>", context_value_type_label(ty))
-        }
-        ContextValueType::Object => format!("<cyan>{}</cyan>", context_value_type_label(ty)),
-    }
-}
-
-fn context_value_type_label(ty: ContextValueType) -> &'static str {
-    match ty {
-        ContextValueType::Date => "Date",
-        ContextValueType::DateTime => "DateTime",
-        ContextValueType::Time => "Time",
-        ContextValueType::Timezone => "Timezone",
-        ContextValueType::Integer => "Integer",
-        ContextValueType::Number => "Number",
-        ContextValueType::Boolean => "Boolean",
-        ContextValueType::String => "String",
-        ContextValueType::Csv => "Csv",
-        ContextValueType::MarkdownList => "MarkdownList",
-        ContextValueType::NestedMarkdownList => "NestedMarkdownList",
-        ContextValueType::Object => "Object",
-        ContextValueType::Nullable(_) => "Nullable",
-    }
+fn context_value_type_markup(ty: &ContextValueType) -> String {
+    let color = match ty.base.as_keyword() {
+        "number" => "green",
+        "boolean" | "boolish" => "orange",
+        "date" | "datetime" | "time" => "violet",
+        "object" => "cyan",
+        _ => "blue",
+    };
+    format!("<{color}>{ty}</{color}>")
 }
 
 fn format_value(value: &serde_json::Value, term: &Terminal) -> String {
@@ -243,7 +208,7 @@ fn render_default_report() {
         .iter()
         .flat_map(|(_, vars)| {
             vars.iter()
-                .map(|v| format_context_value_type(v.display_type, &term))
+                .map(|v| format_context_value_type(&v.display_type, &term))
         })
         .collect();
 
@@ -270,7 +235,7 @@ fn render_default_report() {
                 for desc in descriptors {
                     let row: Vec<TableCellContent> = vec![
                         display_property(desc.name).into(),
-                        format_context_value_type(desc.display_type, &term).into(),
+                        format_context_value_type(&desc.display_type, &term).into(),
                         inline_code_text(desc.description, &term).into(),
                     ];
                     table.add_row(row);
@@ -310,7 +275,7 @@ fn render_values_report_with(capture: impl FnOnce() -> ComposeContext) {
         .iter()
         .flat_map(|(_, vars)| {
             vars.iter()
-                .map(|v| format_context_value_type(v.display_type, &term))
+                .map(|v| format_context_value_type(&v.display_type, &term))
         })
         .collect();
 
@@ -362,7 +327,7 @@ fn render_values_report_with(capture: impl FnOnce() -> ComposeContext) {
 
                     let row: Vec<TableCellContent> = vec![
                         display_property(desc.name).into(),
-                        format_context_value_type(desc.display_type, &term).into(),
+                        format_context_value_type(&desc.display_type, &term).into(),
                         value_str.into(),
                     ];
                     table.add_row(row);
@@ -1036,7 +1001,7 @@ mod tests {
             .iter()
             .flat_map(|(_, vars)| {
                 vars.iter()
-                    .map(|v| format_context_value_type(v.display_type, &term))
+                    .map(|v| format_context_value_type(&v.display_type, &term))
             })
             .collect();
 

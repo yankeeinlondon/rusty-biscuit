@@ -932,7 +932,9 @@ fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<InteractiveShape> {
             let (min, max) = min_max_constraints(atom);
             Some(InteractiveShape::Number { integer, min, max })
         }
-        TypeExpr::Primitive(SimplifiedType::String) => {
+        TypeExpr::Primitive(
+            SimplifiedType::String | SimplifiedType::Yaml | SimplifiedType::Json,
+        ) => {
             let (min_len, max_len) = string_length_constraints(atom);
             Some(InteractiveShape::Text {
                 format: TextFormat::Plain,
@@ -980,7 +982,8 @@ fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<InteractiveShape> {
             })
         }
         TypeExpr::Primitive(SimplifiedType::Object | SimplifiedType::Any)
-        | TypeExpr::InlineObject(_) => None,
+        | TypeExpr::InlineObject(_)
+        | TypeExpr::Imported { .. } => None,
     }
 }
 
@@ -1025,6 +1028,7 @@ fn type_label_for_atom(atom: &PropertyAtom) -> String {
         }
         TypeExpr::Primitive(ty) => format!("{base}{suffix}", base = ty.as_keyword()),
         TypeExpr::InlineObject(_) => format!("object{suffix}"),
+        TypeExpr::Imported { name, reference } => format!("{name}@{reference}{suffix}"),
     }
 }
 
