@@ -1,14 +1,24 @@
 //! Raw runtime fact capture from chrono, std::env, and sniff.
 
+mod agent;
+mod changes;
+mod datetime;
+mod docs;
+mod groups;
+mod host;
+mod languages;
+mod repo;
+mod snapshot;
+
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use serde_json::{Map, Value};
 use sniff::filesystem::blast_radius;
-use sniff::filesystem::docs::{self, MarkdownMeta};
+use sniff::filesystem::docs::{self as sniff_docs, MarkdownMeta};
 use sniff::filesystem::git::{FileStatus, GitRepo};
-use sniff::filesystem::repo::{self, Package, RepoInfo};
+use sniff::filesystem::repo::{self as sniff_repo, Package, RepoInfo};
 use sniff::hardware::{self, HardwareInfo};
 use sniff::os::{self, OsInfo, OsType};
 use sniff::request::OsRequest;
@@ -69,6 +79,9 @@ impl ContextGroup {
 
     /// Map a ctx variable name to its owning group.
     pub(crate) fn for_key(key: &str) -> Option<ContextGroup> {
+        if let Some(group) = groups::group_for_key(key) {
+            return Some(group);
+        }
         match key {
             // DateTime
             "now"
@@ -325,7 +338,7 @@ impl ContextCapture {
                         let t = Instant::now();
                         let result = rr
                             .as_ref()
-                            .and_then(|root| repo::detect_repo_structure(root).ok().flatten());
+                            .and_then(|root| sniff_repo::detect_repo_structure(root).ok().flatten());
                         (result, t.elapsed())
                     }))
                 } else {
@@ -404,7 +417,7 @@ impl ContextCapture {
                         .unwrap_or_default();
                     let result = repo_root
                         .as_ref()
-                        .and_then(|root| docs::detect_docs_with_packages(root, &package_list));
+                        .and_then(|root| sniff_docs::detect_docs_with_packages(root, &package_list));
                     timings.push(("docs".into(), t.elapsed()));
                     result
                 } else {
@@ -606,6 +619,10 @@ pub(crate) fn capture_runtime_context_for_groups(
 
     if groups.contains(&ContextGroup::Hardware) {
         populate_hardware(&cap, &mut values);
+    }
+
+    if groups.contains(&ContextGroup::Gpu) {
+        populate_gpu(&cap, &mut values);
     }
 
     if groups.contains(&ContextGroup::Agent) {
@@ -1566,11 +1583,14 @@ fn populate_hardware(cap: &ContextCapture, values: &mut Map<String, Value>) {
         hw.map_or(Value::Null, |h| Value::String(h.cpu.arch.clone())),
     );
 
+}
+
+fn populate_gpu(cap: &ContextCapture, values: &mut Map<String, Value>) {
     values.insert(
         "gpu".into(),
         cap.gpu_names
             .as_ref()
-            .map_or(Value::Null, |n| Value::String(n.clone())),
+            .map_or(Value::Null, |name| Value::String(name.clone())),
     );
 }
 
@@ -1975,5 +1995,32 @@ mod tests {
                 );
             })
         });
+    }
+
+    #[test]
+    fn gpu_only_population_does_not_require_hardware_capture() {
+        let mut cap = ContextCapture::for_test_base(PathBuf::from("/tmp"), None);
+        cap.gpu_names = Some("Injected GPU".to_string());
+        assert!(cap.hardware_info.is_none());
+
+        let mut values = Map::new();
+        populate_gpu(&cap, &mut values);
+
+        assert_eq!(values.get("gpu"), Some(&Value::String("Injected GPU".into())));
+        assert!(!values.contains_key("cpu_cores"));
+        assert!(!values.contains_key("memory_total"));
+    }
+
+    #[test]
+    fn content_without_runtime_context_only_populates_datetime() {
+        let (values, diagnostics, timings) =
+            capture_runtime_context_for_content(Path::new("."), "ordinary markdown");
+
+        assert!(values.contains_key("now"));
+        assert!(!values.contains_key("repo"));
+        assert!(!values.contains_key("os"));
+        assert!(!values.contains_key("gpu"));
+        assert!(diagnostics.is_empty());
+        assert!(timings.is_empty());
     }
 }
