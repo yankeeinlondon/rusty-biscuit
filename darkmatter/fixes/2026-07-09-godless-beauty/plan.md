@@ -2,7 +2,7 @@
 agent: codex/
 total_phases: 7
 created: 2026-07-09
-phase: 6
+phase: 7
 yolo: false
 spec: darkmatter/fixes/2026-07-09-godless-beauty/spec.md
 source_files_during_phase_1:
@@ -126,6 +126,21 @@ docs_created_during_phase_6:
 skills_files_updated_during_phase_6:
   - .claude/skills/darkmatter/SKILL.md
   - .claude/skills/darkmatter/compose.md
+source_files_during_phase_7:
+  - darkmatter/lib/src/layout/page/tests.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/collections.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/dates.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/markdown_docs.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/predicates.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/skills.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/strings.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/terminal.rs
+docs_updated_during_phase_7:
+  - darkmatter/fixes/2026-07-09-godless-beauty/plan.md
+docs_created_during_phase_7:
+  - darkmatter/fixes/2026-07-09-godless-beauty/phase-7-closeout.md
+skills_files_updated_during_phase_7: []
 packages:
   - darkmatter
   - darkmatter-cli
@@ -424,24 +439,24 @@ Claudine library, and Claudine CLI. Do not leave old and new catalog authorities
 
 ## Phase 7 — Integration, cross-platform review, and closeout
 
-- [ ] Compare the final `cargo nextest list -p darkmatter` and
+- [x] Compare the final `cargo nextest list -p darkmatter` and
   `level2_render_tree_terminal` inventories with the Phase 1 records; account explicitly for every
   added regression test and require every pre-existing test name/count to remain represented.
-- [ ] Review the complete diff for scope: no generic pass trait, plugin framework, direct
+- [x] Review the complete diff for scope: no generic pass trait, plugin framework, direct
   platform-command discovery, production behavior change beyond the two fixes and catalog API
   migration, assertion weakening, test-gate drift, or newly created god-file.
-- [ ] Review all touched comments, rustdoc, READMEs, active architecture docs, and the Darkmatter
+- [x] Review all touched comments, rustdoc, READMEs, active architecture docs, and the Darkmatter
   skill for stale ownership or pipeline claims; update only claims made stale by this work.
-- [ ] Audit path handling, module declarations, fixture paths, environment-variable use, and sniff
+- [x] Audit path handling, module declarations, fixture paths, environment-variable use, and sniff
   integrations for macOS, Windows, and Linux compatibility; ensure no Unix-only separators,
   commands, or filesystem assumptions entered production or tests.
-- [ ] Run final compilation:
+- [x] Run final compilation:
   `cargo check -p darkmatter -p darkmatter-cli -p dmls -p claudine -p claudine-cli`.
-- [ ] Run final Darkmatter package-area gates from `darkmatter/`: `just test`, `just test-l2`, and
+- [x] Run final Darkmatter package-area gates from `darkmatter/`: `just test`, `just test-l2`, and
   `just lint`; run the canonical Claudine checks/tests required by its area recipes.
-- [ ] Run a repository-wide search proving the deleted transform APIs and removed expression
+- [x] Run a repository-wide search proving the deleted transform APIs and removed expression
   constants survive only in historical specifications/reviews or explicit migration notes.
-- [ ] Confirm the final diff preserves rendering bytes/snapshots, compose pass order,
+- [x] Confirm the final diff preserves rendering bytes/snapshots, compose pass order,
   error/status-block text, cache and shell-security behavior, demand-driven capture, and test-level
   gating, with only the UTF-8 title fix, GPU-only capture fix, and documented catalog API break
   called out for review.
