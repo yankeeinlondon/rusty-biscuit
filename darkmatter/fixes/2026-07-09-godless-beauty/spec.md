@@ -9,7 +9,6 @@ packages:
   - dmls
   - claudine
 inputs:
-  - ../../features/2026-07-01-more-modular/prep.md
   - ../../reviews/2026-06-14-god-files/review.md
 ---
 
@@ -18,7 +17,8 @@ inputs:
 **Date:** 2026-07-09
 **Area:** primarily `darkmatter/lib`; Improvement 4 intentionally migrates workspace consumers in
 `darkmatter/dmls` and `claudine` because it changes the expression-catalog authority.
-**Predecessor:** `darkmatter/features/2026-07-01-more-modular/prep.md` (brainstorm prompt only; this spec is its deliverable)
+**Origin:** derived from the 2026-07-01 more-modular brainstorm prompt, which this specification
+supersedes.
 
 ## Problem
 
@@ -430,7 +430,7 @@ green. Use nextest, never `cargo test`, and do not run write-mode `cargo fmt` as
   specifications or migration notes.
 
 The final diff must show no public rendering, compose, cleanup, context, or expression behavior
-change beyond the specified UTF-8 correction and the documented source-level expression-catalog
-API migration. No new production file should merely replace one god-file with another: each
-domain module must have one coherent reason to change, while orchestration remains visible in its
-facade.
+change beyond the specified UTF-8 correction, GPU-only capture correction, and documented
+source-level expression-catalog API migration. No new production file should merely replace one
+god-file with another: each domain module must have one coherent reason to change, while
+orchestration remains visible in its facade.
