@@ -1,6 +1,6 @@
 ---
 clarified: codex/gpt-5
-review_iterations: 2
+review_iterations: 3
 ---
 
 # Suggested Values for SimplifiedSchema
