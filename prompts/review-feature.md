@@ -102,6 +102,7 @@ test is at the wrong level under "Findings" with severity at least "high".
 
 - Save your review suggestions to "@{{review}}"
 - Save the following frontmatter properties on "@{{review_file}}":
+    - set `$schema` to "@.claudine/schemas/review.yaml"
     - based on your review suggestions indicate whether you think this feature is **ready for production** by setting the `ready` frontmatter property to `true` or `false`
     - set the `agent` frontmatter property to "{{ctx.agent}}/{{ctx.model}}" 
     - set the `created` frontmatter property to "{{ctx.now}}"
