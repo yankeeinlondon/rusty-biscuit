@@ -176,7 +176,6 @@ fn labels(items: &[Value]) -> Vec<&str> {
 }
 
 #[test]
-#[ignore = "red acceptance scaffold; enable in suggestion diagnostics phase"]
 fn level2_suggest_phase1_inline_warning_has_exact_argument_range() {
     let workspace = tempfile::tempdir().unwrap();
     let path = workspace.path().join("inline.md");
@@ -196,7 +195,6 @@ fn level2_suggest_phase1_inline_warning_has_exact_argument_range() {
 }
 
 #[test]
-#[ignore = "red acceptance scaffold; enable in standalone schema phase"]
 fn level2_suggest_phase1_standalone_ranges_and_completion() {
     let workspace = tempfile::tempdir().unwrap();
     let pure_path = workspace.path().join("pure.yaml");
@@ -228,7 +226,6 @@ fn level2_suggest_phase1_standalone_ranges_and_completion() {
 }
 
 #[test]
-#[ignore = "red acceptance scaffold; enable in suggestion completion phase"]
 fn level2_suggest_phase1_completion_positions() {
     let workspace = tempfile::tempdir().unwrap();
     let path = workspace.path().join("completion.md");
@@ -258,7 +255,6 @@ fn level2_suggest_phase1_completion_positions() {
 }
 
 #[test]
-#[ignore = "red acceptance scaffold; enable in suggestion completion phase"]
 fn level2_suggest_phase1_union_selection_and_raw_schema_exclusion() {
     let workspace = tempfile::tempdir().unwrap();
     let union_path = workspace.path().join("unions.md");
@@ -275,13 +271,202 @@ fn level2_suggest_phase1_union_selection_and_raw_schema_exclusion() {
     open(&fixture, union_uri.as_str(), "markdown", UNIONS);
     open(&fixture, consumer_uri.as_str(), "markdown", RAW_CONSUMER);
 
-    let property_union = fixture.completion(union_uri.as_str(), 8, 10);
+    let property_union = fixture.completion(union_uri.as_str(), 7, 10);
     assert_eq!(labels(&property_union), vec!["second"]);
-    let root_union = fixture.completion(union_uri.as_str(), 9, 8);
+    let root_union = fixture.completion(union_uri.as_str(), 8, 8);
     assert_eq!(labels(&root_union), vec!["arm-one"]);
     assert!(
         fixture.completion(consumer_uri.as_str(), 2, 9).is_empty(),
         "raw JSON Schema annotations must not activate suggestion completion"
     );
+    fixture.shutdown();
+}
+
+// ── Phase 5 L2 session tests: lifecycle, ownership, correction ──
+
+/// Opening an inline schema document, then correcting the invalid candidate,
+/// removes the warning.
+#[test]
+fn level2_suggest_phase5_inline_warning_removed_after_correction() {
+    let workspace = tempfile::tempdir().unwrap();
+    let path = workspace.path().join("inline.md");
+    let uri = url::Url::from_file_path(&path).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(workspace.path());
+    open(&fixture, uri.as_str(), "markdown", INLINE);
+
+    let diagnostics = fixture.diagnostics(uri.as_str());
+    let suggestion = diagnostics
+        .iter()
+        .find(|d| d["code"] == json!("dm.schema.invalid_suggestion"))
+        .expect("invalid suggestion diagnostic before correction");
+    assert_invalid_suggestion(suggestion, 2, 35, 39);
+
+    // Correct the candidate: replace `many` with `3`.
+    let corrected = INLINE.replace("many", "3");
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [{ "text": corrected }]
+        }),
+    );
+
+    let diagnostics = fixture.diagnostics(uri.as_str());
+    let has_suggestion = diagnostics
+        .iter()
+        .any(|d| d["code"] == json!("dm.schema.invalid_suggestion"));
+    assert!(!has_suggestion, "warning must be removed after correction: {diagnostics:?}");
+
+    fixture.shutdown();
+}
+
+/// A standalone pure-envelope schema document publishes its own warnings; a
+/// consuming Markdown document referencing it gets no suggestion diagnostics.
+#[test]
+fn level2_suggest_phase5_standalone_warning_not_duplicated_on_consumer() {
+    let workspace = tempfile::tempdir().unwrap();
+    let schema_path = workspace.path().join("pure.yaml");
+    let consumer_path = workspace.path().join("consumer.md");
+    std::fs::write(&schema_path, PURE).unwrap();
+    let consumer_text = "---\n$schema: ./pure.yaml\ncount: 1\n---\n\nbody\n";
+    std::fs::write(&consumer_path, consumer_text).unwrap();
+    let schema_uri = url::Url::from_file_path(&schema_path).unwrap();
+    let consumer_uri = url::Url::from_file_path(&consumer_path).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(workspace.path());
+    open(&fixture, consumer_uri.as_str(), "markdown", consumer_text);
+    open(&fixture, schema_uri.as_str(), "yaml", PURE);
+
+    // The schema document has the warning.
+    let schema_diagnostics = fixture.diagnostics(schema_uri.as_str());
+    let schema_suggestion = schema_diagnostics
+        .iter()
+        .find(|d| d["code"] == json!("dm.schema.invalid_suggestion"))
+        .expect("standalone schema document owns the warning");
+    assert_invalid_suggestion(schema_suggestion, 2, 35, 39);
+
+    // The consuming Markdown document does NOT duplicate it.
+    let consumer_diagnostics = fixture.diagnostics(consumer_uri.as_str());
+    let consumer_has_suggestion = consumer_diagnostics
+        .iter()
+        .any(|d| d["code"] == json!("dm.schema.invalid_suggestion"));
+    assert!(
+        !consumer_has_suggestion,
+        "consumer must not carry the standalone schema's suggestion warning: {consumer_diagnostics:?}"
+    );
+
+    fixture.shutdown();
+}
+
+/// A malformed tagged envelope publishes a `dm.schema.document_malformed` error.
+#[test]
+fn level2_suggest_phase5_malformed_tagged_envelope_error() {
+    let workspace = tempfile::tempdir().unwrap();
+    let path = workspace.path().join("bad.yaml");
+    std::fs::write(&path, "kind: schema\n").unwrap();
+    let uri = url::Url::from_file_path(&path).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(workspace.path());
+    open(&fixture, uri.as_str(), "yaml", "kind: schema\n");
+
+    let diagnostics = fixture.diagnostics(uri.as_str());
+    let malformed = diagnostics
+        .iter()
+        .find(|d| d["code"] == json!("dm.schema.document_malformed"))
+        .expect("malformed envelope diagnostic");
+    assert_eq!(malformed["severity"], json!(1), "must be ERROR severity");
+    assert_eq!(malformed["source"], json!("darkmatter.schema"));
+
+    fixture.shutdown();
+}
+
+/// Closing a standalone schema document clears its diagnostics.
+#[test]
+fn level2_suggest_phase5_close_clears_diagnostics() {
+    let workspace = tempfile::tempdir().unwrap();
+    let path = workspace.path().join("pure.yaml");
+    std::fs::write(&path, PURE).unwrap();
+    let uri = url::Url::from_file_path(&path).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(workspace.path());
+    open(&fixture, uri.as_str(), "yaml", PURE);
+
+    let diagnostics = fixture.diagnostics(uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d["code"] == json!("dm.schema.invalid_suggestion")),
+        "expected warning before close"
+    );
+
+    fixture.notify(
+        "textDocument/didClose",
+        json!({ "textDocument": { "uri": uri.as_str() } }),
+    );
+
+    let diagnostics = fixture.diagnostics(uri.as_str());
+    assert!(
+        diagnostics.is_empty(),
+        "closing must clear diagnostics: {diagnostics:?}"
+    );
+
+    fixture.shutdown();
+}
+
+/// The effective schema stays available after suggestion warnings so key
+/// completion, hover, and validation continue operating.
+#[test]
+fn level2_suggest_phase5_schema_remains_active_alongside_warnings() {
+    let workspace = tempfile::tempdir().unwrap();
+    let text = "---\n$schema:\n  color: string(suggest(red, green, blue))\n  count: number(min(0); suggest(1, many, 2))\ncolor: red\ncount: 1\n---\n\nbody\n";
+    let path = workspace.path().join("doc.md");
+    std::fs::write(&path, text).unwrap();
+    let uri = url::Url::from_file_path(&path).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(workspace.path());
+    open(&fixture, uri.as_str(), "markdown", text);
+
+    // The invalid suggestion warning is present.
+    let diagnostics = fixture.diagnostics(uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d["code"] == json!("dm.schema.invalid_suggestion")),
+        "expected invalid suggestion warning"
+    );
+
+    // But schema validation is still active: violating the min(0) constraint
+    // on `count` produces a constraint diagnostic.
+    let changed = text.replace("count: 1\n---", "count: -5\n---");
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [{ "text": changed }]
+        }),
+    );
+    let diagnostics = fixture.diagnostics(uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d["code"] == json!("dm.schema.constraint")
+                || d["code"] == json!("dm.schema.type_mismatch")),
+        "schema validation must remain active alongside warnings: {diagnostics:?}"
+    );
+
+    // And the suggestion warning is still there.
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d["code"] == json!("dm.schema.invalid_suggestion")),
+        "suggestion warning must persist alongside validation: {diagnostics:?}"
+    );
+
     fixture.shutdown();
 }
