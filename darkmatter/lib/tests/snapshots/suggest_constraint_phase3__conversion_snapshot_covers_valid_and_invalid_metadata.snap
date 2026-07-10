@@ -1,0 +1,52 @@
+---
+source: darkmatter/lib/tests/suggest_constraint_phase3.rs
+expression: "serde_json::to_string_pretty(&schema).unwrap()"
+---
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "label": {
+      "minLength": 2,
+      "type": "string",
+      "x-darkmatter-suggest": [
+        "ok",
+        "x"
+      ]
+    },
+    "score": {
+      "maximum": 10,
+      "minimum": 0,
+      "type": "integer",
+      "x-darkmatter-suggest": [
+        -1,
+        3,
+        3.5,
+        11,
+        "many"
+      ]
+    },
+    "tags": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "items": {
+            "type": "string",
+            "x-darkmatter-suggest": [
+              "alpha",
+              "beta"
+            ]
+          },
+          "type": "array"
+        }
+      ]
+    }
+  },
+  "required": [
+    "label",
+    "score"
+  ],
+  "type": "object"
+}

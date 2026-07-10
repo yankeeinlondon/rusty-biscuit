@@ -31,7 +31,6 @@ fn grammar_error(property: &str, expression: &str) -> (String, std::ops::Range<u
 }
 
 #[test]
-#[ignore = "red acceptance scaffold; enable as suggest(...) phases land"]
 fn suggest_phase1_eligible_scalar_and_array_forms_parse() {
     for expression in [
         "string(suggest(red, green, 'blue gray'))",
@@ -61,7 +60,6 @@ fn suggest_phase1_eligible_scalar_and_array_forms_parse() {
 }
 
 #[test]
-#[ignore = "red acceptance scaffold; enable as suggest(...) phases land"]
 fn suggest_phase1_empty_list_is_a_structural_error() {
     let (message, span) = grammar_error("value", "string(suggest())");
     assert!(message.contains("at least one candidate"), "{message}");
@@ -69,7 +67,6 @@ fn suggest_phase1_empty_list_is_a_structural_error() {
 }
 
 #[test]
-#[ignore = "red acceptance scaffold; enable as suggest(...) phases land"]
 fn suggest_phase1_cardinality_is_per_complete_property_definition() {
     let (message, second_span) = grammar_error(
         "value",
@@ -94,7 +91,6 @@ fn suggest_phase1_cardinality_is_per_complete_property_definition() {
 }
 
 #[test]
-#[ignore = "red acceptance scaffold; enable as suggest(...) phases land"]
 fn suggest_phase1_duplicates_are_rejected_at_the_later_argument() {
     for (expression, later) in [
         ("string(suggest(12, \"12\"))", "\"12\""),
@@ -110,12 +106,11 @@ fn suggest_phase1_duplicates_are_rejected_at_the_later_argument() {
 }
 
 #[test]
-#[ignore = "red acceptance scaffold; enable as suggest(...) phases land"]
 fn suggest_phase1_conversion_preserves_string_interpretation_and_order() {
     let schema = schema_json("value: string(suggest(Orange, 12, true, null, 'blue gray'))\n")
         .expect("suggestion schema converts");
     assert_eq!(
-        schema["properties"]["value"]["anyOf"][0]["x-darkmatter-suggest"],
+        schema["properties"]["value"]["anyOf"][1]["x-darkmatter-suggest"],
         json!(["Orange", "12", "true", "null", "blue gray"])
     );
     assert!(schema["properties"]["value"]["anyOf"][0].get("examples").is_none());
@@ -123,20 +118,19 @@ fn suggest_phase1_conversion_preserves_string_interpretation_and_order() {
     let array = schema_json("value: number(suggest(1, 2.50))[]\n")
         .expect("array suggestion schema converts");
     assert_eq!(
-        array["properties"]["value"]["anyOf"][0]["items"]["x-darkmatter-suggest"],
+        array["properties"]["value"]["anyOf"][1]["items"]["x-darkmatter-suggest"],
         json!([1, 2.5])
     );
 }
 
 #[test]
-#[ignore = "red acceptance scaffold; enable as suggest(...) phases land"]
 fn suggest_phase1_invalid_decimal_syntax_is_metadata() {
     let schema = schema_json(
         "value: number(suggest(1e3, +1, .5, 5., many, ' 1 ', 003.500))\n",
     )
     .expect("invalid candidate metadata does not prevent conversion");
     assert_eq!(
-        schema["properties"]["value"]["anyOf"][0]["x-darkmatter-suggest"],
+        schema["properties"]["value"]["anyOf"][1]["x-darkmatter-suggest"],
         json!(["1e3", "+1", ".5", "5.", "many", " 1 ", 3.5])
     );
 }
@@ -157,6 +151,18 @@ fn observable_integer_boundary() -> (String, String) {
     panic!("JSON numeric model exposed no observable integer boundary");
 }
 
+fn observable_negative_integer_boundary() -> (String, String) {
+    let mut accepted = "9".to_string();
+    for _ in 0..256 {
+        let candidate = format!("{accepted}9");
+        if !exact_json_number(&format!("-{candidate}")) {
+            return (accepted, candidate);
+        }
+        accepted = candidate;
+    }
+    panic!("JSON numeric model exposed no observable negative integer boundary");
+}
+
 fn observable_fraction_boundary() -> (String, String) {
     let mut accepted = "0.1".to_string();
     for digit in (1..=9).cycle().take(512) {
@@ -170,20 +176,20 @@ fn observable_fraction_boundary() -> (String, String) {
 }
 
 #[test]
-#[ignore = "red acceptance scaffold; enable as suggest(...) phases land"]
 fn suggest_phase1_numeric_boundaries_follow_observable_json_round_trip() {
     let (integer, beyond_integer) = observable_integer_boundary();
+    let (negative_integer, beyond_negative_integer) = observable_negative_integer_boundary();
     let (fraction, beyond_fraction) = observable_fraction_boundary();
     let yaml = format!(
-        "value: number(suggest({integer}, {beyond_integer}, -{integer}, -{beyond_integer}, \
+        "value: number(suggest({integer}, {beyond_integer}, -{negative_integer}, -{beyond_negative_integer}, \
          {fraction}, {beyond_fraction}, 0003.5000, -0.000))\n"
     );
     let schema = schema_json(&yaml).expect("boundary metadata converts");
-    let suggestions = &schema["properties"]["value"]["anyOf"][0]["x-darkmatter-suggest"];
+    let suggestions = &schema["properties"]["value"]["anyOf"][1]["x-darkmatter-suggest"];
     assert!(suggestions[0].is_number());
     assert_eq!(suggestions[1], json!(beyond_integer));
     assert!(suggestions[2].is_number());
-    assert_eq!(suggestions[3], json!(format!("-{beyond_integer}")));
+    assert_eq!(suggestions[3], json!(format!("-{beyond_negative_integer}")));
     assert!(suggestions[4].is_number());
     assert_eq!(suggestions[5], json!(beyond_fraction));
     assert_eq!(suggestions[6], json!(3.5));
@@ -191,7 +197,6 @@ fn suggest_phase1_numeric_boundaries_follow_observable_json_round_trip() {
 }
 
 #[test]
-#[ignore = "red acceptance scaffold; enable as suggest(...) phases land"]
 fn suggest_phase1_invalid_candidates_remain_loadable_and_lintable() {
     let schema = schema_json(
         "score: number(integer; min(0); max(100); suggest(-1, 50, 50.5, 101, many))\n\
@@ -199,11 +204,11 @@ fn suggest_phase1_invalid_candidates_remain_loadable_and_lintable() {
     )
     .expect("invalid suggestions remain loadable");
     assert_eq!(
-        schema["properties"]["score"]["anyOf"][0]["x-darkmatter-suggest"],
+        schema["properties"]["score"]["anyOf"][1]["x-darkmatter-suggest"],
         json!([-1, 50, 50.5, 101, "many"])
     );
     assert_eq!(
-        schema["properties"]["label"]["anyOf"][0]["x-darkmatter-suggest"],
+        schema["properties"]["label"]["anyOf"][1]["x-darkmatter-suggest"],
         json!(["a", "valid", "TOOLONG"])
     );
 
@@ -213,27 +218,25 @@ fn suggest_phase1_invalid_candidates_remain_loadable_and_lintable() {
 }
 
 #[test]
-#[ignore = "red acceptance scaffold; enable as suggest(...) phases land"]
 fn suggest_phase1_candidate_constraints_target_scalar_or_array_items() {
     let scalar = schema_json(
         "value: string(required; default(ok); example(this); min(2); suggest(x, ok))\n",
     )
     .expect("candidate constraints convert");
     assert_eq!(
-        scalar["properties"]["value"]["anyOf"][0]["x-darkmatter-suggest"],
+        scalar["properties"]["value"]["x-darkmatter-suggest"],
         json!(["x", "ok"])
     );
 
     let array = schema_json("value: number(integer; min(0); suggest(-1, 1.5, 2))[]\n")
         .expect("array item constraints convert");
-    let item = &array["properties"]["value"]["anyOf"][0]["items"];
+    let item = &array["properties"]["value"]["anyOf"][1]["items"];
     assert_eq!(item["x-darkmatter-suggest"], json!([-1, 1.5, 2]));
     assert_eq!(item["type"], json!("integer"));
     assert_eq!(item["minimum"], json!(0));
 }
 
 #[test]
-#[ignore = "red acceptance scaffold; enable as suggest(...) phases land"]
 fn suggest_phase1_metadata_does_not_restrict_document_values() {
     let document: Markdown = "---\n$schema:\n  color: string(suggest(red, green))\ncolor: purple\n---\n"
         .into();
