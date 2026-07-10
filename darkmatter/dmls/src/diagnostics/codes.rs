@@ -83,6 +83,14 @@ pub mod code {
     pub const SCHEMA_DEPRECATED_KEY: &str = "dm.schema.deprecated_key";
     /// A `file(...)`-typed value failed to parse, resolve, or match a file.
     pub const SCHEMA_INVALID_FILE_REFERENCE: &str = "dm.schema.invalid_file_reference";
+    /// A `suggest(...)` candidate is invalid metadata: it fails its target
+    /// schema's type, range, integer, length, not-empty, or pattern constraint,
+    /// or uses invalid decimal syntax or an unsupported lossless representation.
+    pub const SCHEMA_INVALID_SUGGESTION: &str = "dm.schema.invalid_suggestion";
+    /// A recognized standalone SimplifiedSchema envelope is malformed (missing
+    /// or non-mapping `types`, unsupported tagged-envelope keys, or an invalid
+    /// payload).
+    pub const SCHEMA_DOCUMENT_MALFORMED: &str = "dm.schema.document_malformed";
 
     /// A `style:` key the style schema does not recognize.
     pub const STYLE_UNKNOWN_KEY: &str = "dm.style.unknown_key";

@@ -11,8 +11,8 @@
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::schemas::{
-    PositionMap, SchemaError, SchemaOriginKind, ValidationOptions, ValidationProblem,
-    ValidationProblemCode,
+    PositionMap, SchemaError, SchemaOriginKind, SuggestionLintProblem, SuggestionLintReason,
+    ValidationOptions, ValidationProblem, ValidationProblemCode,
 };
 use darkmatter::style::{self, StyleWarningKind};
 use lsp_types::{
@@ -20,7 +20,7 @@ use lsp_types::{
 };
 
 use crate::diagnostics::codes::{code, source};
-use crate::overlay::{FrontmatterAst, SchemaBundle, SchemaOutcome};
+use crate::overlay::{FrontmatterAst, SchemaBundle, SchemaOutcome, SuggestionState};
 use crate::providers::DocumentContext;
 use crate::source_map::SourceMap;
 use crate::workspace::file_path_to_uri;
@@ -60,6 +60,8 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
         }
         SchemaOutcome::Ready(None) => {}
     }
+
+    suggestion_diagnostics(ctx, &overlay.suggestions, &mut out);
 
     out
 }
@@ -205,6 +207,100 @@ fn style_diagnostics(ctx: &DocumentContext, ast: &FrontmatterAst, out: &mut Vec<
     }
 }
 
+/// Suggestion-lint diagnostics from `suggest(...)` candidate problems.
+///
+/// Emits one `dm.schema.invalid_suggestion` `WARNING` per invalid candidate on
+/// the exact authored argument range, plus a `dm.schema.document_malformed`
+/// `ERROR` for a malformed recognized standalone envelope. For a standalone
+/// schema document the warnings are owned by that document and are never
+/// duplicated onto consuming Markdown documents' `$schema` references.
+fn suggestion_diagnostics(
+    ctx: &DocumentContext,
+    suggestions: &SuggestionState,
+    out: &mut Vec<Diagnostic>,
+) {
+    match suggestions {
+        SuggestionState::Inactive => {}
+        SuggestionState::Inline(problems) => {
+            for problem in problems {
+                out.push(suggestion_warning(ctx, problem));
+            }
+        }
+        SuggestionState::Standalone { problems, error, .. } => {
+            for problem in problems {
+                out.push(suggestion_warning(ctx, problem));
+            }
+            if let Some(error) = error {
+                out.push(standalone_error_diagnostic(ctx, error));
+            }
+        }
+    }
+}
+
+/// One `dm.schema.invalid_suggestion` warning ranged at the candidate argument.
+fn suggestion_warning(ctx: &DocumentContext, problem: &SuggestionLintProblem) -> Diagnostic {
+    let range = ctx
+        .source_map
+        .byte_range_to_lsp(problem.span.clone())
+        .unwrap_or_else(zero_range);
+    let message = suggestion_message(problem);
+    diagnostic(
+        range,
+        DiagnosticSeverity::WARNING,
+        source::SCHEMA,
+        code::SCHEMA_INVALID_SUGGESTION,
+        message,
+    )
+}
+
+/// A reason-specific message for an invalid suggestion candidate.
+fn suggestion_message(problem: &SuggestionLintProblem) -> String {
+    let decoded = &problem.decoded;
+    match problem.reason {
+        SuggestionLintReason::InvalidDecimalSyntax => {
+            format!("suggestion `{decoded}` is not a valid simple decimal number")
+        }
+        SuggestionLintReason::UnsupportedNumberRepresentation => {
+            format!("suggestion `{decoded}` cannot be losslessly represented as a JSON number")
+        }
+        SuggestionLintReason::Range => {
+            format!("suggestion `{decoded}` is outside the allowed range")
+        }
+        SuggestionLintReason::Integer => {
+            format!("suggestion `{decoded}` must be an integer")
+        }
+        SuggestionLintReason::Length => {
+            format!("suggestion `{decoded}` violates a length constraint")
+        }
+        SuggestionLintReason::NotEmpty => {
+            format!("suggestion `{decoded}` must not be empty or whitespace-only")
+        }
+        SuggestionLintReason::Pattern => {
+            format!("suggestion `{decoded}` does not match the required pattern")
+        }
+        SuggestionLintReason::Type => {
+            format!("suggestion `{decoded}` does not match the target type")
+        }
+        _ => format!("suggestion `{decoded}` is invalid"),
+    }
+}
+
+/// A malformed recognized standalone envelope, ranged at the whole buffer.
+fn standalone_error_diagnostic(ctx: &DocumentContext, error: &SchemaError) -> Diagnostic {
+    let span = 0..ctx.text.len();
+    let range = ctx
+        .source_map
+        .byte_range_to_lsp(span)
+        .unwrap_or_else(zero_range);
+    diagnostic(
+        range,
+        DiagnosticSeverity::ERROR,
+        source::SCHEMA,
+        code::SCHEMA_DOCUMENT_MALFORMED,
+        error.to_string(),
+    )
+}
+
 /// The `(code, severity)` for a validation-problem category.
 /// Maps a validation problem to its stable code + severity, or `None` when the
 /// problem should not be diagnosed at edit time.
@@ -308,5 +404,99 @@ mod tests {
             assert_eq!(classify(code, false).unwrap().1, DiagnosticSeverity::ERROR);
             assert_eq!(classify(code, true).unwrap().1, DiagnosticSeverity::ERROR);
         }
+    }
+
+    // ── Suggestion diagnostic unit tests ──
+
+    #[test]
+    fn suggestion_message_covers_each_reason() {
+        let problem = |reason| SuggestionLintProblem {
+            property: "x".into(),
+            root_arm: None,
+            property_arm: None,
+            decoded: "bad".into(),
+            interpreted: serde_json::Value::Null,
+            reason,
+            span: 0..0,
+        };
+        assert!(suggestion_message(&problem(SuggestionLintReason::InvalidDecimalSyntax)).contains("simple decimal"));
+        assert!(suggestion_message(&problem(SuggestionLintReason::UnsupportedNumberRepresentation)).contains("losslessly"));
+        assert!(suggestion_message(&problem(SuggestionLintReason::Range)).contains("range"));
+        assert!(suggestion_message(&problem(SuggestionLintReason::Integer)).contains("integer"));
+        assert!(suggestion_message(&problem(SuggestionLintReason::Length)).contains("length"));
+        assert!(suggestion_message(&problem(SuggestionLintReason::NotEmpty)).contains("empty"));
+        assert!(suggestion_message(&problem(SuggestionLintReason::Pattern)).contains("pattern"));
+        assert!(suggestion_message(&problem(SuggestionLintReason::Type)).contains("target type"));
+    }
+
+    /// UTF-8/UTF-16 LSP range conversion: a multibyte character (é = 2 bytes)
+    /// before a candidate must produce different character offsets under UTF-8
+    /// vs UTF-16, but the same line.
+    #[test]
+    fn suggestion_span_converts_under_both_position_encodings() {
+        use crate::source_map::{PositionEncoding, SourceMap};
+        use lsp_types::Uri;
+
+        // `café` has é at byte 5 (2 bytes). `many` is on the same line, after
+        // the multibyte char.
+        let text = "---\n$schema:\n  café: number(suggest(1, many, 2))\n---\n\nbody\n";
+        let ast = crate::overlay::FrontmatterAst::parse(text)
+            .unwrap()
+            .ast
+            .unwrap();
+        let problems = match crate::overlay::suggestions::inline_lints(text, Some(&ast)) {
+            crate::overlay::SuggestionState::Inline(p) => p,
+            other => panic!("expected Inline, got {other:?}"),
+        };
+        assert_eq!(problems.len(), 1);
+        let span = problems[0].span.clone();
+        assert_eq!(&text[span.start..span.end], "many");
+
+        let uri: Uri = "file:///w/test.md".parse().unwrap();
+        let text_arc: std::sync::Arc<str> = text.into();
+
+        // UTF-8: character counts bytes. é = 2 bytes, so column is byte offset
+        // minus line start.
+        let sm_utf8 = SourceMap::new(uri.clone(), 1, PositionEncoding::Utf8, text_arc.clone());
+        let range_utf8 = sm_utf8.byte_range_to_lsp(span.clone()).unwrap();
+        assert_eq!(range_utf8.start.line, 2);
+
+        // UTF-16: character counts UTF-16 code units. é = 1 UTF-16 unit, so
+        // column is lower than the UTF-8 column (which counts 2 bytes).
+        let sm_utf16 = SourceMap::new(uri, 1, PositionEncoding::Utf16, text_arc);
+        let range_utf16 = sm_utf16.byte_range_to_lsp(span.clone()).unwrap();
+        assert_eq!(range_utf16.start.line, 2);
+        assert!(
+            range_utf8.start.character > range_utf16.start.character,
+            "UTF-8 char offset must be > UTF-16 for multibyte prefix: utf8={}, utf16={}",
+            range_utf8.start.character,
+            range_utf16.start.character
+        );
+    }
+
+    /// CRLF line endings: byte spans must convert to correct LSP positions.
+    #[test]
+    fn suggestion_span_converts_with_crlf() {
+        use crate::source_map::{PositionEncoding, SourceMap};
+        use lsp_types::Uri;
+
+        let text = "---\r\n$schema:\r\n  v: number(min(0); suggest(1, many, 2))\r\n---\r\n\r\nbody\r\n";
+        let ast = crate::overlay::FrontmatterAst::parse(text)
+            .unwrap()
+            .ast
+            .unwrap();
+        let problems = match crate::overlay::suggestions::inline_lints(text, Some(&ast)) {
+            crate::overlay::SuggestionState::Inline(p) => p,
+            other => panic!("expected Inline, got {other:?}"),
+        };
+        assert_eq!(problems.len(), 1);
+        let span = problems[0].span.clone();
+        assert_eq!(&text[span.start..span.end], "many");
+
+        let uri: Uri = "file:///w/test.md".parse().unwrap();
+        let text_arc: std::sync::Arc<str> = text.into();
+        let sm = SourceMap::new(uri, 1, PositionEncoding::Utf8, text_arc);
+        let range = sm.byte_range_to_lsp(span).unwrap();
+        assert_eq!(range.start.line, 2);
     }
 }

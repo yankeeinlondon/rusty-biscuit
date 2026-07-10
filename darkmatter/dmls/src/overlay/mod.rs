@@ -17,6 +17,7 @@ pub mod expressions;
 pub mod frontmatter;
 pub mod schema;
 pub mod shell;
+pub mod suggestions;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -24,6 +25,8 @@ use std::sync::{Arc, Mutex};
 
 use biscuit_hash::xx_hash_bytes;
 use darkmatter::markdown::schemas::SchemaError;
+use darkmatter::markdown::schemas::StandaloneSchemaEnvelope;
+use darkmatter::markdown::schemas::SuggestionLintProblem;
 use lsp_types::Uri;
 
 use crate::config::DmlsConfig;
@@ -42,6 +45,36 @@ pub enum SchemaOutcome {
     Failed(Arc<SchemaError>),
 }
 
+/// Suggestion-lint state for the current document.
+///
+/// Carries invalid `suggest(...)` candidate problems with document-relative byte
+/// spans so the diagnostics module can publish `dm.schema.invalid_suggestion`
+/// warnings on the exact authoring argument range. For a standalone
+/// SimplifiedSchema YAML document, also carries a malformed-envelope error when
+/// a recognized envelope could not be parsed.
+#[derive(Clone, Debug)]
+pub enum SuggestionState {
+    /// The document is neither an inline-schema Markdown document nor a
+    /// recognized standalone SimplifiedSchema envelope. No suggestion
+    /// diagnostics apply.
+    Inactive,
+    /// An inline `$schema` mapping was found in Markdown frontmatter. The
+    /// problems carry document-relative spans projected through YAML quoting.
+    Inline(Vec<SuggestionLintProblem>),
+    /// The open buffer was classified as a standalone SimplifiedSchema YAML
+    /// document (pure or tagged envelope). Suggestion warnings are owned by
+    /// this document, never duplicated onto consuming Markdown documents.
+    Standalone {
+        /// The content envelope that claimed the document.
+        envelope: StandaloneSchemaEnvelope,
+        /// Invalid suggestion candidates in declaration order.
+        problems: Vec<SuggestionLintProblem>,
+        /// A malformed recognized envelope (missing/malformed `types`,
+        /// unsupported tagged-envelope keys, invalid payload).
+        error: Option<Arc<SchemaError>>,
+    },
+}
+
 /// The per-request overlay snapshot for one open document.
 pub struct DocumentOverlay {
     /// The frontmatter tree. `None` when the current buffer failed to parse and
@@ -54,6 +87,8 @@ pub struct DocumentOverlay {
     pub parse_error: Option<YamlParseError>,
     /// The effective schema, or the failure that prevented it.
     pub schema: SchemaOutcome,
+    /// Suggestion-lint state for `suggest(...)` candidate diagnostics.
+    pub suggestions: SuggestionState,
 }
 
 impl DocumentOverlay {
@@ -64,6 +99,11 @@ impl DocumentOverlay {
             SchemaOutcome::Ready(Some(bundle)) => Some(bundle),
             _ => None,
         }
+    }
+
+    /// Whether this overlay is a standalone schema authoring document.
+    pub fn is_standalone_schema(&self) -> bool {
+        matches!(self.suggestions, SuggestionState::Standalone { .. })
     }
 }
 
@@ -102,10 +142,10 @@ impl OverlayState {
     ///
     /// ## Returns
     ///
-    /// `None` for a document with no frontmatter block (nothing for the overlay
-    /// to analyze — the substrate handles the body). `Some` otherwise, carrying
-    /// the (possibly stale) tree, the current parse error, and the schema
-    /// outcome.
+    /// `None` for a document with no frontmatter block and no standalone
+    /// SimplifiedSchema envelope. `Some` otherwise, carrying the (possibly
+    /// stale) tree, the current parse error, the schema outcome, and the
+    /// suggestion-lint state.
     pub fn for_document(
         &self,
         uri: &Uri,
@@ -114,24 +154,41 @@ impl OverlayState {
         config: &DmlsConfig,
         workspace_roots: &[PathBuf],
     ) -> Option<DocumentOverlay> {
-        let parse = FrontmatterAst::parse(text)?;
-        let uri_key = uri.as_str().to_string();
-        let mut cache = self.inner.lock().expect("overlay lock poisoned");
+        // Markdown frontmatter path.
+        if let Some(parse) = FrontmatterAst::parse(text) {
+            let uri_key = uri.as_str().to_string();
+            let mut cache = self.inner.lock().expect("overlay lock poisoned");
 
-        let (ast, stale, parse_error) = match parse.ast {
-            Some(fresh) => {
-                let fresh = Arc::new(fresh);
-                cache.last_good.insert(uri_key.clone(), Arc::clone(&fresh));
-                (Some(fresh), false, None)
-            }
-            None => {
-                let previous = cache.last_good.get(&uri_key).map(Arc::clone);
-                (previous.clone(), previous.is_some(), parse.error)
-            }
-        };
+            let (ast, stale, parse_error) = match parse.ast {
+                Some(fresh) => {
+                    let fresh = Arc::new(fresh);
+                    cache.last_good.insert(uri_key.clone(), Arc::clone(&fresh));
+                    (Some(fresh), false, None)
+                }
+                None => {
+                    let previous = cache.last_good.get(&uri_key).map(Arc::clone);
+                    (previous.clone(), previous.is_some(), parse.error)
+                }
+            };
 
-        let schema = cache.schema_for(&uri_key, text, path, config, workspace_roots);
-        Some(DocumentOverlay { ast, stale, parse_error, schema })
+            let schema = cache.schema_for(&uri_key, text, path, config, workspace_roots);
+            let suggestions = suggestions::inline_lints(text, ast.as_deref());
+            return Some(DocumentOverlay { ast, stale, parse_error, schema, suggestions });
+        }
+
+        // Standalone SimplifiedSchema YAML envelope path. A standalone YAML
+        // buffer is classified by content, not filename or glob.
+        if let Some(suggestions) = suggestions::standalone_lints(text, path) {
+            return Some(DocumentOverlay {
+                ast: None,
+                stale: false,
+                parse_error: None,
+                schema: SchemaOutcome::Ready(None),
+                suggestions,
+            });
+        }
+
+        None
     }
 
     /// Drops a closed document's cached state.
