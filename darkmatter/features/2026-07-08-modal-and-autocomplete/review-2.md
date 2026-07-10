@@ -2,6 +2,7 @@
 $schema:
     ready: "boolean(required) -> is the feature production ready?"
 ready: false
+implemented: true
 agent: codex/default
 created: 2026-07-09T20:25:32
 ---
