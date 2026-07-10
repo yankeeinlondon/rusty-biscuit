@@ -2,7 +2,7 @@
 agent: codex/
 total_phases: 8
 created: 2026-07-09
-phase: 4
+phase: 8
 yolo: true
 source_files_during_phase_1:
   - darkmatter/lib/tests/suggest_constraint_phase1.rs
@@ -62,6 +62,85 @@ docs_updated_during_phase_4:
   - darkmatter/features/2026-07-09-suggest-constraint/plan.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
+  - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_5:
+  - darkmatter/dmls/Cargo.toml
+  - darkmatter/dmls/src/diagnostics/codes.rs
+  - darkmatter/dmls/src/diagnostics/frontmatter.rs
+  - darkmatter/dmls/src/overlay/mod.rs
+  - darkmatter/dmls/src/overlay/suggestions.rs
+  - darkmatter/dmls/tests/suggest_constraint_phase1.rs
+docs_updated_during_phase_5:
+  - darkmatter/features/2026-07-09-suggest-constraint/plan.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+  - darkmatter/lib/src/markdown/schemas/simplified/query.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+  - darkmatter/lib/src/markdown/schemas/mod.rs
+  - darkmatter/dmls/src/providers/frontmatter.rs
+  - darkmatter/dmls/tests/suggest_constraint_phase1.rs
+docs_updated_during_phase_6:
+  - darkmatter/features/2026-07-09-suggest-constraint/plan.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_files_during_phase_7:
+  - darkmatter/lib/src/markdown/schemas/about.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/lint.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/query.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/standalone.rs
+docs_updated_during_phase_7:
+  - darkmatter/docs/topics/schema-definition.md
+  - darkmatter/features/2026-07-09-suggest-constraint/plan.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_8: []
+docs_updated_during_phase_8:
+  - darkmatter/features/2026-07-09-suggest-constraint/plan.md
+  - darkmatter/features/2026-07-09-suggest-constraint/test-matrix.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8: []
+source_code:
+  - darkmatter/lib/tests/suggest_constraint_phase1.rs
+  - darkmatter/lib/tests/suggest_constraint_phase2.rs
+  - darkmatter/lib/tests/suggest_constraint_phase3.rs
+  - darkmatter/lib/tests/suggest_constraint_phase4.rs
+  - darkmatter/lib/tests/snapshots/suggest_constraint_phase3__conversion_snapshot_covers_valid_and_invalid_metadata.snap
+  - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/lint.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/query.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/standalone.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+  - darkmatter/lib/src/markdown/schemas/about.rs
+  - darkmatter/lib/src/markdown/schemas/errors.rs
+  - darkmatter/lib/src/markdown/schemas/mod.rs
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+  - darkmatter/dmls/src/diagnostics/codes.rs
+  - darkmatter/dmls/src/diagnostics/frontmatter.rs
+  - darkmatter/dmls/src/overlay/mod.rs
+  - darkmatter/dmls/src/overlay/suggestions.rs
+  - darkmatter/dmls/src/providers/frontmatter.rs
+  - darkmatter/dmls/tests/suggest_constraint_phase1.rs
+  - darkmatter/dmls/tests/fixtures/suggest_constraint/inline.md
+  - darkmatter/dmls/tests/fixtures/suggest_constraint/pure.yaml
+  - darkmatter/dmls/tests/fixtures/suggest_constraint/tagged.yaml
+  - darkmatter/dmls/tests/fixtures/suggest_constraint/completion.md
+  - darkmatter/dmls/tests/fixtures/suggest_constraint/unions.md
+  - darkmatter/dmls/tests/fixtures/suggest_constraint/raw-schema.json
+  - darkmatter/dmls/tests/fixtures/suggest_constraint/raw-consumer.md
+documentation:
+  - darkmatter/features/2026-07-09-suggest-constraint/plan.md
+  - darkmatter/features/2026-07-09-suggest-constraint/test-matrix.md
+  - darkmatter/features/2026-07-09-suggest-constraint/phase1-baseline.md
+  - darkmatter/docs/topics/schema-definition.md
+  - darkmatter/docs/topics/context-variables.md
   - .claude/skills/darkmatter/SKILL.md
 ---
 
@@ -139,55 +218,55 @@ Parallelizable in this phase: envelope classification tests and resolver integra
 
 ## Phase 5 - DMLS Authoring Documents and Suggestion Diagnostics
 
-- [ ] Extend the DMLS document model/router so an open YAML buffer can be classified by the library's content envelopes and analyzed as a standalone SimplifiedSchema authoring document without relying on filename, glob, or consumer discovery.
-- [ ] Reuse the library's source-aware parse and suggestion-lint products for inline Markdown frontmatter and standalone envelopes; do not reimplement candidate interpretation, decimal handling, or target validation in DMLS.
-- [ ] Add stable diagnostic catalog entries for source `darkmatter.schema` and code `dm.schema.invalid_suggestion`, mapping every lint problem to a `WARNING` on the exact original argument range with a reason-specific message.
-- [ ] Publish malformed recognized-envelope diagnostics against the open schema document, including missing/malformed `types` and unsupported tagged-envelope keys, while retaining last-good state only where current DMLS policy permits it.
-- [ ] Ensure warnings for a referenced standalone schema are published on that authoring document when it is open and are not duplicated on each consuming Markdown document's `$schema` reference.
-- [ ] Keep the effective schema available after suggestion warnings so key completion, hover, validation, and valid sibling value completion continue operating.
-- [ ] Verify candidate linting and standalone analysis are passive: no filesystem discovery beyond explicit schema references, composition directive evaluation, shell execution, or network access occurs on open/change/diagnostics.
-- [ ] Add unit tests for UTF-8/UTF-16 LSP range conversion, YAML escapes, LF/CRLF source maps, and inline versus standalone diagnostic ownership.
-- [ ] Add DMLS L2 session tests that open/change/close both envelope forms and assert severity, source, code, message category, exact range, warning removal after correction, and no warning on consumers.
-- [ ] Validation checkpoint: targeted DMLS diagnostic unit and L2 tests pass under both negotiated position encodings, while valid schema completion and validation remain active beside invalid candidates.
+- [x] Extend the DMLS document model/router so an open YAML buffer can be classified by the library's content envelopes and analyzed as a standalone SimplifiedSchema authoring document without relying on filename, glob, or consumer discovery.
+- [x] Reuse the library's source-aware parse and suggestion-lint products for inline Markdown frontmatter and standalone envelopes; do not reimplement candidate interpretation, decimal handling, or target validation in DMLS.
+- [x] Add stable diagnostic catalog entries for source `darkmatter.schema` and code `dm.schema.invalid_suggestion`, mapping every lint problem to a `WARNING` on the exact original argument range with a reason-specific message.
+- [x] Publish malformed recognized-envelope diagnostics against the open schema document, including missing/malformed `types` and unsupported tagged-envelope keys, while retaining last-good state only where current DMLS policy permits it.
+- [x] Ensure warnings for a referenced standalone schema are published on that authoring document when it is open and are not duplicated on each consuming Markdown document's `$schema` reference.
+- [x] Keep the effective schema available after suggestion warnings so key completion, hover, validation, and valid sibling value completion continue operating.
+- [x] Verify candidate linting and standalone analysis are passive: no filesystem discovery beyond explicit schema references, composition directive evaluation, shell execution, or network access occurs on open/change/diagnostics.
+- [x] Add unit tests for UTF-8/UTF-16 LSP range conversion, YAML escapes, LF/CRLF source maps, and inline versus standalone diagnostic ownership.
+- [x] Add DMLS L2 session tests that open/change/close both envelope forms and assert severity, source, code, message category, exact range, warning removal after correction, and no warning on consumers.
+- [x] Validation checkpoint: targeted DMLS diagnostic unit and L2 tests pass under both negotiated position encodings, while valid schema completion and validation remain active beside invalid candidates.
 
 Parallelizable in this phase: diagnostic-code/message lowering and standalone document routing can proceed independently after the library lint/envelope APIs stabilize.
 
 ## Phase 6 - Suggestion-Aware DMLS Completion
 
-- [ ] Add a library-facing query over resolved SimplifiedSchema that returns lint-valid suggestions for a property path, preserving declaration order and retaining scalar/array-item type information without consulting raw generated annotations.
-- [ ] Implement property-union selection using its sole eligible suggestion-bearing arm and root-union selection using the first declaration-order arm with an eligible suggestion-bearing definition, while continuing to lint all arms.
-- [ ] Extend DMLS frontmatter completion context detection for scalar property values and eligible properties nested in inline-object schemas.
-- [ ] Add block-sequence and flow-sequence item contexts so array suggestions insert one candidate element at the cursor instead of replacing or inserting an entire array.
-- [ ] Prefix-filter against decoded candidate values, preserve declaration order after filtering, and omit every candidate represented by a library lint problem while keeping valid siblings.
-- [ ] Lower string suggestions to YAML-safe double-quoted insertion text with required escaping and lower numeric suggestions to canonical decimal insertion text; provide precise text edits compatible with existing client capability gates.
-- [ ] Ensure existing enum, file, and format-hint completion behavior remains unchanged and raw JSON Schema `x-darkmatter-suggest` fields never enter this completion path.
-- [ ] Add provider unit tests for empty/partial prefixes, escaped strings, negative/canonical numbers, nested objects, block/flow arrays, property unions, root unions, invalid filtering, and raw-schema exclusion.
-- [ ] Add end-to-end DMLS L2 completion tests for inline schemas and both referenced standalone envelopes, including changes to an open schema document invalidating/recomputing suggestions for consumers through existing dependency edges.
-- [ ] Validation checkpoint: completion works at all four required position classes, inserts the exact specified YAML text, honors union ordering, excludes invalid candidates, and leaves unrelated completion providers unchanged.
+- [x] Add a library-facing query over resolved SimplifiedSchema that returns lint-valid suggestions for a property path, preserving declaration order and retaining scalar/array-item type information without consulting raw generated annotations.
+- [x] Implement property-union selection using its sole eligible suggestion-bearing arm and root-union selection using the first declaration-order arm with an eligible suggestion-bearing definition, while continuing to lint all arms.
+- [x] Extend DMLS frontmatter completion context detection for scalar property values and eligible properties nested in inline-object schemas.
+- [x] Add block-sequence and flow-sequence item contexts so array suggestions insert one candidate element at the cursor instead of replacing or inserting an entire array.
+- [x] Prefix-filter against decoded candidate values, preserve declaration order after filtering, and omit every candidate represented by a library lint problem while keeping valid siblings.
+- [x] Lower string suggestions to YAML-safe double-quoted insertion text with required escaping and lower numeric suggestions to canonical decimal insertion text; provide precise text edits compatible with existing client capability gates.
+- [x] Ensure existing enum, file, and format-hint completion behavior remains unchanged and raw JSON Schema `x-darkmatter-suggest` fields never enter this completion path.
+- [x] Add provider unit tests for empty/partial prefixes, escaped strings, negative/canonical numbers, nested objects, block/flow arrays, property unions, root unions, invalid filtering, and raw-schema exclusion.
+- [x] Add end-to-end DMLS L2 completion tests for inline schemas and both referenced standalone envelopes, including changes to an open schema document invalidating/recomputing suggestions for consumers through existing dependency edges.
+- [x] Validation checkpoint: completion works at all four required position classes, inserts the exact specified YAML text, honors union ordering, excludes invalid candidates, and leaves unrelated completion providers unchanged.
 
 Parallelizable in this phase: YAML insertion escaping and completion-context detection can proceed independently once the library query shape is fixed. L2 sessions should follow provider unit coverage.
 
 ## Phase 7 - Public Contract, Catalog, and Documentation Alignment
 
-- [ ] Update the public constraint/shape descriptor catalog in `darkmatter/lib/src/markdown/schemas/about.rs` so `suggest(...)` eligibility, cardinality, advisory semantics, and annotation name are generated from the same contract exposed to consumers.
-- [ ] Update SimplifiedSchema serialization and schema documentation examples to show canonical `suggest(...)` output without rewriting authored values as `enum(...)`, `example(...)`, or JSON Schema `examples`.
-- [ ] Document `suggest(...)`, number syntax/canonicalization, invalid metadata behavior, standalone pure/tagged envelopes, whole-file and named-import behavior, DMLS warnings/completion, and raw JSON Schema boundaries in `darkmatter/docs/topics/schema-definition.md` and any DMLS user-facing schema documentation.
-- [ ] Add rustdoc for the new public candidate, lint, envelope, and completion-query types, emphasizing span units, ordering guarantees, side-effect freedom, and error versus lint behavior; remove or correct any nearby comments made stale by the behavior change.
-- [ ] Update `.claude/skills/darkmatter/SKILL.md` if the implementation adds new public schema/lint entry points or changes the documented standalone-schema architecture.
-- [ ] Verify no dependency additions are needed; if implementation requires one, use an existing workspace dependency where possible and update `darkmatter/docs/dependencies.md` plus the repository dependency documentation in the same change.
-- [ ] Add catalog/docs consistency tests or assertions that every advertised constraint parses on its documented eligible types and rejects unsupported types.
-- [ ] Validation checkpoint: public descriptors, serializer output, rustdoc, topic documentation, and executable grammar/converter tests describe the same behavior and terminology.
+- [x] Update the public constraint/shape descriptor catalog in `darkmatter/lib/src/markdown/schemas/about.rs` so `suggest(...)` eligibility, cardinality, advisory semantics, and annotation name are generated from the same contract exposed to consumers.
+- [x] Update SimplifiedSchema serialization and schema documentation examples to show canonical `suggest(...)` output without rewriting authored values as `enum(...)`, `example(...)`, or JSON Schema `examples`.
+- [x] Document `suggest(...)`, number syntax/canonicalization, invalid metadata behavior, standalone pure/tagged envelopes, whole-file and named-import behavior, DMLS warnings/completion, and raw JSON Schema boundaries in `darkmatter/docs/topics/schema-definition.md` and any DMLS user-facing schema documentation.
+- [x] Add rustdoc for the new public candidate, lint, envelope, and completion-query types, emphasizing span units, ordering guarantees, side-effect freedom, and error versus lint behavior; remove or correct any nearby comments made stale by the behavior change.
+- [x] Update `.claude/skills/darkmatter/SKILL.md` if the implementation adds new public schema/lint entry points or changes the documented standalone-schema architecture.
+- [x] Verify no dependency additions are needed; if implementation requires one, use an existing workspace dependency where possible and update `darkmatter/docs/dependencies.md` plus the repository dependency documentation in the same change.
+- [x] Add catalog/docs consistency tests or assertions that every advertised constraint parses on its documented eligible types and rejects unsupported types.
+- [x] Validation checkpoint: public descriptors, serializer output, rustdoc, topic documentation, and executable grammar/converter tests describe the same behavior and terminology.
 
 Documentation work is parallelizable with late DMLS tests once public API names and insertion semantics are stable.
 
 ## Phase 8 - Cross-Platform Regression and Release Validation
 
-- [ ] Run the targeted grammar, conversion snapshot, lint, resolver/envelope, validation/composition, DMLS diagnostics, and DMLS completion tests; resolve every failure without weakening an acceptance assertion.
-- [ ] Run `just test` from the Darkmatter package area and confirm all library, CLI, and DMLS unit tests pass under nextest.
-- [ ] Run `just test-l2` from the package area and confirm DMLS integration sessions and existing schema/render integration coverage pass without interactive input.
-- [ ] Run `just lint` from the package area and address all lint findings; run `cargo fmt --check` only as a read-only diagnostic and do not run write-mode formatting.
-- [ ] Review snapshots and generated JSON Schema fixtures to confirm `x-darkmatter-suggest` ordering/types are stable, invalid fallback metadata is retained, and no unrelated schema output changed.
-- [ ] Audit tests and implementation for platform-specific path separators, newline assumptions, filesystem ordering, locale-sensitive number handling, and machine-word boundaries; ensure Windows, Linux, and macOS behavior is defined by byte/string operations and `FileReference` semantics.
-- [ ] Run the no-side-effects DMLS coverage and verify suggestion lint/completion cannot execute shell expressions, follow composition directives, scan unrelated files, or access the network.
-- [ ] Check every acceptance criterion and Definition of Done item against the Phase 1 matrix, recording the passing test or documentation location and leaving no criterion justified only by manual inspection.
-- [ ] Validation checkpoint: `just test`, `just test-l2`, and `just lint` all pass; the acceptance matrix is complete; documentation and skill drift are resolved; and the working tree contains only intentional feature changes with no write-mode formatting or git commit performed.
+- [x] Run the targeted grammar, conversion snapshot, lint, resolver/envelope, validation/composition, DMLS diagnostics, and DMLS completion tests; resolve every failure without weakening an acceptance assertion.
+- [x] Run `just test` from the Darkmatter package area and confirm all library, CLI, and DMLS unit tests pass under nextest.
+- [x] Run `just test-l2` from the package area and confirm DMLS integration sessions and existing schema/render integration coverage pass without interactive input.
+- [x] Run `just lint` from the package area and address all lint findings; run `cargo fmt --check` only as a read-only diagnostic and do not run write-mode formatting.
+- [x] Review snapshots and generated JSON Schema fixtures to confirm `x-darkmatter-suggest` ordering/types are stable, invalid fallback metadata is retained, and no unrelated schema output changed.
+- [x] Audit tests and implementation for platform-specific path separators, newline assumptions, filesystem ordering, locale-sensitive number handling, and machine-word boundaries; ensure Windows, Linux, and macOS behavior is defined by byte/string operations and `FileReference` semantics.
+- [x] Run the no-side-effects DMLS coverage and verify suggestion lint/completion cannot execute shell expressions, follow composition directives, scan unrelated files, or access the network.
+- [x] Check every acceptance criterion and Definition of Done item against the Phase 1 matrix, recording the passing test or documentation location and leaving no criterion justified only by manual inspection.
+- [x] Validation checkpoint: `just test`, `just test-l2`, and `just lint` all pass; the acceptance matrix is complete; documentation and skill drift are resolved; and the working tree contains only intentional feature changes with no write-mode formatting or git commit performed.

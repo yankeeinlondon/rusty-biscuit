@@ -37,3 +37,38 @@ The library scaffold lives in `darkmatter/lib/tests/suggest_constraint_phase1.rs
 The LSP scaffold and its source fixtures live in
 `darkmatter/dmls/tests/suggest_constraint_phase1.rs` and
 `darkmatter/dmls/tests/fixtures/suggest_constraint/`.
+
+## Phase 8 Validation Record
+
+Every primary test listed above passes under `just test` (Level-1) and
+`just test-l2` (DMLS L2 sessions). Catalog/docs consistency is covered by
+`markdown::schemas::about::tests::suggest_descriptor_*` and
+`markdown::schemas::simplified::serialize::tests::round_trip_*_suggest`.
+No acceptance criterion is justified only by manual inspection.
+
+| AC | Passing location |
+|---:|---|
+| 1 | `suggest_constraint_phase1::suggest_phase1_eligible_scalar_and_array_forms_parse` |
+| 2 | `suggest_constraint_phase1::suggest_phase1_eligible_scalar_and_array_forms_parse` |
+| 3 | `suggest_constraint_phase1::suggest_phase1_cardinality_is_per_complete_property_definition` |
+| 4 | `suggest_constraint_phase1::suggest_phase1_conversion_preserves_string_interpretation_and_order` (snapshot) |
+| 5 | `suggest_constraint_phase1::suggest_phase1_invalid_decimal_syntax_is_metadata` (snapshot) |
+| 6 | `suggest_constraint_phase1::suggest_phase1_numeric_boundaries_follow_observable_json_round_trip` |
+| 7 | `level2_suggest_phase1_standalone_ranges_and_completion` (DMLS L2) |
+| 8 | `suggest_constraint_phase1::suggest_phase1_duplicates_are_rejected_at_the_later_argument` |
+| 9 | `suggest_constraint_phase3::conversion_snapshot_covers_valid_and_invalid_metadata` (snapshot) |
+| 10 | `suggest_constraint_phase1::suggest_phase1_metadata_does_not_restrict_document_values` |
+| 11 | `suggest_constraint_phase1::suggest_phase1_invalid_candidates_remain_loadable_and_lintable`; `suggest_constraint_phase3::suggestion_metadata_neither_restricts_validation_nor_blocks_composition` |
+| 12 | `suggest_constraint_phase1::suggest_phase1_invalid_candidates_remain_loadable_and_lintable` |
+| 13 | `suggest_constraint_phase1::suggest_phase1_candidate_constraints_target_scalar_or_array_items` |
+| 14 | `level2_suggest_phase1_inline_warning_has_exact_argument_range` (DMLS L2) |
+| 15 | `level2_suggest_phase1_standalone_ranges_and_completion`; `level2_suggest_phase5_malformed_tagged_envelope_error` (DMLS L2) |
+| 16 | `suggest_constraint_phase4::mapping_envelopes_resolve_identically_with_origin_metadata`; `named_imports_share_pure_and_tagged_mapping_namespaces` |
+| 17 | `level2_suggest_phase1_union_selection_and_raw_schema_exclusion` (DMLS L2); `suggest_constraint_phase4::raw_json_schema_remains_distinct_and_cannot_supply_named_imports` |
+| 18 | `level2_suggest_phase1_completion_positions` (DMLS L2) |
+| 19 | `level2_suggest_phase1_completion_positions` (DMLS L2) |
+| 20 | `level2_suggest_phase1_union_selection_and_raw_schema_exclusion` (DMLS L2) |
+| 21 | `level2_suggest_phase1_completion_positions` (DMLS L2) |
+| 22 | `level2_suggest_phase1_union_selection_and_raw_schema_exclusion` (DMLS L2) |
+| 23 | `suggest_constraint_phase1::suggest_phase1_numeric_boundaries_follow_observable_json_round_trip` |
+| 24 | `suggest_constraint_phase1::suggest_phase1_fixture_newlines_are_explicit` + all `level2_suggest_phase1_*` sessions |
