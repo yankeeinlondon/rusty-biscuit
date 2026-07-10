@@ -1,7 +1,7 @@
 ---
 status: ready for planning and implementation
 reviewed: true
-review_iterations: 1
+review_iterations: 2
 depends_on:
   - ../_completed/2026-07-08-single-sourcing-schema/spec.md
 inputs:
@@ -53,7 +53,7 @@ Today the `{{ ctx.today }}` hover from `dmls::providers::dsl` shows only:
 ```text
 Expression
 ctx.today
-Resolved from ctx.* at compose time (not evaluated here).
+The `ctx` variable is evaluated at _compose_ time (rather than now).
 ```
 
 It omits the type and description already shown by the frontmatter provider's
@@ -97,7 +97,7 @@ ctx.today (date) — read-only, Darkmatter-owned
 
 Local date in ISO-8601 format.
 
-Resolved from ctx.* at compose time (not evaluated here).
+The `ctx` variable is evaluated at _compose_ time (rather than now).
 ```
 
 The type and description come from `context_variable_descriptors()` through
@@ -187,6 +187,32 @@ without creating a new semantic authority.
 
 If the library later adds catalog metadata for preferred conversions or default
 rendering, DMLS may surface that metadata without changing this decision.
+
+## Concurrent DMLS changes to preserve
+
+These changes landed on this feature's shared files during the review cycle and
+**must not be regressed** by the implementation. Only the first (the compose-time
+note wording) is normative to this feature; the rest are recorded for
+coordination because they touch the same frontmatter/DSL surface.
+
+- **Compose-time note wording (normative, D2).** The passive note wording was
+  updated to *"The `ctx` variable is evaluated at _compose_ time (rather than
+  now)."* — see the D2 hover block above and the source string in
+  `providers::dsl`. The retired form was *"Resolved from ctx.* at compose time
+  (not evaluated here)."*; `providers::dsl` unit tests assert the new wording, so
+  implementations must match it exactly (note the italic `_compose_`).
+- **Frontmatter schema-property hover styling** (`providers::frontmatter::schema_hover_body`
+  — same file, out of this feature's scope): the property name renders as an
+  inline-code box, the type as **bold** (not inline code), and enum/default
+  values as _italic_. The rule and its rationale (LSP-Markdown cannot express
+  color or dim) are in `dmls/docs/hover.md`. The D1 shared-formatter refactor
+  must not revert this schema-hover styling.
+- **Frontmatter diagnostics de-noising** (`diagnostics::frontmatter` — a separate
+  file, unrelated to hover/completion): the `dm.schema.pending_shell_value`
+  diagnostic was removed (deferred `{{ }}` / `$(...)` values are never diagnosed
+  at edit time), and `dm.schema.missing_required` is suppressed outside strict
+  mode (`required` is a compose-time contract). Noted so a broad frontmatter
+  refactor does not reintroduce the removed edit-time noise.
 
 ## Out of scope
 

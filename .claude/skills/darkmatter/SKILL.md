@@ -1,7 +1,7 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-0c9872bc6071f119
+hash: 87f17662fa397abe-a663d547fa097dd5
 last_updated: 2026-07-09
 ---
 
@@ -351,6 +351,23 @@ edges, ancestry in `relatedInformation`), and references ("who transcludes this
 file"). Interpolation gets `{{ }}` completion (frontmatter keys, `ctx.*`,
 functions), erased-parsed-form + frontmatter-backed static-value hover, variable→
 frontmatter-key definition, and `dm.expression.{malformed,unknown_identifier}`.
+Interpolation hover is catalog-enriched (modal-and-autocomplete Phase 2): an
+explicitly `ctx.`-qualified root renders the shared
+`overlay::expressions::format_ctx_hover_block` block (the same bytes as the
+frontmatter `ctx_hover`) plus an interpolation-only compose-time note; a bare
+identifier is always a frontmatter variable even when it matches a `ctx.*`
+tail; and the deepest known `FunctionCall` under the cursor
+(`overlay::expressions::function_call_at`) renders its typed signature +
+description via `format_function_block`.
+Interpolation completion is catalog-backed (modal-and-autocomplete Phase 3):
+`ctx.*` items carry the rendered `display_type` in `detail` and the
+description as eager Markdown `documentation`; function items keep the untyped
+`signature` label and bare-name insertion but carry `typed_signature()` in
+`detail` (incl. the `| error` suffix for fallible functions) plus eager
+Markdown `documentation`. `.` is an advertised completion trigger
+(`capabilities.rs`, alongside `/`, `(`, `#`), gated by the open-interpolation
+guard in `overlay::expressions::completion_partial` so a period in prose
+offers nothing.
 Shell awareness (read-only) hovers `::shell` / frontmatter `$()` with an
 approved/denied/unknown policy verdict and emits `dm.security.disallowed_command`
 (source `darkmatter.security`) for built-in-blacklist denials. Fenced-code info
