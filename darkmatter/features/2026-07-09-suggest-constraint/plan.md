@@ -2,7 +2,7 @@
 agent: codex/
 total_phases: 8
 created: 2026-07-09
-phase: 1
+phase: 4
 yolo: true
 source_files_during_phase_1:
   - darkmatter/lib/tests/suggest_constraint_phase1.rs
@@ -23,7 +23,46 @@ docs_created_during_phase_1:
 skills_files_updated_during_phase_1: []
 packages:
   - darkmatter
-  - dmls
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+  - darkmatter/lib/tests/suggest_constraint_phase1.rs
+  - darkmatter/lib/tests/suggest_constraint_phase2.rs
+docs_updated_during_phase_2:
+  - darkmatter/features/2026-07-09-suggest-constraint/plan.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - darkmatter/lib/src/markdown/schemas/mod.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/lint.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+  - darkmatter/lib/tests/snapshots/suggest_constraint_phase3__conversion_snapshot_covers_valid_and_invalid_metadata.snap
+  - darkmatter/lib/tests/suggest_constraint_phase1.rs
+  - darkmatter/lib/tests/suggest_constraint_phase2.rs
+  - darkmatter/lib/tests/suggest_constraint_phase3.rs
+docs_updated_during_phase_3:
+  - darkmatter/features/2026-07-09-suggest-constraint/plan.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - darkmatter/lib/src/markdown/schemas/errors.rs
+  - darkmatter/lib/src/markdown/schemas/mod.rs
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/standalone.rs
+  - darkmatter/lib/tests/suggest_constraint_phase4.rs
+docs_updated_during_phase_4:
+  - darkmatter/features/2026-07-09-suggest-constraint/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/darkmatter/SKILL.md
 ---
 
 # Suggested Values for SimplifiedSchema Execution Plan
@@ -54,47 +93,47 @@ Parallelizable after the baseline is captured: numeric interpretation tests, sta
 
 ## Phase 2 - Span-Bearing Suggestion AST and Grammar
 
-- [ ] Add a dedicated suggestion candidate type in `simplified/types.rs` that retains decoded text, interpreted `serde_json::Value`, canonical decimal text when applicable, and the exact authored argument `SourceSpan`; add `Constraint::Suggest` using this type without conflating it with `Members` or `Example`.
-- [ ] Extend the existing argument lexer/parser in `simplified/grammar.rs` so `suggest(...)` reuses current comma, quote, and escape rules, rejects an empty list structurally, and captures each argument's expression-relative source span before interpretation.
-- [ ] Implement target-directed string interpretation so every decoded token becomes a JSON string and quoted/bare equivalent spellings compare as the same candidate.
-- [ ] Implement a platform-independent simple-decimal normalizer using string operations: validate the exact grammar, remove redundant integer zeros and trailing fractional zeros, remove an empty fractional component, and normalize every signed zero to `0` without first converting through a machine number.
-- [ ] Implement lossless numeric interpretation by parsing canonical text through the supported JSON number model, canonically serializing it, expanding serializer exponent notation to exact decimal text, renormalizing, and accepting a JSON number only when the canonical strings are byte-identical; retain syntax-invalid decoded strings and representability-invalid canonical strings as metadata.
-- [ ] Reject duplicate candidates after target-directed interpretation at the later argument's span, covering quoted/bare strings and every specified decimal normalization equivalence.
-- [ ] Enforce eligibility on exact `string` and `number` primitives (including item constraints on their array forms) and reject `suggest(...)` on array-level constraints, imports that do not resolve to an eligible exact type, and every unsupported primitive.
-- [ ] Enforce at most one `suggest(...)` across the complete `PropertyDef`, including all atoms of a property union, while keeping declarations of the same property in separate root-union arms independent.
-- [ ] Introduce or extend the source-aware SimplifiedSchema parse product so expression-relative candidate spans can be projected through plain, single-quoted, and double-quoted YAML scalar decoding into document-relative byte spans for inline frontmatter and standalone YAML.
-- [ ] Update `simplified/serialize.rs`, compose cache hashing, equality/clone behavior, schema detection fallbacks, and all exhaustive `Constraint` matches so suggestion metadata round-trips deterministically without changing legacy schema output.
-- [ ] Validation checkpoint: grammar, span-projection, canonical-decimal, duplicate, serializer, and legacy round-trip tests pass; tests include LF, CRLF, escaped quoted scalars, and multibyte UTF-8 before candidate arguments.
+- [x] Add a dedicated suggestion candidate type in `simplified/types.rs` that retains decoded text, interpreted `serde_json::Value`, canonical decimal text when applicable, and the exact authored argument `SourceSpan`; add `Constraint::Suggest` using this type without conflating it with `Members` or `Example`.
+- [x] Extend the existing argument lexer/parser in `simplified/grammar.rs` so `suggest(...)` reuses current comma, quote, and escape rules, rejects an empty list structurally, and captures each argument's expression-relative source span before interpretation.
+- [x] Implement target-directed string interpretation so every decoded token becomes a JSON string and quoted/bare equivalent spellings compare as the same candidate.
+- [x] Implement a platform-independent simple-decimal normalizer using string operations: validate the exact grammar, remove redundant integer zeros and trailing fractional zeros, remove an empty fractional component, and normalize every signed zero to `0` without first converting through a machine number.
+- [x] Implement lossless numeric interpretation by parsing canonical text through the supported JSON number model, canonically serializing it, expanding serializer exponent notation to exact decimal text, renormalizing, and accepting a JSON number only when the canonical strings are byte-identical; retain syntax-invalid decoded strings and representability-invalid canonical strings as metadata.
+- [x] Reject duplicate candidates after target-directed interpretation at the later argument's span, covering quoted/bare strings and every specified decimal normalization equivalence.
+- [x] Enforce eligibility on exact `string` and `number` primitives (including item constraints on their array forms) and reject `suggest(...)` on array-level constraints, imports that do not resolve to an eligible exact type, and every unsupported primitive.
+- [x] Enforce at most one `suggest(...)` across the complete `PropertyDef`, including all atoms of a property union, while keeping declarations of the same property in separate root-union arms independent.
+- [x] Introduce or extend the source-aware SimplifiedSchema parse product so expression-relative candidate spans can be projected through plain, single-quoted, and double-quoted YAML scalar decoding into document-relative byte spans for inline frontmatter and standalone YAML.
+- [x] Update `simplified/serialize.rs`, compose cache hashing, equality/clone behavior, schema detection fallbacks, and all exhaustive `Constraint` matches so suggestion metadata round-trips deterministically without changing legacy schema output.
+- [x] Validation checkpoint: grammar, span-projection, canonical-decimal, duplicate, serializer, and legacy round-trip tests pass; tests include LF, CRLF, escaped quoted scalars, and multibyte UTF-8 before candidate arguments.
 
 Parallelizable in this phase: decimal normalization/round-trip logic and YAML source-span projection can be implemented independently, then joined in the candidate parser. Cardinality enforcement can proceed once `Constraint::Suggest` exists.
 
 ## Phase 3 - Generated Annotation and Library-Owned Candidate Linting
 
-- [ ] Extend `simplified/convert.rs` to emit `x-darkmatter-suggest` on the annotated scalar schema or array `items` schema, preserving interpreted declaration order and JSON scalar types, and never emitting standard `examples` or `x-darkmatter-example` for this feature.
-- [ ] Keep invalid number metadata in the generated annotation as its specified string fallback while allowing SimplifiedSchema conversion, validator construction, frontmatter validation, and composition to continue.
-- [ ] Define a public structured lint API with a stable problem type containing decoded text, interpreted value, reason/category, property/root-arm provenance, and exact authoring span; expose one problem per invalid candidate through `markdown::schemas`.
-- [ ] Build each candidate's target schema from the exact non-null scalar fragment or array item fragment, remove `x-darkmatter-suggest`, and validate the candidate with the existing JSON Schema compiler so numeric/string constraints remain single-sourced.
-- [ ] Add explicit lint reasons for invalid decimal syntax and unsupported lossless numeric representation before target validation, and map validator failures to stable range/integer/length/not-empty/pattern/type reason categories suitable for DMLS messages.
-- [ ] Exclude `required`, `default`, `generated`, and `example(...)` from the candidate target while retaining applicable `min`, `max`, `integer`, `minLength`, `maxLength`, `not-empty`, and `pattern` behavior.
-- [ ] Ensure lint walks every property-union atom and every root-union arm, even when a later arm will not supply completion, and produces deterministic declaration-order results.
-- [ ] Add public API tests proving invalid suggestions are inspectable without turning into `SchemaError`, and regression tests proving arbitrary document values still validate when they satisfy the underlying schema but do not appear in the suggestion list.
-- [ ] Add conversion snapshots for strings, exact numbers, arrays, constraint-invalid values, syntax-invalid numeric strings, and lossless-boundary fallback strings; assert annotation placement and the absence of `examples`.
-- [ ] Add compose/validation regression tests proving invalid metadata does not block schema resolution, validator construction, frontmatter validation, composition, or valid sibling completion infrastructure.
-- [ ] Validation checkpoint: targeted Darkmatter unit and snapshot tests pass, generated schemas validate independently, and lint output contains exact authored spans and stable reasons for every invalid candidate.
+- [x] Extend `simplified/convert.rs` to emit `x-darkmatter-suggest` on the annotated scalar schema or array `items` schema, preserving interpreted declaration order and JSON scalar types, and never emitting standard `examples` or `x-darkmatter-example` for this feature.
+- [x] Keep invalid number metadata in the generated annotation as its specified string fallback while allowing SimplifiedSchema conversion, validator construction, frontmatter validation, and composition to continue.
+- [x] Define a public structured lint API with a stable problem type containing decoded text, interpreted value, reason/category, property/root-arm provenance, and exact authoring span; expose one problem per invalid candidate through `markdown::schemas`.
+- [x] Build each candidate's target schema from the exact non-null scalar fragment or array item fragment, remove `x-darkmatter-suggest`, and validate the candidate with the existing JSON Schema compiler so numeric/string constraints remain single-sourced.
+- [x] Add explicit lint reasons for invalid decimal syntax and unsupported lossless numeric representation before target validation, and map validator failures to stable range/integer/length/not-empty/pattern/type reason categories suitable for DMLS messages.
+- [x] Exclude `required`, `default`, `generated`, and `example(...)` from the candidate target while retaining applicable `min`, `max`, `integer`, `minLength`, `maxLength`, `not-empty`, and `pattern` behavior.
+- [x] Ensure lint walks every property-union atom and every root-union arm, even when a later arm will not supply completion, and produces deterministic declaration-order results.
+- [x] Add public API tests proving invalid suggestions are inspectable without turning into `SchemaError`, and regression tests proving arbitrary document values still validate when they satisfy the underlying schema but do not appear in the suggestion list.
+- [x] Add conversion snapshots for strings, exact numbers, arrays, constraint-invalid values, syntax-invalid numeric strings, and lossless-boundary fallback strings; assert annotation placement and the absence of `examples`.
+- [x] Add compose/validation regression tests proving invalid metadata does not block schema resolution, validator construction, frontmatter validation, composition, or valid sibling completion infrastructure.
+- [x] Validation checkpoint: targeted Darkmatter unit and snapshot tests pass, generated schemas validate independently, and lint output contains exact authored spans and stable reasons for every invalid candidate.
 
 Parallelizable in this phase: converter annotation work and lint API design can proceed independently after the AST lands. Constraint-target integration depends on converter output being available.
 
 ## Phase 4 - Content-Based Standalone SimplifiedSchema Envelopes
 
-- [ ] Add one library-owned content classifier/parser for standalone YAML schema documents that recognizes a pure envelope only when `$schema` is the sole top-level key and recognizes a tagged envelope when `kind: schema` claims the document.
-- [ ] Parse pure mapping and tagged `types` mapping payloads into the same source-aware SimplifiedSchema representation, and preserve pure sequence payloads as whole-file root unions without exposing a named-import namespace.
-- [ ] Treat missing/malformed tagged `types`, non-mapping `types`, and unsupported tagged-envelope top-level keys as claimed schema-document errors rather than falling back to ordinary YAML or raw JSON Schema.
-- [ ] Update `schemas/resolve.rs` so whole-file references to pure and tagged mapping envelopes produce identical complete object schemas, preserve dependency/origin metadata, and resolve nested imports/examples relative to the authoring file.
-- [ ] Update named-import resolution so `Name@fileref` reads the shared mapping payload from either envelope, rejects pure sequence payloads for named imports, and retains existing eager depth bounds, cycle checks, and `FileReference` path semantics.
-- [ ] Keep raw JSON Schema resolution distinct: existing YAML/JSON raw schemas continue validating, cannot supply named imports, do not produce suggestion lint data, and do not expose hand-authored `x-darkmatter-suggest` to SimplifiedSchema consumers.
-- [ ] Expose standalone parse/lint products that retain the authoring document path and candidate source spans, allowing an open schema buffer to be diagnosed directly without transferring ranges to consumers.
-- [ ] Add resolver tests for both mapping envelopes as whole files and named-import namespaces, pure sequence whole-file use, malformed claimed envelopes, import cycles, relative paths, and raw JSON Schema regressions.
-- [ ] Validation checkpoint: the same mapping payload yields equivalent resolved SimplifiedSchema/JSON Schema from pure and tagged envelopes; malformed claimed documents fail with schema-document errors; raw JSON Schema behavior remains unchanged.
+- [x] Add one library-owned content classifier/parser for standalone YAML schema documents that recognizes a pure envelope only when `$schema` is the sole top-level key and recognizes a tagged envelope when `kind: schema` claims the document.
+- [x] Parse pure mapping and tagged `types` mapping payloads into the same source-aware SimplifiedSchema representation, and preserve pure sequence payloads as whole-file root unions without exposing a named-import namespace.
+- [x] Treat missing/malformed tagged `types`, non-mapping `types`, and unsupported tagged-envelope top-level keys as claimed schema-document errors rather than falling back to ordinary YAML or raw JSON Schema.
+- [x] Update `schemas/resolve.rs` so whole-file references to pure and tagged mapping envelopes produce identical complete object schemas, preserve dependency/origin metadata, and resolve nested imports/examples relative to the authoring file.
+- [x] Update named-import resolution so `Name@fileref` reads the shared mapping payload from either envelope, rejects pure sequence payloads for named imports, and retains existing eager depth bounds, cycle checks, and `FileReference` path semantics.
+- [x] Keep raw JSON Schema resolution distinct: existing YAML/JSON raw schemas continue validating, cannot supply named imports, do not produce suggestion lint data, and do not expose hand-authored `x-darkmatter-suggest` to SimplifiedSchema consumers.
+- [x] Expose standalone parse/lint products that retain the authoring document path and candidate source spans, allowing an open schema buffer to be diagnosed directly without transferring ranges to consumers.
+- [x] Add resolver tests for both mapping envelopes as whole files and named-import namespaces, pure sequence whole-file use, malformed claimed envelopes, import cycles, relative paths, and raw JSON Schema regressions.
+- [x] Validation checkpoint: the same mapping payload yields equivalent resolved SimplifiedSchema/JSON Schema from pure and tagged envelopes; malformed claimed documents fail with schema-document errors; raw JSON Schema behavior remains unchanged.
 
 Parallelizable in this phase: envelope classification tests and resolver integration can proceed alongside DMLS fixture preparation. Named-import work depends on the common envelope parser.
 

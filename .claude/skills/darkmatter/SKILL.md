@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-a663d547fa097dd5
-last_updated: 2026-07-09
+hash: 87f17662fa397abe-1f127b636f3f000d
+last_updated: 2026-07-10
 ---
 
 # darkmatter
@@ -497,6 +497,15 @@ Darkmatter defines, detects, and evaluates schemas for Markdown frontmatter via 
 
 - `$schema` frontmatter property (inline, file reference, or root-level union).
 - `md schema validate`, `md schema detect`, and `md schema about` CLI subcommands.
+- `parse_standalone_schema_document` is the content-classification authority for
+  standalone SimplifiedSchema YAML. It recognizes a pure document only when
+  `$schema` is the sole top-level key, and recognizes a tagged document when
+  `kind: schema` claims it with a `types` mapping. Its
+  `StandaloneSchemaDocument` product retains the authoring path, source-aware
+  candidate spans, and suggestion lint problems without performing I/O or
+  composition. Mapping payloads support whole-file resolution and
+  `Name@fileref` imports; pure sequence payloads support whole-file root unions
+  only. Raw JSON Schema remains distinct and never produces this product.
 - `DarkmatterSchemas` library API with baseline merging and LRU validator cache.
 - Base frontmatter schema authored in `darkmatter/docs/schemas/darkmatter.yaml` — the source of truth for Darkmatter-owned frontmatter properties such as `ctx`, `hash`, `style`, and `replace`. The schema is exposed as a first-class library surface via `darkmatter_base_schema()` (returns `SimplifiedSchema`), `darkmatter_base_json_schema()` (returns the compiled Draft 2020-12 JSON Schema), and `ComposeOptions::with_darkmatter_baseline_schema()` (injects it into compose). Both accessors are also re-exported from the crate root.
 - `md compose` injects the Darkmatter base schema by default. Use `--no-baseline-schema` or `DARKMATTER_NO_BASELINE_SCHEMA=1` for raw compose behavior, or `--baseline-schema PATH` to replace the default with a custom SimplifiedSchema YAML baseline. `md schema validate` keeps its explicit `--schema` / `BASELINE_SCHEMA` baseline contract.
