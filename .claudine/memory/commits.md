@@ -100,10 +100,32 @@ details do not belong here.
   with another commit on the same branch from within the subagent; (2)
   the orchestrator can then decide between a downstream `git revert` of
   the stray, a coordinated `git reset --hard <known-good> + cherry-pick`
-  pass (when the user authorizes the rewrite), or simply accepting the
-  typo in the original commit subject; (3) this rule covers all
-  *post-success* follow-ups — `git commit --amend`, `git commit
-  --amend --only`, `git commit --amend --no-edit`, even `git commit
-  --fixup=…` — none of them are safe inside a concurrent batch, because
-  every sibling commit narrows the window in which the amendment would be
-  unambiguous.
+   pass (when the user authorizes the rewrite), or simply accepting the
+   typo in the original commit subject; (3) this rule covers all
+   *post-success* follow-ups — `git commit --amend`, `git commit
+   --amend --only`, `git commit --amend --no-edit`, even `git commit
+   --fixup=…` — none of them are safe inside a concurrent batch, because
+   every sibling commit narrows the window in which the amendment would be
+   unambiguous.
+
+## Verifying a Concurrent Commit
+
+- After `git commit` returns 0, do not use `git log -1 --stat` to verify
+  the assigned paths. By the time the verifying command runs, a sibling
+  commit may have advanced HEAD past the subagent's own commit, so
+  `git log -1` shows the sibling's commit instead. Verified 2026-07-09
+  in the dmls + darkmatter 6-commit batch: two of six subagents reported
+  exactly this and had to fall back to `git show --stat <their-hash>` (or
+  `git show --name-status <their-hash>` for renames) to confirm the
+  assigned paths. The same race affects `git rev-parse HEAD` if it is
+  not the very next command after the commit.
+- Capture the new commit's hash from `git commit`'s own stdout — git
+  prints `[<branch> <hash>] <subject>` on success — and verify with that
+  hash. Reading git's stdout avoids the race entirely because it does
+  not depend on the index/refs state at verification time.
+- This is a sibling of the no-`--amend`-after-success rule: by the time
+  a post-success action runs, HEAD may no longer be the subagent's
+  commit. Treat the post-success window as a high-contention region;
+  minimize the number of git commands that touch HEAD, refs, or the
+  index between `git commit` returning 0 and the subagent's "I'm done"
+  report.
