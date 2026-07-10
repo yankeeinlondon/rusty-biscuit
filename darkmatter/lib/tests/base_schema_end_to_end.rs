@@ -1,8 +1,11 @@
-use std::path::Path;
+use std::{collections::BTreeSet, path::Path};
 
 use darkmatter::markdown::{
     Markdown,
-    schemas::{DarkmatterSchemas, darkmatter_base_json_schema, darkmatter_base_schema, parse_yaml_schema, to_json_schema},
+    schemas::{
+        DarkmatterSchemas, PropertyDef, SchemaShape, TypeExpr, darkmatter_base_json_schema,
+        darkmatter_base_schema, parse_yaml_schema, to_json_schema,
+    },
 };
 use serde_yaml_ng::Value as YamlValue;
 
@@ -27,6 +30,34 @@ fn parse_schema_yaml(raw: &str) -> serde_json::Value {
     to_json_schema(&schema).expect("SimplifiedSchema must convert")
 }
 
+fn collect_style_catalog_paths(
+    shape: &SchemaShape,
+    prefix: &str,
+    catalog: &BTreeSet<&str>,
+    found: &mut BTreeSet<String>,
+) {
+    for (name, def) in &shape.properties {
+        let path = if prefix.is_empty() {
+            name.clone()
+        } else {
+            format!("{prefix}.{name}")
+        };
+        if catalog.contains(path.as_str()) {
+            found.insert(path);
+            continue;
+        }
+        let atoms = match def {
+            PropertyDef::Single(atom) => std::slice::from_ref(atom),
+            PropertyDef::Union(atoms) => atoms.as_slice(),
+        };
+        for atom in atoms {
+            if let TypeExpr::InlineObject(nested) = &atom.ty {
+                collect_style_catalog_paths(nested, &path, catalog, found);
+            }
+        }
+    }
+}
+
 #[test]
 fn base_schema_file_parses_and_converts() {
     let schema = darkmatter_base_schema();
@@ -48,6 +79,60 @@ fn base_schema_file_parses_and_converts() {
             .is_some_and(|properties| properties.contains_key("ctx")),
         "base JSON Schema must expose ctx"
     );
+}
+
+#[test]
+fn base_style_schema_matches_runtime_descriptor() {
+    let darkmatter::markdown::schemas::SimplifiedSchema::Single(root) =
+        darkmatter_base_schema()
+    else {
+        panic!("base schema must be a single object shape");
+    };
+    let style = root.properties.get("style").expect("style property");
+    let PropertyDef::Single(style) = style else {
+        panic!("style must be a single inline object");
+    };
+    let TypeExpr::InlineObject(style) = &style.ty else {
+        panic!("style must expose its nested shape");
+    };
+
+    let expected: BTreeSet<&str> = darkmatter::style::descriptor::SCHEMA
+        .iter()
+        .map(|leaf| leaf.canonical)
+        .collect();
+    let mut actual = BTreeSet::new();
+    collect_style_catalog_paths(style, "", &expected, &mut actual);
+
+    assert_eq!(
+        actual,
+        expected.into_iter().map(str::to_string).collect(),
+        "the authored base schema must stay in lockstep with style::descriptor::SCHEMA"
+    );
+}
+
+#[test]
+fn base_style_schema_validates_nested_values() {
+    let valid = validate_with_base(
+        "style:\n\
+         \x20 block-quote:\n\
+         \x20   alignment: center\n\
+         \x20   border:\n\
+         \x20     left: true\n\
+         \x20     style: dotted\n\
+         \x20   emphasis:\n\
+         \x20     italic: true\n",
+    );
+    assert!(valid.valid, "valid nested style must pass: {:?}", valid.problems);
+
+    let invalid = validate_with_base(
+        "style:\n\
+         \x20 block-quote:\n\
+         \x20   alignment: middle\n",
+    );
+    assert!(!invalid.valid, "invalid nested style enum must fail");
+
+    let invalid_meta = validate_with_base("style:\n  page:\n    meta: description\n");
+    assert!(!invalid_meta.valid, "page metadata must be an object");
 }
 
 #[test]
