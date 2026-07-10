@@ -1,13 +1,14 @@
-//! Level-2 integration tests: full LSP conversations over an in-memory
+//! Level-1 integration tests: full LSP conversations over an in-memory
 //! connection pair (`lsp_server::Connection::memory()`), the fixture shape
 //! ported from `iwes/tests/fixture.rs` (Apache-2.0, IWE project).
 //!
-//! These sessions are in-memory (no real terminal or network resource), so
-//! they run ungated — the `level2_` prefix routes them to `just test-l2`.
+//! These sessions are in-memory (no real terminal, PTY, or network resource),
+//! so they run in the standard `just test` gate with no terminal harness.
 
 use std::sync::mpsc;
 use std::time::Duration;
 
+use dmls::overlay::expressions;
 use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
 use serde_json::{Value, json};
 
@@ -187,7 +188,7 @@ fn neovim_like_initialize_params(root: &std::path::Path) -> Value {
 }
 
 #[test]
-fn level2_initialize_open_change_shutdown() {
+fn initialize_open_change_shutdown() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(
         workspace.path().join(".dmls.toml"),
@@ -274,7 +275,7 @@ fn level2_initialize_open_change_shutdown() {
 }
 
 #[test]
-fn level2_default_negotiation_is_utf16() {
+fn default_negotiation_is_utf16() {
     let mut fixture = ClientFixture::start();
     let result = fixture.initialize(json!({
         "processId": null,
@@ -301,8 +302,28 @@ fn open(fixture: &ClientFixture, uri: &str, text: &str) {
     );
 }
 
+/// Requests `textDocument/hover` at `(line, character)` and returns the rendered
+/// Markdown body (empty string on a null hover). Collapses the request +
+/// `contents.value` extraction that hover assertions would otherwise repeat.
+fn hover_markup(fixture: &mut ClientFixture, uri: &str, line: u32, character: u32) -> String {
+    let hover = fixture
+        .request(
+            "textDocument/hover",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character }
+            }),
+        )
+        .result
+        .expect("hover result");
+    hover["contents"]["value"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
 #[test]
-fn level2_layer0_provider_round_trips() {
+fn layer0_provider_round_trips() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("a.md"), DOC_A).unwrap();
     std::fs::write(workspace.path().join("b.md"), DOC_B).unwrap();
@@ -426,7 +447,7 @@ fn level2_layer0_provider_round_trips() {
 }
 
 #[test]
-fn level2_broken_link_diagnostic_updates_on_edit() {
+fn broken_link_diagnostic_updates_on_edit() {
     let workspace = tempfile::tempdir().unwrap();
     let mut fixture = ClientFixture::start();
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
@@ -459,7 +480,7 @@ fn level2_broken_link_diagnostic_updates_on_edit() {
 }
 
 #[test]
-fn level2_server_rescan_fallback_tracks_unopened_files_on_save() {
+fn server_rescan_fallback_tracks_unopened_files_on_save() {
     // Spec acceptance criterion 2 for watcher-less clients: a ServerRescan
     // client (Neovim-on-Linux shape — no reliable file watcher) must still see
     // an unopened file's create/delete. Its only trigger is a save, so a
@@ -521,7 +542,7 @@ fn level2_server_rescan_fallback_tracks_unopened_files_on_save() {
 }
 
 #[test]
-fn level2_wiki_link_navigation_diagnostics_and_completion() {
+fn wiki_link_navigation_diagnostics_and_completion() {
     let workspace = tempfile::tempdir().unwrap();
     let notes = workspace.path().join("notes");
     std::fs::create_dir_all(&notes).unwrap();
@@ -602,7 +623,7 @@ fn level2_wiki_link_navigation_diagnostics_and_completion() {
 }
 
 #[test]
-fn level2_config_reload_reindexes_wiki_roots() {
+fn config_reload_reindexes_wiki_roots() {
     // A `workspace/didChangeConfiguration` that narrows `wiki.wiki_root` must
     // rebuild the wiki resolution universe and re-publish diagnostics without a
     // server restart: a link that resolves under the default roots becomes
@@ -659,7 +680,7 @@ fn level2_config_reload_reindexes_wiki_roots() {
 const SCHEMA_DOC: &str = "---\n$schema:\n  title: string(required)\n  status: enum(draft, published)\nstatus: draft\n---\n\n# Doc\n";
 
 #[test]
-fn level2_frontmatter_schema_intelligence() {
+fn frontmatter_schema_intelligence() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("doc.md"), SCHEMA_DOC).unwrap();
 
@@ -669,15 +690,16 @@ fn level2_frontmatter_schema_intelligence() {
     let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
     open(&fixture, uri.as_str(), SCHEMA_DOC);
 
-    // Criterion 5-precision: the missing required `title` is diagnosed with a
-    // stable code, ranged against the concrete frontmatter (not a line map).
+    // `required` is a compose-time contract (the value is injected via CLI /
+    // seed / interactive prompt), so the absent required `title` is NOT an
+    // edit-time error in the default non-strict mode. Strict mode re-enables it;
+    // the strict/non-strict rule itself is covered by classify()'s unit tests.
     let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
     assert!(
-        diagnostics
+        !diagnostics
             .iter()
-            .any(|d| d["code"] == json!("dm.schema.missing_required")
-                && d["source"] == json!("darkmatter.schema")),
-        "expected a missing-required diagnostic: {diagnostics:?}"
+            .any(|d| d["code"] == json!("dm.schema.missing_required")),
+        "missing_required must be suppressed in non-strict mode: {diagnostics:?}"
     );
 
     // Key completion offers the schema-declared `title` (a required key).
@@ -720,20 +742,16 @@ fn level2_frontmatter_schema_intelligence() {
         "expected enum value completion: {values:?}"
     );
 
-    // Hover on the `status` key describes the enum.
-    let hover = fixture
-        .request(
-            "textDocument/hover",
-            json!({
-                "textDocument": { "uri": uri.as_str() },
-                "position": { "line": 4, "character": 2 }
-            }),
-        )
-        .result
-        .expect("hover");
+    // Hover on the `status` key describes the enum, styled per docs/hover.md:
+    // the type is bold (never inline code) and the enum members are italic.
+    let markup = hover_markup(&mut fixture, uri.as_str(), 4, 2);
     assert!(
-        hover["contents"]["value"].as_str().unwrap().contains("draft"),
-        "hover should describe the enum: {hover:?}"
+        markup.contains("Type: **") && !markup.contains("Type: `"),
+        "type must render bold, not inline code: {markup}"
+    );
+    assert!(
+        markup.contains("Values: _draft_, _published_"),
+        "enum members must render italic: {markup}"
     );
 
     fixture.shutdown();
@@ -746,7 +764,7 @@ fn level2_frontmatter_schema_intelligence() {
 const NESTED_SCHEMA_DOC: &str = "---\n$schema:\n  settings:\n    mode: enum(dev, prod)\n    path: file\n    level: number\nsettings:\n  mode: dev\n  path: other.md\n---\n\n# Doc\n";
 
 #[test]
-fn level2_frontmatter_nested_schema_intelligence() {
+fn frontmatter_nested_schema_intelligence() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("doc.md"), NESTED_SCHEMA_DOC).unwrap();
     // A sibling document so the nested `file(...)` value completion has a target.
@@ -835,7 +853,7 @@ fn level2_frontmatter_nested_schema_intelligence() {
 const FILE_NAV_DOC: &str = "---\n$schema:\n  home: file\n  settings:\n    doc: file\nhome: top.md\nsettings:\n  doc: nested.md\n---\n\n# Doc\n";
 
 #[test]
-fn level2_frontmatter_nested_file_navigation() {
+fn frontmatter_nested_file_navigation() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("doc.md"), FILE_NAV_DOC).unwrap();
     std::fs::write(workspace.path().join("top.md"), "# Top\n").unwrap();
@@ -917,7 +935,7 @@ const EXTENSIONLESS_FILE_DOC: &str =
     "---\n$schema:\n  license: file\nlicense: LICENSE\n---\n\n# Doc\n";
 
 #[test]
-fn level2_frontmatter_extensionless_file_navigation() {
+fn frontmatter_extensionless_file_navigation() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("doc.md"), EXTENSIONLESS_FILE_DOC).unwrap();
     // The extensionless target must exist so resolution has something to reach.
@@ -974,7 +992,7 @@ const UNION_VALUE_DOC: &str =
     "---\n$schema:\n  asset:\n    - string\n    - file\nasset: \n---\n\n# Doc\n";
 
 #[test]
-fn level2_frontmatter_union_value_completion() {
+fn frontmatter_union_value_completion() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("doc.md"), UNION_VALUE_DOC).unwrap();
     // A sibling document so the `file(...)` arm's value completion has a target.
@@ -1013,7 +1031,7 @@ const UNION_FILE_NAV_DOC: &str =
     "---\n$schema:\n  home:\n    - string\n    - file\nhome: top.md\n---\n\n# Doc\n";
 
 #[test]
-fn level2_frontmatter_union_file_navigation() {
+fn frontmatter_union_file_navigation() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("doc.md"), UNION_FILE_NAV_DOC).unwrap();
     std::fs::write(workspace.path().join("top.md"), "# Top\n").unwrap();
@@ -1065,7 +1083,7 @@ fn level2_frontmatter_union_file_navigation() {
 const UNION_NESTED_DOC: &str = "---\n$schema:\n  settings:\n    - string\n    - mode: enum(dev, prod)\n      path: file\n      level: number\nsettings:\n  mode: dev\n  path: nested.md\n---\n\n# Doc\n";
 
 #[test]
-fn level2_frontmatter_union_nested_schema_intelligence() {
+fn frontmatter_union_nested_schema_intelligence() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("doc.md"), UNION_NESTED_DOC).unwrap();
     std::fs::write(workspace.path().join("nested.md"), "# Nested\n").unwrap();
@@ -1152,7 +1170,7 @@ fn level2_frontmatter_union_nested_schema_intelligence() {
 }
 
 #[test]
-fn level2_claudine_extension_is_pure_config() {
+fn claudine_extension_is_pure_config() {
     // Criterion 6: a Claudine prompt activates a schema baseline through
     // configuration alone — no Claudine-specific code path exists in DMLS.
     let workspace = tempfile::tempdir().unwrap();
@@ -1210,7 +1228,7 @@ fn level2_claudine_extension_is_pure_config() {
 }
 
 #[test]
-fn level2_cancelled_request_answers_request_cancelled() {
+fn cancelled_request_answers_request_cancelled() {
     let mut fixture = ClientFixture::start();
     fixture.initialize(json!({ "processId": null, "capabilities": {} }));
 
@@ -1233,7 +1251,7 @@ const DSL_DOC: &str = "---\ntitle: Guide\n---\n\n# Guide\n\n::file ./intro.md\n\
 const INTRO_DOC: &str = "# Intro\n\nWelcome.\n";
 
 #[test]
-fn level2_dsl_overlay_navigation_hover_and_diagnostics() {
+fn dsl_overlay_navigation_hover_and_diagnostics() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("guide.md"), DSL_DOC).unwrap();
     std::fs::write(workspace.path().join("intro.md"), INTRO_DOC).unwrap();
@@ -1308,7 +1326,7 @@ fn level2_dsl_overlay_navigation_hover_and_diagnostics() {
 
 /// Compose-parity: a directive-name completion after `::` offers the catalog.
 #[test]
-fn level2_dsl_directive_name_completion() {
+fn dsl_directive_name_completion() {
     let workspace = tempfile::tempdir().unwrap();
     let text = "# Doc\n\n::fi\n";
     std::fs::write(workspace.path().join("doc.md"), text).unwrap();
@@ -1343,7 +1361,7 @@ fn level2_dsl_directive_name_completion() {
 const VALID_DSL_DOC: &str = "---\ntitle: Guide\n---\n\n# Guide\n\n::file ./intro.md\n\n::block when=\"true\"\ncontent\n::end-block\n\nHello {{ title }} on {{ ctx.today }}.\n\n```rust\nfn main() {}\n```\n";
 
 #[test]
-fn level2_dsl_valid_document_has_no_dsl_diagnostics() {
+fn dsl_valid_document_has_no_dsl_diagnostics() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("guide.md"), VALID_DSL_DOC).unwrap();
     std::fs::write(workspace.path().join("intro.md"), INTRO_DOC).unwrap();
@@ -1380,7 +1398,7 @@ const SHELL_BLOCK_DOC: &str =
     "---\ntitle: Shell\n---\n\n# Shell\n\n::shell-block\necho hello\nrm -rf /tmp/danger\n::end-block\n";
 
 #[test]
-fn level2_dsl_shell_block_body_disallowed_command_is_diagnosed() {
+fn dsl_shell_block_body_disallowed_command_is_diagnosed() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("doc.md"), SHELL_BLOCK_DOC).unwrap();
 
@@ -1407,7 +1425,7 @@ fn level2_dsl_shell_block_body_disallowed_command_is_diagnosed() {
 }
 
 #[test]
-fn level2_dsl_shell_block_body_hover_shows_policy_verdict() {
+fn dsl_shell_block_body_hover_shows_policy_verdict() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("doc.md"), SHELL_BLOCK_DOC).unwrap();
 
@@ -1441,7 +1459,7 @@ const BENIGN_SHELL_BLOCK_DOC: &str =
     "---\ntitle: Shell\n---\n\n# Shell\n\n::shell-block\necho hello\ngit status\n::end-block\n";
 
 #[test]
-fn level2_dsl_shell_block_benign_body_has_no_security_diagnostic() {
+fn dsl_shell_block_benign_body_has_no_security_diagnostic() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("doc.md"), BENIGN_SHELL_BLOCK_DOC).unwrap();
 
@@ -1467,7 +1485,7 @@ const QUOTED_SHELL_BLOCK_DOC: &str =
     "---\ntitle: Shell\n---\n\n# Shell\n\n> ::shell-block\n> rm -rf /tmp/danger\n> ::end-block\n";
 
 #[test]
-fn level2_dsl_quoted_shell_block_body_disallowed_command_is_diagnosed() {
+fn dsl_quoted_shell_block_body_disallowed_command_is_diagnosed() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("doc.md"), QUOTED_SHELL_BLOCK_DOC).unwrap();
 
@@ -1556,7 +1574,7 @@ fn collect_edit_uris(edit: &Value) -> Vec<String> {
 }
 
 #[test]
-fn level2_formatting_is_byte_equivalent_to_library_cleanup() {
+fn formatting_is_byte_equivalent_to_library_cleanup() {
     let workspace = tempfile::tempdir().unwrap();
     let mut fixture = ClientFixture::start();
     fixture.initialize(vscode_like_initialize_params(workspace.path()));
@@ -1588,7 +1606,7 @@ fn level2_formatting_is_byte_equivalent_to_library_cleanup() {
 }
 
 #[test]
-fn level2_code_action_creates_missing_wiki_note() {
+fn code_action_creates_missing_wiki_note() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("note.md"), "See [[NewNote]].\n").unwrap();
 
@@ -1637,7 +1655,7 @@ const RENAME_DOC_A: &str = "# Overview\n\n[top](#overview)\n";
 const RENAME_DOC_B: &str = "See [[doc_a#Overview]].\n";
 
 #[test]
-fn level2_heading_rename_rewrites_references() {
+fn heading_rename_rewrites_references() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("doc_a.md"), RENAME_DOC_A).unwrap();
     std::fs::write(workspace.path().join("doc_b.md"), RENAME_DOC_B).unwrap();
@@ -1690,7 +1708,7 @@ fn level2_heading_rename_rewrites_references() {
 }
 
 #[test]
-fn level2_rename_refuses_ambiguous_heading() {
+fn rename_refuses_ambiguous_heading() {
     let workspace = tempfile::tempdir().unwrap();
     let source = "# Same\n\ntext\n\n# Same\n";
     std::fs::write(workspace.path().join("dup.md"), source).unwrap();
@@ -1729,7 +1747,7 @@ fn level2_rename_refuses_ambiguous_heading() {
 }
 
 #[test]
-fn level2_will_rename_files_updates_and_refuses() {
+fn will_rename_files_updates_and_refuses() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(workspace.path().join("note1.md"), "See [[note2]].\n").unwrap();
     std::fs::write(workspace.path().join("note2.md"), "# Note Two\n").unwrap();
@@ -1767,6 +1785,282 @@ fn level2_will_rename_files_updates_and_refuses() {
         .result
         .expect("willRenameFiles result");
     assert_eq!(response, Value::Null, "rename onto an existing file must refuse");
+
+    fixture.shutdown();
+}
+
+// ── Modal-and-autocomplete Phase 4: interpolation assistance end-to-end ──
+
+#[test]
+fn initialize_advertises_period_completion_trigger() {
+    let mut fixture = ClientFixture::start();
+    let result = fixture.initialize(json!({ "processId": null, "capabilities": {} }));
+
+    // D3: `.` joins the trigger set without dropping any existing trigger.
+    let triggers = result["capabilities"]["completionProvider"]["triggerCharacters"]
+        .as_array()
+        .expect("completion trigger characters")
+        .clone();
+    for trigger in ["/", "(", "#", "."] {
+        assert!(
+            triggers.contains(&json!(trigger)),
+            "`{trigger}` must be an advertised completion trigger: {triggers:?}"
+        );
+    }
+
+    fixture.shutdown();
+}
+
+/// A document whose frontmatter carries a `ctx.packages` key and whose body
+/// interpolates the same variable, so the two hover surfaces can be compared.
+const CTX_HOVER_DOC: &str =
+    "---\nctx:\n  packages: []\n---\n\n# Doc\n\nList: {{ ctx.packages }}\n";
+
+#[test]
+fn interpolation_ctx_hover_matches_frontmatter_block() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc.md"), CTX_HOVER_DOC).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), CTX_HOVER_DOC);
+
+    let block = expressions::format_ctx_hover_block(
+        expressions::ctx_descriptor("packages").expect("`packages` is a known context variable"),
+    );
+
+    // Interpolation hover on `{{ ctx.packages }}` (line 7): the catalog-derived
+    // type and description are present, plus the interpolation-only note.
+    let hover = fixture
+        .request(
+            "textDocument/hover",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 7, "character": 12 }
+            }),
+        )
+        .result
+        .expect("interpolation hover");
+    let interpolation_text = hover["contents"]["value"].as_str().unwrap_or_default();
+    assert!(interpolation_text.contains("string[]"), "catalog type: {interpolation_text}");
+    assert!(
+        interpolation_text.contains(&block),
+        "catalog-backed block must be the shared formatter's bytes: {interpolation_text}"
+    );
+    assert!(
+        interpolation_text.contains("_compose_ time"),
+        "passive compose-time note must be appended: {interpolation_text}"
+    );
+    // The hover range is the complete `{{ ... }}` expression.
+    assert_eq!(hover["range"]["start"], json!({ "line": 7, "character": 6 }));
+    assert_eq!(hover["range"]["end"], json!({ "line": 7, "character": 24 }));
+
+    // Frontmatter hover on the `packages` key under `ctx:` (line 2): the same
+    // catalog-backed block byte-for-byte, without the compose-time note.
+    let hover = fixture
+        .request(
+            "textDocument/hover",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 2, "character": 3 }
+            }),
+        )
+        .result
+        .expect("frontmatter ctx hover");
+    let frontmatter_text = hover["contents"]["value"].as_str().unwrap_or_default();
+    assert_eq!(
+        frontmatter_text.trim_end(),
+        block,
+        "frontmatter ctx hover must be exactly the shared catalog block"
+    );
+    assert!(
+        !frontmatter_text.contains("compose"),
+        "the compose-time note is interpolation-specific: {frontmatter_text}"
+    );
+
+    fixture.shutdown();
+}
+
+/// An astral character (💡, two UTF-16 units) precedes the open interpolation,
+/// so the negotiated UTF-16 position path is exercised: `ctx.pa` spans UTF-16
+/// columns 6..12 even though its byte span starts at 8.
+const ASTRAL_CTX_COMPLETION_DOC: &str = "# Doc\n\n💡 {{ ctx.pa\n";
+
+#[test]
+fn ctx_completion_shape_under_utf16_astral_prefix() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc.md"), ASTRAL_CTX_COMPLETION_DOC).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    // VS Code-like client: offers UTF-16 only, so positions are UTF-16 columns.
+    fixture.initialize(vscode_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), ASTRAL_CTX_COMPLETION_DOC);
+
+    let completions = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 2, "character": 12 }
+            }),
+        )
+        .result
+        .expect("completions");
+    let items = completions.as_array().expect("completion array");
+    let packages = items
+        .iter()
+        .find(|item| item["label"] == json!("ctx.packages"))
+        .expect("`ctx.pa` offers `ctx.packages`");
+
+    // D3: `detail` is the rendered type, `documentation` is eager Markdown.
+    let descriptor = expressions::ctx_descriptor("packages").unwrap();
+    assert_eq!(packages["kind"], json!(6), "kind VARIABLE: {packages:?}");
+    assert_eq!(packages["detail"], json!("string[]"));
+    assert_eq!(packages["documentation"]["kind"], json!("markdown"));
+    assert_eq!(packages["documentation"]["value"], json!(descriptor.description));
+    // The eager `textEdit` replaces exactly the typed token, in UTF-16 columns
+    // (start 6, not the byte column 8 — the astral 💡 counts as two units).
+    assert_eq!(packages["textEdit"]["newText"], json!("ctx.packages"));
+    assert_eq!(packages["textEdit"]["range"]["start"], json!({ "line": 2, "character": 6 }));
+    assert_eq!(packages["textEdit"]["range"]["end"], json!({ "line": 2, "character": 12 }));
+
+    fixture.shutdown();
+}
+
+const FUNCTION_COMPLETION_DOC: &str = "# Doc\n\nValue: {{ len\n";
+
+#[test]
+fn function_completion_shape() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc.md"), FUNCTION_COMPLETION_DOC).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), FUNCTION_COMPLETION_DOC);
+
+    let completions = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 2, "character": 13 }
+            }),
+        )
+        .result
+        .expect("completions");
+    let items = completions.as_array().expect("completion array");
+    let length = items
+        .iter()
+        .find(|item| item["textEdit"]["newText"] == json!("length"))
+        .expect("`len` offers `length` with bare-name insertion");
+
+    // D4: untyped signature label, typed-signature detail (fallible → `| error`),
+    // eager Markdown documentation, bare-name insertion.
+    let descriptor = expressions::function_descriptor("length").unwrap();
+    assert_eq!(length["label"], json!(descriptor.signature));
+    assert_eq!(length["detail"], json!(descriptor.typed_signature()));
+    assert!(
+        length["detail"].as_str().unwrap().ends_with("| error"),
+        "fallible typed signature must carry `| error`: {length:?}"
+    );
+    assert_eq!(length["documentation"]["kind"], json!("markdown"));
+    assert_eq!(length["documentation"]["value"], json!(descriptor.description));
+    assert_eq!(length["textEdit"]["range"]["start"], json!({ "line": 2, "character": 10 }));
+    assert_eq!(length["textEdit"]["range"]["end"], json!({ "line": 2, "character": 13 }));
+
+    fixture.shutdown();
+}
+
+const FUNCTION_HOVER_DOC: &str = "# Doc\n\nA: {{ as_csv(items) }} and {{ mystery(items) }}\n";
+
+#[test]
+fn function_call_hover_known_and_unknown() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc.md"), FUNCTION_HOVER_DOC).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), FUNCTION_HOVER_DOC);
+
+    // Hover inside `as_csv(...)` renders the typed signature + description.
+    let hover = fixture
+        .request(
+            "textDocument/hover",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 2, "character": 8 }
+            }),
+        )
+        .result
+        .expect("function hover");
+    let hover_text = hover["contents"]["value"].as_str().unwrap_or_default();
+    let as_csv = expressions::function_descriptor("as_csv").unwrap();
+    assert!(
+        hover_text.contains(&expressions::format_function_block(as_csv)),
+        "known function renders the catalog block: {hover_text}"
+    );
+    // The hover range remains the complete `{{ ... }}` expression.
+    assert_eq!(hover["range"]["start"], json!({ "line": 2, "character": 3 }));
+    assert_eq!(hover["range"]["end"], json!({ "line": 2, "character": 22 }));
+
+    // Hover inside `mystery(...)` keeps the generic parsed-expression hover.
+    let hover = fixture
+        .request(
+            "textDocument/hover",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 2, "character": 32 }
+            }),
+        )
+        .result
+        .expect("unknown-function hover");
+    let hover_text = hover["contents"]["value"].as_str().unwrap_or_default();
+    assert!(
+        hover_text.starts_with("**Expression**"),
+        "unknown function keeps the generic hover: {hover_text}"
+    );
+    assert!(
+        !hover_text.contains("**`mystery"),
+        "no catalog block may be synthesized for an unknown function: {hover_text}"
+    );
+
+    fixture.shutdown();
+}
+
+const PROSE_PERIOD_DOC: &str = "# Doc\n\nplain prose ctx.\n";
+
+#[test]
+fn period_trigger_outside_interpolation_offers_nothing() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("doc.md"), PROSE_PERIOD_DOC).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), PROSE_PERIOD_DOC);
+
+    // The advertised `.` trigger fires in ordinary prose: the DSL provider's
+    // open-interpolation guard offers nothing (D3/criterion 4).
+    let completions = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 2, "character": 16 },
+                "context": { "triggerKind": 2, "triggerCharacter": "." }
+            }),
+        )
+        .result
+        .expect("completion result");
+    assert_eq!(
+        completions,
+        json!([]),
+        "a period outside an open interpolation must produce no completion items"
+    );
 
     fixture.shutdown();
 }
