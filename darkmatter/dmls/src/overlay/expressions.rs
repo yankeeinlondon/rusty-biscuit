@@ -12,7 +12,7 @@ use darkmatter::markdown::compose::context::{
     ContextVariableDescriptor, context_variable_descriptors,
 };
 use darkmatter::markdown::compose::expression::{
-    EXPRESSION_FUNCTION_DESCRIPTORS, ExpressionFinder, ExpressionFunctionDescriptor, ParseError,
+    expression_function_descriptors, ExpressionFinder, ExpressionFunctionDescriptor, ParseError,
     SpannedExpr, SpannedExprKind, parse_spanned,
 };
 use darkmatter::markdown::span::SourceSpan;
@@ -220,14 +220,14 @@ pub fn ctx_descriptor(name: &str) -> Option<&'static ContextVariableDescriptor> 
 /// each [`ExpressionFunctionDescriptor`] carries the untyped `signature`, the
 /// typed [`ExpressionFunctionDescriptor::typed_signature`], and the description.
 pub fn function_descriptors() -> &'static [ExpressionFunctionDescriptor] {
-    EXPRESSION_FUNCTION_DESCRIPTORS
+    expression_function_descriptors()
 }
 
 /// The expression-function descriptor whose bare name (the leading identifier
 /// of its `signature`) is `name`, if any. Overloads share a bare name; the
 /// first catalog entry wins, matching the pre-descriptor lookup order.
 pub fn function_descriptor(name: &str) -> Option<&'static ExpressionFunctionDescriptor> {
-    EXPRESSION_FUNCTION_DESCRIPTORS
+    expression_function_descriptors()
         .iter()
         .find(|descriptor| function_name(descriptor.signature) == name)
 }
