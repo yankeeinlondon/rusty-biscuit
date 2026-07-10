@@ -24,7 +24,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
     SchemaTypeDescriptor {
         keyword: "string",
         description: "Text.",
-        accepted_constraints: "min, max, not-empty, pattern, default, required",
+        accepted_constraints: "min, max, not-empty, pattern, suggest, default, required",
         json_schema_effect: "{ \"type\": \"string\" } plus minLength / maxLength / pattern / default",
     },
     SchemaTypeDescriptor {
@@ -48,7 +48,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
     SchemaTypeDescriptor {
         keyword: "number",
         description: "A numeric value.",
-        accepted_constraints: "min, max, integer, default, required",
+        accepted_constraints: "min, max, integer, suggest, default, required",
         json_schema_effect: "{ \"type\": \"number\" } (or `integer` when `integer` is set) with optional minimum / maximum",
     },
     SchemaTypeDescriptor {
@@ -232,6 +232,16 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         argument_arity: "1+",
         description: "Allowed URL schemes (lowercased).",
         json_schema_effect: "x-darkmatter-url-scheme set to the scheme list",
+    },
+    // ── advisory suggestions ───────────────────────────────────────────
+    SchemaConstraintDescriptor {
+        name: "suggest",
+        keyword: "suggest",
+        form: "suggest(value, ...)",
+        target_types: "string | number",
+        argument_arity: "1+",
+        description: "Advisory completion candidates for DMLS. Non-validating: a document value is valid when it satisfies the underlying type and constraints, whether or not it appears in the list. At most one `suggest(...)` per complete property definition (including across property-union atoms). Array forms (`string[]`, `number[]`) describe individual elements, not whole arrays.",
+        json_schema_effect: "emits `x-darkmatter-suggest: [interpreted values]` on the scalar or array `items` schema in declaration order; never lowered to `examples` or `x-darkmatter-example`",
     },
     // ── array ──────────────────────────────────────────────────────────
     SchemaConstraintDescriptor {
@@ -613,6 +623,7 @@ mod tests {
             Constraint::MaxLen(0),
             Constraint::NotEmpty,
             Constraint::Pattern(String::new()),
+            Constraint::Suggest(Vec::new()),
             Constraint::Members(Vec::new()),
             Constraint::Eager,
             Constraint::Match(Vec::new()),
@@ -849,5 +860,61 @@ mod tests {
                 other => panic!("unexpected shape descriptor: {other}"),
             }
         }
+    }
+
+    /// The `suggest(...)` descriptor advertises eligibility on `string` and
+    /// `number`. This test verifies that every advertised eligible type
+    /// accepts the constraint and every excluded type rejects it, so the
+    /// catalog and the grammar cannot drift.
+    #[test]
+    fn suggest_descriptor_eligibility_matches_grammar() {
+        fn accepts(type_expr: &str) -> bool {
+            grammar::parse_type_expr("test", type_expr).is_ok()
+        }
+
+        // Eligible scalar types (per descriptor `target_types`).
+        assert!(accepts("string(suggest(red, green))"));
+        assert!(accepts("number(suggest(1, 2, 3))"));
+        assert!(accepts("number(integer; suggest(80, 443))"));
+
+        // Eligible array forms — candidates describe individual elements.
+        assert!(accepts("string(suggest(alpha, beta))[]"));
+        assert!(accepts("number(integer; suggest(1, 2, 3))[]"));
+
+        // Ineligible types must reject the constraint.
+        let ineligible = [
+            "boolean(suggest(true))",
+            "boolish(suggest(true))",
+            "numberlike(suggest(1))",
+            "date(suggest(2024-01-01))",
+            "datetime(suggest(2024-01-01T00:00:00Z))",
+            "time(suggest(12:00))",
+            "url(suggest(https://example.com))",
+            "email(suggest(a@b.com))",
+            "enum(suggest(x))",
+            "any(suggest(x))",
+            "object(suggest(x))",
+            "file(suggest(x))",
+        ];
+        for expr in ineligible {
+            assert!(
+                !accepts(expr),
+                "`suggest(...)` should be rejected on `{expr}` per the descriptor catalog"
+            );
+        }
+    }
+
+    /// The descriptor catalog's `suggest` entry uses keyword `suggest`, which
+    /// must round-trip through [`Constraint::keyword`].
+    #[test]
+    fn suggest_descriptor_keyword_matches_constraint() {
+        let descriptor = SCHEMA_CONSTRAINT_DESCRIPTORS
+            .iter()
+            .find(|d| d.keyword == "suggest")
+            .expect("suggest descriptor must exist");
+        assert_eq!(
+            Constraint::Suggest(Vec::new()).keyword(),
+            descriptor.keyword,
+        );
     }
 }
