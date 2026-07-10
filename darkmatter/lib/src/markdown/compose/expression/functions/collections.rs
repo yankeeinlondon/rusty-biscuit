@@ -5,86 +5,86 @@ use crate::catalog::{Example, ExampleVerification};
 pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
     FunctionRegistration { canonical: "first", aliases: &[], catalog_order: 12, descriptors: &[
         ExpressionFunctionDescriptor {
-        
+
                 signature: "first(x)",
                 parameters: P_LIST,
                 returns: R_ANY_ERR,
                 description: "Returns the first element of an array, or null when empty.",
                 category: "Collection",
                 order: 1,
-        
+
                 example: Some(Example { invocation: "first(items)", result: "1", verification: ExampleVerification::Executable }),
-        
+
             },
     ], handler: FunctionHandler::Pure(super::first_fn) },
     FunctionRegistration { canonical: "last", aliases: &[], catalog_order: 13, descriptors: &[
         ExpressionFunctionDescriptor {
-        
+
                 signature: "last(x)",
                 parameters: P_LIST,
                 returns: R_ANY_ERR,
                 description: "Returns the last element of an array, or null when empty.",
                 category: "Collection",
                 order: 2,
-        
+
                 example: Some(Example { invocation: "last(items)", result: "3", verification: ExampleVerification::Executable }),
-        
+
             },
     ], handler: FunctionHandler::Pure(super::last_fn) },
     FunctionRegistration { canonical: "has_key", aliases: &["haskey"], catalog_order: 48, descriptors: &[
         ExpressionFunctionDescriptor {
-        
+
                 signature: "has_key(obj, key)",
                 parameters: P_OBJ_STRING,
                 returns: R_BOOL_ERR,
                 description: "Returns true when the object contains the given key.",
                 category: "Collection",
                 order: 3,
-        
+
                 example: Some(Example { invocation: "has_key(obj, \"a\")", result: "true", verification: ExampleVerification::Executable }),
-        
+
             },
     ], handler: FunctionHandler::Pure(super::has_key_fn) },
     FunctionRegistration { canonical: "contains", aliases: &[], catalog_order: 49, descriptors: &[
         ExpressionFunctionDescriptor {
-        
+
                 signature: "contains(haystack, needle)",
                 parameters: P_ANY2,
                 returns: R_BOOL_ERR,
                 description: "Returns true when haystack contains needle (array, object, or string).",
                 category: "Collection",
                 order: 4,
-        
+
                 example: Some(Example { invocation: "contains(\"hello\", \"ell\")", result: "true", verification: ExampleVerification::Executable }),
-        
+
             },
     ], handler: FunctionHandler::Pure(super::contains_fn) },
     FunctionRegistration { canonical: "length", aliases: &[], catalog_order: 50, descriptors: &[
         ExpressionFunctionDescriptor {
-        
+
                 signature: "length(x)",
                 parameters: P_ANY,
                 returns: R_NUM_ERR,
                 description: "Returns the length of a string, array, or object.",
                 category: "Collection",
                 order: 5,
-        
+
                 example: Some(Example { invocation: "length(\"hello\")", result: "5", verification: ExampleVerification::Executable }),
-        
+
             },
     ], handler: FunctionHandler::Pure(super::length_fn) },
     FunctionRegistration { canonical: "number", aliases: &[], catalog_order: 51, descriptors: &[
         ExpressionFunctionDescriptor {
-        
+
                 signature: "number(x, [default])",
                 parameters: P_NUM_CONV,
                 returns: R_NUM_ERR,
                 description: "Converts a value to a number, with an optional default.",
                 category: "Type Conversion",
                 order: 1,
-        
+
                 example: Some(Example { invocation: "number(\"42\")", result: "42", verification: ExampleVerification::Executable }),
-        
+
             },
     ], handler: FunctionHandler::Pure(super::number_fn) },
     FunctionRegistration { canonical: "as_line_separated", aliases: &["aslineseparated"], catalog_order: 79, descriptors: &[
