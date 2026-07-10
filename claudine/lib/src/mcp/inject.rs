@@ -368,7 +368,6 @@ impl McpInjector for GeminiInjector {
 ///
 /// Returns `None` for providers that don't support runtime injection:
 /// - Claude (import/sync only in v1)
-/// - Roo (VS Code extension, not a wrapper target)
 /// - Qwen, Goose, Kimi (blocked on research)
 pub fn injector_for_provider(provider: Provider) -> Option<Box<dyn McpInjector>> {
     crate::provider::provider_info(provider)
@@ -675,7 +674,6 @@ mod tests {
     #[test]
     fn unsupported_providers_return_none() {
         assert!(injector_for_provider(Provider::Claude).is_none());
-        assert!(injector_for_provider(Provider::RooCode).is_none());
         assert!(injector_for_provider(Provider::QwenCode).is_none());
         assert!(injector_for_provider(Provider::Goose).is_none());
         assert!(injector_for_provider(Provider::KimiCode).is_none());

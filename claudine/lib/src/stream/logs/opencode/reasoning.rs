@@ -12,6 +12,9 @@ use chrono::{DateTime, Utc};
 use serde_json::{Map, Value, json};
 use tracing::{debug, warn};
 
+use claudine_catalog_types::{Quantity, Unit};
+
+use crate::signals::{CapScope, SignalEvent as TaxonomySignalEvent, SignalHub, SignalSource};
 use crate::stream::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use crate::stream::summary::{RateLimitInfo, StderrDiagnostics};
 
@@ -210,6 +213,73 @@ pub enum EarlyTermination {
     },
 }
 
+impl EarlyTermination {
+    /// The taxonomy [`TaxonomySignalEvent`] this termination mirrors.
+    ///
+    /// The variants' synthesized summary `error_kind` strings deliberately
+    /// match the corresponding `SignalKind` names; this exhaustive match
+    /// pins that correspondence — adding an `EarlyTermination` variant
+    /// forces a mapping decision here.
+    pub fn to_signal_event(&self) -> TaxonomySignalEvent {
+        match self {
+            // `RateLimit` is only constructed on the terminal-cap path
+            // (`ProviderLimitKind::UsageCap` / `RetriesExhausted`, both
+            // classified terminal in `on_provider_limit`), and the summary
+            // synthesis maps it to `error_kind = "usage_limit_reached"` —
+            // so it is a `usage_capped` signal, not a transient
+            // `rate_limited`. A retries-exhausted origin still fires the
+            // precise `retries_exhausted` kind through the declarative
+            // stderr_promoted record; this bespoke mirror keeps parity with
+            // the summary's cap semantics.
+            Self::RateLimit { message, reset_at } => TaxonomySignalEvent::UsageCapped {
+                // OpenCode's terminal cap payload names no model or window.
+                model: CapScope::All,
+                timeframe: None,
+                // A fired cap has zero capacity left (design convention).
+                remaining: Some(Quantity {
+                    value: 0.0,
+                    unit: Unit::Percent,
+                }),
+                lifts_at: *reset_at,
+                message: Some(message.clone()),
+            },
+            Self::Timeout { message } => TaxonomySignalEvent::Timeout {
+                message: Some(message.clone()),
+            },
+            Self::StepTimeout { message, .. } => TaxonomySignalEvent::StepTimeout {
+                message: Some(message.clone()),
+            },
+            Self::ExitExpression { pattern, scope } => TaxonomySignalEvent::ExitExpression {
+                pattern: pattern.clone(),
+                scope: scope.clone(),
+            },
+            Self::RunawayRepetition { cycle_len, repeats } => {
+                TaxonomySignalEvent::RunawayRepetition {
+                    cycle_len: u32::try_from(*cycle_len).unwrap_or(u32::MAX),
+                    repeats: u32::try_from(*repeats).unwrap_or(u32::MAX),
+                }
+            }
+            Self::RunawayVolume { lines, bytes } => TaxonomySignalEvent::RunawayVolume {
+                lines: *lines,
+                bytes: *bytes,
+            },
+            Self::RepeatedStreamError { count } => {
+                TaxonomySignalEvent::RepeatedStreamError { count: *count }
+            }
+            Self::StalledGeneration {
+                generation_count,
+                stall_duration,
+                ..
+            } => TaxonomySignalEvent::StalledGeneration {
+                message: Some(format!(
+                    "{generation_count} generation attempts over {}s with no progress",
+                    stall_duration.as_secs()
+                )),
+            },
+        }
+    }
+}
+
 /// Progress half of the stalled-generation backstop, shared across the two
 /// producers that can observe forward progress.
 ///
@@ -355,6 +425,13 @@ pub struct OpenCodeLogBridge<S: SemanticEventSink> {
     /// generation. Bridge-local (only the stderr side knows generation
     /// identity), so it stays outside the shared progress cell.
     last_generation_context: Option<StalledGenerationContext>,
+    /// Glue-mode shim into the run's signal pipeline (E5): every
+    /// non-`Unclassified` classification is re-serialized through
+    /// [`LogClassification::to_signal_payload`] and observed as
+    /// [`SignalSource::StderrPromoted`], and early terminations emit their
+    /// bespoke [`TaxonomySignalEvent`] mirror. `None` on legacy/test
+    /// constructions leaves the bridge signal-free.
+    signal_hub: Option<Arc<SignalHub>>,
 }
 
 /// Consecutive unrecognized `stream error` records tolerated before the bridge
@@ -421,7 +498,16 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             stall_timeout,
             progress: Arc::new(Mutex::new(StalledGenerationProgress::new(Instant::now()))),
             last_generation_context: None,
+            signal_hub: None,
         }
+    }
+
+    /// Attach the run's shared signal hub so classified stderr records and
+    /// early terminations feed the signal pipeline. See the `signal_hub`
+    /// field for the emission contract.
+    pub fn with_signal_hub(mut self, hub: Arc<SignalHub>) -> Self {
+        self.signal_hub = Some(hub);
+        self
     }
 
     /// Clone handle into the shared stalled-generation progress clocks.
@@ -496,6 +582,21 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         }
 
         let classification = classify(&record);
+
+        // Glue-mode signal shim (E5, ratified): re-serialize the
+        // classification and let the declarative stderr_promoted records
+        // match it. A `BootBanner` flowing through narrows version-scoped
+        // record selection for the whole run — intended (the opencode
+        // provider_version record extracts it). `Unclassified` records
+        // carry no classification payload worth observing.
+        if !matches!(classification, LogClassification::Unclassified)
+            && let Some(hub) = &self.signal_hub
+        {
+            hub.observe_json(
+                SignalSource::StderrPromoted,
+                &classification.to_signal_payload(),
+            );
+        }
 
         // Defense-in-depth backstop. A `stream error` record that the
         // classifier already deemed terminal fires early-termination through
@@ -606,7 +707,20 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
 
     fn handle_raw(&mut self, line: &str) -> StderrIngestOutcome {
         match classify_raw(line) {
-            LogClassification::UncaughtError { raw_text } => self.on_uncaught_error(raw_text, None),
+            classification @ LogClassification::UncaughtError { .. } => {
+                // Same glue-mode shim as `handle_structured`: raw-line
+                // classifications are stderr-promoted evidence too.
+                if let Some(hub) = &self.signal_hub {
+                    hub.observe_json(
+                        SignalSource::StderrPromoted,
+                        &classification.to_signal_payload(),
+                    );
+                }
+                let LogClassification::UncaughtError { raw_text } = classification else {
+                    unreachable!("matched UncaughtError above");
+                };
+                self.on_uncaught_error(raw_text, None)
+            }
             _ => StderrIngestOutcome::NotConsumed,
         }
     }
@@ -1333,6 +1447,12 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             return;
         }
         self.early_terminate_fired = true;
+        // Bespoke signal mirror at the single choke point where a
+        // termination fires. The CLI's post-wait synthesis emits the same
+        // event; the sink's correlation window folds the double-fire.
+        if let Some(hub) = &self.signal_hub {
+            hub.emit_bespoke(termination.to_signal_event(), SignalSource::StderrPromoted);
+        }
         let Some(sender) = self.early_terminate.as_ref() else {
             return;
         };
@@ -3705,6 +3825,200 @@ mod tests {
         assert!(
             matches!(rx.try_recv(), Ok(EarlyTermination::StalledGeneration { .. })),
             "the guard must still trip once churn resumes past the threshold",
+        );
+    }
+
+    // ── E5 glue-mode signal shim ────────────────────────────────────────
+
+    use claudine_catalog_types::SignalKind;
+
+    const USAGE_CAP_1178: &str = include_str!(
+        "../../../../../docs/research/signals/fixtures/opencode/stream-error-1178-usage-cap.txt"
+    );
+    const VERSION_ANNOUNCEMENT: &str = include_str!(
+        "../../../../../docs/research/signals/fixtures/opencode/version-announcement.txt"
+    );
+
+    /// Bridge wired to a fresh hub over the compiled opencode table.
+    fn shim_bridge() -> (OpenCodeLogBridge<RecordingSink>, Arc<SignalHub>) {
+        let hub = Arc::new(SignalHub::new(
+            crate::signals::detection_table("opencode").expect("opencode table"),
+        ));
+        let bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None)
+            .with_signal_hub(Arc::clone(&hub));
+        (bridge, hub)
+    }
+
+    #[test]
+    fn shim_promotes_usage_cap_stderr_line_to_usage_capped_signal() {
+        let (mut bridge, hub) = shim_bridge();
+        for line in USAGE_CAP_1178.lines().filter(|l| !l.trim().is_empty()) {
+            bridge.ingest(line);
+        }
+
+        let signals = hub.drain();
+        let capped = signals
+            .iter()
+            .find(|s| s.event.kind() == SignalKind::UsageCapped)
+            .expect("usage_capped signal from promoted stderr");
+        assert_eq!(capped.source, SignalSource::StderrPromoted);
+        let TaxonomySignalEvent::UsageCapped {
+            message, lifts_at, ..
+        } = &capped.event
+        else {
+            panic!("kind checked above");
+        };
+        assert!(
+            message
+                .as_deref()
+                .is_some_and(|m| m.contains("Usage limit reached for 5 hour")),
+            "message must carry the provider error: {message:?}"
+        );
+        assert!(
+            lifts_at.is_some(),
+            "lifts_at must be extracted from the classifier's reset_at"
+        );
+    }
+
+    #[test]
+    fn shim_boot_banner_emits_provider_version_and_narrows_selection() {
+        let (mut bridge, hub) = shim_bridge();
+        let banner = VERSION_ANNOUNCEMENT
+            .lines()
+            .next()
+            .expect("fixture has a banner line");
+        bridge.ingest(banner);
+        // A usage-cap line after the banner still fires: 1.14.48 admits the
+        // un-bounded/legacy records, proving version narrowing did not
+        // wipe the candidate set.
+        for line in USAGE_CAP_1178.lines().filter(|l| !l.trim().is_empty()) {
+            bridge.ingest(line);
+        }
+
+        let signals = hub.drain();
+        let version = signals
+            .iter()
+            .find(|s| s.event.kind() == SignalKind::ProviderVersion)
+            .expect("provider_version signal from the boot banner");
+        assert_eq!(
+            version.event,
+            TaxonomySignalEvent::ProviderVersion {
+                version: "1.14.48".to_string()
+            }
+        );
+        assert!(
+            signals
+                .iter()
+                .any(|s| s.event.kind() == SignalKind::UsageCapped),
+            "usage cap must still fire under the narrowed (1.14.x) selection"
+        );
+    }
+
+    #[test]
+    fn fire_early_termination_mirrors_the_bespoke_signal_once() {
+        let (tx, _rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
+        let hub = Arc::new(SignalHub::without_table());
+        let mut bridge =
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx), None)
+                .with_signal_hub(Arc::clone(&hub));
+
+        bridge.fire_early_termination(EarlyTermination::RepeatedStreamError { count: 5 });
+        // Second fire is idempotent — no second signal.
+        bridge.fire_early_termination(EarlyTermination::RepeatedStreamError { count: 6 });
+
+        let signals = hub.drain();
+        assert_eq!(signals.len(), 1);
+        assert_eq!(
+            signals[0].event,
+            TaxonomySignalEvent::RepeatedStreamError { count: 5 }
+        );
+        assert_eq!(signals[0].source, SignalSource::StderrPromoted);
+    }
+
+    /// EarlyTermination → SignalKind, one row per variant. The mapping fn's
+    /// match is exhaustive, so a new variant fails compilation there; this
+    /// test pins the KIND each existing variant maps to.
+    #[test]
+    fn early_termination_to_signal_event_covers_every_variant() {
+        let cases: Vec<(EarlyTermination, SignalKind)> = vec![
+            (
+                EarlyTermination::RateLimit {
+                    message: "cap".into(),
+                    reset_at: None,
+                },
+                // Terminal-cap semantics (see `to_signal_event`), not a
+                // transient rate_limited.
+                SignalKind::UsageCapped,
+            ),
+            (
+                EarlyTermination::Timeout {
+                    message: "wall".into(),
+                },
+                SignalKind::Timeout,
+            ),
+            (
+                EarlyTermination::StepTimeout {
+                    message: "silent".into(),
+                    outstanding: Vec::new(),
+                },
+                SignalKind::StepTimeout,
+            ),
+            (
+                EarlyTermination::ExitExpression {
+                    pattern: "FATAL".into(),
+                    scope: Some("opencode/kimi".into()),
+                },
+                SignalKind::ExitExpression,
+            ),
+            (
+                EarlyTermination::RunawayRepetition {
+                    cycle_len: 3,
+                    repeats: 12,
+                },
+                SignalKind::RunawayRepetition,
+            ),
+            (
+                EarlyTermination::RunawayVolume {
+                    lines: 50_000,
+                    bytes: 33_554_432,
+                },
+                SignalKind::RunawayVolume,
+            ),
+            (
+                EarlyTermination::RepeatedStreamError { count: 5 },
+                SignalKind::RepeatedStreamError,
+            ),
+            (
+                EarlyTermination::StalledGeneration {
+                    generation_count: 4,
+                    stall_duration: Duration::from_secs(600),
+                    context: StalledGenerationContext::default(),
+                },
+                SignalKind::StalledGeneration,
+            ),
+        ];
+        for (termination, expected) in cases {
+            assert_eq!(
+                termination.to_signal_event().kind(),
+                expected,
+                "mapping drifted for {termination:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn exit_expression_mapping_carries_pattern_and_scope() {
+        let event = EarlyTermination::ExitExpression {
+            pattern: "unrecoverable".into(),
+            scope: Some("opencode/kimi-for-coding/k2p7".into()),
+        }
+        .to_signal_event();
+        assert_eq!(
+            event,
+            TaxonomySignalEvent::ExitExpression {
+                pattern: "unrecoverable".into(),
+                scope: Some("opencode/kimi-for-coding/k2p7".into()),
+            }
         );
     }
 }

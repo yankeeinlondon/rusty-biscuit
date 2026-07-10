@@ -58,7 +58,7 @@ rules in a fixed order, and returns the rewritten vector:
 
 | Rule | Purpose | Gated on |
 |---|---|---|
-| **Rule 1** | `--claude` / `--codex` / `--gemini` / `--goose` / `--kimi` / `--opencode` / `--qwen` / `--roo` → `--provider <slug>` | `compose`, `inline-compose`, `sequence` |
+| **Rule 1** | `--claude` / `--codex` / `--gemini` / `--goose` / `--kimi` / `--opencode` / `--qwen` → `--provider <slug>` | `compose`, `inline-compose`, `sequence` |
 | **Rule 2** | Fuzzy canonicalization of `--provider <value>` and `--provider=<value>` via `Provider::fuzzy_match_cli_name` | Any subcommand (flag-driven) |
 | **Rule 4** | Hoist a trailing `--help` / `-h` to argv position 1 so the root custom help handler fires | `compose`, `inline-compose`, `sequence` |
 | **Rule 3** | Insert a single `--` separator before the first `key=value` setter that follows an interleaved flag after a previously seen positional | `compose`, `inline-compose`, `sequence` |
@@ -140,10 +140,10 @@ Several properties of the clap surface shape the pre-parser's rules:
   files plus `key=value` setters in any order. That positional is what
   makes trailing `--help` get absorbed as a value. Rule 3 fixes that
   without disabling help recognition.
-- The eight provider booleans on `SharedComposeArgs` are retained only
+- The seven provider booleans on `SharedComposeArgs` are retained only
   as clap help entries and shell-completion hints. Rule 1 rewrites them
   before clap sees them, so `explicit_provider()` reads a single field
-  (`self.provider`) instead of re-resolving eight booleans.
+  (`self.provider`) instead of re-resolving seven booleans.
 - `Provider::fuzzy_match_cli_name` is the single source of truth for
   fuzzy provider name resolution. Rule 2 delegates to it so the same
   fuzzy behavior applied to `--provider <value>` remains intact after
@@ -178,15 +178,15 @@ converts the argv into a shape clap already handles correctly
 (`--help` hoisted to a root-level flag position, `--` inserted before
 the trailing setters).
 
-### 2. Eight provider booleans plus `--provider`
+### 2. Seven provider booleans plus `--provider`
 
-The composition surface accepts provider selection nine ways: eight
+The composition surface accepts provider selection eight ways: seven
 boolean flags (`--claude`, `--codex`, `--gemini`, `--goose`, `--kimi`,
-`--opencode`, `--qwen`, `--roo`) plus the canonical `--provider
+`--opencode`, `--qwen`) plus the canonical `--provider
 <value>`. Without normalization, downstream code has to re-resolve all
-nine every time it needs the selected provider. Rewriting booleans into
-`--provider <slug>` collapses those nine representations into one and
-removes the need for an `explicit_provider()` helper that inspects eight
+eight every time it needs the selected provider. Rewriting booleans into
+`--provider <slug>` collapses those eight representations into one and
+removes the need for an `explicit_provider()` helper that inspects seven
 fields.
 
 ### 3. Fuzzy provider matching existed but was applied inconsistently

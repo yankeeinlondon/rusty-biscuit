@@ -1,11 +1,12 @@
+pub(crate) mod antigravity;
 pub(crate) mod claude;
 pub(crate) mod codex;
 pub(crate) mod gemini;
 pub(crate) mod goose;
 pub(crate) mod kimicode;
 pub(crate) mod opencode;
+pub(crate) mod pi;
 pub(crate) mod qwen;
-pub(crate) mod roo;
 
 use serde_json::Value;
 
@@ -68,7 +69,7 @@ pub trait ProviderAdapter: Send + Sync {
     /// need a JSON acknowledgment even for non-blocking events like SessionEnd,
     /// otherwise they interpret silent stdout as "hook cancelled."
     ///
-    /// Fire-and-forget providers (Codex, Goose, Roo) return `None`.
+    /// Fire-and-forget providers (Codex, Goose) return `None`.
     ///
     /// Default: `Some(json!({}))` — a safe empty JSON object.
     fn non_blocking_ack(&self) -> Option<Value> {
@@ -107,14 +108,16 @@ pub trait ProviderAdapter: Send + Sync {
     }
 }
 
+pub(crate) static ANTIGRAVITY_ADAPTER: antigravity::AntigravityAdapter =
+    antigravity::AntigravityAdapter;
 pub(crate) static CLAUDE_ADAPTER: claude::ClaudeAdapter = claude::ClaudeAdapter;
 pub(crate) static CODEX_ADAPTER: codex::CodexAdapter = codex::CodexAdapter;
 pub(crate) static GEMINI_ADAPTER: gemini::GeminiAdapter = gemini::GeminiAdapter;
 pub(crate) static GOOSE_ADAPTER: goose::GooseAdapter = goose::GooseAdapter;
 pub(crate) static KIMI_ADAPTER: kimicode::KimiCodeAdapter = kimicode::KimiCodeAdapter;
 pub(crate) static OPENCODE_ADAPTER: opencode::OpenCodeAdapter = opencode::OpenCodeAdapter;
+pub(crate) static PI_ADAPTER: pi::PiAdapter = pi::PiAdapter;
 pub(crate) static QWEN_ADAPTER: qwen::QwenAdapter = qwen::QwenAdapter;
-pub(crate) static ROO_ADAPTER: roo::RooAdapter = roo::RooAdapter;
 
 /// Returns the adapter singleton for a provider.
 pub fn adapter_for(provider: Provider) -> &'static dyn ProviderAdapter {
@@ -152,7 +155,6 @@ mod tests {
             Provider::KimiCode,
             Provider::OpenCode,
             Provider::QwenCode,
-            Provider::RooCode,
         ];
 
         for provider in providers {
@@ -171,7 +173,6 @@ mod tests {
             Provider::KimiCode,
             Provider::OpenCode,
             Provider::QwenCode,
-            Provider::RooCode,
         ] {
             let adapter = adapter_for(provider);
             for event in crate::events::AgenticEvent::ALL {
@@ -218,7 +219,6 @@ mod tests {
             Provider::KimiCode,
             Provider::OpenCode,
             Provider::QwenCode,
-            Provider::RooCode,
         ] {
             let adapter = adapter_for(provider);
             for event in fixture_events {

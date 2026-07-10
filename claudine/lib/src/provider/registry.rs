@@ -9,14 +9,16 @@ use std::sync::OnceLock;
 use crate::provider_id::{PROVIDER_COUNT, PROVIDERS_DISPLAY_ORDER, Provider};
 
 use super::ProviderInfo;
+use super::antigravity::ANTIGRAVITY_INFO;
 use super::claude::CLAUDE_INFO;
 use super::codex::CODEX_INFO;
 use super::gemini::GEMINI_INFO;
 use super::goose::GOOSE_INFO;
+use super::kilo::KILO_INFO;
 use super::kimi::KIMI_INFO;
 use super::opencode::OPENCODE_INFO;
+use super::pi::PI_INFO;
 use super::qwen::QWEN_INFO;
-use super::roo::ROO_INFO;
 
 /// The canonical provider registry, initialized on first access.
 pub(crate) static REGISTRY: OnceLock<[&'static ProviderInfo; PROVIDER_COUNT]> = OnceLock::new();
@@ -36,7 +38,9 @@ pub fn provider_info(provider: Provider) -> &'static ProviderInfo {
             &KIMI_INFO,
             &OPENCODE_INFO,
             &QWEN_INFO,
-            &ROO_INFO,
+            &KILO_INFO,
+            &PI_INFO,
+            &ANTIGRAVITY_INFO,
         ]
     });
     registry[provider as usize]

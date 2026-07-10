@@ -52,9 +52,9 @@ if provider == Provider::OpenRouter {
 
 This means direct-provider models (e.g., `o3` from OpenAI) get **no pricing, no description, and no parameter metadata** from their native APIs.
 
-### 2. Parsera LLM Specs API
+### 2. models.dev
 
-The generator fetches specifications from `https://api.parsera.org/v1/llm-specs` at build time. This external source provides:
+The generator fetches specifications from `https://models.dev/api.json` at generation time. This external source provides:
 
 - `display_name`
 - `family`
@@ -62,10 +62,11 @@ The generator fetches specifications from `https://api.parsera.org/v1/llm-specs`
 - `max_output_tokens`
 - `modalities` (input/output)
 - `capabilities`
+- `pricing` (per-million token costs converted to per-token USD)
+- `knowledge_cutoff`
+- `release_date`
 
-**Parsera does NOT provide pricing, supported parameters, default parameters, descriptions, or knowledge cutoffs.**
-
-Parsera entries are indexed by **bare model ID** (e.g., `gpt-4o`, `claude-3-5-sonnet`) with no provider prefix. This causes a matching failure for OpenRouter models, which use prefixed IDs like `openai/gpt-4o`.
+models.dev entries are bucketed by provider key. The generator maps local provider names into those buckets (`gemini -> google`, `x-ai -> xai`, `z-ai -> zai`) and matches only within the mapped bucket. `ollama` and `zenmux` have no models.dev bucket.
 
 ### 3. model-citizen (Local Models)
 
@@ -79,19 +80,19 @@ The `model-citizen` crate in this monorepo scans local model runners (Ollama, LM
 
 For each model ID discovered from provider APIs, the generator attempts to merge metadata from two sources:
 
-**Priority: Provider-Native > Parsera**
+**Priority: Provider-Native > models.dev**
 
 ```rust
 // unchained-ai/gen/src/metadata_generator.rs
 pub fn merge_metadata(
     provider_native: Option<ProviderModelMetadata>,
-    parsera: Option<&ParseraModel>,
+    enrichment: Option<ProviderModelMetadata>,
 ) -> Option<ProviderModelMetadata> {
-    match (provider_native, parsera) {
+    match (provider_native, enrichment) {
         (None, None) => None,
         (Some(native), None) => Some(native),
-        (None, Some(parsera)) => Some(parsera_to_metadata(parsera)),
-        (Some(native), Some(parsera)) => Some(merge_native_with_parsera(native, parsera)),
+        (None, Some(enrichment)) => Some(enrichment),
+        (Some(native), Some(enrichment)) => Some(merge_native_with_enrichment(native, enrichment)),
     }
 }
 ```
@@ -101,20 +102,21 @@ When both sources provide the same field (e.g., `context_window`), the provider-
 ### The Merge Algorithm
 
 ```rust
-fn merge_native_with_parsera(native, parsera) -> ProviderModelMetadata {
+fn merge_native_with_enrichment(native, enrichment) -> ProviderModelMetadata {
     ProviderModelMetadata {
-        display_name: native.display_name.or(parsera.display_name),
-        family: native.family.or(parsera.family),
-        context_window: native.context_window.or(parsera.context_window),
-        max_output_tokens: native.max_output_tokens.or(parsera.max_output_tokens),
-        modalities: native.modalities.or(parsera.modalities),
-        capabilities: if native.capabilities.is_empty() { parsera.capabilities } else { native.capabilities },
-        // The following are ONLY available from provider-native (OpenRouter):
+        display_name: native.display_name.or(enrichment.display_name),
+        family: native.family.or(enrichment.family),
+        context_window: native.context_window.or(enrichment.context_window),
+        max_output_tokens: native.max_output_tokens.or(enrichment.max_output_tokens),
+        modalities: native.modalities.or(enrichment.modalities),
+        capabilities: if native.capabilities.is_empty() { enrichment.capabilities } else { native.capabilities },
+        pricing: native.pricing.or(enrichment.pricing),
+        knowledge_cutoff: native.knowledge_cutoff.or(enrichment.knowledge_cutoff),
+        release_date: enrichment.release_date,
+        // The following are provider-native only today:
         description: native.description,
-        pricing: native.pricing,
         supported_parameters: native.supported_parameters,
         default_parameters: native.default_parameters,
-        knowledge_cutoff: native.knowledge_cutoff,
         created: native.created,
     }
 }
@@ -134,8 +136,8 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = ...;
 This creates several structural issues:
 
 1. **Pricing is stored as a model property**, but pricing is inherently provider-specific. The same model may cost different amounts via OpenAI direct vs. OpenRouter vs. Groq.
-2. **OpenRouter models get no Parsera data** because the lookup fails for prefixed IDs like `openai/o3`.
-3. **Direct provider models often have no metadata** because their APIs return minimal data and Parsera may not cover them.
+2. **Provider-native richness is asymmetric** because only OpenRouter currently provides broad rich native metadata.
+3. **Direct provider coverage depends on models.dev** for metadata that native `/models` endpoints do not expose.
 
 ### Concrete Example: `o3`
 
@@ -143,7 +145,7 @@ This creates several structural issues:
 |--------|-----|--------|--------------|---------|-------------|---------------------|
 | OpenAI direct | `o3` | `o3` | `batch`, `function_calling`, `structured_output` | None | None | None |
 | OpenRouter | `openai/o3` | None | (empty) | `$0.000002`/`$0.000008` | Full description | `include_reasoning`, `max_tokens`, `reasoning`, ... |
-| Parsera | `o3` | `o3` | `batch`, `function_calling`, `structured_output` | N/A | N/A | N/A |
+| models.dev | `o3` | `o3` | `function_calling`, `structured_output`, `reasoning` | Per-token USD from per-million source costs | N/A | N/A |
 
 Notice that `o3` (direct) and `openai/o3` (OpenRouter) are **entirely separate entries** with **disjoint metadata**. There is no mechanism to say "`o3` has these capabilities AND this pricing via OpenRouter."
 
@@ -167,6 +169,7 @@ pub struct ProviderModelMetadata {
     pub default_parameters: Option<ModelDefaultParameters>, // provider-specific!
     pub knowledge_cutoff: Option<String>,
     pub created: Option<u32>,
+    pub release_date: Option<String>,
 }
 ```
 
@@ -217,7 +220,7 @@ Shows detailed metadata for a single model. The `<model-id>` argument uses the `
 
 2. **No provider scoping**: The metadata table has no provider dimension. Pricing, parameters, and defaults — all provider-specific — are stored as if they are properties of the model itself.
 
-3. **Parsera lookup fails for prefixed IDs**: OpenRouter models like `openai/o3` cannot match Parsera's `gpt-4o` entries, so they miss capabilities and family data.
+3. **Metadata remains offering-scoped**: the artifact can group duplicate logical models, but runtime metadata is still keyed by provider/model offering.
 
 4. **Hardcoded OpenRouter parsing**: The merge loop always passes `Provider::OpenRouter` to the metadata parser, preventing extension to other providers.
 

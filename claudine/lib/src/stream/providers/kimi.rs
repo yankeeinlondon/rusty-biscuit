@@ -28,7 +28,7 @@ use super::parser::{SemanticStreamParser, StreamParseError};
 use super::protocol::kimi::{
     KimiContentPart, KimiEnvelope, KimiJsonRpcError, KimiPromptResult, KimiToolCall,
     KimiToolCallPart, KimiToolResult, KimiWireEvent, KimiWireRequest, KimiWireStatusUpdate,
-    KimiWireTokenUsage,
+    KimiWireTokenUsage, SUPPORTED_WIRE_PROTOCOL_VERSIONS,
 };
 use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::{ContextUsage, StreamExecutionSummary};
@@ -190,6 +190,33 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
                     return;
                 }
             };
+        // Version window check. A missing `protocol_version` stays lenient
+        // (SessionStart proceeds as before) — only an explicit version
+        // outside the supported window is fatal.
+        if let Some(version) = parsed.protocol_version.as_deref()
+            && !SUPPORTED_WIRE_PROTOCOL_VERSIONS.contains(&version)
+        {
+            let supported = SUPPORTED_WIRE_PROTOCOL_VERSIONS.join(", ");
+            let message = format!(
+                "Kimi negotiated Wire protocol version {version}, but this Claudine release supports {supported}. Upgrade Claudine to a release that supports Wire {version}, or check the installed CLI with `kimi --version`."
+            );
+            self.is_error = true;
+            self.error_kind = Some("unsupported_protocol_version".into());
+            self.error_message = Some(message.clone());
+            let mut extra = self.base_extra("initialize");
+            extra.insert("protocol_version".into(), Value::from(version));
+            extra.insert(
+                "supported_versions".into(),
+                Value::from(SUPPORTED_WIRE_PROTOCOL_VERSIONS.to_vec()),
+            );
+            self.sink.on_semantic_event(SemanticEvent::Error {
+                message,
+                terminal: true,
+                kind: SemanticErrorKind::Configuration,
+                extra: Value::Object(extra),
+            });
+            return;
+        }
         if let Some(server) = parsed.server.as_ref()
             && self.model.is_none()
             && let Some(name) = server.name.clone()
@@ -244,6 +271,9 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
             } else {
                 let mut extra = self.info_extra_with_kind("prompt_response", "prompt_status");
                 extra.insert("status".into(), Value::from(status.as_str()));
+                if let Some(steps) = parsed.steps {
+                    extra.insert("steps".into(), Value::from(steps));
+                }
                 self.sink.on_semantic_event(SemanticEvent::Info {
                     message: format!("Prompt status: {status}"),
                     extra: Value::Object(extra),
@@ -341,6 +371,41 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
                     extra: Value::Object(extra),
                 });
             }
+            KimiWireEvent::StepRetry(retry) => {
+                let mut extra = self.info_extra_with_kind(raw_kind, "step_retry");
+                if let Some(n) = retry.n {
+                    extra.insert("n".into(), Value::from(n));
+                }
+                if let Some(next_attempt) = retry.next_attempt {
+                    extra.insert("next_attempt".into(), Value::from(next_attempt));
+                }
+                if let Some(max_attempts) = retry.max_attempts {
+                    extra.insert("max_attempts".into(), Value::from(max_attempts));
+                }
+                if let Some(wait_s) = retry.wait_s {
+                    extra.insert("wait_s".into(), Value::from(wait_s));
+                }
+                if let Some(error_type) = &retry.error_type {
+                    extra.insert("error_type".into(), Value::from(error_type.as_str()));
+                }
+                if let Some(status_code) = retry.status_code {
+                    extra.insert("status_code".into(), Value::from(status_code));
+                }
+                let mut message = String::from("Step retry");
+                if let (Some(next), Some(max)) = (retry.next_attempt, retry.max_attempts) {
+                    message.push_str(&format!(" (attempt {next}/{max})"));
+                }
+                if let Some(error_type) = &retry.error_type {
+                    message.push_str(&format!(": {error_type}"));
+                }
+                if let Some(status_code) = retry.status_code {
+                    message.push_str(&format!(" (HTTP {status_code})"));
+                }
+                self.sink.on_semantic_event(SemanticEvent::Warning {
+                    message,
+                    extra: Value::Object(extra),
+                });
+            }
             KimiWireEvent::SteerInput(_) => {
                 let extra = self.info_extra_with_kind(raw_kind, "steer_input");
                 self.sink.on_semantic_event(SemanticEvent::Info {
@@ -417,9 +482,39 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
                 if let Some(title) = &notification.title {
                     extra.insert("title".into(), Value::from(title.as_str()));
                 }
-                let level = notification.level.as_deref().map(str::to_ascii_lowercase);
+                if let Some(id) = &notification.id {
+                    extra.insert("notification_id".into(), Value::from(id.as_str()));
+                }
+                if let Some(category) = &notification.category {
+                    extra.insert("category".into(), Value::from(category.as_str()));
+                }
+                if let Some(kind) = &notification.notification_type {
+                    extra.insert("notification_type".into(), Value::from(kind.as_str()));
+                }
+                if let Some(source_kind) = &notification.source_kind {
+                    extra.insert("source_kind".into(), Value::from(source_kind.as_str()));
+                }
+                if let Some(source_id) = &notification.source_id {
+                    extra.insert("source_id".into(), Value::from(source_id.as_str()));
+                }
+                if let Some(severity) = &notification.severity {
+                    extra.insert("severity".into(), Value::from(severity.as_str()));
+                }
+                if let Some(created_at) = notification.created_at {
+                    extra.insert("created_at".into(), Value::from(created_at));
+                }
+                if let Some(payload) = notification.payload.clone() {
+                    extra.insert("payload".into(), payload);
+                }
+                // Wire 1.9 carries level/message; 1.10 carries severity/body.
+                let level = notification
+                    .level
+                    .as_deref()
+                    .or(notification.severity.as_deref())
+                    .map(str::to_ascii_lowercase);
                 let message = notification
                     .message
+                    .or(notification.body)
                     .or(notification.title)
                     .unwrap_or_else(|| "Notification".into());
                 // Error/warning-level notifications surface as Warning so the
@@ -619,11 +714,14 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
             KimiWireRequest::Question(question) => {
                 let mut extra = self.info_extra_with_kind(raw_kind, "unexpected_question");
                 extra.insert("request_id".into(), id);
-                if let Some(prompt) = &question.question {
-                    extra.insert("question".into(), Value::from(prompt.as_str()));
+                if let Some(tool_call_id) = &question.tool_call_id {
+                    extra.insert("tool_call_id".into(), Value::from(tool_call_id.as_str()));
+                }
+                if let Some(prompt) = question.primary_question() {
+                    extra.insert("question".into(), Value::from(prompt));
                 }
                 self.sink.on_semantic_event(SemanticEvent::Warning {
-                    message: match question.question {
+                    message: match question.primary_question() {
                         Some(prompt) => format!("Unexpected question from agent: {prompt}"),
                         None => "Unexpected question from agent".into(),
                     },
@@ -684,6 +782,13 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
                 "total".into(),
                 Value::from(status.max_context_tokens.unwrap_or(0)),
             );
+            // The pressure warning is the only event StatusUpdate emits, so
+            // it is also where the 1.10 mcp_status snapshot surfaces.
+            if let Some(snapshot) = status.mcp_status.as_ref()
+                && let Ok(value) = serde_json::to_value(snapshot)
+            {
+                extra.insert("mcp_status".into(), value);
+            }
             self.sink.on_semantic_event(SemanticEvent::Warning {
                 message: format!(
                     "Context window pressure: {pct:.0}% used ({}/{} tokens)",
@@ -1107,6 +1212,96 @@ mod tests {
     }
 
     #[test]
+    fn initialize_response_accepts_wire_1_10() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"jsonrpc":"2.0","id":"init-1","result":{"protocol_version":"1.10","server":{"name":"Kimi Code CLI","version":"1.47.0"},"slash_commands":[],"hooks":[],"capabilities":{"supports_question":true}}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert!(matches!(collected[0], SemanticEvent::SessionStart { .. }));
+        if let SemanticEvent::SessionStart { extra, .. } = &collected[0] {
+            assert_eq!(
+                extra.get("protocol_version").and_then(Value::as_str),
+                Some("1.10")
+            );
+        }
+        assert!(
+            !collected
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::Error { .. })),
+            "1.10 is inside the supported window and must not error"
+        );
+    }
+
+    #[test]
+    fn initialize_response_unknown_version_emits_terminal_configuration_error() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"jsonrpc":"2.0","id":"init-1","result":{"protocol_version":"2.0","server":{"name":"Kimi Code CLI","version":"9.9.9"}}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        let err = collected
+            .iter()
+            .find_map(|e| match e {
+                SemanticEvent::Error {
+                    message,
+                    kind,
+                    terminal,
+                    extra,
+                } => Some((message.clone(), *kind, *terminal, extra.clone())),
+                _ => None,
+            })
+            .expect("terminal error");
+        assert!(err.2, "unsupported version must be terminal");
+        assert_eq!(err.1, SemanticErrorKind::Configuration);
+        assert!(err.0.contains("2.0"), "message names the negotiated version");
+        assert!(err.0.contains("1.9") && err.0.contains("1.10"));
+        assert!(
+            err.0.contains("Upgrade Claudine") && err.0.contains("kimi --version"),
+            "message carries remediation: {}",
+            err.0
+        );
+        assert_eq!(
+            err.3.get("protocol_version").and_then(Value::as_str),
+            Some("2.0")
+        );
+        assert!(
+            !collected
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::SessionStart { .. })),
+            "no SessionStart after a failed handshake"
+        );
+        let summary = parser.finish(1);
+        assert!(summary.is_error);
+        assert_eq!(
+            summary.error_kind.as_deref(),
+            Some("unsupported_protocol_version")
+        );
+    }
+
+    #[test]
+    fn initialize_response_missing_version_stays_lenient() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"jsonrpc":"2.0","id":"init-1","result":{"server":{"name":"Kimi Code CLI","version":"1.38.0"}}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert!(matches!(collected[0], SemanticEvent::SessionStart { .. }));
+        assert!(
+            !collected
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::Error { .. })),
+            "absent protocol_version must not be fatal"
+        );
+    }
+
+    #[test]
     fn turn_begin_emits_turn_start() {
         let (events, mut parser) = new_parser();
         feed_initialize(&mut parser);
@@ -1264,6 +1459,144 @@ mod tests {
     }
 
     #[test]
+    fn step_retry_emits_warning_with_retry_observability() {
+        let (events, mut parser) = new_parser();
+        feed_initialize(&mut parser);
+        parser
+            .feed_line(
+                r#"{"jsonrpc":"2.0","method":"event","params":{"type":"StepRetry","payload":{"n":1,"next_attempt":2,"max_attempts":5,"wait_s":1.5,"error_type":"APIEmptyResponseError","status_code":500}}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        let warning = collected
+            .iter()
+            .find_map(|e| match e {
+                SemanticEvent::Warning { message, extra } => Some((message.clone(), extra.clone())),
+                _ => None,
+            })
+            .expect("warning");
+        assert!(warning.0.contains("attempt 2/5"), "message: {}", warning.0);
+        assert!(warning.0.contains("APIEmptyResponseError"));
+        assert!(warning.0.contains("HTTP 500"));
+        assert_eq!(
+            warning.1.get("kind").and_then(Value::as_str),
+            Some("step_retry")
+        );
+        assert_eq!(warning.1.get("n").and_then(Value::as_u64), Some(1));
+        assert_eq!(warning.1.get("wait_s").and_then(Value::as_f64), Some(1.5));
+        assert_eq!(
+            warning.1.get("error_type").and_then(Value::as_str),
+            Some("APIEmptyResponseError")
+        );
+        assert_eq!(
+            warning.1.get("status_code").and_then(Value::as_i64),
+            Some(500)
+        );
+    }
+
+    #[test]
+    fn step_retry_with_empty_payload_still_emits_warning() {
+        let (events, mut parser) = new_parser();
+        feed_initialize(&mut parser);
+        parser
+            .feed_line(
+                r#"{"jsonrpc":"2.0","method":"event","params":{"type":"StepRetry","payload":{}}}"#,
+            )
+            .unwrap();
+        assert!(events.lock().unwrap().iter().any(|e| matches!(e,
+                SemanticEvent::Warning { message, .. } if message == "Step retry")));
+    }
+
+    #[test]
+    fn notification_1_10_shape_resolves_body_and_severity() {
+        let (events, mut parser) = new_parser();
+        feed_initialize(&mut parser);
+        parser
+            .feed_line(
+                r#"{"jsonrpc":"2.0","method":"event","params":{"type":"Notification","payload":{"id":"notif-1","category":"task","type":"task.completed","source_kind":"background_task","source_id":"task-9","title":"Background task finished","body":"Task `lint` completed","severity":"warning","created_at":1751700000.25,"payload":{"exit_code":1}}}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        let warning = collected
+            .iter()
+            .find_map(|e| match e {
+                SemanticEvent::Warning { message, extra } => Some((message.clone(), extra.clone())),
+                _ => None,
+            })
+            .expect("severity=warning must surface as Warning");
+        assert_eq!(warning.0, "Task `lint` completed", "message prefers body");
+        assert_eq!(
+            warning.1.get("category").and_then(Value::as_str),
+            Some("task")
+        );
+        assert_eq!(
+            warning.1.get("notification_type").and_then(Value::as_str),
+            Some("task.completed")
+        );
+        assert_eq!(
+            warning.1.get("source_kind").and_then(Value::as_str),
+            Some("background_task")
+        );
+        assert_eq!(
+            warning.1.get("severity").and_then(Value::as_str),
+            Some("warning")
+        );
+        assert_eq!(
+            warning.1.get("created_at").and_then(Value::as_f64),
+            Some(1751700000.25)
+        );
+        assert_eq!(warning.1.get("payload"), Some(&json!({"exit_code": 1})));
+    }
+
+    #[test]
+    fn notification_1_10_info_severity_emits_info() {
+        let (events, mut parser) = new_parser();
+        feed_initialize(&mut parser);
+        parser
+            .feed_line(
+                r#"{"jsonrpc":"2.0","method":"event","params":{"type":"Notification","payload":{"id":"notif-2","category":"task","type":"task.completed","source_kind":"background_task","source_id":"task-10","title":"Background task finished","body":"Task `build` completed","severity":"info","created_at":1751700001.0}}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert!(collected.iter().any(|e| matches!(e,
+                SemanticEvent::Info { message, .. } if message == "Task `build` completed")));
+        assert!(
+            !collected
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::Warning { .. }))
+        );
+    }
+
+    #[test]
+    fn status_update_pressure_warning_carries_mcp_status() {
+        let (events, mut parser) = new_parser();
+        feed_initialize(&mut parser);
+        parser
+            .feed_line(
+                r#"{"jsonrpc":"2.0","method":"event","params":{"type":"StatusUpdate","payload":{"context_usage":0.9,"context_tokens":118000,"max_context_tokens":131072,"mcp_status":{"loading":false,"connected":1,"total":2,"tools":4,"servers":[{"name":"weather","status":"connected","tools":["forecast"]},{"name":"broken","status":"failed"}]}}}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        let extra = collected
+            .iter()
+            .find_map(|e| match e {
+                SemanticEvent::Warning { extra, .. } => Some(extra.clone()),
+                _ => None,
+            })
+            .expect("pressure warning");
+        let snapshot = extra.get("mcp_status").expect("mcp_status in extra");
+        assert_eq!(snapshot.get("connected").and_then(Value::as_u64), Some(1));
+        assert_eq!(snapshot.get("total").and_then(Value::as_u64), Some(2));
+        assert_eq!(
+            snapshot
+                .get("servers")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(2)
+        );
+    }
+
+    #[test]
     fn tool_call_with_streamed_arguments_decodes() {
         let (events, mut parser) = new_parser();
         feed_initialize(&mut parser);
@@ -1358,7 +1691,8 @@ mod tests {
     }
 
     #[test]
-    fn unexpected_question_emits_warning() {
+    fn unexpected_question_legacy_flat_shape_emits_warning() {
+        // Pre-Wire-1.4 flat payload; kept as the legacy-tolerance test.
         let (events, mut parser) = new_parser();
         feed_initialize(&mut parser);
         parser
@@ -1369,7 +1703,37 @@ mod tests {
         let collected = events.lock().unwrap().clone();
         assert!(
             collected.iter().any(|e| matches!(e,
-                SemanticEvent::Warning { message, .. } if message.contains("Unexpected question")))
+                SemanticEvent::Warning { message, .. }
+                    if message.contains("Unexpected question from agent: What now?")))
+        );
+    }
+
+    #[test]
+    fn unexpected_question_current_nested_shape_emits_warning() {
+        // Wire >= 1.4 sample from the signals corpus (kimi.md record
+        // `stream-human_input_requested-question_request`).
+        const QUESTION_LINE: &str = include_str!(
+            "../../../../docs/research/signals/fixtures/kimi/wire-question-request.jsonl"
+        );
+        let (events, mut parser) = new_parser();
+        feed_initialize(&mut parser);
+        parser.feed_line(QUESTION_LINE.trim()).unwrap();
+        let collected = events.lock().unwrap().clone();
+        let warning = collected
+            .iter()
+            .find_map(|e| match e {
+                SemanticEvent::Warning { message, extra } => Some((message.clone(), extra.clone())),
+                _ => None,
+            })
+            .expect("warning");
+        assert!(warning.0.contains("Choose an implementation direction."));
+        assert_eq!(
+            warning.1.get("tool_call_id").and_then(Value::as_str),
+            Some("toolu-question")
+        );
+        assert_eq!(
+            warning.1.get("request_id").and_then(Value::as_str),
+            Some("question-1")
         );
     }
 
@@ -1424,6 +1788,37 @@ mod tests {
         let summary = parser.finish(0);
         assert_eq!(summary.provider_status.as_deref(), Some("finished"));
         assert!(!summary.is_error);
+    }
+
+    #[test]
+    fn prompt_max_steps_response_surfaces_steps() {
+        // Wire sample from the signals corpus (kimi.md record
+        // `stream-turn_limit_reached-max_steps`).
+        const MAX_STEPS_LINE: &str = include_str!(
+            "../../../../docs/research/signals/fixtures/kimi/wire-max-steps-reached.jsonl"
+        );
+        let (events, mut parser) = new_parser();
+        feed_initialize(&mut parser);
+        parser.feed_line(MAX_STEPS_LINE.trim()).unwrap();
+        let collected = events.lock().unwrap().clone();
+        let info = collected
+            .iter()
+            .find_map(|e| match e {
+                SemanticEvent::Info { extra, .. }
+                    if extra.get("kind").and_then(Value::as_str) == Some("prompt_status") =>
+                {
+                    Some(extra.clone())
+                }
+                _ => None,
+            })
+            .expect("prompt_status info");
+        assert_eq!(
+            info.get("status").and_then(Value::as_str),
+            Some("max_steps_reached")
+        );
+        assert_eq!(info.get("steps").and_then(Value::as_u64), Some(100));
+        let summary = parser.finish(0);
+        assert_eq!(summary.provider_status.as_deref(), Some("max_steps_reached"));
     }
 
     #[test]
@@ -1622,6 +2017,7 @@ mod tests {
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ApprovalResponse","payload":{"request_id":"r1","response":"approve"}}}"#,
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"SteerInput","payload":{}}}"#,
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"StepInterrupted","payload":{"reason":"cancel"}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"StepRetry","payload":{"n":1,"next_attempt":2,"max_attempts":5,"wait_s":0.5,"error_type":"APIEmptyResponseError","status_code":500}}}"#,
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"TurnEnd","payload":{}}}"#,
             r#"{"jsonrpc":"2.0","method":"request","id":"r1","params":{"type":"ApprovalRequest","payload":{"id":"r1"}}}"#,
             r#"{"jsonrpc":"2.0","method":"request","id":"q1","params":{"type":"QuestionRequest","payload":{"question":"?"}}}"#,

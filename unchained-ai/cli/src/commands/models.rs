@@ -19,7 +19,12 @@ use unchained_ai::rigging::providers::models::{
 };
 
 /// Run the `models` subcommand.
-pub async fn run(provider_filter: Option<String>, json: bool, verbose: bool) -> Result<()> {
+pub async fn run(
+    provider_filter: Option<String>,
+    json: bool,
+    verbose: bool,
+    flat: bool,
+) -> Result<()> {
     let filter = match provider_filter.as_deref() {
         Some(name) => Some(parse_provider(name)?),
         None => None,
@@ -29,6 +34,8 @@ pub async fn run(provider_filter: Option<String>, json: bool, verbose: bool) -> 
 
     if json {
         render_json(&groups)?;
+    } else if flat {
+        render_flat_terminal(&groups);
     } else {
         render_terminal(&groups, verbose);
     }
@@ -144,24 +151,6 @@ fn models_for(provider: Provider) -> Vec<ProviderModel> {
     }
 }
 
-fn provider_slug(provider: Provider) -> &'static str {
-    match provider {
-        Provider::Anthropic => "anthropic",
-        Provider::Deepseek => "deepseek",
-        Provider::Gemini => "gemini",
-        Provider::Groq => "groq",
-        Provider::HuggingFace => "huggingface",
-        Provider::Mistral => "mistral",
-        Provider::MoonshotAi => "moonshotai",
-        Provider::Ollama => "ollama",
-        Provider::OpenAi => "openai",
-        Provider::OpenRouter => "openrouter",
-        Provider::Xai => "xai",
-        Provider::Zai => "zai",
-        Provider::ZenMux => "zenmux",
-    }
-}
-
 fn provider_display(provider: Provider) -> &'static str {
     match provider {
         Provider::Anthropic => "Anthropic",
@@ -183,13 +172,11 @@ fn provider_display(provider: Provider) -> &'static str {
 fn render_json(groups: &[(Provider, Vec<ProviderModel>)]) -> Result<()> {
     let mut entries: Vec<Value> = Vec::new();
 
-    for (provider, models) in groups {
-        let slug = provider_slug(*provider);
+    for (_provider, models) in groups {
         for model in models {
-            let wire_id = format!("{}/{}", slug, model.model_id());
             let attributes = metadata_to_json(model.metadata());
             entries.push(json!({
-                "model": wire_id,
+                "model": model.wire_id(),
                 "attributes": attributes,
             }));
         }
@@ -326,6 +313,16 @@ fn render_terminal(groups: &[(Provider, Vec<ProviderModel>)], verbose: bool) {
 
         let list = build_provider_list(models, verbose);
         print!("{}", list.render(&term));
+    }
+}
+
+fn render_flat_terminal(groups: &[(Provider, Vec<ProviderModel>)]) {
+    let term = Terminal::default();
+
+    for (_provider, models) in groups {
+        for model in models {
+            println!("{}", Prose::new(model.wire_id()).render(&term));
+        }
     }
 }
 

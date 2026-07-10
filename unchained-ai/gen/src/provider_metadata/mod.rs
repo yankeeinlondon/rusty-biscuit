@@ -2,7 +2,7 @@
 //!
 //! Routes raw provider JSON to the appropriate parser based on provider type.
 //! Only providers with rich native metadata (e.g., OpenRouter) get special
-//! parsing; others return `None` and rely on Parsera data exclusively.
+//! parsing; others return `None` and rely on source enrichment data.
 
 pub mod openrouter;
 
@@ -14,7 +14,7 @@ use unchained_ai::rigging::providers::Provider;
 ///
 /// Returns `Some(ProviderModelMetadata)` when the provider has a dedicated
 /// parser, or `None` for providers that return minimal metadata and should
-/// rely on Parsera data instead.
+/// rely on source enrichment data instead.
 pub fn parse_provider_metadata(provider: Provider, value: &Value) -> Option<ProviderModelMetadata> {
     match provider {
         Provider::OpenRouter => Some(openrouter::parse_openrouter_model(value)),

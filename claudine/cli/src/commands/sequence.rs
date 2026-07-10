@@ -285,7 +285,6 @@ mod tests {
             kimicode: false,
             opencode: false,
             qwen: false,
-            roo: false,
             exclude: Vec::new(),
             yolo: false,
             interactive: false,

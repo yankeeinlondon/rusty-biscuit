@@ -8,7 +8,7 @@ use super::context::{CliPolicyInput, PolicyContext};
 use super::mutation::PolicyMutationPlan;
 use super::providers::{
     ClaudePolicyBackend, CodexPolicyBackend, GeminiPolicyBackend, GoosePolicyBackend,
-    KimiPolicyBackend, OpenCodePolicyBackend, QwenPolicyBackend, RooPolicyBackend,
+    KimiPolicyBackend, OpenCodePolicyBackend, QwenPolicyBackend,
 };
 use super::query::{ConfiguredPolicySnapshot, EffectivePolicySnapshot};
 use crate::error::{ClaudineError, Result};
@@ -44,7 +44,6 @@ impl PolicyEngine {
         engine.register(Box::new(CodexPolicyBackend));
         engine.register(Box::new(GeminiPolicyBackend));
         engine.register(Box::new(QwenPolicyBackend));
-        engine.register(Box::new(RooPolicyBackend));
         engine.register(Box::new(GoosePolicyBackend));
         engine.register(Box::new(KimiPolicyBackend));
         engine.register(Box::new(OpenCodePolicyBackend));
@@ -384,7 +383,6 @@ mod tests {
         assert!(engine.has_backend(Provider::Codex));
         assert!(engine.has_backend(Provider::Gemini));
         assert!(engine.has_backend(Provider::QwenCode));
-        assert!(engine.has_backend(Provider::RooCode));
         assert!(engine.has_backend(Provider::Goose));
         assert!(engine.has_backend(Provider::KimiCode));
         assert!(engine.has_backend(Provider::OpenCode));

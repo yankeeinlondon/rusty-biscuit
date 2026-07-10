@@ -3,7 +3,7 @@ use super::super::catalog::{ExpressionFunctionDescriptor, P_FILE, P_FILE_STRING,
 use crate::catalog::{Example, ExampleVerification};
 
 pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
-    FunctionRegistration { canonical: "absolute", aliases: &[], catalog_order: 53, descriptors: &[
+    FunctionRegistration { canonical: "absolute", aliases: &[], catalog_order: 56, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "absolute(file)",
@@ -17,7 +17,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Context(super::absolute_fn) },
-    FunctionRegistration { canonical: "relative", aliases: &[], catalog_order: 54, descriptors: &[
+    FunctionRegistration { canonical: "relative", aliases: &[], catalog_order: 57, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "relative(file)",
@@ -31,7 +31,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Context(super::relative_fn) },
-    FunctionRegistration { canonical: "file_exists", aliases: &["fileexists"], catalog_order: 55, descriptors: &[
+    FunctionRegistration { canonical: "file_exists", aliases: &["fileexists"], catalog_order: 58, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "file_exists(file)",
@@ -45,7 +45,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Context(super::file_exists_fn) },
-    FunctionRegistration { canonical: "has_command", aliases: &["hascommand"], catalog_order: 76, descriptors: &[
+    FunctionRegistration { canonical: "has_command", aliases: &["hascommand"], catalog_order: 79, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "has_command(cmd)",
@@ -59,7 +59,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Context(super::has_command_fn) },
-    FunctionRegistration { canonical: "is_indexed_file", aliases: &["isindexedfile"], catalog_order: 62, descriptors: &[
+    FunctionRegistration { canonical: "is_indexed_file", aliases: &["isindexedfile"], catalog_order: 65, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "is_indexed_file(file)",
@@ -73,7 +73,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Context(super::is_indexed_file_fn) },
-    FunctionRegistration { canonical: "file_index", aliases: &["fileindex"], catalog_order: 63, descriptors: &[
+    FunctionRegistration { canonical: "file_index", aliases: &["fileindex"], catalog_order: 66, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "file_index(file)",
@@ -87,7 +87,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Context(super::file_index_fn) },
-    FunctionRegistration { canonical: "increment_file_index", aliases: &["incrementfileindex"], catalog_order: 64, descriptors: &[
+    FunctionRegistration { canonical: "increment_file_index", aliases: &["incrementfileindex"], catalog_order: 67, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "increment_file_index(file)",
@@ -101,7 +101,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Context(super::increment_file_index_fn) },
-    FunctionRegistration { canonical: "decrement_file_index", aliases: &["decrementfileindex"], catalog_order: 65, descriptors: &[
+    FunctionRegistration { canonical: "decrement_file_index", aliases: &["decrementfileindex"], catalog_order: 68, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "decrement_file_index(file)",
@@ -115,7 +115,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Context(super::decrement_file_index_fn) },
-    FunctionRegistration { canonical: "basename", aliases: &[], catalog_order: 66, descriptors: &[
+    FunctionRegistration { canonical: "basename", aliases: &[], catalog_order: 69, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "basename(file)",
@@ -129,7 +129,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Context(super::basename_fn) },
-    FunctionRegistration { canonical: "basename_without_index", aliases: &["basenamewithoutindex"], catalog_order: 67, descriptors: &[
+    FunctionRegistration { canonical: "basename_without_index", aliases: &["basenamewithoutindex"], catalog_order: 70, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "basename_without_index(file)",
@@ -143,7 +143,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Context(super::basename_without_index_fn) },
-    FunctionRegistration { canonical: "dirname", aliases: &[], catalog_order: 68, descriptors: &[
+    FunctionRegistration { canonical: "dirname", aliases: &[], catalog_order: 71, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "dirname(file)",
@@ -157,7 +157,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Context(super::dirname_fn) },
-    FunctionRegistration { canonical: "ext", aliases: &[], catalog_order: 69, descriptors: &[
+    FunctionRegistration { canonical: "ext", aliases: &[], catalog_order: 72, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "ext(file)",
@@ -171,7 +171,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Context(super::ext_fn) },
-    FunctionRegistration { canonical: "parent_dir", aliases: &["parentdir"], catalog_order: 70, descriptors: &[
+    FunctionRegistration { canonical: "parent_dir", aliases: &["parentdir"], catalog_order: 73, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "parent_dir(file)",
@@ -185,7 +185,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Context(super::parent_dir_fn) },
-    FunctionRegistration { canonical: "file_trailing", aliases: &["filetrailing"], catalog_order: 71, descriptors: &[
+    FunctionRegistration { canonical: "file_trailing", aliases: &["filetrailing"], catalog_order: 74, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "file_trailing(file)",
@@ -199,7 +199,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Context(super::file_trailing_fn) },
-    FunctionRegistration { canonical: "dir_leading", aliases: &["dirleading"], catalog_order: 72, descriptors: &[
+    FunctionRegistration { canonical: "dir_leading", aliases: &["dirleading"], catalog_order: 75, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "dir_leading(file)",
@@ -213,7 +213,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Context(super::dir_leading_fn) },
-    FunctionRegistration { canonical: "join", aliases: &[], catalog_order: 73, descriptors: &[
+    FunctionRegistration { canonical: "join", aliases: &[], catalog_order: 76, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "join(left, right)",
@@ -227,7 +227,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Context(super::join_fn) },
-    FunctionRegistration { canonical: "link", aliases: &[], catalog_order: 74, descriptors: &[
+    FunctionRegistration { canonical: "link", aliases: &[], catalog_order: 77, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "link(file)",

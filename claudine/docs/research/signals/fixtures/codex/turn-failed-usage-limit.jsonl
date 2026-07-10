@@ -1,0 +1,2 @@
+{"type":"turn.failed","error":{"type":"rate_limit","message":"You've hit your usage limit."}}
+{"type":"error","error_type":"rate_limit","error_message":"You've hit your usage limit."}

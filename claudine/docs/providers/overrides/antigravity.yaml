@@ -1,0 +1,19 @@
+# Human-owned overrides for the antigravity provider. Each entry WINS over the
+# field's declared source during generation (whole-key replacement) and MUST
+# carry a `reason:`. Keys are catalog field names; an override for a field
+# with no mapping-registry entry is a generation error.
+model_catalog_source:
+    value: none
+    reason: >-
+        agent-models research reports dynamic_listing.available: true
+        (`agy models`), but the research boolean cannot select a catalog
+        mechanism and `agy models` prints a human-formatted text list of display
+        labels ("Gemini 3.5 Flash (Medium)", "Claude Sonnet 4.6 (Thinking)", …) —
+        verified against the installed agy 1.1.0 — not a machine-parseable JSON
+        list, so no clean ShellCommand candidate exists today. It also requires an
+        authenticated session (prints "Please sign in to view available models"
+        otherwise). `none` is correct: no drift-channel listing, and
+        expected_offerings (research default_models) is the validation baseline.
+        Mirrors the pi/codex/kimi precedent. Pin until `agy models` gains a
+        machine-readable flag or the agent-models schema grows a typed
+        catalog-source key (pending schema addition).

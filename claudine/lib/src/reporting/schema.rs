@@ -2,7 +2,7 @@ use rusqlite::{Connection, OptionalExtension};
 
 use crate::error::Result;
 
-const SCHEMA_VERSION: &str = "5";
+const SCHEMA_VERSION: &str = "6";
 
 /// Initialize the reporting schema if it does not exist yet.
 pub(crate) fn initialize(conn: &Connection) -> Result<()> {
@@ -96,7 +96,27 @@ pub(crate) fn initialize(conn: &Connection) -> Result<()> {
             total_cache_read_tokens INTEGER NOT NULL DEFAULT 0,
             total_cost_usd REAL NOT NULL DEFAULT 0,
             claudine_pid INTEGER,
-            agent_pid INTEGER
+            agent_pid INTEGER,
+            family_latest TEXT
+        );
+
+        -- One row per signal observation exploded from a SessionEnd
+        -- summary row's extra["signals"]; keyed by source position so
+        -- re-ingest is idempotent alongside the events table.
+        CREATE TABLE IF NOT EXISTS session_signals (
+            source_file TEXT NOT NULL,
+            source_offset INTEGER NOT NULL,
+            signal_index INTEGER NOT NULL,
+            session_key TEXT NOT NULL,
+            session_id TEXT,
+            provider TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            source_date TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            source TEXT NOT NULL,
+            occurrences INTEGER NOT NULL,
+            payload_json TEXT NOT NULL,
+            PRIMARY KEY (source_file, source_offset, signal_index)
         );
         "#,
     )?;
@@ -114,6 +134,9 @@ pub(crate) fn initialize(conn: &Connection) -> Result<()> {
     }
     if prev < "5" {
         migrate_to_v5(conn)?;
+    }
+    if prev < "6" {
+        migrate_to_v6(conn)?;
     }
 
     conn.execute(
@@ -136,6 +159,7 @@ pub(crate) fn initialize(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_events_session_timestamp ON events(session_key, timestamp);
         CREATE INDEX IF NOT EXISTS idx_events_tool_source_date ON events(tool_name, source_date);
         CREATE INDEX IF NOT EXISTS idx_events_event_source_date ON events(event, source_date);
+        CREATE INDEX IF NOT EXISTS idx_session_signals_kind_source_date ON session_signals(kind, source_date);
 
         CREATE VIEW IF NOT EXISTS daily_event_totals_v AS
         SELECT
@@ -271,6 +295,22 @@ fn migrate_to_v5(conn: &Connection) -> Result<()> {
     conn.execute("DELETE FROM ingestion_state", [])?;
     conn.execute("DELETE FROM sessions", [])?;
     conn.execute("DELETE FROM events", [])?;
+
+    Ok(())
+}
+
+fn migrate_to_v6(conn: &Connection) -> Result<()> {
+    // Model-catalog reporting: lifted `family_latest` alias stamp on
+    // sessions; the session_signals table itself is created by the base
+    // CREATE TABLE IF NOT EXISTS batch, which runs before migrations.
+    ensure_column(conn, "sessions", "family_latest", "TEXT")?;
+
+    // The reporting database is a derived cache of JSONL logs, so clearing the
+    // indexed tables is the safest way to backfill newly-added columns.
+    conn.execute("DELETE FROM ingestion_state", [])?;
+    conn.execute("DELETE FROM sessions", [])?;
+    conn.execute("DELETE FROM events", [])?;
+    conn.execute("DELETE FROM session_signals", [])?;
 
     Ok(())
 }
@@ -443,6 +483,11 @@ mod tests {
         assert!(event_columns.contains(&"agent_pid".to_string()));
         assert!(session_columns.contains(&"claudine_pid".to_string()));
         assert!(session_columns.contains(&"agent_pid".to_string()));
+        // v6: lifted alias stamp + the signals table
+        assert!(session_columns.contains(&"family_latest".to_string()));
+        let signal_columns = table_columns(&conn, "session_signals");
+        assert!(signal_columns.contains(&"kind".to_string()));
+        assert!(signal_columns.contains(&"payload_json".to_string()));
 
         let event_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))

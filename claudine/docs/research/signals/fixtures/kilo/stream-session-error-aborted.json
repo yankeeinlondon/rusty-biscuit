@@ -1,0 +1,16 @@
+{
+  "directory": "/workspace/project",
+  "payload": {
+    "id": "evt_scrubbed_aborted",
+    "type": "session.error",
+    "properties": {
+      "sessionID": "ses_scrubbed",
+      "error": {
+        "name": "MessageAbortedError",
+        "data": {
+          "message": "Aborted"
+        }
+      }
+    }
+  }
+}

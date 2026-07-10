@@ -6,8 +6,11 @@
 //! press `<TAB>` at the subcommand slot:
 //!
 //! 1. Composition — `compose`, `inline-compose`, `sequence`.
-//! 2. Wrappers — `claude`, `codex`, `gemini`, `goose`, `kimi`,
-//!    `opencode`, `qwen`.
+//! 2. Wrappers — one token per compiled provider in
+//!    `PROVIDERS_DISPLAY_ORDER` (currently `claude`, `codex`, `gemini`,
+//!    `goose`, `kimi`, `opencode`, `qwen`, `kilo`, `pi`, `antigravity`),
+//!    **derived from the provider catalog** so a newly onboarded provider
+//!    appears automatically — never hand-maintained here.
 //! 3. Shared resources — `skills`, `commands`, `agents`, `mcp`.
 //! 4. Hooks / actions — `hooks`, `actions`.
 //! 5. Administration — `sync`, `uninstall`, `providers`, `logs`,
@@ -19,7 +22,21 @@
 //! (`--verbose`, `--debug`, `--plain`) are discoverable from
 //! `claudine --help` and intentionally not listed here.
 
+use claudine::provider::PROVIDERS_DISPLAY_ORDER;
+
 use crate::completion::engine::{RootContext, RootPartial};
+
+/// The wrapper subcommand tokens, one per compiled provider in display
+/// order — each provider's primary CLI alias, which equals its wrapper
+/// subcommand name. Derived from the catalog so onboarding a provider adds
+/// its `claudine <slug>` completion automatically (mirrors the derived argv
+/// Rule 1 in [`crate::argv`]).
+pub(crate) fn wrapper_tokens() -> Vec<&'static str> {
+    PROVIDERS_DISPLAY_ORDER
+        .iter()
+        .filter_map(|provider| provider.cli_aliases().first().copied())
+        .collect()
+}
 
 /// Render the root-slot candidate list for a given partial and context.
 ///
@@ -57,10 +74,9 @@ pub(crate) fn full_menu(ctx: &RootContext) -> Vec<String> {
 
     // 1. Composition.
     menu.extend_from_slice(&["compose", "inline-compose", "sequence"]);
-    // 2. Wrappers — `roo` is intentionally absent (catalog-only provider).
-    menu.extend_from_slice(&[
-        "claude", "codex", "gemini", "goose", "kimi", "opencode", "qwen",
-    ]);
+    // 2. Wrappers — derived from the provider catalog (see wrapper_tokens),
+    //    so kilo/pi/antigravity and any future provider appear automatically.
+    menu.extend(wrapper_tokens());
     // 3. Shared resources.
     menu.extend_from_slice(&["skills", "commands", "agents", "mcp"]);
     // 4. Hooks and actions. (Spec says "hooks and events"; the clap surface
@@ -149,33 +165,44 @@ mod tests {
     }
 
     #[test]
-    fn full_menu_has_wrappers_in_spec_order() {
+    fn full_menu_wrappers_are_catalog_derived_in_display_order() {
         let menu = full_menu(&ctx(true, true, true));
-        assert_eq!(
-            &menu[3..10],
-            &[
-                "claude", "codex", "gemini", "goose", "kimi", "opencode", "qwen"
-            ],
-        );
+        let expected = wrapper_tokens();
+        assert_eq!(&menu[3..3 + expected.len()], expected.as_slice());
+        // Regression guard: the three Phase-H providers must be present
+        // (they were the ones missing from the old hand-maintained list).
+        for slug in ["kilo", "pi", "antigravity"] {
+            assert!(menu.iter().any(|c| c == slug), "{slug} missing from root menu");
+        }
+    }
+
+    /// Index of the first post-wrapper group (`skills`), computed from the
+    /// derived wrapper count so these assertions never drift as providers
+    /// are added.
+    fn post_wrappers() -> usize {
+        3 + wrapper_tokens().len()
     }
 
     #[test]
     fn full_menu_has_shared_resources_in_spec_order() {
         let menu = full_menu(&ctx(true, true, true));
-        assert_eq!(&menu[10..14], &["skills", "commands", "agents", "mcp"]);
+        let n = post_wrappers();
+        assert_eq!(&menu[n..n + 4], &["skills", "commands", "agents", "mcp"]);
     }
 
     #[test]
     fn full_menu_has_hooks_and_actions() {
         let menu = full_menu(&ctx(true, true, true));
-        assert_eq!(&menu[14..16], &["hooks", "actions"]);
+        let n = post_wrappers() + 4;
+        assert_eq!(&menu[n..n + 2], &["hooks", "actions"]);
     }
 
     #[test]
     fn full_menu_has_administration_in_spec_order() {
         let menu = full_menu(&ctx(true, true, true));
+        let n = post_wrappers() + 6;
         assert_eq!(
-            &menu[16..22],
+            &menu[n..n + 6],
             &[
                 "sync",
                 "uninstall",

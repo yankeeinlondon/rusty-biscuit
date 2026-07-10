@@ -1,0 +1,23 @@
+# Human-owned overrides for the goose provider. Each entry WINS over the
+# field's declared source during generation (whole-key replacement) and MUST
+# carry a `reason:`. Keys are catalog field names; an override for a field
+# with no mapping-registry entry is a generation error.
+model_env_vars:
+    value: ["GOOSE_MODEL"]
+    reason: >-
+        agent-models research enumerates GOOSE_PROVIDER and GOOSE_FAST_MODEL
+        alongside GOOSE_MODEL; those select the provider and the auxiliary
+        fast model, not the wrapper MODEL selection chain that
+        composition::select consumes. Pin GOOSE_MODEL until agent-models
+        records carry a selection-role field (pending schema addition).
+model_cli_flag:
+    value: "--model"
+    reason: >-
+        goose is an aggregator, so its agent-models research orders the
+        `--provider` record before `--model` — the provider/model pair
+        problem: a mechanical first-cli_flag-site rule would select the
+        provider switch, not the model selector. (Both sites are also
+        recorded in annotated "--flag  (goose run)" form, which the
+        bare-token rule skips loudly, leaving None.) Pin `--model`, the
+        model selector on `goose run`. Ruled at Phase D wave 1
+        (2026-07-04).

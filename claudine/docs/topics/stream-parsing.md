@@ -16,7 +16,6 @@ We have done deep research on the JSON streaming data that each of CLI Agents re
 - [opencode](claudine/docs/research/non-interactive-sessions/opencode.md)
 - [qwen](claudine/docs/research/non-interactive-sessions/qwen.md)
 - [goose](claudine/docs/research/non-interactive-sessions/goose.md)
-- [roo code](claudine/docs/research/non-interactive-sessions/roo-code.md)
 
 ## Streaming Schemas
 
@@ -122,27 +121,6 @@ Based on this research we've been able to establish the following schemas for th
 - **`SystemNotificationType` enum:** `thinkingMessage`, `inlineMessage`, `creditsExhausted` (the sole credit-related structured signal; HTTP 402 maps to `ProviderError::CreditsExhausted` and then to a `systemNotification`)
 - **Batch `json` shape:** `{ messages: Message[], metadata: { total_tokens, status } }`
 - **Notes:** current `StreamEvent` enum has **no** `model_change` variant; authentication failures surface as `{type: "error", error: "<string>"}`. Some MCP and subagent notifications are reduced to formatted strings before stream emission. Non-interactive human-in-the-loop is still sharp-edged: tool confirmations and elicitation requests are currently intercepted before stream emission.
-
-### Roo Code
-
-- **Flag:** `roo --output-format stream-json --yolo` (or `--json` for a single completion-time array)
-- **Format:** NDJSON
-- **Discriminator:** top-level `type`
-- **Envelope:** `{ type, timestamp (ISO-8601), data }`
-- **Schema source:** TypeScript interfaces in the `@roo-code/types` package (`schemas/cli/json-events.ts`); JSON Schema versions are exported for cross-language validation.
-- **Event types:** `init`, `thinking`, `tool_use`, `tool_result`, `cost`, `final_result`, `model_switch`, `plan_cap_approaching`, `plan_capped`, `insufficient_funds`, `auth_info`, `permission_denied`, `fatal_error`
-- **Key event payloads:**
-    - `init.data`: `model`, `provider`
-    - `tool_use.data`: `name`, `input`, `tool_use_id`
-    - `tool_result.data`: `tool_use_id`, `content`, `isError`
-    - `cost.data`: `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `total_cost_usd` (per-turn)
-    - `final_result.data`: aggregated status and totals
-    - `auth_info.data`: `method` (`api_key`|`oauth`|`session_token`), `provider` (never secrets)
-    - `permission_denied.data`: `operation` (`read`|`write`), `path`, `reason` (e.g. `EACCES`, `system_whitelist_blocked`)
-    - `plan_cap_approaching.data`: `remaining_tokens`, `percent_used`, `reset_timestamp` (fires at 80% usage)
-    - `plan_capped.data`: `reset_timestamp`, `upgrade_url`
-    - `insufficient_funds.data`: `provider_name`, `current_balance`, `required_minimum`
-- **Notes:** `-y` / `--yolo` / `--permission-mode acceptAll` is required for non-interactive runs to prevent the agent from hanging on approval prompts. In `--json` mode, ANSI styling is disabled; in `stream-json`, stdout is reserved for JSON and logging is redirected to stderr. `ask_followup_question` tool use is the detection point for HITL attempts; subagent HITL events nest within the subagent's event context.
 
 ## Typed Protocol Models
 

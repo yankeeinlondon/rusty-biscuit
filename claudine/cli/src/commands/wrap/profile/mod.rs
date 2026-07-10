@@ -2,7 +2,9 @@ use std::path::Path;
 
 use claudine::provider::Provider;
 use claudine::provider::SystemPromptSpec;
-use claudine::provider::{PROVIDER_COUNT, PromptArgConventions, YoloSupport, provider_info};
+use claudine::provider::{
+    PROVIDER_COUNT, PromptArgConventions, ResumeSupport, YoloSupport, provider_info,
+};
 use claudine::stream::StreamProtocol;
 use claudine::system_prompt::PreparedSystemPrompt;
 use color_eyre::eyre::{Result, bail};
@@ -14,13 +16,16 @@ use color_eyre::eyre::{Result, bail};
 #[cfg(test)]
 use claudine::provider::{EntrypointMode, OutputFormatSelector};
 
+mod antigravity;
 mod apply;
 mod claude;
 mod codex;
 mod gemini;
 mod goose;
+mod kilo;
 mod kimi;
 mod opencode;
+mod pi;
 mod qwen;
 mod resolve;
 
@@ -28,14 +33,15 @@ pub(crate) use self::resolve::{
     NoModelProvided, OpenCodeEnvSnapshot, OpenCodeModelSource, apply_opencode_model_resolution,
     extract_prompt_source_from_passthrough, require_prompt_present, resolve_opencode_model,
 };
+pub(crate) use self::antigravity::AntigravityWrapper;
 pub(crate) use self::claude::ClaudeWrapper;
 pub(crate) use self::codex::CodexWrapper;
 pub(crate) use self::gemini::GeminiWrapper;
 pub(crate) use self::goose::GooseWrapper;
+pub(crate) use self::kilo::KiloWrapper;
 pub(crate) use self::kimi::KimiWrapper;
 pub(crate) use self::opencode::OpencodeWrapper;
-#[allow(unused_imports)]
-pub(crate) use self::opencode::opencode_default_tui_noise_prefixes;
+pub(crate) use self::pi::PiWrapper;
 pub(crate) use self::qwen::QwenWrapper;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -364,20 +370,21 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// Map the universal `--model <value>` to provider-specific flags/env.
     ///
     /// Returns `Some(warning)` if the provider doesn't support model selection.
-    /// Default implementation pushes `--model <value>` for child-CLI delivery
-    /// and exports the generic `MODEL` env var that Claudine's wrapper contract
-    /// guarantees (consumed by composition templates, hook dispatch, and
-    /// reporting — independent of how the provider itself reads the model).
+    /// Default implementation reads the provider's catalog `model_cli_flag`
+    /// (the authoritative delivery flag, e.g. `--model`): when present it is
+    /// pushed with the model value (skipped if the user already passed it, or
+    /// the conventional short alias `-m`); when absent a warning is returned
+    /// (a provider with non-flag delivery must override this method). The
+    /// generic `MODEL` env var is always exported — Claudine's wrapper
+    /// contract, consumed by composition templates, hook dispatch, and
+    /// reporting independent of how the provider itself reads the model.
     fn apply_model(
         &self,
         args: &mut Vec<String>,
         env_overrides: &mut Vec<(String, String)>,
         model: &str,
     ) -> Option<String> {
-        args.push("--model".to_string());
-        args.push(model.to_string());
-        env_overrides.push(("MODEL".to_string(), model.to_string()));
-        None
+        apply::apply_model(self.provider(), args, env_overrides, model)
     }
 
     // -- Universal --output flag ---------------------------------------------
@@ -434,9 +441,9 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// other noise to stdout that contaminates non-interactive output. Lines
     /// starting with any of these prefixes are suppressed.
     ///
-    /// Default: empty (no filtering).
+    /// Default: the central catalog's curated suppression list.
     fn stdout_noise_prefixes(&self) -> &'static [&'static str] {
-        &[]
+        provider_info(self.provider()).display_policy.stdout_noise_prefixes
     }
 
     // -- Captured output (compose mode) ----------------------------------------
@@ -471,15 +478,17 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// are noisy but harmless. Lines starting with any of these prefixes are
     /// suppressed.
     ///
-    /// Default: empty (no filtering).
+    /// Default: the central catalog's curated suppression list.
     fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
-        &[]
+        provider_info(self.provider()).display_policy.stderr_noise_prefixes
     }
 
     /// When true, structured non-interactive runs buffer filtered stderr and
     /// only surface it if the provider exits with an error.
+    ///
+    /// Default: reads the central catalog.
     fn suppress_structured_stderr_on_success(&self) -> bool {
-        false
+        provider_info(self.provider()).suppress_structured_stderr_on_success
     }
 
     // -- Prompt-file delivery -------------------------------------------------
@@ -501,9 +510,9 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// Env var names that this provider requires and should bypass the
     /// sensitive-key sanitizer automatically.
     ///
-    /// Default: empty (no automatic includes).
+    /// Default: the central catalog's hand-ruled security allowlist.
     fn allowed_env_keys(&self) -> &'static [&'static str] {
-        &[]
+        provider_info(self.provider()).allowed_env_keys
     }
 
     // -- Structured stream support -------------------------------------------
@@ -539,13 +548,20 @@ pub(crate) trait WrapperProfile: Send + Sync {
 
     /// Whether this provider supports resuming sessions.
     ///
-    /// Defaults to `provider_info(self.provider()).agent_capabilities().runtime.non_interactive.resume_supported`.
+    /// Defaults to the central catalog's [`ResumeSupport`] level:
+    /// `FirstClass` and `Partial` map to `true`; the mode-scoped
+    /// variants (`InteractiveOnly` / `NonInteractiveOnly`) map to
+    /// `false` pending a mode-aware gate. Ratified end-state (Ken,
+    /// 2026-07-04): whenever the provider natively supports resume,
+    /// Claudine must too — a `false` here is only ever a
+    /// not-yet-implemented gap, never a durable posture. All 7 current
+    /// providers are `FirstClass` and implement
+    /// [`build_resume_args`](Self::build_resume_args).
     fn supports_resume(&self) -> bool {
-        provider_info(self.provider())
-            .agent_capabilities()
-            .runtime
-            .non_interactive
-            .resume_supported
+        matches!(
+            provider_info(self.provider()).resume,
+            ResumeSupport::FirstClass | ResumeSupport::Partial
+        )
     }
 
     // -- Structured stream support -------------------------------------------
@@ -554,12 +570,22 @@ pub(crate) trait WrapperProfile: Send + Sync {
     ///
     /// Called only when `supports_structured_stream()` returns true and
     /// the user did not explicitly request an output format.
-    fn apply_structured_stream(&self, _args: &mut Vec<String>) {}
+    ///
+    /// Default implementation derives the argv from the central
+    /// catalog's `Stream`-format [`OutputFormatSupport`] record:
+    /// companion flags first, then the selector.
+    ///
+    /// [`OutputFormatSupport`]: claudine::provider::OutputFormatSupport
+    fn apply_structured_stream(&self, args: &mut Vec<String>) {
+        apply::apply_structured_stream(self.provider(), args)
+    }
 
     /// Whether Claudine can recover a final assistant body after an
     /// interactive session ends for inline composition closure.
+    ///
+    /// Default: reads the central catalog.
     fn supports_interactive_inline_closure(&self) -> bool {
-        false
+        provider_info(self.provider()).supports_interactive_inline_closure
     }
 
     // -- Prompt argv conventions --------------------------------------------
@@ -583,6 +609,9 @@ static KIMI: KimiWrapper = KimiWrapper;
 static QWEN: QwenWrapper = QwenWrapper;
 static OPENCODE: OpencodeWrapper = OpencodeWrapper;
 static GOOSE: GooseWrapper = GooseWrapper;
+static KILO: KiloWrapper = KiloWrapper;
+static PI: PiWrapper = PiWrapper;
+static ANTIGRAVITY: AntigravityWrapper = AntigravityWrapper;
 
 /// Wrapper registry indexed by `Provider as usize`.
 ///
@@ -592,11 +621,10 @@ static GOOSE: GooseWrapper = GooseWrapper;
 ///
 /// ## Documented "no wrapper" exceptions
 ///
-/// - [`Provider::RooCode`] — Roo Code runs exclusively as a VS Code
-///   extension, so there is no standalone CLI binary to wrap. Any future
-///   provider that is intentionally unwrapped must be added to this table
-///   *and* to the `NO_WRAPPER` allow-list referenced by
-///   `wrapper_registry_covers_every_provider_and_documents_exceptions`.
+/// Currently none. Any future provider that is intentionally unwrapped
+/// must use a `None` slot in this table *and* be added to the
+/// `NO_WRAPPER` allow-list referenced by
+/// `wrapper_registry_covers_every_provider_and_documents_exceptions`.
 ///
 /// Slot order MUST match `Provider as usize` — see
 /// `claudine::provider::identity::PROVIDERS_DISPLAY_ORDER`.
@@ -608,7 +636,9 @@ static WRAPPER_REGISTRY: [Option<&'static dyn WrapperProfile>; PROVIDER_COUNT] =
     /* 4: KimiCode */ Some(&KIMI),
     /* 5: OpenCode */ Some(&OPENCODE),
     /* 6: QwenCode */ Some(&QWEN),
-    /* 7: RooCode  */ None,
+    /* 7: Kilo     */ Some(&KILO),
+    /* 8: Pi       */ Some(&PI),
+    /* 9: Antigravity */ Some(&ANTIGRAVITY),
 ];
 
 /// Look up the wrapper profile for a given provider.
@@ -645,14 +675,6 @@ fn option_value(args: &[String], option: &str) -> Option<String> {
         }
     }
     None
-}
-
-fn push_stream_json_flags(args: &mut Vec<String>, extra: &[&str]) {
-    for flag in extra {
-        args.push((*flag).to_string());
-    }
-    args.push("--output-format".to_string());
-    args.push("stream-json".to_string());
 }
 
 fn prompt_delivery_stdin_or_append(

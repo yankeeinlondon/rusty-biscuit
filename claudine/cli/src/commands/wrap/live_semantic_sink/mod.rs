@@ -34,11 +34,12 @@ use std::sync::{Arc, Mutex};
 
 use biscuit_terminal::terminal::Terminal;
 use claudine::events::{AgenticEvent, EnvironmentContext, EventMeta as DispatchEventMeta};
-use claudine::provider::Provider;
+use claudine::provider::{EventClass, Provider};
+use claudine::render::{EventRenderer, ThinkingStream};
 use claudine::runaway::ContentDetector;
 use claudine::stream::logs::EarlyTermination;
 use claudine::stream::progress::{self, LiveMetrics};
-use claudine::stream::semantic::{SemanticErrorKind, SemanticEvent};
+use claudine::stream::semantic::SemanticEvent;
 use claudine::stream::stderr::Verbosity;
 use serde_json::Value;
 
@@ -49,29 +50,43 @@ pub(crate) use super::stream_io::StreamOutput;
 pub(crate) use super::subagent_watchdog::WatchdogState;
 
 // Submodules
-mod errors;
 mod event_sink;
 mod heartbeat;
-mod provider_extension;
-mod render_event;
 mod sections;
 mod spacing;
 mod thinking;
-mod tool_calls;
 
-// Re-exports from submodules to preserve the API surface for tests and callers.
+// Re-exports of the moved render helpers, kept at this path so the existing
+// per-helper unit tests (which reach them via `super::`) compile unchanged.
+// The implementations now live in the shared `claudine::render::EventRenderer`.
 #[allow(unused_imports)]
-pub(crate) use errors::error_kind_presentation;
-// Re-exported so `render_event` can reach the provider-extension classifiers
-// and payload summarizer through the parent module via `super::`.
-pub(crate) use provider_extension::{
-    is_claude_task_progress, is_silent_extension_kind, is_suppressed_claude_rate_limit,
-    provider_short, summarize_provider_payload,
+pub(crate) use claudine::render::{
+    error_kind_presentation, pending_matches_tool_call, strip_progress_verb,
 };
+// Re-exported for the test suites' `use super::*`; the production render path
+// now handles error kinds inside `EventRenderer`.
 #[allow(unused_imports)]
-pub(crate) use tool_calls::{
-    pending_matches_tool_call, strip_progress_verb, tool_result_body, tool_result_output_text,
-};
+pub(crate) use claudine::stream::semantic::SemanticErrorKind;
+
+/// Section that a rendered [`claudine::render::RenderUnit`] is emitted into,
+/// keyed by its [`EventClass`]. Every status class routes to
+/// [`Section::ToolUseAndEvents`]; `Thinking` and `FinalMessage` are reserved
+/// for the streaming paths that stay sink-side (part 2) and are not produced
+/// by [`EventRenderer::render`] this round.
+pub(crate) fn section_for(class: EventClass) -> Section {
+    match class {
+        EventClass::Thinking => Section::Thinking,
+        EventClass::FinalMessage => Section::FinalStdout,
+        EventClass::ToolUse
+        | EventClass::McpCall
+        | EventClass::HookEvent
+        | EventClass::StepProgress
+        | EventClass::FileChange
+        | EventClass::PlanUpdate
+        | EventClass::SubagentActivity
+        | EventClass::Error => Section::ToolUseAndEvents,
+    }
+}
 
 /// Borrow-friendly terminal used for status rendering. Mirrors the helper in
 /// `wrap/mod.rs` so both sinks render against the same capabilities.
@@ -88,9 +103,9 @@ pub(crate) type SemanticDispatchFn =
 pub(crate) type StderrEmitFn = Box<dyn Fn(&str) + Send + Sync + 'static>;
 
 /// Function type for forwarding assistant text to an external
-/// [`super::exec::StreamTextRenderer`]-style renderer on stdout. This keeps
-/// the sink decoupled from the rendering machinery that lives inside
-/// `exec.rs` while still letting `OutputText` events flow through the
+/// `AssistantStream`-style renderer on stdout (the lib streaming component
+/// the exec layer drives). This keeps the sink decoupled from the rendering
+/// machinery while still letting `OutputText` events flow through the
 /// standard semantic pipeline.
 pub(crate) type OutputTextFn = Box<dyn FnMut(&str) + Send + 'static>;
 
@@ -108,19 +123,15 @@ pub(crate) type OutputTextFn = Box<dyn FnMut(&str) + Send + 'static>;
 pub(crate) type SemanticEventLoggerFn =
     Box<dyn Fn(&SemanticEvent, &DispatchEventMeta) + Send + Sync + 'static>;
 
-const TOOL_RESULT_BODY_MAX_LINES: usize = 10;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ToolResultBody {
-    pub(crate) text: String,
-    pub(crate) truncated: bool,
-}
-
 pub(crate) struct LiveSemanticSink {
     provider: Provider,
     env: EnvironmentContext,
     cwd: PathBuf,
-    home: Option<PathBuf>,
+    /// STDERR status renderer. Owns the render policy, the file-link cwd/home
+    /// context, the `SessionStart` auth source, and the `task_progress` dedup
+    /// buffer. The sink drives it per event and routes each returned
+    /// [`claudine::render::RenderUnit`] through [`Self::emit_section_line`].
+    renderer: EventRenderer,
     /// Immediate child PID captured after a successful provider spawn.
     ///
     /// `None` until the wrapper spawns the provider; the parser-builder
@@ -129,10 +140,8 @@ pub(crate) struct LiveSemanticSink {
     /// `env` and needs no separate slot here.
     agent_pid: Option<u32>,
     verbosity: Verbosity,
-    pending_task_progress: Option<String>,
     session_id: Option<String>,
     model: Option<String>,
-    claude_api_key_source: Option<String>,
     start_emitted: bool,
     summary_details: Arc<Mutex<StructuredSummaryDetails>>,
     context_extra: HashMap<String, Value>,
@@ -147,6 +156,29 @@ pub(crate) struct LiveSemanticSink {
     /// of the per-event render path avoids unnecessary work for long
     /// structured sessions.
     terminal: Terminal,
+    /// Buffers `Reasoning` deltas and flushes coalesced thinking blocks. A
+    /// [`claudine::render::StreamRenderable`]: token-level Claude fragments and
+    /// a single accumulated Kimi thought both render as one clean `▌ ` block by
+    /// construction. Drained at the top of `on_semantic_event` before any
+    /// non-`Reasoning` event and again in `Drop`. Owns its own `Terminal`
+    /// clone; the (test-only) `terminal` mutation does not re-target it.
+    ///
+    /// No idle-flush ticker (deliberate — unlike the exec-layer
+    /// [`AssistantStream`], which has [`super::super::exec::spawn_flush_if_idle_ticker`]).
+    /// The next-event boundary drain covers every real thinking→output/tool
+    /// transition and `Drop` covers stream end / timeout termination, so
+    /// buffered thinking is never lost. What a ticker would add is *mid-stall*
+    /// surfacing of the held buffer, and that buffer is bounded to ~one
+    /// in-progress sentence (this stream flushes per line and early-flushes past
+    /// 200 bytes on a sentence terminator) — versus the whole paragraph
+    /// `AssistantStream` can hold, which is what justifies *its* ticker. Wiring
+    /// one here would mean moving this field behind `Arc<Mutex<_>>`, threading
+    /// the handle out of sink construction (`policy.rs`) down to the ticker, and
+    /// adding a second concurrent stderr writer racing `emit_section_line`
+    /// against the no-double-blank-line contract — disproportionate for a
+    /// sub-sentence cosmetic. Revisit only if long silent mid-thought stalls
+    /// holding large partials become a real complaint.
+    thinking_stream: ThinkingStream,
     /// Section-spacing state machine shared with [`super::section::SectionStream`]
     /// and any post-stream trailer emitter obtained via [`Self::section_stream`].
     /// Encapsulates the dedup and section-transition logic so every writer
@@ -215,17 +247,16 @@ impl LiveSemanticSink {
         dispatch: SemanticDispatchFn,
         emit_stderr: StderrEmitFn,
     ) -> Self {
+        let terminal = wrap_terminal();
         Self {
             provider,
             env,
             cwd: cwd.to_path_buf(),
-            home: dirs::home_dir(),
+            renderer: EventRenderer::new(provider, cwd.to_path_buf(), dirs::home_dir()),
             agent_pid: None,
             verbosity,
-            pending_task_progress: None,
             session_id: None,
             model: None,
-            claude_api_key_source: None,
             start_emitted: false,
             summary_details,
             context_extra: HashMap::new(),
@@ -235,7 +266,8 @@ impl LiveSemanticSink {
             emit_event_log: None,
             live_metrics: progress::new_live_metrics(),
             stream_output: StreamOutput::new(),
-            terminal: wrap_terminal(),
+            thinking_stream: ThinkingStream::new(terminal.clone()),
+            terminal,
             section_tracker: Arc::new(Mutex::new(SectionTracker::new())),
             at_blank_row: false,
             stdout_trailing_newlines: 0,
@@ -301,17 +333,16 @@ impl LiveSemanticSink {
                 }
             });
 
+        let terminal = wrap_terminal();
         Self {
             provider,
             env,
             cwd: cwd.to_path_buf(),
-            home: dirs::home_dir(),
+            renderer: EventRenderer::new(provider, cwd.to_path_buf(), dirs::home_dir()),
             agent_pid: None,
             verbosity,
-            pending_task_progress: None,
             session_id: None,
             model: None,
-            claude_api_key_source: None,
             start_emitted: false,
             summary_details,
             context_extra: HashMap::new(),
@@ -321,7 +352,8 @@ impl LiveSemanticSink {
             emit_event_log: Some(event_logger),
             live_metrics: progress::new_live_metrics(),
             stream_output,
-            terminal: wrap_terminal(),
+            thinking_stream: ThinkingStream::new(terminal.clone()),
+            terminal,
             section_tracker: Arc::new(Mutex::new(SectionTracker::new())),
             at_blank_row: false,
             stdout_trailing_newlines: 0,
@@ -355,7 +387,7 @@ impl LiveSemanticSink {
 
     /// Wire a stdout-rendering callback that receives every
     /// [`SemanticEvent::OutputText`]. Typically this forwards into an
-    /// `exec.rs`-owned `StreamTextRenderer` so the markdown-boundary logic
+    /// exec-driven `AssistantStream` so the markdown-boundary logic
     /// stays in one place.
     pub(crate) fn with_output_text_sink(mut self, emit: OutputTextFn) -> Self {
         self.emit_output_text = Some(emit);
@@ -367,7 +399,7 @@ impl LiveSemanticSink {
     /// Used by the structured wrapper path when the sink has been wrapped in
     /// a [`claudine::stream::semantic::SharedSemanticSink`] ahead of thread
     /// spawning — the parser builder closure locks the inner sink and calls
-    /// this setter so the exec-layer `StreamTextRenderer` stays in the stdout
+    /// this setter so the exec-layer `AssistantStream` stays in the stdout
     /// thread while the sink itself is shared with the stderr log bridge.
     pub(crate) fn set_output_text_sink(&mut self, emit: OutputTextFn) {
         self.emit_output_text = Some(emit);
@@ -672,34 +704,18 @@ impl LiveSemanticSink {
 
 impl Drop for LiveSemanticSink {
     fn drop(&mut self) {
+        // Drain any buffered reasoning first so a lone trailing thought (a
+        // `Reasoning` event with no following non-`Reasoning` event to trigger
+        // the boundary flush) still renders at stream end.
+        self.flush_pending_thinking();
         // Any `task_progress` Info still buffered at stream end was never
         // matched against a follow-up tool call. Flush it so the
         // narration is not lost when the sink is dropped mid-turn.
-        if self.pending_task_progress.is_some() {
-            self.flush_pending_task_progress();
+        let units = self.renderer.flush(&self.terminal);
+        for unit in units {
+            self.emit_section_line(section_for(unit.class), &unit.text);
         }
     }
-}
-
-/// Escape user-controlled text so it can be safely interpolated into
-/// biscuit-terminal prose markup without being parsed as tags / tokens.
-///
-/// Biscuit-terminal's `Prose` parser recognises backslash escapes for `<`,
-/// `>`, `{`, and `\`; escaping those four characters is sufficient to
-/// prevent arbitrary user strings (commands, paths, URLs, raw JSON) from
-/// being interpreted as markup.
-fn escape_prose(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for ch in input.chars() {
-        match ch {
-            '\\' | '<' | '>' | '{' => {
-                out.push('\\');
-                out.push(ch);
-            }
-            other => out.push(other),
-        }
-    }
-    out
 }
 
 #[cfg(test)]

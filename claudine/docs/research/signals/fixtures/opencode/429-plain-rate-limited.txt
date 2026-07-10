@@ -1,0 +1,1 @@
+ERROR 2026-05-15T19:26:02 +100ms service=llm providerID=kimi-for-coding modelID=k2p6 error={"error":{"name":"AI_APICallError","statusCode":429,"message":"Too many requests"}}

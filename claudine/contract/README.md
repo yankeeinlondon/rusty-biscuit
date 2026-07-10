@@ -100,7 +100,6 @@ tool-free for untrusted input. Everything else is reported as
 | Kimi Code | `kimi` | stream-json | — | Rejected — not yet verified tool-free for untrusted input in v1 |
 | OpenCode | `opencode` | run / stream-json | — | Rejected — not yet verified tool-free for untrusted input in v1 |
 | Qwen Code | `qwen` | stream-json | — | Rejected — not yet verified tool-free for untrusted input in v1 |
-| Roo Code | `roo` | stream-json | — | Rejected — not yet verified tool-free for untrusted input in v1 |
 
 The matrix is also available programmatically via
 [`claudine_contract::support_matrix`]. Widening the enabled set is a

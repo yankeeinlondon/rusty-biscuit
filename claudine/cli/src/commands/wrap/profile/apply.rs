@@ -161,6 +161,104 @@ pub(super) fn apply_output_format(
 }
 
 /// Catalog-driven default for
+/// [`WrapperProfile::apply_structured_stream`](super::WrapperProfile::apply_structured_stream).
+///
+/// Keyed on the provider's `OutputFormat::Stream` record: the record's
+/// `companion_flags` are pushed first, then its selector. `FlagValue`
+/// pushes are unconditional — structured-stream setup only runs when the
+/// user did not explicitly request a native output format, and this
+/// reproduces the retired `push_stream_json_flags` overrides
+/// byte-for-byte. `Flag`/`TransportFlag` selectors keep the `has_flag`
+/// idempotence guard the retired Codex/Kimi overrides carried.
+/// Providers without a `Stream` record are a no-op.
+pub(super) fn apply_structured_stream(provider: Provider, args: &mut Vec<String>) {
+    let Some(support) = provider_info(provider)
+        .output_formats
+        .iter()
+        .find(|s| s.format == claudine::provider::OutputFormat::Stream)
+    else {
+        return;
+    };
+    for flag in support.companion_flags {
+        args.push((*flag).to_string());
+    }
+    match support.selector {
+        OutputFormatSelector::Flag { flag } | OutputFormatSelector::TransportFlag { flag } => {
+            if !has_flag(args, flag) {
+                args.push(flag.to_string());
+            }
+        }
+        OutputFormatSelector::FlagValue { flag } => {
+            args.push(flag.to_string());
+            args.push(support.native_name.to_string());
+        }
+        OutputFormatSelector::Default | OutputFormatSelector::Positional { .. } => {}
+    }
+}
+
+/// Catalog-driven default for
+/// [`WrapperProfile::apply_model`](super::WrapperProfile::apply_model).
+///
+/// Reads the provider's `model_cli_flag` and delegates to
+/// [`apply_model_flag`], so the argv delivery is authoritative against the
+/// generated catalog rather than a hard-coded `--model`.
+pub(super) fn apply_model(
+    provider: Provider,
+    args: &mut Vec<String>,
+    env_overrides: &mut Vec<(String, String)>,
+    model: &str,
+) -> Option<String> {
+    apply_model_flag(
+        args,
+        env_overrides,
+        model,
+        provider_info(provider).model_cli_flag,
+    )
+}
+
+/// Core of the default `apply_model`: map the universal `--model <value>` to
+/// argv using `flag` (the provider's catalog `model_cli_flag`) and always
+/// export the generic `MODEL` env var.
+///
+/// The `MODEL` override is Claudine's wrapper contract (composition templates,
+/// hook dispatch, reporting) and is exported regardless of how — or whether —
+/// the provider itself reads the model from argv.
+///
+/// ## Returns
+///
+/// `None` when the model was mapped (or the flag was already present).
+/// `Some(warning)` when `flag` is `None`: the provider exposes no
+/// model-selection flag, so the universal `--model` could not be applied to
+/// argv. A provider whose model delivery is not a CLI flag must override
+/// `apply_model` (as Goose does via `GOOSE_MODEL`).
+pub(super) fn apply_model_flag(
+    args: &mut Vec<String>,
+    env_overrides: &mut Vec<(String, String)>,
+    model: &str,
+    flag: Option<&str>,
+) -> Option<String> {
+    env_overrides.push(("MODEL".to_string(), model.to_string()));
+    match flag {
+        Some(flag) => {
+            // Skip when the user already passed the flag (or the conventional
+            // short alias `-m`) in passthrough args, so it is never emitted
+            // twice — matching the retired per-provider dedup overrides.
+            if !args.iter().any(|a| a == flag || a == "-m") {
+                args.push(flag.to_string());
+                args.push(model.to_string());
+            }
+            None
+        }
+        None => Some(
+            "no model-selection flag is mapped for this provider; the --model value \
+             could not be applied to argv (a provider with non-flag model delivery \
+             must override apply_model)"
+                .to_string(),
+        ),
+    }
+}
+
+/// Catalog-driven default for
 /// [`WrapperProfile::apply_system_prompt`](super::WrapperProfile::apply_system_prompt).
 pub(super) fn apply_system_prompt(
     provider: Provider,
@@ -181,4 +279,58 @@ pub(super) fn apply_system_prompt(
             },
         )],
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_model_flag;
+
+    #[test]
+    fn some_flag_pushes_flag_value_and_model_env() {
+        let mut args: Vec<String> = Vec::new();
+        let mut env: Vec<(String, String)> = Vec::new();
+
+        let warning = apply_model_flag(&mut args, &mut env, "opus", Some("--model"));
+
+        assert!(warning.is_none());
+        assert_eq!(args, vec!["--model".to_string(), "opus".to_string()]);
+        assert!(env.contains(&("MODEL".to_string(), "opus".to_string())));
+    }
+
+    #[test]
+    fn some_flag_dedups_existing_long_flag_but_still_sets_env() {
+        let mut args: Vec<String> = vec!["--model".to_string(), "sonnet".to_string()];
+        let mut env: Vec<(String, String)> = Vec::new();
+
+        let warning = apply_model_flag(&mut args, &mut env, "opus", Some("--model"));
+
+        assert!(warning.is_none());
+        // Existing --model is untouched; no second flag is pushed.
+        assert_eq!(args, vec!["--model".to_string(), "sonnet".to_string()]);
+        assert!(env.contains(&("MODEL".to_string(), "opus".to_string())));
+    }
+
+    #[test]
+    fn some_flag_dedups_short_alias_but_still_sets_env() {
+        let mut args: Vec<String> = vec!["-m".to_string(), "sonnet".to_string()];
+        let mut env: Vec<(String, String)> = Vec::new();
+
+        let warning = apply_model_flag(&mut args, &mut env, "opus", Some("--model"));
+
+        assert!(warning.is_none());
+        assert_eq!(args, vec!["-m".to_string(), "sonnet".to_string()]);
+        assert!(env.contains(&("MODEL".to_string(), "opus".to_string())));
+    }
+
+    #[test]
+    fn none_flag_warns_pushes_no_flag_but_still_sets_env() {
+        let mut args: Vec<String> = Vec::new();
+        let mut env: Vec<(String, String)> = Vec::new();
+
+        let warning = apply_model_flag(&mut args, &mut env, "opus", None);
+
+        assert!(warning.is_some());
+        assert!(args.is_empty());
+        assert!(env.contains(&("MODEL".to_string(), "opus".to_string())));
+    }
 }

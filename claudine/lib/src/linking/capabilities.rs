@@ -414,7 +414,7 @@ pub fn capabilities_for(provider: Provider) -> ProviderCapabilities {
 }
 
 /// All providers in display order.
-pub const ALL_PROVIDERS: [Provider; 8] = PROVIDERS_DISPLAY_ORDER;
+pub const ALL_PROVIDERS: [Provider; crate::provider::PROVIDER_COUNT] = PROVIDERS_DISPLAY_ORDER;
 
 #[cfg(test)]
 mod tests {
@@ -473,13 +473,6 @@ mod tests {
     #[test]
     fn qwencode_commands_are_markdown() {
         let caps = capabilities_for(Provider::QwenCode);
-        assert_eq!(caps.commands.level, SupportLevel::Full);
-        assert_eq!(caps.commands.format, Some(ResourceFormat::Markdown));
-    }
-
-    #[test]
-    fn roocode_commands_are_markdown() {
-        let caps = capabilities_for(Provider::RooCode);
         assert_eq!(caps.commands.level, SupportLevel::Full);
         assert_eq!(caps.commands.format, Some(ResourceFormat::Markdown));
     }

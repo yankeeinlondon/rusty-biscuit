@@ -31,7 +31,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Pure(super::last_fn) },
-    FunctionRegistration { canonical: "has_key", aliases: &["haskey"], catalog_order: 48, descriptors: &[
+    FunctionRegistration { canonical: "has_key", aliases: &["haskey"], catalog_order: 51, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "has_key(obj, key)",
@@ -45,7 +45,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Pure(super::has_key_fn) },
-    FunctionRegistration { canonical: "contains", aliases: &[], catalog_order: 49, descriptors: &[
+    FunctionRegistration { canonical: "contains", aliases: &[], catalog_order: 52, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "contains(haystack, needle)",
@@ -59,7 +59,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Pure(super::contains_fn) },
-    FunctionRegistration { canonical: "length", aliases: &[], catalog_order: 50, descriptors: &[
+    FunctionRegistration { canonical: "length", aliases: &[], catalog_order: 53, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "length(x)",
@@ -73,7 +73,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Pure(super::length_fn) },
-    FunctionRegistration { canonical: "number", aliases: &[], catalog_order: 51, descriptors: &[
+    FunctionRegistration { canonical: "number", aliases: &[], catalog_order: 54, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "number(x, [default])",
@@ -87,7 +87,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Pure(super::number_fn) },
-    FunctionRegistration { canonical: "as_line_separated", aliases: &["aslineseparated"], catalog_order: 79, descriptors: &[
+    FunctionRegistration { canonical: "as_line_separated", aliases: &["aslineseparated"], catalog_order: 82, descriptors: &[
         ExpressionFunctionDescriptor {
                 signature: "as_line_separated(list)",
                 parameters: P_LIST,
@@ -98,7 +98,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
                 example: Some(Example { invocation: "as_line_separated(items)", result: "1\n2\n3", verification: ExampleVerification::DisplayOnly("multi-line output; verified via example file") }),
             },
     ], handler: FunctionHandler::Pure(super::as_line_separated) },
-    FunctionRegistration { canonical: "as_csv", aliases: &["ascsv"], catalog_order: 80, descriptors: &[
+    FunctionRegistration { canonical: "as_csv", aliases: &["ascsv"], catalog_order: 83, descriptors: &[
         ExpressionFunctionDescriptor {
                 signature: "as_csv(list)",
                 parameters: P_LIST,
@@ -109,7 +109,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
                 example: Some(Example { invocation: "as_csv(items)", result: "1, 2, 3", verification: ExampleVerification::Executable }),
             },
     ], handler: FunctionHandler::Pure(super::as_csv) },
-    FunctionRegistration { canonical: "as_tsv", aliases: &["astsv"], catalog_order: 81, descriptors: &[
+    FunctionRegistration { canonical: "as_tsv", aliases: &["astsv"], catalog_order: 84, descriptors: &[
         ExpressionFunctionDescriptor {
                 signature: "as_tsv(list)",
                 parameters: P_LIST,
@@ -120,7 +120,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
                 example: Some(Example { invocation: "as_tsv(items)", result: "1\t2\t3", verification: ExampleVerification::DisplayOnly("tab-delimited output; verified via example file") }),
             },
     ], handler: FunctionHandler::Pure(super::as_tsv) },
-    FunctionRegistration { canonical: "as_space_separated", aliases: &["asspaceseparated"], catalog_order: 82, descriptors: &[
+    FunctionRegistration { canonical: "as_space_separated", aliases: &["asspaceseparated"], catalog_order: 85, descriptors: &[
         ExpressionFunctionDescriptor {
                 signature: "as_space_separated(list)",
                 parameters: P_LIST,
@@ -131,7 +131,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
                 example: Some(Example { invocation: "as_space_separated(items)", result: "1 2 3", verification: ExampleVerification::Executable }),
             },
     ], handler: FunctionHandler::Pure(super::as_space_separated) },
-    FunctionRegistration { canonical: "as_unordered_list", aliases: &["asunorderedlist"], catalog_order: 83, descriptors: &[
+    FunctionRegistration { canonical: "as_unordered_list", aliases: &["asunorderedlist"], catalog_order: 86, descriptors: &[
         ExpressionFunctionDescriptor {
                 signature: "as_unordered_list(list)",
                 parameters: P_LIST,
@@ -142,7 +142,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
                 example: Some(Example { invocation: "as_unordered_list(items)", result: "- 1\n- 2\n- 3", verification: ExampleVerification::DisplayOnly("multi-line Markdown list; verified via example file") }),
             },
     ], handler: FunctionHandler::Pure(super::as_unordered_list) },
-    FunctionRegistration { canonical: "as_ordered_list", aliases: &["asorderedlist"], catalog_order: 84, descriptors: &[
+    FunctionRegistration { canonical: "as_ordered_list", aliases: &["asorderedlist"], catalog_order: 87, descriptors: &[
         ExpressionFunctionDescriptor {
                 signature: "as_ordered_list(list)",
                 parameters: P_LIST,

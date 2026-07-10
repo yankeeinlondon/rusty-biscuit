@@ -60,7 +60,7 @@ Each provider file (e.g., `openai.rs`, `anthropic.rs`) contains:
 ### Metadata Lookup Table
 
 The generator also produces `metadata_generated.rs` containing a static lookup table
-with rich model metadata fetched from the [Parsera LLM Specs API](https://api.parsera.org/v1/llm-specs).
+with rich model metadata fetched from models.dev and provider-native APIs.
 
 Metadata includes:
 
@@ -70,56 +70,68 @@ Metadata includes:
 - `max_output_tokens` - Maximum output generation length
 - `modalities` - Input/output modalities (text, image, audio, video)
 - `capabilities` - Features like "function_calling", "structured_output"
+- `pricing` - Per-token USD pricing where available
+- `knowledge_cutoff` - Source knowledge cutoff date where available
+- `release_date` - Source release-date string where available
 
-### Metadata Sourcing from Parsera
+### Metadata Sourcing from models.dev
 
-The generator fetches model specifications from [Parsera's LLM Specs API](https://api.parsera.org/v1/llm-specs)
-at build time. This API is maintained by [Parsera](https://parsera.org) (the web scraping company) in
-partnership with [Carmine Paolino](https://paolino.me/standard-api-llm-capabilities-pricing-live/).
-They use automated scraping to keep model metadata current by pulling from provider documentation.
+The generator fetches model specifications from [models.dev](https://models.dev)
+at generation time and merges them with provider-native metadata.
 
-- **API endpoint**: https://api.parsera.org/v1/llm-specs
-- **Web comparison tool**: https://llmspecs.parsera.org/
-- **GitHub**: [parsera-labs](https://github.com/parsera-labs)
+- **API endpoint**: https://models.dev/api.json
+- **Provider buckets**: direct provider keys plus local mappings such as `gemini -> google`, `x-ai -> xai`, and `z-ai -> zai`
+- **Pricing units**: models.dev costs are per million tokens and are converted to per-token USD by dividing by `1e6`
 
 **Fetch Strategy:**
 
-1. Parsera specs are fetched once at startup, before processing any providers
+1. models.dev data is fetched once at startup, before processing any providers
 2. On failure, the generator waits 2 seconds and retries once
-3. If both attempts fail, generation continues with empty metadata (graceful degradation)
+3. If both attempts fail, generation exits with an error
 4. Request timeout is 30 seconds
+5. The response must pass anti-sunset guards: at least 50 provider buckets and non-empty roster-critical buckets
 
 **Model ID Matching:**
 
-Since provider APIs return model IDs that may differ from Parsera's canonical IDs,
-we use a multi-step matching strategy:
+Since provider APIs return model IDs that may differ from models.dev IDs,
+matching is scoped to the mapped provider bucket:
 
-1. **Exact match** - Direct lookup by model ID (e.g., `gpt-4o` → `gpt-4o`)
-2. **Date suffix stripping** - Remove `-YYYYMMDD` suffixes common in versioned models
-   (e.g., `claude-3-5-haiku-20241022` → `claude-3-5-haiku`)
-3. **Family fallback** - Match against Parsera's `family` field for model variants
-   (e.g., looking up `claude-3-5-sonnet` finds a model with `family: "claude-3-5-sonnet"`)
+1. **Exact match** - Direct lookup by provider-local model ID
+2. **Identity-aware match** - Parse both sides with `ModelIdentity::parse` and compare identity keys
+3. **Tie-breaks** - Prefer exact date-pin agreement, then the unpinned row; ambiguous matches are refused
 
-**Example Parsera Response:**
+**Example models.dev Response Shape:**
 
 ```json
 {
-  "id": "gpt-4o-mini",
-  "name": "GPT-4o mini",
-  "provider": "openai",
-  "family": "gpt-4o-mini",
-  "context_window": 128000,
-  "max_output_tokens": 16384,
-  "modalities": {
-    "input": ["text", "image"],
-    "output": ["text"]
+  "openai": {
+    "models": {
+      "gpt-4o-mini": {
+        "name": "GPT-4o mini",
+        "family": "gpt-4o-mini",
+        "limit": {
+          "context": 128000,
+          "output": 16384
+        },
+        "modalities": {
+          "input": ["text", "image"],
+          "output": ["text"]
+        },
+        "cost": {
+          "input": 0.15,
+          "output": 0.6
+        },
+        "tool_call": true,
+        "structured_output": true
+      }
+    }
   },
-  "capabilities": ["function_calling", "structured_output"]
+  "...": {}
 }
 ```
 
-**Note:** Parsera does not provide `default_temperature` - that field is only available
-from Mistral's native API.
+**Note:** `created` stays provider-native. models.dev `release_date` is stored
+separately and serialized into the v2 model-catalog artifact when present.
 
 ## Runtime API
 
@@ -150,5 +162,5 @@ let has_fc = model.has_capability("function_calling");
 - Local providers (Ollama) are skipped by default
 - Failed providers are logged but don't stop the generation
 - Files are written atomically (temp file + rename) to prevent corruption
-- Parsera API failures are handled gracefully (metadata will be empty)
-- Model ID matching uses exact match, date-suffix stripping, and family fallback
+- models.dev source degradation fails generation loudly
+- Model ID matching uses exact provider-local match followed by identity-aware matching

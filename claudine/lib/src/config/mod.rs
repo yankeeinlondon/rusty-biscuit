@@ -1,17 +1,19 @@
 pub mod atomic;
+pub(crate) mod antigravity;
 pub(crate) mod backup;
 pub(crate) mod claude;
 pub mod claudine_config;
 pub(crate) mod codex;
 pub(crate) mod gemini;
 pub(crate) mod goose;
+pub(crate) mod kilo;
 pub(crate) mod kimicode;
 pub mod merge;
 pub mod messaging_block;
 pub mod migration;
 pub(crate) mod opencode;
+pub(crate) mod pi;
 pub(crate) mod qwen;
-pub(crate) mod roo;
 mod trait_def;
 pub mod tts;
 
@@ -19,20 +21,22 @@ pub use trait_def::{AgentConfigurator, ProviderHookPlan, RegistrationResult, Ski
 
 // Re-exports for convenient access and backward compatibility
 pub use claudine_config::{
-    ClaudineConfig, DefaultSounds, DetailedModelOverride, ModelOverrideMode, ProviderModelOverride,
-    RepoOverrideConfig,
+    ClaudineConfig, DefaultSounds, DetailedModelOverride, ModelOverrideEntry, ModelOverrideMode,
+    ModelOverrideValue, ProviderModelOverride, RepoOverrideConfig,
 };
 pub use messaging_block::{ClaudineMessengerConfig, MessengerProviderConfig};
 pub use tts::{Gender, TtsConfigSettings, TtsValue, VoiceSelection};
 
+pub(crate) use antigravity::AntigravityConfigurator;
 pub(crate) use claude::ClaudeConfigurator;
 pub(crate) use codex::CodexConfigurator;
 pub(crate) use gemini::GeminiConfigurator;
 pub(crate) use goose::GooseConfigurator;
+pub(crate) use kilo::KiloConfigurator;
 pub(crate) use kimicode::KimiCodeConfigurator;
 pub(crate) use opencode::OpenCodeConfigurator;
+pub(crate) use pi::PiConfigurator;
 pub(crate) use qwen::QwenConfigurator;
-pub(crate) use roo::RooConfigurator;
 
 use std::path::PathBuf;
 
@@ -156,9 +160,9 @@ mod tests {
     }
 
     #[test]
-    fn discover_agents_full_returns_all_eight() {
+    fn discover_agents_full_returns_all_providers() {
         let agents = discover_agents_full();
-        assert_eq!(agents.len(), 8);
+        assert_eq!(agents.len(), 10);
 
         // Check all providers are present
         let providers: Vec<_> = agents.iter().map(|a| a.provider).collect();
@@ -169,7 +173,9 @@ mod tests {
         assert!(providers.contains(&Provider::KimiCode));
         assert!(providers.contains(&Provider::OpenCode));
         assert!(providers.contains(&Provider::QwenCode));
-        assert!(providers.contains(&Provider::RooCode));
+        assert!(providers.contains(&Provider::Kilo));
+        assert!(providers.contains(&Provider::Pi));
+        assert!(providers.contains(&Provider::Antigravity));
     }
 
     #[test]

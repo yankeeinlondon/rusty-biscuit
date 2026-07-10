@@ -28,6 +28,9 @@ fn wrapper_command(
         Commands::Qwen(args) => Ok((Provider::QwenCode, args)),
         Commands::Opencode(args) => Ok((Provider::OpenCode, args)),
         Commands::Goose(args) => Ok((Provider::Goose, args)),
+        Commands::Kilo(args) => Ok((Provider::Kilo, args)),
+        Commands::Pi(args) => Ok((Provider::Pi, args)),
+        Commands::Antigravity(args) => Ok((Provider::Antigravity, args)),
         other => Err(Box::new(other)),
     }
 }
@@ -332,6 +335,7 @@ async fn async_main(
         Commands::Agents(args) => commands::agents::run(args, cli.verbose > 0).await,
         Commands::SlashCommands(args) => commands::slash_commands::run(args, cli.verbose > 0).await,
         Commands::Providers(args) => commands::providers::run(args),
+        Commands::Signals(args) => commands::signals::run(args),
         Commands::Logs(args) => commands::logs::run(args).await,
         Commands::Uninstall(args) => commands::uninstall::run(args),
         Commands::Mcp(args) => commands::mcp::run(args),
@@ -341,7 +345,10 @@ async fn async_main(
         | Commands::Kimi(_)
         | Commands::Qwen(_)
         | Commands::Opencode(_)
-        | Commands::Goose(_) => unreachable!("wrapper commands are handled before this match"),
+        | Commands::Goose(_)
+        | Commands::Kilo(_)
+        | Commands::Pi(_)
+        | Commands::Antigravity(_) => unreachable!("wrapper commands are handled before this match"),
         Commands::Compose(args) => {
             commands::compose::run_compose(args, cli.verbose, startup_timings)
         }

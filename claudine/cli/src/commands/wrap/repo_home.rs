@@ -153,7 +153,6 @@ impl RepoHomeManager {
             ".kimi" => vec!["skills", "agents"],
             ".opencode" => vec!["skills"],
             ".qwen" => vec!["skills", "commands"],
-            ".roo" => vec!["skills", "commands", "hooks"],
             _ => vec!["skills", "commands", "agents", "hooks"],
         }
     }

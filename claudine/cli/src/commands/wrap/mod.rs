@@ -17,6 +17,7 @@ pub(crate) mod selection_ui;
 pub(crate) mod sequence;
 
 // New split modules
+pub(crate) mod catalog_drift;
 pub(crate) mod flags;
 pub(crate) mod harness_orch;
 pub(crate) mod inline;
@@ -59,7 +60,7 @@ pub(crate) use resume::{
 use wrapper_stages::{
     apply_opencode_yolo_config_overlay, detect_wrapper_harness, emit_preflight_preamble,
     parse_cli_timeouts, prepare_stream_and_prompt, resolve_and_apply_system_prompt,
-    resolve_opencode_model, run_execution_stage, validate_timeout_constraints,
+    run_execution_stage, validate_timeout_constraints,
 };
 
 use biscuit_terminal::terminal::Terminal;
@@ -383,43 +384,32 @@ fn run_provider_wrapper_inner(
         profile.apply_non_interactive_flags(&mut child_args)?;
     }
 
-    // OpenCode model resolution (replaces apply_non_interactive_defaults +
-    // validate_non_interactive_requirements).
+    // Model resolution, universal --model, and non-interactive validation —
+    // shared prep stage (see `commands::exec_prep`). Only the no-model
+    // presentation stays wrapper-specific: render the agent error report and
+    // exit instead of propagating.
+    let has_model_env = env_overrides.iter().any(|(k, _)| k == "MODEL");
     let opencode_model_source: Option<profile::OpenCodeModelSource> =
-        if provider == Provider::OpenCode {
-            resolve_opencode_model(
-                provider,
-                profile,
-                &mut child_args,
-                &mut env_overrides,
-                args.model.as_deref(),
-                non_interactive_requested,
-            )?
-        } else {
-            None
+        match crate::commands::exec_prep::resolve_model_and_validate(
+            provider,
+            profile,
+            &mut child_args,
+            args.model.as_deref(),
+            non_interactive_requested,
+            has_model_env,
+            &mut |key, value| env_overrides.push((key, value)),
+            &mut |warn| deferred_warnings.push(warn),
+        ) {
+            Ok(source) => source,
+            Err(crate::commands::exec_prep::ModelStageError::NoOpenCodeModel(_)) => {
+                let term = wrap_terminal();
+                let report =
+                    crate::output::error_report::AgentErrorReport::no_model_provided(provider);
+                report.render(&term);
+                std::process::exit(1);
+            }
+            Err(err) => return Err(err.into_report()),
         };
-
-    // Universal --model flag (non-OpenCode providers, and OpenCode when
-    // the user passed --model explicitly but we already handled it above).
-    if provider != Provider::OpenCode {
-        if let Some(ref model) = args.model
-            && let Some(warn) = profile.apply_model(&mut child_args, &mut env_overrides, model)
-        {
-            deferred_warnings.push(warn);
-        }
-    } else if let Some(ref model) = args.model
-        && !non_interactive_requested
-    {
-        // Interactive OpenCode with --model: use the standard apply_model path.
-        if let Some(warn) = profile.apply_model(&mut child_args, &mut env_overrides, model) {
-            deferred_warnings.push(warn);
-        }
-    }
-
-    // Non-OpenCode providers still use the trait-based validation.
-    if provider != Provider::OpenCode && non_interactive_requested {
-        profile.validate_non_interactive_requirements(&child_args)?;
-    }
 
     // Universal --output flag
     if let Some(ref output_str) = args.output {

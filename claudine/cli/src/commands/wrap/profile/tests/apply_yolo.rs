@@ -49,7 +49,9 @@ fn qwen_reject_direct_yolo_catches_approval_mode_yolo() {
 
 #[test]
 fn opencode_noise_prefixes_cover_captured_symptoms() {
-    let noise = opencode_default_tui_noise_prefixes();
+    let noise = provider_info(Provider::OpenCode)
+        .display_policy
+        .stderr_noise_prefixes;
 
     // Representative lines taken verbatim from
     // claudine/claudine-output/opencode.err (2026-04-14 capture).
@@ -422,12 +424,7 @@ fn direct_provider_yolo_flag_is_rejected_with_guidance() {
 
 /// Documented "no wrapper" providers. Must stay in lock-step with the
 /// `None` slots in [`WRAPPER_REGISTRY`].
-const NO_WRAPPER: &[Provider] = &[Provider::RooCode];
-
-#[test]
-fn roo_code_has_no_wrapper_profile() {
-    assert!(profile_for_provider(Provider::RooCode).is_none());
-}
+const NO_WRAPPER: &[Provider] = &[];
 
 /// Phase 3 invariant: the array-backed [`WRAPPER_REGISTRY`] either
 /// returns a wrapper whose `provider()` matches the lookup key, or

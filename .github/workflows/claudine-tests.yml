@@ -53,6 +53,9 @@ jobs:
           - name: Claudine CLI
             recipe: test-cli
             cache-key: claudine-cli
+          - name: Claudine gen + signals
+            recipe: test-gen
+            cache-key: claudine-gen
     steps:
       - name: Checkout
         uses: actions/checkout@v4

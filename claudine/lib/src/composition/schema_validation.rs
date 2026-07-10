@@ -1028,7 +1028,7 @@ fn type_label_for_atom(atom: &PropertyAtom) -> String {
         }
         TypeExpr::Primitive(ty) => format!("{base}{suffix}", base = ty.as_keyword()),
         TypeExpr::InlineObject(_) => format!("object{suffix}"),
-        TypeExpr::Imported { name, reference } => format!("{name}@{reference}{suffix}"),
+        TypeExpr::Imported { name, reference } => format!("{name}{suffix}@{reference}"),
     }
 }
 

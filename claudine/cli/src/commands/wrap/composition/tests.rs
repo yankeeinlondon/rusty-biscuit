@@ -181,12 +181,12 @@ fn catalog_initialized_with_config_overrides() {
     let catalog =
         claudine::model_catalog::ModelCatalogService::with_overrides(config.model_overrides);
 
-    // Static catalog model should still be valid (additive mode)
-    assert!(catalog.is_valid(Provider::Codex, "o3-mini"));
+    // Baseline (expected-offering) model should still be valid (additive mode)
+    assert!(catalog.is_valid(Provider::Codex, "gpt-5.5"));
     // Override model should also be valid
     assert!(catalog.is_valid(Provider::Codex, "gpt-5"));
-    // Non-overridden provider should use static catalog
-    assert!(catalog.is_valid(Provider::Claude, "claude-3-7-sonnet-20250219"));
+    // Non-overridden provider should use its baseline
+    assert!(catalog.is_valid(Provider::Claude, "claude-opus-4-8"));
 }
 
 /// RAII guard that restores the prior value of an env var on drop. Used
@@ -404,7 +404,7 @@ fn opencode_model_env_skips_refresh_for_frontmatter_model() {
     refresh_for_model_validation(&catalog, Provider::OpenCode, &hints, Some(&probe_reason));
 
     // No opencode models subprocess should have been attempted
-    assert_eq!(catalog.opencode_fetch_attempts(), 0);
+    assert_eq!(catalog.shell_command_fetch_attempts(), 0);
 }
 
 #[test]
@@ -424,7 +424,7 @@ fn generic_model_env_skips_refresh_for_frontmatter_model() {
 
     refresh_for_model_validation(&catalog, Provider::OpenCode, &hints, Some(&probe_reason));
 
-    assert_eq!(catalog.opencode_fetch_attempts(), 0);
+    assert_eq!(catalog.shell_command_fetch_attempts(), 0);
 }
 
 #[test]
@@ -473,9 +473,20 @@ fn frontmatter_model_without_env_override_refreshes_dynamic_provider() {
 
     refresh_for_model_validation(&catalog, Provider::OpenCode, &hints, Some(&probe_reason));
 
-    // Refresh should have been attempted (will fail gracefully since
-    // opencode is not on PATH, but the attempt counter increments).
-    assert_eq!(catalog.opencode_fetch_attempts(), 1);
+    // The refresh detaches to a background thread even on a cold cache
+    // (validation is baseline-fed and never waits on the subprocess), so
+    // poll for the attempt instead of asserting synchronously. The
+    // attempt itself fails gracefully since opencode is not on PATH, but
+    // the counter still increments.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while catalog.shell_command_fetch_attempts() == 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "background refresh never attempted the shell-command fetch"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(catalog.shell_command_fetch_attempts(), 1);
 }
 
 // ------------------------------------------------------------------------
@@ -1721,5 +1732,68 @@ mod opencode_yolo_assembly {
         assert_eq!(config["theme"], "dark");
         assert_eq!(config["mcp"], serde_json::json!({ "srv": {} }));
         assert_eq!(config["permission"]["*"], "allow");
+    }
+}
+
+mod projected_rate_limit_bridge {
+    use claudine::stream::summary::RateLimitInfo;
+
+    use super::IterationSummarySignals;
+
+    fn parser_signals() -> IterationSummarySignals {
+        IterationSummarySignals {
+            rate_limit: Some(RateLimitInfo {
+                is_throttled: Some(true),
+                retry_after_ms: None,
+                message: Some("rendered by parser".into()),
+                reset_at: None,
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// No projection → the parser value survives untouched (the migration
+    /// bridge's fallback).
+    #[test]
+    fn none_projection_keeps_parser_value() {
+        let mut signals = parser_signals();
+        signals.apply_projected_rate_limit(None);
+        assert_eq!(
+            signals.rate_limit.unwrap().message.as_deref(),
+            Some("rendered by parser")
+        );
+    }
+
+    /// Projected fields win where present; parser fields fill the gaps —
+    /// notably the parser's rendered message when the projection carries
+    /// no raw provider message.
+    #[test]
+    fn projected_fields_win_and_parser_fills_gaps() {
+        let mut signals = parser_signals();
+        signals.apply_projected_rate_limit(Some(RateLimitInfo {
+            is_throttled: Some(true),
+            retry_after_ms: Some(5_000),
+            message: None,
+            reset_at: None,
+        }));
+        let merged = signals.rate_limit.unwrap();
+        assert_eq!(merged.is_throttled, Some(true));
+        assert_eq!(merged.retry_after_ms, Some(5_000));
+        assert_eq!(merged.message.as_deref(), Some("rendered by parser"));
+    }
+
+    /// A projection with no parser counterpart installs itself wholesale.
+    #[test]
+    fn projection_without_parser_value_installs_itself() {
+        let mut signals = IterationSummarySignals::default();
+        signals.apply_projected_rate_limit(Some(RateLimitInfo {
+            is_throttled: Some(true),
+            retry_after_ms: None,
+            message: Some("raw provider message".into()),
+            reset_at: None,
+        }));
+        let merged = signals.rate_limit.unwrap();
+        assert_eq!(merged.is_throttled, Some(true));
+        assert_eq!(merged.message.as_deref(), Some("raw provider message"));
     }
 }

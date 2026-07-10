@@ -1,468 +1,497 @@
 ---
+$schema: ./_schema.yaml
+created: 2026-07-02
+last_updated: 2026-07-03
+agent: open_code
+model: kimi-for-coding/k2p7
 homepage: https://github.com/openai/codex
 docs: https://developers.openai.com/codex/cli/
-hooks: https://developers.openai.com/codex/config-advanced/
+hooks_docs: https://developers.openai.com/codex/hooks
+hooks:
+  - native_event: SessionStart
+    claudine_event: start
+    timing: pre
+    blocking: false
+    payload_schema: "Common stdin JSON (session_id, transcript_path, cwd, hook_event_name, model, permission_mode) plus source (startup|resume|clear|compact)."
+    return_contract: "Exit 0 continues; stdout plain text or JSON hookSpecificOutput.additionalContext adds developer context; common output fields (continue/stopReason/systemMessage/suppressOutput) supported. Exit 2 shows stderr to user only; session still starts."
+    notes: "Matcher applies to source. Fires at thread scope, including on every compaction (source=compact). Local ~/.codex/config.toml had no hooks and no ~/.codex/hooks.json existed on the research host."
+  - native_event: UserPromptSubmit
+    claudine_event: prompt
+    timing: pre
+    blocking: true
+    payload_schema: "Common stdin JSON plus turn_id and prompt."
+    return_contract: "Exit 0 continues; stdout plain text or JSON hookSpecificOutput.additionalContext adds developer context; top-level {decision: 'block', reason} blocks prompt submission. Exit 2 with stderr blocks."
+    notes: "Configured matcher is ignored."
+  - native_event: PreToolUse
+    claudine_event: tool_call
+    timing: pre
+    blocking: true
+    payload_schema: "Common stdin JSON plus turn_id, tool_name, tool_use_id, and tool_input."
+    return_contract: "Exit 0 continues unless JSON denies/blocks; hookSpecificOutput.permissionDecision=deny blocks; permissionDecision=allow with updatedInput can rewrite supported tool input; legacy top-level {decision: 'block', reason} or exit 2 with stderr blocks."
+    notes: "Matcher applies to tool_name and aliases (Bash, apply_patch, Edit, Write, MCP names). Coverage is explicitly incomplete: unified_exec shell paths, WebSearch, and arbitrary non-shell/non-MCP tools may bypass interception."
+  - native_event: PermissionRequest
+    claudine_event: permission
+    timing: pre
+    blocking: true
+    payload_schema: "Common stdin JSON plus turn_id, tool_name, tool_input, and optional tool_input.description."
+    return_contract: "JSON hookSpecificOutput.decision.behavior allow approves; behavior deny rejects with message; no decision falls through to normal approval flow; any deny wins across matching hooks."
+    notes: "Runs only when Codex is about to ask for approval. updatedInput, updatedPermissions, and interrupt are reserved/fail-closed today."
+  - native_event: PostToolUse
+    claudine_event: tool_result
+    timing: post
+    blocking: false
+    payload_schema: "Common stdin JSON plus turn_id, tool_name, tool_use_id, tool_input, and tool_response."
+    return_contract: "Exit 0 continues; JSON additionalContext is model-visible; top-level {decision: 'block', reason} or exit 2 replaces the model-visible tool result with hook feedback; continue: false stops normal processing of original result."
+    notes: "Cannot undo tool side effects. Matching support mirrors PreToolUse and includes non-zero Bash exits. updatedMCPToolOutput and suppressOutput are parsed but unsupported."
+  - native_event: PreCompact
+    claudine_event: none
+    timing: pre
+    blocking: true
+    payload_schema: "Common stdin JSON plus turn_id and trigger; trigger is manual or auto."
+    return_contract: "Exit 0 continues; JSON common output fields are supported; continue: false stops before compacting."
+    notes: "No direct Claudine lifecycle equivalent for conversation compaction."
+  - native_event: PostCompact
+    claudine_event: none
+    timing: post
+    blocking: true
+    payload_schema: "Common stdin JSON plus turn_id and trigger; trigger is manual or auto."
+    return_contract: "Exit 0 continues; JSON common output fields are supported; continue: false stops after compacting."
+    notes: "No direct Claudine lifecycle equivalent for conversation compaction."
+  - native_event: SubagentStart
+    claudine_event: subagent_start
+    timing: pre
+    blocking: false
+    payload_schema: "Common stdin JSON plus turn_id, agent_id, agent_type, and permission_mode."
+    return_contract: "Exit 0 continues; stdout text or JSON hookSpecificOutput.additionalContext adds developer context for the subagent; continue: false is parsed but does not stop the subagent."
+    notes: "Matcher applies to agent_type."
+  - native_event: SubagentStop
+    claudine_event: subagent_stop
+    timing: post
+    blocking: true
+    payload_schema: "Common stdin JSON plus turn_id, agent_id, agent_type, agent_transcript_path, stop_hook_active, and last_assistant_message."
+    return_contract: "Exit 0 expects JSON; top-level {decision: 'block', reason} or exit 2 asks Codex to continue the subagent flow; continue: false takes precedence over continuation."
+    notes: "Matcher applies to agent_type. Plain text stdout is invalid. Hooks must check stop_hook_active to avoid infinite loops."
+  - native_event: Stop
+    claudine_event: success
+    timing: post
+    blocking: true
+    payload_schema: "Common stdin JSON plus turn_id, stop_hook_active, and last_assistant_message."
+    return_contract: "Exit 0 expects JSON; top-level {decision: 'block', reason} or exit 2 tells Codex to continue by creating a new prompt from the reason; continue: false takes precedence."
+    notes: "Configured matcher is ignored. This is turn completion, not necessarily process/session finalization. The generated input schema includes turn_id. Hooks must check stop_hook_active to avoid infinite loops."
+config_files:
+  - os: macos
+    scope: user
+    path: "~/.codex/hooks.json"
+    format: json
+    notes: "User hook file discovered next to the user config layer. Not present on the research host."
+  - os: linux
+    scope: user
+    path: "~/.codex/hooks.json"
+    format: json
+    notes: "User hook file discovered next to the user config layer."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.codex\\hooks.json"
+    format: json
+    notes: "User hook file under CODEX_HOME/default home on Windows."
+  - os: macos
+    scope: user
+    path: "~/.codex/config.toml"
+    format: toml
+    notes: "Inline [hooks] tables may be placed in config.toml. Research host file contained only model, projects, features, and plugins; no hooks table."
+  - os: linux
+    scope: user
+    path: "~/.codex/config.toml"
+    format: toml
+    notes: "Inline [hooks] tables may be placed in config.toml."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.codex\\config.toml"
+    format: toml
+    notes: "Inline [hooks] tables may be placed in config.toml."
+  - os: macos
+    scope: repo
+    path: ".codex/hooks.json"
+    format: json
+    notes: "Project-local hooks load only when the project .codex layer is trusted."
+  - os: linux
+    scope: repo
+    path: ".codex/hooks.json"
+    format: json
+    notes: "Project-local hooks load only when the project .codex layer is trusted."
+  - os: windows
+    scope: repo
+    path: ".codex\\hooks.json"
+    format: json
+    notes: "Project-local hooks load only when the project .codex layer is trusted."
+  - os: macos
+    scope: repo
+    path: ".codex/config.toml"
+    format: toml
+    notes: "Project-local inline [hooks] tables; trusted projects only."
+  - os: linux
+    scope: repo
+    path: ".codex/config.toml"
+    format: toml
+    notes: "Project-local inline [hooks] tables; trusted projects only."
+  - os: windows
+    scope: repo
+    path: ".codex\\config.toml"
+    format: toml
+    notes: "Project-local inline [hooks] tables; trusted projects only."
+  - os: macos
+    scope: system
+    path: "/etc/codex/hooks.json"
+    format: json
+    notes: "Inferred from hook discovery next to active config layers and documented Unix system config."
+  - os: linux
+    scope: system
+    path: "/etc/codex/hooks.json"
+    format: json
+    notes: "Inferred from hook discovery next to active config layers and documented Unix system config."
+  - os: macos
+    scope: system
+    path: "/etc/codex/config.toml"
+    format: toml
+    notes: "Documented Unix system config layer; inline [hooks] tables may be used."
+  - os: linux
+    scope: system
+    path: "/etc/codex/config.toml"
+    format: toml
+    notes: "Documented Unix system config layer; inline [hooks] tables may be used."
+  - os: windows
+    scope: system
+    path: unknown
+    format: toml
+    notes: "No Windows system config path was found in the official hook/config docs."
+  - os: macos
+    scope: managed
+    path: "requirements.toml"
+    format: toml
+    notes: "Enterprise managed config can define inline [hooks], pin features.hooks, and set managed_dir."
+  - os: linux
+    scope: managed
+    path: "requirements.toml"
+    format: toml
+    notes: "Enterprise managed config can define inline [hooks], pin features.hooks, and set managed_dir."
+  - os: windows
+    scope: managed
+    path: "requirements.toml"
+    format: toml
+    notes: "Enterprise managed config can define inline [hooks] and windows_managed_dir."
+  - os: macos
+    scope: other
+    path: "<plugin-root>/hooks/hooks.json"
+    format: json
+    notes: "Default plugin-bundled hook file when a plugin is enabled. Observed on host: ~/.codex/.tmp/plugins/plugins/figma/hooks.json and replayio/hooks.json."
+  - os: linux
+    scope: other
+    path: "<plugin-root>/hooks/hooks.json"
+    format: json
+    notes: "Default plugin-bundled hook file when a plugin is enabled."
+  - os: windows
+    scope: other
+    path: "<plugin-root>\\hooks\\hooks.json"
+    format: json
+    notes: "Default plugin-bundled hook file when a plugin is enabled."
+cli_params:
+  - flag: "/hooks"
+    description: "Interactive CLI command to inspect hook sources, review/trust changed hooks, and disable individual non-managed hooks."
+    example: "codex /hooks"
+  - flag: "--dangerously-bypass-hook-trust"
+    description: "Runs enabled hooks for one invocation without requiring persisted trust."
+    example: "codex --dangerously-bypass-hook-trust \"run the repo checks\""
+  - flag: "--disable hooks"
+    description: "Disables the hooks feature for one invocation through the feature flag surface."
+    example: "codex --disable hooks \"summarize this repository\""
+  - flag: "--enable hooks"
+    description: "Enables the hooks feature for one invocation through the feature flag surface."
+    example: "codex --enable hooks \"run the test plan\""
+  - flag: "-c features.hooks=false"
+    description: "Disables hooks for one invocation with a direct config override."
+    example: "codex -c features.hooks=false \"explain this file\""
+  - flag: "features disable hooks"
+    description: "Persists a disabled hooks feature flag in CODEX_HOME/config.toml."
+    example: "codex features disable hooks"
+  - flag: "features enable hooks"
+    description: "Persists an enabled hooks feature flag in CODEX_HOME/config.toml."
+    example: "codex features enable hooks"
+  - flag: "--strict-config"
+    description: "Errors when config.toml contains unrecognized fields, which can catch hook schema typos early."
+    example: "codex --strict-config \"hello\""
+payload_fields:
+  - native_event: "*"
+    field: session_id
+    type: string
+    meaning: "Current Codex session id; subagent hooks use the parent session id."
+  - native_event: "*"
+    field: transcript_path
+    type: "string | null"
+    meaning: "Path to the session transcript file if available; transcript format is not stable."
+  - native_event: "*"
+    field: cwd
+    type: string
+    meaning: "Working directory for the session and hook command."
+  - native_event: "*"
+    field: hook_event_name
+    type: string
+    meaning: "Native hook event name."
+  - native_event: "*"
+    field: model
+    type: string
+    meaning: "Active Codex model slug."
+  - native_event: "*"
+    field: permission_mode
+    type: string
+    meaning: "Current permission mode for supported events: default, acceptEdits, plan, dontAsk, or bypassPermissions (per generated JSON schema)."
+  - native_event: SessionStart
+    field: source
+    type: string
+    meaning: "How the session started: startup, resume, clear, or compact."
+  - native_event: UserPromptSubmit
+    field: turn_id
+    type: string
+    meaning: "Active Codex turn id."
+  - native_event: UserPromptSubmit
+    field: prompt
+    type: string
+    meaning: "User prompt about to be submitted."
+  - native_event: PreToolUse
+    field: tool_name
+    type: string
+    meaning: "Canonical hook tool name, such as Bash, apply_patch, or mcp__server__tool."
+  - native_event: PreToolUse
+    field: tool_use_id
+    type: string
+    meaning: "Tool-call id for this invocation."
+  - native_event: PreToolUse
+    field: tool_input
+    type: JSON value
+    meaning: "Tool-specific input; Bash/apply_patch use tool_input.command and MCP tools send arguments."
+  - native_event: PermissionRequest
+    field: tool_input.description
+    type: "string | null"
+    meaning: "Human-readable approval reason when Codex has one."
+  - native_event: PostToolUse
+    field: tool_response
+    type: JSON value
+    meaning: "Tool-specific output; for MCP tools, the MCP call result."
+  - native_event: PreCompact
+    field: trigger
+    type: string
+    meaning: "Compaction trigger: manual or auto."
+  - native_event: PostCompact
+    field: trigger
+    type: string
+    meaning: "Compaction trigger: manual or auto."
+  - native_event: SubagentStart
+    field: agent_id
+    type: string
+    meaning: "Identifier for the subagent."
+  - native_event: SubagentStart
+    field: agent_type
+    type: string
+    meaning: "Subagent type or profile."
+  - native_event: SubagentStop
+    field: agent_transcript_path
+    type: "string | null"
+    meaning: "Path to the subagent transcript file if available."
+  - native_event: SubagentStop
+    field: stop_hook_active
+    type: boolean
+    meaning: "Whether this subagent was already continued by a stop hook."
+  - native_event: SubagentStop
+    field: last_assistant_message
+    type: "string | null"
+    meaning: "Latest subagent assistant message if available."
+  - native_event: Stop
+    field: stop_hook_active
+    type: boolean
+    meaning: "Whether this turn was already continued by Stop."
+  - native_event: Stop
+    field: last_assistant_message
+    type: "string | null"
+    meaning: "Latest assistant message text if available."
+  - native_event: Stop
+    field: turn_id
+    type: string
+    meaning: "Active Codex turn id; present per generated stop.command.input.schema.json."
+response_actions:
+  - action: continue
+    native_value: "exit 0 with no stdout"
+    effect: "Marks the hook successful and lets Codex continue."
+  - action: continue
+    native_value: '{"continue": true}'
+    effect: "Lets Codex continue; supported where common output fields apply."
+  - action: block
+    native_value: "exit 2 with stderr"
+    effect: "Blocks or redirects event flow with stderr as the reason; exact effect varies by event."
+  - action: block
+    native_value: '{"decision":"block","reason":"..."}'
+    effect: "Blocks UserPromptSubmit, blocks PreToolUse through the legacy shape, gives PostToolUse feedback, and continues Stop/SubagentStop with the reason as continuation text."
+  - action: deny
+    native_value: '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"..."}}'
+    effect: "Denies a supported tool call before it runs."
+  - action: allow
+    native_value: '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
+    effect: "Approves an approval request without showing the normal prompt."
+  - action: deny
+    native_value: '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"..."}}}'
+    effect: "Denies an approval request; any deny wins across matching hooks."
+  - action: modify
+    native_value: '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"command":"..."}}}'
+    effect: "Rewrites supported Bash/apply_patch command input or MCP arguments before the tool runs."
+  - action: other
+    native_value: '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"..."}}'
+    effect: "Adds model-visible developer context for SessionStart, UserPromptSubmit, SubagentStart, or PostToolUse."
+  - action: stop
+    native_value: '{"continue": false, "stopReason":"..."}'
+    effect: "Stops or redirects processing for supported events; unsupported on PreToolUse/PermissionRequest and non-blocking on SubagentStart."
+execution:
+  shell: "Command hooks use a command string; examples use shell substitution. Windows can override with commandWindows/command_windows."
+  cwd: "Commands run with the session cwd as their working directory."
+  env: "Inherits the Codex process environment; plugin hooks additionally receive PLUGIN_ROOT, PLUGIN_DATA, CLAUDE_PLUGIN_ROOT, and CLAUDE_PLUGIN_DATA."
+  timeout: "timeout is seconds; default is 600 seconds when omitted."
+  stdin: "Every command hook receives one JSON object on stdin."
+  stdout: "Plain text or JSON semantics are event-specific; empty stdout with exit 0 is success."
+  stderr: "For exit 2, stderr is used as the blocking/feedback reason."
+  notes: "Matching hooks from multiple files all run. Multiple matching command hooks for the same event launch concurrently. Hooks are enabled by default; async, prompt, and agent handlers are parsed but skipped today. Non-managed hooks require trust review unless bypassed. Generated JSON schemas confirm permission_mode enum is default|acceptEdits|plan|dontAsk|bypassPermissions and PreToolUse permissionDecision enum is allow|deny|ask."
+gaps:
+  - "Official docs do not document a Windows system config path equivalent to /etc/codex."
+  - "The exact shell used to execute command strings is not specified in the public hook docs; command substitution examples imply shell evaluation."
+  - "PreToolUse/PostToolUse coverage is explicitly incomplete for some shell paths and does not cover WebSearch or arbitrary non-shell/non-MCP tool paths."
+  - "Transcript file format is explicitly not stable and should not be used as an adapter contract."
+  - "Async command hooks, prompt handlers, agent handlers, suppressOutput, PreToolUse ask/continue/stopReason, PermissionRequest updatedPermissions/interrupt, and PostToolUse updatedMCPToolOutput are parsed but unsupported or fail today."
+  - "Local inspection found no user hooks configured (~/.codex/hooks.json absent, ~/.codex/config.toml had no [hooks] table), so observed behavior is limited to plugin-bundled examples."
+changes:
+  - "2026-07-03: Refreshed against Codex CLI 0.142.5, official hooks docs, and generated JSON schemas. Added local inspection findings (no user hooks present; plugin examples observed). Corrected permission_mode enum to schema values (no auto). Confirmed Stop carries turn_id per generated schema. Added --strict-config as a hook-affecting CLI control."
+requires_claudine_update: true
+reason: "Claudine's current Codex configurator still registers only the legacy notify turn_complete hook, while current Codex supports first-class hooks.json/config.toml events with blocking, mutation, permission, subagent, compaction, and Stop semantics."
 ---
 
 # Codex CLI Hooks and Events
 
-Homepage: https://github.com/openai/codex
+## Overview
 
-Documentation: https://developers.openai.com/codex/cli/
+Codex ships a first-class hook system documented at `https://developers.openai.com/codex/hooks`. Hooks are enabled by default and can be disabled with `[features].hooks = false`; `codex_hooks` remains a deprecated alias. The current system is materially different from the older `notify` integration: command hooks receive JSON on `stdin`, can run at several lifecycle points, and some events can block, modify, or continue execution.
 
-## Scope
+Runtime details that matter for Claudine:
 
-This document covers the hook and event surfaces available in the Codex CLI (OpenAI's agentic CLI). Codex provides two integration surfaces:
+- Hooks are discovered from `hooks.json`, inline `[hooks]` tables in `config.toml`, managed `requirements.toml`, and enabled plugin bundles.
+- Matching hooks from all active sources run; higher-precedence config layers do not replace lower-precedence hooks.
+- Multiple matching command hooks for the same event launch concurrently.
+- Non-managed hooks require trust review through `/hooks`; managed hooks are trusted by policy.
+- Only `type = "command"` handlers run today.
 
-1. A **notify hook** that fires an external program after agent turns complete (and after tool use, internally).
-2. A **JSONL event stream** (`codex exec --json`) for non-interactive automation and CI/CD pipelines.
+## Native Hooks
 
-The hooks system is **outbound-only** and **fire-and-forget**. There is no mechanism to block, modify, or approve tool calls through hooks. Community PRs proposing Claude Code-style blocking/steering hooks (PRs #2904, #9796, #11067) have been declined by OpenAI, who have stated they are designing a hooks system internally.
+Codex documents ten native hook events:
 
-(https://github.com/openai/codex/issues/2109) (https://github.com/openai/codex/discussions/2150)
+- `SessionStart`: start/resume/clear/compact scope. Can add developer context.
+- `UserPromptSubmit`: pre-prompt hook. Can add context or block prompt submission.
+- `PreToolUse`: pre-tool hook for supported Bash, `apply_patch`, and MCP calls. Can deny or rewrite supported input.
+- `PermissionRequest`: approval-path hook. Can allow, deny, or decline to decide.
+- `PostToolUse`: post-tool hook. Can add context, replace the model-visible result with feedback, or stop normal result processing.
+- `PreCompact` and `PostCompact`: conversation compaction hooks.
+- `SubagentStart` and `SubagentStop`: subagent lifecycle hooks.
+- `Stop`: turn-completion hook. A block decision asks Codex to continue with a new prompt built from the reason.
+
+The tool hooks are useful but not a complete security boundary. The docs explicitly say interception is incomplete for richer shell paths and non-shell/non-MCP tools such as `WebSearch`.
 
 ## Configuration
 
-### Config file locations
-
-Codex uses TOML configuration files. Multiple locations are supported, merged by priority.
-
-| Location | Scope | Priority |
-|----------|-------|----------|
-| CLI flags and `--config` | Invocation | Highest |
-| `--profile <name>` values | Per-profile | High |
-| `.codex/config.toml` (project) | Single project (trusted projects only) | Medium-high |
-| `~/.codex/config.toml` | All projects (user) | Medium |
-| `/etc/codex/config.toml` (Unix) | System-wide | Low |
-| Built-in defaults | Fallback | Lowest |
-
-Project-level `.codex/config.toml` files are only loaded for trusted projects. Untrusted projects skip all project-scoped layers.
-
-(https://developers.openai.com/codex/config-basic/)
-
-### Notify hook configuration
-
-The `notify` key in `config.toml` specifies an external command to run after each completed agent turn. The value is an argv array (the program and its fixed arguments). Codex appends one additional argument containing a JSON payload describing the event.
-
-```toml
-# ~/.codex/config.toml
-
-# External notifier - fires after each agent turn completes
-notify = ["notify-send", "Codex"]
-```
-
-Which Codex invokes as:
-
-```shell
-notify-send Codex '{"type":"agent-turn-complete","thread-id":"...","turn-id":"12345",...}'
-```
-
-If unset or empty, the feature is disabled.
-
-### TUI notification configuration
-
-Built-in TUI notifications are separate from the `notify` hook. They control terminal alerts when the window is unfocused.
-
-```toml
-[tui]
-# Boolean or filtered event list. Default: true
-# Examples: false | ["agent-turn-complete", "approval-requested"]
-notifications = true
-
-# Notification method: auto | osc9 | bel. Default: "auto"
-notification_method = "auto"
-```
-
-| Method | Behavior |
-|--------|----------|
-| `auto` | Prefers OSC 9 escape sequences; falls back to BEL |
-| `osc9` | Terminal escape sequence for desktop notifications |
-| `bel` | ASCII bell character (`\x07`) |
-
-### Example configurations
-
-**macOS sound on turn complete:**
-
-```toml
-notify = ["bash", "-lc", "afplay /System/Library/Sounds/Blow.aiff"]
-```
-
-**Linux desktop notification:**
-
-```toml
-notify = ["notify-send", "Codex"]
-```
-
-**Webhook notification:**
-
-```toml
-notify = ["python3", "/path/to/notify.py"]
-```
-
-**TUI notifications filtered to approvals only:**
-
-```toml
-[tui]
-notifications = ["approval-requested"]
-notification_method = "osc9"
-```
-
-(https://developers.openai.com/codex/config-advanced/) (https://developers.openai.com/codex/config-sample/)
-
-## Hook Events
-
-Codex has two internal hook event types. Only `AfterAgent` is currently wired to the user-facing `notify` configuration. `AfterToolUse` is implemented internally but not yet exposed to user configuration (as of CLI 0.102.0, February 2026).
-
-### AfterAgent (notify)
-
-**Triggers:** When the agent finishes processing a user submission (a complete turn).
-
-**User-facing:** Yes, via the `notify` config key.
-
-**Delivery:** The configured command is spawned as a fire-and-forget process. Codex does not wait for it to complete and does not read its output. The JSON payload is passed as the final command-line argument (not stdin).
-
-**Event payload:**
+Hook configuration has three levels: event, matcher group, and hook handler. In JSON:
 
 ```json
 {
-  "type": "agent-turn-complete",
-  "thread-id": "b5f6c1c2-1111-2222-3333-444455556666",
-  "turn-id": "12345",
-  "cwd": "/Users/example/project",
-  "input-messages": ["Rename `foo` to `bar` and update the callsites."],
-  "last-assistant-message": "Rename complete and verified `cargo build` succeeds."
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `type` | string | Always `"agent-turn-complete"` |
-| `thread-id` | string (UUID) | Session identifier |
-| `turn-id` | string | Turn identifier within the session |
-| `cwd` | string | Current working directory when the turn completed |
-| `input-messages` | string[] | User messages that initiated the turn |
-| `last-assistant-message` | string or null | Final assistant response text |
-
-**Event response:** None. The hook is fire-and-forget. Exit code and output are ignored (stdout, stderr, stdin are all connected to `/dev/null`).
-
-**Gotchas:**
-
-1. **Only one event type:** The `notify` system only fires on `agent-turn-complete`. It does not fire on approval requests, tool calls, session start/end, or errors. For approval alerts, use `tui.notifications = ["approval-requested"]` instead.
-2. **Argument-based, not stdin:** The JSON payload is passed as a CLI argument, not piped to stdin. Scripts must read `$1`, not stdin.
-3. **Fire-and-forget:** If the notifier command fails or hangs, Codex logs the spawn error at debug level but never blocks the agent. There is no retry mechanism.
-4. **No flow control:** The hook cannot block, deny, modify, or steer the agent. It is purely observational.
-5. **kebab-case keys:** The legacy payload uses kebab-case field names (`thread-id`, `turn-id`, `input-messages`, `last-assistant-message`), not snake_case.
-
-### AfterToolUse (internal only)
-
-**Triggers:** After any tool execution completes (success or failure).
-
-**User-facing:** Not yet. As of CLI 0.100.0 (February 2026), this hook is implemented in the core runtime but is not wired to user configuration. The `HooksConfig` struct only accepts `legacy_notify_argv` and the `after_tool_use` hook vector is initialized empty.
-
-(https://developers.openai.com/codex/changelog/) (https://github.com/openai/codex/pull/11335)
-
-**Internal payload (for reference):**
-
-```json
-{
-  "session_id": "0199a213-81c0-7800-8aa1-bbab2a035a53",
-  "cwd": "/Users/example/project",
-  "triggered_at": "2026-02-11T00:00:00Z",
-  "hook_event": {
-    "event_type": "after_tool_use",
-    "turn_id": "turn-2",
-    "call_id": "call-1",
-    "tool_name": "local_shell",
-    "tool_kind": "local_shell",
-    "tool_input": {
-      "input_type": "local_shell",
-      "params": {
-        "command": ["cargo", "fmt"],
-        "workdir": "codex-rs",
-        "timeout_ms": 60000,
-        "sandbox_permissions": "use_default",
-        "justification": null,
-        "prefix_rule": null
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/pre_tool_use_policy.py\"",
+            "timeout": 30,
+            "statusMessage": "Checking Bash command"
+          }
+        ]
       }
-    },
-    "executed": true,
-    "success": true,
-    "duration_ms": 42,
-    "mutating": true,
-    "sandbox": "none",
-    "sandbox_policy": "danger-full-access",
-    "output_preview": "ok"
+    ]
   }
 }
 ```
 
-**Payload fields (hook_event):**
+The same shape can be written as inline TOML under `[[hooks.<Event>]]` and `[[hooks.<Event>.hooks]]`. Project hooks load only for trusted projects. Managed hooks can be delivered through `requirements.toml`, can pin `[features].hooks = true`, and can set `allow_managed_hooks_only = true`.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `event_type` | string | Always `"after_tool_use"` |
-| `turn_id` | string | Turn within the session |
-| `call_id` | string | Unique identifier for this tool call |
-| `tool_name` | string | Name of the tool (e.g., `local_shell`, `apply_patch`) |
-| `tool_kind` | string | One of: `function`, `custom`, `local_shell`, `mcp` |
-| `tool_input` | object | Tagged union by `input_type` (see below) |
-| `executed` | boolean | Whether the tool actually ran |
-| `success` | boolean | Whether the tool completed successfully |
-| `duration_ms` | integer | Wall-clock execution time in milliseconds |
-| `mutating` | boolean | Whether the tool modifies state |
-| `sandbox` | string | Sandbox mode used (e.g., `"none"`, `"seatbelt"`) |
-| `sandbox_policy` | string | Sandbox policy name |
-| `output_preview` | string | Truncated/serialized tool output |
+Matchers are regex strings. `PermissionRequest`, `PreToolUse`, and `PostToolUse` match tool names and aliases; compaction hooks match `manual` or `auto`; `SessionStart` matches `startup`, `resume`, `clear`, or `compact`; subagent hooks match agent type. `UserPromptSubmit` and `Stop` ignore matchers.
 
-**Tool input variants (`tool_input.input_type`):**
+## Payloads and Responses
 
-| input_type | Fields | Description |
-|------------|--------|-------------|
-| `function` | `arguments` (string) | Function-call style tool |
-| `custom` | `input` (string) | Custom tool (e.g., `apply_patch`) |
-| `local_shell` | `params.command` (string[]), `params.workdir`, `params.timeout_ms`, `params.sandbox_permissions`, `params.justification`, `params.prefix_rule` | Shell command execution |
-| `mcp` | `server` (string), `tool` (string), `arguments` (string) | MCP server tool call |
+Every command hook receives one JSON object on `stdin` with common fields: `session_id`, `transcript_path`, `cwd`, `hook_event_name`, and `model`. Most turn-scoped events add `turn_id`; several events also include `permission_mode`.
 
-**Hook result types (internal):**
+Codex response parsing is event-specific:
 
-| Result | Behavior |
-|--------|----------|
-| `Success` | Hook completed, continue normally |
-| `FailedContinue` | Hook failed, log warning, continue with remaining hooks and operation |
-| `FailedAbort` | Hook failed, skip remaining hooks, abort the operation with a fatal error |
+- Exit `0` with no stdout means success/continue.
+- Exit `2` plus stderr is a blocking or feedback path.
+- JSON `systemMessage` can surface a warning/status message.
+- `hookSpecificOutput.additionalContext` can add model-visible developer context for several events.
+- `PreToolUse` can deny through `permissionDecision = "deny"` and can rewrite input through `permissionDecision = "allow"` plus `updatedInput`.
+- `PermissionRequest` uses a nested decision object with `behavior = "allow"` or `behavior = "deny"`.
+- `Stop` and `SubagentStop` reinterpret `decision = "block"` as continuation, not rejection.
 
-**Gotchas:**
+Unsupported-but-parsed fields matter for fail-closed behavior: `async`, `prompt`, and `agent` handlers are skipped; several future response fields are parsed but not supported and may mark a hook run failed while Codex continues the underlying operation.
 
-1. **Not user-configurable yet:** You cannot register `AfterToolUse` hooks via `config.toml`. The infrastructure exists but is not exposed.
-2. **Different payload format:** The internal hook payload uses snake_case and a nested `hook_event` structure, unlike the legacy `notify` payload which uses kebab-case and a flat structure.
-3. **Abort capability:** Unlike `AfterAgent`, the `AfterToolUse` hook can abort operations via `FailedAbort`, which returns a fatal error to the agent. This is a significant distinction that will matter when user configuration is eventually added.
+## Execution Semantics
 
-## JSONL Event Stream (`codex exec --json`)
+Command hooks run in the session `cwd`. `timeout` is in seconds and defaults to `600`. `commandWindows` / `command_windows` can provide a Windows-specific command string. Repo-local hooks should avoid fragile relative paths because Codex may be launched from a subdirectory.
 
-Running Codex in non-interactive mode with `--json` streams a newline-delimited JSON event stream to stdout. This is the primary automation surface for CI/CD pipelines and external orchestrators.
+For plugin-bundled hooks, Codex provides `PLUGIN_ROOT`, `PLUGIN_DATA`, `CLAUDE_PLUGIN_ROOT`, and `CLAUDE_PLUGIN_DATA`. The public docs do not specify the exact shell used to evaluate command strings, but official examples use command substitution, so Claudine should treat shell semantics as provider-defined and verify source before emitting portable commands.
 
-```bash
-codex exec --json "your task prompt" | jq
-```
+## Claudine Mapping
 
-### Configuration flags
+The current Claudine Codex implementation is behind the provider. Local inspection shows `claudine/lib/src/config/codex.rs` still treats Codex as notify-only and registers only `turn_complete` through `notify`. That does not match the current first-class hook surface.
 
-| Flag | Description |
-|------|-------------|
-| `--json` | Enable JSONL streaming to stdout |
-| `-o <path>` / `--output-last-message <path>` | Write final assistant message to a file |
-| `--output-schema <path>` | JSON Schema file; Codex validates the final response against it |
+Suggested native-to-Claudine mapping:
 
-### Event types
+| Codex event | Claudine event | Notes |
+| --- | --- | --- |
+| `SessionStart` | `start` | Can inject developer context; source distinguishes startup/resume/clear/compact. |
+| `UserPromptSubmit` | `prompt` | Pre-prompt and blocking. |
+| `PreToolUse` | `tool_call` | Blocking and input mutation for supported tools. |
+| `PermissionRequest` | `permission` | Approval decision hook. |
+| `PostToolUse` | `tool_result` | Post-tool feedback/context; cannot undo side effects. |
+| `PreCompact` | `none` | No direct Claudine event. |
+| `PostCompact` | `none` | No direct Claudine event. |
+| `SubagentStart` | `subagent_start` | Adds context but does not block start. |
+| `SubagentStop` | `subagent_stop` | Can continue subagent flow. |
+| `Stop` | `success` | Turn completion; block means continue with a new prompt. |
 
-Each JSONL line is a JSON object with a `type` field.
+Claudine's blocking model must account for Codex's event-specific meanings. In particular, `Stop`/`SubagentStop` "block" is a continuation request, `PostToolUse` "block" is feedback/result replacement after side effects, and `PermissionRequest` has deny-wins fan-in across concurrent matching hooks.
 
-#### thread.started
+## Gaps
 
-Emitted once at the beginning of a run.
+Open adapter questions:
 
-```json
-{"type": "thread.started", "thread_id": "0199a213-81c0-7800-8aa1-bbab2a035a53"}
-```
+- Windows system config location is undocumented.
+- Exact command-shell semantics are not specified in the public docs.
+- Tool-hook coverage is intentionally incomplete.
+- Transcript contents are not stable.
+- Some parsed fields are future-reserved and currently fail or skip.
+- Local inspection found no configured user hooks; observed examples come from plugin bundles.
+- Claudine needs a migration plan from legacy `notify` wrapper registration to `hooks.json`/inline hooks, including hook trust implications.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `type` | string | `"thread.started"` |
-| `thread_id` | string (UUID) | Correlation key for all subsequent events |
+## Changelog
 
-#### turn.started
-
-Marks the beginning of a new agent turn.
-
-```json
-{"type": "turn.started"}
-```
-
-#### turn.completed
-
-Signals successful completion of a turn with token usage.
-
-```json
-{"type": "turn.completed", "usage": {"input_tokens": 24763, "cached_input_tokens": 24448, "output_tokens": 122}}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `usage.input_tokens` | integer | Total input tokens consumed |
-| `usage.cached_input_tokens` | integer | Input tokens served from cache |
-| `usage.output_tokens` | integer | Output tokens generated |
-
-#### turn.failed
-
-Signals a failed turn. Includes error details.
-
-```json
-{"type": "turn.failed", "error": {"message": "Rate limit exceeded"}}
-```
-
-#### item.started / item.updated / item.completed
-
-Item lifecycle events. Each item has an `id` and a `type`-specific payload.
-
-```json
-{"type": "item.started", "item": {"id": "item_1", "type": "command_execution", "command": "bash -lc ls", "status": "in_progress"}}
-{"type": "item.completed", "item": {"id": "item_3", "type": "agent_message", "text": "Repo contains docs, sdk, and examples directories."}}
-```
-
-#### error
-
-Fatal or recoverable error event.
-
-```json
-{"type": "error", "error": {"message": "Connection timeout"}}
-```
-
-### Item types
-
-| Item type | Description | Key fields |
-|-----------|-------------|------------|
-| `agent_message` | Assistant text response | `text` |
-| `reasoning` | Model reasoning/thinking | `text` (can be suppressed via config) |
-| `command_execution` | Shell command execution | `command`, `status`, `exit_code` |
-| `file_change` | File modification | File path and change details |
-| `mcp_tool_call` | MCP server tool invocation | Server and tool identifiers |
-| `web_search` | Web search performed | Search query and results |
-| `plan_update` | Agent plan modification | Updated plan content |
-
-### Structured output (`--output-schema`)
-
-For deterministic downstream parsing, provide a JSON Schema to validate the final response:
-
-```bash
-codex exec --json --output-schema schema.json "Analyze this repo"
-```
-
-Codex validates the final `agent_message` against the schema, making the output shape reliable for automation.
-
-(https://developers.openai.com/codex/noninteractive/) (https://developers.openai.com/codex/cli/reference/)
-
-## Telemetry Event Export (OpenTelemetry)
-
-Codex can export structured telemetry events via OpenTelemetry. This is not a control hook but provides a structured event stream for observability.
-
-```toml
-[otel]
-exporter = "otlp"  # Options: "none", "otlp"
-```
-
-When `exporter = "none"`, Codex records events internally but sends nothing. Exporters batch asynchronously and flush on shutdown.
-
-**Representative telemetry event types:**
-
-| Event | Description |
-|-------|-------------|
-| `codex.conversation_starts` | Session initiated |
-| `codex.api_request` | API call made |
-| `codex.sse_event` | Server-sent event received |
-| `codex.user_prompt` | User prompt submitted (redacted by default) |
-| `codex.tool_decision` | Tool call decision made |
-| `codex.tool_result` | Tool execution result |
-
-(https://developers.openai.com/codex/config-advanced/)
-
-## Matcher System
-
-Codex does **not** have a matcher system for hooks. The `notify` hook fires on every `agent-turn-complete` event unconditionally. There is no mechanism to filter by tool name, event subtype, or pattern.
-
-The TUI notifications support a limited filter via an array of event type strings:
-
-```toml
-[tui]
-notifications = ["agent-turn-complete", "approval-requested"]
-```
-
-This only controls which events trigger TUI desktop alerts, not which events invoke external hooks.
-
-Community PRs have proposed pattern-matching systems (e.g., PR #11067 proposed `patterns = ["shell:*", "mcp:*"]`), but these have not been merged.
-
-## Known Gotchas and Workarounds
-
-### 1. No blocking or steering hooks
-
-**Problem:** Unlike Claude Code, Codex hooks cannot block, deny, modify, or approve tool calls. The `notify` hook is purely observational and fire-and-forget.
-
-**Workaround:** For programmatic control over Codex, use `codex exec --json` and build external orchestration that parses the JSONL stream and manages the workflow externally. Alternatively, use approval policies (`full_auto`, `auto_edit`, `ask_always`) configured in `config.toml` to control which actions require user approval.
-
-### 2. JSON event schema is experimental
-
-**Problem:** The `--json` flag is also exposed as `--experimental-json`, indicating the event schema can change between versions.
-
-**Workaround:** Use tolerant JSON parsing. Ignore unknown fields. Do not hard-code exact payload shapes beyond `type`, `thread_id`, and `item.id`.
-
-(https://developers.openai.com/codex/cli/reference/)
-
-### 3. Notify payload is a CLI argument, not stdin
-
-**Problem:** The `notify` JSON payload is passed as the last command-line argument, not piped to stdin. Scripts that read from stdin will hang.
-
-**Workaround:** Read `$1` (first/last positional argument) in your notify script:
-
-```bash
-#!/bin/bash
-PAYLOAD="$1"
-echo "$PAYLOAD" | jq '.type'
-```
-
-### 4. JSONL stdout replaces human-readable output
-
-**Problem:** In `--json` mode, stdout is JSONL only. The final human-readable message is not printed as plain text.
-
-**Workaround:** Parse the final `agent_message` item from the JSONL stream, or use `-o/--output-last-message` to capture the final output directly to a file.
-
-(https://developers.openai.com/codex/noninteractive/)
-
-### 5. Item updates can be incremental
-
-**Problem:** `item.updated` events contain partial data, not the full item state.
-
-**Workaround:** Store per-item state keyed by `item.id` and merge updates until `item.completed`.
-
-### 6. Reasoning events can be suppressed
-
-**Problem:** Reasoning events may or may not appear depending on configuration (`hide_agent_reasoning` / `show_raw_agent_reasoning`). Do not depend on them unless you control the config.
-
-**Workaround:** Check for the presence of reasoning items but do not require them for control flow.
-
-(https://developers.openai.com/codex/config-advanced/)
-
-### 7. Telemetry exporters drop events on abrupt termination
-
-**Problem:** OTel exporters flush asynchronously on shutdown. Killing the process (SIGKILL) can lose events.
-
-**Workaround:** Allow graceful shutdown (SIGTERM/SIGINT) or use external retries in your log collector.
-
-### 8. AfterToolUse abort is a fatal error
-
-**Problem:** When the internal `AfterToolUse` hook returns `FailedAbort`, it produces a `FunctionCallError::Fatal` that terminates the tool call pipeline. This behavior is not documented and not user-configurable yet, but developers building on the Codex core library should be aware.
-
-**Workaround:** If using the Codex Rust library directly, prefer `FailedContinue` for non-critical hook failures.
-
-### 9. TUI notifications vs notify are independent
-
-**Problem:** Configuring `tui.notifications = false` does not disable the `notify` external command, and vice versa. They are separate systems.
-
-**Workaround:** Configure each independently. Use `notify` for external integrations (webhooks, CI). Use `tui.notifications` for desktop alerts while working interactively.
+- 2026-07-03: Refreshed against Codex CLI 0.142.5, official hooks docs, and generated JSON schemas. Added local inspection findings, corrected permission_mode enum, confirmed Stop turn_id, and added `--strict-config`.
+- 2026-07-02: Replaced legacy notify-only research with the current first-class Codex hooks surface from official docs.
 
 ## Sources
 
-- Codex CLI homepage: https://github.com/openai/codex
-- Codex CLI documentation: https://developers.openai.com/codex/cli/
-- Codex CLI features: https://developers.openai.com/codex/cli/features/
-- Codex CLI reference: https://developers.openai.com/codex/cli/reference/
-- Codex config basics: https://developers.openai.com/codex/config-basic/
-- Codex config advanced: https://developers.openai.com/codex/config-advanced/
-- Codex config reference: https://developers.openai.com/codex/config-reference/
-- Codex config sample: https://developers.openai.com/codex/config-sample/
-- Codex non-interactive mode: https://developers.openai.com/codex/noninteractive/
-- Codex changelog: https://developers.openai.com/codex/changelog/
-- Event hooks feature request: https://github.com/openai/codex/issues/2109
-- Hooks discussion: https://github.com/openai/codex/discussions/2150
-- AfterToolUse hook PR (merged): https://github.com/openai/codex/pull/11335
-- Allow hooks to error PR (merged): https://github.com/openai/codex/pull/11615
-- Comprehensive hooks PR (closed, not merged): https://github.com/openai/codex/pull/11067
-- Codex hooks source code: https://github.com/openai/codex/tree/main/codex-rs/hooks/src
+- [Codex hooks documentation](https://developers.openai.com/codex/hooks)
+- [Codex config basics](https://developers.openai.com/codex/config-basic)
+- [Codex configuration reference](https://developers.openai.com/codex/config-reference)
+- [Codex command line options](https://developers.openai.com/codex/cli/reference)
+- [Codex managed configuration](https://developers.openai.com/codex/enterprise/managed-configuration)
+- [Codex hook JSON schemas](https://github.com/openai/codex/tree/main/codex-rs/hooks/schema/generated)
+- [OpenAI Codex repository](https://github.com/openai/codex)

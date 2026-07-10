@@ -135,4 +135,4 @@ Drive the conversation forward through structured human-in-the-loop clarificatio
 
 ## Completion
 
-Once you have iterated over the specification file enough times that you feel it is sufficiently clear and detailed, you must set the `clarified` frontmatter property of the document ({{doc.doc}}) to "${env.AGENT}/${env.MODEL}"
+Once you have iterated over the specification file enough times that you feel it is sufficiently clear and detailed, you must set the `clarified` frontmatter property of the document ({{doc.doc}}) to "${ctx.agent}/${ctx.model}"

@@ -3,7 +3,7 @@ use super::super::catalog::{ExpressionFunctionDescriptor, P_STRING, R_BOOL};
 use crate::catalog::{Example, ExampleVerification};
 
 pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
-    FunctionRegistration { canonical: "has_skill", aliases: &["hasskill"], catalog_order: 77, descriptors: &[
+    FunctionRegistration { canonical: "has_skill", aliases: &["hasskill"], catalog_order: 80, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "has_skill(name)",
@@ -17,7 +17,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Context(super::has_skill_fn) },
-    FunctionRegistration { canonical: "has_local_skill", aliases: &["haslocalskill"], catalog_order: 78, descriptors: &[
+    FunctionRegistration { canonical: "has_local_skill", aliases: &["haslocalskill"], catalog_order: 81, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "has_local_skill(name)",

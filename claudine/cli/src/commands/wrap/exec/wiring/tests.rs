@@ -207,6 +207,28 @@ fn dispatch_for_request_classifies_each_kimi_variant() {
 }
 
 #[test]
+fn question_request_current_shape_auto_response_keys_on_envelope_id() {
+    // Wire >= 1.4 nested-questions sample from the signals corpus. The
+    // synthetic empty answer must reply to the JSON-RPC envelope id
+    // ("question-1"), not the payload `id` ("q-1") or `tool_call_id`.
+    const QUESTION_LINE: &str = include_str!(
+        "../../../../../../docs/research/signals/fixtures/kimi/wire-question-request.jsonl"
+    );
+    let value: Value = serde_json::from_str(QUESTION_LINE.trim()).unwrap();
+    let Some(KimiEnvelope::Request { id, params }) = KimiEnvelope::classify(value) else {
+        panic!("expected Request envelope");
+    };
+    let request = params.into_request().expect("typed QuestionRequest");
+    assert!(matches!(
+        dispatch_for_request(&request),
+        WireRequestDispatch::EmptyQuestionAnswer
+    ));
+    let response = build_question_response(id);
+    assert_eq!(response["id"], "question-1");
+    assert_eq!(response["result"]["answer"], "");
+}
+
+#[test]
 fn map_kimi_hook_event_covers_canonical_aliases() {
     assert_eq!(
         map_kimi_hook_event("PreToolUse"),
@@ -227,39 +249,16 @@ fn map_kimi_hook_event_covers_canonical_aliases() {
     assert!(map_kimi_hook_event("UnknownEvent").is_none());
 }
 
+/// Drift guard: the version the CLI advertises must stay inside the window
+/// the lib parser accepts (response validation lives in
+/// `KimiSemanticStreamParser::handle_initialize_response`).
 #[test]
-fn validate_initialize_response_accepts_negotiated_version() {
-    let result = KimiInitializeResult {
-        protocol_version: Some(WIRE_PROTOCOL_VERSION.to_string()),
-        ..Default::default()
-    };
-    assert!(validate_initialize_response(&result).is_ok());
-}
-
-#[test]
-fn validate_initialize_response_rejects_missing_version() {
-    let result = KimiInitializeResult::default();
-    let err = validate_initialize_response(&result).unwrap_err();
-    assert!(matches!(err, WireInitError::MissingProtocolVersion));
-}
-
-#[test]
-fn validate_initialize_response_rejects_unsupported_version() {
-    let result = KimiInitializeResult {
-        protocol_version: Some("0.9".to_string()),
-        ..Default::default()
-    };
-    let err = validate_initialize_response(&result).unwrap_err();
-    match err {
-        WireInitError::UnsupportedProtocolVersion {
-            negotiated,
-            expected,
-        } => {
-            assert_eq!(negotiated, "0.9");
-            assert_eq!(expected, WIRE_PROTOCOL_VERSION);
-        }
-        _ => panic!("expected UnsupportedProtocolVersion"),
-    }
+fn wire_protocol_version_is_within_lib_supported_window() {
+    assert_eq!(WIRE_PROTOCOL_VERSION, "1.10");
+    assert!(
+        claudine::stream::protocol::kimi::SUPPORTED_WIRE_PROTOCOL_VERSIONS
+            .contains(&WIRE_PROTOCOL_VERSION)
+    );
 }
 
 #[test]
@@ -628,6 +627,38 @@ fn is_prompt_response_line_rejects_garbage() {
 }
 
 #[test]
+fn is_initialize_error_line_matches_init_error_response() {
+    let line = format!(
+        r#"{{"jsonrpc":"2.0","id":"{INITIALIZE_REQUEST_ID}","error":{{"code":-32602,"message":"unsupported protocol version"}}}}"#
+    );
+    assert!(is_initialize_error_line(&line));
+}
+
+#[test]
+fn is_initialize_error_line_rejects_init_success_response() {
+    let line = format!(
+        r#"{{"jsonrpc":"2.0","id":"{INITIALIZE_REQUEST_ID}","result":{{"protocol_version":"1.10"}}}}"#
+    );
+    assert!(!is_initialize_error_line(&line));
+}
+
+#[test]
+fn is_initialize_error_line_rejects_prompt_error_response() {
+    let line = format!(
+        r#"{{"jsonrpc":"2.0","id":"{PROMPT_REQUEST_ID}","error":{{"code":-32004,"message":"auth"}}}}"#
+    );
+    assert!(!is_initialize_error_line(&line));
+}
+
+#[test]
+fn is_initialize_error_line_rejects_garbage() {
+    assert!(!is_initialize_error_line("not json"));
+    assert!(!is_initialize_error_line(
+        r#"{"jsonrpc":"2.0","method":"event","params":{"type":"TurnEnd","payload":{}}}"#
+    ));
+}
+
+#[test]
 fn close_stdin_drops_underlying_writer_and_redirects_to_sink() {
     struct DropTracker(Arc<AtomicBool>);
     impl Write for DropTracker {
@@ -774,4 +805,112 @@ exec sleep 30
         .expect("content trip should carry guard context");
     assert_eq!(guard_context.pattern.as_deref(), Some("STOPWIRE"));
     assert_eq!(guard_context.scope, None);
+}
+
+/// A server that answers `init-1` with a JSON-RPC error never processes the
+/// prompt, so the reader must close stdin and complete the session instead
+/// of hanging until the wall-clock timeout (the fake kimi sleeps 30s; the
+/// session must end via the completion path, not the 20s cancel).
+#[cfg(unix)]
+#[test]
+fn kimi_wire_init_error_response_fails_fast() {
+    use crate::commands::wrap::live_semantic_sink::LiveSemanticSink;
+    use crate::commands::wrap::policy::StructuredSummaryDetails;
+    use crate::commands::wrap::stream_io::StreamOutput;
+    use claudine::events::{AgenticEvent, EnvironmentContext, EventMeta as DispatchEventMeta};
+    use claudine::provider::Provider;
+    use claudine::stream::stderr::Verbosity;
+    use std::collections::HashMap;
+    use std::ffi::OsString;
+    use std::os::unix::fs::PermissionsExt;
+
+    let workspace = tempfile::tempdir().expect("temp workspace");
+    let fake_kimi = workspace.path().join("kimi");
+    std::fs::write(
+        &fake_kimi,
+        r#"#!/bin/sh
+read INIT_LINE
+printf '%s\n' '{"jsonrpc":"2.0","id":"init-1","error":{"code":-32602,"message":"unsupported protocol version"}}'
+exec sleep 30
+"#,
+    )
+    .expect("write fake kimi");
+    let mut permissions = std::fs::metadata(&fake_kimi)
+        .expect("fake kimi metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&fake_kimi, permissions).expect("make fake kimi executable");
+
+    let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
+    let sink = LiveSemanticSink::new(
+        Provider::KimiCode,
+        EnvironmentContext::default(),
+        workspace.path(),
+        Verbosity::Silent,
+        summary_details,
+        Box::new(|_event: AgenticEvent, _meta: DispatchEventMeta| {}),
+        Box::new(|_line: &str| {}),
+    );
+    let build_parser: SemanticParserBuilder = Box::new(move |output_cb, _reasoning_cb, agent_pid| {
+        let mut sink = sink.with_output_text_sink(output_cb);
+        sink.set_agent_pid(agent_pid);
+        claudine::stream::create_semantic_parser(
+            Provider::KimiCode,
+            sink,
+            claudine::stream::ParserConfig::default(),
+        )
+    });
+
+    let mut env = HashMap::new();
+    env.insert(
+        OsString::from("PATH"),
+        std::env::var_os("PATH").unwrap_or_default(),
+    );
+    env.insert(
+        OsString::from("HOME"),
+        workspace.path().as_os_str().to_os_string(),
+    );
+
+    let started = std::time::Instant::now();
+    let mut spawned = false;
+    let result = run_kimi_wire_session(
+        WireSessionConfig {
+            binary: &fake_kimi,
+            args: &[],
+            env: &env,
+            cwd: workspace.path(),
+            prompt: "hello".to_string(),
+            timeout: Some(std::time::Duration::from_secs(20)),
+            client_name: "claudine-test",
+            client_version: "0.0.0",
+            capabilities: WireClientCapabilities::default_for_claudine(),
+            env_context: EnvironmentContext::default(),
+        },
+        WireSessionWiring {
+            build_parser,
+            stream_output: StreamOutput::test_recorder(Arc::new(Mutex::new(Vec::new()))),
+            live_metrics: claudine::stream::progress::new_live_metrics(),
+            runtime_context: claudine::dispatch::DispatchRuntimeContext::default(),
+            content_early_rx: None,
+        },
+        &mut spawned,
+    )
+    .expect("wire session runs");
+
+    assert!(spawned, "fake kimi child should be spawned");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "init-1 error must fail fast, took {:?}",
+        started.elapsed()
+    );
+    assert!(result.data.is_error, "summary must carry the init error");
+    assert!(
+        result
+            .data
+            .error_message
+            .as_deref()
+            .is_some_and(|m| m.contains("unsupported protocol version")),
+        "error message: {:?}",
+        result.data.error_message
+    );
 }

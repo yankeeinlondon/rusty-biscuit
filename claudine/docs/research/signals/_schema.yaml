@@ -1,0 +1,129 @@
+# SimplifiedSchema for the signals research topic.
+#
+# Referenced by each provider research document via `$schema: ./_schema.yaml`.
+# The root `$schema:` key is REQUIRED — it is how darkmatter's resolver
+# classifies this file as a SimplifiedSchema rather than raw JSON Schema.
+#
+# This topic captures per-provider signal detection records for Claudine's
+# signal taxonomy — the normalized semantic signals (usage_cap, rate_limit,
+# auth_invalid, model_resolved, ...) that Claudine must extract from
+# heterogeneous provider streams, logs, and diagnostics. Detection records
+# ARE codegen-wired: the generator compiles declarative records into static
+# detection tables in the generated data half; bespoke records are cataloged
+# but detection stays hand-written in the behavior half.
+#
+# **Flat-rows constraint:** SimplifiedSchema nested-object support is limited.
+# One level of quoted inline-object literals in a list (`"{ ... }[]"`) is the
+# proven pattern; nesting an object list inside a record OR nesting an
+# `extract` map inside a record will be rejected by the parser today. To avoid
+# this, the schema uses TWO top-level joined lists: `records[]` (each with a
+# required unique `id`) and `extractions[]` (each with a required `record` key
+# referencing a `records[].id`). This workaround keeps the shape flat while
+# preserving the semantic relationship.
+#
+# Freeze risk: the 30 signal kinds, 10 sources, 5 operators, and shared vocab
+# enums (unit, zone, confidence) are locked to the taxonomy and catalog-types
+# definitions. A test regenerates/verifies sidecar members against the Rust
+# variants; three-copy drift is mechanically closed. Do not hand-edit the enum
+# member lists — amend the canonical Rust definitions and regenerate.
+#
+# Evidence corpus: every record MUST cite an `evidence` fixture under
+# `claudine/docs/research/signals/fixtures/<provider-slug>/`. A seeded corpus
+# already exists there (being added in a parallel change) — reuse seeded
+# fixtures where they prove the record; capture NEW fixtures (scrubbed: no
+# session IDs, no real home paths, no user content beyond what the signal
+# shape needs) when a record has no seeded evidence. A record with no
+# obtainable fixture must be `confidence: inferred` with a `gaps` entry.
+#
+# **SimplifiedSchema inline file constraint limitation:** The design doc
+# specified `evidence: file(eager; required)`, but SimplifiedSchema's inline-
+# object grammar does not currently accept `file(...)` constraints inside
+# object-list literals reliably. The schema uses `string(required)` instead —
+# presence is enforced, but file-reference validation is deferred to the
+# generate-time fixture-replay check (`claudine signals check`). This limitation
+# and the design-doc intent are surfaced at Ken's checkpoint.
+$schema:
+    # Date the research file was first created. Optional because update-mode
+    # legacy docs may predate the schema contract.
+    created: date
+
+    # Date the provider signal behavior was last verified or refreshed.
+    last_updated: date(required)
+
+    # Agent/model that produced the research.
+    agent: string(required)
+    model: string(required)
+
+    # Best official documentation URL for the provider's signal/event surfaces.
+    docs: url
+
+    # Per-signal detection records. One row per (signal × source × version-range)
+    # combination. Priority orders first-match-wins evaluation within one
+    # provider×source group; distinguish explains the human intent; the machine
+    # guarantee is the generate-time mechanical-overlap check (one record's
+    # match-term set subsumes another's with no differing term and no priority
+    # separation → generation error).
+    #
+    # Because SimplifiedSchema inline-object literals cannot nest another list,
+    # payload extractions live in the separate `extractions` list below, joined
+    # via `records[].id`.
+    #
+    # Payload definition per source: for `stream`/`session_log`/`app_log`/
+    # `sqlite`/`hook`/`acp` sources the payload is the raw JSON the channel
+    # carries; for `exit` it is the wrapper-synthesized
+    # `{exit_code, stderr_tail}` object; for `stderr_promoted` the payload is
+    # defined as the serialized output of claudine's promoted-stderr classifier
+    # (glue mode, ratified 2026-07-06) — e.g. OpenCode records match
+    # `LogClassification` fields (`lib/src/stream/logs/opencode/events.rs`),
+    # and the vocabulary/conjunction logic feeding that classifier stays
+    # bespoke in the behavior half.
+    records: "{ id: string(required), signal: enum(usage_cap_approaching,usage_capped,rate_limited,provider_overloaded,retries_exhausted,no_funds,auth_invalid,auth_kind_detected,permission_denied_read,permission_denied_write,tokens_consumed,model_resolved,model_fallback,model_catalog_drift,provider_version,generation_retried,stalled_generation,repeated_stream_error,timeout,step_timeout,exit_expression,runaway_repetition,runaway_volume,unsupported_protocol_version,turn_limit_reached,session_time_limit_reached,interrupted,session_tainted,human_input_requested,session_resumable; required), source: enum(stream,session_log,app_log,sqlite,hook,stderr_diagnostic,stderr_promoted,acp,exit,wrapper; required), locator: string(required), detection: enum(declarative,bespoke; required), priority: number(required), match_path: string, match_op: enum(eq,in,substring_ci,regex,exists), match_value: string, match_values: string[], distinguish: string, vocabulary: string[], since: string, until: string, confidence: enum(inferred,documented,observed,source_code; required), evidence: string(required), notes: string }[]"
+
+    # Payload extraction sites for declarative records. One row per extracted
+    # field, joined to `records` via the `record` key. The `field` name is the
+    # normalized payload field name in the signal's typed payload.
+    #
+    # Each row selects ONE extraction strategy (mirrors catalog-types
+    # `ExtractStrategy`), by which keys are present:
+    #   - `path` alone           → walk the payload at that dot/bracket path
+    #     (the common case; the same restricted JSONPath subset as `match_path`
+    #     — dot segments and numeric bracket indices ONLY, no wildcards,
+    #     filters, or recursive descent);
+    #   - `literal`              → a constant declared by research, independent
+    #     of the payload (e.g. a decomposed cap axis when the provider bundles
+    #     several into one wire token; the value is passed through `unit`
+    #     conversion, so a `duration_secs` timeframe pins seconds like "604800");
+    #   - `regex` + `path`       → first capture group of the pattern applied
+    #     to the string at `path`;
+    #   - `start` + `stop` + `path` → the substring between the two markers.
+    # The generator rejects a row that names no strategy; `unit` and `zone`
+    # apply to whatever the strategy resolves. `unit` and `zone` are forced
+    # answers to the units/timezone questions; `zone: unspecified` is allowed
+    # but flows into `known_gaps` reporting, never silently passes.
+    extractions: "{ record: string(required), field: string(required), path: string, literal: string, regex: string, start: string, stop: string, unit: enum(unix_seconds,unix_millis,unix_nanos,iso8601,duration_secs,duration_millis,percent,tokens,requests,usd), zone: enum(utc,local,embedded_offset,unspecified), notes: string }[]"
+
+    # Optional prose entries, one per bespoke record, saying WHY it cannot be
+    # declarative. Per the ratified boundary: single-payload matching is
+    # declarative; anything needing cross-record or temporal state is bespoke.
+    # Where a record appears with `detection: bespoke`, include a corresponding
+    # entry here explaining the cross-event or temporal dependency that prevents
+    # declarative extraction.
+    bespoke_rationale: string[]
+
+    # Claims that current docs/source-code/local inspection could not verify.
+    # Unknown unit/zone → `unspecified` + `confidence: inferred` + a `gaps`
+    # entry. A record with no obtainable evidence fixture must be `confidence:
+    # inferred` with a `gaps` entry.
+    gaps: string[]
+
+    # Update-mode changelog entries. Fresh first-run documents should use [].
+    changes: string[]
+
+    # Whether discovered behavior requires Claudine code/generated metadata
+    # changes. Expected to be true for most runs — this topic IS codegen-wired,
+    # unlike memory/system-prompt. New detection records or changed signal
+    # vocabularies usually flow into catalog-types or generated detection tables.
+    requires_claudine_update: boolean(required)
+
+    # Required when `requires_claudine_update` is true; optional otherwise.
+    reason: string

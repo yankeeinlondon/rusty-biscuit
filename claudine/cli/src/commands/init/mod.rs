@@ -190,6 +190,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
         models: HashMap::new(),
         default_sounds: DefaultSounds::default(),
         prompt_for_missing: true,
+        harvest_unmatched: false,
         exit_expressions: None,
         guard_settings: Default::default(),
     };
@@ -506,6 +507,7 @@ fn default_config(repo_scope: bool) -> Result<ClaudineConfig> {
         models: HashMap::new(),
         default_sounds: DefaultSounds::default(),
         prompt_for_missing: true,
+        harvest_unmatched: false,
         exit_expressions: None,
         guard_settings: Default::default(),
     })
@@ -617,6 +619,7 @@ mod tests {
             models: HashMap::new(),
             default_sounds: DefaultSounds::default(),
             prompt_for_missing: true,
+            harvest_unmatched: false,
             exit_expressions: None,
             guard_settings: Default::default(),
         }
@@ -639,7 +642,6 @@ mod tests {
             Provider::KimiCode,
             Provider::OpenCode,
             Provider::QwenCode,
-            Provider::RooCode,
         ] {
             let events = provider_hook_events(provider);
             for event in events {

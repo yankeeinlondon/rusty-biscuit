@@ -1,0 +1,58 @@
+# SimplifiedSchema for the agent-cli research topic.
+#
+# Captures the public CLI surface that Claudine wrappers and provider metadata
+# need: version/docs links, flags, subcommands, config discovery, and platform
+# packaging. Referenced by future provider docs via `$schema: ./_schema.yaml`.
+$schema:
+    # Date the research file was first created.
+    created: date
+
+    # Date the provider CLI surface was last verified.
+    last_updated: date(required)
+
+    # Agent/model that produced the research.
+    agent: string(required)
+    model: string(required)
+
+    # Current upstream CLI version observed during research, or "unknown".
+    latest_version: string(required)
+
+    # Primary product, repository, and documentation URLs.
+    homepage: url
+    repo: url
+    docs: url
+    cli_docs: url
+
+    # Binary names by OS. Use `os: all` only when the executable name is the same
+    # everywhere; otherwise record per-OS binaries and aliases/shims.
+    binaries: "{ os: enum(macos,linux,windows; required), binary: string(required), alt_binaries: string[], notes: string }[]"
+    install_methods: "{ os: enum(macos,linux,windows; required), method: enum(package_manager,standalone_binary,npm,pip,cargo,brew,winget,chocolatey,scoop,app_bundle,source,other; required), command: string, notes: string }[]"
+
+    # One record per top-level subcommand or mode.
+    subcommands: "{ name: string(required), description: string(required), non_interactive: boolean, notes: string }[]"
+
+    # Full CLI switch inventory. `scope` is free-form until the fleet reveals stable groups.
+    cli_switches: "{ flag: string(required), value: string, scope: string[], default: string, description: string(required), example: string, notes: string }[]"
+
+    # Config discovery exposed by the CLI itself.
+    config_paths: "{ os: enum(macos,linux,windows; required), scope: enum(user,repo,system,env,other; required), path: string(required), format: enum(json,jsonc,yaml,toml,ini,text,other), notes: string }[]"
+    # General CLI/runtime environment variables not owned by a more specific
+    # topic such as model-config, permissions, mcp, logging, or streaming. Keep
+    # `effect` prose for first-pass research; after the topic fleets, derive
+    # narrower effect enums where the data supports it.
+    env_vars: "{ name: string(required), effect: string(required) }[]"
+
+    # Commands Claudine can run to discover machine-usable provider state. Do
+    # not include generic `--help` / `--version` unless they have a machine-
+    # readable mode or expose state useful to wrappers/codegen.
+    # Examples: model catalogs, config dumps/schemas, doctor diagnostics,
+    # effective env/config, plugin/extension lists, MCP server lists, tool lists.
+    machine_introspection: "{ command: string(required), purpose: enum(version,help,models,config_schema,config_dump,doctor,env,capabilities,plugins,mcp,tools,other; required), machine_readable: boolean(required), output_format: enum(json,jsonl,text,table,yaml,toml,unknown; required), useful_for_codegen: boolean(required), notes: string }[]"
+
+    # Wrapper-impacting caveats: noisy stderr, TTY requirements, shell quoting,
+    # config side effects, broken flags, platform-specific behavior.
+    wrapper_notes: string[]
+
+    changes: string[]
+    requires_claudine_update: boolean(required)
+    reason: string

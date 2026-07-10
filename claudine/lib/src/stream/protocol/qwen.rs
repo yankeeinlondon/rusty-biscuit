@@ -64,7 +64,8 @@ pub struct QwenInit {
 }
 
 /// `system` events only become session-start signals when `subtype` is
-/// `"session_start"`. Other subtypes are ignored by the parser.
+/// `"session_start"` or `"init"` (the latter emitted since qwen 0.19.6 with
+/// model/session metadata). Other subtypes are ignored by the parser.
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct QwenSystem {
     #[serde(default)]
@@ -77,7 +78,7 @@ pub struct QwenSystem {
 
 impl QwenSystem {
     pub fn is_session_start(&self) -> bool {
-        self.subtype.as_deref() == Some("session_start")
+        matches!(self.subtype.as_deref(), Some("session_start") | Some("init"))
     }
 
     pub fn into_init(self) -> QwenInit {
@@ -301,6 +302,23 @@ mod tests {
         assert!(sys.is_session_start());
         let init = sys.into_init();
         assert_eq!(init.session_id.as_deref(), Some("qw-2"));
+    }
+
+    #[test]
+    fn qwen_system_init_detection() {
+        // Wire sample from the signals corpus (qwen.md record
+        // `stream-model_resolved-system-init`, since 0.19.6).
+        const QWEN_SYSTEM_INIT: &str = include_str!(
+            "../../../../docs/research/signals/fixtures/qwen/system-init-model-version.jsonl"
+        );
+        let event = parse(QWEN_SYSTEM_INIT.trim());
+        let QwenEvent::System(sys) = event else {
+            panic!("expected System");
+        };
+        assert!(sys.is_session_start());
+        let init = sys.into_init();
+        assert_eq!(init.session_id.as_deref(), Some("qw-1"));
+        assert_eq!(init.model.as_deref(), Some("qwen3-coder-plus"));
     }
 
     #[test]

@@ -300,6 +300,54 @@ pub struct TrendsReport {
     pub top_tools: Vec<DailyToolStat>,
 }
 
+/// Per-provider aggregate of one model-catalog signal kind.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DriftSignalSummary {
+    pub provider: Provider,
+    /// Signal kind slug (`model_catalog_drift`, `model_resolved`,
+    /// `model_fallback`).
+    pub kind: String,
+    /// Distinct sessions that observed the signal in the range.
+    pub session_count: u64,
+    /// Total folded emissions across those sessions.
+    pub occurrences: u64,
+    pub last_seen: DateTime<Utc>,
+    /// From the most recent `model_catalog_drift` payload: ids the
+    /// provider reported that the baseline lacks. Empty for other kinds.
+    pub unexpected: Vec<String>,
+    /// From the most recent drift payload: baseline ids the provider's
+    /// listing no longer returns. Empty for other kinds.
+    pub missing: Vec<String>,
+    /// `listing` or `resolved_model` for drift rows; `None` otherwise.
+    pub observed_via: Option<String>,
+}
+
+/// One session's `family_latest` alias stamp.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AliasResolution {
+    pub session_key: String,
+    pub session_id: Option<String>,
+    pub provider: Provider,
+    /// Session end time (the stamp is written on the SessionEnd row).
+    pub ended_at: DateTime<Utc>,
+    /// The rolling alias the run requested (e.g. `opus`).
+    pub alias: String,
+    /// The family-latest release identity key the alias meant.
+    pub identity_key: String,
+    pub family_key: Option<String>,
+    /// Whether the vendored artifact was past its max age at stamp time.
+    pub stale: bool,
+    pub age_days: Option<u64>,
+}
+
+/// Model-catalog drift report wrapper for JSON output.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DriftReport {
+    pub range: DateRange,
+    pub signals: Vec<DriftSignalSummary>,
+    pub aliases: Vec<AliasResolution>,
+}
+
 /// One event row within a session detail report.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionEvent {

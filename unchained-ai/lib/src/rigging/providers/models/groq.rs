@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-05-07T02:07:02.946619+00:00
+//! Generated: 2026-07-06T22:44:34.063407+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: Groq
 //!
@@ -44,6 +44,8 @@ pub enum ProviderModelGroq {
     Openai___Gpt__Oss__Safeguard__20b,
     /// Model: `qwen/qwen3-32b`
     Qwen___Qwen3__32b,
+    /// Model: `qwen/qwen3.6-27b`
+    Qwen___Qwen3_6__27b,
     /// Model: `whisper-large-v3`
     Whisper__Large__V3,
     /// Model: `whisper-large-v3-turbo`

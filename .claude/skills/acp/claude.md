@@ -19,7 +19,7 @@ prompt: |-
 
     Your research content should be added to the body of this document along with ensuring that the Frontmatter properties above are updated while preserving all other markdown properties.
 
-last_updated: 2026-02-23
+last_updated: 2026-07-02
 update_policy:
     - Duration(6 mo)
 ---
@@ -55,9 +55,8 @@ Claude API
 
 | Adapter | Language | Install | Notes |
 |---------|----------|---------|-------|
-| `@zed-industries/claude-agent-acp` | TypeScript | `npm i -g @zed-industries/claude-agent-acp` | Official Zed adapter, most mature |
+| `@zed-industries/claude-code-acp` | TypeScript | `npx -y @zed-industries/claude-code-acp@latest` | Official Zed adapter, most mature |
 | `claude-code-acp-rs` | Rust | `cargo install claude-code-acp-rs` | Uses `sacp` + `agent-client-protocol-schema` internally |
-| `acp-claude-code` (Xuanwo) | TypeScript | npm / GitHub | Community alternative |
 
 ### What the Adapter Does
 
@@ -240,13 +239,9 @@ The Claude Code ACP adapter errors out in plan mode since the Agent SDK doesn't 
 
 **12. SDK pathing bug**
 
-The `@zed-industries/claude-agent-acp` package may need manual patching at `sdk.mjs` line 6515: change `join(dirname, "entrypoints", "cli.js")` to `join(dirname, "claude-code", "cli.js")`. This fix resets on reinstall.
+The `@zed-industries/claude-code-acp` package may need manual patching at `sdk.mjs` line 6515: change `join(dirname, "entrypoints", "cli.js")` to `join(dirname, "claude-code", "cli.js")`. This fix resets on reinstall.
 
-**13. `!Send` futures in the official Rust SDK**
-
-The `agent-client-protocol` crate's connection futures are `!Send`, meaning you **must** use `tokio::task::LocalSet` and `spawn_local`. Standard `tokio::spawn` will not compile. This is a deliberate design choice to avoid `Arc<Mutex<>>` overhead, but it catches many developers off guard.
-
-**14. Non-exhaustive enums everywhere**
+**13. Non-exhaustive enums everywhere**
 
 `ContentBlock`, `SessionUpdate`, `StopReason`, `ToolCallStatus`, and `ErrorCode` in `agent-client-protocol-schema` are all `#[non_exhaustive]`. Always include wildcard (`_`) arms in match expressions, or your code will break when new variants are added.
 
@@ -265,373 +260,241 @@ Debug ACP traffic in Zed: Command Palette → `dev: open acp logs`
 
 ## Rust Code Examples
 
-The following examples show how to build a Rust ACP client using the official `agent-client-protocol` crate (v0.9.4). All examples use `tokio` as the async runtime.
+The following examples show how to build a Rust ACP client using the official `agent-client-protocol` crate (v1.0.1). All examples use `tokio` as the async runtime.
+
+As of 1.0.1 the SDK is `Send`/`Sync`, so standard `tokio::spawn` works and you no longer need `tokio::task::LocalSet`.
 
 ### Dependencies
 
 ```toml
 [dependencies]
-agent-client-protocol = "0.9"
+agent-client-protocol = "1"
 tokio = { version = "1", features = ["full"] }
-tokio-util = { version = "0.7", features = ["compat"] }
 anyhow = "1"
 ```
 
 ### 1. Basic ACP Client: Connecting to the Agent
 
-This example spawns a Claude Code ACP adapter as a subprocess and performs the full initialization → session → prompt lifecycle.
+This example spawns the Zed Claude Code ACP adapter as a subprocess and performs the full initialization → session → prompt lifecycle.
 
 ```rust
-use agent_client_protocol as acp;
-use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
-
-/// A minimal ACP client that prints session updates to stdout.
-struct MinimalClient;
-
-#[async_trait::async_trait(?Send)]
-impl acp::MessageHandler<acp::ClientSide> for MinimalClient {
-    // Permission request: auto-approve everything (for demo purposes)
-    async fn request_permission(
-        &self,
-        params: acp::RequestPermissionRequest,
-    ) -> anyhow::Result<acp::RequestPermissionResponse> {
-        let first_allow = params
-            .options
-            .iter()
-            .find(|o| matches!(o.kind, acp::PermissionOptionKind::AllowOnce))
-            .or_else(|| params.options.first());
-
-        Ok(acp::RequestPermissionResponse {
-            outcome: match first_allow {
-                Some(opt) => acp::RequestPermissionOutcome::Selected {
-                    option_id: opt.id.clone(),
-                },
-                None => acp::RequestPermissionOutcome::Cancelled,
-            },
-        })
-    }
-
-    // Streaming session updates arrive here
-    async fn session_notification(
-        &self,
-        params: acp::SessionNotification,
-    ) -> anyhow::Result<()> {
-        match &params.update {
-            acp::SessionUpdate::AgentMessageChunk(chunk) => {
-                if let acp::ContentBlock::Text(t) = &chunk.content {
-                    print!("{}", t.text);
-                }
-            }
-            acp::SessionUpdate::ToolCall(tc) => {
-                println!("\n[tool: {} ({})]", tc.title, tc.tool_call_id);
-            }
-            acp::SessionUpdate::ToolCallUpdate(upd) => {
-                println!("[tool update: {} → {:?}]", upd.tool_call_id, upd.status);
-            }
-            _ => {} // Always include wildcard — enums are non-exhaustive
-        }
-        Ok(())
-    }
-
-    // File read reverse request (stub — see section 2 for full impl)
-    async fn read_text_file(
-        &self,
-        _params: acp::ReadTextFileRequest,
-    ) -> anyhow::Result<acp::ReadTextFileResponse> {
-        anyhow::bail!("fs/read_text_file not implemented")
-    }
-
-    // File write reverse request (stub)
-    async fn write_text_file(
-        &self,
-        _params: acp::WriteTextFileRequest,
-    ) -> anyhow::Result<acp::WriteTextFileResponse> {
-        anyhow::bail!("fs/write_text_file not implemented")
-    }
-
-    // Terminal reverse requests (stubs — see section 3 for full impl)
-    async fn create_terminal(
-        &self,
-        _params: acp::CreateTerminalRequest,
-    ) -> anyhow::Result<acp::CreateTerminalResponse> {
-        anyhow::bail!("terminal/create not implemented")
-    }
-
-    async fn terminal_output(
-        &self,
-        _params: acp::TerminalOutputRequest,
-    ) -> anyhow::Result<acp::TerminalOutputResponse> {
-        anyhow::bail!("terminal/output not implemented")
-    }
-
-    async fn wait_for_terminal_exit(
-        &self,
-        _params: acp::WaitForTerminalExitRequest,
-    ) -> anyhow::Result<acp::WaitForTerminalExitResponse> {
-        anyhow::bail!("terminal/wait_for_exit not implemented")
-    }
-
-    async fn kill_terminal_command(
-        &self,
-        _params: acp::KillTerminalCommandRequest,
-    ) -> anyhow::Result<acp::KillTerminalCommandResponse> {
-        anyhow::bail!("terminal/kill not implemented")
-    }
-
-    async fn release_terminal(
-        &self,
-        _params: acp::ReleaseTerminalRequest,
-    ) -> anyhow::Result<acp::ReleaseTerminalResponse> {
-        anyhow::bail!("terminal/release not implemented")
-    }
-
-    async fn ext_method(
-        &self,
-        _params: acp::ExtRequest,
-    ) -> anyhow::Result<acp::ExtResponse> {
-        anyhow::bail!("ext method not implemented")
-    }
-
-    async fn ext_notification(
-        &self,
-        _params: acp::ExtNotification,
-    ) -> anyhow::Result<()> {
-        Ok(())
-    }
-}
+use agent_client_protocol::schema::{
+    ProtocolVersion,
+    v1::{
+        ClientCapabilities, ContentBlock, FileSystemCapabilities, Implementation,
+        InitializeRequest, NewSessionRequest, PromptRequest, SessionNotification,
+        TextContent,
+    },
+};
+use agent_client_protocol::{AcpAgent, Client};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Spawn the ACP agent adapter as a subprocess
-    let mut child = tokio::process::Command::new("claude-agent-acp")
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::inherit()) // Let agent logs pass through
-        .kill_on_drop(true)
-        .spawn()?;
+    let agent = AcpAgent::zed_claude_code();
 
-    let outgoing = child.stdin.take().unwrap().compat_write();
-    let incoming = child.stdout.take().unwrap().compat();
-
-    // IMPORTANT: ACP SDK futures are !Send — must use LocalSet
-    let local_set = tokio::task::LocalSet::new();
-    local_set
-        .run_until(async move {
-            let (conn, handle_io) = acp::ClientSideConnection::new(
-                MinimalClient,
-                outgoing,
-                incoming,
-                |fut| {
-                    tokio::task::spawn_local(fut);
-                },
-            );
-
-            // Drive the I/O loop in the background
-            tokio::task::spawn_local(handle_io);
-
-            // 1. Initialize — negotiate capabilities
-            let init_response = conn
-                .initialize(acp::InitializeRequest {
-                    protocol_version: acp::V1,
-                    client_capabilities: acp::ClientCapabilities {
-                        fs: Some(acp::FileSystemCapability {
-                            read_text_file: Some(true),
-                            write_text_file: Some(true),
-                        }),
-                        terminal: Some(true),
-                    },
-                    client_info: Some(acp::Implementation {
-                        name: "rusty-client".into(),
-                        title: Some("Rusty ACP Client".into()),
-                        version: "0.1.0".into(),
-                    }),
-                    meta: None,
+    Client
+        .builder()
+        .name("rusty-claude-client")
+        .on_receive_notification(
+            |notification: SessionNotification, _cx| async move {
+                match notification.update {
+                    SessionNotification::AgentMessageChunk(chunk) => {
+                        if let ContentBlock::Text(t) = chunk.content {
+                            print!("{}", t.text);
+                        }
+                    }
+                    SessionNotification::ToolCall(tc) => {
+                        eprintln!("\n[tool started: {}]", tc.title);
+                    }
+                    _ => {}
+                }
+                Ok(())
+            },
+            agent_client_protocol::on_receive_notification!(),
+        )
+        .connect_with(agent, |connection| async move {
+            let caps = ClientCapabilities::new()
+                .fs(FileSystemCapabilities {
+                    read_text_file: true,
+                    write_text_file: true,
                 })
+                .terminal(true);
+
+            let init = InitializeRequest::new(ProtocolVersion::V1)
+                .client_capabilities(caps)
+                .client_info(Implementation {
+                    name: "rusty-client".into(),
+                    title: Some("Rusty ACP Client".into()),
+                    version: "0.1.0".into(),
+                });
+
+            let init_response = connection
+                .send_request(init)
+                .block_task()
                 .await?;
+            println!("Connected to agent: {:?}", init_response.agent_info);
 
-            println!(
-                "Connected to agent: {:?} (protocol v{})",
-                init_response.agent_info, init_response.protocol_version
-            );
-
-            // 2. Create session
-            let session = conn
-                .new_session(acp::NewSessionRequest {
-                    cwd: std::env::current_dir()?,
-                    mcp_servers: vec![],
-                    meta: None,
-                })
+            let session = connection
+                .send_request(NewSessionRequest::new(std::env::current_dir()?))
+                .block_task()
                 .await?;
-
             println!("Session created: {}", session.session_id);
 
-            // 3. Send prompt — streaming updates arrive via session_notification()
-            let result = conn
-                .prompt(acp::PromptRequest {
-                    session_id: session.session_id,
-                    prompt: vec!["What files are in this directory?".into()],
-                    meta: None,
-                })
+            let result = connection
+                .send_request(PromptRequest::new(
+                    session.session_id,
+                    vec![ContentBlock::Text(TextContent::new(
+                        "What files are in this directory?".into(),
+                    ))],
+                ))
+                .block_task()
                 .await?;
 
             println!("\nDone. Stop reason: {:?}", result.stop_reason);
             Ok(())
         })
-        .await
+        .await?;
+
+    Ok(())
 }
 ```
 
 ### 2. Handling Reverse Requests: File System Operations
 
-When the agent needs to read or write files, it sends reverse requests to the client. Here is a full implementation of the file system handlers:
+When the agent needs to read or write files, it sends reverse requests to the client. Register handlers with `on_receive_request` before `connect_with`.
 
 ```rust
-use std::path::PathBuf;
+use agent_client_protocol::schema::v1::{
+    ReadTextFileRequest, ReadTextFileResponse, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
+    WriteTextFileRequest, WriteTextFileResponse,
+};
+use std::path::{Path, PathBuf};
 
-/// An ACP client that handles file system reverse requests.
-struct FsCapableClient {
-    /// Root directory for sandboxing file access.
-    project_root: PathBuf,
+fn sandbox(path: &Path, root: &Path) -> anyhow::Result<PathBuf> {
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    if !canonical.starts_with(root) {
+        anyhow::bail!(
+            "Path {} is outside project root {}",
+            canonical.display(),
+            root.display()
+        );
+    }
+    Ok(canonical)
 }
 
-impl FsCapableClient {
-    fn new(project_root: PathBuf) -> Self {
-        Self { project_root }
-    }
+async fn handle_permission(
+    request: RequestPermissionRequest,
+) -> anyhow::Result<RequestPermissionResponse> {
+    // Auto-select the first option in this demo; in a real app show a UI prompt.
+    let option_id = request
+        .options
+        .first()
+        .map(|o| o.option_id.clone())
+        .unwrap_or_default();
 
-    /// Validate that a path is within the project root (security boundary).
-    fn validate_path(&self, path: &std::path::Path) -> anyhow::Result<PathBuf> {
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-        if !canonical.starts_with(&self.project_root) {
-            anyhow::bail!(
-                "Path {} is outside project root {}",
-                canonical.display(),
-                self.project_root.display()
-            );
-        }
-        Ok(canonical)
-    }
+    Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
+        SelectedPermissionOutcome::new(option_id),
+    )))
 }
 
-#[async_trait::async_trait(?Send)]
-impl acp::MessageHandler<acp::ClientSide> for FsCapableClient {
-    async fn read_text_file(
-        &self,
-        params: acp::ReadTextFileRequest,
-    ) -> anyhow::Result<acp::ReadTextFileResponse> {
-        let path = self.validate_path(&params.path)?;
-        let content = tokio::fs::read_to_string(&path).await?;
+async fn handle_read(
+    request: ReadTextFileRequest,
+    root: PathBuf,
+) -> anyhow::Result<ReadTextFileResponse> {
+    let path = sandbox(&request.path, &root)?;
+    let content = tokio::fs::read_to_string(&path).await?;
 
-        // Apply optional line/limit filtering
-        let filtered = match (params.line, params.limit) {
-            (Some(start_line), Some(limit)) => {
-                // ACP uses 1-based line numbers
-                let start = (start_line as usize).saturating_sub(1);
-                content
-                    .lines()
-                    .skip(start)
-                    .take(limit as usize)
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            }
-            (Some(start_line), None) => {
-                let start = (start_line as usize).saturating_sub(1);
-                content
-                    .lines()
-                    .skip(start)
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            }
-            _ => content,
-        };
+    // ACP uses 1-based line numbers.
+    let filtered = match (request.line, request.limit) {
+        (Some(start), Some(limit)) => content
+            .lines()
+            .skip((start as usize).saturating_sub(1))
+            .take(limit as usize)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        (Some(start), None) => content
+            .lines()
+            .skip((start as usize).saturating_sub(1))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => content,
+    };
 
-        Ok(acp::ReadTextFileResponse { content: filtered })
-    }
-
-    async fn write_text_file(
-        &self,
-        params: acp::WriteTextFileRequest,
-    ) -> anyhow::Result<acp::WriteTextFileResponse> {
-        let path = self.validate_path(&params.path)?;
-
-        // Ensure parent directory exists
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-
-        tokio::fs::write(&path, &params.content).await?;
-        Ok(acp::WriteTextFileResponse {})
-    }
-
-    async fn request_permission(
-        &self,
-        params: acp::RequestPermissionRequest,
-    ) -> anyhow::Result<acp::RequestPermissionResponse> {
-        // Log the permission request for audit
-        if let Some(tc) = &params.tool_call {
-            println!(
-                "[permission] Agent requests: {} (kind: {:?})",
-                tc.title, tc.kind
-            );
-        }
-
-        // Auto-approve read operations, prompt for others
-        let is_read = params
-            .tool_call
-            .as_ref()
-            .map(|tc| matches!(tc.kind, Some(acp::ToolKind::Read)))
-            .unwrap_or(false);
-
-        let option_kind = if is_read {
-            acp::PermissionOptionKind::AllowOnce
-        } else {
-            // In a real app, you'd show a UI prompt here
-            acp::PermissionOptionKind::AllowOnce
-        };
-
-        let selected = params
-            .options
-            .iter()
-            .find(|o| o.kind == option_kind)
-            .or_else(|| params.options.first());
-
-        Ok(acp::RequestPermissionResponse {
-            outcome: match selected {
-                Some(opt) => acp::RequestPermissionOutcome::Selected {
-                    option_id: opt.id.clone(),
-                },
-                None => acp::RequestPermissionOutcome::Cancelled,
-            },
-        })
-    }
-
-    // ... (other handlers as in section 1)
-    # // Remaining handlers omitted for brevity — see section 1 stub pattern
+    Ok(ReadTextFileResponse { content: filtered })
 }
+
+async fn handle_write(
+    request: WriteTextFileRequest,
+    root: PathBuf,
+) -> anyhow::Result<WriteTextFileResponse> {
+    let path = sandbox(&request.path, &root)?;
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    tokio::fs::write(&path, &request.content).await?;
+    Ok(WriteTextFileResponse {})
+}
+```
+
+Register the handlers on the builder:
+
+```rust
+let project_root = std::env::current_dir()?;
+
+Client
+    .builder()
+    .on_receive_request(
+        |request: RequestPermissionRequest, responder, _cx| async move {
+            responder.respond(handle_permission(request).await?)
+        },
+        agent_client_protocol::on_receive_request!(),
+    )
+    .on_receive_request(
+        move |request: ReadTextFileRequest, responder, _cx| {
+            let root = project_root.clone();
+            async move { responder.respond(handle_read(request, root).await?) }
+        },
+        agent_client_protocol::on_receive_request!(),
+    )
+    .on_receive_request(
+        move |request: WriteTextFileRequest, responder, _cx| {
+            let root = project_root.clone();
+            async move { responder.respond(handle_write(request, root).await?) }
+        },
+        agent_client_protocol::on_receive_request!(),
+    )
+    // ... notification handler and connect_with
 ```
 
 ### 3. Handling Terminal Execution Requests
 
-When the agent needs to run commands on the host system, it uses the terminal reverse request lifecycle. Here is a full implementation:
+When the agent needs to run commands on the host system, it uses the terminal reverse request lifecycle. Track spawned processes in a map and respond to each request.
 
 ```rust
+use agent_client_protocol::schema::v1::{
+    CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse,
+    ReleaseTerminalRequest, ReleaseTerminalResponse, TerminalId, TerminalOutputRequest,
+    TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::process::Child;
 use tokio::sync::Mutex;
 
-/// Tracks active terminal processes.
-struct TerminalManager {
-    terminals: Arc<Mutex<HashMap<String, TerminalHandle>>>,
-    next_id: Arc<Mutex<u64>>,
-}
-
 struct TerminalHandle {
-    child: tokio::process::Child,
+    child: Child,
     stdout_buf: Vec<u8>,
     stderr_buf: Vec<u8>,
-    output_limit: usize,
     exited: bool,
     exit_code: Option<i32>,
+    output_limit: usize,
+}
+
+#[derive(Clone)]
+struct TerminalManager {
+    terminals: Arc<Mutex<HashMap<TerminalId, TerminalHandle>>>,
+    next_id: Arc<Mutex<u64>>,
 }
 
 impl TerminalManager {
@@ -642,487 +505,169 @@ impl TerminalManager {
         }
     }
 
-    async fn next_terminal_id(&self) -> String {
+    async fn next_id(&self) -> TerminalId {
         let mut id = self.next_id.lock().await;
         *id += 1;
-        format!("term_{}", *id)
+        format!("term_{}", id).into()
     }
 }
 
-/// An ACP client with full terminal execution support.
-struct TerminalCapableClient {
-    terminals: TerminalManager,
-    project_root: PathBuf,
-}
+async fn handle_create_terminal(
+    request: CreateTerminalRequest,
+    manager: &TerminalManager,
+    default_root: PathBuf,
+) -> anyhow::Result<CreateTerminalResponse> {
+    let cwd = request.cwd.unwrap_or(default_root);
+    let limit = request.output_byte_limit.unwrap_or(1_048_576) as usize;
 
-#[async_trait::async_trait(?Send)]
-impl acp::MessageHandler<acp::ClientSide> for TerminalCapableClient {
-    async fn create_terminal(
-        &self,
-        params: acp::CreateTerminalRequest,
-    ) -> anyhow::Result<acp::CreateTerminalResponse> {
-        let cwd = params
-            .cwd
-            .unwrap_or_else(|| self.project_root.clone());
+    let child = tokio::process::Command::new(&request.command)
+        .args(request.args)
+        .envs(request.env.into_iter().map(|e| (e.name, e.value)))
+        .current_dir(&cwd)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
 
-        let output_limit = params.output_byte_limit.unwrap_or(1_048_576) as usize;
-
-        let child = tokio::process::Command::new(&params.command)
-            .args(params.args.unwrap_or_default())
-            .envs(
-                params
-                    .env
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|e| (e.name, e.value)),
-            )
-            .current_dir(&cwd)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()?;
-
-        let terminal_id = self.terminals.next_terminal_id().await;
-        let handle = TerminalHandle {
+    let id = manager.next_id().await;
+    manager.terminals.lock().await.insert(
+        id.clone(),
+        TerminalHandle {
             child,
             stdout_buf: Vec::new(),
             stderr_buf: Vec::new(),
-            output_limit,
             exited: false,
             exit_code: None,
-        };
+            output_limit: limit,
+        },
+    );
 
-        self.terminals
-            .terminals
-            .lock()
-            .await
-            .insert(terminal_id.clone(), handle);
-
-        Ok(acp::CreateTerminalResponse {
-            terminal_id: terminal_id.into(),
-        })
-    }
-
-    async fn terminal_output(
-        &self,
-        params: acp::TerminalOutputRequest,
-    ) -> anyhow::Result<acp::TerminalOutputResponse> {
-        let mut terminals = self.terminals.terminals.lock().await;
-        let handle = terminals
-            .get_mut(params.terminal_id.as_ref())
-            .ok_or_else(|| anyhow::anyhow!("Unknown terminal: {}", params.terminal_id))?;
-
-        // Read available output from child process
-        if let Some(stdout) = handle.child.stdout.as_mut() {
-            use tokio::io::AsyncReadExt;
-            let mut buf = vec![0u8; 4096];
-            // Non-blocking read of available data
-            match tokio::time::timeout(
-                std::time::Duration::from_millis(100),
-                stdout.read(&mut buf),
-            )
-            .await
-            {
-                Ok(Ok(n)) if n > 0 => handle.stdout_buf.extend_from_slice(&buf[..n]),
-                _ => {}
-            }
-        }
-
-        let truncated = handle.stdout_buf.len() > handle.output_limit;
-        let output = if truncated {
-            String::from_utf8_lossy(&handle.stdout_buf[..handle.output_limit]).into_owned()
-        } else {
-            String::from_utf8_lossy(&handle.stdout_buf).into_owned()
-        };
-
-        Ok(acp::TerminalOutputResponse {
-            output,
-            truncated,
-            exit_status: handle.exit_code,
-        })
-    }
-
-    async fn wait_for_terminal_exit(
-        &self,
-        params: acp::WaitForTerminalExitRequest,
-    ) -> anyhow::Result<acp::WaitForTerminalExitResponse> {
-        let mut terminals = self.terminals.terminals.lock().await;
-        let handle = terminals
-            .get_mut(params.terminal_id.as_ref())
-            .ok_or_else(|| anyhow::anyhow!("Unknown terminal: {}", params.terminal_id))?;
-
-        let status = handle.child.wait().await?;
-        handle.exited = true;
-        handle.exit_code = status.code();
-
-        Ok(acp::WaitForTerminalExitResponse {
-            exit_code: status.code(),
-            signal: None, // Platform-specific; could use status.signal() on unix
-        })
-    }
-
-    async fn kill_terminal_command(
-        &self,
-        params: acp::KillTerminalCommandRequest,
-    ) -> anyhow::Result<acp::KillTerminalCommandResponse> {
-        let mut terminals = self.terminals.terminals.lock().await;
-        let handle = terminals
-            .get_mut(params.terminal_id.as_ref())
-            .ok_or_else(|| anyhow::anyhow!("Unknown terminal: {}", params.terminal_id))?;
-
-        handle.child.kill().await?;
-        Ok(acp::KillTerminalCommandResponse {})
-    }
-
-    async fn release_terminal(
-        &self,
-        params: acp::ReleaseTerminalRequest,
-    ) -> anyhow::Result<acp::ReleaseTerminalResponse> {
-        let mut terminals = self.terminals.terminals.lock().await;
-
-        if let Some(mut handle) = terminals.remove(params.terminal_id.as_ref()) {
-            // Kill if still running, then drop
-            if !handle.exited {
-                let _ = handle.child.kill().await;
-            }
-        }
-
-        Ok(acp::ReleaseTerminalResponse {})
-    }
-
-    // ... (permission, fs, session_notification handlers as above)
+    Ok(CreateTerminalResponse { terminal_id: id })
 }
 ```
 
+The remaining handlers look up the `TerminalId`, operate on the `Child`, and return the corresponding response. Always implement `terminal/release` and kill the process if it is still running.
+
 ### 4. Streaming to a Desktop App via `mpsc` Channels
 
-This example shows how to bridge ACP streaming updates to a desktop UI framework (Tauri or iced) using `tokio::sync::mpsc` channels. The ACP client runs on a background thread while the UI thread receives typed events through the channel.
+Run the ACP client on a dedicated thread and forward `SessionNotification` values through an `mpsc` channel. The 1.0.1 SDK is `Send`/`Sync`, so a multi-threaded Tokio runtime works.
 
 ```rust
 use tokio::sync::mpsc;
 
-/// Events sent from the ACP client to the UI layer.
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
-    /// Agent is streaming text content.
     TextChunk(String),
-    /// Agent is reasoning internally (extended thinking).
     ThoughtChunk(String),
-    /// A tool call has started.
-    ToolCallStarted {
-        id: String,
-        title: String,
-        kind: String,
-    },
-    /// A tool call has completed or failed.
-    ToolCallFinished {
-        id: String,
-        status: String,
-        content: Option<String>,
-    },
-    /// Agent requests permission for an action.
-    PermissionRequest {
-        request_id: String,
-        title: String,
-        options: Vec<(String, String)>, // (id, label)
-    },
-    /// The prompt turn has completed.
-    TurnComplete {
-        stop_reason: String,
-    },
-    /// An error occurred.
+    ToolCallStarted { id: String, title: String },
+    ToolCallFinished { id: String, status: String },
+    PermissionRequest { request_id: String, title: String, options: Vec<(String, String)> },
+    TurnComplete { stop_reason: String },
     Error(String),
 }
 
-/// Messages sent from the UI layer back to the ACP client.
-#[derive(Debug, Clone)]
-pub enum UiCommand {
-    /// Send a prompt to the agent.
-    SendPrompt(String),
-    /// Respond to a permission request.
-    PermissionResponse {
-        request_id: String,
-        option_id: String,
-    },
-    /// Cancel the current operation.
-    Cancel,
-}
-
-/// ACP client that bridges to UI via channels.
-struct ChannelClient {
-    event_tx: mpsc::UnboundedSender<AgentEvent>,
-    /// For permission responses, the UI sends back through this.
-    /// Keyed by JSON-RPC request id.
-    pending_permissions: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<String>>>>,
-}
-
-#[async_trait::async_trait(?Send)]
-impl acp::MessageHandler<acp::ClientSide> for ChannelClient {
-    async fn session_notification(
-        &self,
-        params: acp::SessionNotification,
-    ) -> anyhow::Result<()> {
-        let event = match params.update {
-            acp::SessionUpdate::AgentMessageChunk(chunk) => {
-                if let acp::ContentBlock::Text(t) = chunk.content {
-                    AgentEvent::TextChunk(t.text)
-                } else {
-                    return Ok(());
-                }
-            }
-            acp::SessionUpdate::AgentThoughtChunk(chunk) => {
-                if let acp::ContentBlock::Text(t) = chunk.content {
-                    AgentEvent::ThoughtChunk(t.text)
-                } else {
-                    return Ok(());
-                }
-            }
-            acp::SessionUpdate::ToolCall(tc) => AgentEvent::ToolCallStarted {
-                id: tc.tool_call_id.to_string(),
-                title: tc.title,
-                kind: format!("{:?}", tc.kind),
-            },
-            acp::SessionUpdate::ToolCallUpdate(upd) => {
-                let content_text = upd.content.as_ref().and_then(|blocks| {
-                    blocks.iter().find_map(|b| {
-                        if let acp::ToolCallContent::Content(
-                            acp::ContentBlock::Text(t),
-                        ) = b
-                        {
-                            Some(t.text.clone())
-                        } else {
-                            None
-                        }
-                    })
-                });
-                AgentEvent::ToolCallFinished {
-                    id: upd.tool_call_id.to_string(),
-                    status: format!("{:?}", upd.status),
-                    content: content_text,
-                }
-            }
-            _ => return Ok(()),
-        };
-
-        let _ = self.event_tx.send(event);
-        Ok(())
-    }
-
-    async fn request_permission(
-        &self,
-        params: acp::RequestPermissionRequest,
-    ) -> anyhow::Result<acp::RequestPermissionResponse> {
-        let request_id = uuid::Uuid::new_v4().to_string();
-        let (tx, rx) = tokio::sync::oneshot::channel();
-
-        // Store the oneshot sender for when the UI responds
-        self.pending_permissions
-            .lock()
-            .await
-            .insert(request_id.clone(), tx);
-
-        // Notify UI that a permission decision is needed
-        let title = params
-            .tool_call
-            .as_ref()
-            .map(|tc| tc.title.clone())
-            .unwrap_or_default();
-
-        let options: Vec<(String, String)> = params
-            .options
-            .iter()
-            .map(|o| (o.id.to_string(), o.name.clone()))
-            .collect();
-
-        let _ = self.event_tx.send(AgentEvent::PermissionRequest {
-            request_id,
-            title,
-            options,
-        });
-
-        // Wait for UI to respond (with timeout)
-        let option_id = tokio::time::timeout(
-            std::time::Duration::from_secs(60),
-            rx,
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("Permission request timed out"))?
-        .map_err(|_| anyhow::anyhow!("Permission channel closed"))?;
-
-        Ok(acp::RequestPermissionResponse {
-            outcome: acp::RequestPermissionOutcome::Selected {
-                option_id: option_id.into(),
-            },
-        })
-    }
-
-    // ... (fs and terminal handlers as in previous sections)
-}
-
-/// Spawn the ACP client on a background LocalSet and return channel handles.
-pub fn spawn_acp_client(
-    agent_command: &str,
+pub fn spawn_agent(
     project_dir: PathBuf,
-) -> anyhow::Result<(
-    mpsc::UnboundedReceiver<AgentEvent>,
-    mpsc::UnboundedSender<UiCommand>,
-)> {
+) -> anyhow::Result<(mpsc::UnboundedReceiver<AgentEvent>, mpsc::UnboundedSender<String>)> {
     let (event_tx, event_rx) = mpsc::unbounded_channel();
-    let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();
-    let agent_command = agent_command.to_string();
+    let (prompt_tx, mut prompt_rx) = mpsc::unbounded_channel::<String>();
 
-    // The ACP SDK requires a LocalSet — run it on a dedicated thread
     std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
+        let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
-            .expect("Failed to build tokio runtime");
+            .expect("tokio runtime");
 
-        let local_set = tokio::task::LocalSet::new();
+        rt.block_on(async move {
+            let agent = AcpAgent::zed_claude_code();
 
-        local_set.block_on(&rt, async move {
-            let pending_permissions: Arc<
-                Mutex<HashMap<String, tokio::sync::oneshot::Sender<String>>>,
-            > = Arc::new(Mutex::new(HashMap::new()));
-
-            let client = ChannelClient {
-                event_tx: event_tx.clone(),
-                pending_permissions: pending_permissions.clone(),
-            };
-
-            // Spawn the ACP agent adapter
-            let mut child = tokio::process::Command::new(&agent_command)
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::inherit())
-                .kill_on_drop(true)
-                .spawn()
-                .expect("Failed to spawn ACP agent");
-
-            let outgoing = child.stdin.take().unwrap().compat_write();
-            let incoming = child.stdout.take().unwrap().compat();
-
-            let (conn, handle_io) = acp::ClientSideConnection::new(
-                client,
-                outgoing,
-                incoming,
-                |fut| { tokio::task::spawn_local(fut); },
-            );
-
-            tokio::task::spawn_local(handle_io);
-
-            // Initialize
-            let _ = conn
-                .initialize(acp::InitializeRequest {
-                    protocol_version: acp::V1,
-                    client_capabilities: acp::ClientCapabilities {
-                        fs: Some(acp::FileSystemCapability {
-                            read_text_file: Some(true),
-                            write_text_file: Some(true),
-                        }),
-                        terminal: Some(true),
+            Client
+                .builder()
+                .on_receive_notification(
+                    {
+                        let tx = event_tx.clone();
+                        move |notification: SessionNotification, _cx| {
+                            let tx = tx.clone();
+                            async move {
+                                let event = match notification.update {
+                                    SessionNotification::AgentMessageChunk(chunk) => {
+                                        match chunk.content {
+                                            ContentBlock::Text(t) => Some(AgentEvent::TextChunk(t.text)),
+                                            _ => None,
+                                        }
+                                    }
+                                    SessionNotification::ToolCall(tc) => Some(AgentEvent::ToolCallStarted {
+                                        id: tc.tool_call_id.to_string(),
+                                        title: tc.title,
+                                    }),
+                                    _ => None,
+                                };
+                                if let Some(event) = event {
+                                    let _ = tx.send(event);
+                                }
+                                Ok(())
+                            }
+                        }
                     },
-                    client_info: Some(acp::Implementation {
-                        name: "desktop-app".into(),
-                        title: Some("Desktop ACP Client".into()),
-                        version: "0.1.0".into(),
-                    }),
-                    meta: None,
-                })
-                .await;
+                    agent_client_protocol::on_receive_notification!(),
+                )
+                .connect_with(agent, |connection| async move {
+                    let _ = connection
+                        .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                        .block_task()
+                        .await?;
 
-            // Create session
-            let session = conn
-                .new_session(acp::NewSessionRequest {
-                    cwd: project_dir,
-                    mcp_servers: vec![],
-                    meta: None,
-                })
-                .await
-                .expect("Failed to create session");
+                    let session = connection
+                        .send_request(NewSessionRequest::new(project_dir))
+                        .block_task()
+                        .await?;
 
-            let session_id = session.session_id.clone();
-
-            // Process UI commands
-            while let Some(cmd) = cmd_rx.recv().await {
-                match cmd {
-                    UiCommand::SendPrompt(text) => {
-                        let result = conn
-                            .prompt(acp::PromptRequest {
-                                session_id: session_id.clone(),
-                                prompt: vec![text.into()],
-                                meta: None,
-                            })
-                            .await;
-
-                        match result {
-                            Ok(resp) => {
+                    while let Some(prompt) = prompt_rx.recv().await {
+                        match connection
+                            .send_request(PromptRequest::new(
+                                session.session_id.clone(),
+                                vec![ContentBlock::Text(TextContent::new(prompt))],
+                            ))
+                            .block_task()
+                            .await
+                        {
+                            Ok(response) => {
                                 let _ = event_tx.send(AgentEvent::TurnComplete {
-                                    stop_reason: format!("{:?}", resp.stop_reason),
+                                    stop_reason: format!("{:?}", response.stop_reason),
                                 });
                             }
                             Err(e) => {
-                                let _ = event_tx
-                                    .send(AgentEvent::Error(e.to_string()));
+                                let _ = event_tx.send(AgentEvent::Error(e.to_string()));
                             }
                         }
                     }
-                    UiCommand::PermissionResponse {
-                        request_id,
-                        option_id,
-                    } => {
-                        if let Some(tx) =
-                            pending_permissions.lock().await.remove(&request_id)
-                        {
-                            let _ = tx.send(option_id);
-                        }
-                    }
-                    UiCommand::Cancel => {
-                        conn.cancel(acp::CancelNotification {
-                            session_id: session_id.clone(),
-                        })
-                        .await;
-                    }
-                }
-            }
+                    Ok(())
+                })
+                .await
+                .ok();
         });
     });
 
-    Ok((event_rx, cmd_tx))
+    Ok((event_rx, prompt_tx))
 }
 ```
 
 #### Usage from Tauri
 
 ```rust
-use tauri::Manager;
-
 #[tauri::command]
-async fn send_prompt(
-    state: tauri::State<'_, AppState>,
-    prompt: String,
-) -> Result<(), String> {
-    state
-        .cmd_tx
-        .send(UiCommand::SendPrompt(prompt))
-        .map_err(|e| e.to_string())
+async fn send_prompt(state: tauri::State<'_, AppState>, prompt: String) -> Result<(), String> {
+    state.prompt_tx.send(prompt).map_err(|e| e.to_string())
 }
 
-fn setup_event_listener(app: &tauri::App, mut event_rx: mpsc::UnboundedReceiver<AgentEvent>) {
-    let handle = app.handle().clone();
+fn listen(event_rx: mpsc::UnboundedReceiver<AgentEvent>, handle: tauri::AppHandle) {
     tokio::spawn(async move {
-        while let Some(event) = event_rx.recv().await {
-            match &event {
-                AgentEvent::TextChunk(text) => {
-                    handle.emit("agent:text", text).ok();
-                }
-                AgentEvent::ToolCallStarted { title, .. } => {
-                    handle.emit("agent:tool-start", title).ok();
-                }
-                AgentEvent::TurnComplete { stop_reason } => {
-                    handle.emit("agent:done", stop_reason).ok();
-                }
-                _ => {}
-            }
+        let mut rx = event_rx;
+        while let Some(event) = rx.recv().await {
+            match event {
+                AgentEvent::TextChunk(text) => handle.emit("agent:text", text).ok(),
+                AgentEvent::TurnComplete { stop_reason } => handle.emit("agent:done", stop_reason).ok(),
+                _ => None,
+            };
         }
     });
 }
@@ -1131,9 +676,6 @@ fn setup_event_listener(app: &tauri::App, mut event_rx: mpsc::UnboundedReceiver<
 #### Usage from iced
 
 ```rust
-use iced::futures::SinkExt;
-
-/// iced subscription that receives AgentEvents.
 fn agent_subscription(
     event_rx: Arc<Mutex<Option<mpsc::UnboundedReceiver<AgentEvent>>>>,
 ) -> iced::Subscription<AgentEvent> {
@@ -1145,45 +687,13 @@ fn agent_subscription(
                 .lock()
                 .await
                 .take()
-                .expect("Subscription already consumed");
-
+                .expect("subscription already consumed");
             while let Some(event) = rx.recv().await {
                 output.send(event).await.ok();
             }
-
-            // Keep alive
             std::future::pending().await
         },
     )
-}
-
-impl Application for MyApp {
-    type Message = AppMessage;
-
-    fn update(&mut self, message: AppMessage) -> iced::Task<AppMessage> {
-        match message {
-            AppMessage::AgentEvent(AgentEvent::TextChunk(text)) => {
-                self.response_buffer.push_str(&text);
-                iced::Task::none()
-            }
-            AppMessage::AgentEvent(AgentEvent::TurnComplete { .. }) => {
-                self.is_loading = false;
-                iced::Task::none()
-            }
-            AppMessage::UserSubmit => {
-                let prompt = self.input_text.clone();
-                self.input_text.clear();
-                self.is_loading = true;
-                self.cmd_tx.send(UiCommand::SendPrompt(prompt)).ok();
-                iced::Task::none()
-            }
-            _ => iced::Task::none(),
-        }
-    }
-
-    fn subscription(&self) -> iced::Subscription<AppMessage> {
-        agent_subscription(self.event_rx.clone()).map(AppMessage::AgentEvent)
-    }
 }
 ```
 

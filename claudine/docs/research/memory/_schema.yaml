@@ -1,0 +1,91 @@
+# SimplifiedSchema for the memory research topic.
+#
+# Referenced by each provider research document via `$schema: ./_schema.yaml`.
+# The root `$schema:` key is REQUIRED — it is how darkmatter's resolver
+# classifies this file as a SimplifiedSchema rather than raw JSON Schema.
+#
+# This topic is a landscape survey of what each provider ALREADY ships as
+# "memory" — design input for a future Claudine-owned memory system. It is
+# deliberately NOT wired to catalog codegen. The catalog's `memory_files`
+# field (which context files a provider auto-loads — wrapper mechanics) is
+# out of scope here; that surface belongs to the system-prompt topic.
+#
+# Freeze risk: memory vocabularies differ wildly across providers, so fields
+# stay free-form strings wherever the value set is uncertain; enums appear
+# only where the value set is closed.
+#
+# Nested shapes use quoted inline-object literals — YAML-native nested
+# mappings are rejected by the SimplifiedSchema parser today.
+$schema:
+    # Date the research file was first created. Optional because update-mode
+    # legacy docs may predate the schema contract.
+    created: date
+
+    # Date the provider memory behavior was last verified or refreshed.
+    last_updated: date(required)
+
+    # Agent/model that produced the research.
+    agent: string(required)
+    model: string(required)
+
+    # Best official documentation URL for the provider's memory feature(s).
+    docs: url
+
+    # One record per distinct memory mechanism the provider offers. A provider
+    # may ship several at once (for example model-written auto memory AND
+    # user-curated memory files); record each separately rather than blending
+    # them into one description.
+    memory_kinds: "{ name: string(required), kind: enum(model_written_auto_memory,user_curated_files,session_scoped,project_scoped,semantic_or_vector,other,unknown; required), description: string(required) }[]"
+
+    # Where memory is persisted, one record per OS/location. `format` is
+    # free-form (sqlite, jsonl, markdown, ...) because storage formats are an
+    # open vocabulary. Use `os: all` only when the path is verified identical
+    # across operating systems.
+    storage: "{ os: enum(macos,linux,windows,all; required), path: string(required), format: string, scope: enum(global,project,session,other; required), notes: string }[]"
+
+    # Who writes memory and when. `trigger` is free-form prose (for example
+    # "model decides mid-session", "end-of-session summarization", "explicit
+    # /memory command"). `user_visible` records whether the write is surfaced
+    # to the user when it happens.
+    write_model: "{ writer: enum(model,user,system,other; required), trigger: string, user_visible: boolean }[]"
+
+    # When memory enters context. `summary` is the prose answer; `timing` and
+    # `scope_resolution` refine it when the provider distinguishes them (for
+    # example session-start load vs on-demand retrieval, and how global vs
+    # project vs session stores are selected).
+    load_model: "{ summary: string(required), timing: string, scope_resolution: string }"
+
+    # User-facing controls over memory. `control` is free-form (enable,
+    # disable, edit, clear, inspect, ...); `mechanism` names the flag, command,
+    # setting, or file involved.
+    user_controls: "{ control: string(required), mechanism: string, notes: string }[]"
+
+    # Prose: how memory content relates to the system prompt / context files.
+    # Overlap with the system-prompt topic is expected — reference it, do not
+    # duplicate it.
+    system_prompt_interaction: string
+
+    # Prose: size caps, pruning, compaction interaction, retention/expiry.
+    limits_and_expiry: string
+
+    # Prose: whether the memory store can be exported, shared, or migrated.
+    portability: string
+
+    # Prose: observations relevant to a future Claudine-owned memory system.
+    # Explicitly speculative and non-binding — this is design input, not a
+    # commitment.
+    claudine_notes: string
+
+    # Claims that current docs/local inspection could not verify.
+    gaps: string[]
+
+    # Update-mode changelog entries. Fresh first-run documents should use [].
+    changes: string[]
+
+    # Whether discovered behavior requires Claudine code/generated metadata
+    # changes. Expected to be false for most runs — this topic informs design,
+    # it does not feed catalog codegen.
+    requires_claudine_update: boolean(required)
+
+    # Required when `requires_claudine_update` is true; optional otherwise.
+    reason: string

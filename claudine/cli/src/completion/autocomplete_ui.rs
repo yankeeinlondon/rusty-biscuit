@@ -9,8 +9,9 @@
 //!   as a [`Prose`] value.
 //! - [`confirm_one_file`] — drives the confirmation dialog and returns
 //!   `true` for Y/Enter, `false` for n/Esc.
-//! - [`choose_one_file`] / [`choose_many_files`] — two-pane
-//!   `SplitDirection::Auto` choosers with a live detail pane.
+//! - [`choose_one_file`] / [`choose_many_files`] — two-pane choosers with a
+//!   live detail pane, split horizontally (detail right) in wide terminals
+//!   and vertically (detail above) in narrow ones per [`stacks_vertically`].
 
 use std::io::{self, Write};
 use std::path::Path;
@@ -21,7 +22,7 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::RenderableTerminalContent;
 use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
-use biscuit_tui::core::{SplitDirection, SplitPane};
+use biscuit_tui::core::{SplitDirection, SplitPane, SplitRatio};
 use biscuit_tui::prelude::*;
 use claudine::composition::FileDetail;
 use darkmatter::markdown::CodeBlock;
@@ -175,26 +176,101 @@ pub fn choose_many_files(options: Vec<ChoiceOption<FileDetail>>) -> io::Result<V
 /// reserves more rows instead of clipping the code block — the concrete Bug 3
 /// failure mode.
 fn chooser_height(options: &[ChoiceOption<FileDetail>]) -> HeightSpec {
-    /// Absolute floor that keeps a minimal detail pane readable.
-    const MIN_DETAIL_ROWS: u16 = 12;
-    /// Rows the detail pane needs beyond the schema lines themselves:
-    /// name, blank, blockquoted description (up to two wrapped lines),
-    /// `Schema:` header, blank, the code block's top/bottom fences and header
-    /// row, plus the bottom help-hint row.
-    const DETAIL_CHROME_ROWS: u16 = 11;
-    /// Ceiling on the list pane before it scrolls.
-    const MAX_LIST_ROWS: u16 = 20;
-    let list_rows = options.len().min(MAX_LIST_ROWS as usize) as u16;
+    let list = list_rows(options);
+    let detail = detail_rows(options);
+    // Side-by-side panes share rows, so a horizontal split reserves only the
+    // taller of the two; a stacked (vertical) split draws the detail pane
+    // above the list, so it needs the SUM or the lower pane clips. The
+    // direction is decided from the terminal width — the same signal the
+    // render split uses — so the reservation always matches the layout.
+    let content_rows = if stacks_vertically(terminal_width()) {
+        list.saturating_add(detail)
+    } else {
+        list.max(detail)
+    };
+    HeightSpec::Cells(content_rows.saturating_add(1))
+}
+
+/// Absolute floor that keeps a minimal detail pane readable.
+const MIN_DETAIL_ROWS: u16 = 12;
+/// Rows the detail pane needs beyond the schema lines themselves: name,
+/// blank, blockquoted description (up to two wrapped lines), `Schema:`
+/// header, blank, the code block's top/bottom fences and header row, plus the
+/// bottom help-hint row.
+const DETAIL_CHROME_ROWS: u16 = 11;
+/// Ceiling on the list pane before it scrolls.
+const MAX_LIST_ROWS: u16 = 20;
+/// Minimum columns each pane needs to stay readable in a side-by-side split.
+/// A terminal narrower than two of these can't show two useful panes at once,
+/// so the chooser stacks the detail pane above the list instead.
+const MIN_PANE_WIDTH: u16 = 30;
+
+/// List-pane row count: one per candidate, capped by [`MAX_LIST_ROWS`] so a
+/// large set scrolls rather than filling the screen.
+fn list_rows(options: &[ChoiceOption<FileDetail>]) -> u16 {
+    options.len().min(MAX_LIST_ROWS as usize) as u16
+}
+
+/// Detail-pane row count: the widest candidate's `$schema` code block plus a
+/// fixed chrome allowance, floored by [`MIN_DETAIL_ROWS`] so a schemaless
+/// file still renders a readable pane. Content-aware so a larger schema
+/// reserves more rows instead of clipping the code block.
+fn detail_rows(options: &[ChoiceOption<FileDetail>]) -> u16 {
     let max_schema_lines = options
         .iter()
         .map(|option| option.value.schema_lines.len())
         .max()
         .unwrap_or(0)
         .min(u16::MAX as usize) as u16;
-    let detail_rows = max_schema_lines
+    max_schema_lines
         .saturating_add(DETAIL_CHROME_ROWS)
-        .max(MIN_DETAIL_ROWS);
-    HeightSpec::Cells(list_rows.max(detail_rows).saturating_add(1))
+        .max(MIN_DETAIL_ROWS)
+}
+
+/// Whether the chooser stacks the detail pane above the list (vertical split)
+/// rather than beside it (horizontal split) at `term_width`.
+///
+/// This is the single source of truth shared by [`chooser_height`]'s row
+/// reservation and the render-time [`split_panes`], so the rows claimed and
+/// the layout drawn never disagree. The decision keys off the terminal
+/// *window* width (a real constraint), not the inline viewport's aspect —
+/// the viewport is deliberately only a dozen-odd rows tall, so its own aspect
+/// would always read as "wide" and force horizontal.
+fn stacks_vertically(term_width: u16) -> bool {
+    term_width < MIN_PANE_WIDTH.saturating_mul(2)
+}
+
+/// Live terminal width in columns, or a wide fallback (which prefers the
+/// side-by-side layout) when the size is unavailable — e.g. not a TTY, where
+/// the chooser does not run interactively anyway.
+fn terminal_width() -> u16 {
+    crossterm::terminal::size()
+        .map(|(cols, _)| cols)
+        .unwrap_or(u16::MAX)
+}
+
+/// Split the inline chooser area into `(list_rect, detail_rect)`.
+///
+/// A terminal wide enough for two readable panes splits horizontally (list
+/// left, detail right); a narrow terminal stacks the detail pane on top of
+/// the list. When stacked, the list keeps its full height on the bottom (so
+/// every candidate stays visible rather than scrolling) and the detail pane
+/// takes the remaining rows above it — [`chooser_height`] reserved the sum of
+/// both, so the detail pane still gets its content height. The direction keys
+/// off `area.width`, which for an inline viewport is the live terminal width,
+/// so it agrees with that reservation.
+fn split_panes(area: Rect, list_rows: u16) -> (Rect, Rect) {
+    if stacks_vertically(area.width) {
+        let (detail_rect, list_rect) = SplitPane::new()
+            .with_direction(SplitDirection::Vertical)
+            .with_ratio(SplitRatio::second_fixed(list_rows))
+            .split(area);
+        (list_rect, detail_rect)
+    } else {
+        SplitPane::new()
+            .with_direction(SplitDirection::Horizontal)
+            .split(area)
+    }
 }
 
 /// Wrapper widget that renders a [`ChooseOne`] list beside a live detail
@@ -206,16 +282,7 @@ impl StatefulWidget for FileChooser {
     type State = ChooseOneState<FileDetail>;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let (list_rect, detail_rect) = SplitPane::new()
-            .with_direction(SplitDirection::Auto)
-            .split(area);
-        // Auto resolves to Vertical in tall terminals; the plan wants the
-        // detail pane above the list when taller-than-wide.
-        let (list_rect, detail_rect) = if area.width < area.height {
-            (detail_rect, list_rect)
-        } else {
-            (list_rect, detail_rect)
-        };
+        let (list_rect, detail_rect) = split_panes(area, list_rows(state.options()));
         ratatui::widgets::StatefulWidget::render(ChooseOne::new(), list_rect, buf, state);
         render_detail_pane(detail_rect, state.active_option().map(|o| &o.value), buf);
     }
@@ -240,16 +307,7 @@ impl StatefulWidget for MultiFileChooser {
     type State = ChooseManyState<FileDetail>;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let (list_rect, detail_rect) = SplitPane::new()
-            .with_direction(SplitDirection::Auto)
-            .split(area);
-        // Auto resolves to Vertical in tall terminals; the plan wants the
-        // detail pane above the list when taller-than-wide.
-        let (list_rect, detail_rect) = if area.width < area.height {
-            (detail_rect, list_rect)
-        } else {
-            (list_rect, detail_rect)
-        };
+        let (list_rect, detail_rect) = split_panes(area, list_rows(state.options()));
         ratatui::widgets::StatefulWidget::render(ChooseMany::new(), list_rect, buf, state);
         let detail = state
             .hover()

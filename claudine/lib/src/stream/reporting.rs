@@ -8,7 +8,9 @@ use super::StreamProtocol;
 use super::semantic::SemanticEvent;
 use super::summary::StreamExecutionSummary;
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta};
+use crate::model_catalog::FamilyLatestStamp;
 use crate::reporting::paths;
+use crate::signals::ObservedSignal;
 
 /// Convert a `StreamExecutionSummary` into a synthetic `SessionEnd`
 /// [`EventMeta`] for JSONL logging.
@@ -17,7 +19,7 @@ pub fn summary_to_event_meta(
     protocol: StreamProtocol,
     env: &EnvironmentContext,
 ) -> EventMeta {
-    summary_to_event_meta_with_context(summary, protocol, env, None, None)
+    summary_to_event_meta_with_context(summary, protocol, env, None, None, &[], None)
 }
 
 /// Convert a `StreamExecutionSummary` into an `EventMeta` with optional
@@ -30,6 +32,13 @@ pub fn summary_to_event_meta(
 /// `claudine_pid` (read from `env`) and `agent_pid` into `extra` so
 /// templates and expressions can resolve them alongside the existing
 /// stringly-typed wrapper context keys.
+///
+/// `signals` is the run's drained [`ObservedSignal`] collection; when
+/// non-empty it lands as `extra["signals"]` on this summary row ONLY —
+/// deliberately not on the per-event `context_extra` channel, which is
+/// mirrored onto every live semantic tool row. `family_latest` likewise
+/// lands as `extra["family_latest"]` when the run's requested model was
+/// a marked rolling alias.
 #[allow(clippy::too_many_arguments)]
 pub fn summary_to_event_meta_with_context(
     summary: &StreamExecutionSummary,
@@ -37,6 +46,8 @@ pub fn summary_to_event_meta_with_context(
     env: &EnvironmentContext,
     context_extra: Option<&HashMap<String, Value>>,
     agent_pid: Option<u32>,
+    signals: &[ObservedSignal],
+    family_latest: Option<&FamilyLatestStamp>,
 ) -> EventMeta {
     let mut extra = HashMap::new();
 
@@ -57,6 +68,7 @@ pub fn summary_to_event_meta_with_context(
         StreamProtocol::Ndjson => "ndjson",
         StreamProtocol::Jsonl => "jsonl",
         StreamProtocol::WireJsonRpc => "wire-json-rpc",
+        StreamProtocol::Json => "json",
     };
     extra.insert("stream_protocol".into(), Value::String(protocol_str.into()));
 
@@ -144,6 +156,19 @@ pub fn summary_to_event_meta_with_context(
         extra.insert("badges".into(), value);
     }
 
+    if !signals.is_empty() {
+        extra.insert(
+            "signals".into(),
+            Value::Array(signals.iter().map(observed_signal_value).collect()),
+        );
+    }
+
+    if let Some(stamp) = family_latest
+        && let Ok(value) = serde_json::to_value(stamp)
+    {
+        extra.insert("family_latest".into(), value);
+    }
+
     // Mirror `claudine_pid` (read from the wrapper-supplied environment)
     // and `agent_pid` into `extra` so templates and expressions can
     // resolve them alongside the existing composition/extra keys. The
@@ -179,6 +204,20 @@ pub fn summary_to_event_meta_with_context(
         env: env.clone(),
         agent_pid,
     }
+}
+
+/// Project one [`ObservedSignal`] into the summary-row JSONL shape:
+/// `kind` is hoisted next to `source`/`occurrences`/`first_seen` so SQL
+/// ingest can address it without descending into the payload, while
+/// `event` keeps the full kind-tagged [`crate::signals::SignalEvent`].
+fn observed_signal_value(signal: &ObservedSignal) -> Value {
+    serde_json::json!({
+        "kind": <&'static str>::from(signal.event.kind()),
+        "source": signal.source,
+        "occurrences": signal.occurrences,
+        "first_seen": signal.first_seen,
+        "event": signal.event,
+    })
 }
 
 /// Convert a [`SemanticEvent`] into a synthetic [`EventMeta`] for JSONL logging.
@@ -656,6 +695,8 @@ mod tests {
             &env,
             Some(&context),
             None,
+            &[],
+            None,
         );
 
         assert_eq!(meta.event, AgenticEvent::SessionEnd);
@@ -687,6 +728,8 @@ mod tests {
             StreamProtocol::StreamJson,
             &env,
             None,
+            None,
+            &[],
             None,
         );
 
@@ -727,6 +770,75 @@ mod tests {
         let summary = make_test_summary();
         let meta = summary_to_event_meta(&summary, StreamProtocol::StreamJson, &make_test_env());
         assert!(!meta.extra.contains_key("badges"));
+    }
+
+    /// Drained run signals land as `extra["signals"]` on the summary row
+    /// with `kind` hoisted beside the full tagged `event` payload.
+    #[test]
+    fn summary_to_event_meta_serializes_drained_signals() {
+        use chrono::TimeZone;
+        use claudine_catalog_types::{DriftObservation, SignalEvent, SignalSource};
+
+        let signals = vec![crate::signals::ObservedSignal {
+            event: SignalEvent::ModelCatalogDrift {
+                unexpected: vec!["mystery-model".into()],
+                missing: vec![],
+                observed_via: DriftObservation::Listing,
+            },
+            source: SignalSource::Wrapper,
+            first_seen: Utc.with_ymd_and_hms(2026, 7, 6, 12, 0, 0).unwrap(),
+            occurrences: 2,
+            context: Default::default(),
+        }];
+
+        let meta = summary_to_event_meta_with_context(
+            &make_test_summary(),
+            StreamProtocol::StreamJson,
+            &make_test_env(),
+            None,
+            None,
+            &signals,
+            None,
+        );
+
+        let rows = meta.extra["signals"].as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["kind"], "model_catalog_drift");
+        assert_eq!(rows[0]["source"], "wrapper");
+        assert_eq!(rows[0]["occurrences"], 2);
+        assert_eq!(rows[0]["first_seen"], "2026-07-06T12:00:00Z");
+        assert_eq!(rows[0]["event"]["kind"], "model_catalog_drift");
+        assert_eq!(rows[0]["event"]["unexpected"][0], "mystery-model");
+    }
+
+    /// No signals → no `signals` key; a `family_latest` stamp lands under
+    /// its own key.
+    #[test]
+    fn summary_to_event_meta_omits_signals_and_carries_family_latest_stamp() {
+        let stamp = crate::model_catalog::FamilyLatestStamp {
+            alias: "opus".into(),
+            identity_key: "anthropic/claude-opus@4.5".into(),
+            family_key: "anthropic/claude-opus".into(),
+            artifact_generated_at: "2026-07-06T22:44:37.286219+00:00".into(),
+            stale: false,
+            age_days: None,
+        };
+
+        let meta = summary_to_event_meta_with_context(
+            &make_test_summary(),
+            StreamProtocol::StreamJson,
+            &make_test_env(),
+            None,
+            None,
+            &[],
+            Some(&stamp),
+        );
+
+        assert!(!meta.extra.contains_key("signals"));
+        let value = &meta.extra["family_latest"];
+        assert_eq!(value["alias"], "opus");
+        assert_eq!(value["identity_key"], "anthropic/claude-opus@4.5");
+        assert_eq!(value["stale"], false);
     }
 
     #[test]

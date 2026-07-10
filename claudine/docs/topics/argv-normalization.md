@@ -2,7 +2,7 @@
 
 Claudine's CLI is parsed by `clap` via derive. The surface has grown to
 the point where clap's ordinary parsing model produces rough edges:
-eight boolean provider flags in a mutual-exclusion group, positional
+seven boolean provider flags in a mutual-exclusion group, positional
 "file plus `key=value` setters" collected with `num_args = 1..`, and
 fuzzy provider matching that historically only applied to the
 `--provider` value.
@@ -51,7 +51,7 @@ subcommands (`claude`, `codex`, …) are left alone so they pass through
 to the wrapped child CLI unchanged. See [Pass-through guarantees](#pass-through-guarantees)
 below.
 
-The eight user-facing provider booleans are rewritten to the canonical
+The seven user-facing provider booleans are rewritten to the canonical
 `--provider <slug>` pair using `Provider::as_slug()`:
 
 | Boolean flag | Canonical slug |
@@ -60,10 +60,9 @@ The eight user-facing provider booleans are rewritten to the canonical
 | `--codex` | `codex` |
 | `--gemini` | `gemini` |
 | `--goose` | `goose` |
-| `--kimi` | `kimi_code` |
-| `--opencode` | `open_code` |
-| `--qwen` | `qwen_code` |
-| `--roo` | `roo_code` |
+| `--kimi` | `kimi` |
+| `--opencode` | `opencode` |
+| `--qwen` | `qwen` |
 
 **Before**
 
@@ -104,7 +103,7 @@ claudine compose --provider=oc file.md
 
 ```sh
 claudine compose --provider claude file.md
-claudine compose --provider=open_code file.md
+claudine compose --provider=opencode file.md
 ```
 
 Edge cases intentionally left untouched:

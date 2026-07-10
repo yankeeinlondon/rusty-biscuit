@@ -1,0 +1,16 @@
+{
+  "directory": "/workspace/project",
+  "payload": {
+    "id": "evt_scrubbed_status_retry",
+    "type": "session.status",
+    "properties": {
+      "sessionID": "ses_scrubbed",
+      "status": {
+        "type": "retry",
+        "attempt": 2,
+        "message": "Rate limited",
+        "next": 5000
+      }
+    }
+  }
+}

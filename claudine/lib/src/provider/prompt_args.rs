@@ -25,9 +25,6 @@ pub struct PromptArgConventions {
     /// or `Some("run")` for OpenCode / Goose. `None` for providers that
     /// have no subcommand entrypoint.
     pub entrypoint: Option<&'static str>,
-    /// Additional value-taking flags whose values must not be mistaken
-    /// for a positional prompt, e.g. `&["-m", "--model", "--output-format"]`.
-    pub value_taking_flags: &'static [&'static str],
 }
 
 impl PromptArgConventions {
@@ -37,7 +34,6 @@ impl PromptArgConventions {
         Self {
             prompt_flags: &[],
             entrypoint: Some(entrypoint),
-            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
         }
     }
 
@@ -47,7 +43,6 @@ impl PromptArgConventions {
         Self {
             prompt_flags: &[],
             entrypoint: None,
-            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
         }
     }
 }
@@ -56,7 +51,15 @@ impl PromptArgConventions {
 /// wrapped provider. This is intentionally the UNION of every provider's
 /// value-taking flags, not a per-provider list — the extractor's job is
 /// to avoid mistaking a flag's value for a positional prompt, and
-/// over-skipping an unknown flag's value is harmless.
+/// over-skipping an unknown flag's value is harmless (OQ7a ruling,
+/// 2026-07-04: the per-provider `value_taking_flags` field was removed and
+/// the extractor consumes this const directly).
+///
+/// Latent flag-arity hazard: a flag may be boolean for one provider and
+/// value-taking for another (e.g. `-c` is Claude's boolean `--continue`
+/// but Codex's value-taking config override). Union semantics over-skip
+/// in that case; per-provider precision returns as a facts field only if
+/// it ever bites.
 pub const COMMON_VALUE_TAKING_FLAGS: &[&str] = &[
     "-m",
     "--model",

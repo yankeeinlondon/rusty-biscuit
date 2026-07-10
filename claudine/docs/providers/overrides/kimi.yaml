@@ -1,0 +1,32 @@
+# Human-owned overrides for the kimi provider. Each entry WINS over the
+# field's declared source during generation (whole-key replacement) and MUST
+# carry a `reason:`. Keys are catalog field names; an override for a field
+# with no mapping-registry entry is a generation error.
+model_catalog_source:
+    value: none
+    reason: >-
+        agent-models research reports dynamic_listing.available: true, but
+        the boolean cannot select a catalog mechanism and Kimi's listing
+        surfaces (provider GET /v1/models; ACP available_models) are not
+        shell commands, so no ShellCommand candidate exists. `none` is
+        correct today: no drift-channel listing, and expected_offerings is
+        the research-fed validation baseline. Pin until the agent-models
+        schema grows a typed catalog-source key (pending schema addition).
+model_env_vars:
+    value: ["KIMI_MODEL"]
+    reason: >-
+        agent-models research records the provider-native KIMI_MODEL_NAME,
+        but the wrapper MODEL selection chain (composition::select)
+        consumes Claudine's KIMI_MODEL convention. Pin today's value until
+        the wrapper env contract is redesigned (Phase D).
+config_paths:
+    value: ["~/.kimi/config.json", "~/.kimi/config.toml", "~/.kimi/mcp.json"]
+    reason: >-
+        The agent-cli macOS records use literal "/Users/<name>/.kimi-code/"
+        grammar (skipped by the bare-path rule, leaving an empty
+        projection) and describe the newer .kimi-code home, while the
+        shipping wrapper detects ~/.kimi. Ordering is load-bearing - the
+        legacy config.json stays FIRST because agent discovery
+        (discover_agents_full) reports presence from config_paths[0] and
+        Kimi's CLI auto-migrates config.json to config.toml. Pin today's
+        list until a path-grammar + home-migration ruling lands.

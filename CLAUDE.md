@@ -16,6 +16,7 @@
     - `homelab` — lib/cli/server plus per-device integration crates
     - `schematic` — `define` / `definitions` / `gen` / `oauth` / `schema`
     - `unchained-ai` — includes the `model_id` proc-macro crate
+    - `claudine` — `lib` / `cli` plus `contract` (biscuit-contract adapter), `catalog-types` (leaf: shared provider vocab enums), and `gen` (the `claudine-gen` codegen binary that generates each `provider/<slug>/data.rs`)
 - `biscuit-speaks` CLI binary is named `so-you-say` (lives under `biscuit-speaks/cli`).
 - `biscuit-tui` follows the lib/cli split; CLI binary is named `question` (lives under `biscuit-tui/cli`).
 
@@ -28,7 +29,7 @@ Root `justfile` exposes `just test|lint|build|install|doctest`, iterating a **cu
 
 ## Formatting
 
-`main` is the formatting authority.
+`main` branch is the formatting authority.
 
 - Never run `cargo fmt` / `rustfmt` write-mode unless explicitly asked. Match surrounding style by hand when editing.
 - Reason: `rust-toolchain.toml` pins `channel = "stable"`, not a specific rustfmt version. Ad-hoc fmt reformats to whatever rustfmt floats in locally, which drifts from `main` and poisons branch↔`main` merges — a repo-wide reformat touches nearly every line, so git silently mis-merges reformatted-but-old code with `main`'s real changes.
@@ -82,7 +83,7 @@ Update alongside code changes:
 
 ## Authoritative Docs
 
-- run `sniff repo` for the up to date list of package areas and packages
+- run `sniff repo packages` for the up to date list of package areas and packages
 - Local skill catalog under `.claude/skills/` is the authoritative skill list.
 - `.claude/skills/rust-testing/SKILL.md` — testing tier taxonomy, canonical `just` recipes, and `require_level!` usage.
 
@@ -101,3 +102,14 @@ Update alongside code changes:
 
 - any hashing requirements should prefer using the crypto, non-crypto, and password hashing that **biscuit-hash** provides
 - in the case of hashing Markdown documents, the **Darkmatter** hasher should be used (as it uses a Markdown aware approach)
+
+## Features and Fixes
+
+- each package area will have a `features` and `fixes` directory which contains specs
+    - **features** tend to be larger in scope and can introduce new features
+    - **fixes** are primarily focused on fixing existing functionality
+- we have two lifecycle directories `_unscheduled` and `_completed` which can be found as subdirectories of features/fixes
+    - features/fixes which have been identified but not scheduled (aka, lower urgency) will be found in `_unscheduled` with non-dated filename
+    - features/fixes as direct subdirectories are "active" features/fixes and should always follow the format `YYYY-MM-DD-{name}`
+        - the files in a feature/fix can vary but almost always will be the `spec.md` file
+    - when a feature/fix is completed it is moved to `_completed`

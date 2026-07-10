@@ -136,6 +136,7 @@ fn command_name(command: &Commands) -> &'static str {
         Commands::Agents(_) => "agents",
         Commands::SlashCommands(_) => "commands",
         Commands::Providers(_) => "providers",
+        Commands::Signals(_) => "signals",
         Commands::Logs(_) => "logs",
         Commands::Uninstall(_) => "uninstall",
         Commands::Mcp(_) => "mcp",
@@ -145,7 +146,10 @@ fn command_name(command: &Commands) -> &'static str {
         | Commands::Kimi(_)
         | Commands::Qwen(_)
         | Commands::Opencode(_)
-        | Commands::Goose(_) => "wrap",
+        | Commands::Goose(_)
+        | Commands::Kilo(_)
+        | Commands::Pi(_)
+        | Commands::Antigravity(_) => "wrap",
         Commands::Compose(_) => "compose",
         Commands::InlineCompose(_) => "inline-compose",
         Commands::Sequence(_) => "sequence",
@@ -163,6 +167,9 @@ fn provider_subcommand_name(command: Option<&Commands>) -> Option<&'static str> 
         Commands::Qwen(_) => Some("qwen"),
         Commands::Opencode(_) => Some("opencode"),
         Commands::Goose(_) => Some("goose"),
+        Commands::Kilo(_) => Some("kilo"),
+        Commands::Pi(_) => Some("pi"),
+        Commands::Antigravity(_) => Some("antigravity"),
         _ => None,
     }
 }
@@ -563,6 +570,7 @@ mod tests {
                 crate::commands::providers::ProvidersArgs {
                     describe: false,
                     format: crate::commands::providers::ProvidersFormat::Text,
+                    command: None,
                 }
             ))),
             None

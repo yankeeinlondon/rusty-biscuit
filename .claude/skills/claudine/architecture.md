@@ -8,43 +8,47 @@ Deep technical documentation for Claudine's event model, provider adapters, disp
 claudine/lib/src/
 ├── actions/      → Hook action types and response model
 ├── adapters/     → Provider-specific event parsers (ProviderAdapter trait)
-├── agents/       → Agent capability catalog and registry
 ├── badges/       → Styled terminal badge constants (YOLO, Non-Interactive, Interactive, etc.)
 ├── composition/  → Markdown frontmatter composition (inline and chained prompt pipelines)
 ├── config/       → Agent detection, hook registration, atomic writes, backups
 ├── dispatch/     → Event processing pipeline (loader, template, matcher, runner)
-├── events/       → Normalized event model and types (16 events, 8 providers)
+├── events/       → Normalized event model and types (16 events, 10 providers)
 ├── linking/      → Cross-provider skill synchronization (4 resource types) with portability classification
 ├── mcp/          → MCP catalog, defaults, import/export, session, and injection
 ├── permissions/  → Provider-agnostic PolicyEngine for permission queries and mutation planning
+├── render/       → Functional render components (FinalMessage, AgentPrompt/SystemPrompt, EventRenderer + DISPATCH table, MetricsReport, StreamRenderable/AssistantStream); consume data + policy (DisplayPolicy), never `match provider`
 ├── reporting/    → JSONL-to-SQLite reporting index, sync, and typed queries
 ├── services/     → Cross-provider runtime policy services (ProtectService)
-├── stream/       → Structured stream parsing for 6 providers + summary/reporting
+├── stream/       → Structured stream parsing for 8 providers (Kilo reuses OpenCode's) + summary/reporting
 └── error.rs      → ClaudineError enum
 ```
 
+The per-provider modules under `lib/src/provider/<slug>/` split into two halves: `data.rs` is **generated** by `claudine-gen` (crate `claudine/gen`, sharing vocab enums with the leaf `claudine/catalog-types` crate) from roster + facts + research + overrides (regenerate with `claudine providers generate`; drift-checked in CI by the gen crate's drift test / `claudine-gen check`, which also verify the committed `docs/providers/catalog.json` superset), while `behavior.rs` is hand-written. Never edit a `data.rs` by hand — change the owning input file and regenerate.
+
+**Dispatch drift guard (Phase I).** Decentralized `match Provider` / `matches!` / `==` / `!=` dispatch is prevented from regrowing by one site-level guard in `claudine-cli/tests/dispatch_inventory.rs`, covering **both** `lib/src` and `cli/src` (it retired the lib crate's earlier regex `no_unauthorized_match_provider_in_lib` guard). Every conditional, non-exempt dispatch site must be grandfathered in `GUARD_ALLOWLIST` with a tag + reason (all 18 current sites are `keep` — genuinely behavioral wire/shadow-HOME/stderr-bridge quirks and Claude's canonical linking role); a new one fails until migrated to a `ProviderInfo` field/trait or consciously listed. The committed census is `docs/providers/dispatch-inventory.json`.
+
 ## Event Support Matrix
 
-| Event | Claude | Codex | Gemini | Goose | Kimi | OpenCode | Qwen | Roo |
-|-------|:------:|:-----:|:------:|:-----:|:----:|:--------:|:----:|:---:|
-| session_start | ✓ | ○ | ✓ | - | - | ✓ | - | - |
-| session_end | ✓ | - | ✓ | - | - | ✓ | - | - |
-| before_prompt | ✓ | ○ | ✓ | - | ○ | ✓ | - | - |
-| before_tool | ✓ | ○ | ✓ | - | ○ | ✓ | - | - |
-| after_tool | ✓ | ○ | ✓ | - | ○ | ✓ | - | - |
-| tool_error | ✓ | ○ | - | - | ○ | - | - | - |
-| permission_request | ✓ | - | - | - | ○ | ✓ | - | - |
-| human_in_the_loop | ✓ | - | - | - | - | - | - | - |
-| turn_complete | ✓ | ✓ | ✓ | ○ | ○ | ✓ | ○ | ○ |
-| turn_error | - | ○ | - | ○ | ○ | ✓ | ○ | ○ |
-| subagent_start | ✓ | - | - | ○ | ○ | - | - | - |
-| subagent_stop | ✓ | - | - | ○ | ○ | - | - | - |
-| before_model | - | - | ✓ | - | - | ✓ | - | - |
-| after_model | - | ○ | ✓ | ○ | ○ | ✓ | ○ | ○ |
-| before_compact | ✓ | - | ✓ | - | ○ | ✓ | - | - |
-| notification | ✓ | ○ | ✓ | ○ | ○ | ✓ | ○ | ○ |
+| Event | Claude | Codex | Gemini | Goose | Kimi | OpenCode | Qwen | Kilo | Pi | Antigravity |
+|-------|:------:|:-----:|:------:|:-----:|:----:|:--------:|:----:|:----:|:--:|:-----------:|
+| session_start | ✓ | ○ | ✓ | - | - | ✓ | - | ✓ | ○ | - |
+| session_end | ✓ | - | ✓ | - | - | ✓ | - | ✓ | - | - |
+| before_prompt | ✓ | ○ | ✓ | - | ○ | ✓ | - | ✓ | - | - |
+| before_tool | ✓ | ○ | ✓ | - | ○ | ✓ | - | ✓ | ○ | ✓ |
+| after_tool | ✓ | ○ | ✓ | - | ○ | ✓ | - | ✓ | ○ | ✓ |
+| tool_error | ✓ | ○ | - | - | ○ | - | - | - | - | - |
+| permission_request | ✓ | - | - | - | ○ | ✓ | - | ✓ | - | - |
+| human_in_the_loop | ✓ | - | - | - | - | - | - | ✓ | - | - |
+| turn_complete | ✓ | ✓ | ✓ | ○ | ○ | ✓ | ○ | ✓ | ○ | ✓ |
+| turn_error | - | ○ | - | ○ | ○ | ✓ | ○ | ✓ | ○ | - |
+| subagent_start | ✓ | - | - | ○ | ○ | - | - | - | - | - |
+| subagent_stop | ✓ | - | - | ○ | ○ | - | - | - | - | - |
+| before_model | - | - | ✓ | - | - | ✓ | - | ✓ | - | ✓ |
+| after_model | - | ○ | ✓ | ○ | ○ | ✓ | ○ | ✓ | ○ | ✓ |
+| before_compact | ✓ | - | ✓ | - | ○ | ✓ | - | ✓ | ○ | - |
+| notification | ✓ | ○ | ✓ | ○ | ○ | ✓ | ○ | ✓ | - | - |
 
-**Legend:** ✓ = Hook support (config file), ○ = NonHook (wrapper/proxy required), - = Not supported
+**Legend:** ✓ = Hook support (config file), ○ = NonHook (wrapper/proxy/stream-parse required), - = Not supported. The authoritative source is each provider's generated `lib/src/provider/<slug>/data.rs` `event_mapping` (or `claudine hooks --support`), where `○` further splits into StreamParse / WireProxy / Wrapper / Acp (🅐).
 
 ## Key Types
 
@@ -68,7 +72,7 @@ pub enum AgenticEvent {
 
 ### Provider Enum
 
-8-variant enum (Claude, Codex, Gemini, Goose, KimiCode, OpenCode, QwenCode, RooCode) with slug, docs URL, event support queries, and native event name mappings:
+7-variant enum (Claude, Codex, Gemini, Goose, KimiCode, OpenCode, QwenCode) with slug, docs URL, event support queries, and native event name mappings:
 
 - `EventSupportLevel` — `Hook` | `NonHook` | `NotSupported` per provider-event pair
 
@@ -129,7 +133,6 @@ Each provider has its own adapter implementing the `ProviderAdapter` trait. The 
 | `goose` | Stream-json + env var (type/event field) | Implemented (non-blocking) |
 | `kimicode` | Wire mode JSON-RPC (event_name/method field) | Implemented (blocking: tool, permission) |
 | `qwen` | Stream-json output (event_name/type field) | Implemented (blocking: permission) |
-| `roo` | Stream-json event emitter (event_name/type field) | Implemented (non-blocking) |
 
 ### Claude Code
 
@@ -218,15 +221,6 @@ Events via stream-json output (NonHook, blocking for permission):
 {"type": "system", ...}
 ```
 
-### Roo Code
-
-Events via stream-json event emitter (NonHook, non-blocking):
-
-```json
-{"type": "event", "event_name": "tool_complete", ...}
-{"type": "message", ...}
-```
-
 ## Dispatch Pipeline
 
 The core event processing pipeline runs in 6 steps:
@@ -306,7 +300,7 @@ pub struct RepoOverrideConfig {
 ### Config Management
 
 - `detect_agents()` — returns detected providers with their configurators
-- `discover_agents_full()` — all 8 providers with install/registration status (`AgentInfo`)
+- `discover_agents_full()` — all 10 providers with install/registration status (`AgentInfo`)
 - `get_configurator(provider)` — returns the configurator for a specific provider
 - `AgentConfigurator` trait — `register()`, `deregister()`, `is_registered()`, `registered_events()`, `create_minimal_config()`, `supports_config_registration()`, `registerable_events()`, `is_cli_installed()`
 
@@ -314,7 +308,7 @@ Configurators handle each provider's config format:
 - **Claude/Gemini**: JSON `settings.json` with hooks array
 - **Codex**: TOML `config.toml` with notify section (format-preserving via `toml_edit`)
 - **OpenCode**: JSON `opencode.json` with plugins
-- **Goose/KimiCode/Qwen/Roo**: Wrapper-only (no config-based registration)
+- **Goose/KimiCode/Qwen**: Wrapper-only (no config-based registration)
 
 Atomic file writes (`config::atomic`) prevent corruption during concurrent access. Config backup utilities (`config::backup`) preserve originals before modification.
 
@@ -371,7 +365,7 @@ Spacing is enforced at the sink level, with at most one blank line between any t
 
 ### Markdown rendering boundary (triage)
 
-The prose-bearing sections (System Prompt, **Agent Prompt**, Thinking Prose) render Markdown through `prompt_reporting::render_markdown_for_terminal`, which is **pure delegation** to darkmatter's `Markdown::as_terminal` — it only sets `max_width` and collapses blank lines. claudine owns **no** word-wrap, hanging-indent, or inline-style (code/bold/link) logic; all of that lives in darkmatter's fold + biscuit-terminal's render tree (`render_tree/render.rs`).
+The prose-bearing sections (System Prompt, **Agent Prompt**, Thinking Prose) render Markdown through `render::prompt::render_markdown_for_terminal` (the `AgentPrompt`/`SystemPrompt` components under `lib/src/render/prompt/`, which absorbed the former `prompt_reporting` module), which is **pure delegation** to darkmatter's `Markdown::as_terminal` — it only sets `max_width` and collapses blank lines. claudine owns **no** word-wrap, hanging-indent, or inline-style (code/bold/link) logic; all of that lives in darkmatter's fold + biscuit-terminal's render tree (`render_tree/render.rs`).
 
 So when rendered prompt output shows wrong wrapping, spurious newlines, lines bleeding past the width, or mis-styled inline spans, the defect is in **darkmatter / biscuit-terminal**, not claudine. Reproduce at that layer (`md.as_terminal` with a fixed `max_width`) rather than through the claudine CLI. Known gotcha: a CommonMark *tight* list item carries its content as a flat run of inline siblings (`[Text, InlineCode, Text]`) with no wrapping `Paragraph`, and the terminal renderer must coalesce that run before wrapping — the wrap is per-list-item, not per-inline-node.
 
@@ -438,7 +432,6 @@ Full, CustomFormat, Limited, None
 | KimiCode | `~/.config/agents/skills/` | `.kimi/skills/` | `.claude/skills`, `.agents/skills`, `.codex/skills` |
 | OpenCode | `~/.config/opencode/skills/` | `.opencode/skills/` | `.claude/skills`, `.agents/skills` |
 | QwenCode | `~/.qwen/skills/` | `.qwen/skills/` | -- |
-| RooCode | `~/.roo/skills/` | `.roo/skills/` | -- |
 
 Note: OpenCode also reads `.claude/skills/` directly
 
@@ -463,7 +456,7 @@ Note: OpenCode also reads `.claude/skills/` directly
 ## Key Lessons
 
 - **Hook handlers must respond fast**: `claudine handle` enforces a hard **5-second execution deadline** (overridable via `CLAUDINE_HANDLE_DEADLINE_SECONDS`) to prevent blocking the parent agent session. When exceeded, the handler aborts and exits 124. Bash and messenger actions also have tighter 3s timeouts when running inside a hook handler. Phase-level tracing spans ensure any hang is diagnostic.
-- **All 8 adapters are implemented**: each provider adapter has full event mapping, metadata extraction, and tests. Claude, Gemini, OpenCode, and Codex use config-based hooks; Goose, KimiCode, Qwen, and Roo parse stream-json or wire-mode payloads directly. KimiCode and Qwen support blocking responses; Goose and Roo are observation-only.
+- **All 7 adapters are implemented**: each provider adapter has full event mapping, metadata extraction, and tests. Claude, Gemini, OpenCode, and Codex use config-based hooks; Goose, KimiCode, and Qwen parse stream-json or wire-mode payloads directly. KimiCode and Qwen support blocking responses; Goose is observation-only.
 - **Sound effects are fire-and-forget**: TTS and sound playback spawn tokio tasks to avoid blocking the event pipeline. Log and report actions run inline because they're fast.
 - **Atomic writes prevent config corruption**: all config file mutations go through `config::atomic` to handle concurrent hook firings safely.
 - **Runtime config precompiles regexes**: matcher patterns and Call action mapper regexes are compiled once at config load time, failing fast on invalid patterns with contextual error messages.

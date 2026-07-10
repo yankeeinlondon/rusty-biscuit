@@ -65,6 +65,15 @@ impl WrapperProfile for CodexWrapper {
             // errors when prompt-file content exceeds OS argument length limits.
             // Codex exec reads from stdin when no positional prompt is provided.
             Ok(PromptDelivery::Stdin(prompt.to_string()))
+        } else if prompt.starts_with('-') {
+            // A prompt beginning with `-` (e.g. a Markdown bullet) is otherwise
+            // parsed by Codex's clap as an option ("unexpected argument '- '").
+            // Append it after a `--` end-of-options marker, past every flag, so
+            // it is taken as the positional PROMPT.
+            Ok(PromptDelivery::AppendArgs(vec![
+                "--".to_string(),
+                prompt.to_string(),
+            ]))
         } else {
             // Interactive: insert as positional after "exec"
             let insert_at = if args.first().is_some_and(|f| f == "exec" || f == "e") {
@@ -79,10 +88,6 @@ impl WrapperProfile for CodexWrapper {
         }
     }
 
-    fn allowed_env_keys(&self) -> &'static [&'static str] {
-        &["OPENAI_API_KEY", "CODEX_API_KEY"]
-    }
-
     fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
         Ok(vec![
             "codex".to_string(),
@@ -90,21 +95,5 @@ impl WrapperProfile for CodexWrapper {
             "resume".to_string(),
             session_id.to_string(),
         ])
-    }
-
-    fn apply_structured_stream(&self, args: &mut Vec<String>) {
-        // Codex uses `exec --json` for structured output.
-        // The `exec` subcommand is expected to already be present.
-        if !has_flag(args, "--json") {
-            args.push("--json".to_string());
-        }
-    }
-
-    fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
-        &["Reading prompt from stdin..."]
-    }
-
-    fn supports_interactive_inline_closure(&self) -> bool {
-        true
     }
 }

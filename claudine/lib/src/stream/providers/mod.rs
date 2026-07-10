@@ -1,8 +1,10 @@
+pub mod antigravity;
 pub mod claude;
 pub mod codex;
 pub mod gemini;
 pub mod kimi;
 pub mod opencode;
+pub mod pi;
 pub mod qwen;
 
 // Re-exports so the moved parser files can keep their original `super::`
@@ -44,6 +46,20 @@ pub fn for_provider(
             config.model,
         )),
         Provider::QwenCode => Box::new(qwen::QwenSemanticStreamParser::new(sink)),
+        // Kilo Code is an OpenCode fork; its `--format json` stream is
+        // OpenCode-shaped NDJSON, parsed by the OpenCode parser unchanged.
+        Provider::Kilo => Box::new(opencode::OpenCodeSemanticStreamParser::new(
+            sink,
+            config.model,
+        )),
+        // Pi is a bespoke provider with its own `--mode json` NDJSON format.
+        Provider::Pi => Box::new(pi::PiSemanticStreamParser::new(sink, config.model)),
+        // Antigravity's `--output-format json` print mode emits ONE buffered
+        // JSON envelope (not a line stream); its bespoke parser accumulates and
+        // parses that single object.
+        Provider::Antigravity => Box::new(
+            antigravity::AntigravitySemanticStreamParser::new(sink, config.model),
+        ),
         _ => Box::new(claude::ClaudeSemanticStreamParser::new(sink)),
     }
 }

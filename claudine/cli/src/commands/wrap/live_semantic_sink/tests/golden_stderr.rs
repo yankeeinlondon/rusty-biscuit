@@ -576,6 +576,11 @@ fn reasoning_appears_exactly_once_in_stderr() {
         text: "Let me analyze this step by step.".into(),
         extra: json!({}),
     });
+    // A lone thought now stays buffered in the ThinkingStream until a
+    // boundary — no following non-Reasoning event here, so the `Drop`
+    // close-flush is what coalesces and renders it. Drop the sink to
+    // trigger that flush before inspecting the captured lines.
+    drop(sink);
 
     let captured = lines.lock().unwrap().join("\n");
 
@@ -598,6 +603,105 @@ fn reasoning_appears_exactly_once_in_stderr() {
     assert_eq!(
         count, 1,
         "reasoning text must appear exactly once, found {count} times: {captured:?}"
+    );
+}
+
+/// Build a bare sink that captures every stderr line into `lines`.
+fn capturing_sink(lines: Arc<StdMutex<Vec<String>>>) -> LiveSemanticSink {
+    let dispatch = Box::new(|_ev: AgenticEvent, _meta: DispatchEventMeta| {})
+        as Box<dyn Fn(AgenticEvent, DispatchEventMeta) + Send + Sync + 'static>;
+    let emit = {
+        let cap = lines.clone();
+        Box::new(move |line: &str| {
+            cap.lock().unwrap().push(line.to_string());
+        }) as Box<dyn Fn(&str) + Send + Sync + 'static>
+    };
+    LiveSemanticSink::new(
+        Provider::Claude,
+        EnvironmentContext::default(),
+        Path::new("/tmp"),
+        Verbosity::Normal,
+        Arc::new(Mutex::new(StructuredSummaryDetails::default())),
+        dispatch,
+        emit,
+    )
+}
+
+/// The coalescing win: Claude emits one `Reasoning` event per
+/// `thinking_delta`, so a single thought arrives as several token-level
+/// fragments. The `ThinkingStream` component buffers them and flushes ONE
+/// coalesced `▌ ` block at the boundary — not one bordered fragment per
+/// delta as the old per-delta render did.
+#[test]
+fn consecutive_reasoning_deltas_coalesce_into_one_block() {
+    let lines: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
+    let mut sink = capturing_sink(lines.clone());
+
+    // Three deltas forming one sentence, none newline-terminated — exactly
+    // the token-fragment shape Claude produces.
+    for delta in ["Let me ", "think about ", "this problem."] {
+        sink.on_semantic_event(SemanticEvent::Reasoning {
+            text: delta.into(),
+            extra: json!({}),
+        });
+    }
+    // No following event: the `Drop` close-flush coalesces the residual
+    // fragments into a single block.
+    drop(sink);
+
+    let captured = lines.lock().unwrap().clone();
+    let joined = captured.join("\n");
+    assert!(
+        joined.contains("Let me think about this problem."),
+        "coalesced block must carry the joined sentence: {captured:?}"
+    );
+    let block_lines = captured
+        .iter()
+        .filter(|l| l.contains('\u{258c}'))
+        .count();
+    assert_eq!(
+        block_lines, 1,
+        "one thought must render as ONE ▌ block, not one fragment per delta: {captured:?}"
+    );
+}
+
+/// A `Reasoning` run followed by a `ToolCall` must flush the coalesced
+/// thinking block BEFORE the tool line, so a tool render never interleaves
+/// mid-thought.
+#[test]
+fn reasoning_flushes_before_following_tool_call() {
+    let lines: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
+    let mut sink = capturing_sink(lines.clone());
+
+    for delta in ["Checking the ", "file first."] {
+        sink.on_semantic_event(SemanticEvent::Reasoning {
+            text: delta.into(),
+            extra: json!({}),
+        });
+    }
+    sink.on_semantic_event(SemanticEvent::ToolCall {
+        name: Some("Bash".into()),
+        id: None,
+        input: Some(json!({"command": "ls"})),
+        extra: json!({}),
+    });
+
+    let captured = lines.lock().unwrap().clone();
+    let thinking_idx = captured
+        .iter()
+        .position(|l| l.contains('\u{258c}'))
+        .unwrap_or_else(|| panic!("thinking block must render: {captured:?}"));
+    let tool_idx = captured
+        .iter()
+        .position(|l| l.contains("Bash"))
+        .unwrap_or_else(|| panic!("tool line must render: {captured:?}"));
+    assert!(
+        thinking_idx < tool_idx,
+        "thinking must flush before the tool line: {captured:?}"
+    );
+    assert!(
+        captured.join("\n").contains("Checking the file first."),
+        "coalesced thought must carry the joined text: {captured:?}"
     );
 }
 

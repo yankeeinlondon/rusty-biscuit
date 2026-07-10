@@ -72,6 +72,14 @@ pub(crate) enum CompletionTarget {
     /// prompt-file positional slot has been committed. Routes to the
     /// schema-aware property-name completer.
     SetterName { partial: String, file_arg: String },
+    /// Cursor is on a flag-shaped token inside a composition subcommand
+    /// (`compose` / `inline-compose` / `sequence`). Offers the
+    /// provider-selection switches (`--<provider>`, catalog-derived) merged
+    /// with clap's other composition flags, so the `--kilo` / `--pi` /
+    /// `--antigravity` (and every future provider) switch is discoverable
+    /// via `<TAB>` even though the argv normalizer — not a clap field —
+    /// is what actually rewrites it to `--provider <slug>`.
+    CompositionProviderFlag { partial: String },
     /// Cursor is anywhere else — a wrapper flag value, an administrative
     /// subcommand, etc. The engine emits zero candidates so the shell
     /// falls back to its native file / flag completion.
@@ -174,6 +182,14 @@ pub(crate) fn run_with_context(
             .entered();
             let scope_ctx = ScopeContext::discover();
             composition::run(mode, &scope_ctx, &partial)
+        }
+        CompletionTarget::CompositionProviderFlag { partial } => {
+            let _span = tracing::trace_span!(
+                target: "claudine::completion",
+                "completion::composition_provider_flag",
+            )
+            .entered();
+            run_composition_provider_flag(&partial, argv, current_index)
         }
         CompletionTarget::SetterValue { token, file_arg } => {
             let _span = tracing::trace_span!(
@@ -310,6 +326,33 @@ fn is_setter_name_partial(token: &str) -> bool {
 /// Uses the same `ignore_errors(true)` command tree that powers the legacy
 /// `CompleteEnv` path so wrapper subcommands do not short-circuit on unknown
 /// passthrough tokens.
+/// Complete a flag-shaped token inside a composition subcommand.
+///
+/// Offers the catalog-derived `--<provider>` selection switches first
+/// (drift-proof — see [`crate::completion::root_menu::wrapper_tokens`]; the
+/// argv normalizer's Rule 1 rewrites each to `--provider <slug>`), then
+/// merges clap's other composition flags (`--model`, `--output`,
+/// `--provider`, …) so the whole flag surface completes. Deduped, providers
+/// first. Kilo/Pi/Antigravity (and any future provider) appear automatically
+/// even though they have no dedicated clap boolean field.
+fn run_composition_provider_flag(
+    partial: &str,
+    argv: &[String],
+    current_index: usize,
+) -> Vec<String> {
+    let mut out: Vec<String> = crate::completion::root_menu::wrapper_tokens()
+        .into_iter()
+        .map(|token| format!("--{token}"))
+        .filter(|flag| flag.starts_with(partial))
+        .collect();
+    for candidate in clap_dynamic_fallback(argv, current_index) {
+        if !out.contains(&candidate) {
+            out.push(candidate);
+        }
+    }
+    out
+}
+
 fn clap_dynamic_fallback(argv: &[String], current_index: usize) -> Vec<String> {
     let partial = argv.get(current_index).map(String::as_str).unwrap_or("");
     let prev_flag = current_index
@@ -424,6 +467,16 @@ fn classify_post_subcommand(
     };
 
     let current = argv.get(current_index).map(String::as_str).unwrap_or("");
+
+    // A flag-shaped cursor token routes to the provider-flag completer, so the
+    // `--<provider>` selection switches (catalog-derived, drift-proof) are
+    // discoverable via `<TAB>`. Non-provider composition flags still surface
+    // through the clap merge inside the completer.
+    if current.starts_with('-') {
+        return CompletionTarget::CompositionProviderFlag {
+            partial: current.to_string(),
+        };
+    }
 
     // Walk tokens between the subcommand and the cursor to find the first
     // committed prompt-file positional (skipping flags, flag values, and
@@ -683,6 +736,35 @@ mod tests {
             classify_completion_target(&a, 2),
             CompletionTarget::Root(RootPartial::Empty),
         );
+    }
+
+    #[test]
+    fn classifier_composition_flag_slot_routes_to_provider_flag() {
+        let a = argv(&["claudine", "compose", "--ki"]);
+        assert_eq!(
+            classify_completion_target(&a, 2),
+            CompletionTarget::CompositionProviderFlag {
+                partial: "--ki".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn composition_provider_flag_completer_is_catalog_derived() {
+        // Every provider's switch is offered — including kilo/pi/antigravity,
+        // which have no dedicated clap boolean field — so the derived surface
+        // never drifts as providers are added.
+        let a = argv(&["claudine", "compose", "--"]);
+        let got = run_composition_provider_flag("--", &a, 2);
+        for flag in ["--claude", "--kilo", "--pi", "--antigravity"] {
+            assert!(got.iter().any(|c| c == flag), "{flag} missing: {got:?}");
+        }
+        // Prefix filtering keeps only matching switches. (argv[current_index]
+        // must equal the partial — the clap merge reads the token from argv.)
+        let narrowed_argv = argv(&["claudine", "compose", "--kil"]);
+        let narrowed = run_composition_provider_flag("--kil", &narrowed_argv, 2);
+        assert!(narrowed.iter().any(|c| c == "--kilo"));
+        assert!(!narrowed.iter().any(|c| c == "--claude"));
     }
 
     #[test]

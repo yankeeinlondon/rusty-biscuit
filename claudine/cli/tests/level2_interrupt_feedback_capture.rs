@@ -22,7 +22,10 @@
 //! The assertion targets the stable substring `interrupt received` rather than
 //! the exact glyph (`⚠`) or em-dash punctuation, which are presentation detail
 //! that may drift. `FORCE_COLOR=1` routes claudine through an optimistic
-//! terminal so the capture reflects production styling.
+//! terminal so the capture reflects production styling. The match runs over
+//! the capture with newlines removed: the feedback is written asynchronously
+//! from the SIGINT handler, so it can land mid-line and be hard-wrapped by
+//! the pane at any column — including inside the asserted substring.
 //!
 //! ## Pane height (no scrollback)
 //!
@@ -169,7 +172,8 @@ while :; do /bin/sleep 1; done
         if let Ok(frame) = harness.capture() {
             last_raw = frame.raw;
             // Semantic substring: stable across glyph/punctuation drift.
-            if last_raw.contains("interrupt received") {
+            // Joined across pane hard-wraps (see module doc).
+            if last_raw.replace('\n', "").contains("interrupt received") {
                 rendered = true;
                 break;
             }

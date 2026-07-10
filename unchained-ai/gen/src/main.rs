@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -13,13 +14,16 @@ use unchained_ai::rigging::providers::Provider;
 mod errors;
 mod generator;
 mod metadata_generator;
-mod parsera;
+mod models_dev;
 mod provider_metadata;
 
 use errors::GeneratorError;
 use generator::ModelEnumGenerator;
 use metadata_generator::MetadataGenerator;
-use parsera::{ParseraModel, fetch_parsera_specs_with_retry, find_parsera_metadata};
+use models_dev::{
+    fetch_models_dev_with_retry, find_models_dev_metadata, models_dev_provider_key,
+    models_dev_to_metadata, validate_models_dev_index, ModelsDevError, ModelsDevIndex,
+};
 
 #[derive(Parser)]
 #[command(name = "gen-models")]
@@ -68,6 +72,7 @@ fn default_output_dir() -> PathBuf {
 struct GenerationSummary {
     succeeded: Vec<(Provider, usize)>,
     skipped: Vec<(Provider, String)>,
+    metadata_coverage: Vec<(Provider, usize, usize)>,
 }
 
 impl GenerationSummary {
@@ -85,6 +90,13 @@ impl GenerationSummary {
             println!("\nSkipped:");
             for (provider, reason) in &self.skipped {
                 println!("  {:?}: {}", provider, reason);
+            }
+        }
+
+        if !self.metadata_coverage.is_empty() {
+            println!("\nmodels.dev match coverage:");
+            for (provider, matched, total) in &self.metadata_coverage {
+                println!("  {:?}: {}/{} matched", provider, matched, total);
             }
         }
 
@@ -107,6 +119,24 @@ fn write_atomic(path: &std::path::Path, content: &str) -> Result<(), GeneratorEr
 /// Convert provider name to snake_case filename.
 fn provider_to_filename(provider: Provider) -> String {
     format!("{:?}", provider).to_lowercase()
+}
+
+/// Read the current generated model IDs for a provider from its existing enum file.
+fn existing_model_ids(provider: Provider, output_dir: &std::path::Path) -> Vec<String> {
+    let path = output_dir.join(format!("{}.rs", provider_to_filename(provider)));
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+
+    contents
+        .lines()
+        .filter_map(|line| {
+            line.trim()
+                .strip_prefix("/// Model: `")
+                .and_then(|rest| rest.strip_suffix('`'))
+                .map(ToString::to_string)
+        })
+        .collect()
 }
 
 /// Result of processing a single provider.
@@ -178,7 +208,7 @@ async fn process_single_provider(
 /// Result of processing all providers.
 struct ProcessingResult {
     summary: GenerationSummary,
-    all_model_ids: Vec<String>,
+    provider_model_ids: Vec<(Provider, Vec<String>)>,
     /// Raw provider-native metadata from APIs that return rich data,
     /// keyed by model ID. Currently only OpenRouter provides rich metadata.
     provider_native_raw: HashMap<String, serde_json::Value>,
@@ -192,11 +222,12 @@ async fn process_providers(
     dry_run: bool,
 ) -> ProcessingResult {
     let mut summary = GenerationSummary::default();
-    let mut all_model_ids = Vec::new();
+    let mut provider_model_ids = Vec::new();
     let mut provider_native_raw = HashMap::new();
 
     for provider in providers {
         let Some(api_key) = api_keys.get(&provider) else {
+            provider_model_ids.push((provider, existing_model_ids(provider, output_dir)));
             summary
                 .skipped
                 .push((provider, "No API key configured".to_string()));
@@ -204,6 +235,7 @@ async fn process_providers(
         };
 
         if provider.config().is_local {
+            provider_model_ids.push((provider, existing_model_ids(provider, output_dir)));
             summary
                 .skipped
                 .push((provider, "Local provider".to_string()));
@@ -214,13 +246,14 @@ async fn process_providers(
             Ok(result) => {
                 info!("Generated {} models for {:?}", result.model_count, provider);
                 summary.succeeded.push((provider, result.model_count));
-                all_model_ids.extend(result.model_ids);
+                provider_model_ids.push((provider, result.model_ids));
                 if provider == Provider::OpenRouter {
                     provider_native_raw.extend(result.raw_metadata);
                 }
             }
             Err(e) => {
                 warn!("Skipping {:?}: {}", provider, e);
+                provider_model_ids.push((provider, existing_model_ids(provider, output_dir)));
                 summary.skipped.push((provider, e.to_string()));
             }
         }
@@ -228,7 +261,7 @@ async fn process_providers(
 
     ProcessingResult {
         summary,
-        all_model_ids,
+        provider_model_ids,
         provider_native_raw,
     }
 }
@@ -242,6 +275,33 @@ fn parse_provider_list(input: &str) -> Vec<Provider> {
             Provider::iter().find(|p| format!("{:?}", p).to_lowercase() == name)
         })
         .collect()
+}
+
+async fn load_models_dev_index_for_cli<F, Fut>(
+    cli: &Cli,
+    fetch_models_dev: F,
+) -> Result<ModelsDevIndex, GeneratorError>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<ModelsDevIndex, ModelsDevError>>,
+{
+    if cli.dry_run {
+        info!("Dry run enabled; generated files will not be written");
+    }
+
+    info!("Fetching model specs from models.dev...");
+    let index = fetch_models_dev()
+        .await
+        .map_err(|e| GeneratorError::FetchFailed {
+            provider: "models.dev".to_string(),
+            reason: e.to_string(),
+        })?;
+    validate_models_dev_index(&index).map_err(|e| GeneratorError::FetchFailed {
+        provider: "models.dev".to_string(),
+        reason: e.to_string(),
+    })?;
+    info!("Loaded {} provider buckets from models.dev", index.len());
+    Ok(index)
 }
 
 #[tokio::main]
@@ -261,14 +321,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_target(false)
         .init();
 
-    // Fetch Parsera specs once at startup (graceful degradation on failure)
-    info!("Fetching model specs from Parsera API...");
-    let parsera_index: HashMap<String, ParseraModel> = fetch_parsera_specs_with_retry().await;
-    if parsera_index.is_empty() {
-        warn!("Parsera API unavailable - metadata will be empty");
-    } else {
-        info!("Loaded {} model specs from Parsera", parsera_index.len());
-    }
+    let models_dev_index =
+        load_models_dev_index_for_cli(&cli, fetch_models_dev_with_retry).await?;
 
     // Get all available API keys
     let api_keys = get_api_keys();
@@ -308,28 +362,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Generate metadata lookup table with merge logic
     let mut metadata_gen = MetadataGenerator::new();
     let mut matched_count = 0;
+    let mut total_model_count = 0;
+    let mut summary = result.summary;
 
-    for model_id in &result.all_model_ids {
-        let parsera_data = find_parsera_metadata(model_id, &parsera_index);
+    for (provider, model_ids) in &result.provider_model_ids {
+        let models_dev_bucket =
+            models_dev_provider_key(*provider).and_then(|key| models_dev_index.get(key));
+        let mut provider_matched = 0;
 
-        let provider_native = result
-            .provider_native_raw
-            .get(model_id)
-            .and_then(|v| provider_metadata::parse_provider_metadata(Provider::OpenRouter, v));
+        for model_id in model_ids {
+            let models_dev_metadata = models_dev_bucket
+                .and_then(|bucket| find_models_dev_metadata(model_id, *provider, bucket))
+                .map(models_dev_to_metadata)
+                .transpose()
+                .map_err(|e| GeneratorError::FetchFailed {
+                    provider: "models.dev".to_string(),
+                    reason: format!("{provider:?}/{model_id}: {e}"),
+                })?;
 
-        let merged = MetadataGenerator::merge_metadata(provider_native, parsera_data);
+            let provider_native = if *provider == Provider::OpenRouter {
+                result
+                    .provider_native_raw
+                    .get(model_id)
+                    .and_then(|v| provider_metadata::parse_provider_metadata(Provider::OpenRouter, v))
+            } else {
+                None
+            };
 
-        if merged.is_some() {
-            matched_count += 1;
+            let merged = MetadataGenerator::merge_metadata(provider_native, models_dev_metadata);
+
+            if merged.is_some() {
+                matched_count += 1;
+                provider_matched += 1;
+            }
+
+            metadata_gen.register(model_id.clone(), merged);
         }
 
-        metadata_gen.register(model_id.clone(), merged);
+        total_model_count += model_ids.len();
+        summary
+            .metadata_coverage
+            .push((*provider, provider_matched, model_ids.len()));
     }
 
     info!(
         "Matched {}/{} models with metadata",
         matched_count,
-        result.all_model_ids.len()
+        total_model_count
     );
 
     // Write compact metadata file
@@ -343,7 +422,68 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("{}", metadata_code);
     }
 
-    result.summary.print();
+    summary.print();
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn test_existing_model_ids_reads_generated_model_comments() {
+        let dir = std::env::temp_dir().join(format!(
+            "unchained-ai-gen-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join("xai.rs");
+        std::fs::write(
+            &path,
+            r#"
+pub enum ProviderModelXai {
+    /// Model: `grok-4.3`
+    Grok__4_3,
+    /// Custom model ID not in the predefined list.
+    Bespoke(String),
+}
+"#,
+        )
+        .expect("write generated model file");
+
+        let ids = existing_model_ids(Provider::Xai, &dir);
+
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_dir(dir);
+
+        assert_eq!(ids, vec!["grok-4.3".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn test_dry_run_generation_validates_models_dev_source() {
+        let cli = Cli {
+            output: None,
+            providers: None,
+            skip: None,
+            verbose: 0,
+            dry_run: true,
+        };
+        let fetched = Cell::new(false);
+
+        let err = load_models_dev_index_for_cli(&cli, || {
+            fetched.set(true);
+            async { Ok(ModelsDevIndex::new()) }
+        })
+        .await
+        .expect_err("dry-run should still reject degraded models.dev data");
+
+        assert!(fetched.get(), "dry-run should fetch models.dev data");
+        let message = err.to_string();
+        assert!(
+            message.contains("models.dev response is implausibly thin"),
+            "unexpected error: {message}"
+        );
+    }
 }
