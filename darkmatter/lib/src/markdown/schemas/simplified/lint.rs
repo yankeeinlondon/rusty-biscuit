@@ -69,6 +69,11 @@ pub enum SuggestionLintReason {
 pub struct SuggestionLintProblem {
     /// Dotted property path within its root schema arm (e.g. `"settings.mode"`).
     pub property: String,
+    /// Property path segments within the root schema arm.
+    ///
+    /// This is the unambiguous identity for a property; [`Self::property`] is
+    /// retained as a human-readable diagnostic label.
+    pub property_path: Vec<String>,
     /// Zero-based root-union arm index, or `None` for a single root shape.
     pub root_arm: Option<usize>,
     /// Zero-based property-union atom index, or `None` for a single atom.
@@ -112,11 +117,11 @@ pub fn lint_suggestions(
 ) -> Result<Vec<SuggestionLintProblem>, SchemaError> {
     let mut problems = Vec::new();
     match schema {
-        SimplifiedSchema::Single(shape) => lint_shape(shape, None, "", &mut problems)?,
+        SimplifiedSchema::Single(shape) => lint_shape(shape, None, &[], &mut problems)?,
         SimplifiedSchema::Union(arms) => {
             for (root_arm, arm) in arms.iter().enumerate() {
                 if let SchemaArm::Inline(shape) = arm {
-                    lint_shape(shape, Some(root_arm), "", &mut problems)?;
+                    lint_shape(shape, Some(root_arm), &[], &mut problems)?;
                 }
             }
         }
@@ -127,16 +132,13 @@ pub fn lint_suggestions(
 fn lint_shape(
     shape: &SchemaShape,
     root_arm: Option<usize>,
-    parent: &str,
+    parent: &[String],
     problems: &mut Vec<SuggestionLintProblem>,
 ) -> Result<(), SchemaError> {
     for (name, def) in &shape.properties {
-        let property = if parent.is_empty() {
-            name.clone()
-        } else {
-            format!("{parent}.{name}")
-        };
-        lint_property(def, root_arm, &property, problems)?;
+        let mut property_path = parent.to_vec();
+        property_path.push(name.clone());
+        lint_property(def, root_arm, &property_path, problems)?;
     }
     for pattern in &shape.pattern_keys {
         let name = match &pattern.key {
@@ -145,12 +147,9 @@ fn lint_shape(
             PatternKey::Ending(suffix) => format!("<ending::{suffix}>"),
             PatternKey::Pattern(pattern) => format!("<pattern::{pattern}>"),
         };
-        let property = if parent.is_empty() {
-            name
-        } else {
-            format!("{parent}.{name}")
-        };
-        lint_property(&pattern.def, root_arm, &property, problems)?;
+        let mut property_path = parent.to_vec();
+        property_path.push(name);
+        lint_property(&pattern.def, root_arm, &property_path, problems)?;
     }
     Ok(())
 }
@@ -158,14 +157,14 @@ fn lint_shape(
 fn lint_property(
     def: &PropertyDef,
     root_arm: Option<usize>,
-    property: &str,
+    property_path: &[String],
     problems: &mut Vec<SuggestionLintProblem>,
 ) -> Result<(), SchemaError> {
     match def {
-        PropertyDef::Single(atom) => lint_atom(atom, root_arm, None, property, problems),
+        PropertyDef::Single(atom) => lint_atom(atom, root_arm, None, property_path, problems),
         PropertyDef::Union(atoms) => {
             for (property_arm, atom) in atoms.iter().enumerate() {
-                lint_atom(atom, root_arm, Some(property_arm), property, problems)?;
+                lint_atom(atom, root_arm, Some(property_arm), property_path, problems)?;
             }
             Ok(())
         }
@@ -176,11 +175,11 @@ fn lint_atom(
     atom: &PropertyAtom,
     root_arm: Option<usize>,
     property_arm: Option<usize>,
-    property: &str,
+    property_path: &[String],
     problems: &mut Vec<SuggestionLintProblem>,
 ) -> Result<(), SchemaError> {
     if let TypeExpr::InlineObject(shape) = &atom.ty {
-        lint_shape(shape, root_arm, property, problems)?;
+        lint_shape(shape, root_arm, property_path, problems)?;
     }
     let Some(candidates) = atom.constraints.iter().find_map(|constraint| match constraint {
         Constraint::Suggest(candidates) => Some(candidates),
@@ -189,7 +188,8 @@ fn lint_atom(
         return Ok(());
     };
 
-    let target = suggestion_target_schema(property, atom)?;
+    let property = property_path.join(".");
+    let target = suggestion_target_schema(&property, atom)?;
     let validator = super::super::validate::build_validator(&target, None, None)?;
     let is_number = matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::Number));
 
@@ -206,7 +206,8 @@ fn lint_atom(
         };
         if let Some(reason) = reason {
             problems.push(SuggestionLintProblem {
-                property: property.to_string(),
+                property: property.clone(),
+                property_path: property_path.to_vec(),
                 root_arm,
                 property_arm,
                 decoded: candidate.decoded.clone(),

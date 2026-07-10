@@ -95,7 +95,8 @@ pub fn suggestions_for_path(
     property_path: &[&str],
 ) -> Option<SuggestionQuery> {
     let (leaf, ancestors) = property_path.split_last()?;
-    let atom = suggestion_atom_for_path(schema, ancestors, leaf)?;
+    let (atom, root_arm, property_arm) =
+        suggest_atom_and_provenance(schema, ancestors, leaf)?;
     let candidates = atom.constraints.iter().find_map(|c| match c {
         Constraint::Suggest(candidates) => Some(candidates.as_slice()),
         _ => None,
@@ -106,37 +107,56 @@ pub fn suggestions_for_path(
     let is_number = matches!(atom.ty, TypeExpr::Primitive(super::SimplifiedType::Number));
 
     let lints = lint_suggestions(schema).unwrap_or_default();
-    let (root_arm, property_arm) = locate_atom(schema, ancestors, leaf);
 
     let items = candidates
         .iter()
-        .filter(|candidate| !is_lint_problem(candidates, &lints, &root_arm, &property_arm, candidate))
+        .filter(|candidate| {
+            !is_lint_problem(
+                candidates,
+                &lints,
+                property_path,
+                &root_arm,
+                &property_arm,
+                candidate,
+            )
+        })
         .map(|candidate| build_item(candidate, is_string, is_number))
         .collect();
 
     Some(SuggestionQuery { is_array, items })
 }
 
-/// Resolves the [`PropertyAtom`] carrying `suggest(...)` for a path, applying
-/// the union-selection rules.
-fn suggestion_atom_for_path<'a>(
+/// Resolves the [`PropertyAtom`] carrying `suggest(...)` for a path together
+/// with the lint-problem provenance `(root_arm, property_arm)`, applying the
+/// union-selection rules.
+///
+/// Provenance is derived from the same traversal that selects the atom so lint
+/// filtering always targets the arm/atom the suggestion came from. A root-union
+/// arm whose ancestors do not resolve is skipped (continuing to later arms)
+/// rather than aborting the whole query.
+fn suggest_atom_and_provenance<'a>(
     schema: &'a SimplifiedSchema,
     ancestors: &[&str],
     leaf: &str,
-) -> Option<&'a PropertyAtom> {
+) -> Option<(&'a PropertyAtom, Option<usize>, Option<usize>)> {
     match schema {
         SimplifiedSchema::Single(shape) => {
             let shape = descend(shape, ancestors)?;
-            suggest_atom_in_def(shape.properties.get(leaf)?)
+            let def = shape.properties.get(leaf)?;
+            let (atom, property_arm) = suggest_atom_in_def(def)?;
+            Some((atom, None, property_arm))
         }
         SimplifiedSchema::Union(arms) => {
-            for arm in arms {
+            for (root_arm, arm) in arms.iter().enumerate() {
                 if let SchemaArm::Inline(shape) = arm {
-                    let shape = descend(shape, ancestors)?;
-                    if let Some(def) = shape.properties.get(leaf)
-                        && let Some(atom) = suggest_atom_in_def(def)
-                    {
-                        return Some(atom);
+                    let Some(shape) = descend(shape, ancestors) else {
+                        continue;
+                    };
+                    let Some(def) = shape.properties.get(leaf) else {
+                        continue;
+                    };
+                    if let Some((atom, property_arm)) = suggest_atom_in_def(def) {
+                        return Some((atom, Some(root_arm), property_arm));
                     }
                 }
             }
@@ -163,57 +183,21 @@ fn inline_object_shape(def: &PropertyDef) -> Option<&SchemaShape> {
     })
 }
 
-/// Finds the atom carrying `suggest(...)` in a [`PropertyDef`].
-fn suggest_atom_in_def(def: &PropertyDef) -> Option<&PropertyAtom> {
-    atoms_of(def).iter().find(|atom| {
-        atom.constraints
+/// Finds the atom carrying `suggest(...)` in a [`PropertyDef`], paired with its
+/// property-union arm index (`None` for a single-atom definition).
+fn suggest_atom_in_def(def: &PropertyDef) -> Option<(&PropertyAtom, Option<usize>)> {
+    match def {
+        PropertyDef::Single(atom) => atom
+            .constraints
             .iter()
             .any(|constraint| matches!(constraint, Constraint::Suggest(_)))
-    })
-}
-
-/// Returns the arm indices for lint-problem matching.
-fn locate_atom(
-    schema: &SimplifiedSchema,
-    ancestors: &[&str],
-    leaf: &str,
-) -> (Option<usize>, Option<usize>) {
-    match schema {
-        SimplifiedSchema::Single(shape) => {
-            if let Some(def) = resolve_def(shape, ancestors, leaf) {
-                (None, property_arm_index(def))
-            } else {
-                (None, None)
-            }
-        }
-        SimplifiedSchema::Union(arms) => {
-            for (root_arm, arm) in arms.iter().enumerate() {
-                if let SchemaArm::Inline(shape) = arm
-                    && let Some(def) = resolve_def(shape, ancestors, leaf)
-                {
-                    return (Some(root_arm), property_arm_index(def));
-                }
-            }
-            (None, None)
-        }
-    }
-}
-
-fn resolve_def<'a>(
-    shape: &'a SchemaShape,
-    ancestors: &[&str],
-    leaf: &str,
-) -> Option<&'a PropertyDef> {
-    let shape = descend(shape, ancestors)?;
-    shape.properties.get(leaf)
-}
-
-fn property_arm_index(def: &PropertyDef) -> Option<usize> {
-    match def {
-        PropertyDef::Single(_) => None,
-        PropertyDef::Union(atoms) => atoms
-            .iter()
-            .position(|atom| atom.constraints.iter().any(|c| matches!(c, Constraint::Suggest(_)))),
+            .then_some((atom, None)),
+        PropertyDef::Union(atoms) => atoms.iter().enumerate().find_map(|(index, atom)| {
+            atom.constraints
+                .iter()
+                .any(|constraint| matches!(constraint, Constraint::Suggest(_)))
+                .then_some((atom, Some(index)))
+        }),
     }
 }
 
@@ -228,6 +212,7 @@ fn atoms_of(def: &PropertyDef) -> &[PropertyAtom] {
 fn is_lint_problem(
     candidates: &[SuggestionCandidate],
     lints: &[SuggestionLintProblem],
+    property_path: &[&str],
     root_arm: &Option<usize>,
     property_arm: &Option<usize>,
     candidate: &SuggestionCandidate,
@@ -239,7 +224,12 @@ fn is_lint_problem(
         return false;
     };
     lints.iter().any(|problem| {
-        problem.root_arm == *root_arm
+        problem
+            .property_path
+            .iter()
+            .map(String::as_str)
+            .eq(property_path.iter().copied())
+            && problem.root_arm == *root_arm
             && problem.property_arm == *property_arm
             && problem.decoded == candidate.decoded
             && problem.interpreted == candidate.interpreted
@@ -315,9 +305,14 @@ pub fn yaml_double_quote(text: &str) -> String {
     out
 }
 
-/// Prefix-matches a candidate's display label against `prefix`, case-sensitive.
+/// Prefix-matches a candidate's decoded text against `prefix`, case-sensitive.
+///
+/// For numeric candidates the decoded text is the authored spelling (e.g.
+/// `003.5`), while the canonical label/insert text is normalized (`3.5`).
+/// Prefix filtering must use the decoded text so an author's typed prefix
+/// matches their authored spelling.
 pub fn matches_prefix(item: &SuggestionItem, prefix: &str) -> bool {
-    item.label.starts_with(prefix)
+    item.decoded.starts_with(prefix)
 }
 
 #[cfg(test)]
@@ -377,6 +372,49 @@ mod tests {
     }
 
     #[test]
+    fn sibling_lint_does_not_hide_identical_valid_candidate() {
+        let s = schema(
+            "$schema:\n  bad: number(max(0); suggest(1))\n  good: number(max(1); suggest(1))\n",
+        );
+
+        assert!(suggestions_for_path(&s, &["bad"]).unwrap().items.is_empty());
+        assert_eq!(suggestions_for_path(&s, &["good"]).unwrap().items[0].label, "1");
+    }
+
+    #[test]
+    fn nested_lint_does_not_hide_identical_valid_candidate() {
+        let s = schema(
+            "$schema:\n  bad: \"{ value: number(max(0); suggest(1)) }\"\n  good: \"{ value: number(max(1); suggest(1)) }\"\n",
+        );
+
+        assert!(suggestions_for_path(&s, &["bad", "value"]).unwrap().items.is_empty());
+        assert_eq!(
+            suggestions_for_path(&s, &["good", "value"]).unwrap().items[0].label,
+            "1"
+        );
+    }
+
+    #[test]
+    fn root_union_property_lint_does_not_hide_identical_valid_candidate() {
+        let s = schema(
+            "$schema:\n  - bad: number(max(0); suggest(1))\n  - good: number(max(1); suggest(1))\n",
+        );
+
+        assert!(suggestions_for_path(&s, &["bad"]).unwrap().items.is_empty());
+        assert_eq!(suggestions_for_path(&s, &["good"]).unwrap().items[0].label, "1");
+    }
+
+    #[test]
+    fn dotted_property_name_does_not_collide_with_nested_path() {
+        let s = schema(
+            "$schema:\n  a: \"{ b: number(max(0); suggest(1)) }\"\n  a.b: number(max(1); suggest(1))\n",
+        );
+
+        assert!(suggestions_for_path(&s, &["a", "b"]).unwrap().items.is_empty());
+        assert_eq!(suggestions_for_path(&s, &["a.b"]).unwrap().items[0].label, "1");
+    }
+
+    #[test]
     fn no_suggest_returns_none() {
         let s = schema("$schema:\n  title: string\n");
         assert!(suggestions_for_path(&s, &["title"]).is_none());
@@ -415,6 +453,37 @@ mod tests {
     }
 
     #[test]
+    fn root_union_filters_invalid_candidate_from_later_arm() {
+        let s = schema("$schema:\n  - value: string\n  - value: number(suggest(1, many, 2))\n");
+        let q = suggestions_for_path(&s, &["value"]).unwrap();
+        assert_eq!(q.items.len(), 2);
+        assert_eq!(q.items[0].label, "1");
+        assert_eq!(q.items[1].label, "2");
+    }
+
+    #[test]
+    fn root_union_finds_nested_property_in_later_arm() {
+        let s = schema(
+            "$schema:\n  - settings: string\n  - settings: \"{ mode: string(suggest(fast, slow)) }\"\n",
+        );
+        let q = suggestions_for_path(&s, &["settings", "mode"]).unwrap();
+        assert_eq!(q.items.len(), 2);
+        assert_eq!(q.items[0].label, "fast");
+        assert_eq!(q.items[1].label, "slow");
+    }
+
+    #[test]
+    fn root_union_continues_when_earlier_arm_lacks_ancestor() {
+        let s = schema(
+            "$schema:\n  - other: string\n  - settings: \"{ mode: string(suggest(fast, slow)) }\"\n",
+        );
+        let q = suggestions_for_path(&s, &["settings", "mode"]).unwrap();
+        assert_eq!(q.items.len(), 2);
+        assert_eq!(q.items[0].label, "fast");
+        assert_eq!(q.items[1].label, "slow");
+    }
+
+    #[test]
     fn prefix_filter_matches_label() {
         let s = schema("$schema:\n  color: string(suggest(red, green, blue))\n");
         let q = suggestions_for_path(&s, &["color"]).unwrap();
@@ -422,6 +491,33 @@ mod tests {
             q.items.iter().filter(|item| matches_prefix(item, "gr")).collect();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].label, "green");
+    }
+
+    #[test]
+    fn prefix_filter_uses_decoded_not_canonical() {
+        let s = schema("$schema:\n  v: number(suggest(003.5))\n");
+        let q = suggestions_for_path(&s, &["v"]).unwrap();
+        assert_eq!(q.items.len(), 1);
+        assert_eq!(q.items[0].decoded, "003.5");
+        assert_eq!(q.items[0].label, "3.5");
+        assert_eq!(q.items[0].insert_text, "3.5");
+        assert!(matches_prefix(&q.items[0], "00"));
+        assert!(!matches_prefix(&q.items[0], "3"));
+    }
+
+    #[test]
+    fn prefix_filter_trailing_fractional_zero() {
+        let s = schema("$schema:\n  v: number(suggest(3.0, 3.50))\n");
+        let q = suggestions_for_path(&s, &["v"]).unwrap();
+        assert_eq!(q.items.len(), 2);
+        assert_eq!(q.items[0].decoded, "3.0");
+        assert_eq!(q.items[0].label, "3");
+        assert_eq!(q.items[1].decoded, "3.50");
+        assert_eq!(q.items[1].label, "3.5");
+        assert!(matches_prefix(&q.items[0], "3."));
+        assert!(matches_prefix(&q.items[1], "3."));
+        assert!(!matches_prefix(&q.items[0], "3.5"));
+        assert!(matches_prefix(&q.items[1], "3.5"));
     }
 
     #[test]

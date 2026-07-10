@@ -85,28 +85,68 @@ impl Projector<'_> {
     }
 
     fn atom(&mut self, atom: &mut PropertyAtom) -> Result<(), SchemaError> {
+        if atom_has_suggestions(atom)
+            && let Some((scalar_index, scalar)) = self.scalars[self.next_scalar..]
+                .iter()
+                .enumerate()
+                .find(|(_, scalar)| scalar_matches_atom(scalar, atom))
+                .map(|(relative, scalar)| (self.next_scalar + relative, scalar))
+        {
+            self.next_scalar = scalar_index + 1;
+            return project_atom_suggestions(atom, scalar, self.source_offset);
+        }
+
         if let TypeExpr::InlineObject(shape) = &mut atom.ty {
             self.shape(shape)?;
         }
-        let Some(candidates) = atom.constraints.iter_mut().find_map(|constraint| {
-            if let Constraint::Suggest(candidates) = constraint {
-                Some(candidates)
-            } else {
-                None
-            }
-        }) else {
-            return Ok(());
-        };
-
-        let Some((scalar_index, scalar)) = self.scalars[self.next_scalar..]
-            .iter()
-            .enumerate()
-            .find(|(_, scalar)| scalar_matches_candidates(scalar, candidates))
-            .map(|(relative, scalar)| (self.next_scalar + relative, scalar))
-        else {
+        if atom.constraints.iter().any(|constraint| matches!(constraint, Constraint::Suggest(_))) {
             return Err(projection_error());
-        };
-        self.next_scalar = scalar_index + 1;
+        }
+        Ok(())
+    }
+}
+
+fn atom_has_suggestions(atom: &PropertyAtom) -> bool {
+    atom.constraints.iter().any(|constraint| matches!(constraint, Constraint::Suggest(_)))
+        || match &atom.ty {
+            TypeExpr::InlineObject(shape) => shape.properties.values().any(property_has_suggestions)
+                || shape.pattern_keys.iter().any(|pattern| property_has_suggestions(&pattern.def)),
+            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } => false,
+        }
+}
+
+fn property_has_suggestions(def: &PropertyDef) -> bool {
+    match def {
+        PropertyDef::Single(atom) => atom_has_suggestions(atom),
+        PropertyDef::Union(atoms) => atoms.iter().any(atom_has_suggestions),
+    }
+}
+
+fn scalar_matches_atom(scalar: &DecodedScalar, expected: &PropertyAtom) -> bool {
+    super::grammar::parse_type_expr("<source>", &scalar.decoded)
+        .is_ok_and(|actual| actual == *expected)
+}
+
+fn project_atom_suggestions(
+    atom: &mut PropertyAtom,
+    scalar: &DecodedScalar,
+    source_offset: usize,
+) -> Result<(), SchemaError> {
+    if let TypeExpr::InlineObject(shape) = &mut atom.ty {
+        for def in shape.properties.values_mut() {
+            project_property_suggestions(def, scalar, source_offset)?;
+        }
+        for pattern in &mut shape.pattern_keys {
+            project_property_suggestions(&mut pattern.def, scalar, source_offset)?;
+        }
+    }
+    if let Some(candidates) = atom.constraints.iter_mut().find_map(|constraint| {
+        if let Constraint::Suggest(candidates) = constraint {
+            Some(candidates)
+        } else {
+            None
+        }
+    }) {
         for candidate in candidates {
             let start = *scalar
                 .decoded_to_raw
@@ -116,30 +156,26 @@ impl Projector<'_> {
                 .decoded_to_raw
                 .get(candidate.span.end)
                 .ok_or_else(projection_error)?;
-            candidate.span = self.source_offset + start..self.source_offset + end;
+            candidate.span = source_offset + start..source_offset + end;
         }
-        Ok(())
     }
+    Ok(())
 }
 
-fn scalar_matches_candidates(
+fn project_property_suggestions(
+    def: &mut PropertyDef,
     scalar: &DecodedScalar,
-    expected: &[super::SuggestionCandidate],
-) -> bool {
-    let Ok(atom) = super::grammar::parse_type_expr("<source>", &scalar.decoded) else {
-        return false;
-    };
-    atom.constraints.iter().any(|constraint| {
-        let Constraint::Suggest(actual) = constraint else {
-            return false;
-        };
-        actual.len() == expected.len()
-            && actual.iter().zip(expected).all(|(actual, expected)| {
-                actual.decoded == expected.decoded
-                    && actual.interpreted == expected.interpreted
-                    && actual.canonical_decimal == expected.canonical_decimal
-            })
-    })
+    source_offset: usize,
+) -> Result<(), SchemaError> {
+    match def {
+        PropertyDef::Single(atom) => project_atom_suggestions(atom, scalar, source_offset),
+        PropertyDef::Union(atoms) => {
+            for atom in atoms {
+                project_atom_suggestions(atom, scalar, source_offset)?;
+            }
+            Ok(())
+        }
+    }
 }
 
 fn projection_error() -> SchemaError {
@@ -388,5 +424,34 @@ mod tests {
         let yaml = "café: string\r\nvalue: string(suggest(alpha, beta))\r\n";
         let span = candidate_span(yaml, 100);
         assert_eq!(&yaml[span.start - 100..span.end - 100], "beta");
+    }
+
+    #[test]
+    fn projects_nested_inline_object_candidates_through_containing_scalar() {
+        let yaml = "value: \"{ mode: string(min(5); suggest(no, valid)) }\"\n";
+        let value: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let schema = parse_yaml_schema_with_source(&value, yaml, 0).unwrap();
+        let SimplifiedSchema::Single(shape) = schema else {
+            panic!("expected single shape");
+        };
+        let PropertyDef::Single(value) = &shape.properties["value"] else {
+            panic!("expected single value atom");
+        };
+        let TypeExpr::InlineObject(nested) = &value.ty else {
+            panic!("expected inline object");
+        };
+        let PropertyDef::Single(mode) = &nested.properties["mode"] else {
+            panic!("expected single mode atom");
+        };
+        let Constraint::Suggest(candidates) = mode
+            .constraints
+            .iter()
+            .find(|constraint| matches!(constraint, Constraint::Suggest(_)))
+            .unwrap()
+        else {
+            unreachable!()
+        };
+        let expected = yaml.find("no").unwrap();
+        assert_eq!(candidates[0].span, expected..expected + 2);
     }
 }
