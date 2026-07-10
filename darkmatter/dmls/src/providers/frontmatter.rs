@@ -12,7 +12,6 @@
 
 use std::path::{Path, PathBuf};
 
-use darkmatter::markdown::compose::context::context_variable_descriptors;
 use darkmatter::markdown::schemas::{
     Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
     darkmatter_base_schema,
@@ -26,7 +25,7 @@ use lsp_types::{
 
 use super::DocumentContext;
 use crate::graph::normalize_join;
-use crate::overlay::{FmEntry, FmValueKind, FrontmatterAst};
+use crate::overlay::{FmEntry, FmValueKind, FrontmatterAst, expressions};
 use crate::workspace::file_path_to_uri;
 
 /// Frontmatter/schema diagnostics (delegated to the diagnostics module).
@@ -282,22 +281,25 @@ fn schema_hover(ctx: &DocumentContext, entry: &FmEntry) -> Option<Hover> {
 
 /// Hover content for a `ctx.*` generated key (read-only, Darkmatter-owned).
 fn ctx_hover(ctx: &DocumentContext, entry: &FmEntry) -> Option<Hover> {
-    let mut value = if entry.dotted == "ctx" {
-        "**`ctx`** — Darkmatter-generated context (read-only)".to_string()
-    } else {
-        let descriptor = context_variable_descriptors()
-            .iter()
-            .find(|descriptor| descriptor.name == entry.key);
-        match descriptor {
-            Some(descriptor) => format!(
-                "**`ctx.{}`** ({}) — read-only, Darkmatter-owned\n\n{}",
-                descriptor.name, descriptor.display_type, descriptor.description
-            ),
-            None => format!("**`ctx.{}`** — Darkmatter-generated (read-only)", entry.key),
-        }
-    };
+    let mut value = ctx_hover_markdown(&entry.dotted, &entry.key);
     value.push('\n');
     markup_hover(ctx, entry.key_span.clone(), value)
+}
+
+/// The Markdown body of a frontmatter `ctx.*` hover.
+///
+/// The catalog-backed block comes from the shared Phase-1 formatter
+/// ([`expressions::format_ctx_hover_block`]) so it is byte-identical to the
+/// interpolation hover's block for the same variable; the compose-time note is
+/// interpolation-specific and never appears here.
+fn ctx_hover_markdown(dotted: &str, key: &str) -> String {
+    if dotted == "ctx" {
+        return "**`ctx`** — Darkmatter-generated context (read-only)".to_string();
+    }
+    match expressions::ctx_descriptor(key) {
+        Some(descriptor) => expressions::format_ctx_hover_block(descriptor),
+        None => format!("**`ctx.{key}`** — Darkmatter-generated (read-only)"),
+    }
 }
 
 // ── Navigation (definition + document links) ────────────────────────────────
@@ -766,6 +768,20 @@ mod tests {
         assert!(def_at_path(&root, &["settings", "absent"]).is_none());
         // A top-level leaf resolves through an empty ancestor path.
         assert!(def_at_path(&root, &["title"]).is_some());
+    }
+
+    #[test]
+    fn test_ctx_hover_markdown_is_the_shared_formatter_block() {
+        // The catalog-backed block is exactly the shared Phase-1 formatter's
+        // output, so it can never drift from the interpolation hover's block.
+        let descriptor = expressions::ctx_descriptor("packages").unwrap();
+        let markdown = ctx_hover_markdown("ctx.packages", "packages");
+        assert_eq!(markdown, expressions::format_ctx_hover_block(descriptor));
+        // The interpolation-specific compose-time note never appears here.
+        assert!(!markdown.contains("compose time"));
+        // Unknown tails and the `ctx` container keep their generic annotations.
+        assert!(ctx_hover_markdown("ctx.nope", "nope").contains("Darkmatter-generated"));
+        assert!(ctx_hover_markdown("ctx", "ctx").starts_with("**`ctx`**"));
     }
 
     #[test]

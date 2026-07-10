@@ -160,8 +160,8 @@ fn interpolation_completions(
     }
 
     // `ctx.*` variables (offered fully-qualified).
-    for (name, description) in expressions::ctx_names() {
-        let label = format!("ctx.{name}");
+    for descriptor in expressions::context_descriptors() {
+        let label = format!("ctx.{}", descriptor.name);
         if label.starts_with(partial)
             && let Some(item) = text_edit_item(
                 ctx,
@@ -170,7 +170,7 @@ fn interpolation_completions(
                 &label,
                 &label,
                 CompletionItemKind::VARIABLE,
-                Some(description.to_string()),
+                Some(descriptor.description.to_string()),
             )
         {
             items.push(item);
@@ -178,7 +178,8 @@ fn interpolation_completions(
     }
 
     // Expression functions.
-    for (signature, description) in expressions::function_signatures() {
+    for descriptor in expressions::function_descriptors() {
+        let signature = descriptor.signature;
         let name = signature.split('(').next().unwrap_or(signature);
         if name.starts_with(partial)
             && let Some(item) = text_edit_item(
@@ -188,7 +189,7 @@ fn interpolation_completions(
                 signature,
                 name,
                 CompletionItemKind::FUNCTION,
-                Some(description.to_string()),
+                Some(descriptor.description.to_string()),
             )
         {
             items.push(item);
@@ -242,30 +243,67 @@ fn directive_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     Some(markup_hover(ctx, directive.span.clone(), lines.join("\n")))
 }
 
-/// Hover on a `{{ … }}` expression: its parsed form and, when the leading
-/// identifier is a frontmatter key, its static value.
+/// Hover on a `{{ … }}` expression: its parsed form plus, in precedence order,
+/// the catalog block for the function call under the cursor (D5), the shared
+/// `ctx.*` catalog block with the compose-time note (D2), a frontmatter static
+/// value, or a bare function-name description.
 fn interpolation_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     let body_base = body_base(ctx.text);
     let interpolation = expressions::interpolation_at(ctx.text, body_base, offset)?;
-    let mut value = match expressions::parse(&interpolation.text) {
+    let expr_offset = offset.saturating_sub(interpolation.inner.start);
+    let value = interpolation_hover_markdown(&interpolation.text, expr_offset, |name| {
+        frontmatter_scalar(ctx, name)
+    });
+    Some(markup_hover(ctx, interpolation.outer.clone(), value))
+}
+
+/// The Markdown body of an interpolation hover. Pure (no [`DocumentContext`])
+/// so the D2/D5 classification is unit-testable; `expr_offset` is the cursor's
+/// byte offset into `expression`.
+///
+/// The D2 classification rule: only an explicitly `ctx.`-qualified root
+/// receives context-variable metadata — a bare identifier is a frontmatter
+/// variable even when its name matches a known `ctx.*` tail, and an unknown
+/// `ctx.<name>` keeps the generic hover without borrowing a similarly named
+/// bare key's value. Nothing here evaluates the expression or reads `ctx.*`.
+fn interpolation_hover_markdown(
+    expression: &str,
+    expr_offset: usize,
+    frontmatter_scalar: impl Fn(&str) -> Option<String>,
+) -> String {
+    let parsed = expressions::parse(expression);
+    let mut value = match &parsed {
         Ok(expr) => format!("**Expression**\n\n`{}`", expr.erase()),
-        Err(_) => format!("**Expression** (unparsed)\n\n`{}`", interpolation.text),
+        Err(_) => format!("**Expression** (unparsed)\n\n`{expression}`"),
+    };
+    let Ok(expr) = parsed else {
+        return value;
     };
 
-    if let Ok(expr) = expressions::parse(&interpolation.text)
-        && let Some(name) = expressions::root_identifier(&expr)
+    // D5: the deepest known function call under the cursor wins.
+    if let Some(name) = expressions::function_call_at(&expr, expr_offset)
+        && let Some(descriptor) = expressions::function_descriptor(name)
     {
-        if let Some(scalar) = frontmatter_scalar(ctx, &name) {
-            value.push_str(&format!("\n\nStatic value: `{scalar}` (from frontmatter `{name}`)"));
-        } else if expressions::is_ctx_name(name.strip_prefix("ctx.").unwrap_or(&name)) {
-            // `ctx.*` is captured at compose time — never read here.
-            value.push_str("\n\nResolved from `ctx.*` at compose time (not evaluated here).");
-        } else if let Some(description) = expressions::function_description(&name) {
-            value.push_str(&format!("\n\nFunction: {description}"));
-        }
+        value.push_str(&format!("\n\n{}", expressions::format_function_block(descriptor)));
+        return value;
     }
 
-    Some(markup_hover(ctx, interpolation.outer.clone(), value))
+    let Some(name) = expressions::root_identifier(&expr) else {
+        return value;
+    };
+    if let Some(tail) = name.strip_prefix("ctx.") {
+        if let Some(descriptor) = expressions::ctx_descriptor(tail) {
+            value.push_str(&format!(
+                "\n\n{}\n\nResolved from `ctx.*` at compose time (not evaluated here).",
+                expressions::format_ctx_hover_block(descriptor)
+            ));
+        }
+    } else if let Some(scalar) = frontmatter_scalar(&name) {
+        value.push_str(&format!("\n\nStatic value: `{scalar}` (from frontmatter `{name}`)"));
+    } else if let Some(descriptor) = expressions::function_descriptor(&name) {
+        value.push_str(&format!("\n\nFunction: {}", descriptor.description));
+    }
+    value
 }
 
 /// Hover on a frontmatter `$(...)` value: the parsed command and policy verdict.
@@ -1041,6 +1079,85 @@ mod tests {
     fn shell_block_commands_ignores_page_blocks() {
         let text = "::block when=\"true\"\nrm -rf /\n::end-block\n";
         assert!(shell_block_commands(text).is_empty());
+    }
+
+    /// A frontmatter lookup that knows no keys.
+    fn no_frontmatter(_: &str) -> Option<String> {
+        None
+    }
+
+    #[test]
+    fn ctx_hover_shares_catalog_block_and_appends_compose_note() {
+        let descriptor = expressions::ctx_descriptor("packages").unwrap();
+        let block = expressions::format_ctx_hover_block(descriptor);
+        let markdown = interpolation_hover_markdown("ctx.packages", 0, no_frontmatter);
+        // The catalog-backed block is the shared formatter's output verbatim —
+        // the same bytes the frontmatter `ctx_hover` renders.
+        assert!(markdown.contains(&block));
+        // The interpolation-specific passive note follows the block, and the
+        // hover carries no captured value — `ctx.*` is never evaluated here.
+        assert!(markdown.ends_with("Resolved from `ctx.*` at compose time (not evaluated here)."));
+        assert!(!markdown.contains("Static value"));
+    }
+
+    #[test]
+    fn bare_identifier_matching_ctx_tail_is_frontmatter_not_context() {
+        // `today` is a known `ctx.*` tail, but a bare `{{ today }}` is a
+        // frontmatter variable (D2 classification rule).
+        let markdown = interpolation_hover_markdown("today", 0, |name| {
+            (name == "today").then(|| "2026-07-09".to_string())
+        });
+        assert!(markdown.contains("Static value: `2026-07-09` (from frontmatter `today`)"));
+        assert!(!markdown.contains("Darkmatter-owned"));
+        assert!(!markdown.contains("compose time"));
+        // Without a matching frontmatter key it still borrows nothing from the
+        // ctx catalog.
+        let markdown = interpolation_hover_markdown("today", 0, no_frontmatter);
+        assert!(!markdown.contains("Darkmatter-owned"));
+        assert!(!markdown.contains("compose time"));
+    }
+
+    #[test]
+    fn unknown_ctx_name_keeps_generic_hover() {
+        // An unknown `ctx.<name>` keeps the generic expression hover and does
+        // not borrow a similarly named bare frontmatter key's value.
+        let markdown = interpolation_hover_markdown("ctx.nope", 0, |name| {
+            (name == "nope").then(|| "shadow".to_string())
+        });
+        assert!(markdown.starts_with("**Expression**"));
+        assert!(!markdown.contains("Darkmatter-owned"));
+        assert!(!markdown.contains("compose time"));
+        assert!(!markdown.contains("Static value"));
+    }
+
+    #[test]
+    fn function_call_hover_renders_catalog_block() {
+        // A formatting function.
+        let as_csv = expressions::function_descriptor("as_csv").unwrap();
+        let markdown = interpolation_hover_markdown("as_csv(items)", 2, no_frontmatter);
+        assert!(markdown.contains(&expressions::format_function_block(as_csv)));
+        // A pre-existing function; its fallible typed signature carries `| error`.
+        let markdown = interpolation_hover_markdown("length(items)", 3, no_frontmatter);
+        let length = expressions::function_descriptor("length").unwrap();
+        assert!(markdown.contains(&length.typed_signature()));
+        assert!(markdown.contains("| error"));
+        // An unknown function keeps the generic parsed-expression hover.
+        let markdown = interpolation_hover_markdown("mystery(items)", 3, no_frontmatter);
+        assert!(markdown.starts_with("**Expression**"));
+        assert!(!markdown.contains("**`mystery"));
+    }
+
+    #[test]
+    fn function_call_hover_resolves_deepest_call_under_cursor() {
+        let source = "as_csv(length(items))";
+        let inner = source.find("length").unwrap() + 1;
+        let markdown = interpolation_hover_markdown(source, inner, no_frontmatter);
+        let length = expressions::function_descriptor("length").unwrap();
+        assert!(markdown.contains(&length.typed_signature()));
+        // On the outer name the outer call answers.
+        let markdown = interpolation_hover_markdown(source, 1, no_frontmatter);
+        let as_csv = expressions::function_descriptor("as_csv").unwrap();
+        assert!(markdown.contains(&as_csv.typed_signature()));
     }
 }
 
