@@ -136,6 +136,99 @@ Every type accepts:
 
 `date`, `datetime`, and `time` accept `default(s)` (ISO string) and `required`. The type itself emits the corresponding `format` with format-assertion enabled.
 
+### Advisory Suggestions (`suggest`)
+
+`suggest(...)` provides representative completion candidates for `string` and `number` properties. Unlike `enum(...)`, suggestions are **advisory** — a document value is valid when it satisfies the underlying type and constraints, whether or not it appears in the suggestion list. DMLS uses valid suggestions for frontmatter value completion.
+
+```yaml
+$schema:
+    color: string(suggest(red, green, "blue gray"))
+    port: number(integer; suggest(80, 443))
+    ratio: number(min(0); max(1); suggest(0.25, 0.5, 1))
+    tags: string(suggest(alpha, beta))[]
+    retries: number(integer; suggest(1, 2, 3))[]
+```
+
+#### Eligibility
+
+`suggest(...)` is available only on exact `string` and `number` types. `number(integer)` remains eligible because `integer` is a constraint on `number`. Array forms (`string[]`, `number[]`) are eligible — their candidates describe individual elements, not whole arrays.
+
+`suggest(...)` is not available on `numberlike`, `date`, `datetime`, `time`, `url`, `email`, `boolean`, `boolish`, `enum`, `any`, `object`, `file`, or raw JSON Schema.
+
+#### Cardinality
+
+A complete property definition may contain at most one `suggest(...)` constraint. A second occurrence is a structural grammar error. This restriction applies across all atoms of a property-level union:
+
+```yaml
+# INVALID: two suggest(...) across union atoms
+$schema:
+    value: [string(suggest(a)), string(suggest(b))]
+```
+
+Each property declaration in a separate root-level schema-union arm is an independent complete property definition and may carry its own suggestion list.
+
+`suggest()` with no candidates is a structural grammar error.
+
+#### Argument Grammar
+
+Candidate arguments reuse the existing SimplifiedSchema argument delimiter, quoting, and escaping grammar — the feature introduces no new string literal syntax. The parser retains the exact source span and decoded text for every candidate.
+
+#### String Interpretation
+
+Every syntactically valid argument to `string(suggest(...))` is interpreted as a string. Bare spellings that resemble numbers, booleans, or null are still strings. Quotes delimit and escape; they do not create a distinct candidate type. So `12` and `"12"` are the same interpreted string candidate.
+
+#### Number Interpretation
+
+Bare and quoted arguments to `number(suggest(...))` are interpreted using the **simple decimal** syntax:
+
+```text
+optional `-` + one or more digits + optional (`.` + one or more digits)
+```
+
+The syntax accepts leading zeros and canonicalizes them. It does not accept exponent notation (`1e3`), a leading plus sign (`+1`), a missing integer portion (`.5`), a missing fractional portion (`5.`), or leading/trailing whitespace.
+
+A simple decimal becomes a JSON number only when its canonical decimal text survives conversion to the supported JSON numeric model and canonical JSON serialization with the same exact value (lossless canonical round-trip equality). For example, `3`, `"3"`, `003`, and `3.0` all have canonical decimal text `3` and interpret to the same numeric candidate `3`. `-0` canonicalizes to `0`.
+
+A simple decimal outside the lossless representation boundary is retained as its exact canonical decimal JSON string — it is invalid metadata that DMLS warns about and omits from completion, but it never blocks schema loading or validation.
+
+An argument whose decoded text does not use simple decimal syntax (e.g. `many`) is also retained as its decoded JSON string for linting and diagnostics — it is not a schema-load error.
+
+#### Uniqueness
+
+Candidates must be unique after target-directed interpretation. A duplicate is a structural grammar error ranged at the later argument, including duplicates created by leading-zero, trailing-fractional-zero, quoted/bare, or negative-zero normalization.
+
+#### Generated Annotation
+
+Darkmatter preserves interpreted suggestions in generated JSON Schema using the custom `x-darkmatter-suggest` annotation. Authors never write this field — they write only `suggest(...)`.
+
+```yaml
+$schema:
+    score: number(min(0); max(100); suggest(-1, 50, 101))
+```
+
+generates:
+
+```json
+{
+  "type": "number",
+  "minimum": 0,
+  "maximum": 100,
+  "x-darkmatter-suggest": [-1, 50, 101]
+}
+```
+
+The annotation preserves interpreted candidate order and scalar values. It is never lowered to the standard JSON Schema `examples` annotation and is distinct from Darkmatter's `example(...)` artifact and `x-darkmatter-example` annotation. Raw JSON Schema may contain a field with the same spelling, but Darkmatter and DMLS do not discover suggestions from raw JSON Schema.
+
+#### Candidate Linting
+
+The Darkmatter library owns candidate checking via `lint_suggestions()` — a structured, typed, span-bearing lint API. Each interpreted candidate is checked against its target schema (the non-null scalar or array-item fragment, with `x-darkmatter-suggest` excluded). Applicable number constraints include `min`, `max`, and `integer`; applicable string constraints include `minLength`, `maxLength`, `not-empty`, and `pattern`. `required`, `default`, `generated`, and `example(...)` do not constrain a candidate.
+
+Invalid candidates produce structured lint problems (not schema-load errors) with decoded text, interpreted value, failure reason, and exact source span. Schema resolution, validator construction, frontmatter validation, and composition all continue uninterrupted. See `SuggestionLintProblem` and `SuggestionLintReason` in the library API.
+
+#### Completion Query
+
+DMLS reads suggestions from the SimplifiedSchema representation via `suggestions_for_path()`. This returns lint-valid candidates in declaration order, prefixed-filtered, with YAML-safe insertion text (double-quoted strings, canonical numbers). Invalid candidates are omitted; valid siblings are retained. See `SuggestionItem` and `SuggestionQuery` in the library API.
+
 ### Boolean Constraints
 
 `boolean` and `boolish` accept `default(b)` and `required`.
@@ -532,12 +625,75 @@ The resolution rules:
    - If the root mapping contains a `$schema` key whose value is **itself a mapping**, treat as SimplifiedSchema.
    - Otherwise (no `$schema` key, or the value is a string URI like `https://json-schema.org/draft/2020-12/schema`) treat as raw JSON Schema.
    - `.json` files are always treated as JSON Schema.
+   - If the file is recognized as a standalone SimplifiedSchema document (see [Standalone Schema Documents](#standalone-schema-documents)), its payload is used directly.
 3. **YAML sequence** at `$schema` — root union; each arm is resolved by the same rules above.
 4. **No `$schema` and no baseline** — validation succeeds vacuously and `pretty` mode emits a `no schema; vacuously valid` note (suppressed by `--quiet`).
 
 Relative paths in `$schema` references resolve from the **document's parent directory**.
 
 Remote (`http://` / `https://`) references are **not supported** in v1 and produce a clear `SchemaError::RemoteUnsupported` directing the user to download the schema locally.
+
+## Standalone Schema Documents
+
+A standalone YAML file can be a SimplifiedSchema authoring document, recognized by **content** — not by filename, glob, or consumer discovery. The library classifier `parse_standalone_schema_document()` recognizes two envelopes:
+
+### Pure Envelope
+
+A YAML mapping whose only top-level key is `$schema`:
+
+```yaml
+$schema:
+    name: string(suggest(Bob, Mary, Sam))
+    age: number(integer; min(0); suggest(21, 30, 40))
+```
+
+The `$schema` value is the SimplifiedSchema payload. A mapping payload is usable both as a whole-file schema and as the namespace for `Name@fileref` named imports. A sequence payload is a root-level schema union for whole-file use only (it supplies no named-import namespace).
+
+### Tagged Envelope
+
+A YAML mapping containing exactly `kind: schema` and a `types` mapping:
+
+```yaml
+kind: schema
+types:
+    name: string(suggest(Bob, Mary, Sam))
+    age: number(integer; min(0); suggest(21, 30, 40))
+```
+
+The `types` mapping is semantically equivalent to a pure envelope's `$schema` mapping for whole-file use and named imports.
+
+### Whole-File References and Named Imports
+
+A Markdown document references a standalone schema file via `$schema`:
+
+```yaml
+---
+$schema: ./schemas/person.yaml
+name: Bob
+age: 30
+---
+```
+
+Referencing either mapping envelope as a whole validates the document against that mapping's complete object shape. The `Name@fileref` named-import syntax extracts a single named type from the file's mapping payload and inlines it:
+
+```yaml
+$schema:
+    display-name: name@./schemas/person.yaml
+    ages: age[]@./schemas/person.yaml
+```
+
+### Malformed Envelopes
+
+Once an envelope is recognized, a missing or malformed payload is a schema-document error (`SchemaError::SchemaDocument`). The library does not silently reinterpret the document as ordinary YAML or raw JSON Schema. For the tagged envelope, `kind: schema` claims the document even when `types` is missing, malformed, or accompanied by unsupported top-level keys.
+
+### Raw JSON Schema
+
+Existing raw JSON Schema reference support remains a distinct validation format. Raw JSON Schema:
+
+- does not provide `suggest(...)`;
+- cannot supply a `Name@fileref` named-import namespace;
+- does not receive SimplifiedSchema authoring diagnostics or completion; and
+- does not enable suggestion discovery from a hand-authored `x-darkmatter-suggest` field.
 
 ## Baseline Schemas
 
@@ -930,7 +1086,12 @@ let detected = api.detect(&refs, DetectOptions { merge: true });
 | `PropertyDef`         | Either `Single(PropertyAtom)` or `Union(Vec<PropertyAtom>)`.                                                        |
 | `PropertyAtom`        | `ty`, `is_array`, `constraints`, `array_constraints`, `description`.                                                |
 | `SimplifiedType`      | Enum of the supported types (`String`, `Date`, `Number`, …, `Any`).                                                 |
-| `Constraint`          | Enum of all constraint variants (`Required`, `Default`, `Min`, `Max`, `Members`, `Match`, …).                       |
+| `Constraint`          | Enum of all constraint variants (`Required`, `Default`, `Min`, `Max`, `Members`, `Match`, `Suggest`, …).           |
+| `SuggestionCandidate` | One interpreted `suggest(...)` argument: decoded text, interpreted value, canonical decimal, byte span.             |
+| `SuggestionLintProblem` | One invalid suggestion candidate with decoded text, interpreted value, reason (`SuggestionLintReason`), and exact authored byte span. |
+| `SuggestionItem`      | One lint-valid completion candidate: decoded text, interpreted value, YAML-safe insertion text, display label.     |
+| `SuggestionQuery`     | Result of `suggestions_for_path()`: `is_array` flag + lint-valid `SuggestionItem`s in declaration order.            |
+| `StandaloneSchemaDocument` | Parsed standalone schema file: envelope type, SimplifiedSchema payload, suggestion lint problems.            |
 | `SchemaError`         | All failure modes (grammar, resolution, conversion, baseline, validator build, I/O).                                |
 
 ### Free Functions
@@ -940,6 +1101,9 @@ let detected = api.detect(&refs, DetectOptions { merge: true });
 - `detect_schema(&[&Markdown], DetectOptions)` — multi-file detection entry point.
 - `detect_from_document(&Markdown)` — single-document detection (returns a `SchemaShape`).
 - `schema_to_yaml(&SimplifiedSchema)` — serialise a SimplifiedSchema back to YAML (used by `md schema detect --format yaml`).
+- `lint_suggestions(&SimplifiedSchema)` — check every `suggest(...)` candidate against its target schema; returns `Vec<SuggestionLintProblem>` (never a `SchemaError` for an invalid candidate).
+- `suggestions_for_path(&SimplifiedSchema, &[&str])` — query lint-valid completion candidates for a property path; returns `Option<SuggestionQuery>` with YAML-safe insertion text.
+- `parse_standalone_schema_document(&str, path)` — classify and parse a standalone YAML file as a SimplifiedSchema authoring document; returns `Option<StandaloneSchemaDocument>` (`None` for ordinary YAML / raw JSON Schema).
 
 ### Schema Descriptor Catalog
 
