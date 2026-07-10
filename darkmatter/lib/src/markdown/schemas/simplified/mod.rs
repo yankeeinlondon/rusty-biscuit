@@ -12,6 +12,7 @@
 pub mod convert;
 pub mod grammar;
 mod lint;
+pub mod query;
 mod serialize;
 mod source;
 mod standalone;
@@ -19,6 +20,7 @@ pub mod types;
 
 pub use convert::{DRAFT_2020_12, to_json_schema};
 pub use lint::{SuggestionLintProblem, SuggestionLintReason, lint_suggestions};
+pub use query::{SuggestionItem, SuggestionQuery, suggestions_for_path};
 pub use serialize::serialize_property_atom;
 pub use source::{parse_yaml_schema_with_source, project_suggestion_spans};
 pub use standalone::{
