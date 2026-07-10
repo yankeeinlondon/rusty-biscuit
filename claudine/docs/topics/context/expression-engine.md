@@ -23,9 +23,9 @@ Every expression descriptor — functions *and* language semantics — implement
 the shared `Described` trait from `darkmatter::catalog`. This powers exact lookup,
 fuzzy suggestion, and plain-text error enrichment inside the evaluator:
 
-- `describe(EXPRESSION_FUNCTION_DESCRIPTORS, "upper(x)")` returns the matching
+- `describe(expression_function_descriptors(), "upper(x)")` returns the matching
   function descriptor.
-- `suggest(EXPRESSION_FUNCTION_DESCRIPTORS, "uper", 1)` returns `upper(x)`.
+- `suggest(expression_function_descriptors(), "uper", 1)` returns `upper(x)`.
 - `describe_for_error(descriptor)` emits a plain-text line with signature,
   description, and verified example.
 
@@ -94,18 +94,17 @@ The function forms `and(...)` / `or(...)` are valid in *both* modes.
 ## Functions
 
 Functions are the extensible part of the language. They are registered in
-**authoritative typed tables** in
-`darkmatter/lib/src/markdown/compose/expression/functions.rs`:
+domain-owned typed registration slices under
+`darkmatter/lib/src/markdown/compose/expression/functions/`:
 
-- `PURE_FUNCTIONS` — pure functions resolved by `dispatch()` (type predicates,
+- `FunctionHandler::Pure` — functions resolved by `dispatch()` (type predicates,
   math, collections, string predicates/mutations, date formatting/validators,
   type conversion).
-- `FS_FUNCTIONS` — context-aware functions resolved by `dispatch_fs()` that need
+- `FunctionHandler::Context` — functions resolved by `dispatch_fs()` that need
   a `ResolutionContext` (`absolute`, `relative`, `file_exists`, `frontmatter`,
   `markdown_body_empty`, `markdown_title`, `validate_schema`).
 - **Lazy logical operators** — `and(...)` / `or(...)`, which short-circuit and
-  therefore cannot go through the eager dispatchers; named in
-  `LAZY_OPERATOR_NAMES`.
+  therefore use `FunctionHandler::Lazy` instead of the eager dispatchers.
 
 Each registration carries the full set of **signatures** it answers to,
 including overloads and optional/variadic arity:
@@ -123,8 +122,7 @@ These tables are the single source of truth for *what the evaluator recognizes*.
 kinds of content:
 
 1. **The function catalog** — rendered directly from
-   `expression_function_descriptors()` (`EXPRESSION_FUNCTION_DESCRIPTORS` in
-   `expression/catalog.rs`). The CLI groups descriptors by `category` (each
+   `expression_function_descriptors()`. The CLI groups descriptors by `category` (each
    category emitted once, even though the catalog is physically laid out by
    implementation grouping) and orders within a category by the descriptor's
    `order`. **This part cannot drift from the catalog** — it *is* the catalog.
@@ -141,29 +139,26 @@ kinds of content:
 ## Narrative documentation parity
 
 The function table in `darkmatter/docs/topics/darkmatter-expressions.md` is
-regenerated from `EXPRESSION_FUNCTION_DESCRIPTORS` by
+regenerated from `expression_function_descriptors()` by
 `just darkmatter regen-expr-doc`. The generated region is guarded by
 `narrative_doc_function_table_matches_catalog`, which fails the build if the
 committed doc diverges from the catalog output.
 
 ## How to add an expression function
 
-1. **Implement and register it.** Add a handler and a `PureFunction` (or
-   `FsFunction`) entry in `functions.rs`, listing every signature/overload.
-2. **Describe it.** Add an `ExpressionFunctionDescriptor` to
-   `EXPRESSION_FUNCTION_DESCRIPTORS` in `catalog.rs` with a verified `example`.
-3. The `--expressions` function table needs **no change** — it reads the catalog.
+1. **Implement and register it.** Add the handler and one `FunctionRegistration`
+   to the owning domain module, listing every descriptor/overload there.
+2. The `--expressions` function table needs **no change** — it reads
+   `expression_function_descriptors()`.
 
 ## Drift control for the function catalog
 
-The catalog and the runtime registry are two parallel lists, kept in exact,
-overload-aware lockstep by tests in `expression/catalog.rs`:
+The catalog and runtime registry are one domain-owned model, guarded by registry
+invariants and behavior tests:
 
-- **`descriptor_signature_set_equals_dispatchable_signature_set`** — bidirectional
-  set equality between `EXPRESSION_FUNCTION_DESCRIPTORS` and
-  `dispatchable_signatures()` (the runtime surface enumerated from
-  `PURE_FUNCTIONS` + `FS_FUNCTIONS` + lazy operators). Comparing *signatures*
-  (with arity), not just names, means a stray or missing overload fails too.
+- Registration invariants reject duplicate canonical names, aliases, and
+  signatures, empty descriptor sets, and descriptors whose leading name differs
+  from the registration canonical name.
 - **`every_descriptor_overload_is_dispatchable_at_its_declared_arity`** — an
   end-to-end proof: each descriptor is parsed and run through the real
   `evaluate` pipeline at its declared arity. A descriptor whose handler was
