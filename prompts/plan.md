@@ -1,7 +1,7 @@
 ---
 $schema:
-    spec: file(required;match(**/*spec*.md);eager)
-    design: file(match(**/*design*.md))
+    spec: file(required;match(**/*spec*.md);eager) -> path to specification file
+    design: file(match(**/*design*.md)) -> path to the design file (if exists)
     plan: "file(required) -> the plan file this prompt will create"
     area: "string() -> the package area (or package in some cases) where the work is being done"
     

@@ -131,9 +131,34 @@ details do not belong here.
   prints `[<branch> <hash>] <subject>` on success — and verify with that
   hash. Reading git's stdout avoids the race entirely because it does
   not depend on the index/refs state at verification time.
+- If a wrapper (e.g. a zsh function that pipes `git commit` through
+  `tee`/`cat`/`read`) hides that stdout line, recover the hash via
+  `git reflog -1` (or `git log --format='%H %s' -1 HEAD` immediately
+  after the commit, before sibling commits land) and verify with
+  `git show --stat <hash>`. Verified 2026-07-10 in the
+  claudine + darkmatter 4-commit batch: one subagent's zsh wrapper
+  swallowed `git commit`'s stdout; the subagent recovered the hash from
+  reflog and verified paths with `git show --stat`, no content drift.
+  This is a fallback for wrappers, not a recommendation to wrap —
+  prefer the un-wrapped `git commit` form so stdout reaches the
+  orchestrator directly.
 - This is a sibling of the no-`--amend`-after-success rule: by the time
   a post-success action runs, HEAD may no longer be the subagent's
   commit. Treat the post-success window as a high-contention region;
   minimize the number of git commands that touch HEAD, refs, or the
   index between `git commit` returning 0 and the subagent's "I'm done"
   report.
+
+## Verifying a Whitespace-Only Diff
+
+- For a `style` commit (or any group expected to be whitespace-only),
+  sanity-check the staged diff before committing with
+  `git diff --staged --stat --ignore-all-space --ignore-blank-lines`
+  (or `--numstat --ignore-all-space --ignore-blank-lines` for the
+  numeric form). Zero output from the `--ignore-all-space
+  --ignore-blank-lines` form means the diff contains no non-whitespace
+  changes; a non-zero result means semantic content is in the diff and
+  the group is mis-classified. Verified 2026-07-10 in the
+  claudine + darkmatter 4-commit batch: the `style(darkmatter)`
+  subagent ran this on `functions/collections.rs` (zero output)
+  before committing the 9-file whitespace-only group.
