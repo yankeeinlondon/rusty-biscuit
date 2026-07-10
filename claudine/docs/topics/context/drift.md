@@ -14,11 +14,11 @@ exports, and the CLI renders that catalog directly:
 | Subsystem | Catalog (Darkmatter) | Accessor |
 |-----------|----------------------|----------|
 | Context variables | `CONTEXT_VARIABLE_DESCRIPTORS` | `context_variable_descriptors()` |
-| Expression functions | `EXPRESSION_FUNCTION_DESCRIPTORS` | `expression_function_descriptors()` |
+| Expression functions | domain-owned `FunctionRegistration` slices | `expression_function_descriptors()` |
 | Expression semantics | `OPERATOR_DESCRIPTORS`, `TRUTHINESS_DESCRIPTORS`, `MODE_DESCRIPTORS`, `NULL_PROPAGATION_DESCRIPTORS`, `UNARY_OPERATOR_DESCRIPTORS`, `COMPARISON_OPERATOR_DESCRIPTORS`, `ARITHMETIC_OPERATOR_DESCRIPTORS`, `VARIABLE_ACCESS_DESCRIPTORS` | accessors in `expression::semantics` |
 | Side-effect capabilities | `EFFECT_DESCRIPTORS` | `effect_descriptors()` |
 
-Each catalog is a pure `const` — reading it does no I/O and captures no context.
+Each catalog is static data — reading it does no I/O and captures no context.
 The CLI imports the accessor, groups the descriptors, and folds them into
 biscuit-terminal tables. It keeps **no parallel list of its own**.
 
@@ -39,7 +39,7 @@ descriptor in Darkmatter and it appears in the CLI on the next build, grouped
 and styled, with zero CLI edits. This gap cannot open as long as the CLI keeps
 reading the accessor rather than hard-coding rows.
 
-### Layer 2 — catalog ↔ runtime: closed by parity tests
+### Layer 2 — catalog ↔ runtime: closed structurally
 
 Each subsystem proves, in-crate, that its catalog matches the real runtime
 surface — in both directions:
@@ -48,14 +48,13 @@ surface — in both directions:
 |-----------|----------------|--------------|
 | Context | `descriptor_name_set_equals_captured_runtime_key_set` | descriptor **names** == captured `ctx.*` keys |
 | Context examples | `capture_value_shape_matches_display_type`, `context_example_results_are_type_consistent` | declared `display_type` matches captured JSON shape |
-| Expression functions | `descriptor_signature_set_equals_dispatchable_signature_set` + `every_descriptor_overload_is_dispatchable_at_its_declared_arity` | descriptor **signatures** == dispatchable signatures (overload-aware), and each is callable at its arity |
+| Expression functions | registration invariants + `every_descriptor_overload_is_dispatchable_at_its_declared_arity` | descriptors and handlers share one registration (overload-aware), and each is callable at its arity |
 | Expression semantics | `operator_precedence_matches_parser` + per-catalog `*_examples_evaluate_correctly` | precedence table matches parser; every example evaluates to declared result |
 | Side effects | `verb_signature_set_equals_descriptor_signature_set` + `every_verb_maps_to_a_reachable_method` | each descriptor **signature** is backed by a real, reachable `EffectEngine` method |
 
-Add an item to one side only — the catalog or the runtime — and the build fails.
-For the expression engine the runtime side is itself a single source of truth
-(`PURE_FUNCTIONS` / `FS_FUNCTIONS` carry their own `signatures`), so the
-dispatcher and the parity check read the same data.
+Expression descriptors and runtime handlers are fields of the same domain-owned
+registration. Dispatch and catalog projection therefore read the same data, and
+invariant tests reject name, alias, and signature collisions.
 
 A separate, related guard protects the **documentation-only** contract: the
 `effects-instrumentation` counters and the CLI test
@@ -99,7 +98,7 @@ The remaining content drift surfaces are minor:
 
 - **The darkmatter narrative doc.** `darkmatter/docs/topics/darkmatter-expressions.md`
   contains narrative prose, but its function table is generated from
-  `EXPRESSION_FUNCTION_DESCRIPTORS` by `just darkmatter regen-expr-doc` and is
+  `expression_function_descriptors()` by `just darkmatter regen-expr-doc` and is
   guarded by the parity test `narrative_doc_function_table_matches_catalog`.
 
 ## Next steps

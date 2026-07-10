@@ -40,7 +40,7 @@ catalog is a plain `const` slice of structs — constructing or reading it does
 Darkmatter (library)                         Claudine CLI (claudine context)
 ────────────────────                         ───────────────────────────────
 context::CONTEXT_VARIABLE_DESCRIPTORS  ─────▶ default report  (Property/Type/Description)
-expression::EXPRESSION_FUNCTION_DESCRIPTORS ─▶ --expressions   (Function/Description)
+expression_function_descriptors() ──────────▶ --expressions   (Function/Description)
 effects::EFFECT_DESCRIPTORS            ─────▶ --side-effects   (Capability/Description/Safety)
 ```
 
