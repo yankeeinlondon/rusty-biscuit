@@ -245,12 +245,34 @@ table:
 ";
     let md = with_style(style, TABLE_BODY);
     let page = frontmatter_page(&md);
-    assert_tree_parity(&md, &page, |root| {
+    let sut = sut_doc(&md, &page);
+    let oracle = oracle_doc(&md, |root| {
         block(root).attrs.set_layout(&Layout {
             width: Width::FitContent,
             ..Layout::default()
         });
     });
+
+    assert_eq!(
+        render_terminal(&sut),
+        render_terminal(&oracle),
+        "terminal output must match the hand-built renderable tree"
+    );
+    let sut_html = render_html(&sut);
+    assert_eq!(
+        sut_html,
+        render_html(&oracle),
+        "browser HTML must match the hand-built renderable tree"
+    );
+
+    // The default `Width::Auto` hugs on the terminal exactly like
+    // `FitContent`, so the no-silent-no-op check must look at the browser
+    // surface, where `fit-content` is emitted as distinct CSS.
+    assert_ne!(
+        sut_html,
+        render_html(&base_doc(&md)),
+        "style: frontmatter must visibly change browser output"
+    );
 }
 
 #[test]
