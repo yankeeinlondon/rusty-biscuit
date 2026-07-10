@@ -79,14 +79,25 @@ pub fn root_identifier(expr: &SpannedExpr) -> Option<String> {
     }
 }
 
-/// The name of the deepest [`SpannedExprKind::FunctionCall`] whose span
-/// contains `offset` (a byte offset into the expression text), if any.
+/// The name of the deepest [`SpannedExprKind::FunctionCall`] whose
+/// function-name identifier contains `offset` (a byte offset into `source`),
+/// if any.
 ///
-/// The D5 cursor-to-function resolver: hovering anywhere inside a call — the
-/// name, parentheses, or an argument — resolves to the innermost enclosing
-/// call, so nested calls like `as_csv(length(x))` answer for the inner call
-/// when the cursor sits inside it.
-pub fn function_call_at(expr: &SpannedExpr, offset: usize) -> Option<&str> {
+/// Only a cursor on the function-name identifier itself resolves; an offset on
+/// an argument, parenthesis, or comma does not, so the caller's ctx/frontmatter
+/// hover can take over for the inner expression. Nested calls like
+/// `as_csv(length(x))` answer for the inner call only when the cursor sits on
+/// the inner name.
+///
+/// `source` is the expression text the spans index into; the
+/// `source.get(name_span) == name` check filters out synthetic `and`/`or`
+/// calls lowered from `&&`/`||` operators, whose call span begins at the left
+/// operand rather than at a name token.
+pub fn function_call_at<'a>(
+    expr: &'a SpannedExpr,
+    source: &str,
+    offset: usize,
+) -> Option<&'a str> {
     if offset < expr.span.start || offset > expr.span.end {
         return None;
     }
@@ -108,14 +119,63 @@ pub fn function_call_at(expr: &SpannedExpr, offset: usize) -> Option<&str> {
         _ => Vec::new(),
     };
     for child in children {
-        if let Some(name) = function_call_at(child, offset) {
+        if let Some(name) = function_call_at(child, source, offset) {
             return Some(name);
         }
     }
     match &expr.kind {
-        SpannedExprKind::FunctionCall { name, .. } => Some(name),
+        SpannedExprKind::FunctionCall { name, .. } => {
+            let name_span = expr.span.start..expr.span.start + name.len();
+            // Exclusive end so a cursor on `(` does not match; the source-text
+            // check rejects synthetic `and`/`or` calls whose span starts at the
+            // left operand, not at a name token.
+            if offset >= name_span.start
+                && offset < name_span.end
+                && source.get(name_span) == Some(name.as_str())
+            {
+                Some(name)
+            } else {
+                None
+            }
+        }
         _ => None,
     }
+}
+
+/// The deepest sub-expression whose span contains `offset` (a byte offset into
+/// the expression text), if any.
+///
+/// Used by the interpolation hover to find which sub-expression (e.g. a
+/// `ctx.packages` argument inside `as_csv(ctx.packages)`) is under the cursor,
+/// so the ctx/frontmatter hover path can serve it after
+/// [`function_call_at`] declines on a non-name offset.
+pub fn expression_at(expr: &SpannedExpr, offset: usize) -> Option<&SpannedExpr> {
+    if offset < expr.span.start || offset > expr.span.end {
+        return None;
+    }
+    let children: Vec<&SpannedExpr> = match &expr.kind {
+        SpannedExprKind::UnaryNot(inner)
+        | SpannedExprKind::UnaryMinus(inner)
+        | SpannedExprKind::Paren(inner) => vec![inner],
+        SpannedExprKind::Binary { left, right, .. }
+        | SpannedExprKind::Comparison { left, right, .. } => vec![left, right],
+        SpannedExprKind::Index { base, index } => vec![base, index],
+        SpannedExprKind::MemberAccess { base, .. } => vec![base],
+        SpannedExprKind::Fallback { primary, fallback } => vec![primary, fallback],
+        SpannedExprKind::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => vec![condition, then_branch, else_branch],
+        SpannedExprKind::FunctionCall { args, .. } => args.iter().collect(),
+        _ => Vec::new(),
+    };
+    for child in children {
+        if let Some(found) = expression_at(child, offset) {
+            return Some(found);
+        }
+    }
+    Some(expr)
 }
 
 /// The completion partial being typed inside an open `{{` at `offset`, and the
@@ -315,15 +375,33 @@ mod tests {
         let source = "as_csv(length(items))";
         let expr = parse(source).unwrap();
         let inner = source.find("length").unwrap();
-        // Inside the nested call (name or argument) the inner call wins.
-        assert_eq!(function_call_at(&expr, inner + 1), Some("length"));
-        assert_eq!(function_call_at(&expr, source.find("items").unwrap()), Some("length"));
-        // Inside the outer name, only the outer call contains the offset.
-        assert_eq!(function_call_at(&expr, 1), Some("as_csv"));
+        // Cursor on the inner call's name resolves to that call.
+        assert_eq!(function_call_at(&expr, source, inner + 1), Some("length"));
+        // Cursor on the outer name resolves to the outer call.
+        assert_eq!(function_call_at(&expr, source, 1), Some("as_csv"));
+        // Cursor on an argument, parenthesis, or comma claims nothing — the
+        // caller's ctx/frontmatter hover path takes over.
+        assert_eq!(function_call_at(&expr, source, source.find("items").unwrap()), None);
+        assert_eq!(function_call_at(&expr, source, source.find("(").unwrap()), None);
+        assert_eq!(function_call_at(&expr, source, source.rfind(")").unwrap()), None);
         // Outside the expression entirely, and on a non-call expression: none.
-        assert_eq!(function_call_at(&expr, source.len() + 5), None);
+        assert_eq!(function_call_at(&expr, source, source.len() + 5), None);
         let plain = parse("title").unwrap();
-        assert_eq!(function_call_at(&plain, 2), None);
+        assert_eq!(function_call_at(&plain, "title", 2), None);
+    }
+
+    #[test]
+    fn test_expression_at_finds_deepest_subexpression() {
+        let source = "as_csv(ctx.packages)";
+        let expr = parse(source).unwrap();
+        // Cursor on `ctx.packages` (the argument) finds that Variable.
+        let sub = expression_at(&expr, 8).expect("cursor on argument finds sub-expression");
+        assert_eq!(root_identifier(sub).as_deref(), Some("ctx.packages"));
+        // Cursor on the function name finds the FunctionCall itself.
+        let sub = expression_at(&expr, 1).expect("cursor on name finds function call");
+        assert!(matches!(sub.kind, SpannedExprKind::FunctionCall { .. }));
+        // Cursor outside the expression finds nothing.
+        assert!(expression_at(&expr, source.len() + 5).is_none());
     }
 
     #[test]

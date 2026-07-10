@@ -92,7 +92,14 @@ pub fn server_capabilities(profile: &ClientProfile) -> ServerCapabilities {
             work_done_progress_options: Default::default(),
         }),
         completion_provider: Some(CompletionOptions {
-            trigger_characters: Some(vec!["/".to_string(), "(".to_string(), "#".to_string()]),
+            trigger_characters: Some(vec![
+                "/".to_string(),
+                "(".to_string(),
+                "#".to_string(),
+                // `ctx.` auto-completes inside `{{ }}`; outside an open
+                // interpolation the provider's guard offers nothing (D3).
+                ".".to_string(),
+            ]),
             ..Default::default()
         }),
         folding_range_provider: profile
