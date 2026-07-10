@@ -1,9 +1,6 @@
-//! Executable acceptance scaffolding for `suggest(...)`.
+//! Executable acceptance tests for `suggest(...)`.
 //!
-//! Phase 1 deliberately leaves the behavior tests ignored: narrow runs use
-//! `--run-ignored all` to prove that they fail for the missing feature, while
-//! the package's ordinary L1 gate remains green. Remove each ignore when its
-//! owning implementation phase lands.
+//! All scaffolds are enabled and run under the package's ordinary L1 gate.
 
 use std::str::FromStr;
 
@@ -247,7 +244,6 @@ fn suggest_phase1_metadata_does_not_restrict_document_values() {
 }
 
 #[test]
-#[ignore = "red acceptance scaffold; enable as suggest(...) phases land"]
 fn suggest_phase1_standalone_envelopes_resolve_consistently() {
     let dir = tempfile::tempdir().unwrap();
     let pure = dir.path().join("pure.yaml");
