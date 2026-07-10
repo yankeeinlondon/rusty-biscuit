@@ -1,4 +1,24 @@
 //! Structured linting for `suggest(...)` metadata.
+//!
+//! The public entry point [`lint_suggestions`] checks every
+//! `suggest(...)` candidate against its target schema and returns one
+//! [`SuggestionLintProblem`] per invalid candidate. Invalid candidates are
+//! **lint problems, not errors** — schema resolution, validator construction,
+//! frontmatter validation, and composition all continue uninterrupted.
+//!
+//! ## Side-effect freedom
+//!
+//! Linting performs no filesystem discovery, no composition directive
+//! evaluation, no shell execution, and no network access. It validates each
+//! candidate against an in-memory target schema fragment built from the
+//! SimplifiedSchema AST.
+//!
+//! ## Span units
+//!
+//! Every problem's [`SuggestionLintProblem::span`] is a byte range into the
+//! original authoring source (frontmatter YAML or standalone schema YAML),
+//! including argument quotes. These spans are projected through YAML quoting
+//! and escaping before lint results are returned.
 
 use jsonschema::error::ValidationErrorKind;
 use serde_json::Value;
@@ -10,13 +30,18 @@ use super::{
     SimplifiedType, TypeExpr, convert::suggestion_target_schema,
 };
 
-/// Stable category for an invalid suggestion candidate.
+/// Stable category describing why a suggestion candidate failed its target.
+///
+/// DMLS maps each variant to a human-readable diagnostic message. The set is
+/// `#[non_exhaustive]` so future categories can be added without a breaking
+/// change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum SuggestionLintReason {
     /// A number candidate does not use the supported simple-decimal syntax.
     InvalidDecimalSyntax,
-    /// A simple decimal cannot round-trip through the supported JSON number model.
+    /// A simple decimal cannot round-trip through the supported JSON number
+    /// model without loss.
     UnsupportedNumberRepresentation,
     /// A numeric minimum or maximum was violated.
     Range,
@@ -32,16 +57,23 @@ pub enum SuggestionLintReason {
     Type,
 }
 
-/// One invalid candidate found in authored SimplifiedSchema metadata.
+/// One invalid candidate found in authored `suggest(...)` metadata.
+///
+/// Produced by [`lint_suggestions`]. Each problem carries enough structured
+/// data for DMLS (or any consumer) to render a precise diagnostic without
+/// re-interpreting the candidate or re-validating the schema.
+///
+/// Spans are byte ranges into the original authoring source (frontmatter YAML
+/// or standalone schema YAML), including argument quotes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SuggestionLintProblem {
-    /// Property path within its root schema arm.
+    /// Dotted property path within its root schema arm (e.g. `"settings.mode"`).
     pub property: String,
-    /// Zero-based root-union arm, or `None` for a single root shape.
+    /// Zero-based root-union arm index, or `None` for a single root shape.
     pub root_arm: Option<usize>,
-    /// Zero-based property-union atom, or `None` for a single atom.
+    /// Zero-based property-union atom index, or `None` for a single atom.
     pub property_arm: Option<usize>,
-    /// Argument text after quote and escape processing.
+    /// Argument text after SimplifiedSchema quote and escape processing.
     pub decoded: String,
     /// Target-directed JSON value retained in generated metadata.
     pub interpreted: Value,
@@ -53,9 +85,28 @@ pub struct SuggestionLintProblem {
 
 /// Lints every `suggest(...)` candidate in declaration order.
 ///
-/// Invalid candidates are returned as data and never become a
-/// [`SchemaError`]. Errors are reserved for an invalid schema fragment or a
-/// validator that cannot be constructed.
+/// Walks all properties (including inline-object descendants), pattern keys,
+/// property-union atoms, and root-union arms. Each candidate is checked
+/// against its target schema — the non-null scalar fragment or array-item
+/// fragment, with `x-darkmatter-suggest` excluded — using the existing JSON
+/// Schema validator so numeric and string constraints are single-sourced.
+///
+/// ## Errors versus lint
+///
+/// Invalid candidates are returned as [`SuggestionLintProblem`] data and
+/// **never** become a [`SchemaError`]. Errors are reserved for an invalid
+/// schema fragment or a validator that cannot be constructed — in those cases
+/// the function returns `Err`.
+///
+/// ## Ordering
+///
+/// Problems are returned in declaration order: properties first, then pattern
+/// keys, then inline-object descendants, then root-union arms.
+///
+/// ## Side-effect freedom
+///
+/// No filesystem discovery, shell execution, composition directive evaluation,
+/// or network access occurs.
 pub fn lint_suggestions(
     schema: &SimplifiedSchema,
 ) -> Result<Vec<SuggestionLintProblem>, SchemaError> {

@@ -1,4 +1,30 @@
 //! Content-based standalone SimplifiedSchema document recognition.
+//!
+//! The public entry point [`parse_standalone_schema_document`] classifies a
+//! YAML source string as a standalone SimplifiedSchema authoring document by
+//! its **content** — not by filename, glob, or consumer discovery.
+//!
+//! ## Recognition
+//!
+//! Two envelopes are recognized:
+//!
+//! - **Pure**: a YAML mapping whose sole top-level key is `$schema`.
+//! - **Tagged**: a YAML mapping containing exactly `kind: schema` and a
+//!   `types` mapping.
+//!
+//! Both mapping envelopes behave identically for whole-file schema references
+//! and `Name@fileref` named imports. A pure sequence payload is a root-level
+//! schema union for whole-file use only.
+//!
+//! Once an envelope is recognized, a malformed payload is a
+//! [`SchemaError::SchemaDocument`] — the library never silently reinterprets
+//! the document as ordinary YAML or raw JSON Schema.
+//!
+//! ## Side-effect freedom
+//!
+//! Classification, parsing, and suggestion linting perform no file reads,
+//! shell execution, composition directive evaluation, or network access. The
+//! caller supplies the source string; all work is in-memory.
 
 use std::path::{Path, PathBuf};
 
@@ -21,9 +47,14 @@ pub enum StandaloneSchemaEnvelope {
 
 /// A parsed standalone SimplifiedSchema authoring document.
 ///
-/// Candidate spans are byte ranges in `source`, and lint problems retain those
-/// same authoring-document ranges. Parsing and linting perform no file, shell,
-/// network, or composition operations.
+/// Produced by [`parse_standalone_schema_document`]. Carries the parsed
+/// [`SimplifiedSchema`] payload, the content envelope that claimed the
+/// document, and suggestion lint problems with byte spans relative to
+/// `source`.
+///
+/// Candidate spans are byte ranges in the authoring source, and lint problems
+/// retain those same authoring-document ranges. Parsing and linting perform no
+/// file reads, shell, network, or composition operations.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StandaloneSchemaDocument {
     /// Path of the authoring document supplied by the caller.
@@ -33,6 +64,9 @@ pub struct StandaloneSchemaDocument {
     /// Source-aware parsed SimplifiedSchema payload.
     pub schema: SimplifiedSchema,
     /// Invalid advisory suggestion metadata in declaration order.
+    ///
+    /// These are lint problems, not errors — the schema is still usable for
+    /// validation and completion. See [`SuggestionLintProblem`].
     pub suggestion_lints: Vec<SuggestionLintProblem>,
 }
 
@@ -42,6 +76,20 @@ pub struct StandaloneSchemaDocument {
 /// `kind: schema` claims a tagged document, or `$schema` is the sole top-level
 /// key of a pure document, malformed envelope content is returned as a
 /// [`SchemaError::SchemaDocument`] instead of falling back to raw JSON Schema.
+///
+/// ## Errors versus lint
+///
+/// A malformed recognized envelope (missing/malformed `types`, unsupported
+/// tagged-envelope keys, unparseable SimplifiedSchema payload) returns
+/// `Err(SchemaError::SchemaDocument)`. Invalid `suggest(...)` candidates
+/// within a valid envelope are returned as
+/// [`StandaloneSchemaDocument::suggestion_lints`] — they are lint data, not
+/// errors.
+///
+/// ## Side-effect freedom
+///
+/// Performs no file reads, shell execution, composition directive evaluation,
+/// or network access. The caller supplies `source`; all work is in-memory.
 pub fn parse_standalone_schema_document(
     source: &str,
     path: impl AsRef<Path>,
