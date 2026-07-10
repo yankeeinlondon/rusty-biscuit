@@ -1,3 +1,4 @@
+$schema: ./schema-definition.yaml
 kind: schema
 name: err
 description: the late-binding `err` variable that is provided to lifecycle hooks in Claudine
