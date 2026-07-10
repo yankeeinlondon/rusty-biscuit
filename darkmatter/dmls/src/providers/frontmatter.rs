@@ -12,10 +12,9 @@
 
 use std::path::{Path, PathBuf};
 
-use darkmatter::markdown::compose::context::context_variable_descriptors;
 use darkmatter::markdown::schemas::{
     Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
-    darkmatter_base_schema,
+    darkmatter_base_schema, suggestions_for_path,
 };
 use darkmatter::markdown::span::SourceSpan;
 use lsp_types::{
@@ -26,7 +25,7 @@ use lsp_types::{
 
 use super::DocumentContext;
 use crate::graph::normalize_join;
-use crate::overlay::{FmEntry, FmValueKind, FrontmatterAst};
+use crate::overlay::{FmEntry, FmValueKind, FrontmatterAst, expressions};
 use crate::workspace::file_path_to_uri;
 
 /// Frontmatter/schema diagnostics (delegated to the diagnostics module).
@@ -37,7 +36,7 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
 // ── Completion ────────────────────────────────────────────────────────────
 
 /// Completion inside the frontmatter block: schema keys, enum values, boolish
-/// scaffolds, file paths, and `style.*` keys.
+/// scaffolds, file paths, `style.*` keys, and `suggest(...)` candidates.
 pub fn completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
     let Some(ast) = overlay_ast(ctx) else {
         return Vec::new();
@@ -57,7 +56,12 @@ pub fn completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
             value_completions(ctx, offset, &ancestors, &key, value_partial)
         }
         None if indent == 0 => top_level_key_completions(ctx, ast, offset, trimmed),
-        None => nested_key_completions(ctx, ast, offset, line_start, indent, trimmed),
+        None => {
+            if let Some(items) = block_array_suggestions(ctx, offset, line_start, indent, trimmed) {
+                return items;
+            }
+            nested_key_completions(ctx, ast, offset, line_start, indent, trimmed)
+        }
     }
 }
 
@@ -141,9 +145,9 @@ fn present_child_keys<'a>(ast: &'a FrontmatterAst, ancestors: &[String]) -> Vec<
         .collect()
 }
 
-/// Enum members, boolish scaffolds, or file paths for a key's value. `ancestors`
-/// is the parent mapping path (empty at the top level); the leaf atom is
-/// resolved by descending inline objects.
+/// Enum members, boolish scaffolds, file paths, or `suggest(...)` candidates for
+/// a key's value. `ancestors` is the parent mapping path (empty at the top
+/// level); the leaf atom is resolved by descending inline objects.
 fn value_completions(
     ctx: &DocumentContext,
     offset: usize,
@@ -152,9 +156,23 @@ fn value_completions(
     partial: &str,
 ) -> Vec<CompletionItem> {
     let start = offset - partial.len();
-    let shape = known_shape(ctx);
     let mut path: Vec<&str> = ancestors.iter().map(String::as_str).collect();
     path.push(key);
+
+    // Flow-array item: `key: [partial_or_empty, more]`
+    if partial.trim_start().starts_with('[') {
+        let (element_partial, element_start) = flow_array_element(partial, start);
+        return suggestion_completions(ctx, &path, element_start, offset, &element_partial)
+            .unwrap_or_default();
+    }
+
+    // Suggestion candidates for scalar values (checked before enum/boolish/file
+    // so a suggest-bearing union arm wins per the spec).
+    if let Some(items) = suggestion_completions(ctx, &path, start, offset, partial) {
+        return items;
+    }
+
+    let shape = known_shape(ctx);
     let Some(atom) = def_at_path(&shape, &path).and_then(completable_atom) else {
         return Vec::new();
     };
@@ -208,6 +226,90 @@ fn file_path_completions(ctx: &DocumentContext, offset: usize, partial: &str) ->
     out
 }
 
+// ── Suggestion completion ──────────────────────────────────────────────────
+
+/// The document's own SimplifiedSchema (when available from the effective
+/// schema). Raw JSON Schema documents yield `None`, so suggestion completion
+/// never activates for them.
+fn document_simplified_schema<'a>(ctx: &'a DocumentContext<'a>) -> Option<&'a SimplifiedSchema> {
+    ctx.overlay
+        .and_then(|overlay| overlay.bundle())
+        .and_then(|bundle| bundle.effective.simplified.as_ref())
+}
+
+/// Builds suggestion completion items for a property path, filtered by `prefix`.
+/// Returns `None` when the property has no `suggest(...)` constraint or no
+/// SimplifiedSchema is available.
+fn suggestion_completions(
+    ctx: &DocumentContext,
+    property_path: &[&str],
+    start: usize,
+    offset: usize,
+    prefix: &str,
+) -> Option<Vec<CompletionItem>> {
+    let schema = document_simplified_schema(ctx)?;
+    let query = suggestions_for_path(schema, property_path)?;
+    let items: Vec<CompletionItem> = query
+        .items
+        .iter()
+        .filter(|suggestion| suggestion.decoded.starts_with(prefix))
+        .filter_map(|suggestion| {
+            item(
+                ctx,
+                start,
+                offset,
+                &suggestion.label,
+                &suggestion.insert_text,
+                CompletionItemKind::VALUE,
+                None,
+            )
+        })
+        .collect();
+    Some(items)
+}
+
+/// Detects a block-sequence item (`- value`) and returns suggestion completions
+/// when the enclosing property is suggestion-eligible.
+fn block_array_suggestions(
+    ctx: &DocumentContext,
+    offset: usize,
+    line_start: usize,
+    indent: usize,
+    trimmed: &str,
+) -> Option<Vec<CompletionItem>> {
+    let (after_dash, marker_len) = if let Some(after_dash) = trimmed.strip_prefix("- ") {
+        (after_dash, 2)
+    } else if trimmed == "-" {
+        ("", 1)
+    } else {
+        return None;
+    };
+    let ancestors = enclosing_path(ctx.text, line_start, indent);
+    let path: Vec<&str> = ancestors.iter().map(String::as_str).collect();
+    let item_start = line_start + indent + marker_len;
+    suggestion_completions(ctx, &path, item_start, offset, after_dash)
+}
+
+/// Extracts the current element text and its byte-offset start from a flow-array
+/// value partial (the text after `key:` up to the cursor, starting with `[`).
+///
+/// Returns `(element_partial, element_start_byte)` where `element_partial` is
+/// the text of the element being typed (possibly empty) and `element_start_byte`
+/// is the absolute byte offset where a text edit should begin.
+fn flow_array_element(value_partial: &str, value_start: usize) -> (String, usize) {
+    let last_sep = value_partial.rfind([',', '[']);
+    match last_sep {
+        Some(pos) => {
+            let after_sep = &value_partial[pos + 1..];
+            let trimmed_element = after_sep.trim_start();
+            let leading_ws = after_sep.len() - trimmed_element.len();
+            let element_start = value_start + pos + 1 + leading_ws;
+            (trimmed_element.to_string(), element_start)
+        }
+        None => (value_partial.to_string(), value_start),
+    }
+}
+
 /// `style.*` container keys from the style descriptor catalog.
 fn style_key_completions(ctx: &DocumentContext, offset: usize, partial: &str) -> Vec<CompletionItem> {
     let start = offset - partial.len();
@@ -248,18 +350,30 @@ fn schema_hover(ctx: &DocumentContext, entry: &FmEntry) -> Option<Hover> {
     let shape = known_shape(ctx);
     let path: Vec<&str> = entry.dotted.split('.').collect();
     let def = def_at_path(&shape, &path)?;
+    let body = schema_hover_body(&entry.key, def)?;
+    markup_hover(ctx, entry.key_span.clone(), body)
+}
+
+/// The Markdown body for a schema-declared property's hover.
+///
+/// Style rule — bounded by what LSP-Markdown can express (color and dim are the
+/// editor theme's decision, not ours; see `docs/hover.md`): inline-code box =
+/// the property being described; **bold** = its type; _italic_ = its enum and
+/// default values. Kept pure (no `DocumentContext`) so the formatting rule is
+/// unit-testable without an LSP session.
+pub(crate) fn schema_hover_body(key: &str, def: &PropertyDef) -> Option<String> {
     let atom = primary_atom(def)?;
-    let mut lines = vec![format!("**`{}`**", entry.key)];
+    let mut lines = vec![format!("**`{key}`**")];
 
     let type_line = match &atom.ty {
         TypeExpr::Primitive(ty) => {
             let suffix = if atom.is_array { "[]" } else { "" };
-            format!("Type: `{}{}`", ty.as_keyword(), suffix)
+            format!("Type: **{}{}**", ty.as_keyword(), suffix)
         }
-        TypeExpr::InlineObject(_) => "Type: `object`".to_string(),
+        TypeExpr::InlineObject(_) => "Type: **object**".to_string(),
         TypeExpr::Imported { name, reference } => {
             let suffix = if atom.is_array { "[]" } else { "" };
-            format!("Type: `{name}{suffix}@{reference}`")
+            format!("Type: **{name}{suffix}@{reference}**")
         }
     };
     lines.push(type_line);
@@ -268,36 +382,40 @@ fn schema_hover(ctx: &DocumentContext, entry: &FmEntry) -> Option<Hover> {
         lines.push("Required".to_string());
     }
     if let Some(members) = enum_members(atom) {
-        lines.push(format!("Values: {}", members.join(", ")));
+        let italicized: Vec<String> = members.iter().map(|m| format!("_{m}_")).collect();
+        lines.push(format!("Values: {}", italicized.join(", ")));
     }
     if let Some(default) = default_value(atom) {
-        lines.push(format!("Default: `{default}`"));
+        lines.push(format!("Default: _{default}_"));
     }
     if let Some(description) = &atom.description {
         lines.push(String::new());
         lines.push(description.clone());
     }
-    markup_hover(ctx, entry.key_span.clone(), lines.join("\n\n"))
+    Some(lines.join("\n\n"))
 }
 
 /// Hover content for a `ctx.*` generated key (read-only, Darkmatter-owned).
 fn ctx_hover(ctx: &DocumentContext, entry: &FmEntry) -> Option<Hover> {
-    let mut value = if entry.dotted == "ctx" {
-        "**`ctx`** — Darkmatter-generated context (read-only)".to_string()
-    } else {
-        let descriptor = context_variable_descriptors()
-            .iter()
-            .find(|descriptor| descriptor.name == entry.key);
-        match descriptor {
-            Some(descriptor) => format!(
-                "**`ctx.{}`** ({}) — read-only, Darkmatter-owned\n\n{}",
-                descriptor.name, descriptor.display_type, descriptor.description
-            ),
-            None => format!("**`ctx.{}`** — Darkmatter-generated (read-only)", entry.key),
-        }
-    };
+    let mut value = ctx_hover_markdown(&entry.dotted, &entry.key);
     value.push('\n');
     markup_hover(ctx, entry.key_span.clone(), value)
+}
+
+/// The Markdown body of a frontmatter `ctx.*` hover.
+///
+/// The catalog-backed block comes from the shared Phase-1 formatter
+/// ([`expressions::format_ctx_hover_block`]) so it is byte-identical to the
+/// interpolation hover's block for the same variable; the compose-time note is
+/// interpolation-specific and never appears here.
+fn ctx_hover_markdown(dotted: &str, key: &str) -> String {
+    if dotted == "ctx" {
+        return "**`ctx`** — Darkmatter-generated context (read-only)".to_string();
+    }
+    match expressions::ctx_descriptor(key) {
+        Some(descriptor) => expressions::format_ctx_hover_block(descriptor),
+        None => format!("**`ctx.{key}`** — Darkmatter-generated (read-only)"),
+    }
 }
 
 // ── Navigation (definition + document links) ────────────────────────────────
@@ -697,6 +815,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_schema_hover_body_applies_style_rules() {
+        // The rule from docs/hover.md, bounded by LSP-Markdown (no color, no
+        // dim): property being described → inline-code box; type → bold (never
+        // inline code); enum members and default → italic.
+        let mut atom = PropertyAtom::bare(SimplifiedType::Enum);
+        atom.constraints = vec![
+            Constraint::Members(vec!["draft".to_string(), "published".to_string()]),
+            Constraint::Default(serde_json::Value::from("draft")),
+        ];
+        atom.description = Some("the publication state".to_string());
+        let def = PropertyDef::Single(atom);
+
+        let body = schema_hover_body("status", &def).expect("hover body");
+
+        assert!(body.contains("**`status`**"), "property → inline-code box: {body}");
+        assert!(body.contains("Type: **"), "type → bold: {body}");
+        assert!(!body.contains("Type: `"), "type must not be inline code: {body}");
+        assert!(body.contains("Values: _draft_, _published_"), "enum → italic: {body}");
+        assert!(body.contains("Default: _\"draft\"_"), "default → italic: {body}");
+        assert!(body.contains("the publication state"), "description verbatim: {body}");
+    }
+
+    #[test]
+    fn test_schema_hover_body_bare_type_is_bold() {
+        let def = PropertyDef::Single(PropertyAtom::bare(SimplifiedType::String));
+        let body = schema_hover_body("title", &def).expect("hover body");
+        assert_eq!(body, "**`title`**\n\nType: **string**", "{body}");
+    }
+
+    #[test]
     fn test_line_prefix() {
         let text = "---\ntitle: X\n---\n";
         // offset at end of "title: X"
@@ -745,6 +893,46 @@ mod tests {
     }
 
     #[test]
+    fn test_base_style_schema_exposes_nested_completion_shapes() {
+        let darkmatter::markdown::schemas::SimplifiedSchema::Single(root) =
+            darkmatter::markdown::schemas::darkmatter_base_schema()
+        else {
+            panic!("base schema must be a single object shape");
+        };
+
+        let block_quote = nested_shape(&root, &["style", "block-quote"])
+            .expect("block-quote must be a typed style bucket");
+        for key in [
+            "width",
+            "max-width",
+            "alignment",
+            "color",
+            "bg-color",
+            "margin",
+            "padding",
+            "border",
+            "emphasis",
+            "word-wrap",
+        ] {
+            assert!(
+                block_quote.properties.contains_key(key),
+                "style.block-quote must complete `{key}`"
+            );
+        }
+
+        let emphasis = nested_shape(&root, &["style", "block-quote", "emphasis"])
+            .expect("compound emphasis must expose nested keys");
+        assert!(emphasis.properties.contains_key("italic"));
+        assert!(emphasis.properties.contains_key("underline"));
+
+        let alignment = def_at_path(&root, &["style", "block-quote", "alignment"])
+            .and_then(completable_atom)
+            .and_then(enum_members)
+            .expect("alignment must offer enum values");
+        assert_eq!(alignment, ["left", "center", "right"]);
+    }
+
+    #[test]
     fn test_nested_shape_missing_segment_is_none() {
         let root = nested_fixture();
         assert!(nested_shape(&root, &["absent"]).is_none());
@@ -766,6 +954,20 @@ mod tests {
         assert!(def_at_path(&root, &["settings", "absent"]).is_none());
         // A top-level leaf resolves through an empty ancestor path.
         assert!(def_at_path(&root, &["title"]).is_some());
+    }
+
+    #[test]
+    fn test_ctx_hover_markdown_is_the_shared_formatter_block() {
+        // The catalog-backed block is exactly the shared Phase-1 formatter's
+        // output, so it can never drift from the interpolation hover's block.
+        let descriptor = expressions::ctx_descriptor("packages").unwrap();
+        let markdown = ctx_hover_markdown("ctx.packages", "packages");
+        assert_eq!(markdown, expressions::format_ctx_hover_block(descriptor));
+        // The interpolation-specific compose-time note never appears here.
+        assert!(!markdown.contains("compose time"));
+        // Unknown tails and the `ctx` container keep their generic annotations.
+        assert!(ctx_hover_markdown("ctx.nope", "nope").contains("Darkmatter-generated"));
+        assert!(ctx_hover_markdown("ctx", "ctx").starts_with("**`ctx`**"));
     }
 
     #[test]
@@ -865,5 +1067,47 @@ mod tests {
         assert!(settings.properties.contains_key("mode"));
         // And `def_at_path` reaches the nested leaf through the same union arm.
         assert!(def_at_path(&root, &["settings", "mode"]).is_some());
+    }
+
+    // ── Suggestion completion helper tests ──
+
+    #[test]
+    fn test_flow_array_element_empty_after_comma() {
+        // `[0.,` with cursor after the comma — element is empty.
+        let (element, start) = flow_array_element("[0.,", 100);
+        assert_eq!(element, "");
+        assert_eq!(start, 104); // 100 + 3 (comma pos) + 1 = 104
+    }
+
+    #[test]
+    fn test_flow_array_element_first_element() {
+        // `[red` — cursor inside the first element.
+        let (element, start) = flow_array_element("[red", 0);
+        assert_eq!(element, "red");
+        assert_eq!(start, 1); // after `[`
+    }
+
+    #[test]
+    fn test_flow_array_element_after_bracket() {
+        // `[` alone — cursor right after opening bracket.
+        let (element, start) = flow_array_element("[", 0);
+        assert_eq!(element, "");
+        assert_eq!(start, 1);
+    }
+
+    #[test]
+    fn test_flow_array_element_partial_after_comma() {
+        // `[a, b` — cursor inside the second element.
+        let (element, start) = flow_array_element("[a, b", 0);
+        assert_eq!(element, "b");
+        assert_eq!(start, 4); // after `, `
+    }
+
+    #[test]
+    fn test_flow_array_element_with_spaces() {
+        // `[a,    b` — multiple spaces after comma.
+        let (element, start) = flow_array_element("[a,    b", 0);
+        assert_eq!(element, "b");
+        assert_eq!(start, 7); // after `,    `
     }
 }

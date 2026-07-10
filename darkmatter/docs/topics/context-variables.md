@@ -180,7 +180,7 @@ failure message prints the up-to-date block to paste back.
 
 **Agent**
 
-- **ctx.agent** — `string` — Executing agentic CLI name, trimmed from the AGENT env var; defaults to "unknown".
+- **ctx.agent** — `string` — The agentic CLI provider being used in the current session.
 - **ctx.model** — `string` — Active model identifier, trimmed from the MODEL env var; defaults to "default".
 <!-- END GENERATED: ctx catalog -->
 

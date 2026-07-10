@@ -147,9 +147,8 @@ Initial scope includes:
 - lifecycle event keys: `initialize`, `start`, `blocked`, `success`,
   `failure`, `finalize`
 - lifecycle communication/action fields through broad event object validation
-- `operation`, `output`, `yolo`
-- `timeout`, `step_timeout`, `timeout_warn`, `step_timeout_warn`,
-  `stall_timeout`
+- `operation`, `yolo`
+- `timeout`, `step_timeout`, `timeout_warn`, `step_timeout_warn`
 - `exit_expressions`, `guard_settings`
 - linking and portability fields: `name`, `allowed-tools`, `tools`, `skills`,
   `license`, `compatibility`, `user-invocable`,
@@ -201,9 +200,8 @@ when composing prompts. This applies to:
   applies
 
 The existing system-prompt `mode` baseline should be reconciled with the new
-base schema. Because `mode` can have context-specific meanings, the v1
-Claudine base schema may keep `mode: string` while narrower code paths continue
-to apply stricter validation where appropriate.
+base schema. The Claudine base schema declares `mode` as the `append` /
+`replace` enum used by automatically discovered system prompts.
 
 Document-level `$schema` declarations retain precedence over baseline
 properties on conflict, following Darkmatter merge semantics.

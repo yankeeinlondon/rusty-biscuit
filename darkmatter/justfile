@@ -129,6 +129,36 @@ lint:
     @just _lint {{ CLI }}
     @just _lint {{ DMLS }}
 
+# installs the DMLS binary into binary path
+install-dmls:
+    @cargo install --path ./dmls --force
+
+# Package the DMLS VSCode extension and (re)install it into VSCode.
+#
+# `npm install` runs first so a fresh clone bundles the runtime deps
+# (node_modules is gitignored and has no lockfile — without this the
+# packaged .vsix ships no `vscode-languageclient` and silently fails to
+# activate). `--force` overwrites the same 0.0.1 build on re-runs, and the
+# vsix name is resolved dynamically so a version bump does not install a
+# stale file. A CLI install cannot refresh an already-open VSCode window,
+# so the recipe prints the reload step.
+install-vscode-package:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd ./dmls/vscode-dmls
+    echo
+    echo "Installing extension runtime dependencies…"
+    npm install --silent
+    echo "Packaging extension…"
+    npx @vscode/vsce package --allow-missing-repository
+    vsix="$(ls -t ./*.vsix | head -1)"
+    echo "Installing ${vsix##*/} into VSCode…"
+    code --install-extension "$vsix" --force
+    echo
+    echo "Installed. If VSCode is already open, reload it to activate:"
+    echo "  Cmd+Shift+P → Developer: Reload Window"
+    echo
+
 # Report CLI source/test files over the ~500-line review soft cap.
 #
 # Files listed in `ACCEPTED_OVERCAP` below are documented exceptions
@@ -226,8 +256,6 @@ all:
     @just test-browser
 
 # ----------------------------------------------------------------------------
-
-
 
 # Install the CLI
 install *args="":

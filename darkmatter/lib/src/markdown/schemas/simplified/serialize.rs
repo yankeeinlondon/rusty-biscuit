@@ -159,6 +159,24 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: SimplifiedType) {
             write_arg(out, p);
             out.push(')');
         }
+        Constraint::Suggest(candidates) => {
+            out.push_str("suggest(");
+            for (i, candidate) in candidates.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                let value = if matches!(ty, SimplifiedType::Number) {
+                    candidate
+                        .canonical_decimal
+                        .as_deref()
+                        .unwrap_or(&candidate.decoded)
+                } else {
+                    &candidate.decoded
+                };
+                write_arg(out, value);
+            }
+            out.push(')');
+        }
         Constraint::Members(members) => {
             // Members are positional, no keyword.
             for (i, m) in members.iter().enumerate() {
@@ -449,5 +467,110 @@ mod tests {
             array_constraints: vec![],
             description: None,
         });
+    }
+
+    #[test]
+    fn round_trip_string_suggest() {
+        let atom = PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::String),
+            is_array: false,
+            constraints: vec![Constraint::Suggest(vec![
+                super::super::types::SuggestionCandidate {
+                    decoded: "red".into(),
+                    interpreted: serde_json::Value::String("red".into()),
+                    canonical_decimal: None,
+                    span: 0..0,
+                },
+                super::super::types::SuggestionCandidate {
+                    decoded: "blue gray".into(),
+                    interpreted: serde_json::Value::String("blue gray".into()),
+                    canonical_decimal: None,
+                    span: 0..0,
+                },
+            ])],
+            array_constraints: vec![],
+            description: None,
+        };
+        let s = serialize_property_atom(&atom);
+        let parsed = parse_type_expr("test", &s)
+            .unwrap_or_else(|e| panic!("re-parse of {s:?} failed: {e:?}"));
+        let parsed_candidates = parsed.constraints.iter().find_map(|c| match c {
+            Constraint::Suggest(cands) => Some(cands),
+            _ => None,
+        });
+        let orig_candidates = atom.constraints.iter().find_map(|c| match c {
+            Constraint::Suggest(cands) => Some(cands),
+            _ => None,
+        });
+        let (parsed_candidates, orig_candidates) =
+            (parsed_candidates.unwrap(), orig_candidates.unwrap());
+        assert_eq!(parsed_candidates.len(), orig_candidates.len());
+        assert_eq!(parsed_candidates[0].decoded, "red");
+        assert_eq!(parsed_candidates[0].interpreted, serde_json::json!("red"));
+        assert_eq!(parsed_candidates[1].decoded, "blue gray");
+        assert_eq!(parsed_candidates[1].interpreted, serde_json::json!("blue gray"));
+    }
+
+    #[test]
+    fn round_trip_number_suggest() {
+        let atom = PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::Number),
+            is_array: false,
+            constraints: vec![Constraint::Suggest(vec![
+                super::super::types::SuggestionCandidate {
+                    decoded: "1".into(),
+                    interpreted: serde_json::json!(1),
+                    canonical_decimal: Some("1".into()),
+                    span: 0..0,
+                },
+                super::super::types::SuggestionCandidate {
+                    decoded: "2.5".into(),
+                    interpreted: serde_json::json!(2.5),
+                    canonical_decimal: Some("2.5".into()),
+                    span: 0..0,
+                },
+            ])],
+            array_constraints: vec![],
+            description: None,
+        };
+        let s = serialize_property_atom(&atom);
+        let parsed = parse_type_expr("test", &s)
+            .unwrap_or_else(|e| panic!("re-parse of {s:?} failed: {e:?}"));
+        let parsed_candidates = parsed.constraints.iter().find_map(|c| match c {
+            Constraint::Suggest(cands) => Some(cands),
+            _ => None,
+        });
+        let parsed_candidates = parsed_candidates.unwrap();
+        assert_eq!(parsed_candidates.len(), 2);
+        assert_eq!(parsed_candidates[0].decoded, "1");
+        assert_eq!(parsed_candidates[0].interpreted, serde_json::json!(1));
+        assert_eq!(parsed_candidates[0].canonical_decimal.as_deref(), Some("1"));
+        assert_eq!(parsed_candidates[1].decoded, "2.5");
+        assert_eq!(parsed_candidates[1].interpreted, serde_json::json!(2.5));
+        assert_eq!(parsed_candidates[1].canonical_decimal.as_deref(), Some("2.5"));
+    }
+
+    #[test]
+    fn round_trip_number_suggest_array() {
+        let atom = PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::Number),
+            is_array: true,
+            constraints: vec![Constraint::Suggest(vec![
+                super::super::types::SuggestionCandidate {
+                    decoded: "1".into(),
+                    interpreted: serde_json::json!(1),
+                    canonical_decimal: Some("1".into()),
+                    span: 0..0,
+                },
+            ])],
+            array_constraints: vec![],
+            description: None,
+        };
+        let s = serialize_property_atom(&atom);
+        let parsed = parse_type_expr("test", &s)
+            .unwrap_or_else(|e| panic!("re-parse of {s:?} failed: {e:?}"));
+        assert!(parsed.is_array);
+        let has_suggest = parsed.constraints.iter().any(|c| matches!(c, Constraint::Suggest(_)));
+        assert!(has_suggest, "parsed atom must retain suggest constraint");
     }
 }

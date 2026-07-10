@@ -15,6 +15,8 @@
 
 use indexmap::IndexMap;
 
+use crate::markdown::span::SourceSpan;
+
 /// A SimplifiedSchema is either a single object shape or a root-level union of
 /// object shapes.
 #[derive(Debug, Clone, PartialEq)]
@@ -346,6 +348,17 @@ pub enum Constraint {
     /// ECMA-262 regex the value must match.
     Pattern(String),
 
+    /// Ordered, non-validating completion candidates authored with
+    /// `suggest(...)`.
+    ///
+    /// Available only on exact `string` and `number` types (including their
+    /// array forms). At most one `suggest(...)` per complete property
+    /// definition (including across property-union atoms). Candidates are
+    /// advisory — they never restrict what document values are valid.
+    ///
+    /// See [`SuggestionCandidate`] for the per-candidate data model.
+    Suggest(Vec<SuggestionCandidate>),
+
     // ── enum ─────────────────────────────────────────────────────────────
     /// Enumerated members.
     Members(Vec<String>),
@@ -405,6 +418,7 @@ impl Constraint {
             Constraint::MaxLen(_) => "max",
             Constraint::NotEmpty => "not-empty",
             Constraint::Pattern(_) => "pattern",
+            Constraint::Suggest(_) => "suggest",
             Constraint::Members(_) => "<members>",
             Constraint::Match(_) => "match",
             Constraint::Eager => "eager",
@@ -417,6 +431,37 @@ impl Constraint {
             Constraint::Example(_) => "example",
         }
     }
+}
+
+/// One interpreted argument from a `suggest(...)` constraint.
+///
+/// Each candidate retains decoded text, a target-directed interpreted JSON
+/// value, optional canonical decimal text for numeric candidates, and the
+/// exact authored argument byte span.
+///
+/// `span` is a byte range into the source handed to the relevant parser. The
+/// string grammar initially records a range into its type-expression string;
+/// source-aware YAML parsing projects it into the complete YAML or Markdown
+/// document without normalizing line endings.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SuggestionCandidate {
+    /// Argument text after SimplifiedSchema quote and escape processing.
+    pub decoded: String,
+    /// Target-directed value retained as suggestion metadata.
+    ///
+    /// For `string(suggest(...))`, every candidate is a JSON string. For
+    /// `number(suggest(...))`, a losslessly representable candidate is a JSON
+    /// number; a non-representable one is retained as its canonical decimal
+    /// string so the invalid metadata stays available for linting.
+    pub interpreted: serde_json::Value,
+    /// Normalized simple-decimal spelling for numeric candidates.
+    ///
+    /// Populated when the decoded text uses simple-decimal syntax — even when
+    /// the value is not losslessly representable by the supported JSON number
+    /// model. `None` for string candidates.
+    pub canonical_decimal: Option<String>,
+    /// Exact authored argument byte span, including argument quotes.
+    pub span: SourceSpan,
 }
 
 #[cfg(test)]

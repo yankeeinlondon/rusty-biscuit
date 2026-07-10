@@ -544,16 +544,13 @@ payloads.
 | Layer | Surface | Notes |
 |---|---|---|
 | CLI flag | `--stall-timeout <DURATION>` | wrapper and compose; highest priority |
-| Frontmatter | `stall_timeout: 10m` | per-document (per-step in `sequence`) |
 | Env default | `CLAUDINE_OPENCODE_STALL_TIMEOUT` | duration string |
 | Built-in | `10m` | `Duration::from_secs(10 * 60)` |
 
-Precedence is the same strict top-down chain as `step_timeout`
-(CLI > frontmatter > env > built-in), and the same duration grammar applies.
-`0s` at any layer **disables** the guard for that run. Non-OpenCode runs
-accept `stall_timeout` silently as inert config (a `debug!` trace only, never
-a warning) so portable prompt files stay provider-neutral. There is no
-`stall_timeout_warn` companion.
+Precedence is CLI > env > built-in, and the same duration grammar as the two
+general timeouts applies. `0s` from the CLI or environment **disables** the
+guard for that run. The OpenCode-specific guard is intentionally not exposed
+in Markdown frontmatter. There is no `stall_timeout_warn` companion.
 
 ## Provider-specific stream variants
 

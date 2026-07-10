@@ -58,13 +58,17 @@ pub enum SchemaError {
         source: biscuit_file::FileReferenceError,
     },
 
-    /// A referenced schema file is neither a SimplifiedSchema (root `$schema:`
-    /// is missing or is not a mapping) nor a recognisable JSON Schema.
+    /// A referenced schema file is neither a recognized standalone
+    /// SimplifiedSchema envelope nor a recognizable JSON Schema.
     #[error(
-        "referenced schema file `{path}` is neither a valid SimplifiedSchema (missing root \
-         `$schema:` mapping) nor a valid JSON Schema"
+        "referenced schema file `{path}` is neither a valid standalone SimplifiedSchema nor a \
+         valid JSON Schema"
     )]
     AmbiguousReferenced { path: PathBuf },
+
+    /// A recognized standalone SimplifiedSchema envelope is malformed.
+    #[error("invalid standalone schema document `{path}`: {message}")]
+    SchemaDocument { path: PathBuf, message: String },
 
     /// A `$schema` value is a remote URL; v1 only supports local references.
     #[error("remote $schema references are not supported in this version: `{reference}`")]
@@ -207,13 +211,33 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     "ambiguous schema reference",
                 ))
                 .body(Prose::new(format!(
-                    "<cyan>{}</cyan> is neither a SimplifiedSchema (missing root <cyan>$schema:</cyan> \
-                     mapping) nor a valid JSON Schema.",
+                    "<cyan>{}</cyan> is neither a recognized standalone SimplifiedSchema nor a \
+                     valid JSON Schema.",
                     Prose::escape_text(&path.display().to_string())
                 )))
                 .hint(
                     "Either prefix a SimplifiedSchema mapping with <cyan>$schema:</cyan>, or \
                      supply a Draft 2020-12 JSON Schema.",
+                ),
+
+            SchemaError::SchemaDocument { path, message } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "SchemaError",
+                    "standalone schema document invalid",
+                ))
+                .body(vec![
+                    Prose::new(format!(
+                        "Could not parse <cyan>{}</cyan> as a standalone SimplifiedSchema.",
+                        Prose::escape_text(&path.display().to_string())
+                    )),
+                    Prose::new(format!(
+                        "<dim>Reason:</dim> {}",
+                        Prose::escape_text(message)
+                    )),
+                ])
+                .hint(
+                    "Use either a sole top-level <cyan>$schema:</cyan> mapping/sequence or exactly \
+                     <cyan>kind: schema</cyan> with a <cyan>types:</cyan> mapping.",
                 ),
 
             SchemaError::RemoteUnsupported { reference } => StatusBlock::new(StatusState::Error)

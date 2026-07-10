@@ -80,7 +80,7 @@ pub mod semantics;
 pub use ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind};
 pub use catalog::{
     expression_function_descriptors, generate_expression_function_table,
-    DataType, ExpressionFunctionDescriptor, ParamType, ReturnType, EXPRESSION_FUNCTION_DESCRIPTORS,
+    DataType, ExpressionFunctionDescriptor, ParamType, ReturnType,
 };
 pub use ctx::CtxLookup;
 pub use error::{ArityBound, ExpressionError, FileRefFailure, FileReferenceDiagnostic};
@@ -596,7 +596,7 @@ fn is_arity_error(message: &str) -> bool {
 /// did-you-mean suggestion when one exists.
 fn unknown_function_error(name: &str) -> ExpressionError {
     let mut text = format!("{UNKNOWN_FUNCTION_PREFIX} {name}");
-    if let Some(suggestion) = suggest(EXPRESSION_FUNCTION_DESCRIPTORS, name, 1).first() {
+    if let Some(suggestion) = suggest(expression_function_descriptors(), name, 1).first() {
         text.push_str("\n\nDid you mean:\n  ");
         text.push_str(&describe_for_error(*suggestion));
     }
@@ -612,12 +612,12 @@ fn unknown_function_error(name: &str) -> ExpressionError {
 /// Appends the matched function descriptor's signature, description, and example
 /// to an arity error message.
 fn enrich_arity_error(name: &str, message: &str) -> String {
-    let signature = EXPRESSION_FUNCTION_DESCRIPTORS
+    let signature = expression_function_descriptors()
         .iter()
         .find(|d| d.key().starts_with(&format!("{name}(")) || d.key() == name)
         .map(|d| d.key());
     match signature {
-        Some(sig) if let Some(descriptor) = describe(EXPRESSION_FUNCTION_DESCRIPTORS, sig) => {
+        Some(sig) if let Some(descriptor) = describe(expression_function_descriptors(), sig) => {
             format!("{message}\n\nExpected:\n  {}", describe_for_error(descriptor))
         }
         _ => message.to_string(),

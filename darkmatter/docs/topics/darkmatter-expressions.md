@@ -29,10 +29,9 @@ surface that runs it:
 | Claudine hook conditions | `when=` |
 
 This is the **availability invariant**: a read-side function or `doc.*`
-reference resolves on every surface above. (The historical asymmetry — where
-read-side functions worked only in body interpolation — is gone.) The single
-documented exception is the `markdown::transform` pipeline, which uses a bare
-state and is not in scope.
+reference resolves on every surface above. The historical asymmetry — where
+read-side functions worked only in body interpolation — is gone; the compose
+pipeline and public condition API use the same evaluation contract.
 
 > Earlier docs called this "Boolean Conditional Logic". The language is now
 > general-purpose and supports arithmetic, member/index access, type
@@ -301,7 +300,7 @@ Arithmetic errors fail composition:
 Function names are **case-insensitive**: `has_key`, `HasKey`, and `haskey` all
 resolve to the same function.
 
-The table below is generated from [`EXPRESSION_FUNCTION_DESCRIPTORS`](../../lib/src/markdown/compose/expression/catalog.rs). Run `just darkmatter regen-expr-doc` to refresh it.
+The table below is generated from [`expression_function_descriptors()`](../../lib/src/markdown/compose/expression/catalog.rs). Run `just darkmatter regen-expr-doc` to refresh it.
 
 <!-- BEGIN GENERATED FUNCTION TABLE -->
 
@@ -809,14 +808,14 @@ Unsupported or easy-to-misread forms:
 
 ## Authoring a New Expression Function
 
-Expression functions live in
-[`expression/functions.rs`](../../lib/src/markdown/compose/expression/functions.rs)
-and split into two registries:
+Expression functions live in domain modules under
+[`expression/functions/`](../../lib/src/markdown/compose/expression/functions)
+and share one registration model:
 
-- **Pure functions** (`PURE_FUNCTIONS`) — depend only on their arguments. Most
+- **Pure functions** — depend only on their arguments. Most
   helpers (`length`, `min`, `kebab_case`, `is_today`, …) are pure. Dispatched by
   `dispatch`, which needs no context.
-- **Context-aware / read-side functions** (`FS_FUNCTIONS`) — need a
+- **Context-aware / read-side functions** — need a
   [`ResolutionContext`](../../lib/src/markdown/compose/expression/resolve_ctx.rs)
   to resolve path arguments. The [read-side functions](#read-side-functions)
   live here. Dispatched by `dispatch_fs`, which receives the context; `is_fs_function`
@@ -825,13 +824,11 @@ and split into two registries:
 
 To add a function:
 
-1. Implement it and register it in the correct slice (`PURE_FUNCTIONS` or
-   `FS_FUNCTIONS`).
-2. Add a matching descriptor to `EXPRESSION_FUNCTION_DESCRIPTORS` in
-   [`catalog.rs`](../../lib/src/markdown/compose/expression/catalog.rs). This is
-   **mandatory**: parity tests enforce exact bidirectional set equality between
-   the registered functions and the descriptor catalog, so a missing or extra
-   descriptor fails the build.
+1. In the owning domain module, implement the handler and add one
+   `FunctionRegistration` containing its aliases, descriptors, and handler kind.
+2. Add overloads as multiple descriptors on that registration. Consumers read the
+   projected catalog through `expression_function_descriptors()`; there is no
+   second public descriptor table to update.
 
 For a read-side function, obtain paths through the `ResolutionContext`
 (`base_dir`, magic search paths, optional remote runtime) rather than the

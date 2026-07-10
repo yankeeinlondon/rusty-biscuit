@@ -4,6 +4,7 @@
 //! ergonomic parsing and rendering for Markdown and terminal output.
 
 use std::collections::BTreeMap;
+#[cfg(test)]
 use std::env;
 use std::fmt;
 
@@ -16,6 +17,8 @@ use thiserror::Error;
 use crate::render::stylesheet::{
     CssSizing, CssSizingProp, CssStyle, StylesheetBlockError, StylesheetError,
 };
+use crate::render::metadata_codec::{self, MetadataPolicy};
+use crate::render::reference_parse;
 
 /// BEL character used by OSC 8 hyperlinks.
 const BEL: &str = "\x07";
@@ -1188,27 +1191,8 @@ impl From<(&String, &Prose)> for ImageRef {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MetadataPolicy {
-    Inline,
-    Strip,
-    Lossless,
-}
-
 fn metadata_policy(with_inline: bool) -> MetadataPolicy {
-    if with_inline {
-        return MetadataPolicy::Inline;
-    }
-
-    let value = env::var("IMAGE_REF_METADATA")
-        .ok()
-        .map(|v| v.trim().to_ascii_lowercase());
-
-    match value.as_deref() {
-        Some("inline") => MetadataPolicy::Inline,
-        Some("strip") => MetadataPolicy::Strip,
-        _ => MetadataPolicy::Lossless,
-    }
+    metadata_codec::metadata_policy(with_inline, "IMAGE_REF_METADATA")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1452,177 +1436,27 @@ fn parse_markdown_image(input: &str) -> Result<ImageRef, ImageRefError> {
 }
 
 fn parse_html_attributes(input: &str) -> BTreeMap<String, String> {
-    let mut attrs = BTreeMap::new();
-    let mut chars = input.chars().peekable();
-
-    while chars.peek().is_some() {
-        while chars.peek().is_some_and(|ch| ch.is_whitespace()) {
-            chars.next();
-        }
-
-        let mut key = String::new();
-        while let Some(&ch) = chars.peek() {
-            if ch.is_whitespace() || ch == '=' {
-                break;
-            }
-            key.push(ch);
-            chars.next();
-        }
-
-        if key.is_empty() {
-            break;
-        }
-
-        while chars.peek().is_some_and(|ch| ch.is_whitespace()) {
-            chars.next();
-        }
-
-        if chars.peek() != Some(&'=') {
-            attrs.insert(key.to_ascii_lowercase(), String::new());
-            continue;
-        }
-        chars.next();
-
-        while chars.peek().is_some_and(|ch| ch.is_whitespace()) {
-            chars.next();
-        }
-
-        let value = match chars.peek().copied() {
-            Some('"') | Some('\'') => {
-                let quote = chars.next().unwrap_or('"');
-                let mut value = String::new();
-                for ch in chars.by_ref() {
-                    if ch == quote {
-                        break;
-                    }
-                    value.push(ch);
-                }
-                html_unescape(&value)
-            }
-            _ => {
-                let mut value = String::new();
-                while let Some(&ch) = chars.peek() {
-                    if ch.is_whitespace() {
-                        break;
-                    }
-                    value.push(ch);
-                    chars.next();
-                }
-                html_unescape(&value)
-            }
-        };
-
-        attrs.insert(key.to_ascii_lowercase(), value);
-    }
-
-    attrs
+    reference_parse::parse_html_attributes(input)
 }
 
 fn find_closing_bracket(input: &str, start: usize) -> Result<usize, ImageRefError> {
-    let bytes = input.as_bytes();
-    let mut depth = 0usize;
-    let mut idx = start;
-
-    while idx < bytes.len() {
-        match bytes[idx] {
-            b'\\' if idx + 1 < bytes.len() => {
-                idx += 2;
-            }
-            b'[' => {
-                depth += 1;
-                idx += 1;
-            }
-            b']' => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    return Ok(idx);
-                }
-                idx += 1;
-            }
-            _ => idx += 1,
-        }
-    }
-
-    Err(ImageRefError::malformed_markdown_with_context(
-        "unmatched `[` in markdown image",
-        input,
-        start,
-    ))
+    reference_parse::find_closing_bracket(input, start).ok_or_else(|| {
+        ImageRefError::malformed_markdown_with_context(
+            "unmatched `[` in markdown image", input, start,
+        )
+    })
 }
 
 fn find_closing_paren(input: &str, start: usize) -> Result<usize, ImageRefError> {
-    let bytes = input.as_bytes();
-    let mut depth = 0usize;
-    let mut idx = start;
-    let mut in_quotes = false;
-    let mut quote_char = b'"';
-
-    while idx < bytes.len() {
-        let byte = bytes[idx];
-
-        if in_quotes {
-            if byte == b'\\' && idx + 1 < bytes.len() {
-                idx += 2;
-                continue;
-            }
-            if byte == quote_char {
-                in_quotes = false;
-            }
-            idx += 1;
-            continue;
-        }
-
-        match byte {
-            b'"' | b'\'' => {
-                in_quotes = true;
-                quote_char = byte;
-                idx += 1;
-            }
-            b'(' => {
-                depth += 1;
-                idx += 1;
-            }
-            b')' => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    return Ok(idx);
-                }
-                idx += 1;
-            }
-            _ => idx += 1,
-        }
-    }
-
-    Err(ImageRefError::malformed_markdown_with_context(
-        "unmatched `(` in markdown image",
-        input,
-        start,
-    ))
+    reference_parse::find_closing_paren(input, start).ok_or_else(|| {
+        ImageRefError::malformed_markdown_with_context(
+            "unmatched `(` in markdown image", input, start,
+        )
+    })
 }
 
 fn extract_markdown_url(content: &str) -> (String, &str) {
-    let content = content.trim();
-    let bytes = content.as_bytes();
-    let mut idx = 0usize;
-
-    if bytes.first() == Some(&b'<') {
-        idx = 1;
-        while idx < bytes.len() && bytes[idx] != b'>' {
-            idx += 1;
-        }
-        if idx < bytes.len() {
-            return (content[1..idx].to_string(), &content[idx + 1..]);
-        }
-    }
-
-    while idx < bytes.len() {
-        if bytes[idx].is_ascii_whitespace() {
-            break;
-        }
-        idx += 1;
-    }
-
-    (content[..idx].to_string(), &content[idx..])
+    reference_parse::extract_markdown_url(content)
 }
 
 /// Whether a markdown image title is a structured `key='value'` directive
@@ -1633,45 +1467,7 @@ fn extract_markdown_url(content: &str) -> (String, &str) {
 /// `key=` token (the key being alphanumeric plus `-`/`_`) outside any quoted
 /// run marks structured mode.
 fn is_structured_image_title(content: &str) -> bool {
-    let content = content.trim();
-    let bytes = content.as_bytes();
-    let mut in_quotes = false;
-    let mut quote_char = '"';
-
-    for (i, &b) in bytes.iter().enumerate() {
-        if in_quotes {
-            if b == b'\\' {
-                continue;
-            }
-            if b == quote_char as u8 {
-                in_quotes = false;
-            }
-        } else {
-            match b {
-                b'"' | b'\'' => {
-                    in_quotes = true;
-                    quote_char = b as char;
-                }
-                b'=' => {
-                    let key_part = content[..i]
-                        .trim()
-                        .split(&[' ', ','][..])
-                        .next_back()
-                        .unwrap_or("");
-                    if !key_part.is_empty()
-                        && key_part
-                            .chars()
-                            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
-                    {
-                        return true;
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    false
+    reference_parse::is_structured(content)
 }
 
 /// Parses a structured `key='value'` image title into typed [`ImageRef`] attrs.
@@ -1680,68 +1476,9 @@ fn is_structured_image_title(content: &str) -> bool {
 /// of the hyperlink directive vocabulary). Unknown keys are ignored. The shared
 /// tokenizer matches `parse_structured_props` in [`Link`](crate::render::Link).
 fn parse_structured_image_props(image: &mut ImageRef, content: &str) {
-    let mut chars = content.chars().peekable();
-
-    while chars.peek().is_some() {
-        while chars.peek().is_some_and(|&c| c.is_whitespace() || c == ',') {
-            chars.next();
-        }
-        if chars.peek().is_none() {
-            break;
-        }
-
-        let mut key = String::new();
-        while let Some(&c) = chars.peek() {
-            if c == '=' || c.is_whitespace() || c == ',' {
-                break;
-            }
-            key.push(c);
-            chars.next();
-        }
-        if key.is_empty() {
-            break;
-        }
-
-        while chars.peek().is_some_and(|c| c.is_whitespace()) {
-            chars.next();
-        }
-        if chars.peek() != Some(&'=') {
-            continue;
-        }
-        chars.next();
-        while chars.peek().is_some_and(|c| c.is_whitespace()) {
-            chars.next();
-        }
-
-        let value = if chars.peek() == Some(&'"') || chars.peek() == Some(&'\'') {
-            let quote = chars.next().unwrap_or('"');
-            let mut value = String::new();
-            while let Some(c) = chars.next() {
-                if c == '\\' {
-                    if let Some(escaped) = chars.next() {
-                        value.push(escaped);
-                    }
-                } else if c == quote {
-                    break;
-                } else {
-                    value.push(c);
-                }
-            }
-            value
-        } else {
-            let mut value = String::new();
-            while let Some(&c) = chars.peek() {
-                if c.is_whitespace() || c == ',' {
-                    break;
-                }
-                value.push(c);
-                chars.next();
-            }
-            value
-        };
-
-        apply_structured_image_prop(image, key.trim(), value);
-    }
+    reference_parse::parse_structured(content, |key, value| {
+        apply_structured_image_prop(image, key, value);
+    });
 }
 
 /// Applies a single structured image directive property.
@@ -1768,34 +1505,7 @@ fn apply_structured_image_prop(image: &mut ImageRef, key: &str, value: String) {
 }
 
 fn parse_markdown_title_value(value: &str) -> String {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-
-    let bytes = trimmed.as_bytes();
-    if bytes.len() > 1 && (bytes[0] == b'"' || bytes[0] == b'\'') {
-        let quote = bytes[0];
-        let mut idx = 1usize;
-        let mut out = String::new();
-
-        while idx < bytes.len() {
-            if bytes[idx] == b'\\' && idx + 1 < bytes.len() {
-                out.push(bytes[idx + 1] as char);
-                idx += 2;
-                continue;
-            }
-            if bytes[idx] == quote {
-                break;
-            }
-            out.push(bytes[idx] as char);
-            idx += 1;
-        }
-
-        return out;
-    }
-
-    trimmed.to_string()
+    reference_parse::parse_title(value)
 }
 
 fn parse_alt_width_hint(alt_text: &str) -> (String, Option<CssSizing>) {
@@ -1833,11 +1543,11 @@ fn parse_css_width_value(value: &str) -> Option<CssSizing> {
 }
 
 fn decode_markdown_url(value: &str) -> String {
-    value.replace("%28", "(").replace("%29", ")")
+    reference_parse::decode_markdown_url(value)
 }
 
 fn escape_markdown_url(value: &str) -> String {
-    value.replace('(', "%28").replace(')', "%29")
+    reference_parse::escape_markdown_url(value)
 }
 
 fn unescape_markdown_alt(value: &str) -> String {
@@ -1855,15 +1565,11 @@ fn escape_markdown_alt(value: &str) -> String {
 }
 
 fn encode_markdown_metadata(value: &MarkdownMetadataPackage) -> Option<String> {
-    let json = serde_json::to_string(value).ok()?;
-    Some(base64_encode(json.as_bytes()))
+    metadata_codec::encode(value)
 }
 
 fn decode_markdown_metadata(value: &str) -> Option<MarkdownMetadataPackage> {
-    let trimmed = value.trim();
-    let decoded = base64_decode(trimmed)?;
-    let json = String::from_utf8(decoded).ok()?;
-    let metadata = serde_json::from_str::<MarkdownMetadataPackage>(&json).ok()?;
+    let metadata: MarkdownMetadataPackage = metadata_codec::decode(value)?;
     if metadata.marker == MARKDOWN_METADATA_MARKER {
         Some(metadata)
     } else {
@@ -1877,26 +1583,11 @@ fn parse_positive_u32(value: &str) -> Option<u32> {
 }
 
 fn normalize_optional(value: String) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
+    reference_parse::normalize_optional(value)
 }
 
 fn normalize_data_key(key: String) -> Option<String> {
-    let key = key.trim();
-    if key.is_empty() {
-        return None;
-    }
-
-    let normalized = key.strip_prefix("data-").unwrap_or(key);
-    if normalized.is_empty() {
-        None
-    } else {
-        Some(normalized.to_string())
-    }
+    reference_parse::normalize_data_key(key)
 }
 
 fn extract_primary_src_from_srcset(srcset: &str) -> Option<&str> {
@@ -1917,160 +1608,13 @@ fn extract_primary_src_from_srcset(srcset: &str) -> Option<&str> {
 }
 
 fn html_escape(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#x27;")
-}
-
-fn html_unescape(value: &str) -> String {
-    value
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#x27;", "'")
-        .replace("&#39;", "'")
+    reference_parse::html_escape(value)
 }
 
 fn strip_ansi_sequences(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    let mut chars = value.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        if ch != '\u{1b}' {
-            out.push(ch);
-            continue;
-        }
-
-        match chars.peek().copied() {
-            Some('[') => {
-                chars.next();
-                for c in chars.by_ref() {
-                    if ('@'..='~').contains(&c) {
-                        break;
-                    }
-                }
-            }
-            Some(']') => {
-                chars.next();
-                let mut prev_escape = false;
-                for c in chars.by_ref() {
-                    if c == '\u{7}' {
-                        break;
-                    }
-                    if prev_escape && c == '\\' {
-                        break;
-                    }
-                    prev_escape = c == '\u{1b}';
-                }
-            }
-            _ => {}
-        }
-    }
-
-    out
+    reference_parse::strip_ansi_sequences(value)
 }
 
-fn base64_encode(input: &[u8]) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
-    let mut idx = 0usize;
-
-    while idx < input.len() {
-        let b0 = input[idx];
-        let b1 = if idx + 1 < input.len() {
-            input[idx + 1]
-        } else {
-            0
-        };
-        let b2 = if idx + 2 < input.len() {
-            input[idx + 2]
-        } else {
-            0
-        };
-
-        let n = ((b0 as u32) << 16) | ((b1 as u32) << 8) | (b2 as u32);
-        out.push(TABLE[((n >> 18) & 0x3f) as usize] as char);
-        out.push(TABLE[((n >> 12) & 0x3f) as usize] as char);
-        if idx + 1 < input.len() {
-            out.push(TABLE[((n >> 6) & 0x3f) as usize] as char);
-        } else {
-            out.push('=');
-        }
-        if idx + 2 < input.len() {
-            out.push(TABLE[(n & 0x3f) as usize] as char);
-        } else {
-            out.push('=');
-        }
-
-        idx += 3;
-    }
-
-    out
-}
-
-fn base64_decode(input: &str) -> Option<Vec<u8>> {
-    let input = input.trim();
-    if input.is_empty() || !input.len().is_multiple_of(4) {
-        return None;
-    }
-
-    let mut out = Vec::with_capacity(input.len() / 4 * 3);
-    let bytes = input.as_bytes();
-    let mut idx = 0usize;
-
-    while idx < bytes.len() {
-        let c0 = bytes[idx] as char;
-        let c1 = bytes[idx + 1] as char;
-        let c2 = bytes[idx + 2] as char;
-        let c3 = bytes[idx + 3] as char;
-
-        let v0 = base64_value(c0)?;
-        let v1 = base64_value(c1)?;
-        let v2 = if c2 == '=' {
-            None
-        } else {
-            Some(base64_value(c2)?)
-        };
-        let v3 = if c3 == '=' {
-            None
-        } else {
-            Some(base64_value(c3)?)
-        };
-
-        let n = ((v0 as u32) << 18)
-            | ((v1 as u32) << 12)
-            | ((v2.unwrap_or(0) as u32) << 6)
-            | (v3.unwrap_or(0) as u32);
-
-        out.push(((n >> 16) & 0xff) as u8);
-        if v2.is_some() {
-            out.push(((n >> 8) & 0xff) as u8);
-        }
-        if v3.is_some() {
-            out.push((n & 0xff) as u8);
-        }
-
-        idx += 4;
-    }
-
-    Some(out)
-}
-
-fn base64_value(ch: char) -> Option<u8> {
-    match ch {
-        'A'..='Z' => Some((ch as u8) - b'A'),
-        'a'..='z' => Some((ch as u8) - b'a' + 26),
-        '0'..='9' => Some((ch as u8) - b'0' + 52),
-        '+' => Some(62),
-        '/' => Some(63),
-        _ => None,
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -2367,7 +1911,7 @@ mod tests {
         let paren_end = find_closing_paren(rest, 0).expect("closing paren");
         let (_, trailing) = extract_markdown_url(&rest[1..paren_end]);
         let encoded = parse_markdown_title_value(trailing.trim());
-        let decoded = base64_decode(&encoded).expect("metadata should be base64");
+        let decoded = metadata_codec::base64_decode(&encoded).expect("metadata should be base64");
         let json = String::from_utf8(decoded).expect("metadata should be utf8");
 
         assert!(json.contains("\"class\":\"hero\""));

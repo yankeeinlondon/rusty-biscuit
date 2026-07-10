@@ -1,0 +1,434 @@
+use super::*;
+
+// ============================================
+// Schema Validation integration tests
+// ============================================
+
+mod schema_validation_integration {
+    use super::*;
+
+    #[test]
+    fn schema_validation_fails_fast_before_shell_expansion() {
+        // Document matching the shape of the failing planner prompt:
+        // spec is empty, and dir uses shell expansion that would fail
+        // if spec stays empty.
+        let content = "---\n$schema:\n  spec: 'file(required)'\nspec: \"\"\ndir: \"$(dirname '{{ spec }}')\"\n---\nBody\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new().only(&[
+            ComposeOperation::FrontmatterInterpolation,
+            ComposeOperation::FrontmatterShellExpansion,
+            ComposeOperation::Interpolation,
+        ]);
+
+        let err = md.compose_with(options).unwrap_err();
+        let err_string = format!("{err}");
+        assert!(
+            err_string.contains("Schema validation failed"),
+            "Expected schema validation error, got: {err_string}"
+        );
+        assert!(
+            !err_string.contains("dirname"),
+            "Shell expansion should not have run, got: {err_string}"
+        );
+
+        // The error variant itself should name the failing property.
+        match err {
+            MarkdownError::SchemaValidationFailed { problems, .. } => {
+                assert!(
+                    problems.iter().any(|p| {
+                        p.property.as_deref() == Some("spec") || p.path == "/spec"
+                    }),
+                    "Error should mention the spec property, got: {problems:?}"
+                );
+            }
+            other => panic!("Expected SchemaValidationFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn schema_violation_on_shell_value_reported_when_shell_expansion_disabled() {
+        // A `$(...)` frontmatter value violates the schema, but
+        // FrontmatterShellExpansion is NOT in the enabled set. Because no
+        // later stage will expand or re-validate `spec`, the violation must
+        // surface here rather than being deferred and silently accepted.
+        let content =
+            "---\n$schema:\n  spec: 'number(required)'\nspec: \"$(echo 1)\"\n---\nBody\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+
+        let err = md.compose_with(options).unwrap_err();
+        match err {
+            MarkdownError::SchemaValidationFailed { problems, .. } => {
+                assert!(
+                    problems
+                        .iter()
+                        .any(|p| p.property.as_deref() == Some("spec") || p.path == "/spec"),
+                    "Error should mention the spec property, got: {problems:?}"
+                );
+            }
+            other => panic!("Expected SchemaValidationFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn schema_validation_reports_zero_shell_replacements() {
+        let content = "---\n$schema:\n  spec: 'file(required)'\nspec: \"\"\ndir: \"$(dirname '{{ spec }}')\"\n---\nBody\n";
+        let md: Markdown = content.into();
+
+        // Even with fail_fast=false, schema validation is a hard error.
+        let options = ComposeOptions::new()
+            .only(&[
+                ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::FrontmatterShellExpansion,
+                ComposeOperation::Interpolation,
+            ])
+            .with_fail_fast(false);
+
+        let err = md.compose_with(options).unwrap_err();
+        match err {
+            MarkdownError::SchemaValidationFailed { .. } => {}
+            other => panic!("Expected SchemaValidationFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn coercion_write_back_flows_to_composed_frontmatter() {
+        // `has_spec` derives from a ternary, resolves to the string "true"
+        // during frontmatter interpolation, and is coerced to a real JSON
+        // bool by schema validation. The composed frontmatter must hold the
+        // bool, not the string.
+        let content = "---\n$schema:\n  spec: string(required)\n  has_spec: boolean\nspec: design.md\nhas_spec: \"{{spec ? true : false}}\"\n---\nBody\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new().only(&[
+            ComposeOperation::FrontmatterInterpolation,
+            ComposeOperation::Interpolation,
+        ]);
+
+        let (composed, _report) = md.compose_with(options).unwrap();
+        assert_eq!(
+            composed.frontmatter().as_map().get("has_spec"),
+            Some(&serde_json::json!(true))
+        );
+    }
+
+    #[test]
+    fn implement_md_three_arm_union_ternaries_coerce_and_defer_shell() {
+        // Faithful reproduction of the original failing `claudine compose
+        // prompts/implement.md spec=… --claude` invocation: a 3-arm root
+        // union where every arm types the `has_*` trio as strict `boolean`,
+        // computed `has_*` ternaries that render into quoted scalars
+        // ("true"/"false"), and a `$(...)`-bearing `dir`. A `spec=` value is
+        // supplied via --set, so arm 2 (`spec: string(required)`) validates
+        // post-coercion. Before this feature the strict `boolean` arms
+        // rejected the "false"/"true" strings; now they coerce.
+        //
+        // Frontmatter shell expansion is left disabled to keep the test
+        // hermetic (no real `dirname` invocation). `dir` is typed `string`,
+        // so its literal `$(...)` value is already a valid string: coercion
+        // skips it and validation raises no type problem, so it survives
+        // untouched into the composed output as a deferred shell expression.
+        let content = "---\n\
+            $schema:\n\
+            \x20 - review: string(required)\n\
+            \x20   spec: string\n\
+            \x20   iteration: number\n\
+            \x20   has_plan: boolean\n\
+            \x20   has_spec: boolean\n\
+            \x20   has_review: boolean\n\
+            \x20 - spec: string(required)\n\
+            \x20   has_plan: boolean\n\
+            \x20   has_spec: boolean\n\
+            \x20   has_review: boolean\n\
+            \x20 - plan: string(required)\n\
+            \x20   spec: string\n\
+            \x20   iteration: number\n\
+            \x20   has_plan: boolean\n\
+            \x20   has_spec: boolean\n\
+            \x20   has_review: boolean\n\
+            has_spec: \"{{spec ? true : false}}\"\n\
+            has_plan: \"{{plan ? true : false}}\"\n\
+            has_review: \"{{review ? true : false}}\"\n\
+            dir: \"$(dirname '{{spec || plan}}')\"\n\
+            ---\nBody\n";
+        let md: Markdown = content.into();
+
+        // `spec=` provided via --set; no `plan`/`review` → second arm wins.
+        let options = ComposeOptions::new()
+            .with_set_overrides(serde_json::json!({ "spec": "features/plan.md" }))
+            .only(&[
+                ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::Interpolation,
+            ]);
+
+        let (composed, _report) = md
+            .compose_with(options)
+            .expect("compose should succeed once the has_* strings coerce");
+
+        let fm = composed.frontmatter();
+        let map = fm.as_map();
+        // The motivating fix: the ternary-derived strings become real bools.
+        assert_eq!(map.get("has_spec"), Some(&serde_json::json!(true)));
+        assert_eq!(map.get("has_plan"), Some(&serde_json::json!(false)));
+        assert_eq!(map.get("has_review"), Some(&serde_json::json!(false)));
+        // The `$(...)` `dir` value is deferred: coercion skips it pre-shell,
+        // and the unresolved interpolation/shell template never errored.
+        let dir = map.get("dir").and_then(serde_json::Value::as_str).unwrap();
+        assert!(
+            dir.contains("$(") && dir.contains("dirname"),
+            "dir should remain a deferred shell expression, got: {dir}"
+        );
+    }
+
+    #[test]
+    fn parent_set_overlay_satisfies_child_schema() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+
+        // Child has a schema requiring child_input
+        std::fs::write(
+            &child,
+            "---\n$schema:\n  child_input: 'string(required)'\n---\nChild body\n",
+        )
+        .unwrap();
+
+        // Parent transcludes child with set.child_input="ok"
+        std::fs::write(
+            &root,
+            "# Parent\n\n::file ./child.md set.child_input=\"ok\"\n",
+        )
+        .unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = ComposeOptions::new().with_source_file(root);
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        assert!(composed.content().contains("Child body"));
+        assert_eq!(report.transclusions_applied, 1);
+    }
+
+    #[test]
+    fn parent_set_overlay_missing_child_schema_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+
+        // Child has a schema requiring child_input
+        std::fs::write(
+            &child,
+            "---\n$schema:\n  child_input: 'string(required)'\n---\nChild body\n",
+        )
+        .unwrap();
+
+        // Parent transcludes child WITHOUT the set overlay
+        std::fs::write(&root, "# Parent\n\n::file ./child.md\n").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        // fail_fast=true so the schema validation error propagates rather
+        // than being downgraded to a transclusion warning.
+        let options = ComposeOptions::new()
+            .with_source_file(root)
+            .with_fail_fast(true);
+        let err = md.compose_with(options).unwrap_err();
+
+        match err {
+            MarkdownError::SchemaValidationFailed { problems, .. } => {
+                assert!(
+                    problems.iter().any(|p| p.property.as_deref() == Some("child_input")),
+                    "Expected problem on child_input, got: {problems:?}"
+                );
+            }
+            other => panic!("Expected SchemaValidationFailed, got {other:?}"),
+        }
+    }
+
+    /// Different baseline schemas must not share cache entries for the same
+    /// transcluded child. Compose the same parent+child three times against
+    /// a shared persistent cache:
+    ///
+    /// 1. baseline A → cold cache, child is computed and written to the
+    ///    persistent store (`persistent_hits == 0`, `persistent_writes >= 1`).
+    /// 2. baseline A again → cache is warm and the child compose entry is
+    ///    reused (`persistent_hits >= 1`).
+    /// 3. baseline B → baseline differs, so the persistent cache key
+    ///    differs; the child must be recomputed rather than reuse the
+    ///    baseline-A entry (`persistent_hits == 0` again).
+    ///
+    /// This proves `options_hash` includes `baseline_schema` in a way that
+    /// actually invalidates the persistent cache — guarding against the
+    /// "stale success keyed without baseline" regression.
+    #[test]
+    fn baseline_cache_does_not_reuse_across_distinct_baselines() {
+        use crate::markdown::compose::CacheAccessMode;
+        use crate::markdown::schemas::{
+            Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema,
+            SimplifiedType, TypeExpr,
+        };
+        use indexmap::IndexMap;
+
+        fn baseline_required(prop: &str) -> SimplifiedSchema {
+            let mut properties = IndexMap::new();
+            properties.insert(
+                prop.into(),
+                PropertyDef::Single(PropertyAtom {
+                    ty: TypeExpr::Primitive(SimplifiedType::String),
+                    is_array: false,
+                    constraints: vec![Constraint::Required],
+                    array_constraints: vec![],
+                    description: None,
+                }),
+            );
+            SimplifiedSchema::Single(SchemaShape {
+                properties,
+                ..Default::default()
+            })
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let cache_root = dir.path().join("cache");
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+
+        // Parent supplies both `alpha` and `beta` so it (and its effective
+        // state inherited by the child) satisfies either baseline under
+        // test. Cache invalidation is the contract we care about here, not
+        // the validation outcome.
+        std::fs::write(&child, "---\nalpha: ok\nbeta: ok\n---\nChild body\n").unwrap();
+        std::fs::write(
+            &root,
+            "---\nalpha: ok\nbeta: ok\n---\n# Parent\n\n::file ./child.md\n",
+        )
+        .unwrap();
+
+        let mk_options = |baseline_prop: &str| {
+            ComposeOptions::new()
+                .with_source_file(&root)
+                .with_baseline_schema(baseline_required(baseline_prop))
+                .with_cache_access_mode(CacheAccessMode::ReadWrite)
+                .with_cache_root(&cache_root)
+                .with_cache_namespace("baseline_cache_regression")
+                .with_fail_fast(true)
+        };
+
+        // ── Run 1: cold cache under baseline A ─────────────────────
+        let md1 = Markdown::try_from(root.as_path()).unwrap();
+        let (_, report1) = md1
+            .compose_with(mk_options("alpha"))
+            .expect("run 1 (baseline alpha, cold cache) should succeed");
+        let stats1 = report1
+            .cache_stats
+            .expect("expected cache stats with cache enabled");
+        assert_eq!(
+            stats1.persistent_hits, 0,
+            "run 1 should have a cold persistent cache, got {stats1:?}"
+        );
+        assert!(
+            stats1.persistent_writes >= 1,
+            "run 1 must write the child compose to the persistent cache, got {stats1:?}"
+        );
+
+        // ── Run 2: same baseline A → cache should be warm ──────────
+        let md2 = Markdown::try_from(root.as_path()).unwrap();
+        let (_, report2) = md2
+            .compose_with(mk_options("alpha"))
+            .expect("run 2 (baseline alpha, warm cache) should succeed");
+        let stats2 = report2
+            .cache_stats
+            .expect("expected cache stats with cache enabled");
+        assert!(
+            stats2.persistent_hits >= 1,
+            "run 2 must reuse the warmed persistent entry, got {stats2:?}",
+        );
+
+        // ── Run 3: baseline B → distinct key, must not reuse run 1 ─
+        let md3 = Markdown::try_from(root.as_path()).unwrap();
+        let (_, report3) = md3
+            .compose_with(mk_options("beta"))
+            .expect("run 3 (baseline beta) should succeed");
+        let stats3 = report3
+            .cache_stats
+            .expect("expected cache stats with cache enabled");
+        assert_eq!(
+            stats3.persistent_hits, 0,
+            "run 3 must NOT reuse the baseline-A entry — options_hash must include \
+             baseline_schema. got {stats3:?}",
+        );
+        assert!(
+            stats3.persistent_writes >= 1,
+            "run 3 must compute and write a fresh entry under the new baseline, got {stats3:?}"
+        );
+    }
+
+    /// The launch-area anchor (`file_ref_fallback_dir`) changes read-side file
+    /// resolution, so two runs that differ only in their anchor must not share a
+    /// persistent cache entry.
+    ///
+    /// The body interpolates `{{ file_exists("anchored.md") }}`. The document
+    /// dir never holds `anchored.md`, so the outcome depends entirely on the
+    /// fallback dir: run 1's fallback has the file (resolves `true`), run 2's
+    /// fallback does not (`false`). If `options_hash` ignored
+    /// `file_ref_fallback_dir`, run 2 would reuse run 1's cached `true` —
+    /// returning a stale, wrong-launch-area result.
+    #[test]
+    fn cache_does_not_reuse_across_distinct_file_ref_fallback_dirs() {
+        use crate::markdown::compose::CacheAccessMode;
+
+        let dir = tempfile::tempdir().unwrap();
+        let cache_root = dir.path().join("cache");
+        let doc_dir = dir.path().join("doc");
+        std::fs::create_dir_all(&doc_dir).unwrap();
+        let root = doc_dir.join("root.md");
+        std::fs::write(&root, "anchored exists: {{ file_exists(\"anchored.md\") }}\n").unwrap();
+
+        // Run 1's launch area HAS anchored.md; run 2's does NOT.
+        let fallback_present = dir.path().join("launch-present");
+        let fallback_absent = dir.path().join("launch-absent");
+        std::fs::create_dir_all(&fallback_present).unwrap();
+        std::fs::create_dir_all(&fallback_absent).unwrap();
+        std::fs::write(fallback_present.join("anchored.md"), "# Anchored\n").unwrap();
+
+        let mk_options = |fallback: &std::path::Path| {
+            ComposeOptions::new()
+                .with_source_file(&root)
+                .with_file_ref_fallback_dir(fallback.to_path_buf())
+                .with_cache_access_mode(CacheAccessMode::ReadWrite)
+                .with_cache_root(&cache_root)
+                .with_cache_namespace("file_ref_fallback_cache_regression")
+                .with_fail_fast(true)
+        };
+
+        // ── Run 1: cold cache, fallback HAS anchored.md → true ─────
+        let md1 = Markdown::try_from(root.as_path()).unwrap();
+        let (composed1, report1) = md1
+            .compose_with(mk_options(&fallback_present))
+            .expect("run 1 (present fallback, cold cache) should succeed");
+        assert!(
+            composed1.content().contains("anchored exists: true"),
+            "run 1 must resolve file_exists as true from its launch area: {}",
+            composed1.content(),
+        );
+        let stats1 = report1
+            .cache_stats
+            .expect("expected cache stats with cache enabled");
+        assert_eq!(
+            stats1.persistent_hits, 0,
+            "run 1 should have a cold persistent cache, got {stats1:?}"
+        );
+
+        // ── Run 2: different launch area, fallback LACKS the file ──
+        let md2 = Markdown::try_from(root.as_path()).unwrap();
+        let (composed2, _report2) = md2
+            .compose_with(mk_options(&fallback_absent))
+            .expect("run 2 (absent fallback) should succeed");
+        assert!(
+            composed2.content().contains("anchored exists: false"),
+            "run 2 must reflect its OWN launch area (file absent) — options_hash \
+             must include file_ref_fallback_dir, not reuse run 1's cached output: {}",
+            composed2.content(),
+        );
+    }
+}
+

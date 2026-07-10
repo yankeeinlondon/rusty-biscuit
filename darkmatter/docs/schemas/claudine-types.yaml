@@ -1,0 +1,72 @@
+# Reusable SimplifiedSchema types for Claudine-owned frontmatter.
+# `claudine.yaml` imports these definitions without exposing helper names as
+# document properties.
+$schema:
+    lifecycle-action:
+        "<string>": any
+        $constraints:
+            min-keys: 1
+
+    lifecycle-stack-item:
+        when: "string -> Darkmatter condition expression evaluated when the event fires."
+        action:
+            - "string(required) -> Bare zero-argument lifecycle action verb."
+            - "lifecycle-action(required)@this -> Positional or key/value lifecycle action."
+            - "lifecycle-action[](required)@this -> Ordered positional and key/value lifecycle actions."
+        no_error: "boolean -> Suppresses dispatch failures for a single scalar action; array actions declare this per action."
+
+    lifecycle-event:
+        # messaging
+        say: "string -> Text spoken with TTS after sound effects. Mutually exclusive with say_first."
+        say_first: "string -> Text spoken with TTS before sound effects. Mutually exclusive with say."
+        effect: "string -> Built-in sound effect name."
+        message: "string -> Message sent through the configured messenger route."
+        stderr: "string -> Statusless text written to stderr."
+        stdout: "string -> Statusless text written to stdout."
+        info: "string -> Info status line written to stderr."
+        warn: "string -> Warning status line written to stderr."
+        success: "string -> Success status line written to stderr."
+        notify: "string -> Desktop notification title."
+        # conditional stack with flow control
+        stack: "lifecycle-stack-item[]@this -> Ordered conditional lifecycle actions."
+
+    loop-action:
+        op: "enum(increment, decrement, set, append, prepend, merge; required) -> Frontmatter mutation operation."
+        prop: "string(not-empty; required) -> Frontmatter property to mutate."
+        value: "any -> Value used by set, append, prepend, and merge."
+
+    loop-event:
+        while: "string -> Boolean expression evaluated before each iteration; mutually exclusive with until."
+        until: "string -> Boolean expression evaluated before each iteration; mutually exclusive with while."
+        action:
+            - "string -> Frontmatter mutation in op(...) form; mutually exclusive with actions."
+            - "loop-action@this -> Structured frontmatter mutation; mutually exclusive with actions."
+        actions:
+            - "string -> Frontmatter mutation in op(...) form; mutually exclusive with action."
+            - "loop-action@this -> Structured frontmatter mutation; mutually exclusive with action."
+            - "any[] -> Ordered string or structured frontmatter mutations; mutually exclusive with action."
+        max: "number(integer; min(1); default(100)) -> Maximum iteration count."
+        fail_fast: "boolean(default(true)) -> Per-loop failure policy; when set to `true` any failure will immediately stop the transaction and the error will be sent to the `failure` event."
+        on_rate_limit: "enum(pause, abort, continue; default(pause)) -> Rate-limit handling policy."
+        say: "string -> Text spoken with TTS after sound effects. Mutually exclusive with say_first."
+        say_first: "string -> Text spoken with TTS before sound effects. Mutually exclusive with say."
+        effect: "string -> Built-in sound effect name."
+        message: "string -> Message sent through the configured messenger route."
+        stderr: "string -> Statusless text written to stderr."
+        stdout: "string -> Statusless text written to stdout."
+        info: "string -> Info status line written to stderr."
+        warn: "string -> Warning status line written to stderr."
+        success: "string -> Success status line written to stderr."
+        notify: "string -> Desktop notification title."
+        stack: "lifecycle-stack-item[]@this -> Ordered conditional lifecycle actions for the post-finalize loop event."
+
+    exit-expression:
+        pattern: "string(not-empty) -> Literal or regular-expression pattern that ends a run; mutually exclusive with patterns."
+        patterns: "string(not-empty)[](min(1)) -> Patterns sharing one kind and scope; mutually exclusive with pattern."
+        kind: "enum(literal, regex; default(literal)) -> Pattern interpretation."
+        ignore_case: "boolean(default(false)) -> Enables case-insensitive literal matching."
+        scope: "string -> Optional agent or agent/model selector."
+
+    exit-expression-layer:
+        mode: "enum(merge, override) -> How this layer combines with lower-precedence rules."
+        rules: "exit-expression[]@this -> Exit-expression rules in this layer."

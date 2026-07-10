@@ -8,10 +8,12 @@
 //! `env`, captures `ctx`, or executes anything: static value resolution is
 //! frontmatter-backed only.
 
-use darkmatter::markdown::compose::context::context_variable_descriptors;
+use darkmatter::markdown::compose::context::{
+    ContextVariableDescriptor, context_variable_descriptors,
+};
 use darkmatter::markdown::compose::expression::{
-    EXPRESSION_FUNCTION_DESCRIPTORS, ExpressionFinder, ParseError, SpannedExpr, SpannedExprKind,
-    parse_spanned,
+    expression_function_descriptors, ExpressionFinder, ExpressionFunctionDescriptor, ParseError,
+    SpannedExpr, SpannedExprKind, parse_spanned,
 };
 use darkmatter::markdown::span::SourceSpan;
 
@@ -77,6 +79,105 @@ pub fn root_identifier(expr: &SpannedExpr) -> Option<String> {
     }
 }
 
+/// The name of the deepest [`SpannedExprKind::FunctionCall`] whose
+/// function-name identifier contains `offset` (a byte offset into `source`),
+/// if any.
+///
+/// Only a cursor on the function-name identifier itself resolves; an offset on
+/// an argument, parenthesis, or comma does not, so the caller's ctx/frontmatter
+/// hover can take over for the inner expression. Nested calls like
+/// `as_csv(length(x))` answer for the inner call only when the cursor sits on
+/// the inner name.
+///
+/// `source` is the expression text the spans index into; the
+/// `source.get(name_span) == name` check filters out synthetic `and`/`or`
+/// calls lowered from `&&`/`||` operators, whose call span begins at the left
+/// operand rather than at a name token.
+pub fn function_call_at<'a>(
+    expr: &'a SpannedExpr,
+    source: &str,
+    offset: usize,
+) -> Option<&'a str> {
+    if offset < expr.span.start || offset > expr.span.end {
+        return None;
+    }
+    let children: Vec<&SpannedExpr> = match &expr.kind {
+        SpannedExprKind::UnaryNot(inner)
+        | SpannedExprKind::UnaryMinus(inner)
+        | SpannedExprKind::Paren(inner) => vec![inner],
+        SpannedExprKind::Binary { left, right, .. }
+        | SpannedExprKind::Comparison { left, right, .. } => vec![left, right],
+        SpannedExprKind::Index { base, index } => vec![base, index],
+        SpannedExprKind::MemberAccess { base, .. } => vec![base],
+        SpannedExprKind::Fallback { primary, fallback } => vec![primary, fallback],
+        SpannedExprKind::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => vec![condition, then_branch, else_branch],
+        SpannedExprKind::FunctionCall { args, .. } => args.iter().collect(),
+        _ => Vec::new(),
+    };
+    for child in children {
+        if let Some(name) = function_call_at(child, source, offset) {
+            return Some(name);
+        }
+    }
+    match &expr.kind {
+        SpannedExprKind::FunctionCall { name, .. } => {
+            let name_span = expr.span.start..expr.span.start + name.len();
+            // Exclusive end so a cursor on `(` does not match; the source-text
+            // check rejects synthetic `and`/`or` calls whose span starts at the
+            // left operand, not at a name token.
+            if offset >= name_span.start
+                && offset < name_span.end
+                && source.get(name_span) == Some(name.as_str())
+            {
+                Some(name)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// The deepest sub-expression whose span contains `offset` (a byte offset into
+/// the expression text), if any.
+///
+/// Used by the interpolation hover to find which sub-expression (e.g. a
+/// `ctx.packages` argument inside `as_csv(ctx.packages)`) is under the cursor,
+/// so the ctx/frontmatter hover path can serve it after
+/// [`function_call_at`] declines on a non-name offset.
+pub fn expression_at(expr: &SpannedExpr, offset: usize) -> Option<&SpannedExpr> {
+    if offset < expr.span.start || offset > expr.span.end {
+        return None;
+    }
+    let children: Vec<&SpannedExpr> = match &expr.kind {
+        SpannedExprKind::UnaryNot(inner)
+        | SpannedExprKind::UnaryMinus(inner)
+        | SpannedExprKind::Paren(inner) => vec![inner],
+        SpannedExprKind::Binary { left, right, .. }
+        | SpannedExprKind::Comparison { left, right, .. } => vec![left, right],
+        SpannedExprKind::Index { base, index } => vec![base, index],
+        SpannedExprKind::MemberAccess { base, .. } => vec![base],
+        SpannedExprKind::Fallback { primary, fallback } => vec![primary, fallback],
+        SpannedExprKind::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => vec![condition, then_branch, else_branch],
+        SpannedExprKind::FunctionCall { args, .. } => args.iter().collect(),
+        _ => Vec::new(),
+    };
+    for child in children {
+        if let Some(found) = expression_at(child, offset) {
+            return Some(found);
+        }
+    }
+    Some(expr)
+}
+
 /// The completion partial being typed inside an open `{{` at `offset`, and the
 /// document offset where it begins. `None` when the cursor is not inside an
 /// interpolation.
@@ -95,33 +196,90 @@ pub fn completion_partial(text: &str, offset: usize) -> Option<(usize, &str)> {
     Some((token_start, &text[token_start..offset]))
 }
 
-/// The `ctx.*` variable names (bare, without the `ctx.` prefix) with their
-/// descriptions, for completion and hover documentation.
-pub fn ctx_names() -> impl Iterator<Item = (&'static str, &'static str)> {
+/// All context-variable descriptors, in catalog display order.
+///
+/// The descriptor-returning access surface for `ctx.*` completion and hover:
+/// it preserves the full [`ContextVariableDescriptor`] — name, rendered
+/// `display_type`, ownership flags, and description — instead of the lossy
+/// `(name, description)` projection it replaces.
+pub fn context_descriptors() -> &'static [ContextVariableDescriptor] {
     context_variable_descriptors()
-        .iter()
-        .map(|descriptor| (descriptor.name, descriptor.description))
 }
 
-/// The expression function signatures with their descriptions.
-pub fn function_signatures() -> impl Iterator<Item = (&'static str, &'static str)> {
-    EXPRESSION_FUNCTION_DESCRIPTORS
+/// The context-variable descriptor whose bare tail name is `name` (e.g.
+/// `"today"`, `"packages"`), if any. The lookup is exact and case-sensitive.
+pub fn ctx_descriptor(name: &str) -> Option<&'static ContextVariableDescriptor> {
+    context_variable_descriptors()
         .iter()
-        .map(|descriptor| (descriptor.signature, descriptor.description))
+        .find(|descriptor| descriptor.name == name)
+}
+
+/// All expression-function descriptors, in catalog display order.
+///
+/// The descriptor-returning access surface for function completion and hover:
+/// each [`ExpressionFunctionDescriptor`] carries the untyped `signature`, the
+/// typed [`ExpressionFunctionDescriptor::typed_signature`], and the description.
+pub fn function_descriptors() -> &'static [ExpressionFunctionDescriptor] {
+    expression_function_descriptors()
+}
+
+/// The expression-function descriptor whose bare name (the leading identifier
+/// of its `signature`) is `name`, if any. Overloads share a bare name; the
+/// first catalog entry wins, matching the pre-descriptor lookup order.
+pub fn function_descriptor(name: &str) -> Option<&'static ExpressionFunctionDescriptor> {
+    expression_function_descriptors()
+        .iter()
+        .find(|descriptor| function_name(descriptor.signature) == name)
+}
+
+/// The bare function name — the leading identifier of a catalog `signature`.
+fn function_name(signature: &str) -> &str {
+    signature.split('(').next().unwrap_or(signature)
 }
 
 /// Whether `name` (a `ctx.NAME` tail) is a known context variable.
+///
+/// Thin wrapper over [`ctx_descriptor`]; new work that needs any other datum
+/// (type, description) must take the descriptor directly.
 pub fn is_ctx_name(name: &str) -> bool {
-    context_variable_descriptors().iter().any(|d| d.name == name)
+    ctx_descriptor(name).is_some()
 }
 
-/// The description of a function by its bare name (`length`, `relative`, …),
-/// matching against the descriptor signature's leading identifier.
+/// The description of a function by its bare name (`length`, `relative`, …).
+///
+/// Thin wrapper over [`function_descriptor`]; new work that needs the typed
+/// signature must take the descriptor directly.
 pub fn function_description(name: &str) -> Option<&'static str> {
-    EXPRESSION_FUNCTION_DESCRIPTORS.iter().find_map(|descriptor| {
-        let signature_name = descriptor.signature.split('(').next().unwrap_or("");
-        (signature_name == name).then_some(descriptor.description)
-    })
+    function_descriptor(name).map(|descriptor| descriptor.description)
+}
+
+/// Renders the shared catalog-backed Markdown block for a `ctx.*` hover.
+///
+/// This is the single authority for that block: both the interpolation hover
+/// ([`crate::providers::dsl`]) and the frontmatter `ctx.*` hover
+/// ([`crate::providers::frontmatter`]) render it, so the two surfaces can never
+/// drift. It carries the qualified name (`ctx.<name>`), the rendered
+/// `display_type`, the read-only/Darkmatter-owned ownership note, and the
+/// description — but not any surface-specific trailer (the interpolation
+/// compose-time note is appended by its caller).
+pub fn format_ctx_hover_block(descriptor: &ContextVariableDescriptor) -> String {
+    format!(
+        "**`ctx.{}`** ({}) — read-only, Darkmatter-owned\n\n{}",
+        descriptor.name, descriptor.display_type, descriptor.description
+    )
+}
+
+/// Renders the shared catalog-backed Markdown block for a function-call hover.
+///
+/// Carries the typed signature (e.g. `as_csv(list: any[]) -> string | error`)
+/// and the description. Used by the D5 function-call hover and available as the
+/// D4 completion documentation source.
+pub fn format_function_block(descriptor: &ExpressionFunctionDescriptor) -> String {
+    format!(
+        "**`{}`**\n\n{}",
+        descriptor.typed_signature(),
+        descriptor.description
+    )
 }
 
 #[cfg(test)]
@@ -174,8 +332,94 @@ mod tests {
     }
 
     #[test]
-    fn test_catalog_lookups() {
-        assert!(is_ctx_name("today") || ctx_names().count() > 0);
-        assert!(function_description("length").is_some() || function_signatures().count() > 0);
+    fn test_ctx_descriptor_returns_full_catalog_entry() {
+        let today = ctx_descriptor("today").expect("`today` is a known context variable");
+        assert_eq!(today.name, "today");
+        assert!(!today.description.is_empty());
+        // Thin wrapper agrees with the descriptor lookup.
+        assert!(is_ctx_name("today"));
+        assert!(ctx_descriptor("definitely_not_a_ctx_var").is_none());
+        assert!(!is_ctx_name("definitely_not_a_ctx_var"));
+    }
+
+    #[test]
+    fn test_ctx_descriptor_preserves_rendered_array_type() {
+        // The lossy `(name, description)` projection discarded this; the
+        // descriptor accessor keeps the rendered `string[]` array type.
+        let packages = ctx_descriptor("packages").expect("`packages` is a known context variable");
+        assert_eq!(packages.display_type.to_string(), "string[]");
+    }
+
+    #[test]
+    fn test_function_descriptor_returns_typed_signature() {
+        let length = function_descriptor("length").expect("`length` is a known function");
+        assert_eq!(function_name(length.signature), "length");
+        // Thin wrapper agrees with the descriptor lookup.
+        assert_eq!(function_description("length"), Some(length.description));
+        assert!(function_descriptor("definitely_not_a_function").is_none());
+        assert!(function_description("definitely_not_a_function").is_none());
+    }
+
+    #[test]
+    fn test_function_descriptor_fallible_signature_has_error_suffix() {
+        // `length` is fallible (`R_NUM_ERR`), so its typed signature carries the
+        // `| error` union suffix that the untyped `signature` lacks.
+        let length = function_descriptor("length").expect("`length` is a known function");
+        assert!(length.signature.contains("length("));
+        assert!(!length.signature.contains("| error"));
+        assert!(length.typed_signature().ends_with("| error"));
+    }
+
+    #[test]
+    fn test_function_call_at_finds_deepest_call() {
+        let source = "as_csv(length(items))";
+        let expr = parse(source).unwrap();
+        let inner = source.find("length").unwrap();
+        // Cursor on the inner call's name resolves to that call.
+        assert_eq!(function_call_at(&expr, source, inner + 1), Some("length"));
+        // Cursor on the outer name resolves to the outer call.
+        assert_eq!(function_call_at(&expr, source, 1), Some("as_csv"));
+        // Cursor on an argument, parenthesis, or comma claims nothing — the
+        // caller's ctx/frontmatter hover path takes over.
+        assert_eq!(function_call_at(&expr, source, source.find("items").unwrap()), None);
+        assert_eq!(function_call_at(&expr, source, source.find("(").unwrap()), None);
+        assert_eq!(function_call_at(&expr, source, source.rfind(")").unwrap()), None);
+        // Outside the expression entirely, and on a non-call expression: none.
+        assert_eq!(function_call_at(&expr, source, source.len() + 5), None);
+        let plain = parse("title").unwrap();
+        assert_eq!(function_call_at(&plain, "title", 2), None);
+    }
+
+    #[test]
+    fn test_expression_at_finds_deepest_subexpression() {
+        let source = "as_csv(ctx.packages)";
+        let expr = parse(source).unwrap();
+        // Cursor on `ctx.packages` (the argument) finds that Variable.
+        let sub = expression_at(&expr, 8).expect("cursor on argument finds sub-expression");
+        assert_eq!(root_identifier(sub).as_deref(), Some("ctx.packages"));
+        // Cursor on the function name finds the FunctionCall itself.
+        let sub = expression_at(&expr, 1).expect("cursor on name finds function call");
+        assert!(matches!(sub.kind, SpannedExprKind::FunctionCall { .. }));
+        // Cursor outside the expression finds nothing.
+        assert!(expression_at(&expr, source.len() + 5).is_none());
+    }
+
+    #[test]
+    fn test_format_ctx_hover_block_carries_name_type_ownership_description() {
+        let packages = ctx_descriptor("packages").expect("`packages` is a known context variable");
+        let block = format_ctx_hover_block(packages);
+        assert!(block.contains("**`ctx.packages`**"));
+        assert!(block.contains("(string[])"));
+        assert!(block.contains("read-only, Darkmatter-owned"));
+        assert!(block.contains(packages.description));
+    }
+
+    #[test]
+    fn test_format_function_block_carries_typed_signature_and_description() {
+        let length = function_descriptor("length").expect("`length` is a known function");
+        let block = format_function_block(length);
+        assert!(block.contains(&length.typed_signature()));
+        assert!(block.contains("| error"));
+        assert!(block.contains(length.description));
     }
 }

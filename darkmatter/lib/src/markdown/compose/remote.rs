@@ -17,7 +17,7 @@ use crate::markdown::compose::transclusion::BlockDirective;
 /// evaluator will actually **fetch over the network** when it is an HTTP(S) URL.
 ///
 /// This is deliberately narrower than the context-requiring read-side set
-/// (`expression::functions::FS_FUNCTIONS`, seven functions): `absolute` and
+/// (the context-aware expression registrations): `absolute` and
 /// `relative` also require a resolution context but only ever rewrite a path
 /// string — they never touch the network — so registering them as remote
 /// egress would make the pre-fetch discovery scanner contact a host for a URL

@@ -81,7 +81,7 @@ pub(crate) fn run_structured_stream_session(
     // Resolve the OpenCode stalled-generation backstop for the direct wrapper
     // path (CLI > env > built-in `10m`; no frontmatter layer here). Only the
     // OpenCode branch of `build_structured_plumbing` consumes it.
-    let stall_timeout = composition::resolve_stall_timeout(args.stall_timeout.clone(), None);
+    let stall_timeout = composition::resolve_stall_timeout(args.stall_timeout.clone());
     // One signal hub per run: shared by the stdout reader thread, the
     // OpenCode stderr bridge, and the post-wait termination synthesis.
     // Harvest opt-in (E6) is resolved inside the builder.

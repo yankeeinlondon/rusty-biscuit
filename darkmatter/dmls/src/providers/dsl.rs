@@ -21,8 +21,8 @@ use darkmatter::markdown::language_grammar::LanguageGrammar;
 use darkmatter::markdown::span::SourceSpan;
 use lsp_types::{
     CompletionItem, CompletionItemKind, CompletionTextEdit, Diagnostic, DiagnosticRelatedInformation,
-    DiagnosticSeverity, DocumentLink, FoldingRange, Hover, HoverContents, Location, MarkupContent,
-    MarkupKind, NumberOrString, Range, TextEdit,
+    DiagnosticSeverity, DocumentLink, Documentation, FoldingRange, Hover, HoverContents, Location,
+    MarkupContent, MarkupKind, NumberOrString, Range, TextEdit,
 };
 
 use super::DocumentContext;
@@ -31,6 +31,7 @@ use crate::diagnostics::codes::{code, source};
 use crate::graph::normalize_join;
 use crate::overlay::shell::PolicyVerdict;
 use crate::overlay::{directives, expressions, shell};
+use crate::source_map::SourceMap;
 use crate::workspace::file_path_to_uri;
 
 // ── Completion ──────────────────────────────────────────────────────────────
@@ -60,13 +61,16 @@ fn directive_name_completions(ctx: &DocumentContext, offset: usize, partial: &st
         .filter(|info| info.keyword[2..].starts_with(partial))
         .filter_map(|info| {
             text_edit_item(
-                ctx,
+                ctx.source_map,
                 start,
                 offset,
-                info.keyword,
-                info.keyword,
-                CompletionItemKind::KEYWORD,
-                Some(info.summary.to_string()),
+                CompletionCandidate {
+                    label: info.keyword.to_string(),
+                    new_text: info.keyword.to_string(),
+                    kind: CompletionItemKind::KEYWORD,
+                    detail: Some(info.summary.to_string()),
+                    documentation: None,
+                },
             )
         })
         .collect()
@@ -94,13 +98,16 @@ fn directive_option_completions(
                     .filter(|value| value.starts_with(value_partial))
                     .filter_map(|value| {
                         text_edit_item(
-                            ctx,
+                            ctx.source_map,
                             value_start,
                             offset,
-                            value,
-                            value,
-                            CompletionItemKind::VALUE,
-                            None,
+                            CompletionCandidate {
+                                label: value.to_string(),
+                                new_text: value.to_string(),
+                                kind: CompletionItemKind::VALUE,
+                                detail: None,
+                                documentation: None,
+                            },
                         )
                     })
                     .collect(),
@@ -116,13 +123,16 @@ fn directive_option_completions(
                     .filter(|key| key.starts_with(token))
                     .filter_map(|key| {
                         text_edit_item(
-                            ctx,
+                            ctx.source_map,
                             token_start,
                             offset,
-                            key,
-                            &format!("{key}="),
-                            CompletionItemKind::PROPERTY,
-                            None,
+                            CompletionCandidate {
+                                label: key.to_string(),
+                                new_text: format!("{key}="),
+                                kind: CompletionItemKind::PROPERTY,
+                                detail: None,
+                                documentation: None,
+                            },
                         )
                     })
                     .collect(),
@@ -138,60 +148,79 @@ fn interpolation_completions(
     offset: usize,
     partial: &str,
 ) -> Vec<CompletionItem> {
+    let frontmatter_keys: Vec<String> = ctx
+        .overlay
+        .and_then(|overlay| overlay.ast.as_ref())
+        .map(|ast| ast.top_level().map(|entry| entry.key.clone()).collect())
+        .unwrap_or_default();
+    interpolation_candidates(partial, &frontmatter_keys)
+        .into_iter()
+        .filter_map(|candidate| text_edit_item(ctx.source_map, token_start, offset, candidate))
+        .collect()
+}
+
+/// One completion candidate before LSP lowering. Pure data so the D3/D4 field
+/// mapping is unit-testable without a [`DocumentContext`].
+struct CompletionCandidate {
+    /// The completion label — the untyped `signature` for functions.
+    label: String,
+    /// The eagerly inserted text — the bare name for functions (no snippet,
+    /// no synthesized parentheses), the fully qualified `ctx.<name>` for
+    /// context variables.
+    new_text: String,
+    kind: CompletionItemKind,
+    /// D3/D4: the rendered `display_type` (`ctx.*`) or `typed_signature()`
+    /// (functions).
+    detail: Option<String>,
+    /// D3/D4: the catalog description, lowered to eager Markdown.
+    documentation: Option<String>,
+}
+
+/// Candidates matching `partial` (prefix-based, case-sensitive): top-level
+/// frontmatter keys, fully qualified `ctx.*` variables, and expression
+/// functions — every field derived from the one catalog descriptor.
+fn interpolation_candidates(
+    partial: &str,
+    frontmatter_keys: &[String],
+) -> Vec<CompletionCandidate> {
     let mut items = Vec::new();
 
-    // Frontmatter keys (top-level).
-    if let Some(ast) = ctx.overlay.and_then(|overlay| overlay.ast.as_ref()) {
-        for entry in ast.top_level() {
-            if entry.key.starts_with(partial)
-                && let Some(item) = text_edit_item(
-                    ctx,
-                    token_start,
-                    offset,
-                    &entry.key,
-                    &entry.key,
-                    CompletionItemKind::FIELD,
-                    Some("frontmatter key".to_string()),
-                )
-            {
-                items.push(item);
-            }
+    for key in frontmatter_keys {
+        if key.starts_with(partial) {
+            items.push(CompletionCandidate {
+                label: key.clone(),
+                new_text: key.clone(),
+                kind: CompletionItemKind::FIELD,
+                detail: Some("frontmatter key".to_string()),
+                documentation: None,
+            });
         }
     }
 
-    // `ctx.*` variables (offered fully-qualified).
-    for (name, description) in expressions::ctx_names() {
-        let label = format!("ctx.{name}");
-        if label.starts_with(partial)
-            && let Some(item) = text_edit_item(
-                ctx,
-                token_start,
-                offset,
-                &label,
-                &label,
-                CompletionItemKind::VARIABLE,
-                Some(description.to_string()),
-            )
-        {
-            items.push(item);
+    for descriptor in expressions::context_descriptors() {
+        let label = format!("ctx.{}", descriptor.name);
+        if label.starts_with(partial) {
+            items.push(CompletionCandidate {
+                new_text: label.clone(),
+                label,
+                kind: CompletionItemKind::VARIABLE,
+                detail: Some(descriptor.display_type.to_string()),
+                documentation: Some(descriptor.description.to_string()),
+            });
         }
     }
 
-    // Expression functions.
-    for (signature, description) in expressions::function_signatures() {
+    for descriptor in expressions::function_descriptors() {
+        let signature = descriptor.signature;
         let name = signature.split('(').next().unwrap_or(signature);
-        if name.starts_with(partial)
-            && let Some(item) = text_edit_item(
-                ctx,
-                token_start,
-                offset,
-                signature,
-                name,
-                CompletionItemKind::FUNCTION,
-                Some(description.to_string()),
-            )
-        {
-            items.push(item);
+        if name.starts_with(partial) {
+            items.push(CompletionCandidate {
+                label: signature.to_string(),
+                new_text: name.to_string(),
+                kind: CompletionItemKind::FUNCTION,
+                detail: Some(descriptor.typed_signature()),
+                documentation: Some(descriptor.description.to_string()),
+            });
         }
     }
 
@@ -242,30 +271,74 @@ fn directive_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     Some(markup_hover(ctx, directive.span.clone(), lines.join("\n")))
 }
 
-/// Hover on a `{{ … }}` expression: its parsed form and, when the leading
-/// identifier is a frontmatter key, its static value.
+/// Hover on a `{{ … }}` expression: its parsed form plus, in precedence order,
+/// the catalog block for the function call under the cursor (D5), the shared
+/// `ctx.*` catalog block with the compose-time note (D2), a frontmatter static
+/// value, or a bare function-name description.
 fn interpolation_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     let body_base = body_base(ctx.text);
     let interpolation = expressions::interpolation_at(ctx.text, body_base, offset)?;
-    let mut value = match expressions::parse(&interpolation.text) {
+    let expr_offset = offset.saturating_sub(interpolation.inner.start);
+    let value = interpolation_hover_markdown(&interpolation.text, expr_offset, |name| {
+        frontmatter_scalar(ctx, name)
+    });
+    Some(markup_hover(ctx, interpolation.outer.clone(), value))
+}
+
+/// The Markdown body of an interpolation hover. Pure (no [`DocumentContext`])
+/// so the D2/D5 classification is unit-testable; `expr_offset` is the cursor's
+/// byte offset into `expression`.
+///
+/// The D2 classification rule: only an explicitly `ctx.`-qualified root
+/// receives context-variable metadata — a bare identifier is a frontmatter
+/// variable even when its name matches a known `ctx.*` tail, and an unknown
+/// `ctx.<name>` keeps the generic hover without borrowing a similarly named
+/// bare key's value. Nothing here evaluates the expression or reads `ctx.*`.
+fn interpolation_hover_markdown(
+    expression: &str,
+    expr_offset: usize,
+    frontmatter_scalar: impl Fn(&str) -> Option<String>,
+) -> String {
+    let parsed = expressions::parse(expression);
+    let mut value = match &parsed {
         Ok(expr) => format!("**Expression**\n\n`{}`", expr.erase()),
-        Err(_) => format!("**Expression** (unparsed)\n\n`{}`", interpolation.text),
+        Err(_) => format!("**Expression** (unparsed)\n\n`{expression}`"),
+    };
+    let Ok(expr) = parsed else {
+        return value;
     };
 
-    if let Ok(expr) = expressions::parse(&interpolation.text)
-        && let Some(name) = expressions::root_identifier(&expr)
+    // D5: a cursor on a known function-name identifier wins.
+    if let Some(name) = expressions::function_call_at(&expr, expression, expr_offset)
+        && let Some(descriptor) = expressions::function_descriptor(name)
     {
-        if let Some(scalar) = frontmatter_scalar(ctx, &name) {
-            value.push_str(&format!("\n\nStatic value: `{scalar}` (from frontmatter `{name}`)"));
-        } else if expressions::is_ctx_name(name.strip_prefix("ctx.").unwrap_or(&name)) {
-            // `ctx.*` is captured at compose time — never read here.
-            value.push_str("\n\nResolved from `ctx.*` at compose time (not evaluated here).");
-        } else if let Some(description) = expressions::function_description(&name) {
-            value.push_str(&format!("\n\nFunction: {description}"));
-        }
+        value.push_str(&format!("\n\n{}", expressions::format_function_block(descriptor)));
+        return value;
     }
 
-    Some(markup_hover(ctx, interpolation.outer.clone(), value))
+    // Resolve the identifier against the sub-expression under the cursor (e.g.
+    // a `ctx.packages` argument inside a call) rather than the top-level
+    // expression, so an argument's ctx/frontmatter hover is not shadowed by
+    // the enclosing call.
+    let Some(sub_expr) = expressions::expression_at(&expr, expr_offset) else {
+        return value;
+    };
+    let Some(name) = expressions::root_identifier(sub_expr) else {
+        return value;
+    };
+    if let Some(tail) = name.strip_prefix("ctx.") {
+        if let Some(descriptor) = expressions::ctx_descriptor(tail) {
+            value.push_str(&format!(
+                "\n\n{}\n\nThe `ctx` variable is evaluated at _compose_ time (rather than now).",
+                expressions::format_ctx_hover_block(descriptor)
+            ));
+        }
+    } else if let Some(scalar) = frontmatter_scalar(&name) {
+        value.push_str(&format!("\n\nStatic value: `{scalar}` (from frontmatter `{name}`)"));
+    } else if let Some(descriptor) = expressions::function_descriptor(&name) {
+        value.push_str(&format!("\n\nFunction: {}", descriptor.description));
+    }
+    value
 }
 
 /// Hover on a frontmatter `$(...)` value: the parsed command and policy verdict.
@@ -959,24 +1032,30 @@ fn push_span_fold(ctx: &DocumentContext, folds: &mut Vec<FoldingRange>, span: So
     }
 }
 
-/// Builds a completion item with an eager text edit replacing `start..offset`.
+/// Lowers a [`CompletionCandidate`] to an LSP item with an eager text edit
+/// replacing `start..offset` and eager Markdown `documentation` (D3/D4 —
+/// nothing is deferred to `completionItem/resolve`, which Zed never uses for
+/// `textEdit`).
 fn text_edit_item(
-    ctx: &DocumentContext,
+    source_map: &SourceMap,
     start: usize,
     offset: usize,
-    label: &str,
-    new_text: &str,
-    kind: CompletionItemKind,
-    detail: Option<String>,
+    candidate: CompletionCandidate,
 ) -> Option<CompletionItem> {
-    let range = ctx.source_map.byte_range_to_lsp(start..offset)?;
+    let range = source_map.byte_range_to_lsp(start..offset)?;
     Some(CompletionItem {
-        label: label.to_string(),
-        kind: Some(kind),
-        detail,
+        label: candidate.label,
+        kind: Some(candidate.kind),
+        detail: candidate.detail,
+        documentation: candidate.documentation.map(|value| {
+            Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            })
+        }),
         text_edit: Some(CompletionTextEdit::Edit(TextEdit {
             range,
-            new_text: new_text.to_string(),
+            new_text: candidate.new_text,
         })),
         ..Default::default()
     })
@@ -1041,6 +1120,319 @@ mod tests {
     fn shell_block_commands_ignores_page_blocks() {
         let text = "::block when=\"true\"\nrm -rf /\n::end-block\n";
         assert!(shell_block_commands(text).is_empty());
+    }
+
+    /// A frontmatter lookup that knows no keys.
+    fn no_frontmatter(_: &str) -> Option<String> {
+        None
+    }
+
+    #[test]
+    fn ctx_hover_shares_catalog_block_and_appends_compose_note() {
+        let descriptor = expressions::ctx_descriptor("packages").unwrap();
+        let block = expressions::format_ctx_hover_block(descriptor);
+        let markdown = interpolation_hover_markdown("ctx.packages", 0, no_frontmatter);
+        // The catalog-backed block is the shared formatter's output verbatim —
+        // the same bytes the frontmatter `ctx_hover` renders.
+        assert!(markdown.contains(&block));
+        // The interpolation-specific passive note follows the block, and the
+        // hover carries no captured value — `ctx.*` is never evaluated here.
+        assert!(markdown
+            .ends_with("The `ctx` variable is evaluated at _compose_ time (rather than now)."));
+        assert!(!markdown.contains("Static value"));
+    }
+
+    #[test]
+    fn bare_identifier_matching_ctx_tail_is_frontmatter_not_context() {
+        // `today` is a known `ctx.*` tail, but a bare `{{ today }}` is a
+        // frontmatter variable (D2 classification rule).
+        let markdown = interpolation_hover_markdown("today", 0, |name| {
+            (name == "today").then(|| "2026-07-09".to_string())
+        });
+        assert!(markdown.contains("Static value: `2026-07-09` (from frontmatter `today`)"));
+        assert!(!markdown.contains("Darkmatter-owned"));
+        assert!(!markdown.contains("_compose_ time"));
+        // Without a matching frontmatter key it still borrows nothing from the
+        // ctx catalog.
+        let markdown = interpolation_hover_markdown("today", 0, no_frontmatter);
+        assert!(!markdown.contains("Darkmatter-owned"));
+        assert!(!markdown.contains("_compose_ time"));
+    }
+
+    #[test]
+    fn unknown_ctx_name_keeps_generic_hover() {
+        // An unknown `ctx.<name>` keeps the generic expression hover and does
+        // not borrow a similarly named bare frontmatter key's value.
+        let markdown = interpolation_hover_markdown("ctx.nope", 0, |name| {
+            (name == "nope").then(|| "shadow".to_string())
+        });
+        assert!(markdown.starts_with("**Expression**"));
+        assert!(!markdown.contains("Darkmatter-owned"));
+        assert!(!markdown.contains("_compose_ time"));
+        assert!(!markdown.contains("Static value"));
+    }
+
+    #[test]
+    fn function_call_hover_renders_catalog_block() {
+        // A formatting function.
+        let as_csv = expressions::function_descriptor("as_csv").unwrap();
+        let markdown = interpolation_hover_markdown("as_csv(items)", 2, no_frontmatter);
+        assert!(markdown.contains(&expressions::format_function_block(as_csv)));
+        // A pre-existing function; its fallible typed signature carries `| error`.
+        let markdown = interpolation_hover_markdown("length(items)", 3, no_frontmatter);
+        let length = expressions::function_descriptor("length").unwrap();
+        assert!(markdown.contains(&length.typed_signature()));
+        assert!(markdown.contains("| error"));
+        // An unknown function keeps the generic parsed-expression hover.
+        let markdown = interpolation_hover_markdown("mystery(items)", 3, no_frontmatter);
+        assert!(markdown.starts_with("**Expression**"));
+        assert!(!markdown.contains("**`mystery"));
+    }
+
+    #[test]
+    fn function_call_hover_resolves_deepest_call_under_cursor() {
+        let source = "as_csv(length(items))";
+        let inner = source.find("length").unwrap() + 1;
+        let markdown = interpolation_hover_markdown(source, inner, no_frontmatter);
+        let length = expressions::function_descriptor("length").unwrap();
+        assert!(markdown.contains(&length.typed_signature()));
+        // On the outer name the outer call answers.
+        let markdown = interpolation_hover_markdown(source, 1, no_frontmatter);
+        let as_csv = expressions::function_descriptor("as_csv").unwrap();
+        assert!(markdown.contains(&as_csv.typed_signature()));
+    }
+
+    #[test]
+    fn function_identifier_hover_shows_catalog_block() {
+        // Offset 1 is on `s` in the `as_csv` name identifier.
+        let as_csv = expressions::function_descriptor("as_csv").unwrap();
+        let markdown = interpolation_hover_markdown("as_csv(ctx.packages)", 1, no_frontmatter);
+        assert!(markdown.contains(&expressions::format_function_block(as_csv)));
+        let packages = expressions::ctx_descriptor("packages").unwrap();
+        assert!(!markdown.contains(&expressions::format_ctx_hover_block(packages)));
+        assert!(!markdown.contains("_compose_ time"));
+    }
+
+    #[test]
+    fn ctx_variable_inside_function_call_shows_ctx_hover() {
+        // Offset 8 is on `t` in `ctx` — the argument, not the name.
+        let packages = expressions::ctx_descriptor("packages").unwrap();
+        let markdown = interpolation_hover_markdown("as_csv(ctx.packages)", 8, no_frontmatter);
+        assert!(markdown.contains(&expressions::format_ctx_hover_block(packages)));
+        assert!(markdown.contains("_compose_ time"));
+        let as_csv = expressions::function_descriptor("as_csv").unwrap();
+        assert!(
+            !markdown.contains(&expressions::format_function_block(as_csv)),
+            "no function hover on an argument: {markdown}"
+        );
+    }
+
+    #[test]
+    fn ctx_hover_surfaces_through_index_access() {
+        // `ctx.packages[0]` parses as
+        // `Index { base: Variable("ctx.packages"), index: NumberLiteral(0) }` —
+        // the lexer keeps the dotted `ctx.packages` as one Variable token, so the
+        // ctx variable is the root through index access (D2). The catalog block,
+        // the rendered type, and the compose-time note must all surface, with no
+        // captured frontmatter value.
+        let packages = expressions::ctx_descriptor("packages").unwrap();
+        let block = expressions::format_ctx_hover_block(packages);
+
+        // Offset 5 lands on `a` inside `packages` — within the ctx-rooted base.
+        let markdown = interpolation_hover_markdown("ctx.packages[0]", 5, no_frontmatter);
+        assert!(markdown.contains(&block), "catalog block on base: {markdown}");
+        assert!(markdown.contains("string[]"), "rendered array type: {markdown}");
+        assert!(markdown.contains("_compose_ time"), "compose-time note: {markdown}");
+        assert!(!markdown.contains("Static value"), "no captured value: {markdown}");
+
+        // Cursor on the `[` bracket (byte 12) — a structural position of the
+        // Index construct rather than the `ctx.packages` text — still resolves to
+        // the ctx-rooted expression, confirming the Index-rooted expression is
+        // handled end-to-end at the bracket offset.
+        let markdown = interpolation_hover_markdown("ctx.packages[0]", 12, no_frontmatter);
+        assert!(markdown.contains(&block), "catalog block on `[`: {markdown}");
+        assert!(markdown.contains("_compose_ time"), "compose-time note on `[`: {markdown}");
+    }
+
+    #[test]
+    fn ctx_hover_surfaces_through_member_access_chain() {
+        // `ctx.packages[0].first` parses as
+        // `MemberAccess { base: Index { base: Variable("ctx.packages"), index: 0 },
+        //                  name: "first" }` — the postfix dot only follows `]`, so
+        // the chain is rooted at the ctx variable (D2).
+        let packages = expressions::ctx_descriptor("packages").unwrap();
+        let block = expressions::format_ctx_hover_block(packages);
+
+        // Cursor on the `ctx.packages` base (offset 5 on `a`): the catalog block
+        // and compose-time note surface.
+        let markdown = interpolation_hover_markdown("ctx.packages[0].first", 5, no_frontmatter);
+        assert!(markdown.contains(&block), "catalog block on base: {markdown}");
+        assert!(markdown.contains("string[]"), "rendered array type: {markdown}");
+        assert!(markdown.contains("_compose_ time"), "compose-time note: {markdown}");
+
+        // Cursor on the `first` member name (offset 17 on `i`): the deepest
+        // sub-expression under the cursor is the MemberAccess node, so
+        // `root_identifier` must recurse MemberAccess -> Index -> Variable to
+        // reach `ctx.packages`. This is the genuine root-recursion proof through
+        // both member-access and index nodes.
+        let markdown = interpolation_hover_markdown("ctx.packages[0].first", 17, no_frontmatter);
+        assert!(markdown.contains(&block), "catalog block on member name: {markdown}");
+        assert!(markdown.contains("_compose_ time"), "compose-time note on member name: {markdown}");
+    }
+
+    #[test]
+    fn frontmatter_variable_inside_function_call_shows_static_value() {
+        // Offset 7 is on `i` in `title` — the argument, not the name.
+        let markdown = interpolation_hover_markdown("upper(title)", 7, |name| {
+            (name == "title").then(|| "Guide".to_string())
+        });
+        assert!(markdown.contains("Static value: `Guide`"));
+        let upper = expressions::function_descriptor("upper").unwrap();
+        assert!(
+            !markdown.contains(&expressions::format_function_block(upper)),
+            "no function hover on an argument: {markdown}"
+        );
+    }
+
+    #[test]
+    fn parentheses_and_commas_show_no_function_hover() {
+        let as_csv = expressions::function_descriptor("as_csv").unwrap();
+        let block = expressions::format_function_block(as_csv);
+        // Offset 6 = `(`, offset 8 = `,`, offset 11 = `)` in `as_csv(a, b)`.
+        for (label, offset) in [("(", 6), (",", 8), (")", 11)] {
+            let markdown = interpolation_hover_markdown("as_csv(a, b)", offset, no_frontmatter);
+            assert!(
+                markdown.starts_with("**Expression**"),
+                "cursor on {label} keeps the generic hover: {markdown}"
+            );
+            assert!(
+                !markdown.contains(&block),
+                "no function docs on {label}: {markdown}"
+            );
+        }
+    }
+
+    #[test]
+    fn ctx_completion_derives_detail_and_documentation_from_descriptor() {
+        let candidates = interpolation_candidates("ctx.pa", &[]);
+        let packages = candidates
+            .iter()
+            .find(|candidate| candidate.label == "ctx.packages")
+            .expect("`ctx.pa` offers `ctx.packages`");
+        let descriptor = expressions::ctx_descriptor("packages").unwrap();
+        assert_eq!(packages.kind, CompletionItemKind::VARIABLE);
+        // D3: the rendered type rides in `detail`, the description in
+        // `documentation`, and the inserted text is the fully qualified name.
+        assert_eq!(packages.detail.as_deref(), Some("string[]"));
+        assert_eq!(packages.documentation.as_deref(), Some(descriptor.description));
+        assert_eq!(packages.new_text, "ctx.packages");
+        // Removed `*_list` aliases are gone from the catalog, so none is offered.
+        assert!(candidates.iter().all(|candidate| !candidate.label.ends_with("_list")));
+    }
+
+    #[test]
+    fn function_completion_derives_all_fields_from_one_descriptor() {
+        let candidates = interpolation_candidates("len", &[]);
+        let length = candidates
+            .iter()
+            .find(|candidate| candidate.new_text == "length")
+            .expect("`len` offers `length`");
+        let descriptor = expressions::function_descriptor("length").unwrap();
+        assert_eq!(length.kind, CompletionItemKind::FUNCTION);
+        // D4: untyped signature label, typed-signature detail, description
+        // documentation, bare-name insertion (no snippet, no parentheses).
+        assert_eq!(length.label, descriptor.signature);
+        assert_eq!(length.detail, Some(descriptor.typed_signature()));
+        assert_eq!(length.documentation.as_deref(), Some(descriptor.description));
+        assert!(!length.new_text.contains('('));
+    }
+
+    #[test]
+    fn all_formatting_functions_present_with_fallible_error_detail() {
+        let candidates = interpolation_candidates("", &[]);
+        for name in [
+            "as_csv",
+            "as_tsv",
+            "as_space_separated",
+            "as_line_separated",
+            "as_unordered_list",
+            "as_ordered_list",
+        ] {
+            assert!(
+                candidates.iter().any(|candidate| candidate.new_text == name),
+                "formatting function `{name}` missing from completion"
+            );
+        }
+        // At least one fallible function's `detail` carries the `| error` suffix.
+        let length = candidates
+            .iter()
+            .find(|candidate| candidate.new_text == "length")
+            .unwrap();
+        assert!(length.detail.as_deref().unwrap().ends_with("| error"));
+    }
+
+    #[test]
+    fn completion_matching_is_prefix_based_and_case_sensitive() {
+        let keys = vec!["title".to_string()];
+        // Frontmatter keys remain available alongside `ctx.*` and functions.
+        let candidates = interpolation_candidates("ti", &keys);
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.label == "title" && candidate.kind == CompletionItemKind::FIELD));
+        // Case-sensitive: an uppercase partial matches nothing.
+        assert!(interpolation_candidates("CTX.", &keys).is_empty());
+        assert!(interpolation_candidates("Ti", &keys).is_empty());
+    }
+
+    #[test]
+    fn period_outside_open_interpolation_offers_nothing() {
+        // The `completion` router only reaches interpolation candidates through
+        // `completion_partial`, whose open-interpolation guard rejects both a
+        // period in plain prose and one after a closed `{{ … }}`.
+        let prose = "plain prose ctx.";
+        assert!(expressions::completion_partial(prose, prose.len()).is_none());
+        let closed = "x {{ a }} ctx.";
+        assert!(expressions::completion_partial(closed, closed.len()).is_none());
+    }
+
+    #[test]
+    fn text_edit_item_carries_eager_edit_and_markdown_documentation() {
+        use crate::source_map::PositionEncoding;
+        let text = "hello {{ ctx.pa";
+        let source_map = SourceMap::new(
+            "file:///t.md".parse().unwrap(),
+            1,
+            PositionEncoding::Utf16,
+            text.into(),
+        );
+        let token_start = text.find("ctx.pa").unwrap();
+        let item = text_edit_item(
+            &source_map,
+            token_start,
+            text.len(),
+            CompletionCandidate {
+                label: "ctx.packages".to_string(),
+                new_text: "ctx.packages".to_string(),
+                kind: CompletionItemKind::VARIABLE,
+                detail: Some("string[]".to_string()),
+                documentation: Some("All package names.".to_string()),
+            },
+        )
+        .unwrap();
+        // The eager `textEdit` replaces exactly the typed token.
+        let Some(CompletionTextEdit::Edit(edit)) = item.text_edit else {
+            panic!("expected an eager text edit");
+        };
+        assert_eq!(edit.new_text, "ctx.packages");
+        assert_eq!(edit.range.start.character as usize, token_start);
+        assert_eq!(edit.range.end.character as usize, text.len());
+        // Documentation is eager Markdown, not deferred to resolve.
+        let Some(Documentation::MarkupContent(content)) = item.documentation else {
+            panic!("expected eager Markdown documentation");
+        };
+        assert_eq!(content.kind, MarkupKind::Markdown);
+        assert_eq!(content.value, "All package names.");
+        assert_eq!(item.detail.as_deref(), Some("string[]"));
     }
 }
 

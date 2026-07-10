@@ -31,7 +31,7 @@ success:
               - effect: sad-trombone
 failure:
     stderr: "{{feature_or_fix}} review {{iteration}} for `{{parent_dir(spec)}}` in the {{ctx.area}} package area failed to complete!"
-    message: "💥 {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area }}** failed to complete ({{err.message}})!"
+    message: "💥 {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area }}** failed to complete ({{err.msg}})!"
     effect: phase-jump-3
 ---
 # Review of {{title_case(without_date(parent_dir(spec)))}}
@@ -102,6 +102,7 @@ test is at the wrong level under "Findings" with severity at least "high".
 
 - Save your review suggestions to "@{{review}}"
 - Save the following frontmatter properties on "@{{review_file}}":
+    - set `$schema` to "@.claudine/schemas/review.yaml"
     - based on your review suggestions indicate whether you think this feature is **ready for production** by setting the `ready` frontmatter property to `true` or `false`
     - set the `agent` frontmatter property to "{{ctx.agent}}/{{ctx.model}}" 
     - set the `created` frontmatter property to "{{ctx.now}}"

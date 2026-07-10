@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-0c9872bc6071f119
-last_updated: 2026-07-09
+hash: 87f17662fa397abe-6461c42470661700
+last_updated: 2026-07-10
 ---
 
 # darkmatter
@@ -43,6 +43,20 @@ Other entry points:
 - Use `biscuit-terminal` components for rich terminal UI outside ordinary
   parsed Markdown rendering.
 
+## Cleanup Pipeline
+
+`darkmatter::markdown::cleanup` is the source-compatible public facade. Its
+`cleanup_content_internal` orchestrator explicitly preserves the two-stage pass
+order: event-stream passes (list-marker capture, emphasis placeholders, empty
+fence language, table alignment, cmark serialization), then string passes
+(emphasis restoration/unescaping, list spacing, blockquotes, list markers and
+indentation, brackets, trailing-newline normalization).
+
+Domain implementation lives under `markdown/cleanup/` in `emphasis.rs`,
+`tables.rs`, `lists.rs`, `blockquote.rs`, `brackets.rs`, and `reflow.rs`.
+Keep the facade paths stable and the pass calls explicit; do not introduce a
+pass trait or implicit chaining.
+
 ## Responsibility Split
 
 | Need | Owner |
@@ -55,6 +69,14 @@ Other entry points:
 | HTML and terminal Markdown renderers | `darkmatter` |
 | Terminal capability detection, images, Mermaid, graph adapters | `biscuit-terminal` |
 | Shared render tree and target-agnostic layout/style types | `renderable` |
+
+## Demand-Driven Context Capture
+
+Runtime `ctx.*` capture is grouped under `markdown/compose/context/capture/`. Domain modules own
+their recognized key lists, while the facade preserves capture sequencing and always-on local
+datetime values. Repository, filesystem, OS, hardware, and GPU discovery must continue to use
+`sniff`. GPU population is independent of CPU/memory population, so a `ctx.gpu`-only request does
+not require the hardware-summary probe.
 
 ## Grammar Authority
 
@@ -351,6 +373,23 @@ edges, ancestry in `relatedInformation`), and references ("who transcludes this
 file"). Interpolation gets `{{ }}` completion (frontmatter keys, `ctx.*`,
 functions), erased-parsed-form + frontmatter-backed static-value hover, variable→
 frontmatter-key definition, and `dm.expression.{malformed,unknown_identifier}`.
+Interpolation hover is catalog-enriched (modal-and-autocomplete Phase 2): an
+explicitly `ctx.`-qualified root renders the shared
+`overlay::expressions::format_ctx_hover_block` block (the same bytes as the
+frontmatter `ctx_hover`) plus an interpolation-only compose-time note; a bare
+identifier is always a frontmatter variable even when it matches a `ctx.*`
+tail; and the deepest known `FunctionCall` under the cursor
+(`overlay::expressions::function_call_at`) renders its typed signature +
+description via `format_function_block`.
+Interpolation completion is catalog-backed (modal-and-autocomplete Phase 3):
+`ctx.*` items carry the rendered `display_type` in `detail` and the
+description as eager Markdown `documentation`; function items keep the untyped
+`signature` label and bare-name insertion but carry `typed_signature()` in
+`detail` (incl. the `| error` suffix for fallible functions) plus eager
+Markdown `documentation`. `.` is an advertised completion trigger
+(`capabilities.rs`, alongside `/`, `(`, `#`), gated by the open-interpolation
+guard in `overlay::expressions::completion_partial` so a period in prose
+offers nothing.
 Shell awareness (read-only) hovers `::shell` / frontmatter `$()` with an
 approved/denied/unknown policy verdict and emits `dm.security.disallowed_command`
 (source `darkmatter.security`) for built-in-blacklist denials. Fenced-code info
@@ -406,6 +445,18 @@ the extension downloads by. The release-build performance sign-off
 AD-2 verdict — full repo (3,141 files) ~1.9 s cold, `vault-5k` ~0.5 s, both
 inside the R-6 budget — so the v1 in-memory-only model stands and no warm-start
 cache is built. See `darkmatter/features/2026-07-04-dmls/plan.md`.
+
+## Expression Function Registrations
+
+Expression callables are registered once in the owning module under
+`markdown/compose/expression/functions/`. A `FunctionRegistration` contains the
+canonical name, aliases, every overload descriptor, and a `FunctionHandler`
+kind (`Pure`, `Context`, or `Lazy`). Add a callable or overload to that domain
+slice; do not create a parallel dispatch or descriptor table.
+
+Public consumers must read the projected, handler-free catalog through
+`expression_function_descriptors()`. The accessor is backed by one `LazyLock`
+and is the sole public expression-function catalog API.
 
 ## Common Entry Points
 
@@ -480,6 +531,15 @@ Darkmatter defines, detects, and evaluates schemas for Markdown frontmatter via 
 
 - `$schema` frontmatter property (inline, file reference, or root-level union).
 - `md schema validate`, `md schema detect`, and `md schema about` CLI subcommands.
+- `parse_standalone_schema_document` is the content-classification authority for
+  standalone SimplifiedSchema YAML. It recognizes a pure document only when
+  `$schema` is the sole top-level key, and recognizes a tagged document when
+  `kind: schema` claims it with a `types` mapping. Its
+  `StandaloneSchemaDocument` product retains the authoring path, source-aware
+  candidate spans, and suggestion lint problems without performing I/O or
+  composition. Mapping payloads support whole-file resolution and
+  `Name@fileref` imports; pure sequence payloads support whole-file root unions
+  only. Raw JSON Schema remains distinct and never produces this product.
 - `DarkmatterSchemas` library API with baseline merging and LRU validator cache.
 - Base frontmatter schema authored in `darkmatter/docs/schemas/darkmatter.yaml` — the source of truth for Darkmatter-owned frontmatter properties such as `ctx`, `hash`, `style`, and `replace`. The schema is exposed as a first-class library surface via `darkmatter_base_schema()` (returns `SimplifiedSchema`), `darkmatter_base_json_schema()` (returns the compiled Draft 2020-12 JSON Schema), and `ComposeOptions::with_darkmatter_baseline_schema()` (injects it into compose). Both accessors are also re-exported from the crate root.
 - `md compose` injects the Darkmatter base schema by default. Use `--no-baseline-schema` or `DARKMATTER_NO_BASELINE_SCHEMA=1` for raw compose behavior, or `--baseline-schema PATH` to replace the default with a custom SimplifiedSchema YAML baseline. `md schema validate` keeps its explicit `--schema` / `BASELINE_SCHEMA` baseline contract.
@@ -488,7 +548,7 @@ Darkmatter defines, detects, and evaluates schemas for Markdown frontmatter via 
 - Typed schema-language descriptor catalog (`schema_type_descriptors()`, `schema_constraint_descriptors()`, `schema_shape_descriptors()`, `inline_object_rule_descriptors()`, `coercion_rule_descriptors()`, `validation_behavior_descriptors()`) — the authoritative source for `md schema about` and the same surface library callers render their own reports from.
 - Span-aware diagnostic shapes (added for DMLS, R-5). `ValidationProblem` carries, alongside the legacy fields, a fine-grained `code: ValidationProblemCode` (missing-required / type-mismatch / constraint-violation / unknown-key / invalid-file-reference), a parsed `instance_path: JsonPointer`, optional `schema_path`, `offending_property` (the undeclared key for `additionalProperties` failures), and `file_reference: Option<FileReferenceDiagnostic>` (invalid-syntax / resolution-failed / no-match, resolved-from context). These are purely additive — `message` and `md schema validate` output are byte-identical. `EffectiveSchema::origins: SchemaOriginMap` records each top-level property's provenance (document vs baseline vs referenced-file path). `EffectiveSchema::validate_with_options(_, _, ValidationOptions { pending_policy, excluded_keys })` mirrors the compose deferral rules as data — populating `ValidationReport.pending: Vec<PendingValue>` (`$(...)` → shell-expression, `{{ }}` → unresolved-template) and dropping deferred/excluded problems — **without executing anything**. The plain `validate` / `validate_with_positions` entry points are unchanged (empty `pending`). On the style side, `darkmatter::style::build_yaml_position_map` maps a dotted YAML key path to a raw-YAML-relative `StyleSpan`, `StyleWarning::source_span` is populated by `from_frontmatter` when `Frontmatter::raw_source()` is available, and `StyleParseError::source_span()` surfaces the first `Strict`-warning span.
 
-- Composition primitives (schema-plus). SimplifiedSchema composes named types and dictionaries on top of the base grammar: `example(...)` attaches documentation-only example artifacts (validated at schema-load time, emitted as the `x-darkmatter-example` extension); `Name@file` / `Name@this` inline a named type's definition from another schema file's top-level `$schema:` entries (eager, bounded, cycle-checked — `SchemaError::ImportCycle`, dependency edges on `ResolvedSchema.imports`); pattern keys (`<string>` → `additionalProperties`, `<starting::P>` / `<ending::S>` / `<pattern::RE>` → `patternProperties` with literal-key precedence via negative-lookahead wrapping) plus `min-keys` / `max-keys` (authored postfix or via the reserved `$constraints` block key) type dictionaries; and `yaml` / `json` are content-format string types (`format: darkmatter-yaml` / `darkmatter-json`) that accept a string or a coerced native value. A malformed example is `SchemaError::InvalidExample`. Schemas emitting a lookaround-bearing pattern validate on `jsonschema`'s `fancy-regex` engine per-schema; all others keep the ReDoS-safe linear engine.
+- Composition primitives (schema-plus). SimplifiedSchema composes named types and dictionaries on top of the base grammar: `example(...)` attaches documentation-only example artifacts (validated at schema-load time, emitted as the `x-darkmatter-example` extension); `Name@file` / `Name@this` inline a named type's definition from another schema file's top-level `$schema:` entries (eager, bounded, cycle-checked — `SchemaError::ImportCycle`, dependency edges on `ResolvedSchema.imports`); pattern keys (`<string>` → `additionalProperties`, `<starting::P>` / `<ending::S>` / `<pattern::RE>` → `patternProperties` with literal-key precedence via negative-lookahead wrapping) plus `min-keys` / `max-keys` (authored postfix or via the reserved `$constraints` block key) type dictionaries; `suggest(...)` provides advisory, non-validating completion candidates for `string` and `number` properties (at most one per complete property definition; emitted as `x-darkmatter-suggest`, never `examples`; library-owned structured linting via `lint_suggestions()` → `SuggestionLintProblem`; DMLS completion via `suggestions_for_path()` → `SuggestionQuery`/`SuggestionItem`); and `yaml` / `json` are content-format string types (`format: darkmatter-yaml` / `darkmatter-json`) that accept a string or a coerced native value. A malformed example is `SchemaError::InvalidExample`. Schemas emitting a lookaround-bearing pattern validate on `jsonschema`'s `fancy-regex` engine per-schema; all others keep the ReDoS-safe linear engine.
 
 See `darkmatter/docs/topics/schema-definition.md` for the full topic documentation.
 

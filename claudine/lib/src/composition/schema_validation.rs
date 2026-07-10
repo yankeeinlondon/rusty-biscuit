@@ -932,7 +932,9 @@ fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<InteractiveShape> {
             let (min, max) = min_max_constraints(atom);
             Some(InteractiveShape::Number { integer, min, max })
         }
-        TypeExpr::Primitive(SimplifiedType::String) => {
+        TypeExpr::Primitive(
+            SimplifiedType::String | SimplifiedType::Yaml | SimplifiedType::Json,
+        ) => {
             let (min_len, max_len) = string_length_constraints(atom);
             Some(InteractiveShape::Text {
                 format: TextFormat::Plain,
@@ -979,12 +981,7 @@ fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<InteractiveShape> {
                 patterns,
             })
         }
-        TypeExpr::Primitive(
-            SimplifiedType::Object
-            | SimplifiedType::Any
-            | SimplifiedType::Yaml
-            | SimplifiedType::Json,
-        )
+        TypeExpr::Primitive(SimplifiedType::Object | SimplifiedType::Any)
         | TypeExpr::InlineObject(_)
         | TypeExpr::Imported { .. } => None,
     }

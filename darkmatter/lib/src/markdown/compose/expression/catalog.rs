@@ -1,9 +1,9 @@
 //! Typed descriptor catalog for expression functions.
 //!
 //! Each [`ExpressionFunctionDescriptor`] describes a single callable function
-//! available in Darkmatter expressions. The catalog is a static, compile-time
-//! constant — constructing or reading it performs no host probes, no I/O, and
-//! no runtime context capture.
+//! available in Darkmatter expressions. The public catalog is projected once
+//! from domain-owned registrations; reading it performs no host probes, no I/O,
+//! and no runtime context capture.
 //!
 //! Each descriptor now also carries a **typed signature** ([`ParamType`] per
 //! parameter plus a [`ReturnType`]). The type vocabulary is the schema-plus
@@ -140,7 +140,7 @@ impl ReturnType {
 }
 
 /// Descriptor for a single expression function.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ExpressionFunctionDescriptor {
 
     /// Canonical snake_case signature (e.g., `is_string(x)`). Preserved verbatim
@@ -233,1104 +233,45 @@ impl Described for ExpressionFunctionDescriptor {
 // Shared typed parameter lists, referenced by the descriptors below to keep
 // each entry compact. Names are irrelevant here (they live in the signature);
 // only the type shape is shared.
-const P_ANY: &[ParamType] = &[ParamType::val(DataType::Any)];
-const P_ANY2: &[ParamType] = &[ParamType::val(DataType::Any), ParamType::val(DataType::Any)];
-const P_STRING: &[ParamType] = &[ParamType::val(DataType::String)];
-const P_STRING2: &[ParamType] =
+pub(super) const P_ANY: &[ParamType] = &[ParamType::val(DataType::Any)];
+pub(super) const P_ANY2: &[ParamType] = &[ParamType::val(DataType::Any), ParamType::val(DataType::Any)];
+pub(super) const P_STRING: &[ParamType] = &[ParamType::val(DataType::String)];
+pub(super) const P_STRING2: &[ParamType] =
     &[ParamType::val(DataType::String), ParamType::val(DataType::String)];
-const P_STRING3: &[ParamType] = &[
+pub(super) const P_STRING3: &[ParamType] = &[
     ParamType::val(DataType::String),
     ParamType::val(DataType::String),
     ParamType::val(DataType::String),
 ];
-const P_NUM: &[ParamType] = &[ParamType::val(DataType::Number)];
-const P_NUM2: &[ParamType] = &[ParamType::val(DataType::Number), ParamType::val(DataType::Number)];
-const P_LIST: &[ParamType] = &[ParamType::array(DataType::Any)];
-const P_VARIADIC: &[ParamType] = &[ParamType::variadic(DataType::Any)];
-const P_OBJ_STRING: &[ParamType] =
+pub(super) const P_NUM: &[ParamType] = &[ParamType::val(DataType::Number)];
+pub(super) const P_NUM2: &[ParamType] = &[ParamType::val(DataType::Number), ParamType::val(DataType::Number)];
+pub(super) const P_LIST: &[ParamType] = &[ParamType::array(DataType::Any)];
+pub(super) const P_VARIADIC: &[ParamType] = &[ParamType::variadic(DataType::Any)];
+pub(super) const P_OBJ_STRING: &[ParamType] =
     &[ParamType::val(DataType::Object), ParamType::val(DataType::String)];
-const P_NUM_CONV: &[ParamType] =
+pub(super) const P_NUM_CONV: &[ParamType] =
     &[ParamType::val(DataType::Any), ParamType::optional(DataType::Any)];
-const P_ROUND: &[ParamType] =
+pub(super) const P_ROUND: &[ParamType] =
     &[ParamType::val(DataType::Number), ParamType::optional(DataType::Number)];
-const P_FILE: &[ParamType] = &[ParamType::val(DataType::File)];
-const P_FILE_STRING: &[ParamType] =
+pub(super) const P_FILE: &[ParamType] = &[ParamType::val(DataType::File)];
+pub(super) const P_FILE_STRING: &[ParamType] =
     &[ParamType::val(DataType::File), ParamType::val(DataType::String)];
-const P_FILE_OBJ: &[ParamType] =
+pub(super) const P_FILE_OBJ: &[ParamType] =
     &[ParamType::val(DataType::File), ParamType::val(DataType::Object)];
 
 // Shared typed returns.
-const R_BOOL: ReturnType = ReturnType::plain(DataType::Boolean);
-const R_BOOL_ERR: ReturnType = ReturnType::fallible(DataType::Boolean);
-const R_NUM: ReturnType = ReturnType::plain(DataType::Number);
-const R_NUM_ERR: ReturnType = ReturnType::fallible(DataType::Number);
-const R_STRING_ERR: ReturnType = ReturnType::fallible(DataType::String);
-const R_FILE_ERR: ReturnType = ReturnType::fallible(DataType::File);
-const R_OBJ_ERR: ReturnType = ReturnType::fallible(DataType::Object);
-const R_ANY_ERR: ReturnType = ReturnType::fallible(DataType::Any);
-
-/// All expression function descriptors, in display order.
-pub const EXPRESSION_FUNCTION_DESCRIPTORS: &[ExpressionFunctionDescriptor] = &[
-    // ── Type Predicates ─────────────────────────────────────────────
-    ExpressionFunctionDescriptor {
-        signature: "is_string(x)",
-        parameters: P_ANY,
-        returns: R_BOOL,
-        description: "Returns true when the value is a string.",
-        category: "Type Predicates",
-        order: 1,
-
-        example: Some(Example { invocation: "is_string(\"hello\")", result: "true", verification: ExampleVerification::Executable }),
- },
-    ExpressionFunctionDescriptor {
-
-        signature: "is_number(x)",
-        parameters: P_ANY,
-        returns: R_BOOL,
-        description: "Returns true when the value is a number.",
-        category: "Type Predicates",
-        order: 2,
-
-        example: Some(Example { invocation: "is_number(42)", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "is_array(x)",
-        parameters: P_ANY,
-        returns: R_BOOL,
-        description: "Returns true when the value is an array.",
-        category: "Type Predicates",
-        order: 3,
-
-        example: Some(Example { invocation: "is_array(items)", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "is_null(x)",
-        parameters: P_ANY,
-        returns: R_BOOL,
-        description: "Returns true when the value is null.",
-        category: "Type Predicates",
-        order: 4,
-
-        example: Some(Example { invocation: "is_null(null)", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "is_object(x)",
-        parameters: P_ANY,
-        returns: R_BOOL,
-        description: "Returns true when the value is an object.",
-        category: "Type Predicates",
-        order: 5,
-
-        example: Some(Example { invocation: "is_object(obj)", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "is_empty(x)",
-        parameters: P_ANY,
-        returns: R_BOOL,
-        description: "Returns true when the value is null, empty string, empty array, or empty object.",
-        category: "Type Predicates",
-        order: 6,
-
-        example: Some(Example { invocation: "is_empty(\"\")", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "is_positive(val)",
-        parameters: P_ANY,
-        returns: R_BOOL_ERR,
-        description: "Returns true when the coerced value is greater than zero.",
-        category: "Type Predicates",
-        order: 7,
-
-        example: Some(Example { invocation: "is_positive(5)", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "is_negative(val)",
-        parameters: P_ANY,
-        returns: R_BOOL_ERR,
-        description: "Returns true when the coerced value is less than zero.",
-        category: "Type Predicates",
-        order: 8,
-
-        example: Some(Example { invocation: "is_negative(-3)", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "is_integer(val)",
-        parameters: P_ANY,
-        returns: R_BOOL,
-        description: "Returns true when the value is a JSON number with no fractional component.",
-        category: "Type Predicates",
-        order: 9,
-
-        example: Some(Example { invocation: "is_integer(7)", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    // ── Math ────────────────────────────────────────────────────────
-    ExpressionFunctionDescriptor {
-
-        signature: "min(a, b)",
-        parameters: P_NUM2,
-        returns: R_NUM_ERR,
-        description: "Returns the smaller of two numbers.",
-        category: "Math",
-        order: 1,
-
-        example: Some(Example { invocation: "min(2, 5)", result: "2", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "max(a, b)",
-        parameters: P_NUM2,
-        returns: R_NUM_ERR,
-        description: "Returns the larger of two numbers.",
-        category: "Math",
-        order: 2,
-
-        example: Some(Example { invocation: "max(2, 5)", result: "5", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "abs(x)",
-        parameters: P_NUM,
-        returns: R_NUM_ERR,
-        description: "Returns the absolute value of a number.",
-        category: "Math",
-        order: 3,
-
-        example: Some(Example { invocation: "abs(-3)", result: "3", verification: ExampleVerification::Executable }),
-
-    },
-    // ── Collection ──────────────────────────────────────────────────
-    ExpressionFunctionDescriptor {
-
-        signature: "first(x)",
-        parameters: P_LIST,
-        returns: R_ANY_ERR,
-        description: "Returns the first element of an array, or null when empty.",
-        category: "Collection",
-        order: 1,
-
-        example: Some(Example { invocation: "first(items)", result: "1", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "last(x)",
-        parameters: P_LIST,
-        returns: R_ANY_ERR,
-        description: "Returns the last element of an array, or null when empty.",
-        category: "Collection",
-        order: 2,
-
-        example: Some(Example { invocation: "last(items)", result: "3", verification: ExampleVerification::Executable }),
-
-    },
-    // ── String Predicates ───────────────────────────────────────────
-    ExpressionFunctionDescriptor {
-
-        signature: "starts_with(x, find)",
-        parameters: P_STRING2,
-        returns: R_BOOL_ERR,
-        description: "Returns true when the string starts with the given prefix (case-sensitive).",
-        category: "String Predicates",
-        order: 1,
-
-        example: Some(Example { invocation: "starts_with(\"hello\", \"he\")", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "ends_with(x, find)",
-        parameters: P_STRING2,
-        returns: R_BOOL_ERR,
-        description: "Returns true when the string ends with the given suffix (case-sensitive).",
-        category: "String Predicates",
-        order: 2,
-
-        example: Some(Example { invocation: "ends_with(\"hello\", \"lo\")", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    // ── String Mutations ────────────────────────────────────────────
-    ExpressionFunctionDescriptor {
-
-        signature: "lower(x)",
-        parameters: P_STRING,
-        returns: R_STRING_ERR,
-        description: "Converts a string to lowercase.",
-        category: "String Mutations",
-        order: 1,
-
-        example: Some(Example { invocation: "lower(\"HELLO\")", result: "hello", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "upper(x)",
-        parameters: P_STRING,
-        returns: R_STRING_ERR,
-        description: "Converts a string to uppercase.",
-        category: "String Mutations",
-        order: 2,
-
-        example: Some(Example { invocation: "upper(\"hello\")", result: "HELLO", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "capitalize(x)",
-        parameters: P_STRING,
-        returns: R_STRING_ERR,
-        description: "Capitalizes the first character of a string.",
-        category: "String Mutations",
-        order: 3,
-
-        example: Some(Example { invocation: "capitalize(\"hello\")", result: "Hello", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "kebab_case(x)",
-        parameters: P_STRING,
-        returns: R_STRING_ERR,
-        description: "Converts a string to kebab-case.",
-        category: "String Mutations",
-        order: 4,
-
-        example: Some(Example { invocation: "kebab_case(\"Hello World\")", result: "hello-world", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "snake_case(x)",
-        parameters: P_STRING,
-        returns: R_STRING_ERR,
-        description: "Converts a string to snake_case.",
-        category: "String Mutations",
-        order: 5,
-
-        example: Some(Example { invocation: "snake_case(\"Hello World\")", result: "hello_world", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "camel_case(x)",
-        parameters: P_STRING,
-        returns: R_STRING_ERR,
-        description: "Converts a string to camelCase.",
-        category: "String Mutations",
-        order: 6,
-
-        example: Some(Example { invocation: "camel_case(\"hello world\")", result: "helloWorld", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "pascal_case(x)",
-        parameters: P_STRING,
-        returns: R_STRING_ERR,
-        description: "Converts a string to PascalCase.",
-        category: "String Mutations",
-        order: 7,
-
-        example: Some(Example { invocation: "pascal_case(\"hello world\")", result: "HelloWorld", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "title_case(x)",
-        parameters: P_STRING,
-        returns: R_STRING_ERR,
-        description: "Converts a string to Title Case.",
-        category: "String Mutations",
-        order: 8,
-
-        example: Some(Example { invocation: "title_case(\"hello world\")", result: "Hello World", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "without_date(string)",
-        parameters: P_STRING,
-        returns: R_STRING_ERR,
-        description: "Removes substrings that are real YYYY-MM-DD calendar dates, leaving surrounding text untouched.",
-        category: "String Mutations",
-        order: 9,
-
-        example: Some(Example { invocation: "without_date(\"Note 2024-06-15\")", result: "Note ", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "ensure_leading(var, prefix)",
-        parameters: P_ANY2,
-        returns: R_STRING_ERR,
-        description: "Ensures the string form of a value starts with a prefix.",
-        category: "String Mutations",
-        order: 10,
-
-        example: Some(Example { invocation: "ensure_leading(\"world\", \"hello \")", result: "hello world", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "ensure_trailing(var, postfix)",
-        parameters: P_ANY2,
-        returns: R_STRING_ERR,
-        description: "Ensures the string form of a value ends with a postfix.",
-        category: "String Mutations",
-        order: 11,
-
-        example: Some(Example { invocation: "ensure_trailing(\"hello\", \" world\")", result: "hello world", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "replace(x, find, replacement)",
-        parameters: P_STRING3,
-        returns: R_STRING_ERR,
-        description: "Replaces every literal occurrence of a substring; empty find is a no-op.",
-        category: "String Mutations",
-        order: 12,
-
-        example: Some(Example { invocation: "replace(\"a.b.c\", \".\", \"/\")", result: "a/b/c", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "replace_first(x, find, replacement)",
-        parameters: P_STRING3,
-        returns: R_STRING_ERR,
-        description: "Replaces the first literal occurrence of a substring; empty find is a no-op.",
-        category: "String Mutations",
-        order: 13,
-
-        example: Some(Example { invocation: "replace_first(\"a.b.c\", \".\", \"/\")", result: "a/b.c", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "replace_last(x, find, replacement)",
-        parameters: P_STRING3,
-        returns: R_STRING_ERR,
-        description: "Replaces the last literal occurrence of a substring; empty find is a no-op.",
-        category: "String Mutations",
-        order: 14,
-
-        example: Some(Example { invocation: "replace_last(\"a.b.c\", \".\", \"/\")", result: "a.b/c", verification: ExampleVerification::Executable }),
-
-    },
-    // ── Rendering ───────────────────────────────────────────────────
-    ExpressionFunctionDescriptor {
-
-        signature: "terminal(string)",
-        parameters: P_STRING,
-        returns: R_STRING_ERR,
-        description: "Renders Prose markup to a terminal string with ANSI SGR sequences.",
-        category: "Rendering",
-        order: 1,
-
-        example: Some(Example { invocation: "terminal(\"hello\")", result: "hello", verification: ExampleVerification::Executable }),
-
-    },
-    // ── Date Formatting ─────────────────────────────────────────────
-    ExpressionFunctionDescriptor {
-
-        signature: "date(iso, fmt)",
-        parameters: P_STRING2,
-        returns: R_STRING_ERR,
-        description: "Reformats an ISO date/datetime string into a named human format.",
-        category: "Date Formatting",
-        order: 1,
-
-        example: Some(Example { invocation: "date(\"2024-06-15\", \"long\")", result: "Sat, June 15th, 2024", verification: ExampleVerification::Executable }),
-
-    },
-    // ── Date Validators (Strict) ────────────────────────────────────
-    ExpressionFunctionDescriptor {
-
-        signature: "is_date(x)",
-        parameters: P_ANY,
-        returns: R_BOOL,
-        description: "Returns true when the string is a valid ISO date (YYYY-MM-DD).",
-        category: "Date Validators",
-        order: 1,
-
-        example: Some(Example { invocation: "is_date(\"2024-06-15\")", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "is_date_utc(x)",
-        parameters: P_ANY,
-        returns: R_BOOL,
-        description: "Same as is_date (the format itself is timezone-agnostic).",
-        category: "Date Validators",
-        order: 2,
-
-        example: Some(Example { invocation: "is_date_utc(\"2024-06-15\")", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "is_date_time(x)",
-        parameters: P_ANY,
-        returns: R_BOOL,
-        description: "Returns true when the string is a valid ISO datetime.",
-        category: "Date Validators",
-        order: 3,
-
-        example: Some(Example { invocation: "is_date_time(\"2024-06-15T12:30:00\")", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "is_date_time_utc(x)",
-        parameters: P_ANY,
-        returns: R_BOOL,
-        description: "Same parse contract as is_date_time.",
-        category: "Date Validators",
-        order: 4,
-
-        example: Some(Example { invocation: "is_date_time_utc(\"2024-06-15T12:30:00Z\")", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    // ── Date Validators (Relative) ──────────────────────────────────
-    ExpressionFunctionDescriptor {
-
-        signature: "is_today(x)",
-        parameters: P_ANY,
-        returns: R_BOOL,
-        description: "Returns true when the date/datetime is today (local).",
-        category: "Date Validators",
-        order: 5,
-
-        example: Some(Example { invocation: "is_today(\"2024-06-15\")", result: "true", verification: ExampleVerification::DisplayOnly("wall-clock dependent") }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "is_today_utc(x)",
-        parameters: P_ANY,
-        returns: R_BOOL,
-        description: "Returns true when the date/datetime is today (UTC).",
-        category: "Date Validators",
-        order: 6,
-
-        example: Some(Example { invocation: "is_today_utc(\"2024-06-15\")", result: "true", verification: ExampleVerification::DisplayOnly("wall-clock dependent") }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "is_yesterday(x)",
-        parameters: P_ANY,
-        returns: R_BOOL,
-        description: "Returns true when the date/datetime is yesterday (local).",
-        category: "Date Validators",
-        order: 7,
-
-        example: Some(Example { invocation: "is_yesterday(\"2024-06-14\")", result: "true", verification: ExampleVerification::DisplayOnly("wall-clock dependent") }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "is_yesterday_utc(x)",
-        parameters: P_ANY,
-        returns: R_BOOL,
-        description: "Returns true when the date/datetime is yesterday (UTC).",
-        category: "Date Validators",
-        order: 8,
-
-        example: Some(Example { invocation: "is_yesterday_utc(\"2024-06-14\")", result: "true", verification: ExampleVerification::DisplayOnly("wall-clock dependent") }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "is_tomorrow(x)",
-        parameters: P_ANY,
-        returns: R_BOOL,
-        description: "Returns true when the date/datetime is tomorrow (local).",
-        category: "Date Validators",
-        order: 9,
-
-        example: Some(Example { invocation: "is_tomorrow(\"2024-06-16\")", result: "true", verification: ExampleVerification::DisplayOnly("wall-clock dependent") }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "is_tomorrow_utc(x)",
-        parameters: P_ANY,
-        returns: R_BOOL,
-        description: "Returns true when the date/datetime is tomorrow (UTC).",
-        category: "Date Validators",
-        order: 10,
-
-        example: Some(Example { invocation: "is_tomorrow_utc(\"2024-06-16\")", result: "true", verification: ExampleVerification::DisplayOnly("wall-clock dependent") }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "is_this_month(x)",
-        parameters: P_ANY,
-        returns: R_BOOL,
-        description: "Returns true when the date/datetime is in the current month (local).",
-        category: "Date Validators",
-        order: 11,
-
-        example: Some(Example { invocation: "is_this_month(\"2024-06-15\")", result: "true", verification: ExampleVerification::DisplayOnly("wall-clock dependent") }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "is_this_month_utc(x)",
-        parameters: P_ANY,
-        returns: R_BOOL,
-        description: "Returns true when the date/datetime is in the current month (UTC).",
-        category: "Date Validators",
-        order: 12,
-
-        example: Some(Example { invocation: "is_this_month_utc(\"2024-06-15\")", result: "true", verification: ExampleVerification::DisplayOnly("wall-clock dependent") }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "is_this_year(x)",
-        parameters: P_ANY,
-        returns: R_BOOL,
-        description: "Returns true when the date/datetime is in the current year (local).",
-        category: "Date Validators",
-        order: 13,
-
-        example: Some(Example { invocation: "is_this_year(\"2024-06-15\")", result: "true", verification: ExampleVerification::DisplayOnly("wall-clock dependent") }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "is_this_year_utc(x)",
-        parameters: P_ANY,
-        returns: R_BOOL,
-        description: "Returns true when the date/datetime is in the current year (UTC).",
-        category: "Date Validators",
-        order: 14,
-
-        example: Some(Example { invocation: "is_this_year_utc(\"2024-06-15\")", result: "true", verification: ExampleVerification::DisplayOnly("wall-clock dependent") }),
-
-    },
-    // ── Date Arithmetic ─────────────────────────────────────────────
-    ExpressionFunctionDescriptor {
-
-        signature: "date_delta(date1, date2, diff)",
-        parameters: P_STRING3,
-        returns: R_BOOL_ERR,
-        description: "Returns true when the two dates are at least the given duration apart, ignoring order (duration like 14d, 2mo, 1 hour).",
-        category: "Date Arithmetic",
-        order: 1,
-
-        example: Some(Example { invocation: "date_delta(\"2024-06-01\", \"2024-06-20\", \"14d\")", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "older_than(date1, date2, diff)",
-        parameters: P_STRING3,
-        returns: R_BOOL_ERR,
-        description: "Returns true when date1 is at least the given duration older (earlier) than date2.",
-        category: "Date Arithmetic",
-        order: 2,
-
-        example: Some(Example { invocation: "older_than(\"2024-06-01\", \"2024-06-20\", \"14d\")", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "newer_than(date1, date2, diff)",
-        parameters: P_STRING3,
-        returns: R_BOOL_ERR,
-        description: "Returns true when date1 is at least the given duration newer (later) than date2.",
-        category: "Date Arithmetic",
-        order: 3,
-
-        example: Some(Example { invocation: "newer_than(\"2024-06-20\", \"2024-06-01\", \"14d\")", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    // ── Core Operators (in evaluate_function) ───────────────────────
-    ExpressionFunctionDescriptor {
-
-        signature: "and(...)",
-        parameters: P_VARIADIC,
-        returns: R_BOOL,
-        description: "Logical AND of all arguments. Short-circuits on first falsy value.",
-        category: "Logical",
-        order: 1,
-
-        example: Some(Example { invocation: "and(true, true)", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "or(...)",
-        parameters: P_VARIADIC,
-        returns: R_BOOL,
-        description: "Logical OR of all arguments. Short-circuits on first truthy value.",
-        category: "Logical",
-        order: 2,
-
-        example: Some(Example { invocation: "or(false, true)", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "has_key(obj, key)",
-        parameters: P_OBJ_STRING,
-        returns: R_BOOL_ERR,
-        description: "Returns true when the object contains the given key.",
-        category: "Collection",
-        order: 3,
-
-        example: Some(Example { invocation: "has_key(obj, \"a\")", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "contains(haystack, needle)",
-        parameters: P_ANY2,
-        returns: R_BOOL_ERR,
-        description: "Returns true when haystack contains needle (array, object, or string).",
-        category: "Collection",
-        order: 4,
-
-        example: Some(Example { invocation: "contains(\"hello\", \"ell\")", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "length(x)",
-        parameters: P_ANY,
-        returns: R_NUM_ERR,
-        description: "Returns the length of a string, array, or object.",
-        category: "Collection",
-        order: 5,
-
-        example: Some(Example { invocation: "length(\"hello\")", result: "5", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "number(x, [default])",
-        parameters: P_NUM_CONV,
-        returns: R_NUM_ERR,
-        description: "Converts a value to a number, with an optional default.",
-        category: "Type Conversion",
-        order: 1,
-
-        example: Some(Example { invocation: "number(\"42\")", result: "42", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "round(x, [default])",
-        parameters: P_ROUND,
-        returns: R_NUM,
-        description: "Rounds a value to the nearest integer, with an optional default.",
-        category: "Math",
-        order: 4,
-
-        example: Some(Example { invocation: "round(3.7)", result: "4", verification: ExampleVerification::Executable }),
-
-    },
-    // ── Filesystem Functions ────────────────────────────────────────
-    ExpressionFunctionDescriptor {
-
-        signature: "absolute(file)",
-        parameters: P_FILE,
-        returns: R_FILE_ERR,
-        description: "Resolves a file path to an absolute path.",
-        category: "Filesystem",
-        order: 1,
-
-        example: Some(Example { invocation: "absolute(\"fixture.md\")", result: "/path/to/fixture.md", verification: ExampleVerification::DisplayOnly("resolves to an absolute path of the resolution context, which is not portable") }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "relative(file)",
-        parameters: P_FILE,
-        returns: R_FILE_ERR,
-        description: "Returns a best-effort relative path from the document base directory.",
-        category: "Filesystem",
-        order: 2,
-
-        example: Some(Example { invocation: "relative(\"fixture.md\")", result: "fixture.md", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "file_exists(file)",
-        parameters: P_FILE,
-        returns: R_BOOL_ERR,
-        description: "Returns true when the file exists (local or remote URL).",
-        category: "Filesystem",
-        order: 3,
-
-        example: Some(Example { invocation: "file_exists(\"fixture.md\")", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "frontmatter(file)",
-        parameters: P_FILE,
-        returns: R_OBJ_ERR,
-        description: "Reads the frontmatter of a Markdown file as an object.",
-        category: "Filesystem",
-        order: 4,
-
-        example: Some(Example { invocation: "frontmatter(\"fixture.md\")", result: "{\"title\":\"Fixture Title\"}", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "frontmatter(file, prop)",
-        parameters: P_FILE_STRING,
-        returns: R_ANY_ERR,
-        description: "Reads a single frontmatter property from a Markdown file.",
-        category: "Filesystem",
-        order: 5,
-
-        example: Some(Example { invocation: "frontmatter(\"fixture.md\", \"title\")", result: "Fixture Title", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "markdown_body_empty(file)",
-        parameters: P_FILE,
-        returns: R_BOOL_ERR,
-        description: "Returns true when the Markdown body has only whitespace.",
-        category: "Filesystem",
-        order: 6,
-
-        example: Some(Example { invocation: "markdown_body_empty(\"fixture.md\")", result: "false", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "markdown_title(file)",
-        parameters: P_FILE,
-        returns: R_STRING_ERR,
-        description: "Returns the title from frontmatter or the first H1 heading.",
-        category: "Filesystem",
-        order: 7,
-
-        example: Some(Example { invocation: "markdown_title(\"fixture.md\")", result: "Fixture Title", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "validate_schema(file)",
-        parameters: P_FILE,
-        returns: R_BOOL_ERR,
-        description: "Validates a Markdown document against its declared schema.",
-        category: "Filesystem",
-        order: 8,
-
-        example: Some(Example { invocation: "validate_schema(\"fixture.md\")", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "validate_schema(file, obj)",
-        parameters: P_FILE_OBJ,
-        returns: R_BOOL_ERR,
-        description: "Two-argument form accepted for forward compatibility.",
-        category: "Filesystem",
-        order: 9,
-
-        example: Some(Example { invocation: "validate_schema(\"fixture.md\", {})", result: "true", verification: ExampleVerification::DisplayOnly("forward-compatible overload with no evaluable behavior yet") }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "is_indexed_file(file)",
-        parameters: P_FILE,
-        returns: R_BOOL_ERR,
-        description: "Returns true when the filename stem matches the indexed grammar (base-NNN).",
-        category: "Filesystem",
-        order: 10,
-
-        example: Some(Example { invocation: "is_indexed_file(\"review-1.md\")", result: "true", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "file_index(file)",
-        parameters: P_FILE,
-        returns: R_NUM_ERR,
-        description: "Returns the parsed index suffix, or -1 when non-indexed.",
-        category: "Filesystem",
-        order: 11,
-
-        example: Some(Example { invocation: "file_index(\"review-1.md\")", result: "1", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "increment_file_index(file)",
-        parameters: P_FILE,
-        returns: R_FILE_ERR,
-        description: "Increments the numeric index suffix, preserving zero-padding width.",
-        category: "Filesystem",
-        order: 12,
-
-        example: Some(Example { invocation: "increment_file_index(\"review-1.md\")", result: "review-2.md", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "decrement_file_index(file)",
-        parameters: P_FILE,
-        returns: R_FILE_ERR,
-        description: "Decrements the numeric index suffix, clamped at 0.",
-        category: "Filesystem",
-        order: 13,
-
-        example: Some(Example { invocation: "decrement_file_index(\"review-2.md\")", result: "review-1.md", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "basename(file)",
-        parameters: P_FILE,
-        returns: R_STRING_ERR,
-        description: "Returns the final path component including extension.",
-        category: "Filesystem",
-        order: 14,
-
-        example: Some(Example { invocation: "basename(\"sub/note.md\")", result: "note.md", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "basename_without_index(file)",
-        parameters: P_FILE,
-        returns: R_STRING_ERR,
-        description: "Returns the basename with any indexed suffix removed from the stem.",
-        category: "Filesystem",
-        order: 15,
-
-        example: Some(Example { invocation: "basename_without_index(\"review-1.md\")", result: "review.md", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "dirname(file)",
-        parameters: P_FILE,
-        returns: R_STRING_ERR,
-        description: "Returns the directory portion of the display path.",
-        category: "Filesystem",
-        order: 16,
-
-        example: Some(Example { invocation: "dirname(\"sub/note.md\")", result: "sub", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "ext(file)",
-        parameters: P_FILE,
-        returns: R_STRING_ERR,
-        description: "Returns the final extension without the leading dot.",
-        category: "Filesystem",
-        order: 17,
-
-        example: Some(Example { invocation: "ext(\"sub/note.md\")", result: "md", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "parent_dir(file)",
-        parameters: P_FILE,
-        returns: R_STRING_ERR,
-        description: "Returns the directory segment immediately above the basename.",
-        category: "Filesystem",
-        order: 18,
-
-        example: Some(Example { invocation: "parent_dir(\"sub/note.md\")", result: "sub", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "file_trailing(file)",
-        parameters: P_FILE,
-        returns: R_STRING_ERR,
-        description: "Returns the last directory segment plus the basename.",
-        category: "Filesystem",
-        order: 19,
-
-        example: Some(Example { invocation: "file_trailing(\"sub/note.md\")", result: "sub/note.md", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "dir_leading(file)",
-        parameters: P_FILE,
-        returns: R_STRING_ERR,
-        description: "Returns the directory path above the last directory segment, dropping the basename and its parent (the complement of file_trailing).",
-        category: "Filesystem",
-        order: 20,
-
-        example: Some(Example { invocation: "dir_leading(\"sub/note.md\")", result: "", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "join(left, right)",
-        parameters: P_STRING2,
-        returns: R_STRING_ERR,
-        description: "Joins two path strings with normalized separators.",
-        category: "Filesystem",
-        order: 21,
-
-        example: Some(Example { invocation: "join(\"sub\", \"note.md\")", result: "sub/note.md", verification: ExampleVerification::Executable }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "link(file)",
-        parameters: P_FILE,
-        returns: R_STRING_ERR,
-        description: "Creates a Markdown link to a local file, using its relative path as the link text.",
-        category: "Filesystem",
-        order: 22,
-
-        example: Some(Example { invocation: "link(\"fixture.md\")", result: "[fixture.md](/path/to/fixture.md)", verification: ExampleVerification::DisplayOnly("result includes an absolute path, which is not portable") }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "link(target, desc)",
-        parameters: P_FILE_STRING,
-        returns: R_STRING_ERR,
-        description: "Creates a Markdown link to a local file or HTTP(S) URL with the given description.",
-        category: "Filesystem",
-        order: 23,
-
-        example: Some(Example { invocation: "link(\"fixture.md\", \"Fixture\")", result: "[Fixture](/path/to/fixture.md)", verification: ExampleVerification::DisplayOnly("result includes an absolute destination path, which is not portable") }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "has_command(cmd)",
-        parameters: P_STRING,
-        returns: R_BOOL,
-        description: "Returns true when the command is found on PATH or is an existing executable absolute path.",
-        category: "Filesystem",
-        order: 24,
-
-        example: None,
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "has_skill(name)",
-        parameters: P_STRING,
-        returns: R_BOOL,
-        description: "Returns true when a skill directory exists in a user-scoped or local-scoped skill root.",
-        category: "Context",
-        order: 1,
-
-        example: Some(Example { invocation: "has_skill(\"darkmatter\")", result: "true", verification: ExampleVerification::DisplayOnly("depends on agent-specific skill roots outside the tempdir fixture") }),
-
-    },
-    ExpressionFunctionDescriptor {
-
-        signature: "has_local_skill(name)",
-        parameters: P_STRING,
-        returns: R_BOOL,
-        description: "Returns true when a skill directory exists in a local-scoped skill root.",
-        category: "Context",
-        order: 2,
-
-        example: Some(Example { invocation: "has_local_skill(\"darkmatter\")", result: "true", verification: ExampleVerification::DisplayOnly("depends on agent-specific skill roots outside the tempdir fixture") }),
-
-    },
-    // ── List Formatting ─────────────────────────────────────────────
-    // Each takes an array and renders it to a string. Bare-array interpolation
-    // is line-separated by default (Phase 5), so `as_line_separated` is the
-    // explicit, no-op form. Multi-line / whitespace-sensitive renderings carry
-    // `DisplayOnly` examples so the generated single-line doc table stays intact;
-    // they are verified by the dedicated unit tests and the schema-plus example
-    // files (`features/2026-07-08-single-sourcing-schema/examples/`).
-    ExpressionFunctionDescriptor {
-        signature: "as_line_separated(list)",
-        parameters: P_LIST,
-        returns: R_STRING_ERR,
-        description: "Joins a list into a newline-separated string (the default bare-array rendering).",
-        category: "List Formatting",
-        order: 1,
-        example: Some(Example { invocation: "as_line_separated(items)", result: "1\n2\n3", verification: ExampleVerification::DisplayOnly("multi-line output; verified via example file") }),
-    },
-    ExpressionFunctionDescriptor {
-        signature: "as_csv(list)",
-        parameters: P_LIST,
-        returns: R_STRING_ERR,
-        description: "Joins a list into a comma-separated string.",
-        category: "List Formatting",
-        order: 2,
-        example: Some(Example { invocation: "as_csv(items)", result: "1, 2, 3", verification: ExampleVerification::Executable }),
-    },
-    ExpressionFunctionDescriptor {
-        signature: "as_tsv(list)",
-        parameters: P_LIST,
-        returns: R_STRING_ERR,
-        description: "Joins a list into a tab-separated string.",
-        category: "List Formatting",
-        order: 3,
-        example: Some(Example { invocation: "as_tsv(items)", result: "1\t2\t3", verification: ExampleVerification::DisplayOnly("tab-delimited output; verified via example file") }),
-    },
-    ExpressionFunctionDescriptor {
-        signature: "as_space_separated(list)",
-        parameters: P_LIST,
-        returns: R_STRING_ERR,
-        description: "Joins a list into a space-separated string.",
-        category: "List Formatting",
-        order: 4,
-        example: Some(Example { invocation: "as_space_separated(items)", result: "1 2 3", verification: ExampleVerification::Executable }),
-    },
-    ExpressionFunctionDescriptor {
-        signature: "as_unordered_list(list)",
-        parameters: P_LIST,
-        returns: R_STRING_ERR,
-        description: "Renders a list as a Markdown unordered list, auto-nesting nested arrays and object-array shapes as indented sublists.",
-        category: "List Formatting",
-        order: 5,
-        example: Some(Example { invocation: "as_unordered_list(items)", result: "- 1\n- 2\n- 3", verification: ExampleVerification::DisplayOnly("multi-line Markdown list; verified via example file") }),
-    },
-    ExpressionFunctionDescriptor {
-        signature: "as_ordered_list(list)",
-        parameters: P_LIST,
-        returns: R_STRING_ERR,
-        description: "Renders a list as a Markdown ordered list, auto-nesting nested arrays and object-array shapes as indented sublists.",
-        category: "List Formatting",
-        order: 6,
-        example: Some(Example { invocation: "as_ordered_list(items)", result: "1. 1\n2. 2\n3. 3", verification: ExampleVerification::DisplayOnly("multi-line Markdown list; verified via example file") }),
-    },
-];
+pub(super) const R_BOOL: ReturnType = ReturnType::plain(DataType::Boolean);
+pub(super) const R_BOOL_ERR: ReturnType = ReturnType::fallible(DataType::Boolean);
+pub(super) const R_NUM: ReturnType = ReturnType::plain(DataType::Number);
+pub(super) const R_NUM_ERR: ReturnType = ReturnType::fallible(DataType::Number);
+pub(super) const R_STRING_ERR: ReturnType = ReturnType::fallible(DataType::String);
+pub(super) const R_FILE_ERR: ReturnType = ReturnType::fallible(DataType::File);
+pub(super) const R_OBJ_ERR: ReturnType = ReturnType::fallible(DataType::Object);
+pub(super) const R_ANY_ERR: ReturnType = ReturnType::fallible(DataType::Any);
 
 /// Returns all expression function descriptors in display order.
 pub fn expression_function_descriptors() -> &'static [ExpressionFunctionDescriptor] {
-    EXPRESSION_FUNCTION_DESCRIPTORS
+    super::functions::expression_function_descriptors()
 }
 
 /// Generates a Markdown function-reference table from the expression catalog.
@@ -1344,7 +285,7 @@ pub fn generate_expression_function_table() -> String {
     let mut out = String::new();
     out.push_str("| Category | Function | Description | Example |\n");
     out.push_str("| --- | --- | --- | --- |\n");
-    for d in EXPRESSION_FUNCTION_DESCRIPTORS {
+    for d in expression_function_descriptors() {
         let example = match d.example() {
             Some(ex) if ex.verification == ExampleVerification::Executable => {
                 format!("`{}` ⇒ `{}`", ex.invocation, ex.result)
@@ -1367,7 +308,7 @@ pub fn generate_expression_function_table() -> String {
 mod tests {
     use super::*;
     use crate::markdown::compose::expression::functions::{
-        dispatchable_signatures, LAZY_OPERATOR_NAMES,
+        dispatchable_signatures, lazy_operator_names,
     };
     use crate::markdown::compose::expression::{
         evaluate, parse, EvaluationLookup, ResolutionContext,
@@ -1459,7 +400,7 @@ mod tests {
     ///   signature.
     #[test]
     fn descriptor_signature_set_equals_dispatchable_signature_set() {
-        let descriptors: HashSet<&str> = EXPRESSION_FUNCTION_DESCRIPTORS
+        let descriptors: HashSet<&str> = expression_function_descriptors()
             .iter()
             .map(|d| d.signature)
             .collect();
@@ -1479,13 +420,13 @@ mod tests {
     }
 
     /// The lazy logical operators must genuinely resolve at runtime, so their
-    /// presence in `LAZY_OPERATOR_NAMES` (and the parity set above) is real.
+    /// presence in the lazy registrations (and the parity set above) is real.
     #[test]
     fn lazy_operators_are_dispatchable() {
         let lookup = FsLookup {
             ctx: ResolutionContext::new(std::env::temp_dir()),
         };
-        for name in LAZY_OPERATOR_NAMES {
+        for name in lazy_operator_names() {
             let err = dispatch_error(name, &lookup);
             assert!(
                 err.as_deref().map(|e| !e.contains("Unknown function")).unwrap_or(true),
@@ -1511,7 +452,7 @@ mod tests {
         };
 
         let mut failures = Vec::new();
-        for desc in EXPRESSION_FUNCTION_DESCRIPTORS {
+        for desc in expression_function_descriptors() {
             let name = desc.signature.split('(').next().unwrap();
             let arity = signature_call_arity(desc.signature);
             if let Some(err) = dispatch_error_arity(name, arity, &lookup)
@@ -1544,11 +485,11 @@ mod tests {
 
     #[test]
     fn descriptor_traversal_order_is_deterministic() {
-        let sigs: Vec<&str> = EXPRESSION_FUNCTION_DESCRIPTORS
+        let sigs: Vec<&str> = expression_function_descriptors()
             .iter()
             .map(|d| d.signature)
             .collect();
-        let sigs_again: Vec<&str> = EXPRESSION_FUNCTION_DESCRIPTORS
+        let sigs_again: Vec<&str> = expression_function_descriptors()
             .iter()
             .map(|d| d.signature)
             .collect();
@@ -1558,7 +499,7 @@ mod tests {
     #[test]
     fn descriptor_signatures_are_unique() {
         let mut seen = HashSet::new();
-        for d in EXPRESSION_FUNCTION_DESCRIPTORS {
+        for d in expression_function_descriptors() {
             assert!(
                 seen.insert(d.signature),
                 "Duplicate descriptor signature: {}",
@@ -1581,7 +522,7 @@ mod tests {
     fn every_expression_example_is_executable_or_display_only() {
         use crate::catalog::ExampleVerification;
         let mut offenders = Vec::new();
-        for d in EXPRESSION_FUNCTION_DESCRIPTORS {
+        for d in expression_function_descriptors() {
             if let Some(example) = d.example()
                 && matches!(example.verification, ExampleVerification::TypeShapeOnly)
             {
@@ -1622,7 +563,7 @@ mod tests {
     /// Claudine anti-drift: every function added by this feature must remain
     /// present in the exported expression catalog (`claudine context --expressions`).
     ///
-    /// Asserts against the shared [`EXPRESSION_FUNCTION_DESCRIPTORS`] so the
+    /// Asserts against the shared [`expression_function_descriptors()`] so the
     /// check stays in sync with the runtime surface and does not duplicate a
     /// Claudine-only list.
     #[test]
@@ -1660,7 +601,7 @@ mod tests {
         ];
 
         let descriptor_sigs: std::collections::HashSet<&str,
-        > = EXPRESSION_FUNCTION_DESCRIPTORS
+        > = expression_function_descriptors()
             .iter()
             .map(|d| d.signature)
             .collect();
@@ -1733,7 +674,7 @@ mod phase2_tests {
         use crate::catalog::ExampleVerification;
         let (_dir, lookup) = make_fixture();
         let mut failures = Vec::new();
-        for d in EXPRESSION_FUNCTION_DESCRIPTORS {
+        for d in expression_function_descriptors() {
             let Some(example) = d.example() else { continue };
             // Only `Executable` examples are asserted to evaluate to their
             // declared result; display-only examples are illustrative and not
@@ -1778,7 +719,7 @@ mod typed_signature_tests {
     /// type; a fallible return carries the `| error` union member.
     #[test]
     fn every_descriptor_has_a_typed_signature() {
-        for d in EXPRESSION_FUNCTION_DESCRIPTORS {
+        for d in expression_function_descriptors() {
             let typed = d.typed_signature();
             assert!(
                 typed.starts_with(d.signature.split('(').next().unwrap()),
@@ -1808,7 +749,7 @@ mod typed_signature_tests {
             "as_ordered_list(list)",
         ];
         for signature in expected {
-            let d = EXPRESSION_FUNCTION_DESCRIPTORS
+            let d = expression_function_descriptors()
                 .iter()
                 .find(|d| d.signature == signature)
                 .unwrap_or_else(|| panic!("missing list formatter: {signature}"));
@@ -1819,7 +760,7 @@ mod typed_signature_tests {
             assert_eq!(d.returns.ty, DataType::String);
             assert!(d.returns.fallible, "list formatters are fallible");
         }
-        let csv = EXPRESSION_FUNCTION_DESCRIPTORS
+        let csv = expression_function_descriptors()
             .iter()
             .find(|d| d.signature == "as_csv(list)")
             .unwrap();
@@ -1889,8 +830,8 @@ mod list_formatting_example_files {
     #[test]
     fn example_files_evaluate_to_their_declared_returns() {
         let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let dir =
-            manifest_dir.join("../features/2026-07-08-single-sourcing-schema/examples");
+        let dir = manifest_dir
+            .join("../features/_completed/2026-07-08-single-sourcing-schema/examples");
         let files = [
             "as_line_separated.yaml",
             "as_csv.yaml",

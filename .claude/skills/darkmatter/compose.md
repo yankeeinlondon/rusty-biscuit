@@ -455,7 +455,7 @@ darkmatter/lib/src/
     │   ├── lexer.rs     # Tokenizer
     │   ├── ast.rs       # AST types
     │   ├── parser.rs    # Expression parser
-    │   ├── functions.rs # PURE_FUNCTIONS + FS_FUNCTIONS dispatch (read-side fns)
+    │   ├── functions/   # domain-owned registrations and dispatch
     │   ├── catalog.rs   # Descriptor catalog (parity-tested against functions)
     │   ├── ctx.rs       # CtxLookup (ctx.* runtime context)
     │   ├── doc_namespace.rs # Reserved doc / doc.* namespace resolution

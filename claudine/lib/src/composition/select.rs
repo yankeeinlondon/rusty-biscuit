@@ -872,7 +872,10 @@ mod tests {
     #[test]
     fn model_catalog_rejects_invalid_single_hint() {
         let prepared = make_prepared_composition(None, Some(ModelHint::Single("not-real".into())));
-        let catalog = crate::model_catalog::ModelCatalogService::new();
+        let cache = tempfile::TempDir::new().unwrap();
+        let catalog = crate::model_catalog::ModelCatalogService::with_cache_dir(
+            cache.path().to_path_buf(),
+        );
         let (model, reason) = resolve_model_with_env(
             Provider::Codex,
             &prepared.selection_hints,
@@ -891,7 +894,10 @@ mod tests {
             None,
             Some(ModelHint::List(vec!["not-real".into(), "gpt-5.5".into()])),
         );
-        let catalog = crate::model_catalog::ModelCatalogService::new();
+        let cache = tempfile::TempDir::new().unwrap();
+        let catalog = crate::model_catalog::ModelCatalogService::with_cache_dir(
+            cache.path().to_path_buf(),
+        );
         let (model, reason) = resolve_model_with_env(
             Provider::Codex,
             &prepared.selection_hints,
@@ -909,7 +915,10 @@ mod tests {
             None,
             Some(ModelHint::List(vec!["not-real".into(), "also-fake".into()])),
         );
-        let catalog = crate::model_catalog::ModelCatalogService::new();
+        let cache = tempfile::TempDir::new().unwrap();
+        let catalog = crate::model_catalog::ModelCatalogService::with_cache_dir(
+            cache.path().to_path_buf(),
+        );
         let (model, reason) = resolve_model_with_env(
             Provider::Codex,
             &prepared.selection_hints,
@@ -924,7 +933,10 @@ mod tests {
     #[test]
     fn model_catalog_valid_single_hint_accepted() {
         let prepared = make_prepared_composition(None, Some(ModelHint::Single("gpt-5.5".into())));
-        let catalog = crate::model_catalog::ModelCatalogService::new();
+        let cache = tempfile::TempDir::new().unwrap();
+        let catalog = crate::model_catalog::ModelCatalogService::with_cache_dir(
+            cache.path().to_path_buf(),
+        );
         let (model, reason) = resolve_model_with_env(
             Provider::Codex,
             &prepared.selection_hints,

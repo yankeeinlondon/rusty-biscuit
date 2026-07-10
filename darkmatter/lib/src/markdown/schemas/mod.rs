@@ -84,7 +84,10 @@ pub use errors::SchemaError;
 pub use rewrite::NormalizationOutcome;
 pub use simplified::{
     Constraint, DRAFT_2020_12, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
-    SimplifiedType, TypeExpr, parse_yaml_schema, to_json_schema,
+    SimplifiedType, SuggestionItem, SuggestionLintProblem, SuggestionLintReason, SuggestionQuery,
+    TypeExpr, lint_suggestions, suggestions_for_path,
+    StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,
+    parse_yaml_schema, to_json_schema,
 };
 pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
 

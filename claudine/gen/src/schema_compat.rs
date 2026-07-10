@@ -212,13 +212,10 @@ fn enum_members(atom: &PropertyAtom) -> Vec<String> {
 }
 
 fn describe_atom(atom: &PropertyAtom) -> String {
-    let base = match &atom.ty {
-        TypeExpr::Primitive(ty) => ty.as_keyword().to_string(),
-        TypeExpr::InlineObject(_) => "inline object".to_string(),
-    };
-    if atom.is_array {
-        format!("{base}[]")
-    } else {
-        base
+    let suffix = if atom.is_array { "[]" } else { "" };
+    match &atom.ty {
+        TypeExpr::Primitive(ty) => format!("{base}{suffix}", base = ty.as_keyword()),
+        TypeExpr::InlineObject(_) => format!("inline object{suffix}"),
+        TypeExpr::Imported { name, reference } => format!("{name}{suffix}@{reference}"),
     }
 }

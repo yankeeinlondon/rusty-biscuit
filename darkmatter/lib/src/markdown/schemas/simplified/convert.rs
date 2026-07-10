@@ -420,6 +420,31 @@ fn atom_fragment_without_null_wrap(
     Ok((fragment, required))
 }
 
+/// Builds the exact non-null schema fragment used to lint one atom's
+/// suggestions.
+pub(super) fn suggestion_target_schema(
+    name: &str,
+    atom: &PropertyAtom,
+) -> Result<Value, SchemaError> {
+    let (fragment, _) = atom_fragment_without_null_wrap(name, atom, false)?;
+    let mut target = if atom.is_array {
+        fragment
+            .get("items")
+            .cloned()
+            .expect("array atoms always carry an items schema")
+    } else {
+        fragment
+    };
+    if let Value::Object(map) = &mut target {
+        map.remove("x-darkmatter-suggest");
+        map.remove("x-darkmatter-example");
+        map.remove("x-darkmatter-generated");
+        map.remove("default");
+        map.remove("description");
+    }
+    Ok(target)
+}
+
 /// Lowers an inline object `SchemaShape` to a Draft 2020-12 object fragment.
 ///
 /// The fragment defaults to `additionalProperties: false` (Decision #7):
@@ -743,6 +768,17 @@ fn string_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, Sche
             | Constraint::Default(_)
             | Constraint::Generated
             | Constraint::Example(_) => {}
+            Constraint::Suggest(candidates) => {
+                m.insert(
+                    "x-darkmatter-suggest".into(),
+                    Value::Array(
+                        candidates
+                            .iter()
+                            .map(|candidate| candidate.interpreted.clone())
+                            .collect(),
+                    ),
+                );
+            }
             Constraint::MinLen(n) => {
                 m.insert("minLength".into(), json!(*n));
             }
@@ -785,6 +821,17 @@ fn number_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, Sche
             | Constraint::Default(_)
             | Constraint::Generated
             | Constraint::Example(_) => {}
+            Constraint::Suggest(candidates) => {
+                m.insert(
+                    "x-darkmatter-suggest".into(),
+                    Value::Array(
+                        candidates
+                            .iter()
+                            .map(|candidate| candidate.interpreted.clone())
+                            .collect(),
+                    ),
+                );
+            }
             Constraint::Min(n) => {
                 m.insert("minimum".into(), number_to_json(*n));
             }
