@@ -1,4 +1,4 @@
-//! Built-in helper functions for the Darkmatter expression evaluator.
+//! Built-in helper functions and registrations for the Darkmatter expression evaluator.
 //!
 //! This module groups the type predicates, math helpers, collection helpers,
 //! string predicates and mutations, and date validators added in the
@@ -12,6 +12,7 @@ use chrono::{Datelike, Local, NaiveDate, NaiveDateTime, Utc};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
@@ -25,6 +26,161 @@ use super::resolve_ctx::{
 };
 use crate::markdown::Markdown;
 use crate::markdown::schemas::DarkmatterSchemas;
+
+mod args;
+mod collections;
+mod dates;
+mod markdown_docs;
+mod paths;
+mod predicates;
+mod skills;
+mod strings;
+mod terminal;
+
+use super::catalog::ExpressionFunctionDescriptor;
+use args::require_args;
+use crate::catalog::{Example, ExampleVerification};
+
+type PureFn = fn(&[Value]) -> Result<Value, String>;
+type ContextFn = fn(&[Value], &ResolutionContext) -> Result<Value, ExpressionError>;
+
+#[derive(Clone, Copy)]
+enum FunctionHandler {
+    Pure(PureFn),
+    Context(ContextFn),
+    Lazy,
+}
+
+#[cfg(test)]
+mod registration_tests {
+    use std::collections::HashSet;
+
+    use serde_json::Value;
+
+    use super::{FunctionHandler, dispatch, dispatch_fs, registrations};
+    use crate::markdown::compose::expression::ResolutionContext;
+
+    #[test]
+    fn registration_names_aliases_and_signatures_are_unique() {
+        let registrations: Vec<_> = registrations().collect();
+        let canonicals: HashSet<_> = registrations.iter().map(|r| r.canonical).collect();
+        assert_eq!(canonicals.len(), registrations.len());
+
+        let mut all_names = canonicals;
+        let mut signatures = HashSet::new();
+        for registration in registrations {
+            assert!(!registration.descriptors.is_empty());
+            for alias in registration.aliases {
+                assert!(all_names.insert(*alias), "duplicate expression alias: {alias}");
+            }
+            for descriptor in registration.descriptors {
+                assert_eq!(
+                    descriptor.signature.split('(').next(),
+                    Some(registration.canonical)
+                );
+                assert!(
+                    signatures.insert(descriptor.signature),
+                    "duplicate expression signature: {}",
+                    descriptor.signature
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn handler_kinds_dispatch_through_their_intended_paths() {
+        let context = ResolutionContext::default();
+        for registration in registrations() {
+            match registration.handler {
+                FunctionHandler::Pure(_) => {
+                    assert!(dispatch(registration.canonical, &[]).is_some());
+                    assert!(dispatch_fs(registration.canonical, &[], &context).is_none());
+                }
+                FunctionHandler::Context(_) => {
+                    assert!(dispatch(registration.canonical, &[]).is_none());
+                    assert!(dispatch_fs(registration.canonical, &[], &context).is_some());
+                }
+                FunctionHandler::Lazy => {
+                    assert!(dispatch(registration.canonical, &[Value::Bool(true)]).is_none());
+                    assert!(dispatch_fs(registration.canonical, &[], &context).is_none());
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct FunctionRegistration {
+    canonical: &'static str,
+    aliases: &'static [&'static str],
+    catalog_order: usize,
+    descriptors: &'static [ExpressionFunctionDescriptor],
+    handler: FunctionHandler,
+}
+
+const LAZY_REGISTRATIONS: &[FunctionRegistration] = &[
+    FunctionRegistration {
+        canonical: "and",
+        aliases: &[],
+        catalog_order: 46,
+        descriptors: &[ExpressionFunctionDescriptor {
+            signature: "and(...)",
+            parameters: super::catalog::P_VARIADIC,
+            returns: super::catalog::R_BOOL,
+            description: "Logical AND of all arguments. Short-circuits on first falsy value.",
+            category: "Logical",
+            order: 1,
+            example: Some(Example { invocation: "and(true, true)", result: "true", verification: ExampleVerification::Executable }),
+        }],
+        handler: FunctionHandler::Lazy,
+    },
+    FunctionRegistration {
+        canonical: "or",
+        aliases: &[],
+        catalog_order: 47,
+        descriptors: &[ExpressionFunctionDescriptor {
+            signature: "or(...)",
+            parameters: super::catalog::P_VARIADIC,
+            returns: super::catalog::R_BOOL,
+            description: "Logical OR of all arguments. Short-circuits on first truthy value.",
+            category: "Logical",
+            order: 2,
+            example: Some(Example { invocation: "or(false, true)", result: "true", verification: ExampleVerification::Executable }),
+        }],
+        handler: FunctionHandler::Lazy,
+    },
+];
+
+const REGISTRATION_GROUPS: &[&[FunctionRegistration]] = &[
+    predicates::REGISTRATIONS,
+    collections::REGISTRATIONS,
+    strings::REGISTRATIONS,
+    terminal::REGISTRATIONS,
+    dates::REGISTRATIONS,
+    paths::REGISTRATIONS,
+    skills::REGISTRATIONS,
+    markdown_docs::REGISTRATIONS,
+    LAZY_REGISTRATIONS,
+];
+
+fn registrations() -> impl Iterator<Item = &'static FunctionRegistration> {
+    REGISTRATION_GROUPS.iter().flat_map(|group| group.iter())
+}
+
+pub(super) fn expression_function_descriptors() -> &'static [ExpressionFunctionDescriptor] {
+    static DESCRIPTORS: LazyLock<Vec<ExpressionFunctionDescriptor>> = LazyLock::new(|| {
+        let mut descriptors: Vec<_> = registrations()
+            .flat_map(|registration| {
+                registration.descriptors.iter().copied().enumerate().map(|(offset, descriptor)| {
+                    (registration.catalog_order + offset, descriptor)
+                })
+            })
+            .collect();
+        descriptors.sort_by_key(|(order, _)| *order);
+        descriptors.into_iter().map(|(_, descriptor)| descriptor).collect()
+    });
+    &DESCRIPTORS
+}
 
 /// Parsed components of an indexed filename stem.
 ///
@@ -228,17 +384,6 @@ pub fn is_empty(value: &Value) -> bool {
         Value::Array(arr) => arr.is_empty(),
         Value::Object(obj) => obj.is_empty(),
         Value::Number(_) | Value::Bool(_) => false,
-    }
-}
-
-fn require_args(name: &str, args: &[Value], expected: usize) -> Result<(), String> {
-    if args.len() != expected {
-        Err(format!(
-            "{name}() requires {expected} argument{}",
-            if expected == 1 { "" } else { "s" }
-        ))
-    } else {
-        Ok(())
     }
 }
 
@@ -2043,217 +2188,21 @@ pub fn round_fn(args: &[Value]) -> Result<Value, String> {
     Ok(Value::Number(serde_json::Number::from(number)))
 }
 
-/// Signature of a pure expression function (fully-evaluated `Value` args).
-pub type PureFn = fn(&[Value]) -> Result<Value, String>;
-/// Signature of a context-aware (filesystem/document) expression function.
-pub type FsFn = fn(&[Value], &ResolutionContext) -> Result<Value, ExpressionError>;
-
-/// One pure (context-free) expression function registration.
-pub struct PureFunction {
-    /// Canonical snake_case name (matches the descriptor signature).
-    pub canonical: &'static str,
-    /// Accepted lowercased aliases (e.g. the underscore-free spelling).
-    pub aliases: &'static [&'static str],
-    /// Every canonical signature this function answers to, including each
-    /// overload and optional/variadic arity (e.g. `number(x, [default])`). This
-    /// is the authoritative set of callable signatures the descriptor catalog
-    /// is checked against, so adding or removing an overload here (or in a
-    /// descriptor) is detected by `descriptor_signature_set_equals_dispatchable_signature_set`.
-    pub signatures: &'static [&'static str],
-    /// Handler invoked with fully-evaluated arguments.
-    pub handler: PureFn,
-}
-
-/// One context-aware expression function registration.
-pub struct FsFunction {
-    /// Canonical snake_case name (matches the descriptor signature).
-    pub canonical: &'static str,
-    /// Accepted lowercased aliases (e.g. the underscore-free spelling).
-    pub aliases: &'static [&'static str],
-    /// Every canonical signature this function answers to, including overloads
-    /// (e.g. `frontmatter(file)` and `frontmatter(file, prop)`). See
-    /// [`PureFunction::signatures`].
-    pub signatures: &'static [&'static str],
-    /// Handler invoked with fully-evaluated arguments and the resolution context.
-    pub handler: FsFn,
-}
-
-/// The authoritative table of pure expression functions.
-///
-/// [`dispatch`] resolves names against this slice, so it is the single source
-/// of truth for which pure functions the evaluator recognizes — not a list
-/// maintained beside the dispatcher. The descriptor catalog must match it
-/// (enforced by `descriptor_name_set_equals_dispatchable_runtime_name_set`).
-pub const PURE_FUNCTIONS: &[PureFunction] = &[
-    // Type predicates
-    PureFunction { canonical: "is_string", aliases: &["isstring"], signatures: &["is_string(x)"], handler: is_string },
-    PureFunction { canonical: "is_number", aliases: &["isnumber"], signatures: &["is_number(x)"], handler: is_number },
-    PureFunction { canonical: "is_array", aliases: &["isarray"], signatures: &["is_array(x)"], handler: is_array },
-    PureFunction { canonical: "is_null", aliases: &["isnull"], signatures: &["is_null(x)"], handler: is_null },
-    PureFunction { canonical: "is_object", aliases: &["isobject"], signatures: &["is_object(x)"], handler: is_object },
-    PureFunction { canonical: "is_empty", aliases: &["isempty"], signatures: &["is_empty(x)"], handler: is_empty_fn },
-    PureFunction { canonical: "is_positive", aliases: &["ispositive"], signatures: &["is_positive(val)"], handler: is_positive },
-    PureFunction { canonical: "is_negative", aliases: &["isnegative"], signatures: &["is_negative(val)"], handler: is_negative },
-    PureFunction { canonical: "is_integer", aliases: &["isinteger"], signatures: &["is_integer(val)"], handler: is_integer },
-    // Math helpers
-    PureFunction { canonical: "min", aliases: &[], signatures: &["min(a, b)"], handler: min_fn },
-    PureFunction { canonical: "max", aliases: &[], signatures: &["max(a, b)"], handler: max_fn },
-    PureFunction { canonical: "abs", aliases: &[], signatures: &["abs(x)"], handler: abs_fn },
-    PureFunction { canonical: "round", aliases: &[], signatures: &["round(x, [default])"], handler: round_fn },
-    // Collection helpers
-    PureFunction { canonical: "first", aliases: &[], signatures: &["first(x)"], handler: first_fn },
-    PureFunction { canonical: "last", aliases: &[], signatures: &["last(x)"], handler: last_fn },
-    PureFunction { canonical: "has_key", aliases: &["haskey"], signatures: &["has_key(obj, key)"], handler: has_key_fn },
-    PureFunction { canonical: "contains", aliases: &[], signatures: &["contains(haystack, needle)"], handler: contains_fn },
-    PureFunction { canonical: "length", aliases: &[], signatures: &["length(x)"], handler: length_fn },
-    // Type conversion
-    PureFunction { canonical: "number", aliases: &[], signatures: &["number(x, [default])"], handler: number_fn },
-    // String predicates
-    PureFunction { canonical: "starts_with", aliases: &["startswith"], signatures: &["starts_with(x, find)"], handler: starts_with },
-    PureFunction { canonical: "ends_with", aliases: &["endswith"], signatures: &["ends_with(x, find)"], handler: ends_with },
-    // String mutations
-    PureFunction { canonical: "lower", aliases: &[], signatures: &["lower(x)"], handler: lower },
-    PureFunction { canonical: "upper", aliases: &[], signatures: &["upper(x)"], handler: upper },
-    PureFunction { canonical: "capitalize", aliases: &[], signatures: &["capitalize(x)"], handler: capitalize },
-    PureFunction { canonical: "kebab_case", aliases: &["kebabcase"], signatures: &["kebab_case(x)"], handler: kebab_case },
-    PureFunction { canonical: "snake_case", aliases: &["snakecase"], signatures: &["snake_case(x)"], handler: snake_case },
-    PureFunction { canonical: "camel_case", aliases: &["camelcase"], signatures: &["camel_case(x)"], handler: camel_case },
-    PureFunction { canonical: "pascal_case", aliases: &["pascalcase"], signatures: &["pascal_case(x)"], handler: pascal_case },
-    PureFunction { canonical: "title_case", aliases: &["titlecase"], signatures: &["title_case(x)"], handler: title_case },
-    PureFunction { canonical: "without_date", aliases: &["withoutdate"], signatures: &["without_date(string)"], handler: without_date },
-    PureFunction { canonical: "ensure_leading", aliases: &["ensureleading"], signatures: &["ensure_leading(var, prefix)"], handler: ensure_leading },
-    PureFunction { canonical: "ensure_trailing", aliases: &["ensuretrailing"], signatures: &["ensure_trailing(var, postfix)"], handler: ensure_trailing },
-    PureFunction { canonical: "replace", aliases: &[], signatures: &["replace(x, find, replacement)"], handler: replace },
-    PureFunction { canonical: "replace_first", aliases: &["replacefirst"], signatures: &["replace_first(x, find, replacement)"], handler: replace_first },
-    PureFunction { canonical: "replace_last", aliases: &["replacelast"], signatures: &["replace_last(x, find, replacement)"], handler: replace_last },
-    // List formatting
-    PureFunction { canonical: "as_line_separated", aliases: &["aslineseparated"], signatures: &["as_line_separated(list)"], handler: as_line_separated },
-    PureFunction { canonical: "as_csv", aliases: &["ascsv"], signatures: &["as_csv(list)"], handler: as_csv },
-    PureFunction { canonical: "as_tsv", aliases: &["astsv"], signatures: &["as_tsv(list)"], handler: as_tsv },
-    PureFunction { canonical: "as_space_separated", aliases: &["asspaceseparated"], signatures: &["as_space_separated(list)"], handler: as_space_separated },
-    PureFunction { canonical: "as_unordered_list", aliases: &["asunorderedlist"], signatures: &["as_unordered_list(list)"], handler: as_unordered_list },
-    PureFunction { canonical: "as_ordered_list", aliases: &["asorderedlist"], signatures: &["as_ordered_list(list)"], handler: as_ordered_list },
-    // Rendering
-    PureFunction { canonical: "terminal", aliases: &["terminal"], signatures: &["terminal(string)"], handler: terminal },
-    // Date formatting
-    PureFunction { canonical: "date", aliases: &[], signatures: &["date(iso, fmt)"], handler: date_fn },
-    // Strict date validators
-    PureFunction { canonical: "is_date", aliases: &["isdate"], signatures: &["is_date(x)"], handler: is_date },
-    PureFunction { canonical: "is_date_utc", aliases: &["isdateutc"], signatures: &["is_date_utc(x)"], handler: is_date_utc },
-    PureFunction {
-        canonical: "is_date_time",
-        aliases: &["isdatetime", "is_datetime"],
-        signatures: &["is_date_time(x)"],
-        handler: is_datetime,
-    },
-    PureFunction {
-        canonical: "is_date_time_utc",
-        aliases: &["isdatetimeutc", "is_datetime_utc"],
-        signatures: &["is_date_time_utc(x)"],
-        handler: is_datetime_utc,
-    },
-    // Relative date validators
-    PureFunction { canonical: "is_today", aliases: &["istoday"], signatures: &["is_today(x)"], handler: is_today },
-    PureFunction { canonical: "is_today_utc", aliases: &["istodayutc"], signatures: &["is_today_utc(x)"], handler: is_today_utc },
-    PureFunction { canonical: "is_yesterday", aliases: &["isyesterday"], signatures: &["is_yesterday(x)"], handler: is_yesterday },
-    PureFunction {
-        canonical: "is_yesterday_utc",
-        aliases: &["isyesterdayutc"],
-        signatures: &["is_yesterday_utc(x)"],
-        handler: is_yesterday_utc,
-    },
-    PureFunction { canonical: "is_tomorrow", aliases: &["istomorrow"], signatures: &["is_tomorrow(x)"], handler: is_tomorrow },
-    PureFunction {
-        canonical: "is_tomorrow_utc",
-        aliases: &["istomorrowutc"],
-        signatures: &["is_tomorrow_utc(x)"],
-        handler: is_tomorrow_utc,
-    },
-    PureFunction { canonical: "is_this_month", aliases: &["isthismonth"], signatures: &["is_this_month(x)"], handler: is_this_month },
-    PureFunction {
-        canonical: "is_this_month_utc",
-        aliases: &["isthismonthutc"],
-        signatures: &["is_this_month_utc(x)"],
-        handler: is_this_month_utc,
-    },
-    PureFunction { canonical: "is_this_year", aliases: &["isthisyear"], signatures: &["is_this_year(x)"], handler: is_this_year },
-    PureFunction {
-        canonical: "is_this_year_utc",
-        aliases: &["isthisyearutc"],
-        signatures: &["is_this_year_utc(x)"],
-        handler: is_this_year_utc,
-    },
-];
-
-/// The authoritative table of context-aware (filesystem/document) functions.
-///
-/// [`dispatch_fs`] resolves names against this slice, making it the single
-/// source of truth for the fs surface.
-pub const FS_FUNCTIONS: &[FsFunction] = &[
-    FsFunction { canonical: "absolute", aliases: &[], signatures: &["absolute(file)"], handler: absolute_fn },
-    FsFunction { canonical: "relative", aliases: &[], signatures: &["relative(file)"], handler: relative_fn },
-    FsFunction { canonical: "file_exists", aliases: &["fileexists"], signatures: &["file_exists(file)"], handler: file_exists_fn },
-    FsFunction { canonical: "has_command", aliases: &["hascommand"], signatures: &["has_command(cmd)"], handler: has_command_fn },
-    FsFunction { canonical: "is_indexed_file", aliases: &["isindexedfile"], signatures: &["is_indexed_file(file)"], handler: is_indexed_file_fn },
-    FsFunction { canonical: "file_index", aliases: &["fileindex"], signatures: &["file_index(file)"], handler: file_index_fn },
-    FsFunction { canonical: "increment_file_index", aliases: &["incrementfileindex"], signatures: &["increment_file_index(file)"], handler: increment_file_index_fn },
-    FsFunction { canonical: "decrement_file_index", aliases: &["decrementfileindex"], signatures: &["decrement_file_index(file)"], handler: decrement_file_index_fn },
-    FsFunction { canonical: "basename", aliases: &[], signatures: &["basename(file)"], handler: basename_fn },
-    FsFunction { canonical: "basename_without_index", aliases: &["basenamewithoutindex"], signatures: &["basename_without_index(file)"], handler: basename_without_index_fn },
-    FsFunction { canonical: "dirname", aliases: &[], signatures: &["dirname(file)"], handler: dirname_fn },
-    FsFunction { canonical: "ext", aliases: &[], signatures: &["ext(file)"], handler: ext_fn },
-    FsFunction { canonical: "parent_dir", aliases: &["parentdir"], signatures: &["parent_dir(file)"], handler: parent_dir_fn },
-    FsFunction { canonical: "file_trailing", aliases: &["filetrailing"], signatures: &["file_trailing(file)"], handler: file_trailing_fn },
-    FsFunction { canonical: "dir_leading", aliases: &["dirleading"], signatures: &["dir_leading(file)"], handler: dir_leading_fn },
-    FsFunction { canonical: "join", aliases: &[], signatures: &["join(left, right)"], handler: join_fn },
-    FsFunction { canonical: "link", aliases: &[], signatures: &["link(file)", "link(target, desc)"], handler: link_fn },
-    FsFunction { canonical: "has_skill", aliases: &["hasskill"], signatures: &["has_skill(name)"], handler: has_skill_fn },
-    FsFunction { canonical: "has_local_skill", aliases: &["haslocalskill"], signatures: &["has_local_skill(name)"], handler: has_local_skill_fn },
-    FsFunction {
-        canonical: "frontmatter",
-        aliases: &[],
-        signatures: &["frontmatter(file)", "frontmatter(file, prop)"],
-        handler: frontmatter_fn,
-    },
-    FsFunction {
-        canonical: "markdown_body_empty",
-        aliases: &["markdownbodyempty"],
-        signatures: &["markdown_body_empty(file)"],
-        handler: markdown_body_empty_fn,
-    },
-    FsFunction {
-        canonical: "markdown_title",
-        aliases: &["markdowntitle"],
-        signatures: &["markdown_title(file)"],
-        handler: markdown_title_fn,
-    },
-    FsFunction {
-        canonical: "validate_schema",
-        aliases: &["validateschema"],
-        signatures: &["validate_schema(file)", "validate_schema(file, obj)"],
-        handler: validate_schema_fn,
-    },
-];
-
 /// Logical short-circuit operators handled directly in `evaluate_function`
 /// (they evaluate their arguments lazily and so cannot live in the pure
 /// `&[Value]` table). Listed here so the dispatchable-name enumeration stays
 /// complete; `lazy_operators_are_dispatchable` proves each one resolves.
-pub const LAZY_OPERATOR_NAMES: &[&str] = &["and", "or"];
-
-/// Canonical signatures of the lazy logical operators, kept in lock-step with
-/// [`LAZY_OPERATOR_NAMES`] so they appear in [`dispatchable_signatures`].
-pub const LAZY_OPERATOR_SIGNATURES: &[&str] = &["and(...)", "or(...)"];
+#[cfg(test)]
+pub(crate) fn lazy_operator_names() -> impl Iterator<Item = &'static str> {
+    LAZY_REGISTRATIONS.iter().map(|registration| registration.canonical)
+}
 
 /// Returns every canonical function name the evaluator can dispatch.
 ///
 /// This is the authoritative runtime surface: the lazy operators plus the two
 /// dispatch tables that [`dispatch`]/[`dispatch_fs`] actually consult.
 pub fn dispatchable_canonical_names() -> Vec<&'static str> {
-    let mut names: Vec<&'static str> = LAZY_OPERATOR_NAMES.to_vec();
-    names.extend(PURE_FUNCTIONS.iter().map(|f| f.canonical));
-    names.extend(FS_FUNCTIONS.iter().map(|f| f.canonical));
-    names
+    registrations().map(|registration| registration.canonical).collect()
 }
 
 /// Returns every canonical callable signature the evaluator dispatches,
@@ -2262,54 +2211,57 @@ pub fn dispatchable_canonical_names() -> Vec<&'static str> {
 /// This is the authoritative runtime signature surface: the lazy operators plus
 /// the per-registration [`PureFunction::signatures`]/[`FsFunction::signatures`].
 /// The expression descriptor catalog is checked for exact set equality against
-/// it, so adding or removing a callable *overload* (not merely a name) without
-/// a matching descriptor — or vice versa — fails a test.
+/// it, so overload metadata and dispatch always come from the same registration.
 pub fn dispatchable_signatures() -> Vec<&'static str> {
-    let mut sigs: Vec<&'static str> = LAZY_OPERATOR_SIGNATURES.to_vec();
-    sigs.extend(PURE_FUNCTIONS.iter().flat_map(|f| f.signatures.iter().copied()));
-    sigs.extend(FS_FUNCTIONS.iter().flat_map(|f| f.signatures.iter().copied()));
-    sigs
+    registrations()
+        .flat_map(|registration| registration.descriptors.iter().map(|d| d.signature))
+        .collect()
 }
 
 /// Context-aware dispatch for filesystem/document functions.
 ///
 /// ## Returns
 ///
-/// `Some(result)` for names registered in [`FS_FUNCTIONS`], or `None` for any
-/// other name (the caller then falls through to [`dispatch`]).
+/// `Some(result)` for context-aware registrations, or `None` for any other
+/// name (the caller then falls through to [`dispatch`]).
 pub fn dispatch_fs(
     name: &str,
     args: &[Value],
     ctx: &ResolutionContext,
 ) -> Option<Result<Value, ExpressionError>> {
-    for f in FS_FUNCTIONS {
-        if f.canonical == name || f.aliases.contains(&name) {
-            return Some((f.handler)(args, ctx));
+    for registration in registrations() {
+        if (registration.canonical == name || registration.aliases.contains(&name))
+            && let FunctionHandler::Context(handler) = registration.handler
+        {
+            return Some(handler(args, ctx));
         }
     }
     None
 }
 
 /// Returns `true` when `name` matches a canonical name or alias in
-/// [`FS_FUNCTIONS`].
+/// the context-aware registration set.
 ///
 /// Lets the evaluator distinguish a known filesystem function that fell
 /// through dispatch only because no document resolution context was available
 /// from a genuinely unrecognized symbol.
 pub fn is_fs_function(name: &str) -> bool {
-    FS_FUNCTIONS
-        .iter()
-        .any(|f| f.canonical == name || f.aliases.contains(&name))
+    registrations().any(|registration| {
+        matches!(registration.handler, FunctionHandler::Context(_))
+            && (registration.canonical == name || registration.aliases.contains(&name))
+    })
 }
 
 /// Dispatches an evaluated function call against the pure helper library.
 ///
-/// Returns `Some(result)` when the name matches an entry in [`PURE_FUNCTIONS`],
+/// Returns `Some(result)` when the name matches a pure registration,
 /// or `None` to let the outer dispatcher report `Unknown function: ...`.
 pub fn dispatch(name: &str, args: &[Value]) -> Option<Result<Value, String>> {
-    for f in PURE_FUNCTIONS {
-        if f.canonical == name || f.aliases.contains(&name) {
-            return Some((f.handler)(args));
+    for registration in registrations() {
+        if (registration.canonical == name || registration.aliases.contains(&name))
+            && let FunctionHandler::Pure(handler) = registration.handler
+        {
+            return Some(handler(args));
         }
     }
     None

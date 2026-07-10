@@ -446,7 +446,7 @@ mod tests {
             &mut failures,
         );
         check(
-            crate::markdown::compose::expression::catalog::EXPRESSION_FUNCTION_DESCRIPTORS,
+            crate::markdown::compose::expression::expression_function_descriptors(),
             "expression",
             &mut failures,
         );
