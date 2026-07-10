@@ -6,9 +6,8 @@
 //! sentinel a shell directive would create never appears) and no network fetch
 //! is made (the remote constructs resolve instantly, never hanging on I/O).
 //!
-//! In-memory session (no real terminal/network resource), so it runs ungated
-//! and routes to `just test-l2` via the file name (`no_side_effects` — the
-//! harness's `require_level!`-free L2 tier).
+//! In-memory session (no real terminal or network resource), so it runs in the
+//! standard `just test` gate with no terminal harness.
 
 use std::sync::mpsc;
 use std::time::Duration;
@@ -122,7 +121,7 @@ impl Fixture {
 }
 
 #[test]
-fn level2_dsl_requests_spawn_no_processes_and_open_no_sockets() {
+fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
     let workspace = tempfile::tempdir().unwrap();
     // A sentinel a shell directive *would* create if DMLS ever executed it. Its
     // continued absence after every request is the "no child process" proof.

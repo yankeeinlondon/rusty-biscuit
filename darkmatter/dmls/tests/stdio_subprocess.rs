@@ -1,18 +1,18 @@
-//! Level-2 subprocess smoke test: launch the **compiled** `dmls` binary and
+//! Level-1 subprocess smoke test: launch the **compiled** `dmls` binary and
 //! drive a full `initialize` → `initialized` → `shutdown` → `exit` LSP handshake
 //! over real OS stdin/stdout pipes — the exact launch path a Zed/VS Code/Neovim
 //! integration uses.
 //!
-//! The in-memory `Connection::memory()` sessions in `level2_lsp_session.rs`
+//! The in-memory `Connection::memory()` sessions in `lsp_session.rs`
 //! prove the request handlers; they never exercise the native binary's argv
 //! parsing, `Connection::stdio()` framing, or process shutdown. This test proves
 //! the binary starts, speaks LSP over real pipes, and exits cleanly — release
 //! readiness the in-memory suite cannot observe.
 //!
-//! Named `level2_` to route through `just test-l2` alongside the other LSP
-//! sessions; it needs no terminal harness, only the built binary (located via
-//! `CARGO_BIN_EXE_dmls`). Every read is bounded by a hard timeout that kills the
-//! child, so the test can never hang the suite.
+//! No terminal emulator is involved (only OS pipes), so it runs in the standard
+//! `just test` gate. It needs the built binary (located via `CARGO_BIN_EXE_dmls`)
+//! but no terminal harness. Every read is bounded by a hard timeout that kills
+//! the child, so the test can never hang the suite.
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
@@ -64,7 +64,7 @@ fn await_response(reader: &mut impl BufRead, id: i64) -> Option<Value> {
 }
 
 #[test]
-fn level2_native_binary_speaks_lsp_over_real_stdio() {
+fn native_binary_speaks_lsp_over_real_stdio() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_dmls"))
         // `--stdio` is a no-op the binary accepts for editor compatibility.
         .arg("--stdio")
