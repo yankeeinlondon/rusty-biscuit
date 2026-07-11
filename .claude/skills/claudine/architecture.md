@@ -10,7 +10,9 @@ claudine/lib/src/
 ├── adapters/     → Provider-specific event parsers (ProviderAdapter trait)
 ├── badges/       → Styled terminal badge constants (YOLO, Non-Interactive, Interactive, etc.)
 ├── composition/  → Markdown frontmatter composition (inline and chained prompt pipelines)
-│   └── lifecycle/ → Lifecycle config/types, parsing, validation, actions, context, control, execution, and provider-neutral runtime routing
+│   ├── lifecycle/ → Lifecycle config/types, parsing, validation, actions, context, control, execution, and provider-neutral runtime routing
+│   ├── looping/   → Loop configuration, action DSL, condition evaluation, and execution orchestration
+│   └── schema/    → Schema-aware preparation, error translation, problem classification, and status reporting
 ├── config/       → Agent detection, hook registration, atomic writes, backups
 ├── dispatch/     → Event processing pipeline (loader, template, matcher, runner)
 ├── events/       → Normalized event model and types (16 events, 10 providers)
