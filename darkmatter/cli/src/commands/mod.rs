@@ -103,6 +103,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             allow_reassigned_frontmatter_property,
             baseline_schema,
             no_baseline_schema,
+            no_trigger_schemas,
             timeout,
             allow_shell_timeout,
             shell,
@@ -144,6 +145,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 allow_reassigned_frontmatter_property,
                 baseline_schema.as_ref(),
                 no_baseline_schema,
+                no_trigger_schemas,
                 timeout,
                 allow_shell_timeout,
                 shell,
@@ -277,8 +279,15 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 schema,
                 format,
                 quiet,
+                no_trigger_schemas,
             } => {
-                schema::run_validate(&inputs, schema.as_deref(), format, quiet)?;
+                schema::run_validate(
+                    &inputs,
+                    schema.as_deref(),
+                    format,
+                    quiet,
+                    no_trigger_schemas,
+                )?;
             }
             SchemaTarget::Detect {
                 files,
@@ -290,6 +299,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             SchemaTarget::About => {
                 schema::run_about(cli.verbose > 0, cli.code_block.into())?;
             }
+            SchemaTarget::Triggers { file } => schema::run_triggers(&file)?,
         },
     }
 

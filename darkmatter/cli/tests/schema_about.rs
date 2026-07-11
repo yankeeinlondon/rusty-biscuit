@@ -20,6 +20,10 @@ fn schema_about_prints_simplified_schema_reference() {
         "Schema Shapes",
         "Type System",
         "Constraint Vocabulary",
+        "Trigger Schemas",
+        "kind: trigger-schema",
+        "Vacuous-arm lint",
+        "Match-safe constraints only",
         "use --verbose to see additional details",
     ] {
         assert!(stdout.contains(needle), "schema about missing `{needle}`");
