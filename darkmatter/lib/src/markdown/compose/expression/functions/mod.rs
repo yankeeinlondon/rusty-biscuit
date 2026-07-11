@@ -39,7 +39,7 @@ mod strings;
 mod terminal;
 
 use args::require_args;
-use super::catalog::{ExpressionFunctionDescriptor, expression_function_catalog, expression_function_descriptors};
+use super::catalog::{ExpressionFunctionDescriptor, ParamType, expression_function_catalog, expression_function_descriptors};
 
 type PureFn = fn(&[Value]) -> Result<Value, String>;
 type ContextFn = fn(&[Value], &ResolutionContext) -> Result<Value, ExpressionError>;
@@ -273,9 +273,55 @@ fn joined_bindings() -> &'static [JoinedBinding] {
 }
 
 fn accepts_arity(descriptor: &ExpressionFunctionDescriptor, arity: usize) -> bool {
-    let minimum = descriptor.parameters.iter().filter(|parameter| !parameter.optional && !parameter.variadic).count();
-    let variadic = descriptor.parameters.iter().any(|parameter| parameter.variadic);
-    arity >= minimum && (variadic || arity <= descriptor.parameters.len())
+    accepts_parameter_arity(descriptor.parameters, arity)
+}
+
+fn accepts_parameter_arity(parameters: &[ParamType], arity: usize) -> bool {
+    let minimum = parameters
+        .iter()
+        .filter(|parameter| !parameter.optional && !parameter.variadic)
+        .count();
+    let variadic = parameters.iter().any(|parameter| parameter.variadic);
+    arity >= minimum && (variadic || arity <= parameters.len())
+}
+
+/// Builds the registry-produced arity error for a binding whose overloads all
+/// reject `args.len()`.
+///
+/// Aggregates the lower bound, upper bound, and variadic flag across every
+/// overload descriptor so the message names the full acceptable window rather
+/// than a single overload's shape. The wording keeps the `"requires … argument"`
+/// shape that downstream `is_arity_error` detection and `enrich_arity_error`
+/// appending depend on.
+fn arity_error_message(name: &str, descriptors: &[&ExpressionFunctionDescriptor]) -> String {
+    let minimum = descriptors
+        .iter()
+        .map(|descriptor| {
+            descriptor
+                .parameters
+                .iter()
+                .filter(|parameter| !parameter.optional && !parameter.variadic)
+                .count()
+        })
+        .min()
+        .unwrap_or(0);
+    let variadic = descriptors
+        .iter()
+        .any(|descriptor| descriptor.parameters.iter().any(|parameter| parameter.variadic));
+    let maximum = descriptors.iter().map(|descriptor| descriptor.parameters.len()).max();
+    if variadic {
+        format!(
+            "{name}() requires at least {minimum} argument{}",
+            if minimum == 1 { "" } else { "s" }
+        )
+    } else if maximum == Some(minimum) {
+        format!(
+            "{name}() requires {minimum} argument{}",
+            if minimum == 1 { "" } else { "s" }
+        )
+    } else {
+        format!("{name}() requires {minimum} to {} arguments", maximum.unwrap_or(minimum))
+    }
 }
 
 /// Parsed components of an indexed filename stem.
@@ -2441,6 +2487,39 @@ pub fn dispatchable_signatures() -> Vec<&'static str> {
         .collect()
 }
 
+pub(crate) enum LazyArityEligibility {
+    Eligible,
+    Ineligible(String),
+}
+
+/// Resolves a lazy binding and checks its authored overload shapes without
+/// evaluating any call arguments.
+pub(crate) fn lazy_arity_eligibility(
+    name: &str,
+    arity: usize,
+) -> Option<LazyArityEligibility> {
+    joined_bindings().iter().find_map(|entry| {
+        let binding = entry.binding;
+        if binding.evaluation != EvaluationMode::Lazy
+            || (binding.canonical != name && !binding.aliases.contains(&name))
+        {
+            return None;
+        }
+        Some(if entry
+            .descriptors
+            .iter()
+            .any(|descriptor| accepts_arity(descriptor, arity))
+        {
+            LazyArityEligibility::Eligible
+        } else {
+            LazyArityEligibility::Ineligible(arity_error_message(
+                binding.canonical,
+                &entry.descriptors,
+            ))
+        })
+    })
+}
+
 /// Context-aware dispatch for filesystem/document functions.
 ///
 /// ## Returns
@@ -2458,11 +2537,15 @@ pub fn dispatch_fs(
             && binding.evaluation == EvaluationMode::Context
             && let Some(FunctionHandler::Context(handler)) = binding.handler
         {
-            let _eligible_overload = entry.descriptors.iter()
+            let eligible = entry.descriptors.iter()
                 .find(|descriptor| accepts_arity(descriptor, args.len()));
-            // The handler remains the diagnostic authority when no overload is
-            // eligible, preserving its typed arity error.
-            return Some(handler(args, ctx));
+            return Some(match eligible {
+                Some(_) => handler(args, ctx),
+                None => Err(ExpressionError::Other {
+                    function: name.to_string(),
+                    message: arity_error_message(binding.canonical, &entry.descriptors),
+                }),
+            });
         }
     }
     None
@@ -2492,11 +2575,12 @@ pub fn dispatch(name: &str, args: &[Value]) -> Option<Result<Value, String>> {
             && binding.evaluation == EvaluationMode::Pure
             && let Some(FunctionHandler::Pure(handler)) = binding.handler
         {
-            let _eligible_overload = entry.descriptors.iter()
+            let eligible = entry.descriptors.iter()
                 .find(|descriptor| accepts_arity(descriptor, args.len()));
-            // The handler remains the diagnostic authority when no overload is
-            // eligible, preserving its established arity message.
-            return Some(handler(args));
+            return Some(match eligible {
+                Some(_) => handler(args),
+                None => Err(arity_error_message(binding.canonical, &entry.descriptors)),
+            });
         }
     }
     None
@@ -4802,5 +4886,210 @@ mod phase1_helpers {
             remove_date_substrings("start--2026-06-15--end"),
             "start----end"
         );
+    }
+}
+
+#[cfg(test)]
+mod arity_gating_tests {
+    use super::*;
+    use crate::markdown::compose::expression::catalog::DataType;
+    use crate::markdown::compose::expression::ResolutionContext;
+    use serde_json::json;
+
+    fn is_arity_message(message: &str) -> bool {
+        let lower = message.to_lowercase();
+        lower.contains("requires") && lower.contains("argument")
+    }
+
+    #[test]
+    fn pure_fixed_arity_accepts_exact_count() {
+        assert_eq!(
+            dispatch("is_positive", &[json!(5)]).unwrap().unwrap(),
+            json!(true)
+        );
+    }
+
+    #[test]
+    fn pure_fixed_arity_rejects_below_minimum() {
+        let result = dispatch("is_positive", &[])
+            .expect("a recognized function must return Some, not None");
+        let message = result.expect_err("zero arguments must be rejected");
+        assert!(message.contains("is_positive"), "{message}");
+        assert!(is_arity_message(&message), "{message}");
+    }
+
+    #[test]
+    fn pure_fixed_arity_rejects_above_maximum() {
+        let result = dispatch("is_positive", &[json!(1), json!(2)])
+            .expect("a recognized function must return Some, not None");
+        let message = result.expect_err("two arguments must be rejected");
+        assert!(message.contains("is_positive"), "{message}");
+        assert!(is_arity_message(&message), "{message}");
+    }
+
+    #[test]
+    fn pure_optional_range_accepts_minimum() {
+        assert_eq!(
+            dispatch("round", &[json!(3.7)]).unwrap().unwrap(),
+            json!(4)
+        );
+    }
+
+    #[test]
+    fn pure_optional_range_accepts_maximum() {
+        assert!(
+            dispatch("round", &[json!(3.7), json!(0)])
+                .unwrap()
+                .is_ok(),
+            "round at its maximum arity must reach the handler"
+        );
+    }
+
+    #[test]
+    fn pure_optional_range_rejects_below_minimum() {
+        let result = dispatch("round", &[])
+            .expect("a recognized function must return Some, not None");
+        let message = result.expect_err("zero arguments must be rejected");
+        assert!(is_arity_message(&message), "{message}");
+    }
+
+    #[test]
+    fn pure_optional_range_rejects_above_maximum() {
+        let result = dispatch("round", &[json!(1), json!(2), json!(3)])
+            .expect("a recognized function must return Some, not None");
+        let message = result.expect_err("three arguments must be rejected");
+        assert!(is_arity_message(&message), "{message}");
+    }
+
+    #[test]
+    fn context_fixed_arity_accepts_exact_count() {
+        let ctx = ResolutionContext::default();
+        assert_eq!(
+            dispatch_fs("basename", &[json!("foo/bar.md")], &ctx)
+                .unwrap()
+                .unwrap(),
+            json!("bar.md")
+        );
+    }
+
+    #[test]
+    fn context_fixed_arity_rejects_below_minimum() {
+        let ctx = ResolutionContext::default();
+        let result = dispatch_fs("basename", &[], &ctx)
+            .expect("a recognized function must return Some, not None");
+        let ExpressionError::Other { function, message } =
+            result.expect_err("zero arguments must be rejected")
+        else {
+            panic!("registry arity error must be ExpressionError::Other");
+        };
+        assert_eq!(function, "basename");
+        assert!(is_arity_message(&message), "{message}");
+    }
+
+    #[test]
+    fn context_fixed_arity_rejects_above_maximum() {
+        let ctx = ResolutionContext::default();
+        let result = dispatch_fs("basename", &[json!("a"), json!("b")], &ctx)
+            .expect("a recognized function must return Some, not None");
+        let message = result.expect_err("two arguments must be rejected").to_string();
+        assert!(is_arity_message(&message), "{message}");
+    }
+
+    #[test]
+    fn overloaded_context_range_reports_min_to_max_window() {
+        let ctx = ResolutionContext::default();
+        let result = dispatch_fs("link", &[], &ctx)
+            .expect("a recognized function must return Some, not None");
+        let message = result.expect_err("zero arguments must be rejected").to_string();
+        assert!(
+            message.contains("1 to 2 arguments"),
+            "overloaded range must name the full window: {message}"
+        );
+        assert!(is_arity_message(&message), "{message}");
+    }
+
+    #[test]
+    fn overloaded_context_range_rejects_above_max() {
+        let ctx = ResolutionContext::default();
+        let result = dispatch_fs(
+            "link",
+            &[json!("a"), json!("b"), json!("c")],
+            &ctx,
+        )
+        .expect("a recognized function must return Some, not None");
+        let message = result.expect_err("three arguments must be rejected").to_string();
+        assert!(is_arity_message(&message), "{message}");
+    }
+
+    #[test]
+    fn ineligible_arity_returns_some_err_not_none() {
+        // The outer evaluator treats `None` as "Unknown function" (authoring
+        // fatal). A recognized function at an ineligible arity must surface as
+        // `Some(Err(..))` so it is never mistaken for an unknown symbol.
+        assert!(dispatch("is_positive", &[]).is_some());
+        let ctx = ResolutionContext::default();
+        assert!(dispatch_fs("basename", &[], &ctx).is_some());
+    }
+
+    #[test]
+    fn unrecognized_function_still_returns_none() {
+        assert!(dispatch("definitely_not_a_real_function", &[]).is_none());
+        let ctx = ResolutionContext::default();
+        assert!(dispatch_fs("definitely_not_a_real_function", &[], &ctx).is_none());
+    }
+
+    #[test]
+    fn variadic_bound_message_uses_at_least_form() {
+        let variadic_descriptors: Vec<&ExpressionFunctionDescriptor> =
+            expression_function_descriptors()
+                .iter()
+                .filter(|descriptor| {
+                    descriptor.signature.split('(').next() == Some("and")
+                })
+                .collect();
+        assert!(!variadic_descriptors.is_empty());
+        let message = arity_error_message("and", &variadic_descriptors);
+        assert!(message.contains("and()"), "{message}");
+        assert!(message.contains("at least"), "{message}");
+        assert!(is_arity_message(&message), "{message}");
+    }
+
+    #[test]
+    fn authored_parameter_shapes_determine_arity_independently_of_lazy_catalog_entries() {
+        let fixed = [ParamType::val(DataType::Any), ParamType::val(DataType::Any)];
+        assert!(!accepts_parameter_arity(&fixed, 1));
+        assert!(accepts_parameter_arity(&fixed, 2));
+        assert!(!accepts_parameter_arity(&fixed, 3));
+
+        let optional = [
+            ParamType::val(DataType::Any),
+            ParamType::optional(DataType::Any),
+        ];
+        assert!(accepts_parameter_arity(&optional, 1));
+        assert!(accepts_parameter_arity(&optional, 2));
+        assert!(!accepts_parameter_arity(&optional, 3));
+
+        let variadic = [
+            ParamType::val(DataType::Any),
+            ParamType::variadic(DataType::Any),
+        ];
+        assert!(!accepts_parameter_arity(&variadic, 0));
+        assert!(accepts_parameter_arity(&variadic, 1));
+        assert!(accepts_parameter_arity(&variadic, 4));
+    }
+
+    #[test]
+    fn lazy_registry_query_uses_joined_authored_descriptors() {
+        for name in ["and", "or"] {
+            assert!(matches!(
+                lazy_arity_eligibility(name, 0),
+                Some(LazyArityEligibility::Eligible)
+            ));
+            assert!(matches!(
+                lazy_arity_eligibility(name, 3),
+                Some(LazyArityEligibility::Eligible)
+            ));
+        }
+        assert!(lazy_arity_eligibility("not_lazy", 0).is_none());
     }
 }

@@ -350,8 +350,8 @@ pub(crate) fn expression_function_catalog() -> &'static ExpressionFunctionCatalo
 #[allow(dead_code)]
 pub(crate) fn try_parse_catalog(
     yaml: &str,
-) -> Result<Vec<ExpressionFunctionDescriptor>, CatalogParseError> {
-    parse_expression_function_catalog(yaml).map(project_descriptors)
+) -> Result<ExpressionFunctionCatalog, CatalogParseError> {
+    parse_expression_function_catalog(yaml)
 }
 
 /// Returns all expression function descriptors in display order.
@@ -406,9 +406,53 @@ mod tests {
 
     #[test]
     fn malformed_catalog_is_rejected_before_projection() {
-        let error = try_parse_catalog("kind: expression-function-catalog\nfunctions: []\n")
-            .expect_err("an empty catalog must not reach descriptor projection");
+        // The fixture carries a minimal `$schema` so it clears structural
+        // validation and reaches the function-domain `EmptyCatalog` check.
+        let error = try_parse_catalog(
+            "kind: expression-function-catalog\n$schema:\n  kind: string(required)\n  functions: string[](required)\nfunctions: []\n",
+        )
+        .expect_err("an empty catalog must not reach descriptor projection");
         assert!(error.to_string().contains("function"));
+    }
+
+    /// `try_parse_catalog` returns the **owned** AST, never a leaking
+    /// `&'static` descriptor projection. The spec's lifetime decision permits
+    /// leaking only the one validated embedded catalog (via
+    /// [`expression_function_descriptors`]); the fixture path must stay owned
+    /// so repeated valid-fixture parsing cannot accumulate process-lifetime
+    /// allocations. The explicit owned type annotation below is the
+    /// structural proof; each iteration's catalog then drops in place.
+    #[test]
+    fn try_parse_catalog_returns_owned_catalog_without_leaking() {
+        use super::ast::ExpressionFunctionCatalog;
+
+        const FIXTURE: &str = r#"kind: expression-function-catalog
+$schema:
+  kind: string(required)
+  functions: "{ name: string(not-empty; required), category: string(not-empty; required), order: number(integer; required), description: string(not-empty; required), overloads: { parameters: { name: string(not-empty; required), type: string(not-empty; required), array: boolean, optional: boolean, variadic: boolean }[], returns: { type: string(not-empty; required), array: boolean, fallible: boolean }, example: { expression: string(not-empty; required), result: string(required), verification: enum(executable, display-only; required), reason: string(not-empty) } }[](min(1); required) }[](min(1); required)"
+functions:
+  - name: ping
+    category: Test
+    order: 1
+    description: Returns its argument.
+    overloads:
+      - parameters:
+          - { name: value, type: string }
+        returns: { type: string }
+        example: { expression: 'ping("x")', result: x, verification: executable }
+"#;
+
+        let catalog: ExpressionFunctionCatalog =
+            try_parse_catalog(FIXTURE).expect("valid fixture must parse as owned catalog");
+        assert_eq!(catalog.functions.len(), 1);
+        assert_eq!(catalog.functions[0].name, "ping");
+
+        // Repeatable valid-fixture parsing with no static promotion: each
+        // owned catalog drops at the end of the iteration.
+        for _ in 0..3 {
+            let _owned: ExpressionFunctionCatalog =
+                try_parse_catalog(FIXTURE).expect("valid fixture must parse repeatedly");
+        }
     }
 
     /// The number of arguments to pass when exercising a signature: the count

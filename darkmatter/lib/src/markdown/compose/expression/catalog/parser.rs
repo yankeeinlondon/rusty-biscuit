@@ -11,6 +11,7 @@ use super::{
         CatalogVerification, ExpressionFunctionCatalog,
     },
 };
+use crate::markdown::schemas::{parse_yaml_schema, to_json_schema};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("catalog error{location}: {kind}", location = format_location(.function.as_deref(), *.overload, .field.as_deref()))]
@@ -25,6 +26,10 @@ pub(crate) struct CatalogParseError {
 pub(crate) enum CatalogErrorKind {
     #[error("invalid YAML: {0}")]
     InvalidYaml(String),
+    #[error("catalog $schema declaration is invalid: {0}")]
+    SchemaDeclaration(String),
+    #[error("catalog document fails its $schema: {0}")]
+    SchemaInstance(String),
     #[error("`kind` must be `expression-function-catalog`")] 
     InvalidKind,
     #[error("at least one function is required")]
@@ -64,7 +69,7 @@ pub(crate) enum CatalogErrorKind {
 struct RawCatalog {
     kind: String,
     #[serde(rename = "$schema")]
-    _schema: Option<serde_yaml_ng::Value>,
+    schema: serde_yaml_ng::Value,
     functions: Vec<RawFunction>,
 }
 
@@ -131,12 +136,26 @@ enum RawVerification {
 pub(crate) fn parse_expression_function_catalog(
     yaml: &str,
 ) -> Result<ExpressionFunctionCatalog, CatalogParseError> {
-    let raw: RawCatalog = serde_yaml_ng::from_str(yaml).map_err(|error| CatalogParseError {
-        function: None,
-        overload: None,
-        field: None,
-        kind: CatalogErrorKind::InvalidYaml(error.to_string()),
-    })?;
+    let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml)
+        .map_err(|err| error(None, None, None, CatalogErrorKind::InvalidYaml(err.to_string())))?;
+    let raw: RawCatalog = serde_yaml_ng::from_value(value.clone())
+        .map_err(|err| error(None, None, None, CatalogErrorKind::InvalidYaml(err.to_string())))?;
+
+    // Structural validation: the catalog document must conform to its own
+    // declared SimplifiedSchema before dedicated function-domain checks run.
+    // This makes the authored `$schema` the structural authority in the
+    // loading path (requirement 3).
+    let schema = parse_yaml_schema(&raw.schema)
+        .map_err(|err| error(None, None, Some("$schema"), CatalogErrorKind::SchemaDeclaration(err.to_string())))?;
+    let json_schema = to_json_schema(&schema)
+        .map_err(|err| error(None, None, Some("$schema"), CatalogErrorKind::SchemaDeclaration(err.to_string())))?;
+    let validator = jsonschema::validator_for(&json_schema)
+        .map_err(|err| error(None, None, Some("$schema"), CatalogErrorKind::SchemaDeclaration(err.to_string())))?;
+    let instance = serde_json::to_value(&value)
+        .map_err(|err| error(None, None, None, CatalogErrorKind::InvalidYaml(err.to_string())))?;
+    validator.validate(&instance)
+        .map_err(|err| error(None, None, Some("$schema"), CatalogErrorKind::SchemaInstance(err.to_string())))?;
+
     if raw.kind != "expression-function-catalog" {
         return Err(error(None, None, Some("kind"), CatalogErrorKind::InvalidKind));
     }
@@ -392,13 +411,79 @@ functions:
     }
 
     #[test]
+    fn production_parser_rejects_a_missing_schema_declaration() {
+        // `$schema` is now a required Serde field, so a document omitting it
+        // fails deserialization with `InvalidYaml`.
+        let fixture = r#"
+kind: expression-function-catalog
+functions:
+  - name: sample
+    category: Test
+    order: 1
+    description: Exercises catalog shapes.
+    overloads:
+      - parameters: []
+        returns: { type: string }
+        example: { expression: 'sample()', result: x, verification: executable }
+"#;
+        assert!(matches!(kind(fixture), CatalogErrorKind::InvalidYaml(_)));
+    }
+
+    #[test]
+    fn production_parser_rejects_a_malformed_schema_declaration() {
+        // `$schema` is a bare scalar instead of a mapping, so `parse_yaml_schema`
+        // rejects it with `SchemaDeclaration`.
+        let fixture = r#"
+kind: expression-function-catalog
+$schema: not-a-mapping
+functions:
+  - name: sample
+    category: Test
+    order: 1
+    description: Exercises catalog shapes.
+    overloads:
+      - parameters: []
+        returns: { type: string }
+        example: { expression: 'sample()', result: x, verification: executable }
+"#;
+        assert!(matches!(kind(fixture), CatalogErrorKind::SchemaDeclaration(_)));
+    }
+
+    #[test]
+    fn production_parser_rejects_a_structurally_incomplete_instance() {
+        // Tighten the declared functions-array arity from `min(1)` to `min(5)`
+        // while the data still carries only two functions. The schema parses
+        // and the document deserializes into `RawCatalog`, but the instance no
+        // longer conforms — proving the production parser runs the validator.
+        let fixture = replace(
+            SCHEMA,
+            "}[](min(1); required) }[](min(1); required)",
+            "}[](min(1); required) }[](min(5); required)",
+        );
+        assert!(matches!(kind(&fixture), CatalogErrorKind::SchemaInstance(_)));
+    }
+
+    #[test]
+    fn production_parser_validates_the_checked_in_authored_catalog() {
+        // The real embedded catalog must pass the full production validation
+        // path (structural + semantic), not just the independent schema check.
+        assert!(parse_expression_function_catalog(AUTHORED_CATALOG).is_ok());
+    }
+
+    #[test]
     fn rejects_identity_order_and_value_errors() {
-        assert!(matches!(kind(&replace(SCHEMA, "kind: expression-function-catalog", "kind: other")), CatalogErrorKind::InvalidKind));
-        assert!(matches!(kind("kind: expression-function-catalog\nfunctions: []\n"), CatalogErrorKind::EmptyCatalog));
+        // Structural validation runs before the defense-in-depth `kind` check:
+        // the declared `enum(expression-function-catalog)` now rejects this.
+        assert!(matches!(kind(&replace(SCHEMA, "kind: expression-function-catalog", "kind: other")), CatalogErrorKind::SchemaInstance(_)));
+        // `$schema` is now a required Serde field, so a bare document without
+        // one fails deserialization before any semantic check runs.
+        assert!(matches!(kind("kind: expression-function-catalog\nfunctions: []\n"), CatalogErrorKind::InvalidYaml(_)));
         assert!(matches!(kind(&replace(SCHEMA, "name: sample", "name: Sample")), CatalogErrorKind::InvalidIdentifier(_)));
         assert!(matches!(kind(&replace(SCHEMA, "name: value", "name: Value")), CatalogErrorKind::InvalidIdentifier(_)));
-        assert!(matches!(kind(&replace(SCHEMA, "category: Test", "category: '  '")), CatalogErrorKind::EmptyValue));
-        assert!(matches!(kind(&replace(SCHEMA, "description: Exercises catalog shapes.", "description: ''")), CatalogErrorKind::EmptyValue));
+        // `not-empty` compiles to `pattern: \S`, so whitespace-only/empty values
+        // are rejected at structural validation before the semantic empty check.
+        assert!(matches!(kind(&replace(SCHEMA, "category: Test", "category: '  '")), CatalogErrorKind::SchemaInstance(_)));
+        assert!(matches!(kind(&replace(SCHEMA, "description: Exercises catalog shapes.", "description: ''")), CatalogErrorKind::SchemaInstance(_)));
         assert!(parse_expression_function_catalog(&replace(SCHEMA, "order: 1", "order: 0")).is_ok());
         assert!(matches!(kind(&replace(SCHEMA, "order: 1", "order: -1")), CatalogErrorKind::InvalidOrder));
         assert!(matches!(kind(&replace(SCHEMA, "order: 2", "order: 1")), CatalogErrorKind::DuplicateOrder(1)));
