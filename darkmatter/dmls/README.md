@@ -39,6 +39,45 @@ For exact v1 scope and out-of-scope items see
 [spec.md](../features/2026-07-04-dmls/spec.md); for architecture see
 [design.md](../features/2026-07-04-dmls/design.md).
 
+## Installation
+
+Every editor integration boils down to the same thing: a native `dmls`
+binary the editor can launch over stdio, plus (for VS Code and Zed) a thin
+shipped extension that starts it.
+
+**1. Install the binary** (any one of these):
+
+```bash
+# from the darkmatter/ package area — the canonical repo recipe
+just install-dmls
+
+# equivalent, from the repo root
+cargo install --path darkmatter/dmls --force
+```
+
+Or, without a checkout: extract a release archive (see
+[Packaging](#packaging)) and put `dmls` (`dmls.exe` on Windows) on `PATH`.
+
+**2. Verify it runs:**
+
+```bash
+dmls --version
+```
+
+**3. Wire up your editor** — see [`docs/editors/`](docs/editors/):
+
+| Editor | Install path |
+|--------|-------------|
+| VS Code | `just install-vscode-package` (packages + installs the shipped [`vscode-dmls/`](vscode-dmls/) extension) |
+| Zed | Install [`zed-dmls/`](zed-dmls/) as a dev extension ([guide](docs/editors/zed.md)) |
+| Neovim | Built-in LSP config only ([guide](docs/editors/neovim.md)) |
+| Helix | `languages.toml` entry only ([guide](docs/editors/helix.md)) |
+
+GUI editors do not always inherit your shell's `PATH`; if the editor cannot
+find `dmls`, point it at the absolute path (usually `~/.cargo/bin/dmls`) —
+both shipped extensions expose a binary-path setting. More failure modes are
+covered in the [editor-setup troubleshooting section](docs/editors/README.md#troubleshooting).
+
 ## Architecture
 
 - **One workspace graph** (`dmls::graph`): a single arena carrying every node
