@@ -98,6 +98,39 @@ docs_updated_during_phase_2:
   - claudine/features/2026-07-11-module-structure/critical-plan.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/lib/src/composition/lifecycle/mod.rs
+  - claudine/lib/src/composition/lifecycle/parse.rs
+  - claudine/lib/src/composition/lifecycle/action_shape.rs
+  - claudine/lib/src/composition/lifecycle/validate.rs
+  - claudine/lib/src/composition/lifecycle/audio.rs
+  - claudine/lib/src/composition/lifecycle/actions.rs
+  - claudine/lib/src/composition/lifecycle/signatures.rs
+  - claudine/lib/src/composition/lifecycle/context.rs
+  - claudine/lib/src/composition/lifecycle/control.rs
+  - claudine/lib/src/composition/lifecycle/executor.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests.rs
+  - claudine/lib/src/composition/mod.rs
+  - claudine/lib/tests/boundary_lint.rs
+docs_updated_during_phase_3:
+  - claudine/features/2026-07-11-module-structure/critical-plan.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/claudine/architecture.md
+source_files_during_phase_5:
+  - claudine/lib/src/composition/lifecycle/runtime.rs
+  - claudine/lib/src/composition/lifecycle/mod.rs
+  - claudine/lib/src/composition/mod.rs
+  - claudine/lib/src/composition/loop_engine.rs
+  - claudine/cli/src/commands/wrap/composition/mod.rs
+  - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+docs_updated_during_phase_5:
+  - claudine/docs/providers/dispatch-inventory.json
+  - claudine/features/2026-07-11-module-structure/critical-plan.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/claudine/architecture.md
 ---
 
 # Critical Module-Structure Refactor — Execution Plan
@@ -481,20 +514,20 @@ The six clusters and their destinations:
 | `lifecycle/validate.rs` | `validate_no_interpolation_leaks` (2585), `find_matching_warning_reason` (2646), `iter_stack_expression_surfaces` (2691), `iter_action_expressions` (2720), `visit_string_literals` (2849), `validate_no_undefined_lifecycle_variables` (2927), `find_undefined_top_level_variable` (2997), `find_undefined_stack_variable` (3036), `first_undefined_stack_variable` (3076), `resolves_outside_frontmatter` (3090), `undefined_bare_variable` (3109), `undefined_stack_variable` (3129), `validate_no_err_in_no_error_events` (3161), `surface_references_err` (3207), `literal_spans_reference_err` (3222), `references_bare_err` (3236), `collect_lifecycle_shell_commands` (3291), `expr_as_string_literal` (3309). |
 | `lifecycle/audio.rs` | `audio_phases` (856), TTS/sound blocking emission, `run_blocking_with_timeout`, `emit_lifecycle_signal` (884), `AudioPhase` enum, `play_effect_blocking`, `normalize_empty_string` (3320). |
 
-- [ ] `git mv lifecycle.rs lifecycle/mod.rs`
-- [ ] Cut each cluster into its named file with `use super::*;` + necessary
+- [x] `git mv lifecycle.rs lifecycle/mod.rs`
+- [x] Cut each cluster into its named file with `use super::*;` + necessary
       `use` imports
-- [ ] In `lifecycle/mod.rs`, declare:
+- [x] In `lifecycle/mod.rs`, declare:
       ```rust
       mod parse;
       mod action_shape;
       mod validate;
       mod audio;
       ```
-- [ ] Make any cross-module references work via `pub(crate)` or `pub(super)`
+- [x] Make any cross-module references work via `pub(crate)` or `pub(super)`
       on the items each submodule needs from `mod.rs` (e.g. `parse.rs` needs
       `LifecycleConfig`, `LifecycleStacks`, `LifecycleNotification`)
-- [ ] Verify: `just test` + `just lint`
+- [x] Verify: `just test` + `just lint`
 
 ### Step 3.2 — Fold sibling files into `lifecycle/`
 
@@ -508,11 +541,11 @@ The six clusters and their destinations:
     `lifecycle/executor/tests.rs` — the `mod tests;` declaration travels with
     the file)
 
-- [ ] For each move: `git mv` the file, update any `use super::…` paths that
+- [x] For each move: `git mv` the file, update any `use super::…` paths that
       referenced the old parent
-- [ ] In `lifecycle/actions.rs`, carve `signatures.rs` for the signature
+- [x] In `lifecycle/actions.rs`, carve `signatures.rs` for the signature
       registry; declare `mod signatures;` in `actions.rs`
-- [ ] In `lifecycle/mod.rs`, declare:
+- [x] In `lifecycle/mod.rs`, declare:
       ```rust
       pub mod actions;
       pub mod context;
@@ -532,37 +565,37 @@ The barrel (lines 14–37) currently declares `pub mod lifecycle;` (line 21),
 the old declarations are removed. But the `pub use` re-exports (lines 50–69)
 and the three deep-path importers need them.
 
-- [ ] Replace the five module declarations with:
+- [x] Replace the five module declarations with:
       ```rust
       pub mod lifecycle;
       ```
-- [ ] Add facade re-exports so the old module paths still resolve:
+- [x] Add facade re-exports so the old module paths still resolve:
       ```rust
       pub use self::lifecycle::actions as lifecycle_actions;
       pub use self::lifecycle::context as lifecycle_context;
       pub use self::lifecycle::control as lifecycle_control;
       pub use self::lifecycle::executor as lifecycle_executor;
       ```
-- [ ] Verify the three deep-path importers still compile:
+- [x] Verify the three deep-path importers still compile:
       1. `cli/…/wrap/inline.rs` → `closure` (resolves through barrel)
       2. `cli/…/output/error_walker.rs` → `lifecycle_context` (now facade)
       3. `cli/…/harness_orch/loop_control.rs` → `lifecycle_executor` (now facade)
-- [ ] Verify: `just test` + `just lint`
+- [x] Verify: `just test` + `just lint`
 
 ### Step 3.4 — Update skill architecture doc
 
 **Files:**
 - Modify: `.opencode/skill/claudine/architecture.md`
 
-- [ ] Update the module map to reflect the `lifecycle/` directory structure
+- [x] Update the module map to reflect the `lifecycle/` directory structure
 
 ### Phase 3 Exit Criteria
 
-- [ ] `just test` passes for claudine lib + claudine-cli
-- [ ] `just lint` passes
-- [ ] `lifecycle/mod.rs` is ~960 lines (config/types only)
-- [ ] No deep-path importer needed code changes (only facades in mod.rs)
-- [ ] The lifecycle family is unified under `composition/lifecycle/`
+- [x] `just test` passes for claudine lib + claudine-cli
+- [x] `just lint` passes
+- [x] `lifecycle/mod.rs` is ~960 lines (config/types only)
+- [x] No deep-path importer needed code changes (only facades in mod.rs)
+- [x] The lifecycle family is unified under `composition/lifecycle/`
 
 ---
 
@@ -582,12 +615,22 @@ safety net.
 
 **Prerequisite:** Phase 1 complete (loop_control.rs tests extracted).
 
+> **Status truthing (2026-07-11, second pass):** Step 4.1's `LoopStep` and
+> `HarnessLoopCtx` landed (loop_control.rs:33/39), but the ctx is
+> immediately destructured back into ~28 locals at the top of
+> `run_harness_loop_inner` — the phase helpers do not consume it, and the
+> 15 `#[allow(clippy::too_many_arguments)]` remain. Steps 4.2 and 4.3 did
+> **not** land (no `drive_terminal_recovery`; the three terminal-recovery
+> sequences are still copy-pasted at ~2470/~2637/~2748; the sibling split
+> files do not exist). A previously ticked 4.3 verify checkbox has been
+> reset to match reality.
+
 ### Step 4.1 — Introduce `LoopStep` enum and `HarnessLoopCtx`
 
 **Files:**
 - Modify: `claudine/cli/src/commands/wrap/harness_orch/loop_control.rs`
 
-- [ ] Define `enum LoopStep`:
+- [x] Define `enum LoopStep`:
       ```rust
       enum LoopStep {
           NextAttempt,
@@ -595,7 +638,7 @@ safety net.
           Abort { reason: String, code: i32 },
       }
       ```
-- [ ] Define `struct HarnessLoopCtx<'a>` bundling the ~10 arguments that
+- [x] Define `struct HarnessLoopCtx<'a>` bundling the ~10 arguments that
       every phase threads: `provider`, `binary_path`, `child_cwd`,
       `base_args`, `base_env`, `term`, `lifecycle_guard`, `effect_engine`,
       `harness_context`, `env_context`, etc. (not the mutable prompt state —
@@ -692,6 +735,18 @@ unification, not just a move. Must be carefully tested.
 **Prerequisite:** Phase 4 complete (the pure routing must already be carved
 out of `run_harness_loop` as `drive_terminal_recovery` and friends).
 
+> **Addendum (2026-07-11, second pass):** Phase 5 landed *without* Phase 4's
+> `drive_terminal_recovery` — the lib routers (`route_blocked_finalize`,
+> `route_failure_finalize`, `route_loop_gate`) are consumed directly by the
+> three still-copy-pasted terminal-recovery sites in `loop_control.rs` (via
+> the adapters at :482/:582/:1332), the compose preflight
+> (`wrap/composition/mod.rs:204/:327`), and lib `loop_engine`
+> (:1101/:1197/:1210). **No Phase 5 rework is needed**: completing Step 4.2
+> collapses the three CLI call sites into one helper, which becomes the
+> single harness-side consumer of the routing layer — the shape this phase
+> originally intended. `lifecycle/runtime.rs` itself should need at most
+> trivial signature adjustments.
+
 ### Step 5.1 — Create `lib/src/composition/lifecycle/runtime.rs`
 
 **Files:**
@@ -710,7 +765,7 @@ The shared routing functions to consolidate:
 | `route_init_failure*` | — | `loop_engine.rs:1052–1152` |
 | `run_loop_gate` | — | `loop_engine.rs:1154` |
 
-- [ ] In `runtime.rs`, define a provider-agnostic routing API that returns
+- [x] In `runtime.rs`, define a provider-agnostic routing API that returns
       pure decision types (not CLI-specific `LoopStep` or
       `CompositionError`):
       ```rust
@@ -719,12 +774,14 @@ The shared routing functions to consolidate:
       pub fn route_failure_finalize(...) -> TerminalRoutingDecision { ... }
       pub fn route_loop_gate(...) -> TerminalRoutingDecision { ... }
       ```
-- [ ] The CLI callers adapt: `drive_terminal_recovery` (Phase 4) calls the
+- [x] The CLI callers adapt: `drive_terminal_recovery` (Phase 4) calls the
       lib `route_*` functions and maps the decision to `LoopStep`
-- [ ] The compose preflight (`cli/…/composition/mod.rs:226`) calls the same
+      (the Phase 4 helper is not present in this worktree, so the existing
+      terminal-recovery adapters call the shared router directly)
+- [x] The compose preflight (`cli/…/composition/mod.rs:226`) calls the same
       lib `route_*` functions instead of its own mirror
-- [ ] Declare `pub mod runtime;` in `lifecycle/mod.rs`
-- [ ] Export from `composition/mod.rs` barrel if needed
+- [x] Declare `pub mod runtime;` in `lifecycle/mod.rs`
+- [x] Export from `composition/mod.rs` barrel if needed
 
 ### Step 5.2 — Move `IterationSummarySignals` to lib
 
@@ -739,150 +796,155 @@ The shared routing functions to consolidate:
 `loop_engine`'s `LoopIterationOutput` (`loop_engine.rs:126–140`) and flows
 back into lib. It belongs in lib.
 
-- [ ] Move the struct definition to `lifecycle/runtime.rs`
-- [ ] Update the CLI import in `loop_control.rs:19`:
+- [x] Move the struct definition to `lifecycle/runtime.rs`
+- [x] Update the CLI import in `loop_control.rs:19`:
       `use super::super::composition::IterationSummarySignals;` →
       `use claudine::composition::lifecycle::runtime::IterationSummarySignals;`
       (or export through the barrel)
-- [ ] Verify: `just test` + `just lint`
+- [x] Verify: `just test` + `just lint`
 
 ### Step 5.3 — Remove the CLI `composition/mod.rs` mirror
 
 **Files:**
 - Modify: `claudine/cli/src/commands/wrap/composition/mod.rs`
 
-- [ ] Replace `emit_preflight_blocked_and_finalize` (line 226, documented at
+- [x] Replace `emit_preflight_blocked_and_finalize` (line 226, documented at
       line 194 as a mirror of the harness-loop version) with a call to the
       lib `route_*` function
-- [ ] Remove the duplicated routing logic
-- [ ] Verify: `just test` — the 6 tests in
+- [x] Remove the duplicated routing logic
+- [x] Verify: `just test` — the 6 tests in
       `composition/tests.rs:1029–1543` that test
       `emit_preflight_blocked_and_finalize_*` must still pass
-- [ ] Confirm the "Mirrors `harness_orch::loop_control::…`" doc comment at
+- [x] Confirm the "Mirrors `harness_orch::loop_control::…`" doc comment at
       line 194 is updated or removed (the mirror is gone)
 
 ### Phase 5 Exit Criteria
 
-- [ ] `just test` passes for claudine + claudine-cli
-- [ ] `just lint` passes
-- [ ] The routing algorithm has exactly one implementation in
+- [x] `just test` passes for claudine + claudine-cli
+- [x] `just lint` passes
+- [x] The routing algorithm has exactly one implementation in
       `lib/…/lifecycle/runtime.rs`
-- [ ] `IterationSummarySignals` lives in the lib crate
-- [ ] The `composition/mod.rs:194` "Mirrors" comment is gone
+- [x] `IterationSummarySignals` lives in the lib crate
+- [x] The `composition/mod.rs:194` "Mirrors" comment is gone
 
 ---
 
-## Phase 6 — C5: Create `stream/providers/common.rs` and Collapse the 8-Way Parser Copy-Paste
+## Phase 6 — C5: Collapse the 8-Way Parser Copy-Paste (Re-scoped, Incremental)
 
-**Goal:** Introduce a `ParserShared` struct + shared methods that every
-provider parser delegates to. Each provider file shrinks to its typed dispatch
-arms — the only part that actually differs. This directly serves the
-provider-ladder roadmap: the next provider costs one dispatch match, not a
-1,000-line copy.
+> **Re-scope rationale (2026-07-11):** the first execution attempt was
+> reverted. Its report was half right: the original Step 6.1 made unifying
+> parser *state* (`ParserShared` with "~12 compatible fields") the entry
+> gate, and listed **antigravity.rs** — the buffered-JSON outlier with no
+> line loop — as a `feed_line`-driver target. When the structs turned out to
+> differ materially, the whole phase wedged with nothing landed. The
+> verified duplication (7 byte-identical `emit_provider_extension` copies,
+> `emit_malformed_warning`, `base_extra`, the `finish` assembly idiom, the
+> `classify_error` cascade) never depended on state unification. This
+> rewrite extracts those as **independently-landable increments** — free
+> functions / builders, zero changes to any parser's own state struct — and
+> demotes the speculative generic driver to an evidence-gated decision at
+> the end. Each increment is revert-safe on its own.
+>
+> **Execution constraints:** run increments serially in this worktree (the
+> aborted attempt also hit >60s cargo-lock contention from a concurrent
+> build; wait out locks or use an isolated `CARGO_TARGET_DIR`, never abort
+> the design work over the lock). Antigravity participates in 6a–6c only —
+> never in a line driver.
 
-**Risk:** Low-medium. The parser logic is well-tested (each provider has
-classify-error and feed-line tests). The extraction is mechanical but touches
-8 files.
+**Goal:** every provider file shrinks toward its typed dispatch arms — the
+only part that actually differs — so the next provider on the ladder costs
+one dispatch match, not a 1,000-line copy.
 
-**Prerequisite:** Phase 1 complete (for cleaner diff). Independent of Phases
-2–5.
+**Risk:** Low per increment. Parser logic is well-tested; each increment
+converts one concern across the parsers with `just test` between parsers.
 
-### Step 6.1 — Create `ParserShared` struct
+**Prerequisite:** Phase 1 complete. Independent of Phases 2–5.
+
+### Step 6.0 — Discovery: ground-truth diff of the 8 parser structs
+
+Before any extraction, produce a field-by-field comparison of the 8 parser
+state structs and their `finish()` implementations:
+
+- [ ] The intersection: fields identical in name/type/semantics across all
+      8 (and across the 7 line-oriented parsers)
+- [ ] Fields shared by 4+ parsers but not all
+- [ ] Genuinely provider-specific state, per provider
+- [ ] Which `StreamExecutionSummary` fields each `finish()` populates, and
+      any provider-specific computation (OpenCode stderr-state merge, Kimi
+      wire, Antigravity buffered-object finish)
+- [ ] The per-provider `classify_error` keyword deltas as a table
+
+The findings gate what 6a–6c share and decide 6d. Record the summary in this
+plan (or a sidecar `phase6-discovery.md`) so the evidence survives the run.
+
+### Step 6a — Shared emit helpers (no state changes)
 
 **Files:**
 - Create: `claudine/lib/src/stream/providers/common.rs`
-- Modify: `claudine/lib/src/stream/providers/mod.rs`
+- Modify: `claudine/lib/src/stream/providers/mod.rs` (`pub(crate) mod common;`)
+- Modify: the 8 provider files, one at a time
 
-The ~12 fields every parser re-declares (verified across `claude.rs`,
-`codex.rs`, `opencode.rs`, `kimi.rs`):
+Extract the byte-identical-modulo-`Provider` helpers as free functions over
+explicit parameters — **no `ParserShared` struct, no field moves**:
 
 ```rust
-pub(crate) struct ParserShared {
-    pub(crate) sink: BoxedSemanticEventSink,
-    pub(crate) line_num: usize,
-    pub(crate) session_id: Option<String>,
-    pub(crate) model: Option<String>,
-    pub(crate) token_usage: NormalizedTokenUsage,
-    pub(crate) cost: Option<f64>,
-    pub(crate) warnings: Vec<String>,
-    // … remaining shared fields identified by diffing the 8 structs
-}
+pub(crate) fn base_extra(provider: Provider, line_num: usize, raw_kind: &str) -> Map<String, Value>;
+pub(crate) fn emit_provider_extension(sink: &mut dyn SemanticEventSink, provider: Provider, line_num: usize, kind: &str, payload: Value);
+pub(crate) fn emit_malformed_warning(sink: &mut dyn SemanticEventSink, provider: Provider, line_num: usize, err: &str);
 ```
 
-- [ ] Create `common.rs` with `ParserShared` and shared methods:
-  - `emit_provider_extension(&mut self, kind: &str, payload: Value)` —
-    currently 7 copies
-  - `emit_malformed_warning(&mut self, err: &str)` — currently 7 copies
-  - `base_extra(&self, raw_kind: &str) -> Map<String, Value>` — currently 7
-    copies
-  - `finish_summary(self, exit_code: i32) -> StreamExecutionSummary` — the
-    shared `finish` summary builder + `derive_badges` call
-  - `classify_error(error_kind, message) -> SemanticErrorKind` — currently 5
-    copies of the keyword cascade + 2 str-variant copies
+(Exact signatures follow 6.0's findings — if a provider's copy has a real
+variation, either parameterize it or leave that provider's copy local with a
+comment naming the delta.)
 
-- [ ] The `classify_error` keyword cascade varies slightly per provider
-      (different keywords for billing/auth/rate-limit). Parameterize via a
-      per-provider keyword table or trait method, keeping the cascade
-      skeleton shared.
-- [ ] Declare `pub(crate) mod common;` in `providers/mod.rs`
+- [ ] Create `common.rs` with the three helpers
+- [ ] Convert one parser at a time; `just test` after each
+- [ ] Kill the 7 `emit_provider_extension` copies (all 8 files delegate)
 
-### Step 6.2 — Refactor each provider to delegate to `ParserShared`
+### Step 6b — Shared summary assembly
 
-**Files (one at a time, verify after each):**
-- `claudine/lib/src/stream/providers/claude.rs`
-- `claudine/lib/src/stream/providers/codex.rs`
-- `claudine/lib/src/stream/providers/opencode.rs`
-- `claudine/lib/src/stream/providers/kimi.rs`
-- `claudine/lib/src/stream/providers/qwen.rs`
-- `claudine/lib/src/stream/providers/gemini.rs`
-- `claudine/lib/src/stream/providers/pi.rs`
-- `claudine/lib/src/stream/providers/antigravity.rs`
+- [ ] Add a `finish` assembly helper to `common.rs` (builder or
+      options-struct) that owns the shared idiom: the
+      `if x > 0 { Some } else { None }` field population +
+      `derive_badges(&summary, provider)` stamping
+- [ ] Providers keep their own counters/state; they hand the helper only the
+      values they track (per 6.0's populate-table). Provider-specific
+      post-steps (e.g. OpenCode's stderr-state merge) stay local, after the
+      shared assembly
+- [ ] Convert one parser at a time; `just test` after each
 
-For each provider:
-- [ ] Replace the ~12 re-declared fields with a `shared: ParserShared` field
-- [ ] Replace `emit_provider_extension`, `emit_malformed_warning`,
-      `base_extra` impls with delegations to `self.shared.*`
-- [ ] Replace `feed_line`'s boilerplate (line counting, JSON parse,
-      malformed-warning emit, extension emit) with a call to a shared
-      `feed_line` driver parameterized over the typed event enum and a
-      per-provider dispatch closure
-- [ ] Replace `finish` with a delegation to `self.shared.finish_summary()`
-- [ ] Replace `classify_error` with a delegation (or keep genuinely
-      provider-specific keywords)
-- [ ] What remains in each provider file: the typed `Protocol::*` event
-      dispatch (the `match` arms that map wire JSON → `SemanticEvent`) —
-      which is the only part that actually differs
-- [ ] Verify after each provider: `just test` (especially the
-      `classify_error_*` tests in each provider's test module)
+### Step 6c — Parameterized `classify_error` cascade
 
-### Step 6.3 — Verify the `feed_line` driver abstraction
+- [ ] Add the shared keyword cascade to `common.rs`, parameterized by a
+      per-provider keyword table (from 6.0's comparison); the `str`-only
+      variants (`pi.rs`, `antigravity.rs`) route through the same cascade
+- [ ] Genuinely bespoke provider rules stay local as pre-checks that fall
+      through to the shared cascade
+- [ ] Verify: the `classify_error_*` tests in each provider's test module
+      must pass unchanged — they are the spec for this step
 
-**Files:**
-- Verify: `claudine/lib/src/stream/providers/common.rs`
+### Step 6d — Decision point: generic `feed_line` driver (optional)
 
-- [ ] The shared `feed_line` driver should:
-  1. Increment `line_num`
-  2. Parse the line as JSON (on failure: `emit_malformed_warning` + return Ok)
-  3. Extract the `kind`/`type` discriminator
-  4. Call the per-provider dispatch closure with the parsed `Value`
-  5. The closure returns `Result<(), StreamParseError>` or emits events
-     directly via the shared sink
+Only after 6a–6c, and only for the **7 line-oriented parsers** (Antigravity
+excluded by design):
 
-- [ ] Confirm the driver handles the structural variants (Claude uses
-      `stream-json` event envelopes; Codex/OpenCode use NDJSON with `type`;
-      Antigravity uses a single buffered JSON object; Pi uses `--mode json`
-      NDJSON). The abstraction must accommodate these without forcing a
-      one-size-fits-all parse — the driver handles the common skeleton, the
-      closure handles the variant.
+- [ ] Re-measure: if each parser's `feed_line` has shrunk to
+      "deserialize typed enum → match dispatch" plus delegations, the
+      generic driver no longer pays for its machinery — **close C5 here**
+      and demote the driver to the Nice-to-Have tier in `review.md`
+- [ ] If real skeleton duplication remains (per the re-measure), implement
+      the driver parameterized over the typed event enum + a per-provider
+      dispatch closure, converting one parser at a time
 
 ### Phase 6 Exit Criteria
 
 - [ ] `just test` passes for claudine lib (all provider parser tests)
 - [ ] `just lint` passes
-- [ ] Each provider file is reduced to its typed dispatch arms (estimate:
-      ~300–500 lines each, down from ~1,000–1,900)
-- [ ] `common.rs` contains the shared skeleton (~400–600 lines)
-- [ ] Estimated 600–900 duplicated non-test lines eliminated
+- [ ] Zero copies of `emit_provider_extension` / `emit_malformed_warning` /
+      `base_extra` outside `common.rs`
+- [ ] One shared summary-assembly helper; one shared `classify_error`
+      cascade
+- [ ] The 6d decision is recorded here with its evidence
 - [ ] The dispatch inventory test
       (`claudine-cli/tests/dispatch_inventory.rs`) still passes
 
