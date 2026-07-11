@@ -1288,3 +1288,49 @@ unless the same baseline is supplied explicitly.
 ## Implementation-Bound Reference
 
 `md schema about` is the **implementation-bound CLI reference** for this topic. Its contents come from a typed descriptor catalog (`schema_type_descriptors`, `schema_constraint_descriptors`, `schema_shape_descriptors`, `inline_object_rule_descriptors`, `coercion_rule_descriptors`, `validation_behavior_descriptors` in `darkmatter::markdown::schemas`), which library callers can consume to render their own reports. Drift between this prose document and the CLI report is caught by parity tests that pin the descriptor catalog to the implemented `SimplifiedType` and `Constraint` enums.
+### Repository Trigger Schemas
+
+File-backed CLI and DMLS validation can discover `schemas/` directories from
+the document's directory through an explicit repository or workspace boundary.
+A YAML file opts into activation by declaring `kind: trigger-schema`:
+
+```yaml
+kind: trigger-schema
+match:
+    all:
+        - kind: enum(prompt; required)
+        - none:
+              - steps: any(required)
+$schema: prompt.yaml
+```
+
+The envelope and payload are separate files. Bare filenames such as
+`prompt.yaml` resolve against discovered schema roots, nearest first; use
+`./prompt.yaml` when the intended file is beside the referencing document or
+schema. A trigger filename in a nearer root shadows the same filename in every
+farther root.
+
+Property conditions reuse SimplifiedSchema type expressions. A condition
+without `required` is a guard: absence is allowed, but a present value of the
+wrong type defeats the match. `required` makes it a presence gate. Match-safe
+constraints are limited to structural types plus pure constraints such as
+`required`, `enum`, `pattern`, length/range, item-count, and key-count.
+Stateful or transforming constraints (`file(eager)`, imports, `example`,
+`default`, and `generated`) are rejected in trigger matches.
+
+The match grammar supports freely nested `all`, `any`, `none`, and
+`min-match: { count, of }` combinators. A sequence under `match:` is an outer
+OR of independent arms. `$path` matches the boundary-relative,
+forward-slash-separated, case-sensitive path with gitignore-style globs. Every
+arm must contain a satisfiable presence gate or `$path`; otherwise the vacuous
+arm is a load error.
+
+Effective precedence is caller baseline, matching trigger payloads (nearest
+root and then filename order), then the document's own `$schema`. Trigger
+payloads must be merge-compatible object schemas. Discovery is transactional:
+an invalid opted-in envelope rejects the scan, while unrelated YAML files are
+ignored. Library hosts opt in explicitly with
+`DarkmatterSchemas::with_trigger_discovery`; `md compose` and
+`md schema validate` opt in for repository-backed files and accept
+`--no-trigger-schemas`. Use `md schema triggers <file>` to inspect roots,
+shadowing, matched arms, and defeat explanations.
