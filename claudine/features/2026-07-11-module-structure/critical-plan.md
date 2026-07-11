@@ -117,6 +117,17 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/claudine/architecture.md
+source_files_during_phase_4:
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/error_routing.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/requeue.rs
+docs_updated_during_phase_4:
+  - claudine/features/2026-07-11-module-structure/critical-plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 source_files_during_phase_5:
   - claudine/lib/src/composition/lifecycle/runtime.rs
   - claudine/lib/src/composition/lifecycle/mod.rs
@@ -130,6 +141,25 @@ docs_updated_during_phase_5:
   - claudine/features/2026-07-11-module-structure/critical-plan.md
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
+  - .claude/skills/claudine/architecture.md
+source_files_during_phase_6:
+  - claudine/lib/src/stream/providers/common.rs
+  - claudine/lib/src/stream/providers/mod.rs
+  - claudine/lib/src/stream/providers/claude.rs
+  - claudine/lib/src/stream/providers/codex.rs
+  - claudine/lib/src/stream/providers/opencode.rs
+  - claudine/lib/src/stream/providers/kimi.rs
+  - claudine/lib/src/stream/providers/qwen.rs
+  - claudine/lib/src/stream/providers/gemini.rs
+  - claudine/lib/src/stream/providers/pi.rs
+  - claudine/lib/src/stream/providers/antigravity.rs
+docs_updated_during_phase_6:
+  - claudine/docs/providers/dispatch-inventory.json
+  - claudine/features/2026-07-11-module-structure/critical-plan.md
+  - claudine/features/2026-07-11-module-structure/review.md
+docs_created_during_phase_6:
+  - claudine/features/2026-07-11-module-structure/phase6-discovery.md
+skills_files_updated_during_phase_6:
   - .claude/skills/claudine/architecture.md
 ---
 
@@ -646,11 +676,19 @@ safety net.
 - [ ] Refactor each of the 13 sequential phases inside `run_harness_loop`
       into a method or free function taking `&mut HarnessLoopCtx` and
       returning `LoopStep`
+      > **Deferred (2026-07-11 second pass):** after 4.2's dedup the loop
+      > body is ~960 lines of *once-each* sequential phases with no
+      > remaining duplication. Converting them to phase methods requires
+      > moving ~20 loop-mutable locals into a state struct — judged not
+      > worth the behavior-drift risk in this pass. Revisit only if the
+      > loop grows again.
 - [ ] The loop body becomes: call phase → match on `LoopStep` → continue or
-      return
+      return *(deferred with the bullet above)*
 - [ ] This eliminates the 15 `#[allow(clippy::too_many_arguments)]` on the
       phase functions (they now take one `&mut HarnessLoopCtx`)
-- [ ] Verify: `just test` (the behavior is identical — this is a pure
+      *(deferred — the allows sit on genuinely multi-param helpers; they
+      disappear only with the state-struct conversion above)*
+- [x] Verify: `just test` (the behavior is identical — this is a pure
       extraction)
 
 ### Step 4.2 — Collapse terminal-recovery into `drive_terminal_recovery`
@@ -669,19 +707,19 @@ The three copy-pasted sequences (failure 2,321–2,458; inline-closure
 
 The Abort arms at 2,396–2,422 / 2,527–2,553 / 2,638–2,664 are near-verbatim.
 
-- [ ] Extract one helper:
-      ```rust
-      fn drive_terminal_recovery(
-          ctx: &mut HarnessLoopCtx,
-          terminal_outcome: TerminalEventOutcome,
-          event_name: &str,
-      ) -> LoopStep
-      ```
-- [ ] Replace each of the three inline sequences with a call to
+- [x] Extract one helper — landed as
+      `drive_terminal_recovery(lifecycle_guard, signal, event_err, …) ->
+      Result<TerminalRecovery>` (parameter style matches its sibling
+      `run_finalize_with_recovery`; `Err` = halt, `NextAttempt`/`Completed`
+      = loop control). It runs the whole 5-step sequence including
+      `execute_terminal_event`, unifying the per-path finalize `err` as
+      `event_err.or(downgrade_err)` — verified exact for all three paths.
+- [x] Replace each of the three inline sequences with a call to
       `drive_terminal_recovery`
-- [ ] Verify: `just test` — especially the tests in
-      `loop_control/tests.rs` that exercise failure/success/abort paths
-- [ ] Confirm ~400 lines collapsed
+- [x] Verify: `just test` — 54/54 `loop_control` tests + 774 wrap-scoped
+      tests pass
+- [x] Confirm ~400 lines collapsed (three ~110-line sequences → three
+      ~24-line call sites + one shared helper)
 
 ### Step 4.3 — Split `loop_control.rs` into sibling files
 
@@ -701,21 +739,35 @@ The Abort arms at 2,396–2,422 / 2,527–2,553 / 2,638–2,664 are near-verbati
       `try_enqueue_via_daemon` — lines 876–1,048 — currently
       `#[allow(dead_code)]`, retained for the future rendezvous backend)
 
-- [ ] After splitting, `loop_control.rs` contains only: `run_harness_loop`
-      (now much shorter thanks to 4.1 + 4.2), `HarnessLoopCtx`, `LoopStep`,
-      and `drive_terminal_recovery`
-- [ ] Update `harness_orch/mod.rs` with `mod` declarations for the new
-      siblings
-- [ ] Verify: `just test` + `just lint`
+- [x] After splitting, `loop_control.rs` contains only: `run_harness_loop`
+      (+ `run_harness_loop_inner`), `HarnessLoopCtx`, and `LoopStep`
+      (1,126 lines, from 2,743)
+      > **Placement deviation:** the five modules landed as **children of
+      > `loop_control/`** (beside the existing `tests.rs`) rather than
+      > `harness_orch/` siblings, with `use super::*;` in each child and
+      > glob re-imports in the parent. This keeps the parent's import set
+      > flowing into the children and preserves the test suite's
+      > `use super::*;` contract with zero test edits. Items are
+      > `pub(super)`; `drive_terminal_recovery`/`TerminalRecovery` live in
+      > `control_dispatch.rs` with the dispatch machinery they wrap.
+- [x] Update the module declarations for the new children (in
+      `loop_control.rs`; `harness_orch/mod.rs` unchanged — it still exposes
+      only `run_harness_loop`)
+- [x] Verify: `just test` + `just lint`
 
 ### Phase 4 Exit Criteria
 
-- [ ] `just test` passes for claudine-cli
-- [ ] `just lint` passes
-- [ ] `run_harness_loop` is < 300 lines (from 1,001)
-- [ ] `drive_terminal_recovery` replaces three copy-pasted sequences
-- [ ] `loop_control.rs` is < 1,000 lines total (from ~2,700 post-Phase-1)
-- [ ] Zero `#[allow(clippy::too_many_arguments)]` on the phase functions
+- [x] `just test` passes for claudine-cli
+- [x] `just lint` passes
+- [ ] `run_harness_loop` is < 300 lines (from 1,001) — *not met by design*:
+      after the dedup, `run_harness_loop_inner` is ~960 lines of once-each
+      sequential phases; the phase-method conversion is deferred (see 4.1)
+- [x] `drive_terminal_recovery` replaces three copy-pasted sequences
+- [ ] `loop_control.rs` is < 1,000 lines total — 1,126; the miss is
+      entirely the undecomposed loop function above
+- [ ] Zero `#[allow(clippy::too_many_arguments)]` on the phase functions —
+      deferred with the state-struct conversion (16 remain, one per
+      multi-param helper across the split modules)
 
 ---
 
@@ -865,17 +917,21 @@ converts one concern across the parsers with `just test` between parsers.
 Before any extraction, produce a field-by-field comparison of the 8 parser
 state structs and their `finish()` implementations:
 
-- [ ] The intersection: fields identical in name/type/semantics across all
+- [x] The intersection: fields identical in name/type/semantics across all
       8 (and across the 7 line-oriented parsers)
-- [ ] Fields shared by 4+ parsers but not all
-- [ ] Genuinely provider-specific state, per provider
-- [ ] Which `StreamExecutionSummary` fields each `finish()` populates, and
-      any provider-specific computation (OpenCode stderr-state merge, Kimi
-      wire, Antigravity buffered-object finish)
-- [ ] The per-provider `classify_error` keyword deltas as a table
+- [x] Fields shared by 4+ parsers but not all
+- [x] Genuinely provider-specific state, per provider
+- [x] Which `StreamExecutionSummary` fields each `finish()` populates, and
+      any provider-specific computation (Kimi wire flushes, Antigravity
+      buffered-object finish; the "OpenCode stderr-state merge" turned out
+      to live in `OpenCodeLogBridge`, not in `finish()`)
+- [x] The per-provider `classify_error` keyword deltas as a table
 
-The findings gate what 6a–6c share and decide 6d. Record the summary in this
-plan (or a sidecar `phase6-discovery.md`) so the evidence survives the run.
+The findings gate what 6a–6c share and decide 6d. Recorded in
+[`phase6-discovery.md`](phase6-discovery.md). Headline: only 8 of ~15
+fields are identical across all 8 structs (`token_usage`/`cost_usd`/
+`num_turns` split Option-vs-plain), confirming the delegation design over
+state unification.
 
 ### Step 6a — Shared emit helpers (no state changes)
 
@@ -897,56 +953,67 @@ pub(crate) fn emit_malformed_warning(sink: &mut dyn SemanticEventSink, provider:
 variation, either parameterize it or leave that provider's copy local with a
 comment naming the delta.)
 
-- [ ] Create `common.rs` with the three helpers
-- [ ] Convert one parser at a time; `just test` after each
-- [ ] Kill the 7 `emit_provider_extension` copies (all 8 files delegate)
+- [x] Create `common.rs` with the three helpers (`base_extra_parts`,
+      `base_extra`, `emit_provider_extension`, `emit_malformed_warning`)
+- [x] Convert one parser at a time; stream suite (767 tests) after the batch
+- [x] Kill the 7 `emit_provider_extension` copies (7 line-oriented files
+      delegate; Antigravity never had the helpers — no line surface)
 
 ### Step 6b — Shared summary assembly
 
-- [ ] Add a `finish` assembly helper to `common.rs` (builder or
-      options-struct) that owns the shared idiom: the
-      `if x > 0 { Some } else { None }` field population +
-      `derive_badges(&summary, provider)` stamping
-- [ ] Providers keep their own counters/state; they hand the helper only the
-      values they track (per 6.0's populate-table). Provider-specific
-      post-steps (e.g. OpenCode's stderr-state merge) stay local, after the
-      shared assembly
-- [ ] Convert one parser at a time; `just test` after each
+- [x] Landed simpler than planned: `StreamExecutionSummary` already
+      implements `Default`, so no seed/builder struct was needed — each
+      parser's literal keeps only its populated fields plus
+      `..Default::default()`, and `common::finish_summary(provider,
+      summary)` stamps `provider` + `derive_badges` (provider can no longer
+      drift from the badge derivation)
+- [x] Providers keep their own counters/state; provider-specific pre-steps
+      (kimi flushes, gemini `flush_pending_text`, antigravity buffered
+      re-emit + error synthesis, `trace_parser_finish` calls) stay local
+- [x] Converted all 8; stream suite green (767 tests)
 
 ### Step 6c — Parameterized `classify_error` cascade
 
-- [ ] Add the shared keyword cascade to `common.rs`, parameterized by a
-      per-provider keyword table (from 6.0's comparison); the `str`-only
-      variants (`pi.rs`, `antigravity.rs`) route through the same cascade
-- [ ] Genuinely bespoke provider rules stay local as pre-checks that fall
-      through to the shared cascade
-- [ ] Verify: the `classify_error_*` tests in each provider's test module
-      must pass unchanged — they are the spec for this step
+- [x] Added `common::ErrorKeywords` (**ordered** bucket tables — order is
+      the behavior contract, encoding gemini's config-first kind branch,
+      the late-ApiRemote pass, antigravity's auth-first message branch, and
+      pi/antigravity's `"abort"` vs the others' `"aborted"`) +
+      `classify_error_by_keywords`; `pi.rs`/`antigravity.rs` route through
+      the same cascade with empty kind tables
+- [x] Kimi's JSON-RPC numeric-code `match` stays local and falls through to
+      its message table
+- [x] Verified: all `classify_error_*` tests pass unchanged (784-test
+      stream+classify run)
 
 ### Step 6d — Decision point: generic `feed_line` driver (optional)
 
 Only after 6a–6c, and only for the **7 line-oriented parsers** (Antigravity
 excluded by design):
 
-- [ ] Re-measure: if each parser's `feed_line` has shrunk to
-      "deserialize typed enum → match dispatch" plus delegations, the
-      generic driver no longer pays for its machinery — **close C5 here**
-      and demote the driver to the Nice-to-Have tier in `review.md`
-- [ ] If real skeleton duplication remains (per the re-measure), implement
-      the driver parameterized over the typed event enum + a per-provider
-      dispatch closure, converting one parser at a time
+- [x] Re-measured: post-6a each `feed_line` is the 6-line prologue + a
+      pure-delegation fallback arm + genuinely provider-specific typed
+      dispatch (kimi's envelope classifier and gemini's pre-dispatch flush
+      deviate structurally). A driver would save ~14 lines × 6 parsers at
+      the cost of generic machinery + per-provider hooks. **C5 closed at
+      6c**; driver demoted to Nice-to-Have in `review.md` (decision +
+      evidence in `phase6-discovery.md`)
+- [x] Not implemented (per the re-measure above)
 
 ### Phase 6 Exit Criteria
 
-- [ ] `just test` passes for claudine lib (all provider parser tests)
-- [ ] `just lint` passes
-- [ ] Zero copies of `emit_provider_extension` / `emit_malformed_warning` /
-      `base_extra` outside `common.rs`
-- [ ] One shared summary-assembly helper; one shared `classify_error`
-      cascade
-- [ ] The 6d decision is recorded here with its evidence
-- [ ] The dispatch inventory test
-      (`claudine-cli/tests/dispatch_inventory.rs`) still passes
+- [x] `just test` passes for the whole claudine area (3,379 lib + 1,900
+      cli + 90 gen + 47 contract + 21 catalog-types)
+- [x] `just lint` passes
+- [x] Zero copies of `emit_provider_extension` / `emit_malformed_warning` /
+      `base_extra` bodies outside `common.rs` (parsers keep 1–3-line
+      delegating methods so call sites did not churn)
+- [x] One shared summary-assembly helper (`finish_summary`); one shared
+      `classify_error` cascade (`classify_error_by_keywords`)
+- [x] The 6d decision is recorded in `phase6-discovery.md`
+- [x] The dispatch inventory test passes (regenerated via
+      `CLAUDINE_UPDATE_INVENTORY=1` — the diff is line-number churn from
+      the moves plus 6 new `direct-ref` sites from the keyword-table
+      constants; no new decentralized `match Provider` dispatch)
 
 ---
 

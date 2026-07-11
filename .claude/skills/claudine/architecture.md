@@ -383,6 +383,7 @@ So when rendered prompt output shows wrong wrapping, spurious newlines, lines bl
 
 ### Infrastructure
 
+- `providers/common` — shared parser skeleton the per-provider parsers delegate to: `base_extra`/`base_extra_parts` payload bases, `emit_provider_extension` + `emit_malformed_warning` fallbacks, `finish_summary` (stamps `provider` + derived badges onto a `..Default::default()`-built summary), and the `ErrorKeywords` ordered-bucket tables + `classify_error_by_keywords` cascade (bucket order is the per-provider behavior contract — do not sort the tables). Provider files keep thin delegating methods plus their genuinely provider-specific typed dispatch.
 - `parser` — `StreamParser` trait and `StreamEventSink` callback interface for coarse event handling (session start, turn lifecycle, tool events)
 - `summary` — `StreamExecutionSummary` struct: provider-agnostic metadata (session ID, model, tokens, cost, duration, tool calls, rate limits, context usage)
 - `token_usage` — `NormalizedTokenUsage` with input/output/total/cache_read fields

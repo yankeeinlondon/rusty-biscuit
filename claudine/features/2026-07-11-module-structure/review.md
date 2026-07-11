@@ -84,6 +84,8 @@ Verified duplicated shapes (identical except the `Provider::X` literal):
 
 Introduce a `ParserShared` struct (sink, line_num, session_id, model, token_usage, cost — the ~12 fields every parser re-declares) with the shared emit/summary/classify methods, plus a generic `feed_line` driver parameterized over the typed event enum and a per-provider dispatch closure. Each provider file shrinks to its typed dispatch arms — which is the only part that actually differs. This directly serves the provider-ladder roadmap: the next provider costs one dispatch match, not a 1,000-line copy.
 
+> **Status (2026-07-11, implemented):** landed as free-function delegation in `stream/providers/common.rs`, **not** a `ParserShared` state struct — the Phase 6.0 discovery ([`phase6-discovery.md`](phase6-discovery.md)) showed only 8 of ~15 fields are identical across the 8 structs (`token_usage`/`cost_usd`/`num_turns` split Option-vs-plain), so state unification was abandoned in favor of shared helpers (`base_extra`, `emit_provider_extension`, `emit_malformed_warning`), `finish_summary` + `..Default::default()` assembly, and `ErrorKeywords` ordered-bucket classify tables. The generic `feed_line` driver was evaluated and **demoted to Nice-to-Have** (see N7).
+
 ### C6. Split `composition/error.rs` into data model vs rendering
 
 `error.rs` holds four concerns: the 70-variant `CompositionError` enum + aux types (39–1,557), constructors/frontmatter enrichment (1,558–1,809), the `impl BlockError` rendering layer whose `status_block` alone is ~743 sloc (1,828–2,571) plus ~240 lines of `render_*` free functions, and the `impl Diagnostic` projection (2,878–3,120). Move rendering to `composition/error/render.rs`. **Zero external blast radius** — the barrel exports the types, not the render functions. This is the best "first split" to establish the pattern.
@@ -162,6 +164,10 @@ The result/option/context types (29–276: `LoopExecutionOptions`, `LoopIteratio
 `stream/protocol/kimi.rs` is 48% tests, `protocol/codex.rs` 37% — deserialization-fidelity tests over the `fixtures/kimi/*.jsonl` corpus. Reasonable to co-locate, but moving the fixture-replay portions to integration tests would shrink the compile units. Low urgency; the models themselves are legitimately large (Kimi wire has 4 envelope shapes) and hand-written by design.
 
 ---
+
+### N7. Generic `feed_line` driver for the line-oriented stream parsers
+
+Demoted from C5 after the 6a–6c extractions landed (2026-07-11): the residual per-parser skeleton is a 6-line prologue plus a pure-delegation fallback arm, while kimi (envelope classifier, synthetic `raw_kind`) and gemini (pre-dispatch `flush_pending_text`) deviate structurally. A generic driver would save ~14 lines × 6 parsers at the cost of generic machinery plus per-provider hooks. Revisit only if a future provider's `feed_line` grows a genuinely new skeleton. Antigravity (buffered JSON, no line loop) is excluded by design regardless. Evidence: [`phase6-discovery.md`](phase6-discovery.md).
 
 ## Suggested sequencing
 

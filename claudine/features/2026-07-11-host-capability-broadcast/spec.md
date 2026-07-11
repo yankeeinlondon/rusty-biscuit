@@ -12,6 +12,7 @@ All of the below are detectable using the sniff library:
 
 - `os`: enum(macOs,Linux,Windows) 
 - `memory`: number
+    - the amount of RAM the machine has
 - `cpu_cores`: number
 - `gpu`: enum(none,metal,nvidia,other)
 - `gpu_features`: features[]
