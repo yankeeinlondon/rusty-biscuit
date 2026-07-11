@@ -1,0 +1,5 @@
+---
+steps: []
+---
+
+Sequence dialect fixture.
