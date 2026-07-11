@@ -10,6 +10,7 @@ claudine/lib/src/
 ├── adapters/     → Provider-specific event parsers (ProviderAdapter trait)
 ├── badges/       → Styled terminal badge constants (YOLO, Non-Interactive, Interactive, etc.)
 ├── composition/  → Markdown frontmatter composition (inline and chained prompt pipelines)
+│   └── lifecycle/ → Lifecycle config/types, parsing, validation, actions, context, control, execution, and provider-neutral runtime routing
 ├── config/       → Agent detection, hook registration, atomic writes, backups
 ├── dispatch/     → Event processing pipeline (loader, template, matcher, runner)
 ├── events/       → Normalized event model and types (16 events, 10 providers)
@@ -399,6 +400,10 @@ Markdown frontmatter-based composition pipelines for delivering prompts to provi
 
 - **Inline composition** (`--frontmatter-prompt`): reads frontmatter `prompt` field as input, replaces document body with provider output
 - **Chained composition** (`--compose`): composes full document as prompt without file mutation
+
+## Test Placement
+
+**Inline tests** (`#[cfg(test)] mod tests { … }`) are the default for small files. Once a file exceeds **~800 production lines** or its test module exceeds **~300 lines**, move tests to a sibling file declared via `#[cfg(test)] mod tests;` at the bottom of the parent. This pattern is already established in `lib/src/provider/`, `cli/…/wrap/composition/`, and `cli/…/wrap/exec/wiring/`.
 
 ## Skill Linking
 
