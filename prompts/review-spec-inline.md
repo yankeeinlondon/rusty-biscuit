@@ -1,6 +1,6 @@
 ---
 $schema:
-    spec: file(required)
+    spec: file(required) -> the specification file being reviewed
 description: Reviews a draft specification inline and updates the spec file
 
 basename: "$(basename '{{ spec }}')"
@@ -46,3 +46,4 @@ Update the spec file at "{{spec}}" and then:
 
 - set the spec file's `reviewed` Frontmatter property to 'true'
 - set the spec file's `status` to "ready for planning and implementation"
+- DO NOT set the the `review_iterations` frontmatter property (this property is intended to indicate implementation reviews not spec reviews)
