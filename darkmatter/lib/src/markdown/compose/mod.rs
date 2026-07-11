@@ -141,9 +141,8 @@ pub use transclusion::TransclusionError;
 pub(crate) use context::options::TransclusionOptions;
 
 // Shared helpers, re-exported so in-crate callers reach them as `compose::<name>`.
-pub(crate) use util::{
-    abbreviate_path, find_git_root_from, find_target_range, prepare_frontmatter_for_compose,
-};
+pub use util::find_git_root_from;
+pub(crate) use util::{abbreviate_path, find_target_range, prepare_frontmatter_for_compose};
 
 use super::Markdown;
 use super::types::MarkdownResult;

@@ -61,7 +61,7 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
     let has_document_schema = markdown.frontmatter().as_map().contains_key("$schema");
     let has_baseline = options.baseline_schema.is_some();
 
-    if !has_document_schema && !has_baseline {
+    if !has_document_schema && !has_baseline && !options.trigger_schemas {
         return Ok(());
     }
 
@@ -87,6 +87,20 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
                     source: Some(Box::new(err)),
                 }
             })?;
+        }
+        if options.trigger_schemas
+            && let Some(ComposeSource::File(document_path)) = markdown.source()
+            && let Some(boundary) = crate::markdown::compose::find_git_root_from(document_path)
+        {
+            builder = builder
+                .with_trigger_discovery(document_path, boundary)
+                .map_err(|err| MarkdownError::SchemaValidationFailed {
+                    path: path.clone(),
+                    problems: Vec::new(),
+                    summary: format!("trigger schemas could not be prepared: {err}"),
+                    description: description.clone(),
+                    source: Some(Box::new(err)),
+                })?;
         }
         builder
     };
