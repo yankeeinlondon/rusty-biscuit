@@ -2,7 +2,7 @@
 agent: opencode
 total_phases: 7
 created: 2026-07-10
-phase: 5
+phase: 7
 yolo: "true"
 source_files_during_phase_1: []
 docs_updated_during_phase_1:
@@ -10,8 +10,6 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1:
   - darkmatter/fixes/2026-07-10-function-schemas/phase-1-baseline.md
 skills_files_updated_during_phase_1: []
-packages:
-  - darkmatter
 source_files_during_phase_2:
   - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
   - darkmatter/lib/src/markdown/compose/expression/catalog/ast.rs
@@ -53,6 +51,50 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
   - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_6:
+  - darkmatter/cli/src/commands/schema/about.rs
+docs_updated_during_phase_6:
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - darkmatter/fixes/2026-07-10-function-schemas/plan.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_files_during_phase_7:
+  - darkmatter/dmls/src/overlay/expressions.rs
+docs_updated_during_phase_7:
+  - claudine/docs/topics/context/drift.md
+  - claudine/docs/topics/context/expression-engine.md
+  - darkmatter/fixes/2026-07-10-function-schemas/plan.md
+docs_created_during_phase_7:
+  - darkmatter/fixes/2026-07-10-function-schemas/phase-7-closeout.md
+skills_files_updated_during_phase_7: []
+source_code:
+  - darkmatter/cli/src/commands/schema/about.rs
+  - darkmatter/dmls/src/overlay/expressions.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/ast.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/parser.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/collections.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/dates.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/markdown_docs.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/predicates.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/skills.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/strings.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/terminal.rs
+documentation:
+  - claudine/docs/topics/context/drift.md
+  - claudine/docs/topics/context/expression-engine.md
+  - darkmatter/docs/schemas/expression-functions.yaml
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - darkmatter/fixes/2026-07-10-function-schemas/drift-log.md
+  - darkmatter/fixes/2026-07-10-function-schemas/phase-1-baseline.md
+  - darkmatter/fixes/2026-07-10-function-schemas/phase-7-closeout.md
+  - darkmatter/fixes/2026-07-10-function-schemas/plan.md
+packages:
+  - darkmatter
+  - dmls
+  - claudine
 ---
 
 # Execution Plan: Authored Expression-Function Schemas
@@ -554,7 +596,7 @@ is reviewed.
   `expression_function_descriptors()`.
 - [x] Verify `claudine/cli/src/commands/context.rs` still works unchanged —
   `claudine context --expressions` reads `expression_function_descriptors()`.
-- [ ] Run Claudine tests: `just test` in the claudine area.
+- [x] Run Claudine tests: `just test` in the claudine area.
 - [x] Run `claudine/cli/tests/context_command.rs` to verify the context
   command reports expression functions.
 
@@ -581,48 +623,48 @@ documentation updated.
 
 ### 7a — Remove dead code
 
-- [ ] Remove the shared `P_*` parameter constants and `R_*` return constants
+- [x] Remove the shared `P_*` parameter constants and `R_*` return constants
   from `catalog.rs` (`P_ANY`, `P_ANY2`, `P_STRING`, `P_STRING2`, `P_STRING3`,
   `P_NUM`, `P_NUM2`, `P_LIST`, `P_VARIADIC`, `P_OBJ_STRING`, `P_NUM_CONV`,
   `P_ROUND`, `P_FILE`, `P_FILE_STRING`, `P_FILE_OBJ`, `R_BOOL`, `R_BOOL_ERR`,
   `R_NUM`, `R_NUM_ERR`, `R_STRING_ERR`, `R_FILE_ERR`, `R_OBJ_ERR`,
   `R_ANY_ERR`).
-- [ ] Remove the old `FunctionRegistration` struct and any remaining
+- [x] Remove the old `FunctionRegistration` struct and any remaining
   descriptor-bearing registration code paths.
-- [ ] Remove `catalog_order` from any surviving types (it is replaced by the
+- [x] Remove `catalog_order` from any surviving types (it is replaced by the
   YAML `order` field).
-- [ ] Remove the old `expression_function_descriptors()` implementation in
+- [x] Remove the old `expression_function_descriptors()` implementation in
   `functions/mod.rs` that flattened `registrations()` — the Phase 4
   `LazyLock` accessor in `catalog.rs` is now the sole implementation.
-- [ ] Verify `cargo check -p darkmatter -p darkmatter-cli -p dmls` passes
+- [x] Verify `cargo check -p darkmatter -p darkmatter-cli -p dmls` passes
   with no dead-code warnings for removed items.
 
 ### 7b — Update skill and documentation
 
-- [ ] Update the local Darkmatter skill (`.claude/skills/darkmatter/SKILL.md`)
+- [x] Update the local Darkmatter skill (`.claude/skills/darkmatter/SKILL.md`)
   to identify:
   - The YAML catalog at `docs/schemas/expression-functions.yaml`.
   - The catalog parser and accessor.
   - The runtime-binding boundary (bindings join to catalog by canonical name).
-- [ ] Update `docs/topics/darkmatter-expressions.md` authoring guide to
+- [x] Update `docs/topics/darkmatter-expressions.md` authoring guide to
   reference the YAML catalog as the source for function metadata.
-- [ ] Update any Godless Beauty prose made stale by replacing
+- [x] Update any Godless Beauty prose made stale by replacing
   descriptor-bearing Rust registrations with catalog-backed bindings.
-- [ ] Update `AGENTS.md` if any workspace-layout or convention references
+- [x] Update `AGENTS.md` if any workspace-layout or convention references
   changed.
 
 ### 7c — Full validation suite
 
-- [ ] Run `just test` in the darkmatter area (L1 tests for darkmatter,
+- [x] Run `just test` in the darkmatter area (L1 tests for darkmatter,
   darkmatter-cli, dmls).
-- [ ] Run `just test-l2` in the darkmatter area (L2 real-terminal tests).
-- [ ] Run `just lint` in the darkmatter area.
-- [ ] Run `just doctest` in the darkmatter area.
-- [ ] Run `just check` in the darkmatter area (cargo check + zed check).
-- [ ] Run `just test` in the claudine area (claudine lib + cli).
-- [ ] Run `cargo check -p darkmatter -p darkmatter-cli -p dmls -p claudine
+- [x] Run `just test-l2` in the darkmatter area (L2 real-terminal tests).
+- [x] Run `just lint` in the darkmatter area.
+- [x] Run `just doctest` in the darkmatter area.
+- [x] Run `just check` in the darkmatter area (cargo check + zed check).
+- [x] Run `just test` in the claudine area (claudine lib + cli).
+- [x] Run `cargo check -p darkmatter -p darkmatter-cli -p dmls -p claudine
   -p claudine-cli` from the repo root.
-- [ ] Verify all spec acceptance criteria:
+- [x] Verify all spec acceptance criteria:
   - Removing or renaming a catalog function without changing its Rust
     binding fails a bidirectional parity test.
   - Adding a Rust binding without a catalog entry fails the same invariant.
@@ -644,7 +686,7 @@ documentation updated.
     reviewed.
   - DMLS function completion and hover tests pass against the parsed
     catalog.
-- [ ] Record final validation results in
+- [x] Record final validation results in
   `darkmatter/fixes/2026-07-10-function-schemas/phase-7-closeout.md`.
 
 ---
