@@ -721,4 +721,21 @@ mod tests {
         assert_eq!(index.links.len(), 2);
         assert_eq!(index.links[0].target, LinkTarget::External);
     }
+
+    #[test]
+    fn test_interpolation_literal_produces_no_variable_use_fact() {
+        // `{{{ ... }}}` is inert on every scanning surface; the substrate must
+        // not materialize a `VariableUseFact` (and therefore no graph edge).
+        let source = "# Doc\n\nThe title literal is {{{ title }}}.\n";
+        let index = index_document(Path::new("doc.md"), source);
+        assert!(index.variable_uses.is_empty());
+    }
+
+    #[test]
+    fn test_regular_interpolation_produces_variable_use_fact() {
+        let source = "---\ntitle: Guide\n---\n\n# {{ title }}\n";
+        let index = index_document(Path::new("doc.md"), source);
+        assert_eq!(index.variable_uses.len(), 1);
+        assert_eq!(index.variable_uses[0].name, "title");
+    }
 }
