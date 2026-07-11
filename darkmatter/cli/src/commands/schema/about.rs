@@ -815,6 +815,14 @@ mod tests {
             signatures.contains("as_csv(list: any[]) -> string | error"),
             "missing typed as_csv signature:\n{signatures}"
         );
+        assert!(
+            signatures.contains("link(target: file, desc: string) -> string | error"),
+            "missing authored link overload:\n{signatures}"
+        );
+        assert!(
+            signatures.contains("ensure_leading(var: any, prefix: any) -> string | error"),
+            "missing authored string signature:\n{signatures}"
+        );
     }
 
     #[test]
