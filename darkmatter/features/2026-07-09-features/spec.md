@@ -22,4 +22,12 @@ Mermaid charts are really useful and so we support rendering them in both the te
     - here two we have a choice but by default we would render the code block as HTML and add the MermaidJS as inline Javascript.
         - letting Mermaid be rendered by Javascript in the browser enables some dynamic features that can't be supported with a static image
         - the more diagrams used the less "bytes" will be needed loaded into the browser to get the visual representation we desire (initially the Javascript code _might_ make the payload larger but )
-        -
+        - 
+
+## Deduplication
+
+## Implementation Targets
+
+- mermaid feature
+- popover feature (CSS only)
+-
