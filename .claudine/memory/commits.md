@@ -44,6 +44,28 @@ details do not belong here.
   first become identical through changes made by the caller.
 - For a rename, include both the old and new paths so the deletion and addition
   remain in the same commit.
+- **`git commit --only -- <dest-paths>` only commits the `A` half of a rename
+  (2026-07-11 darkmatter archive batch, `5728b87d6` + `637422fc6`).** A
+  rename staged as `D <old>` + `A <new>` is two index entries; passing only
+  the destination pathspec to `--only` commits the additions but leaves the
+  `D` entries stranded in the index. A subagent hit this when archiving
+  `darkmatter/features/2026-07-10-interpolation-literal/*` into
+  `_completed/...`: the first `--only -- <new paths>` commit
+  (`5728b87d6 planning(darkmatter): archive 2026-07-10-interpolation-literal
+  to _completed`) added the four files at their new locations; the staged
+  deletes at the old paths were *not* swept up, so a follow-up
+  `--only -- <old paths>` commit (`637422fc6 planning(darkmatter): drop old
+  paths after archive move`) was needed to retire them. The end tree is
+  correct, but the move is split across two commits when it could have been
+  one. Two reinforcing points: (1) for a rename, always pass *both* the old
+  and the new paths in the same `--` pathspec list so a single commit
+  captures the `D` + `A` pair; (2) if a subagent discovers stranded `D`
+  entries after a successful `--only` commit, the correct response is a
+  scoped follow-up commit (or, if HEAD has not moved and no concurrent
+  commits exist, `git commit --only -- <old paths>` is acceptable) — never
+  amend the prior commit, since the no-amend-after-success rule still
+  applies. The "include both old and new paths" rule is the prevention; the
+  follow-up commit is the cure.
 - Put all Git options before `--`. For very large explicit path lists, use
   `--pathspec-from-file`; inspect the generated list and ensure rename lists
   contain both source and destination paths.
