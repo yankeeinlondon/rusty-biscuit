@@ -6,7 +6,7 @@
 //! communication properties (`say`, `say_first`, `effect`, `message`,
 //! `stderr`, `notify`, `info`, `warn`) and an ordered `stack:` of
 //! conditional actions. The `loop` event additionally carries iteration
-//! controls parsed by [`super::loop_config::resolve_loop_config`].
+//! controls parsed by [`super::looping::resolve_loop_config`].
 
 // rustfmt doesn't support let-chains yet, so nested ifs are required
 #![allow(clippy::collapsible_if)]
@@ -105,7 +105,7 @@ fn notification_comm_fields(
 /// interpolation. Non-lifecycle keys compose as today; the iteration
 /// controls inside `loop:` (`while`/`until`/`actions`/`max`/`fail_fast`)
 /// are unaffected because they are parsed from raw frontmatter by
-/// [`super::loop_config::resolve_loop_config`] and evaluated by the loop
+/// [`super::looping::resolve_loop_config`] and evaluated by the loop
 /// engine, not by compose-time interpolation.
 ///
 /// Order matches [`LifecycleSignal::ALL`] for readable diffs; the set is
@@ -128,7 +128,7 @@ pub const LIFECYCLE_EVENT_KEYS: &[&str] = &[
 /// any late-binding reference inside a `shell` command because shell commands
 /// are resolved at pre-flight — before any event fires — so only early-binding
 /// values (`doc.*`, `ctx.*`, `env.*`, read-side functions) are available there.
-pub const LATE_BINDING_ROOTS: &[&str] = &["err", "timing", "current"];
+pub use super::reserved::LATE_BINDING_ROOTS;
 
 /// A single lifecycle notification configuration.
 ///

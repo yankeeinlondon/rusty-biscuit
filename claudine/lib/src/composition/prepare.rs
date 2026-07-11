@@ -7,6 +7,8 @@ use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
 use darkmatter::markdown::hash::MdHashKind;
 use darkmatter::markdown::{Markdown, MarkdownError};
 
+use super::json_util::json_type_name;
+
 /// Convert a `MarkdownError` into a `CompositionError`, preserving the
 /// structured `ShellExpansion` variant so the CLI can render rich errors.
 ///
@@ -615,17 +617,6 @@ pub fn parse_interactive_hint(
         other => Err(CompositionError::InteractiveHintWrongType(
             json_type_name(other).to_string(),
         )),
-    }
-}
-
-fn json_type_name(value: &serde_json::Value) -> &'static str {
-    match value {
-        serde_json::Value::Null => "null",
-        serde_json::Value::Bool(_) => "boolean",
-        serde_json::Value::Number(_) => "number",
-        serde_json::Value::String(_) => "string",
-        serde_json::Value::Array(_) => "array",
-        serde_json::Value::Object(_) => "object",
     }
 }
 

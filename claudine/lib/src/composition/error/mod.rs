@@ -40,6 +40,10 @@ use render::render_agent_resolution_failed_body;
 /// (typically `1`).
 pub const LOOP_RATE_LIMITED_EXIT_CODE: i32 = 75;
 
+pub(crate) fn indexed_property(property: &str, index: usize) -> String {
+    format!("{property}[{index}]")
+}
+
 /// Errors that can occur during composition workflows.
 #[derive(Error, Debug)]
 pub enum CompositionError {

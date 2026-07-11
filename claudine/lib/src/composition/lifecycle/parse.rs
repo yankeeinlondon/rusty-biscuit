@@ -54,7 +54,7 @@ pub fn scan_removed_validation_keys(
 /// `failure`, `finalize`) and extracts the top-level communication
 /// properties into [`LifecycleConfig`]. Lifecycle concerns authored inside
 /// the `loop:` block (alongside the iteration controls parsed by
-/// [`super::loop_config::resolve_loop_config`]) are extracted into
+/// [`super::looping::resolve_loop_config`]) are extracted into
 /// [`LifecycleConfig::loop_concerns`].
 ///
 /// For each event the raw `stack:` is parsed into typed
@@ -295,7 +295,7 @@ fn parse_lifecycle_stack(
 /// Attach the stack-item index to a parse error so the diagnostic can name
 /// `start.stack[2]` rather than just `start`.
 fn annotate_stack_error(err: CompositionError, property: &str, idx: usize) -> CompositionError {
-    let dotted = format!("{property}.stack[{idx}]");
+    let dotted = super::super::error::indexed_property(&format!("{property}.stack"), idx);
     match err {
         CompositionError::LifecycleStackInvalidShape {
             source_path,
@@ -920,3 +920,4 @@ fn collect_backtick_values(s: &str) -> Vec<String> {
 
 /// Build a `TtsConfig` from global settings.
 use super::*;
+use super::super::json_util::json_type_name;

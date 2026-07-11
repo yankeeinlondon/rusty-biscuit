@@ -660,18 +660,6 @@ pub(super) fn event_stack_field_mut(
     }
 }
 
-/// JSON type label for diagnostics.
-pub(super) fn json_type_name(value: &serde_json::Value) -> &'static str {
-    match value {
-        serde_json::Value::Null => "null",
-        serde_json::Value::Bool(_) => "boolean",
-        serde_json::Value::Number(_) => "number",
-        serde_json::Value::String(_) => "string",
-        serde_json::Value::Array(_) => "array",
-        serde_json::Value::Object(_) => "object",
-    }
-}
-
 /// Validates that no rendered lifecycle string contains a surviving
 /// `{{ … }}` interpolation span.
 ///
@@ -698,3 +686,4 @@ pub(super) fn json_type_name(value: &serde_json::Value) -> &'static str {
 /// * `warnings` — compose report warnings, used best-effort to enrich the
 ///   leak reason.
 use super::*;
+use super::super::json_util::json_type_name;

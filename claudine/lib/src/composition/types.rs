@@ -171,13 +171,7 @@ impl AmbientVariable {
     /// All loop ambient variables are namespaced under the `_loop_` prefix
     /// to avoid shadowing user-defined frontmatter properties named
     /// `iteration`, `is_first`, `last_output`, etc.
-    pub const NAMES: &[&str] = &[
-        "_loop_count",
-        "_loop_is_first",
-        "_loop_is_last",
-        "_loop_last_output",
-        "_loop_last_exit_code",
-    ];
+    pub const NAMES: &[&str] = super::reserved::AMBIENT_VARIABLE_NAMES;
 
     /// Returns true when `name` is a reserved ambient variable.
     pub fn is_reserved(name: &str) -> bool {
@@ -187,11 +181,11 @@ impl AmbientVariable {
     /// Return the frontmatter/template key for this ambient variable.
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Iteration => "_loop_count",
-            Self::IsFirst => "_loop_is_first",
-            Self::IsLast => "_loop_is_last",
-            Self::LastOutput => "_loop_last_output",
-            Self::LastExitCode => "_loop_last_exit_code",
+            Self::Iteration => Self::NAMES[0],
+            Self::IsFirst => Self::NAMES[1],
+            Self::IsLast => Self::NAMES[2],
+            Self::LastOutput => Self::NAMES[3],
+            Self::LastExitCode => Self::NAMES[4],
         }
     }
 }
