@@ -1,6 +1,6 @@
 # Logging Refactor
 
-We have had logging for a long time but it was never implemented well and hasn't been used in a long time in it's current form. In more recent times we've had a few very important developments:
+We have had logging for a long time in Claudine but it was never implemented well and hasn't been used in a long time in it's current form. In more recent times we've had a few important feature developments:
 
 1. Provider Research -> Metadata
 
@@ -44,4 +44,4 @@ We keep track of logs so we can report on them to the user in a way that provide
 
 One of the key _entities_ which structures logging is the idea of a `Session`:
 
-- when interacting with 
+- when interacting with
