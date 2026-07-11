@@ -14,7 +14,10 @@ claudine/lib/src/
 │   ├── looping/   → Loop configuration, action DSL, condition evaluation, and execution orchestration
 │   └── schema/    → Schema-aware preparation, error translation, problem classification, and status reporting
 ├── config/       → Agent detection, hook registration, atomic writes, backups
-├── dispatch/     → Event processing pipeline (loader, template, matcher, runner)
+├── dispatch/     → Event processing pipeline
+│   ├── logging.rs        → Event metadata preparation and JSONL logging
+│   ├── protect_bridge.rs → Protect observations mapped into hook responses
+│   └── wrapper_flags.rs  → Wrapper environment flags and repository root extraction
 ├── events/       → Normalized event model and types (16 events, 10 providers)
 ├── linking/      → Cross-provider skill synchronization (4 resource types) with portability classification
 ├── mcp/          → MCP catalog, defaults, import/export, session, and injection
@@ -237,6 +240,9 @@ The core event processing pipeline runs in 6 steps:
 
 ### Dispatch Sub-modules
 
+- `logging` — Event metadata preparation, compact tool-detail rendering, and daily JSONL event logging
+- `protect_bridge` — Protect observation evaluation and blocked-decision translation into hook responses
+- `wrapper_flags` — Wrapper environment flag and runtime repository-root extraction
 - `loader` — Config file discovery, loading, merge logic, runtime compilation (matchers + mappers), and config save/validation
 - `template` — `{{placeholder}}` Handlebars-style interpolation engine with 28 variables across 5 categories (legacy `{placeholder}` single-brace syntax is deprecated with warnings)
 - `matcher` — Regex-based event filtering against tool name, notification type, or error

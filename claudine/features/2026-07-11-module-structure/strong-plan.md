@@ -118,6 +118,17 @@ docs_updated_during_phase_3:
   - claudine/features/2026-07-11-module-structure/strong-plan.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - claudine/lib/src/dispatch/mod.rs
+  - claudine/lib/src/dispatch/logging.rs
+  - claudine/lib/src/dispatch/protect_bridge.rs
+  - claudine/lib/src/dispatch/wrapper_flags.rs
+docs_updated_during_phase_4:
+  - claudine/features/2026-07-11-module-structure/strong-plan.md
+  - .claude/skills/claudine/architecture.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/claudine/architecture.md
 ---
 
 # Strong-Candidate Module-Structure Refactor — Execution Plan
@@ -563,13 +574,13 @@ Move the logging cluster (411–578): `write_dispatch_event_to`, `log_dispatch_e
 `prepare_meta_for_dispatch`, `tool_detail_for_log`, `compact_value_for_log`,
 `compact_scalar_for_log`, `truncate_for_log`.
 
-- [ ] The existing `mod logging_tests` (1,516) moves with them →
+- [x] The existing `mod logging_tests` (1,516) moves with them →
       `logging.rs` gains `#[cfg(test)] mod logging_tests;` or the tests fold
       into `dispatch/tests.rs` if one exists
-- [ ] Keep `write_dispatch_event_to` / `log_dispatch_event` re-exported from
+- [x] Keep `write_dispatch_event_to` / `log_dispatch_event` re-exported from
       `mod.rs` (`pub use logging::{log_dispatch_event, write_dispatch_event_to};`)
       since they are public API
-- [ ] Verify: `just test` + `just lint`
+- [x] Verify: `just test` + `just lint`
 
 ### Step 4.2 — Carve protect bridging into `dispatch/protect_bridge.rs`
 
@@ -579,8 +590,8 @@ Move the logging cluster (411–578): `write_dispatch_event_to`, `log_dispatch_e
 Move (580–647): `map_protect_block`, `evaluate_protect_observation`,
 `synthetic_unparsed_block`.
 
-- [ ] `mod.rs` declares `mod protect_bridge;` and calls into it
-- [ ] Verify: `just test`
+- [x] `mod.rs` declares `mod protect_bridge;` and calls into it
+- [x] Verify: `just test`
 
 ### Step 4.3 — Carve wrapper-flag extraction into `dispatch/wrapper_flags.rs`
 
@@ -590,21 +601,21 @@ Move (580–647): `map_protect_block`, `evaluate_protect_observation`,
 Move (649–681): `runtime_repo_root`, `wrapper_interactive_flag`,
 `wrapper_yolo_flag`, `wrapper_interactive_flag_from`, `wrapper_flag_from`.
 
-- [ ] Verify: `just test` + `just lint`
+- [x] Verify: `just test` + `just lint`
 
 ### Step 4.4 — Slim `mod.rs` to the entry pipeline
 
-- [ ] `mod.rs` retains: `DispatchRuntimeContext` (30), `DispatchOutcome` (81),
+- [x] `mod.rs` retains: `DispatchRuntimeContext` (30), `DispatchOutcome` (81),
       the entry dispatch pipeline (the `pub` functions that call into the three
       submodules), `finalize_response` (682)
-- [ ] Confirm `mod.rs` is now a declaration/re-export root under ~450 lines
-- [ ] Update `.opencode/skill/claudine/architecture.md` module map
+- [x] Confirm `mod.rs` is now a declaration/re-export root under ~450 lines
+- [x] Update `.opencode/skill/claudine/architecture.md` module map
 
 ### Phase 4 Exit Criteria
 
-- [ ] `just test` + `just lint` pass
-- [ ] `dispatch/mod.rs` is under ~450 production lines
-- [ ] `logging.rs`, `protect_bridge.rs`, `wrapper_flags.rs` each hold one
+- [x] `just test` + `just lint` pass
+- [x] `dispatch/mod.rs` is under ~450 production lines
+- [x] `logging.rs`, `protect_bridge.rs`, `wrapper_flags.rs` each hold one
       concern
 
 ---
