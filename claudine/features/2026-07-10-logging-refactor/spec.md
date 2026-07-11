@@ -27,3 +27,21 @@ We have had logging for a long time but it was never implemented well and hasn't
     - note: also possible that we have multiple variants of the logging monitor:
         - one that monitors files
         - another one which monitors a Database
+
+![architecture](architecture.excalidraw.svg)
+
+- in terms of **state**, the Rendezvous daemon will maintain state in two separate databases:
+
+    1. **redb** - transactional system of record (kv store)
+    2. **duckdb** - analytical/reporting database
+
+- all -- _or at least most_ -- of the data stored in **redb** will be CRDT documents
+- the CRDT documents will then be be pushed into **duckdb** for reporting purposes
+
+## Reporting Requirements
+
+We keep track of logs so we can report on them to the user in a way that provides utility. The Rendezvous daemon and Log Monitor client are both long running processes who's job it is to capture log information and store it in a way which can be easily queried as well as synchronized across other Rendezvous daemons on other hosts.
+
+One of the key _entities_ which structures logging is the idea of a `Session`:
+
+- when interacting with 
