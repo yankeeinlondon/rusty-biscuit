@@ -118,6 +118,17 @@ flags.
 - boolean literals: `true`, `false`
 - parentheses for grouping: `(env.AGENT == "claude" || env.AGENT == "opencode")`
 
+## Interpolation Literals
+
+A triple-brace span `{{{ ... }}}` is an **interpolation literal**. It is recognized on every expression-scanning surface but is **inert**: the content is never lexed, parsed, or evaluated, and it produces no diagnostic.
+
+- `{{{ name }}}` composes to the literal text `{{ name }}`.
+- `{{{ {{ x }} }}}` composes to `{{ {{ x }} }}` with `x` unevaluated.
+- The literal closes at the first subsequent `}}}`; an unclosed `{{{` falls back to legacy `{{` scanning.
+- Literals are inert on every scanner consumer: interpolation, DMLS diagnostics, demand-driven context capture, and remote-reference discovery.
+
+Use interpolation literals when documentation needs to display `{{ ... }}` syntax rather than evaluate it. The fenced-code-block alternative remains the way to show literal `{{{ ... }}}` syntax itself.
+
 ## Variable Access
 
 Supported variable forms:
