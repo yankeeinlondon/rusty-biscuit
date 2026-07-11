@@ -2,8 +2,57 @@
 agent: opencode
 total_phases: 7
 created: 2026-07-10
-phase: 1
+phase: 5
 yolo: "true"
+source_files_during_phase_1: []
+docs_updated_during_phase_1:
+  - darkmatter/fixes/2026-07-10-function-schemas/plan.md
+docs_created_during_phase_1:
+  - darkmatter/fixes/2026-07-10-function-schemas/phase-1-baseline.md
+skills_files_updated_during_phase_1: []
+packages:
+  - darkmatter
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/ast.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/parser.rs
+docs_updated_during_phase_2:
+  - darkmatter/fixes/2026-07-10-function-schemas/plan.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - darkmatter/lib/src/markdown/compose/expression/catalog/parser.rs
+docs_updated_during_phase_3:
+  - darkmatter/fixes/2026-07-10-function-schemas/plan.md
+docs_created_during_phase_3:
+  - darkmatter/docs/schemas/expression-functions.yaml
+  - darkmatter/fixes/2026-07-10-function-schemas/drift-log.md
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+docs_updated_during_phase_4:
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - darkmatter/fixes/2026-07-10-function-schemas/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_5:
+  - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/predicates.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/collections.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/strings.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/terminal.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/dates.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/skills.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/markdown_docs.rs
+docs_updated_during_phase_5:
+  - darkmatter/fixes/2026-07-10-function-schemas/plan.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/darkmatter/SKILL.md
 ---
 
 # Execution Plan: Authored Expression-Function Schemas
@@ -60,23 +109,23 @@ phase can prove parity against it.
 **Validation checkpoint**: A baseline inventory file exists on disk and a
 baseline test run passes.
 
-- [ ] Run `just test` and `just lint` in the darkmatter area; record the test
+- [x] Run `just test` and `just lint` in the darkmatter area; record the test
   count and confirm zero failures before any changes.
-- [ ] Run `just test` in `claudine/` and `claudine/cli/` to record the Claudine
+- [x] Run `just test` in `claudine/` and `claudine/cli/` to record the Claudine
   baseline (expression-function consumer tests).
-- [ ] Produce a machine-readable inventory of every current
+- [x] Produce a machine-readable inventory of every current
   `FunctionRegistration`: canonical name, aliases, `catalog_order`, category,
   per-overload `order`, signature string, parameter types (`DataType` + flags),
   return type (`DataType` + flags), example (`invocation`/`result`/verification),
   and handler kind (`Pure`/`Context`/`Lazy`).
   - Source: iterate `registrations()` in a one-off test or example binary that
     prints the inventory as structured data (YAML or JSON).
-- [ ] Save the inventory as
+- [x] Save the inventory as
   `darkmatter/fixes/2026-07-10-function-schemas/phase-1-baseline.md`.
-- [ ] Record the exact `generate_expression_function_table()` output and the
+- [x] Record the exact `generate_expression_function_table()` output and the
   checked-in `darkmatter-expressions.md` function-table bytes for later
   byte-for-byte comparison.
-- [ ] Record the exact `expression_function_signatures_markdown()` output from
+- [x] Record the exact `expression_function_signatures_markdown()` output from
   `md schema about --verbose` for later comparison.
 
 ---
@@ -94,7 +143,7 @@ every rejection case listed in the spec's acceptance criteria.
 
 ### 2a — Catalog AST types
 
-- [ ] Create `darkmatter/lib/src/markdown/compose/expression/catalog/ast.rs`
+- [x] Create `darkmatter/lib/src/markdown/compose/expression/catalog/ast.rs`
   (or a `catalog/` submodule) with the function-specific AST types:
   - `CatalogFunction` — `name`, `category`, `order` (globally unique), `description`, `overloads: Vec<CatalogOverload>`
   - `CatalogOverload` — `parameters: Vec<CatalogParam>`, `returns: CatalogReturn`, `example: CatalogExample`
@@ -103,25 +152,25 @@ every rejection case listed in the spec's acceptance criteria.
   - `CatalogExample` — `expression: String`, `result: String`, `verification: CatalogVerification`, `reason: Option<String>`
   - `CatalogVerification` — `Executable` or `DisplayOnly(reason: String)`
   - `ExpressionFunctionCatalog` — `functions: Vec<CatalogFunction>` (declaration-order preserved)
-- [ ] Reuse `DataType` from the existing `catalog.rs` (it already mirrors the
+- [x] Reuse `DataType` from the existing `catalog.rs` (it already mirrors the
   `SimplifiedType` keyword set plus `Any` and deliberately excludes `error` and
   function types). Add a `DataType::from_keyword(&str) -> Option<DataType>`
   method that delegates to `SimplifiedType::from_keyword` where possible,
   adding `Any` (which `SimplifiedType` already has) and `Integer` (which maps
   from the `number(integer)` keyword).
-- [ ] Keep `DataType`, `ParamType`, and `ReturnType` as public
+- [x] Keep `DataType`, `ParamType`, and `ReturnType` as public
   descriptor-facing projection types. They MUST no longer be independently
   authored authorities after Phase 4 but their public shape stays.
 
 ### 2b — Fallible parser
 
-- [ ] Create `darkmatter/lib/src/markdown/compose/expression/catalog/parser.rs`
+- [x] Create `darkmatter/lib/src/markdown/compose/expression/catalog/parser.rs`
   with:
   - `pub(crate) fn parse_expression_function_catalog(yaml: &str) -> Result<ExpressionFunctionCatalog, CatalogParseError>`
   - `CatalogParseError` — structured error identifying the function, overload,
     and field where possible (e.g. `CatalogParseError { function: Option<String>,
     overload: Option<usize>, field: Option<String>, kind: CatalogErrorKind }`)
-- [ ] The parser MUST:
+- [x] The parser MUST:
   - Parse the YAML using `serde_yaml_ng` into an intermediate owned structure.
   - Validate `kind: expression-function-catalog` is present and exact.
   - Reject unknown fields at every level (catalog, function, overload,
@@ -145,44 +194,44 @@ every rejection case listed in the spec's acceptance criteria.
     - `verification: executable` MUST NOT carry a `reason`.
     - `verification: display-only` MUST carry a non-empty `reason`.
   - Reject duplicate function names and duplicate rendered signatures.
-- [ ] The parser MUST NOT perform any filesystem probes, shell commands,
+- [x] The parser MUST NOT perform any filesystem probes, shell commands,
   network requests, or expression evaluation.
-- [ ] The parser MUST NOT leak (no `Box::leak`) — it returns owned data.
+- [x] The parser MUST NOT leak (no `Box::leak`) — it returns owned data.
   Leaking happens only in the Phase 4 infallible accessor after validation.
 
 ### 2c — SimplifiedSchema declaration for the catalog document
 
-- [ ] Author the `$schema:` SimplifiedSchema declaration for
+- [x] Author the `$schema:` SimplifiedSchema declaration for
   `expression-functions.yaml` as specified in the spec (inline object arrays for
   functions, overloads, parameters, returns, examples). Use the grammar's
   multiline inline-object form if it improves readability.
-- [ ] The SimplifiedSchema declaration handles structural validation (field
+- [x] The SimplifiedSchema declaration handles structural validation (field
   presence, types, `not-empty`, `required`, `min(1)`). The dedicated parser
   handles closed-field and cross-field invariants that SimplifiedSchema cannot
   express.
-- [ ] Add a test proving the checked-in catalog document validates against its
+- [x] Add a test proving the checked-in catalog document validates against its
   own SimplifiedSchema declaration (structural pass), separate from the
   semantic parser tests.
 
 ### 2d — Parser unit tests (L1)
 
-- [ ] Parse the complete checked-in catalog (once it exists in Phase 3) and
+- [x] Parse the complete checked-in catalog (once it exists in Phase 3) and
   assert function/signature counts against the Phase 1 baseline. Until then,
   use focused fixtures.
-- [ ] Parse focused fixtures for every supported parameter shape: scalar,
+- [x] Parse focused fixtures for every supported parameter shape: scalar,
     array, optional, variadic.
-- [ ] Parse focused fixtures for every supported return shape: infallible
+- [x] Parse focused fixtures for every supported return shape: infallible
     scalar, fallible scalar, array return.
-- [ ] Assert declaration/display ordering and overload grouping.
-- [ ] Assert precise failures for every illegal placement:
+- [x] Assert declaration/display ordering and overload grouping.
+- [x] Assert precise failures for every illegal placement:
     `error` parameters, `error`-only returns, multiple success return members,
     required-after-optional, non-final variadics, duplicate parameter names,
     duplicate signatures, unknown type keywords, unknown fields, invalid
     identifiers, empty descriptions/categories, duplicate global order values,
     display-only without reason, executable with reason.
-- [ ] Assert `SimplifiedType::from_keyword("error")` and
+- [x] Assert `SimplifiedType::from_keyword("error")` and
     `SimplifiedType::from_keyword("function")` remain `None`.
-- [ ] Assert malformed fixture parsing performs no process-lifetime leaks
+- [x] Assert malformed fixture parsing performs no process-lifetime leaks
     (verify via a test that parses several invalid fixtures and checks that
     only the successfully validated embedded catalog is promoted to static
     descriptors — this test can be deferred to Phase 4 when the accessor
@@ -205,11 +254,11 @@ every rejection case listed in the spec's acceptance criteria.
 parser with zero errors and the parsed catalog matches the Phase 1 baseline
 inventory exactly.
 
-- [ ] Create `darkmatter/docs/schemas/expression-functions.yaml` with:
+- [x] Create `darkmatter/docs/schemas/expression-functions.yaml` with:
   - `kind: expression-function-catalog`
   - `$schema:` carrying the SimplifiedSchema declaration from Phase 2c
   - `functions:` list with every function from the Phase 1 inventory
-- [ ] For each function, transcribe faithfully:
+- [x] For each function, transcribe faithfully:
   - `name` ← canonical name
   - `category` ← existing category (exact string)
   - `order` ← existing `catalog_order` (globally unique; replaces both
@@ -223,21 +272,21 @@ inventory exactly.
     - `example:` — `expression` (← `invocation`), `result`, `verification`
       (`executable` or `display-only`), `reason` (only when `display-only`;
       carries the existing `DisplayOnly` reason string)
-- [ ] For functions with no example (`example: None`), omit the `example` key
-  on that overload. The parser MUST treat a missing example as `None`.
+- [x] Resolve registrations with no example while retaining the parser's
+  requirement that every authored overload carry exactly one example.
   - **Note**: The spec says "Every overload MUST carry exactly one example."
     Verify during transcription whether `has_command` (currently `example: None`)
     needs an example added. If so, add one as a clearly separated commit per
     the spec's drift-correction policy. If the spec's "MUST" is a hard
     requirement, add a display-only example with a reason like
     `"result is host-dependent"`.
-- [ ] Verify the YAML file parses through the Phase 2 fallible parser with
+- [x] Verify the YAML file parses through the Phase 2 fallible parser with
   zero errors.
-- [ ] Verify the parsed catalog matches the Phase 1 baseline inventory:
+- [x] Verify the parsed catalog matches the Phase 1 baseline inventory:
   same function count, same signature count, same categories, same `order`
   values (mapped from `catalog_order`), same parameter types, same return
   types, same examples.
-- [ ] Do NOT make intentional catalog corrections in this transcription. If
+- [x] Do NOT make intentional catalog corrections in this transcription. If
   drift is discovered (stale descriptions, wrong examples, etc.), record it
   in `darkmatter/fixes/2026-07-10-function-schemas/drift-log.md` for a
   separate reviewable change.
@@ -260,7 +309,7 @@ pass unchanged.
 
 ### 4a — Projection from catalog AST to descriptor types
 
-- [ ] Implement a projection function that converts
+- [x] Implement a projection function that converts
   `ExpressionFunctionCatalog` (owned AST) into
   `Vec<ExpressionFunctionDescriptor>` with `&'static` fields:
   - Construct `signature` strings from `name + "(" + param_names.join(", ") + ")"`
@@ -271,14 +320,14 @@ pass unchanged.
   - Construct `Option<Example>` from the catalog's example data.
   - Use `Box::leak` to promote validated owned `String`s and `Vec`s to
     `&'static` — ONLY after the entire catalog has validated successfully.
-- [ ] The projection MUST preserve declaration order within overloads (same
+- [x] The projection MUST preserve declaration order within overloads (same
   canonical name retains authored order).
-- [ ] The projection MUST sort the global descriptor list by the globally
+- [x] The projection MUST sort the global descriptor list by the globally
   unique `order` field, matching the current `catalog_order + offset` sort.
 
 ### 4b — Infallible embedded accessor
 
-- [ ] Implement the `LazyLock`-backed accessor:
+- [x] Implement the `LazyLock`-backed accessor:
   ```rust
   pub fn expression_function_descriptors() -> &'static [ExpressionFunctionDescriptor] {
       static CATALOG: LazyLock<Vec<ExpressionFunctionDescriptor>> = LazyLock::new(|| {
@@ -295,15 +344,15 @@ pass unchanged.
   - The `include_str!` path is relative to the source file location.
   - Invalid checked-in catalog data panics with a precise message, matching
     `darkmatter_base_schema()`.
-- [ ] Keep the public signature unchanged:
+- [x] Keep the public signature unchanged:
   `pub fn expression_function_descriptors() -> &'static [ExpressionFunctionDescriptor]`
-- [ ] Keep `generate_expression_function_table()` unchanged — it already
+- [x] Keep `generate_expression_function_table()` unchanged — it already
   iterates `expression_function_descriptors()`, so it automatically consumes
   the new source.
 
 ### 4c — Crate-visible fallible accessor
 
-- [ ] Expose a crate-visible fallible entry point for fixture-based tests:
+- [x] Expose a crate-visible fallible entry point for fixture-based tests:
   ```rust
   pub(crate) fn try_parse_catalog(yaml: &str)
       -> Result<Vec<ExpressionFunctionDescriptor>, CatalogParseError>
@@ -313,22 +362,22 @@ pass unchanged.
 
 ### 4d — Parity validation (L1)
 
-- [ ] Add a parity test asserting the projected descriptors match the Phase 1
+- [x] Add a parity test asserting the projected descriptors match the Phase 1
   baseline exactly: same count, same signatures in the same order, same
   categories, same `order` values, same `typed_signature()` output, same
   examples.
-- [ ] Run all existing catalog tests (`catalog.rs` tests module) unchanged.
+- [x] Run all existing catalog tests (`catalog.rs` tests module) unchanged.
   They MUST pass without modification because the public descriptor shape is
   identical.
-- [ ] Run `descriptor_signature_set_equals_dispatchable_signature_set` — this
+- [x] Run `descriptor_signature_set_equals_dispatchable_signature_set` — this
   test compares descriptor signatures against `dispatchable_signatures()`.
   At this stage, `dispatchable_signatures()` still reads from
   `FunctionRegistration.descriptors`, so the set should still match. This
   test will become more significant in Phase 5.
-- [ ] Run `narrative_doc_function_table_matches_catalog` — verifies the
+- [x] Run `narrative_doc_function_table_matches_catalog` — verifies the
   generated table matches the checked-in doc. The table bytes should be
   unchanged because the descriptors are unchanged.
-- [ ] Run `every_example_evaluates_to_its_declared_result` — verifies
+- [x] Run `every_example_evaluates_to_its_declared_result` — verifies
   executable examples still evaluate correctly.
 
 ---
@@ -347,10 +396,10 @@ output is unchanged.
 
 ### 5a — Define `FunctionBinding` and `EvaluationMode`
 
-- [ ] Introduce `EvaluationMode` enum (`Pure`, `Context`, `Lazy`) — making
+- [x] Introduce `EvaluationMode` enum (`Pure`, `Context`, `Lazy`) — making
   the evaluation mode an explicit field rather than implicit from the
   `FunctionHandler` variant.
-- [ ] Restructure `FunctionHandler` to hold only the function pointer:
+- [x] Restructure `FunctionHandler` to hold only the function pointer:
   ```rust
   enum FunctionHandler {
       Pure(PureFn),
@@ -358,7 +407,7 @@ output is unchanged.
       // Lazy has no function pointer — the evaluator handles it directly
   }
   ```
-- [ ] Define `FunctionBinding`:
+- [x] Define `FunctionBinding`:
   ```rust
   struct FunctionBinding {
       canonical: &'static str,
@@ -373,18 +422,18 @@ output is unchanged.
 
 ### 5b — Migrate domain registrations to bindings
 
-- [ ] In each domain module (`functions/{predicates,collections,strings,
+- [x] In each domain module (`functions/{predicates,collections,strings,
   terminal,dates,paths,skills,markdown_docs}.rs` and `LAZY_REGISTRATIONS`),
   replace `pub(super) const REGISTRATIONS: &[FunctionRegistration]` with
   `pub(super) const BINDINGS: &[FunctionBinding]`.
-- [ ] Each binding carries only: `canonical`, `aliases`, `evaluation`, and
+- [x] Each binding carries only: `canonical`, `aliases`, `evaluation`, and
   `handler`. No `catalog_order`, no `descriptors`.
-- [ ] The `REGISTRATION_GROUPS` aggregator becomes a `BINDING_GROUPS`
+- [x] The `REGISTRATION_GROUPS` aggregator becomes a `BINDING_GROUPS`
   aggregator. The `registrations()` function becomes `bindings()`.
 
 ### 5c — Registry initialization with bidirectional parity
 
-- [ ] Implement a registry initialization that:
+- [x] Implement a registry initialization that:
   - Loads the parsed catalog (via the Phase 4 accessor or a crate-private
     catalog getter).
   - Iterates `bindings()`.
@@ -392,24 +441,24 @@ output is unchanged.
   - Asserts every binding has exactly one catalog function.
   - Rejects alias/canonical collisions.
   - Caches the join in a `LazyLock`.
-- [ ] The initialization MUST be cached and not change per-call dispatch cost.
-- [ ] A catalog entry without a binding and a binding without a catalog entry
+- [x] The initialization MUST be cached and not change per-call dispatch cost.
+- [x] A catalog entry without a binding and a binding without a catalog entry
   are both library defects (panic with a precise message in the infallible
   path, structured error in the fallible path).
 
 ### 5d — Dispatch from catalog parameter shapes
 
-- [ ] Update `dispatch` and `dispatch_fs` to use `bindings()` instead of
+- [x] Update `dispatch` and `dispatch_fs` to use `bindings()` instead of
   `registrations()`. The handler matching logic stays the same (match
   canonical/alias, then match `EvaluationMode`/`FunctionHandler` variant).
-- [ ] Update `dispatchable_signatures()` to return signatures derived from
+- [x] Update `dispatchable_signatures()` to return signatures derived from
     the parsed catalog (not from `registration.descriptors`). The catalog
     is the sole authority for signatures.
-- [ ] Update `dispatchable_canonical_names()` to return canonical names from
+- [x] Update `dispatchable_canonical_names()` to return canonical names from
     `bindings()`.
-- [ ] Update `is_fs_function()` to check `EvaluationMode::Context` on
+- [x] Update `is_fs_function()` to check `EvaluationMode::Context` on
     bindings.
-- [ ] The handler retains its defensive argument validation and Rust-owned
+- [x] The handler retains its defensive argument validation and Rust-owned
     evaluation mode. The registry decides whether an authored overload is
     eligible before invoking it (dispatch arity selection is derived from
     catalog parameter shapes, but the handler still validates argument
@@ -417,24 +466,24 @@ output is unchanged.
 
 ### 5e — Runtime parity tests (L1)
 
-- [ ] Update `descriptor_signature_set_equals_dispatchable_signature_set`:
+- [x] Update `descriptor_signature_set_equals_dispatchable_signature_set`:
   now the descriptor side comes from the catalog and the runtime side comes
   from `dispatchable_signatures()` (which also reads from the catalog). The
   test still proves bidirectional parity but both sides now originate from
   the same parsed source, with the binding join adding the runtime
   dimension.
-- [ ] Add a bidirectional canonical-name parity test:
+- [x] Add a bidirectional canonical-name parity test:
   - Every catalog function name appears in `bindings()`.
   - Every binding canonical appears in the catalog.
   - Fail with a precise message naming the orphan on either side.
-- [ ] Add an alias/canonical collision rejection test.
-- [ ] Retain `every_descriptor_overload_is_dispatchable_at_its_declared_arity`
+- [x] Add an alias/canonical collision rejection test.
+- [x] Retain `every_descriptor_overload_is_dispatchable_at_its_declared_arity`
   — proves each overload's handler accepts its declared arity.
-- [ ] Retain `handler_kinds_dispatch_through_their_intended_paths`.
-- [ ] Retain `registration_names_aliases_and_signatures_are_unique` (update
+- [x] Retain `handler_kinds_dispatch_through_their_intended_paths`.
+- [x] Retain `registration_names_aliases_and_signatures_are_unique` (update
   to use bindings + catalog).
-- [ ] Retain `lazy_operators_are_dispatchable`.
-- [ ] Retain behavioral tests for overloads, aliases, lazy evaluation,
+- [x] Retain `lazy_operators_are_dispatchable`.
+- [x] Retain behavioral tests for overloads, aliases, lazy evaluation,
   remote/local path rules, and injected date behavior.
 
 ---
@@ -457,7 +506,7 @@ is reviewed.
 
 ### 6a — Generated documentation
 
-- [ ] Update `darkmatter/docs/topics/darkmatter-expressions.md`:
+- [x] Update `darkmatter/docs/topics/darkmatter-expressions.md`:
   - Change the source-attribution prose to name
     `docs/schemas/expression-functions.yaml` as the authored source.
   - Add a "do not edit generated tables directly" notice if not already
@@ -466,55 +515,55 @@ is reviewed.
   - Review the diff: existing bytes should remain stable except where the
     spec deliberately improves source-attribution prose or fixes catalog
     drift discovered during migration.
-- [ ] Run `narrative_doc_function_table_matches_catalog` to verify the
+- [x] Run `narrative_doc_function_table_matches_catalog` to verify the
   checked-in table matches the generated output.
-- [ ] Update any architecture or dependency documentation that still
+- [x] Update any architecture or dependency documentation that still
   describes Rust descriptors as the metadata authority.
 
 ### 6b — CLI `md schema about`
 
-- [ ] Verify `darkmatter/cli/src/commands/schema/about.rs`
+- [x] Verify `darkmatter/cli/src/commands/schema/about.rs`
   `expression_function_signatures_markdown()` still works unchanged — it
   already reads `expression_function_descriptors()`, so it automatically
   consumes the new source.
-- [ ] Run the existing test
+- [x] Run the existing test
   `expression_function_signatures_render_typed_list_formatters` to verify
   `as_csv(list: any[]) -> string | error` still renders.
-- [ ] Add or update tests asserting `md schema about` includes representative
+- [x] Add or update tests asserting `md schema about` includes representative
   authored typed signatures from the catalog.
 
 ### 6c — DMLS expression function consumers
 
-- [ ] Verify `darkmatter/dmls/src/overlay/expressions.rs`
+- [x] Verify `darkmatter/dmls/src/overlay/expressions.rs`
   `function_descriptors()` and `function_descriptor(name)` still work
   unchanged — they delegate to `expression_function_descriptors()`.
-- [ ] Verify `darkmatter/dmls/src/providers/dsl.rs` completion and hover
+- [x] Verify `darkmatter/dmls/src/providers/dsl.rs` completion and hover
   still work unchanged — they read `typed_signature()` and `description`
   from descriptors.
-- [ ] Run DMLS L1 tests: `just test` in the darkmatter area (includes DMLS).
-- [ ] Run DMLS L2 LSP session tests: `just test-l2` in the darkmatter area.
-- [ ] Verify `function_completion_shape` integration test passes (asserts
+- [x] Run DMLS L1 tests: `just test` in the darkmatter area (includes DMLS).
+- [x] Run DMLS L2 LSP session tests: `just test-l2` in the darkmatter area.
+- [x] Verify `function_completion_shape` integration test passes (asserts
   `detail` = `typed_signature()` with `| error` suffix).
-- [ ] Verify `function_call_hover_known_and_unknown` integration test passes.
+- [x] Verify `function_call_hover_known_and_unknown` integration test passes.
 
 ### 6d — Claudine consumers
 
-- [ ] Verify `claudine/lib/src/composition/lifecycle_actions.rs` still works
+- [x] Verify `claudine/lib/src/composition/lifecycle_actions.rs` still works
   unchanged — `is_known_expression_function_verb()`,
   `expression_function_signature()`, and `all_lifecycle_verbs()` all read
   `expression_function_descriptors()`.
-- [ ] Verify `claudine/cli/src/commands/context.rs` still works unchanged —
+- [x] Verify `claudine/cli/src/commands/context.rs` still works unchanged —
   `claudine context --expressions` reads `expression_function_descriptors()`.
 - [ ] Run Claudine tests: `just test` in the claudine area.
-- [ ] Run `claudine/cli/tests/context_command.rs` to verify the context
+- [x] Run `claudine/cli/tests/context_command.rs` to verify the context
   command reports expression functions.
 
 ### 6e — Catalog example verification
 
-- [ ] Verify `every_example_evaluates_to_its_declared_result` still passes —
+- [x] Verify `every_example_evaluates_to_its_declared_result` still passes —
   executable examples from the catalog are verified through the expression
   evaluator.
-- [ ] Verify the catalog parser only describes examples; it never executes
+- [x] Verify the catalog parser only describes examples; it never executes
   an expression while loading the catalog (assert via the no-side-effects
   test or a new focused test).
 
