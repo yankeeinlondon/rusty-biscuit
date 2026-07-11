@@ -5,16 +5,16 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value};
 use tracing::info;
 
-use super::error::CompositionError;
-use super::lifecycle::{LifecycleConfig, LifecycleEmitter, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal};
-use super::lifecycle_context::LifecycleErrorInfo;
-use super::lifecycle_control::{MAX_PROXY_HOPS, proxy_handoff_allowed, resolve_proxy_target};
-use super::lifecycle_executor::{ShellRunner, StackControl, StackExecutionContext};
-use super::loop_actions::ActionStaging;
-use super::loop_config::{extract_control_variables, resolve_loop_config};
-use super::loop_expression::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
-use super::prepare::{PrepareOptions, prepare_direct, prepare_inline};
-use super::types::{CompositionMode, LoopConfig, OnRateLimit, ResolvedCompositionSource};
+use super::super::error::CompositionError;
+use super::super::lifecycle::{LifecycleConfig, LifecycleEmitter, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal};
+use super::super::lifecycle_context::LifecycleErrorInfo;
+use super::super::lifecycle_control::{MAX_PROXY_HOPS, proxy_handoff_allowed, resolve_proxy_target};
+use super::super::lifecycle_executor::{ShellRunner, StackControl, StackExecutionContext};
+use super::super::prepare::{PrepareOptions, prepare_direct, prepare_inline};
+use super::super::types::{CompositionMode, LoopConfig, OnRateLimit, ResolvedCompositionSource};
+use super::actions::ActionStaging;
+use super::config::{extract_control_variables, resolve_loop_config};
+use super::expression::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
 use crate::stream::summary::RateLimitInfo;
 
 /// Default safety cap for prompt loops.
@@ -296,7 +296,7 @@ pub struct LoopSeed {
     pub seed: Map<String, Value>,
     /// Lifecycle config parsed from the **full** composed effective
     /// frontmatter — carries every event block, unlike [`Self::seed`].
-    pub lifecycle: super::lifecycle::LifecycleConfig,
+    pub lifecycle: super::super::lifecycle::LifecycleConfig,
 }
 
 /// Build the loop seed and parse the lifecycle config from the full composed
@@ -1098,7 +1098,7 @@ fn route_init_failure_with(
         LifecycleSignal::Finalize,
         &init_ctx.with_error(active_err).with_signal(LifecycleSignal::Finalize),
     );
-    let decision = super::route_failure_finalize(&failure_outcome, Some(&finalize_outcome));
+    let decision = super::super::route_failure_finalize(&failure_outcome, Some(&finalize_outcome));
     // A raise inside either catch event (failure or finalize) surfaces as the
     // typed lifecycle evaluation error (precedence: finalize > failure >
     // original). Otherwise the explicit `error(...)` reason stands.
@@ -1194,7 +1194,7 @@ fn run_loop_gate(
             LifecycleSignal::Finalize,
             &loop_ctx.with_error(info).with_signal(LifecycleSignal::Finalize),
         );
-        let decision = super::route_loop_gate(&loop_outcome, Some(&finalize_outcome));
+        let decision = super::super::route_loop_gate(&loop_outcome, Some(&finalize_outcome));
         debug_assert!(decision.evaluation_error_signal.is_some());
         return Ok(LoopGateOutcome::Fail(
             CompositionError::catch_evaluation_error(
@@ -1207,7 +1207,7 @@ fn run_loop_gate(
         ));
     }
 
-    let decision = super::route_loop_gate(&loop_outcome, None);
+    let decision = super::super::route_loop_gate(&loop_outcome, None);
 
     // An explicit `error(...)` in the gate stack converts the loop's final
     // outcome to failure and exits — before the condition is evaluated and
@@ -1278,8 +1278,8 @@ fn build_loop_stack_context<'a>(
     shell_runner: &'a dyn ShellRunner,
     emitter: &'a dyn LifecycleEmitter,
     base_dir: Option<&'a Path>,
-    timing: Option<&'a super::lifecycle_context::LifecycleTiming>,
-    current: Option<&'a super::lifecycle_context::LifecycleCurrent>,
+    timing: Option<&'a super::super::lifecycle_context::LifecycleTiming>,
+    current: Option<&'a super::super::lifecycle_context::LifecycleCurrent>,
 ) -> StackExecutionContext<'a> {
     StackExecutionContext {
         signal,
@@ -1321,16 +1321,16 @@ fn capture_loop_lifecycle_globals(
     ctx_base_dir: Option<&Path>,
     loop_start: std::time::Instant,
 ) -> (
-    super::lifecycle_context::LifecycleTiming,
-    super::lifecycle_context::LifecycleCurrent,
+    super::super::lifecycle_context::LifecycleTiming,
+    super::super::lifecycle_context::LifecycleCurrent,
 ) {
     // `current.ctx.*` follows the launch area like the event-time `ctx.*`
     // capture; `current.env.*` is launch-area independent.
     let current = match ctx_base_dir.or(base_dir) {
-        Some(dir) => super::lifecycle_context::LifecycleCurrent::capture_at_event(dir),
-        None => super::lifecycle_context::LifecycleCurrent::capture_env_only(),
+        Some(dir) => super::super::lifecycle_context::LifecycleCurrent::capture_at_event(dir),
+        None => super::super::lifecycle_context::LifecycleCurrent::capture_env_only(),
     };
-    let timing = super::lifecycle_context::LifecycleTiming::from_instants(
+    let timing = super::super::lifecycle_context::LifecycleTiming::from_instants(
         loop_start,
         Some(loop_start),
         std::time::Instant::now(),

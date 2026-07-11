@@ -7,8 +7,8 @@ use darkmatter::markdown::compose::expression::{
 };
 use serde_json::{Map, Value};
 
-use super::error::CompositionError;
-use super::types::LoopCondition;
+use super::super::error::CompositionError;
+use super::super::types::LoopCondition;
 
 /// Ambient values injected into loop condition and prompt evaluation.
 #[derive(Debug, Clone, PartialEq, Eq)]

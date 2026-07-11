@@ -5,8 +5,9 @@ use darkmatter::markdown::compose::expression::{
 };
 use serde_json::{Map, Number, Value};
 
-use super::error::CompositionError;
-use super::types::{AmbientVariable, LoopAction};
+use super::super::error::CompositionError;
+use super::super::json_util::json_type_name;
+use super::super::types::{AmbientVariable, LoopAction};
 
 /// Staged frontmatter mutations for one loop iteration.
 #[derive(Debug, Clone)]
@@ -432,7 +433,9 @@ fn apply_merge(
 }
 
 fn reject_reserved_property(prop: &str, context: ActionContext) -> Result<(), CompositionError> {
-    if prop == "loop" || prop == "replace" || AmbientVariable::is_reserved(prop) {
+    if super::super::reserved::SET_ACTION_BLOCKLIST.contains(&prop)
+        || AmbientVariable::is_reserved(prop)
+    {
         return Err(invalid_action(
             context,
             format!("`{prop}` is reserved and cannot be set by a loop action"),
@@ -496,17 +499,6 @@ fn jsonl_empty_placeholder(existing: &str) -> &'static str {
 
 fn compact_json(value: &Value) -> String {
     serde_json::to_string(value).expect("serializing serde_json::Value cannot fail")
-}
-
-fn json_type_name(value: &Value) -> &'static str {
-    match value {
-        Value::Null => "null",
-        Value::Bool(_) => "boolean",
-        Value::Number(_) => "number",
-        Value::String(_) => "string",
-        Value::Array(_) => "array",
-        Value::Object(_) => "object",
-    }
 }
 
 #[cfg(test)]
