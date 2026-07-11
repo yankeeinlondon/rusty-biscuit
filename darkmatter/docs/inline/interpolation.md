@@ -139,11 +139,11 @@ A literal in a frontmatter value is always text. `key: "{{{ x }}}"` resolves to 
 
 The current implementation uses a source-first scanner approach (single-pass rewrite):
 
-- A scanner finds `{{ ... }}` spans in the document body, and also recognizes `{{{ ... }}}` interpolation literals. Inline code spans (single backticks) are interpolated by default, since the templating pattern `` `var_{{ phase }}` `` is a common use case, and literals inside inline code convert to literal `{{ ... }}` text. Fenced and indented code blocks are skipped.
+- A scanner finds `{{{ ... }}}` spans in the document body, and also recognizes `{{{ ... }}}` interpolation literals. Inline code spans (single backticks) are interpolated by default, since the templating pattern `` `var_{{ phase }}` `` is a common use case, and literals inside inline code convert to literal `{{{ ... }}}` text. Fenced and indented code blocks are skipped.
 - Each expression is parsed with a dedicated tokenizer and evaluator
 - The interpolation context is built from the effective state (frontmatter + external state), `ctx.*` runtime values, and `env.*` environment variables
 - Replacements are applied from the end of the string backward to preserve offsets
-- Literal conversion (`{{{ ... }}}` → `{{ ... }}`) happens after the final scan pass over a surface, so a literal introduced by a replacement value is also converted exactly once
+- Literal conversion (`{{{ ... }}}` → `{{{ ... }}}`) happens after the final scan pass over a surface, so a literal introduced by a replacement value is also converted exactly once
 
 See the source modules:
 
