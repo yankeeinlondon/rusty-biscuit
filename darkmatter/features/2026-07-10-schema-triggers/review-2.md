@@ -3,6 +3,7 @@ $schema: "@.claudine/schemas/review.yaml"
 ready: false
 agent: codex/default
 created: 2026-07-11T08:19:03
+implemented: true
 ---
 
 # Review 2: Schema Triggers
