@@ -13,7 +13,7 @@
 //! decode positions until the encoding is negotiated (Helix) are safe by
 //! construction.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -297,18 +297,23 @@ impl ServerState {
         for uri in self.documents.open_uris() {
             self.refresh_diagnostics(&uri);
         }
+        let mut trigger_transitions = HashMap::new();
         for transition in self.overlay.take_trigger_diagnostic_transitions() {
-            let Some(uri) = crate::workspace::file_path_to_uri(&transition.path) else {
+            trigger_transitions.insert(transition.path, transition.error);
+        }
+        for (path, error) in trigger_transitions {
+            let Some(uri) = crate::workspace::file_path_to_uri(&path) else {
                 continue;
             };
             // Open-buffer diagnostics are versioned and derive from the
-            // authoritative in-memory text. Transitions cover disk-backed
-            // envelopes that otherwise have no diagnostics request path.
+            // authoritative in-memory text. Recompute them after every scan
+            // has settled because a later document can move or clear trigger
+            // failure ownership after the envelope's first refresh.
             if self.documents.is_open(&uri) {
+                self.refresh_diagnostics(&uri);
                 continue;
             }
-            let diagnostics = transition
-                .error
+            let diagnostics = error
                 .as_deref()
                 .map(crate::diagnostics::frontmatter::trigger_load_diagnostic)
                 .into_iter()
