@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tracing::info_span;
 
-use super::super::composition::IterationSummarySignals;
+use claudine::composition::IterationSummarySignals;
 use super::{
     AttemptLaunch, HarnessPromptMode, HarnessPromptState, MaterializedHarnessPrompt,
     harness_prompt_mode_label,

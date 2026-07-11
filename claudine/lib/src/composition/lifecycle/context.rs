@@ -42,7 +42,7 @@ use std::collections::HashMap;
 use darkmatter::markdown::compose::subtree::InjectedGlobal;
 use serde_json::{Map, Value};
 
-use super::error::CompositionError;
+use super::super::error::CompositionError;
 use crate::diagnostics::Diagnostic;
 use crate::error::ClaudineError;
 use crate::harness::error::HarnessError;

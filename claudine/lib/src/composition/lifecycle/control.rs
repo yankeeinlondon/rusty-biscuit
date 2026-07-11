@@ -14,8 +14,8 @@
 
 use std::time::Duration;
 
-use super::lifecycle_actions::RetryBackoff;
-use super::lifecycle_executor::StackControl;
+use super::actions::RetryBackoff;
+use super::executor::StackControl;
 
 /// The concrete runtime action a terminal-event [`StackControl`] resolves to.
 ///

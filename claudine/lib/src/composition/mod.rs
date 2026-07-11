@@ -19,10 +19,10 @@ pub mod frontmatter_excerpt;
 mod guardrails;
 pub mod launch_workspace;
 pub mod lifecycle;
-mod lifecycle_actions;
-pub mod lifecycle_context;
-pub mod lifecycle_control;
-pub mod lifecycle_executor;
+pub use self::lifecycle::actions as lifecycle_actions;
+pub use self::lifecycle::context as lifecycle_context;
+pub use self::lifecycle::control as lifecycle_control;
+pub use self::lifecycle::executor as lifecycle_executor;
 pub mod loop_actions;
 pub mod loop_config;
 pub mod loop_engine;
@@ -66,6 +66,10 @@ pub use lifecycle_control::{
 };
 pub use lifecycle_executor::{
     LifecycleEventOutcome, ShellRunner, StackControl, StackExecutionContext, SystemShellRunner,
+};
+pub use lifecycle::runtime::{
+    IterationSummarySignals, TerminalRoutingDecision, route_blocked_finalize,
+    route_failure_finalize, route_loop_gate,
 };
 pub use loop_config::{
     extract_control_variables, resolve_fail_fast_from_env, resolve_loop_config,

@@ -24,10 +24,10 @@ use claudine::composition::lifecycle_executor::{
 };
 use claudine::composition::{
     AgentResolutionState, CompositionClosurePlan, CompositionError, CompositionExecutionRequest,
-    CompositionMode, InlineClosurePlan, ModelResolutionReason, ResolvedExecutionTarget,
-    SelectionReason, SessionInteractivitySource, agent_state_breakdown, build_installed_snapshot,
-    build_picker_plan, classify_agent_resolution, invalid_agent_message,
-    resolve_target_non_tty_with_catalog,
+    CompositionMode, InlineClosurePlan, IterationSummarySignals, ModelResolutionReason,
+    ResolvedExecutionTarget, SelectionReason, SessionInteractivitySource, agent_state_breakdown,
+    build_installed_snapshot, build_picker_plan, classify_agent_resolution,
+    invalid_agent_message, resolve_target_non_tty_with_catalog, route_blocked_finalize,
 };
 use claudine::config::claudine_config::ProviderModelOverride;
 use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
@@ -191,11 +191,8 @@ enum PreflightBlockedOutcome {
 /// ran its `failure`/`finalize` events, keeping the "already emitted to stderr"
 /// bookkeeping correct (Decision #2).
 ///
-/// Mirrors `harness_orch::loop_control::surface_catch_evaluation_error` but
-/// returns a [`CompositionError`] (the pre-flight outcome carries one, not a
-/// `Report`): the original `blocked` raise was already emitted as `early`; if a
-/// catch event raised a newer crash, that one is emitted now (no further
-/// lifecycle events fire) and marked emitted, else `early` surfaces unchanged.
+/// The shared runtime router selects the winning event; this adapter renders
+/// that event as a [`CompositionError`] for the pre-flight caller.
 fn surface_preflight_catch_error(
     source_path: &Path,
     failure_outcome: Option<&LifecycleEventOutcome>,
@@ -203,23 +200,28 @@ fn surface_preflight_catch_error(
     early: CompositionError,
     term: &Terminal,
 ) -> CompositionError {
-    if let Some(fin_info) = finalize_outcome.and_then(|o| o.evaluation_error.as_ref()) {
-        crate::output::error_walker::emit_lifecycle_evaluation_error_early(
-            source_path,
+    let empty = LifecycleEventOutcome::default();
+    let decision = claudine::composition::route_failure_finalize(
+        failure_outcome.unwrap_or(&empty),
+        finalize_outcome,
+    );
+    let (event, info) = match decision.evaluation_error_signal {
+        Some(LifecycleSignal::Finalize) => (
             "finalize",
-            fin_info,
-            term,
-        )
-    } else if let Some(fail_info) = failure_outcome.and_then(|o| o.evaluation_error.as_ref()) {
-        crate::output::error_walker::emit_lifecycle_evaluation_error_early(
-            source_path,
+            finalize_outcome.and_then(|outcome| outcome.evaluation_error.as_ref()),
+        ),
+        Some(LifecycleSignal::Failure) => (
             "failure",
-            fail_info,
-            term,
-        )
-    } else {
-        early
-    }
+            failure_outcome.and_then(|outcome| outcome.evaluation_error.as_ref()),
+        ),
+        _ => return early,
+    };
+    crate::output::error_walker::emit_lifecycle_evaluation_error_early(
+        source_path,
+        event,
+        info.expect("routing decision identifies an evaluation error"),
+        term,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -322,6 +324,7 @@ fn emit_preflight_blocked_and_finalize(
 
     // A raise inside `finalize` itself halts without re-entering `finalize`
     // (the re-entry guard). Surface it to stderr at the point of error.
+    let decision = route_blocked_finalize(&blocked_outcome, None, Some(&finalize_outcome));
     if let Some(eval_info) = finalize_outcome.evaluation_error.as_ref() {
         let early = crate::output::error_walker::emit_lifecycle_evaluation_error_early(
             source_path,
@@ -338,7 +341,7 @@ fn emit_preflight_blocked_and_finalize(
     // `resume` → `ResumeWithoutSession` and `retry`/`requeue`/`proxy` → a
     // typed setup-phase-deferred error rather than silently dropping the
     // control.
-    PreflightBlockedOutcome::Control(blocked_outcome.control)
+    PreflightBlockedOutcome::Control(decision.control)
 }
 
 /// Translate a compose pre-flight `blocked` stack's surfaced flow-control action
@@ -397,73 +400,6 @@ pub(crate) struct SingleCompositionOutcome {
     /// Used by the loop engine to apply `fail_fast` semantics and to sequence
     /// the post-`finalize` loop gate.
     pub terminal_signal: Option<LifecycleSignal>,
-}
-
-/// Iteration-level signals lifted from the per-iteration
-/// [`claudine::stream::summary::StreamExecutionSummary`] so the
-/// `compose --loop` orchestrator can drive rate-limit-aware iteration and
-/// build [`claudine::composition::CompositionError::LoopIterationFailed`]
-/// with an honest cause.
-#[derive(Debug, Default, Clone)]
-pub(crate) struct IterationSummarySignals {
-    /// Rate-limit trailer observed during the iteration. May be present on
-    /// both successful and failed iterations.
-    pub rate_limit: Option<claudine::stream::summary::RateLimitInfo>,
-    /// Structured `error_kind` (e.g. `step_timeout`, `wall_clock_timeout`,
-    /// `usage_limit_reached`). Mirrors the JSONL session_end row's
-    /// `extra.exit_reason`.
-    pub exit_reason: Option<String>,
-    /// Human-readable failure detail from the iteration's summary, when
-    /// present (e.g. "no stream activity for 30m; terminating due to
-    /// step_timeout").
-    pub error_message: Option<String>,
-    /// Resolved provider identifier (e.g. `"k2p6"`) from the iteration's
-    /// summary, when known. Carried into [`CompositionError::LoopRateLimited`]
-    /// for honest attribution.
-    pub provider_id: Option<String>,
-    /// Resolved model identifier (e.g. `"kimi-for-coding"`) from the
-    /// iteration's summary, when known.
-    pub model_id: Option<String>,
-}
-
-impl IterationSummarySignals {
-    /// Extract the loop-relevant fields from a fully-built
-    /// [`claudine::stream::summary::StreamExecutionSummary`].
-    pub fn from_summary(summary: &claudine::stream::summary::StreamExecutionSummary) -> Self {
-        Self {
-            rate_limit: summary.rate_limit.clone(),
-            exit_reason: summary.error_kind.clone(),
-            error_message: summary.error_message.clone(),
-            // Use the Provider enum's display form (e.g. "opencode"). The
-            // finer-grained AI-SDK provider (e.g. "k2p6") typically lives
-            // inside `rate_limit.message`.
-            provider_id: Some(summary.provider.to_string()),
-            model_id: summary.model.clone(),
-        }
-    }
-
-    /// Migration bridge (E5): prefer the signal-engine projection of the
-    /// run's rate-limit posture over the parser-computed value, field by
-    /// field. Projected fields win when present; parser fields fill the
-    /// gaps — notably the parser's rendered `message`, which the
-    /// projection deliberately does not synthesize. The parser computation
-    /// stays authoritative for lib/mid-stream consumers this wave; full
-    /// retirement waits until the engine path has soaked.
-    pub fn apply_projected_rate_limit(
-        &mut self,
-        projected: Option<claudine::stream::summary::RateLimitInfo>,
-    ) {
-        let Some(projected) = projected else {
-            return;
-        };
-        let parser = self.rate_limit.take().unwrap_or_default();
-        self.rate_limit = Some(claudine::stream::summary::RateLimitInfo {
-            is_throttled: projected.is_throttled.or(parser.is_throttled),
-            retry_after_ms: projected.retry_after_ms.or(parser.retry_after_ms),
-            message: projected.message.or(parser.message),
-            reset_at: projected.reset_at.or(parser.reset_at),
-        });
-    }
 }
 
 /// Render the one-line execution header for a composition run.
