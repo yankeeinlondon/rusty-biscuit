@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-6461c42470661700
-last_updated: 2026-07-10
+hash: 87f17662fa397abe-d342367dd620580a
+last_updated: 2026-07-11
 ---
 
 # darkmatter
@@ -69,6 +69,28 @@ pass trait or implicit chaining.
 | HTML and terminal Markdown renderers | `darkmatter` |
 | Terminal capability detection, images, Mermaid, graph adapters | `biscuit-terminal` |
 | Shared render tree and target-agnostic layout/style types | `renderable` |
+
+## Trigger-Schema CLI Integration
+
+Repository-scoped trigger schemas are opt-in for library hosts through
+`ComposeOptions::with_trigger_schemas(true)` or
+`DarkmatterSchemas::with_trigger_discovery(document_path, boundary)`. The `md`
+CLI opts in by default for file-backed `compose` and `schema validate` commands,
+using the discovered Git root as the inclusive boundary. Stdin, URL, and
+in-memory sources do not discover roots. `--no-trigger-schemas` disables both
+discovery and schema-root bare-name lookup, while path-qualified schema
+references continue to resolve normally.
+
+Use `md schema triggers <file>` to inspect roots, shadowed envelopes, matching
+triggers, and arm-level defeat explanations. Its presentation-neutral library
+model is `schemas::TriggerTrace`, built with `trace_registry`.
+
+Trigger payloads layer in deterministic baseline → matching triggers → document
+order and must resolve to merge-compatible object schemas. Match expressions
+reuse SimplifiedSchema types but permit only pure constraints; `all`, `any`,
+`none`, `min-match`, outer-OR arms, and case-sensitive boundary-relative
+`$path` globs are supported. Keep dialect families disjoint with explicit
+`none:` carve-outs, and keep every envelope separate from its payload.
 
 ## Demand-Driven Context Capture
 
@@ -358,6 +380,18 @@ edges for the `$schema` file reference and `uses_file` edges for inline-schema
 provider's `$schema`/`file(...)` navigation keeps its own request-time path
 resolution because it also honors extension-baseline `file(...)` properties the
 pure index-time slice does not see.
+
+Schema-trigger integration extends that overlay without adding a second
+assembler. DMLS selects the nearest containing workspace folder as the
+discovery boundary, narrowed to a Git root when that root remains inside the
+workspace. `OverlayState` caches transactionally loaded trigger registries and
+the last-good frontmatter source: malformed YAML retains the previous
+activation set, and a malformed trigger envelope retains the previous registry
+while publishing a schema diagnostic on the envelope. Dynamic watchers include
+`**/schemas/*.yaml` and `**/schemas/*.yml`; watcher-less clients rescan trigger
+state on save. Effective assembly still routes through
+`DarkmatterSchemas::with_trigger_registry`, preserving baseline → triggers →
+document precedence and the library's dependency/origin accounting.
 
 Phase 9 (Layer-3 Darkmatter DSL overlay) adds `dmls::overlay::{directives,
 expressions, shell}` (thin passive wrappers over the Phase-8 library scanners —
