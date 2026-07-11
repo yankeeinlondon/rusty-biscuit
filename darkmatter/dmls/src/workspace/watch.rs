@@ -47,10 +47,7 @@ pub const WATCH_REGISTRATION_ID: &str = "dmls-watch-workspace";
 ///
 /// `None` when there is nothing to watch (no include patterns).
 pub fn watch_registration(config: &WorkspaceConfig) -> Option<Registration> {
-    if config.include.is_empty() {
-        return None;
-    }
-    let watchers = config
+    let mut watchers: Vec<_> = config
         .include
         .iter()
         .map(|pattern| FileSystemWatcher {
@@ -59,6 +56,15 @@ pub fn watch_registration(config: &WorkspaceConfig) -> Option<Registration> {
             kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
         })
         .collect();
+    // Trigger envelopes and their payload/import/example files live in schema
+    // roots and can affect Markdown documents even though they are not part of
+    // workspace document discovery.
+    watchers.extend(["**/schemas/*.yaml", "**/schemas/*.yml"].map(|pattern| {
+        FileSystemWatcher {
+            glob_pattern: GlobPattern::String(pattern.to_string()),
+            kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+        }
+    }));
     let options = DidChangeWatchedFilesRegistrationOptions { watchers };
     Some(Registration {
         id: WATCH_REGISTRATION_ID.to_string(),
@@ -151,7 +157,7 @@ mod tests {
         assert_eq!(registration.method, "workspace/didChangeWatchedFiles");
         let options: DidChangeWatchedFilesRegistrationOptions =
             serde_json::from_value(registration.register_options.unwrap()).unwrap();
-        assert_eq!(options.watchers.len(), 2); // **/*.md and **/*.markdown
+        assert_eq!(options.watchers.len(), 4); // Markdown plus YAML schema roots.
     }
 
     #[test]
@@ -160,7 +166,10 @@ mod tests {
             include: Vec::new(),
             ..WorkspaceConfig::default()
         };
-        assert!(watch_registration(&config).is_none());
+        let registration = watch_registration(&config).unwrap();
+        let options: DidChangeWatchedFilesRegistrationOptions =
+            serde_json::from_value(registration.register_options.unwrap()).unwrap();
+        assert_eq!(options.watchers.len(), 2);
     }
 
     #[test]

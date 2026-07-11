@@ -27,6 +27,7 @@ use biscuit_hash::xx_hash_bytes;
 use darkmatter::markdown::schemas::SchemaError;
 use darkmatter::markdown::schemas::StandaloneSchemaEnvelope;
 use darkmatter::markdown::schemas::SuggestionLintProblem;
+use darkmatter::markdown::schemas::triggers::{TriggerRegistry, scan as scan_triggers};
 use lsp_types::Uri;
 
 use crate::config::DmlsConfig;
@@ -73,6 +74,10 @@ pub enum SuggestionState {
         /// unsupported tagged-envelope keys, invalid payload).
         error: Option<Arc<SchemaError>>,
     },
+    /// A YAML file in a `schemas/` root claims `kind: trigger-schema` but its
+    /// envelope is malformed. The registry remains last-good while this error
+    /// is published on the authoring file.
+    TriggerError(Arc<SchemaError>),
 }
 
 /// The per-request overlay snapshot for one open document.
@@ -117,6 +122,12 @@ pub struct OverlayState {
 struct OverlayCache {
     /// Last successfully-parsed frontmatter tree per document URI.
     last_good: HashMap<String, Arc<FrontmatterAst>>,
+    /// Source text paired with `last_good`; schema matching must use this text
+    /// while the current YAML is malformed so activation does not flap.
+    last_good_text: HashMap<String, String>,
+    /// Last transactionally loaded registry for each document walk within a
+    /// boundary. A failed rescan leaves the previous value installed.
+    trigger_registries: HashMap<(PathBuf, PathBuf), TriggerRegistry>,
     /// Cached effective schema per document URI, invalidated by content hash.
     schema: HashMap<String, CachedSchema>,
 }
@@ -163,6 +174,7 @@ impl OverlayState {
                 Some(fresh) => {
                     let fresh = Arc::new(fresh);
                     cache.last_good.insert(uri_key.clone(), Arc::clone(&fresh));
+                    cache.last_good_text.insert(uri_key.clone(), text.to_string());
                     (Some(fresh), false, None)
                 }
                 None => {
@@ -171,9 +183,40 @@ impl OverlayState {
                 }
             };
 
-            let schema = cache.schema_for(&uri_key, text, path, config, workspace_roots);
+            let schema_text = if stale {
+                cache.last_good_text.get(&uri_key).map(String::as_str).unwrap_or(text)
+            } else {
+                text
+            };
+            let schema_text = schema_text.to_string();
+            let schema = cache.schema_for(
+                &uri_key,
+                &schema_text,
+                path,
+                config,
+                workspace_roots,
+            );
             let suggestions = suggestions::inline_lints(text, ast.as_deref());
             return Some(DocumentOverlay { ast, stale, parse_error, schema, suggestions });
+        }
+
+        // Trigger-schema authoring path. Only claimed, malformed envelopes are
+        // diagnostics; ordinary schema-root YAML remains silent.
+        if path
+            .parent()
+            .and_then(Path::file_name)
+            .is_some_and(|name| name == "schemas")
+            && matches!(path.extension().and_then(|ext| ext.to_str()), Some("yaml" | "yml"))
+            && let Err(error) =
+                darkmatter::markdown::schemas::parse_trigger_envelope_from_str(text)
+        {
+            return Some(DocumentOverlay {
+                ast: None,
+                stale: false,
+                parse_error: None,
+                schema: SchemaOutcome::Ready(None),
+                suggestions: SuggestionState::TriggerError(Arc::new(error)),
+            });
         }
 
         // Standalone SimplifiedSchema YAML envelope path. A standalone YAML
@@ -195,6 +238,7 @@ impl OverlayState {
     pub fn forget(&self, uri: &Uri) {
         let mut cache = self.inner.lock().expect("overlay lock poisoned");
         cache.last_good.remove(uri.as_str());
+        cache.last_good_text.remove(uri.as_str());
         cache.schema.remove(uri.as_str());
     }
 }
@@ -210,14 +254,19 @@ impl OverlayCache {
         config: &DmlsConfig,
         workspace_roots: &[PathBuf],
     ) -> SchemaOutcome {
-        let key = schema_cache_key(text, config);
+        let registry = self.trigger_registry(path, workspace_roots);
+        let registry_key = registry
+            .as_ref()
+            .map(|registry| xx_hash_bytes(format!("{registry:?}").as_bytes()))
+            .unwrap_or_default();
+        let key = schema_cache_key(text, config) ^ registry_key;
         if let Some(cached) = self.schema.get(uri_key)
             && cached.key == key
             && deps_unchanged(&cached.deps)
         {
             return cached.outcome.clone();
         }
-        let outcome = match schema::assemble(path, text, config, workspace_roots) {
+        let outcome = match schema::assemble(path, text, config, workspace_roots, registry) {
             Ok(bundle) => SchemaOutcome::Ready(bundle.map(Arc::new)),
             Err(error) => SchemaOutcome::Failed(Arc::new(error)),
         };
@@ -225,6 +274,26 @@ impl OverlayCache {
         self.schema
             .insert(uri_key.to_string(), CachedSchema { key, deps, outcome: outcome.clone() });
         outcome
+    }
+
+    fn trigger_registry(
+        &mut self,
+        path: &Path,
+        workspace_roots: &[PathBuf],
+    ) -> Option<TriggerRegistry> {
+        let boundary = schema::trigger_boundary(path, workspace_roots)?;
+        let document_dir = path.parent().unwrap_or(path).to_path_buf();
+        let key = (boundary.clone(), document_dir);
+        match scan_triggers(path, &boundary) {
+            Ok(registry) => {
+                self.trigger_registries.insert(key, registry.clone());
+                Some(registry)
+            }
+            Err(error) => {
+                tracing::warn!(path = %path.display(), %error, "retaining last-good trigger registry");
+                self.trigger_registries.get(&key).cloned()
+            }
+        }
     }
 }
 
@@ -495,5 +564,180 @@ mod tests {
         assert!(overlay.parse_error.is_some());
         let ast = overlay.ast.expect("last-good tree retained");
         assert_eq!(ast.entry_by_dotted("title").unwrap().key, "title");
+    }
+
+    fn write_trigger_fixture(root: &Path) {
+        std::fs::create_dir_all(root.join("schemas")).unwrap();
+        std::fs::write(
+            root.join("schemas/prompt.yaml"),
+            "$schema:\n  model: string(required)\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("schemas/prompt.trigger.yaml"),
+            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n",
+        )
+        .unwrap();
+    }
+
+    fn copy_dialect_fixture(root: &Path) {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../tests/fixtures/schema-triggers");
+        for directory in ["schemas", "docs"] {
+            std::fs::create_dir_all(root.join(directory)).unwrap();
+            for entry in std::fs::read_dir(source.join(directory)).unwrap() {
+                let entry = entry.unwrap();
+                std::fs::copy(entry.path(), root.join(directory).join(entry.file_name())).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn trigger_activation_uses_workspace_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_trigger_fixture(root);
+        let path = root.join("doc.md");
+        let text = "---\nprompt: hello\n---\n\nbody\n";
+        let state = OverlayState::default();
+        let doc: Uri = url::Url::from_file_path(&path).unwrap().as_str().parse().unwrap();
+
+        let overlay = state
+            .for_document(&doc, text, &path, &DmlsConfig::default(), &[root.to_path_buf()])
+            .unwrap();
+        let bundle = ready_bundle(&overlay);
+        let report = bundle.effective.validate(&bundle.frontmatter_json);
+        assert!(
+            report.problems.iter().any(|problem| problem.message.contains("model")),
+            "matching trigger must contribute its required property: {:?}",
+            report.problems
+        );
+
+        let outside = root.parent().unwrap().join("outside.md");
+        let outside_uri: Uri =
+            url::Url::from_file_path(&outside).unwrap().as_str().parse().unwrap();
+        let overlay = state
+            .for_document(
+                &outside_uri,
+                text,
+                &outside,
+                &DmlsConfig::default(),
+                &[root.to_path_buf()],
+            )
+            .unwrap();
+        let report = ready_bundle(&overlay).effective.validate(
+            &ready_bundle(&overlay).frontmatter_json,
+        );
+        assert!(report.valid, "outside-workspace documents must not discover triggers");
+    }
+
+    #[test]
+    fn trigger_activation_has_yaml_hysteresis_and_transactional_registry() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_trigger_fixture(root);
+        let path = root.join("doc.md");
+        let good = "---\nprompt: hello\n---\n\nbody\n";
+        let state = OverlayState::default();
+        let doc: Uri = url::Url::from_file_path(&path).unwrap().as_str().parse().unwrap();
+        let roots = [root.to_path_buf()];
+
+        let first = state
+            .for_document(&doc, good, &path, &DmlsConfig::default(), &roots)
+            .unwrap();
+        assert!(!ready_bundle(&first).effective.validate(&ready_bundle(&first).frontmatter_json).valid);
+
+        let broken = "---\nprompt:\n\tbad: yaml\n---\n";
+        let stale = state
+            .for_document(&doc, broken, &path, &DmlsConfig::default(), &roots)
+            .unwrap();
+        assert!(stale.stale);
+        assert!(
+            !ready_bundle(&stale).effective.validate(&ready_bundle(&stale).frontmatter_json).valid,
+            "a malformed edit must retain the prior activation"
+        );
+
+        std::fs::write(
+            root.join("schemas/prompt.trigger.yaml"),
+            "kind: trigger-schema\nmatch: {}\n",
+        )
+        .unwrap();
+        let retained = state
+            .for_document(&doc, good, &path, &DmlsConfig::default(), &roots)
+            .unwrap();
+        assert!(
+            !ready_bundle(&retained)
+                .effective
+                .validate(&ready_bundle(&retained).frontmatter_json)
+                .valid,
+            "a malformed envelope edit must retain the last-good registry"
+        );
+    }
+
+    #[test]
+    fn dialect_family_matches_cli_parity_corpus() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        copy_dialect_fixture(root);
+        let state = OverlayState::default();
+        let roots = [root.to_path_buf()];
+
+        for (document, required) in [
+            ("claudine.md", "provider"),
+            ("inline-compose.md", "output"),
+            ("sequence.md", "sequence_name"),
+        ] {
+            let path = root.join("docs").join(document);
+            let text = std::fs::read_to_string(&path).unwrap();
+            let doc: Uri = url::Url::from_file_path(&path).unwrap().as_str().parse().unwrap();
+            let overlay = state
+                .for_document(&doc, &text, &path, &DmlsConfig::default(), &roots)
+                .unwrap();
+            let bundle = ready_bundle(&overlay);
+            let report = bundle.effective.validate(&bundle.frontmatter_json);
+            assert!(
+                report.problems.iter().any(|problem| problem.message.contains(required)),
+                "{document} must activate only its `{required}` payload: {:?}",
+                report.problems
+            );
+        }
+
+        let path = root.join("docs/plain.md");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let doc: Uri = url::Url::from_file_path(&path).unwrap().as_str().parse().unwrap();
+        let overlay = state
+            .for_document(&doc, &text, &path, &DmlsConfig::default(), &roots)
+            .unwrap();
+        let bundle = ready_bundle(&overlay);
+        assert!(bundle.effective.validate(&bundle.frontmatter_json).valid);
+    }
+
+    #[test]
+    fn sibling_only_bare_reference_reaches_dmls_schema_diagnostic_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::create_dir_all(root.join("schemas")).unwrap();
+        std::fs::write(
+            root.join("docs/local.yaml"),
+            "$schema:\n  title: string(required)\n",
+        )
+        .unwrap();
+        let path = root.join("docs/doc.md");
+        let text = "---\n$schema: local.yaml\ntitle: Test\n---\nBody\n";
+        let doc: Uri = url::Url::from_file_path(&path).unwrap().as_str().parse().unwrap();
+        let overlay = OverlayState::default()
+            .for_document(
+                &doc,
+                text,
+                &path,
+                &DmlsConfig::default(),
+                &[root.to_path_buf()],
+            )
+            .unwrap();
+        let SchemaOutcome::Failed(error) = overlay.schema else {
+            panic!("sibling-only bare reference must fail schema preparation");
+        };
+        assert!(error.to_string().contains("./local.yaml"));
     }
 }

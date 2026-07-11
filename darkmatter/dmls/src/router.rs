@@ -888,9 +888,11 @@ impl Router {
                 // here — a `ClientWatched` client gets that from
                 // `didChangeWatchedFiles`, so it skips the scan.
                 tracing::debug!(uri = params.text_document.uri.as_str(), "didSave");
-                if self.state.watch_mode == WatchMode::ServerRescan
-                    && self.state.rescan_workspace()
-                {
+                if self.state.watch_mode == WatchMode::ServerRescan {
+                    self.state.rescan_workspace();
+                    // Schema-root YAML is intentionally outside Markdown
+                    // workspace discovery, but a save is also the watcher-less
+                    // trigger-registry rescan boundary.
                     self.state.refresh_all_diagnostics();
                 }
             }
