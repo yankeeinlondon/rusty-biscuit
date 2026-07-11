@@ -45,4 +45,5 @@ Look for how this spec file could be improved:
 Update the spec file at "{{spec}}" and then:
 
 - set the spec file's `reviewed` Frontmatter property to 'true'
-- set the spec file's `status` to "ready for planning and implementation"
+- set the spec file's `reviewed_by` Frontmatter property to "{{ctx.agent}}/{{ctx.model}}"
+- set the spec file's `reviewed_on` Frontmatter property to "{{ctx.today}}"
