@@ -116,6 +116,8 @@ details do not belong here.
    every sibling commit narrows the window in which the amendment would be
    unambiguous.
 
+- **The staged set can shrink between your `git status` and your `git commit` (2026-07-11 claudine + prompts 3-commit batch).** In a concurrent batch, a sibling commit can land and remove some of your staged paths in the window between when you inspect the staged set and when you commit. `git commit --only -- <paths>` handles this correctly — pathspecs filter the commit, so paths already committed by a sibling are silently excluded from your commit. Observed in the claudine + prompts 3-commit batch: the chore(prompts) subagent noted that the three claudine-area files it saw in its initial `git status` had been committed by a sibling docs(claudine) commit (`2955a7938`) before its own `git commit` ran; its `--only -- <paths>` commit then correctly contained only the `prompts/*` paths, and `git show --name-status <hash>` confirmed the rename/delete/add shape matched the now-shrunk staged set. No fix needed — `--only -- <paths>` is robust to mid-flight race by design; just confirm in the verification step that the committed shape still matches what you intended, and report any drift back to the orchestrator.
+
 ## Verifying a Concurrent Commit
 
 - After `git commit` returns 0, do not use `git log -1 --stat` to verify

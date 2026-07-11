@@ -4,7 +4,7 @@ $schema:
     - plan: "file(required;eager) -> the plan file who's implementation you want to review"
     - review: "file(required;eager) -> the review file who's findings have now been implemented"
 description: |-
-    This prompt can be use to perform a variety of review types. The specific type of
+    This prompt can be used to perform a variety of review _types_. The specific type of
     review is determined by the parameters the user passes in and the frontmatter state
     of files in the filesystem.
 
@@ -25,7 +25,7 @@ description: |-
         - the review will create a review _iteration_ with findings focused on what left to be done the original review finding and/or any additional new findings
 initialize:
     stack:
-        - when: "spec && ( frontmatter(spec, 'reviewed') == true || frontmatter(spec, 'implemented') == true"
+        - when: "spec && ( frontmatter(spec, 'reviewed') == true || frontmatter(spec, 'implemented') == true )"
           action:
               - proxy: "prompts/_reviews/review-feature.md"
         - when: "spec"
