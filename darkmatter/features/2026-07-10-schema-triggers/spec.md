@@ -1,7 +1,7 @@
 ---
 status: ready for planning and implementation
 reviewed: true
-review_iterations: 1
+review_iterations: 2
 inputs:
   - ../../lib/src/markdown/schemas/resolve.rs
   - ../../lib/src/markdown/schemas/mod.rs
@@ -182,14 +182,16 @@ The expected shape is not one Claudine trigger but a small family — `claudine.
 
 ## Acceptance Criteria
 
-1. The library matcher is side-effect-free and has table-driven tests for every combinator, outer OR arms, nesting, path normalization, forbidden stateful constraints, and vacuous-arm rejection.
-2. Discovery tests cover nested roots, inclusive boundaries, filename shadowing, `.yaml`/`.yml`, symlink exclusion, case-fold collisions, malformed-trigger atomicity, and no discovery for pathless/out-of-boundary documents on macOS, Windows-compatible paths, and Linux-compatible paths.
-3. A `.trigger.yaml` envelope and separate payload resolve without self-reference; direct and indirect envelope/payload cycles fail with source paths in the error.
-4. `md compose`, `md schema validate`, and DMLS produce identical trigger sets for the same settled file and configured boundary. Tests also pin assignment re-resolution, pending shell values, host opt-in, and `--no-trigger-schemas` behavior.
-5. Merge tests pin configured-baseline → ordered triggers → document-schema precedence, shadowing before matching, rejection of non-mergeable payloads, origin attribution, and complete dependency collection.
-6. Trigger create/change/delete invalidates every document under its boundary; payload/import/example changes invalidate all and only effective schemas that depend on them. DMLS retains a last-good registry after a malformed edit.
-7. Corpus migration confirms path-less schema references are either intentionally schema-root-resolved or changed to `./`; diagnostics suggest `./name` for a sibling-only legacy reference.
-8. `md schema about` is generated from the typed catalog and documents the envelope, match-safe constraint subset, path semantics, combinators, arms, and vacuous lint.
+- [x] The library matcher is side-effect-free and has table-driven tests for every combinator, outer OR arms, nesting, path normalization, forbidden stateful constraints, and vacuous-arm rejection.
+- [x] Discovery tests cover nested roots, inclusive boundaries, filename shadowing, `.yaml`/`.yml`, symlink exclusion, case-fold collisions, malformed-trigger atomicity, and no discovery for pathless/out-of-boundary documents on macOS, Windows-compatible paths, and Linux-compatible paths.
+- [x] A `.trigger.yaml` envelope and separate payload resolve without self-reference; direct and indirect envelope/payload cycles fail with source paths in the error.
+- [x] `md compose`, `md schema validate`, and DMLS produce identical trigger sets for the same settled file and configured boundary. Tests also pin assignment re-resolution, pending shell values, host opt-in, and `--no-trigger-schemas` behavior.
+- [x] Merge tests pin configured-baseline → ordered triggers → document-schema precedence, shadowing before matching, rejection of non-mergeable payloads, origin attribution, and complete dependency collection.
+- [x] Trigger create/change/delete invalidates every document under its boundary; payload/import/example changes invalidate all and only effective schemas that depend on them. DMLS retains a last-good registry after a malformed edit.
+- [x] Corpus migration confirms path-less schema references are either intentionally schema-root-resolved or changed to `./`; diagnostics suggest `./name` for a sibling-only legacy reference.
+- [x] `md schema about` is generated from the typed catalog and documents the envelope, match-safe constraint subset, path semantics, combinators, arms, and vacuous lint.
+
+Phase 8 acceptance sweep found no deviations from these criteria.
 
 ## Open Questions
 
