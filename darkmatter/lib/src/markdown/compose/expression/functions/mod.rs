@@ -10,9 +10,10 @@
 
 use chrono::{Datelike, Duration, Local, Months, NaiveDate, NaiveDateTime, Utc};
 use serde_json::Value;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
@@ -37,9 +38,8 @@ mod skills;
 mod strings;
 mod terminal;
 
-use super::catalog::ExpressionFunctionDescriptor;
 use args::require_args;
-use crate::catalog::{Example, ExampleVerification};
+use super::catalog::{ExpressionFunctionDescriptor, expression_function_catalog, expression_function_descriptors};
 
 type PureFn = fn(&[Value]) -> Result<Value, String>;
 type ContextFn = fn(&[Value], &ResolutionContext) -> Result<Value, ExpressionError>;
@@ -48,7 +48,21 @@ type ContextFn = fn(&[Value], &ResolutionContext) -> Result<Value, ExpressionErr
 enum FunctionHandler {
     Pure(PureFn),
     Context(ContextFn),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EvaluationMode {
+    Pure,
+    Context,
     Lazy,
+}
+
+#[derive(Clone, Copy)]
+struct FunctionBinding {
+    canonical: &'static str,
+    aliases: &'static [&'static str],
+    evaluation: EvaluationMode,
+    handler: Option<FunctionHandler>,
 }
 
 #[cfg(test)]
@@ -57,26 +71,27 @@ mod registration_tests {
 
     use serde_json::Value;
 
-    use super::{FunctionHandler, dispatch, dispatch_fs, registrations};
+    use super::{EvaluationMode, FunctionHandler, bindings, dispatch, dispatch_fs};
     use crate::markdown::compose::expression::ResolutionContext;
 
     #[test]
     fn registration_names_aliases_and_signatures_are_unique() {
-        let registrations: Vec<_> = registrations().collect();
-        let canonicals: HashSet<_> = registrations.iter().map(|r| r.canonical).collect();
-        assert_eq!(canonicals.len(), registrations.len());
+        let bindings: Vec<_> = bindings().collect();
+        let canonicals: HashSet<_> = bindings.iter().map(|r| r.canonical).collect();
+        assert_eq!(canonicals.len(), bindings.len());
 
         let mut all_names = canonicals;
         let mut signatures = HashSet::new();
-        for registration in registrations {
-            assert!(!registration.descriptors.is_empty());
-            for alias in registration.aliases {
+        for binding in bindings {
+            for alias in binding.aliases {
                 assert!(all_names.insert(*alias), "duplicate expression alias: {alias}");
             }
-            for descriptor in registration.descriptors {
+            for descriptor in crate::markdown::compose::expression::catalog::expression_function_descriptors()
+                .iter().filter(|descriptor| descriptor.signature.split('(').next() == Some(binding.canonical))
+            {
                 assert_eq!(
                     descriptor.signature.split('(').next(),
-                    Some(registration.canonical)
+                    Some(binding.canonical)
                 );
                 assert!(
                     signatures.insert(descriptor.signature),
@@ -88,98 +103,179 @@ mod registration_tests {
     }
 
     #[test]
+    fn catalog_and_runtime_bindings_have_bidirectional_canonical_parity() {
+        let catalog: HashSet<_> = super::expression_function_catalog()
+            .functions.iter().map(|function| function.name.as_str()).collect();
+        let runtime: HashSet<_> = bindings().map(|binding| binding.canonical).collect();
+        assert_eq!(catalog, runtime);
+        assert!(super::validate_registry().is_ok());
+    }
+
+    #[test]
+    fn alias_canonical_collisions_are_rejected() {
+        let fixtures = [("alpha", &["beta"][..]), ("beta", &[][..])];
+        assert_eq!(
+            super::validate_name_uniqueness(fixtures),
+            Err(super::RegistryError::NameCollision("beta".to_string()))
+        );
+    }
+
+    #[test]
     fn handler_kinds_dispatch_through_their_intended_paths() {
         let context = ResolutionContext::default();
-        for registration in registrations() {
-            match registration.handler {
-                FunctionHandler::Pure(_) => {
-                    assert!(dispatch(registration.canonical, &[]).is_some());
-                    assert!(dispatch_fs(registration.canonical, &[], &context).is_none());
+        for binding in bindings() {
+            match binding.evaluation {
+                EvaluationMode::Pure => {
+                    assert!(matches!(binding.handler, Some(FunctionHandler::Pure(_))));
+                    let arity = super::joined_bindings().iter().find(|entry| entry.binding.canonical == binding.canonical).unwrap().descriptors[0].parameters.iter().filter(|parameter| !parameter.optional && !parameter.variadic).count();
+                    let args = vec![Value::Null; arity];
+                    assert!(dispatch(binding.canonical, &args).is_some());
+                    assert!(dispatch_fs(binding.canonical, &args, &context).is_none());
                 }
-                FunctionHandler::Context(_) => {
-                    assert!(dispatch(registration.canonical, &[]).is_none());
-                    assert!(dispatch_fs(registration.canonical, &[], &context).is_some());
+                EvaluationMode::Context => {
+                    assert!(matches!(binding.handler, Some(FunctionHandler::Context(_))));
+                    let arity = super::joined_bindings().iter().find(|entry| entry.binding.canonical == binding.canonical).unwrap().descriptors[0].parameters.iter().filter(|parameter| !parameter.optional && !parameter.variadic).count();
+                    let args = vec![Value::Null; arity];
+                    assert!(dispatch(binding.canonical, &args).is_none());
+                    assert!(dispatch_fs(binding.canonical, &args, &context).is_some());
                 }
-                FunctionHandler::Lazy => {
-                    assert!(dispatch(registration.canonical, &[Value::Bool(true)]).is_none());
-                    assert!(dispatch_fs(registration.canonical, &[], &context).is_none());
+                EvaluationMode::Lazy => {
+                    assert!(binding.handler.is_none());
+                    assert!(dispatch(binding.canonical, &[Value::Bool(true)]).is_none());
+                    assert!(dispatch_fs(binding.canonical, &[], &context).is_none());
                 }
             }
         }
     }
 }
 
-#[derive(Clone, Copy)]
-struct FunctionRegistration {
-    canonical: &'static str,
-    aliases: &'static [&'static str],
-    catalog_order: usize,
-    descriptors: &'static [ExpressionFunctionDescriptor],
-    handler: FunctionHandler,
-}
-
-const LAZY_REGISTRATIONS: &[FunctionRegistration] = &[
-    FunctionRegistration {
+const LAZY_BINDINGS: &[FunctionBinding] = &[
+    FunctionBinding {
         canonical: "and",
         aliases: &[],
-        catalog_order: 49,
-        descriptors: &[ExpressionFunctionDescriptor {
-            signature: "and(...)",
-            parameters: super::catalog::P_VARIADIC,
-            returns: super::catalog::R_BOOL,
-            description: "Logical AND of all arguments. Short-circuits on first falsy value.",
-            category: "Logical",
-            order: 1,
-            example: Some(Example { invocation: "and(true, true)", result: "true", verification: ExampleVerification::Executable }),
-        }],
-        handler: FunctionHandler::Lazy,
+        evaluation: EvaluationMode::Lazy,
+        handler: None,
     },
-    FunctionRegistration {
+    FunctionBinding {
         canonical: "or",
         aliases: &[],
-        catalog_order: 50,
-        descriptors: &[ExpressionFunctionDescriptor {
-            signature: "or(...)",
-            parameters: super::catalog::P_VARIADIC,
-            returns: super::catalog::R_BOOL,
-            description: "Logical OR of all arguments. Short-circuits on first truthy value.",
-            category: "Logical",
-            order: 2,
-            example: Some(Example { invocation: "or(false, true)", result: "true", verification: ExampleVerification::Executable }),
-        }],
-        handler: FunctionHandler::Lazy,
+        evaluation: EvaluationMode::Lazy,
+        handler: None,
     },
 ];
 
-const REGISTRATION_GROUPS: &[&[FunctionRegistration]] = &[
-    predicates::REGISTRATIONS,
-    collections::REGISTRATIONS,
-    strings::REGISTRATIONS,
-    terminal::REGISTRATIONS,
-    dates::REGISTRATIONS,
-    paths::REGISTRATIONS,
-    skills::REGISTRATIONS,
-    markdown_docs::REGISTRATIONS,
-    LAZY_REGISTRATIONS,
+const BINDING_GROUPS: &[&[FunctionBinding]] = &[
+    predicates::BINDINGS,
+    collections::BINDINGS,
+    strings::BINDINGS,
+    terminal::BINDINGS,
+    dates::BINDINGS,
+    paths::BINDINGS,
+    skills::BINDINGS,
+    markdown_docs::BINDINGS,
+    LAZY_BINDINGS,
 ];
 
-fn registrations() -> impl Iterator<Item = &'static FunctionRegistration> {
-    REGISTRATION_GROUPS.iter().flat_map(|group| group.iter())
+fn bindings() -> impl Iterator<Item = &'static FunctionBinding> {
+    BINDING_GROUPS.iter().flat_map(|group| group.iter())
 }
 
-pub(super) fn expression_function_descriptors() -> &'static [ExpressionFunctionDescriptor] {
-    static DESCRIPTORS: LazyLock<Vec<ExpressionFunctionDescriptor>> = LazyLock::new(|| {
-        let mut descriptors: Vec<_> = registrations()
-            .flat_map(|registration| {
-                registration.descriptors.iter().copied().enumerate().map(|(offset, descriptor)| {
-                    (registration.catalog_order + offset, descriptor)
-                })
-            })
-            .collect();
-        descriptors.sort_by_key(|(order, _)| *order);
-        descriptors.into_iter().map(|(_, descriptor)| descriptor).collect()
+struct JoinedBinding {
+    binding: &'static FunctionBinding,
+    descriptors: Vec<&'static ExpressionFunctionDescriptor>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum RegistryError {
+    DuplicateBinding(String),
+    CatalogWithoutBinding(String),
+    BindingWithoutCatalog(String),
+    NameCollision(String),
+    InvalidHandler(String),
+}
+
+impl fmt::Display for RegistryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (kind, name) = match self {
+            Self::DuplicateBinding(name) => ("duplicate runtime binding", name),
+            Self::CatalogWithoutBinding(name) => ("catalog function has no runtime binding", name),
+            Self::BindingWithoutCatalog(name) => ("runtime binding has no catalog function", name),
+            Self::NameCollision(name) => ("expression canonical/alias name collision", name),
+            Self::InvalidHandler(name) => ("runtime binding has an invalid evaluation/handler pairing", name),
+        };
+        write!(formatter, "{kind}: {name}")
+    }
+}
+
+fn validate_registry() -> Result<Vec<JoinedBinding>, RegistryError> {
+    let catalog = expression_function_catalog();
+    let descriptors = expression_function_descriptors();
+    let catalog_names: HashSet<&str> = catalog.functions.iter().map(|function| function.name.as_str()).collect();
+    let mut binding_by_name = HashMap::new();
+    validate_name_uniqueness(bindings().map(|binding| (binding.canonical, binding.aliases)))?;
+
+    for binding in bindings() {
+        if binding_by_name.insert(binding.canonical, binding).is_some() {
+            return Err(RegistryError::DuplicateBinding(binding.canonical.to_string()));
+        }
+        let valid_handler = matches!(
+            (binding.evaluation, binding.handler),
+            (EvaluationMode::Pure, Some(FunctionHandler::Pure(_)))
+                | (EvaluationMode::Context, Some(FunctionHandler::Context(_)))
+                | (EvaluationMode::Lazy, None)
+        );
+        if !valid_handler {
+            return Err(RegistryError::InvalidHandler(binding.canonical.to_string()));
+        }
+    }
+
+    for name in &catalog_names {
+        if !binding_by_name.contains_key(name) {
+            return Err(RegistryError::CatalogWithoutBinding((*name).to_string()));
+        }
+    }
+    for name in binding_by_name.keys() {
+        if !catalog_names.contains(name) {
+            return Err(RegistryError::BindingWithoutCatalog((*name).to_string()));
+        }
+    }
+
+    Ok(bindings().map(|binding| JoinedBinding {
+        binding,
+        descriptors: descriptors.iter().filter(|descriptor| {
+            descriptor.signature.split('(').next() == Some(binding.canonical)
+        }).collect(),
+    }).collect())
+}
+
+fn validate_name_uniqueness<'a>(
+    bindings: impl IntoIterator<Item = (&'a str, &'a [&'a str])>,
+) -> Result<(), RegistryError> {
+    let mut names = HashSet::new();
+    for (canonical, aliases) in bindings {
+        if !names.insert(canonical) {
+            return Err(RegistryError::NameCollision(canonical.to_string()));
+        }
+        for alias in aliases {
+            if !names.insert(*alias) {
+                return Err(RegistryError::NameCollision((*alias).to_string()));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn joined_bindings() -> &'static [JoinedBinding] {
+    static REGISTRY: LazyLock<Vec<JoinedBinding>> = LazyLock::new(|| {
+        validate_registry().unwrap_or_else(|error| panic!("invalid embedded expression-function registry: {error}"))
     });
-    &DESCRIPTORS
+    &REGISTRY
+}
+
+fn accepts_arity(descriptor: &ExpressionFunctionDescriptor, arity: usize) -> bool {
+    let minimum = descriptor.parameters.iter().filter(|parameter| !parameter.optional && !parameter.variadic).count();
+    let variadic = descriptor.parameters.iter().any(|parameter| parameter.variadic);
+    arity >= minimum && (variadic || arity <= descriptor.parameters.len())
 }
 
 /// Parsed components of an indexed filename stem.
@@ -2321,7 +2417,7 @@ pub fn newer_than(args: &[Value]) -> Result<Value, String> {
 /// complete; `lazy_operators_are_dispatchable` proves each one resolves.
 #[cfg(test)]
 pub(crate) fn lazy_operator_names() -> impl Iterator<Item = &'static str> {
-    LAZY_REGISTRATIONS.iter().map(|registration| registration.canonical)
+    LAZY_BINDINGS.iter().map(|binding| binding.canonical)
 }
 
 /// Returns every canonical function name the evaluator can dispatch.
@@ -2329,7 +2425,7 @@ pub(crate) fn lazy_operator_names() -> impl Iterator<Item = &'static str> {
 /// This is the authoritative runtime surface: the lazy operators plus the two
 /// dispatch tables that [`dispatch`]/[`dispatch_fs`] actually consult.
 pub fn dispatchable_canonical_names() -> Vec<&'static str> {
-    registrations().map(|registration| registration.canonical).collect()
+    joined_bindings().iter().map(|entry| entry.binding.canonical).collect()
 }
 
 /// Returns every canonical callable signature the evaluator dispatches,
@@ -2340,8 +2436,8 @@ pub fn dispatchable_canonical_names() -> Vec<&'static str> {
 /// The expression descriptor catalog is checked for exact set equality against
 /// it, so overload metadata and dispatch always come from the same registration.
 pub fn dispatchable_signatures() -> Vec<&'static str> {
-    registrations()
-        .flat_map(|registration| registration.descriptors.iter().map(|d| d.signature))
+    joined_bindings().iter()
+        .flat_map(|entry| entry.descriptors.iter().map(|descriptor| descriptor.signature))
         .collect()
 }
 
@@ -2356,10 +2452,16 @@ pub fn dispatch_fs(
     args: &[Value],
     ctx: &ResolutionContext,
 ) -> Option<Result<Value, ExpressionError>> {
-    for registration in registrations() {
-        if (registration.canonical == name || registration.aliases.contains(&name))
-            && let FunctionHandler::Context(handler) = registration.handler
+    for entry in joined_bindings() {
+        let binding = entry.binding;
+        if (binding.canonical == name || binding.aliases.contains(&name))
+            && binding.evaluation == EvaluationMode::Context
+            && let Some(FunctionHandler::Context(handler)) = binding.handler
         {
+            let _eligible_overload = entry.descriptors.iter()
+                .find(|descriptor| accepts_arity(descriptor, args.len()));
+            // The handler remains the diagnostic authority when no overload is
+            // eligible, preserving its typed arity error.
             return Some(handler(args, ctx));
         }
     }
@@ -2373,9 +2475,9 @@ pub fn dispatch_fs(
 /// through dispatch only because no document resolution context was available
 /// from a genuinely unrecognized symbol.
 pub fn is_fs_function(name: &str) -> bool {
-    registrations().any(|registration| {
-        matches!(registration.handler, FunctionHandler::Context(_))
-            && (registration.canonical == name || registration.aliases.contains(&name))
+    joined_bindings().iter().any(|entry| {
+        entry.binding.evaluation == EvaluationMode::Context
+            && (entry.binding.canonical == name || entry.binding.aliases.contains(&name))
     })
 }
 
@@ -2384,10 +2486,16 @@ pub fn is_fs_function(name: &str) -> bool {
 /// Returns `Some(result)` when the name matches a pure registration,
 /// or `None` to let the outer dispatcher report `Unknown function: ...`.
 pub fn dispatch(name: &str, args: &[Value]) -> Option<Result<Value, String>> {
-    for registration in registrations() {
-        if (registration.canonical == name || registration.aliases.contains(&name))
-            && let FunctionHandler::Pure(handler) = registration.handler
+    for entry in joined_bindings() {
+        let binding = entry.binding;
+        if (binding.canonical == name || binding.aliases.contains(&name))
+            && binding.evaluation == EvaluationMode::Pure
+            && let Some(FunctionHandler::Pure(handler)) = binding.handler
         {
+            let _eligible_overload = entry.descriptors.iter()
+                .find(|descriptor| accepts_arity(descriptor, args.len()));
+            // The handler remains the diagnostic authority when no overload is
+            // eligible, preserving its established arity message.
             return Some(handler(args));
         }
     }

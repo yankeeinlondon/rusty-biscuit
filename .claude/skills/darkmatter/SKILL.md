@@ -1,7 +1,7 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-d342367dd620580a
+hash: 87f17662fa397abe-20b7b5a7168eab1a
 last_updated: 2026-07-11
 ---
 
@@ -65,10 +65,20 @@ pass trait or implicit chaining.
 | Compose pipeline, interpolation, shell directives, transclusion | `darkmatter` |
 | Frontmatter extraction and Markdown-aware hashing | `darkmatter` / `md hash` |
 | `$schema` / SimplifiedSchema validation, detection, compose integration | `darkmatter::markdown::schemas` |
+| Expression-function signatures, descriptions, ordering, and examples | `darkmatter/docs/schemas/expression-functions.yaml` |
 | `style:` frontmatter parsing and application | `darkmatter::style` |
 | HTML and terminal Markdown renderers | `darkmatter` |
 | Terminal capability detection, images, Mermaid, graph adapters | `biscuit-terminal` |
 | Shared render tree and target-agnostic layout/style types | `renderable` |
+
+## Expression-Function Catalog
+
+`darkmatter/docs/schemas/expression-functions.yaml` is the authored authority
+for expression-function descriptors. The library embeds and validates it once,
+then projects the public `expression_function_descriptors()` values with stable
+static lifetimes. Runtime handlers and aliases remain Rust-owned under
+`markdown/compose/expression/functions/`; do not duplicate handler-free
+descriptor metadata there.
 
 ## Trigger-Schema CLI Integration
 
@@ -482,11 +492,14 @@ cache is built. See `darkmatter/features/2026-07-04-dmls/plan.md`.
 
 ## Expression Function Registrations
 
-Expression callables are registered once in the owning module under
-`markdown/compose/expression/functions/`. A `FunctionRegistration` contains the
-canonical name, aliases, every overload descriptor, and a `FunctionHandler`
-kind (`Pure`, `Context`, or `Lazy`). Add a callable or overload to that domain
-slice; do not create a parallel dispatch or descriptor table.
+Expression callables are bound once in the owning module under
+`markdown/compose/expression/functions/`. A runtime-only `FunctionBinding`
+contains the canonical name, aliases, explicit evaluation mode, and optional
+handler pointer (`None` for lazy operators). The cached registry joins bindings
+to the authored catalog by canonical name with bidirectional parity and derives
+dispatch arity eligibility from catalog parameter shapes. Add descriptive
+metadata and overloads to the authored catalog; add executable behavior and
+aliases to the owning Rust domain slice.
 
 Public consumers must read the projected, handler-free catalog through
 `expression_function_descriptors()`. The accessor is backed by one `LazyLock`
