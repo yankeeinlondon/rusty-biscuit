@@ -81,6 +81,32 @@ details do not belong here.
   subagent with a successful commit on disk but no way to capture its hash
   for verification. Use `commit_status` (or similar) instead. The
   underlying commit is unaffected; the fix is to rename the local variable.
+- **Never proactively disable GPG signing in a subagent (2026-07-10
+  darkmatter 2-commit batch, stray `af09e75af`).** The repo has
+  `commit.gpgsign=true` and `tag.gpgsign=true` enabled at the global
+  git config level, so every `git commit` invocation in a subagent
+  implicitly attempts to sign. In a non-interactive session this is
+  racy: signing succeeds when `gpg-agent` has the passphrase cached,
+  and blocks indefinitely on `pinentry` when it does not. Verified
+  in the 2026-07-10 darkmatter 2-commit batch: subagent 1
+  (`6d28d5ae0 planning(darkmatter): archive 2026-07-09-godless-beauty
+  to _completed`) signed cleanly because the passphrase was cached
+  in `gpg-agent`; subagent 2 (`af09e75af docs(prompts): clarify plan
+  field description in plan prompt schema`) preemptively disabled
+  signing via `-c commit.gpgsign=false -c tag.gpgsign=false` to avoid
+  the perceived hang, producing an unsigned commit. The override
+  yielded a successful `git commit` (exit 0), but the commit landed
+  without a signature, weakening the audit chain silently (no record
+  in `git log` distinguishes it from a signed commit). Three
+  reinforcing points: (1) attempt the commit with the default signing
+  config first; if it hangs, abort and report to the orchestrator
+  instead of retrying with the override; (2) the existing rule "never
+  disable repository signing to bypass a failure" applies to
+  *proactive* overrides too — bypassing is bypassing regardless of
+  whether a failure has manifested yet; (3) if the orchestrator (or a
+  downstream human reviewer) later decides to accept an unsigned
+  commit, the subagent's report must make the unsigned state explicit
+  so the decision is visible in the trace.
 - **Never run `git commit --amend` after a successful commit in a concurrent
   batch (2026-07-09 dmls + darkmatter batch, stray `7873a9a05`).** Once
   `git commit` returns zero, treat the commit as final for that invocation.
