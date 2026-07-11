@@ -78,6 +78,17 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
     out
 }
 
+/// Builds the file-level diagnostic for a failed trigger-registry scan.
+pub fn trigger_load_diagnostic(error: &SchemaError) -> Diagnostic {
+    diagnostic(
+        zero_range(),
+        DiagnosticSeverity::ERROR,
+        source::SCHEMA,
+        code::SCHEMA_PREPARE,
+        error.to_string(),
+    )
+}
+
 /// A schema resolution/preparation failure, ranged at `$schema` (or the block).
 fn schema_prepare_diagnostic(
     ctx: &DocumentContext,

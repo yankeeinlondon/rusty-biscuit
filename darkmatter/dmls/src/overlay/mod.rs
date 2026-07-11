@@ -128,8 +128,28 @@ struct OverlayCache {
     /// Last transactionally loaded registry for each document walk within a
     /// boundary. A failed rescan leaves the previous value installed.
     trigger_registries: HashMap<(PathBuf, PathBuf), TriggerRegistry>,
+    /// Current failed transactional scan per discovery scope. This state is
+    /// independent of `trigger_registries` so failure ownership can change
+    /// without discarding the last-good registry.
+    trigger_load_errors: HashMap<(PathBuf, PathBuf), TriggerLoadError>,
+    /// Diagnostic ownership changes waiting for the router to publish them.
+    trigger_diagnostic_transitions: Vec<TriggerDiagnosticTransition>,
     /// Cached effective schema per document URI, invalidated by content hash.
     schema: HashMap<String, CachedSchema>,
+}
+
+#[derive(Clone)]
+struct TriggerLoadError {
+    path: PathBuf,
+    error: Arc<SchemaError>,
+}
+
+/// A trigger-load diagnostic that must be published or cleared.
+pub struct TriggerDiagnosticTransition {
+    /// Trigger envelope owning the diagnostic.
+    pub path: PathBuf,
+    /// The current load error, or `None` when a prior diagnostic must clear.
+    pub error: Option<Arc<SchemaError>>,
 }
 
 struct CachedSchema {
@@ -207,16 +227,37 @@ impl OverlayState {
             .and_then(Path::file_name)
             .is_some_and(|name| name == "schemas")
             && matches!(path.extension().and_then(|ext| ext.to_str()), Some("yaml" | "yml"))
-            && let Err(error) =
-                darkmatter::markdown::schemas::parse_trigger_envelope_from_str(text)
         {
-            return Some(DocumentOverlay {
-                ast: None,
-                stale: false,
-                parse_error: None,
-                schema: SchemaOutcome::Ready(None),
-                suggestions: SuggestionState::TriggerError(Arc::new(error)),
-            });
+            match darkmatter::markdown::schemas::parse_trigger_envelope_from_str(text) {
+                Err(error) => {
+                    return Some(DocumentOverlay {
+                        ast: None,
+                        stale: false,
+                        parse_error: None,
+                        schema: SchemaOutcome::Ready(None),
+                        suggestions: SuggestionState::TriggerError(Arc::new(error)),
+                    });
+                }
+                Ok(Some(_)) => {
+                    let mut cache = self.inner.lock().expect("overlay lock poisoned");
+                    cache.trigger_registry(path, workspace_roots);
+                    if let Some(error) = cache
+                        .trigger_load_errors
+                        .values()
+                        .find(|failure| failure.path == path)
+                        .map(|failure| Arc::clone(&failure.error))
+                    {
+                        return Some(DocumentOverlay {
+                            ast: None,
+                            stale: false,
+                            parse_error: None,
+                            schema: SchemaOutcome::Ready(None),
+                            suggestions: SuggestionState::TriggerError(error),
+                        });
+                    }
+                }
+                Ok(None) => {}
+            }
         }
 
         // Standalone SimplifiedSchema YAML envelope path. A standalone YAML
@@ -240,6 +281,12 @@ impl OverlayState {
         cache.last_good.remove(uri.as_str());
         cache.last_good_text.remove(uri.as_str());
         cache.schema.remove(uri.as_str());
+    }
+
+    /// Takes trigger-load diagnostic ownership changes since the last refresh.
+    pub fn take_trigger_diagnostic_transitions(&self) -> Vec<TriggerDiagnosticTransition> {
+        let mut cache = self.inner.lock().expect("overlay lock poisoned");
+        std::mem::take(&mut cache.trigger_diagnostic_transitions)
     }
 }
 
@@ -286,11 +333,38 @@ impl OverlayCache {
         let key = (boundary.clone(), document_dir);
         match scan_triggers(path, &boundary) {
             Ok(registry) => {
-                self.trigger_registries.insert(key, registry.clone());
+                self.trigger_registries.insert(key.clone(), registry.clone());
+                if let Some(previous) = self.trigger_load_errors.remove(&key) {
+                    self.trigger_diagnostic_transitions.push(TriggerDiagnosticTransition {
+                        path: previous.path,
+                        error: None,
+                    });
+                }
                 Some(registry)
             }
             Err(error) => {
                 tracing::warn!(path = %path.display(), %error, "retaining last-good trigger registry");
+                if let SchemaError::TriggerLoad { path, .. } = &error {
+                    let failure = TriggerLoadError {
+                        path: path.clone(),
+                        error: Arc::new(error),
+                    };
+                    let previous = self.trigger_load_errors.insert(key.clone(), failure.clone());
+                    if let Some(old) = previous.as_ref().filter(|old| old.path != failure.path) {
+                        self.trigger_diagnostic_transitions.push(TriggerDiagnosticTransition {
+                            path: old.path.clone(),
+                            error: None,
+                        });
+                    }
+                    if previous.as_ref().is_none_or(|old| {
+                        old.path != failure.path || old.error.to_string() != failure.error.to_string()
+                    }) {
+                        self.trigger_diagnostic_transitions.push(TriggerDiagnosticTransition {
+                            path: failure.path,
+                            error: Some(failure.error),
+                        });
+                    }
+                }
                 self.trigger_registries.get(&key).cloned()
             }
         }
@@ -719,6 +793,78 @@ mod tests {
             "a payload edit must retain the last-good registry and activation: {:?}",
             retained_report.problems
         );
+    }
+
+    #[test]
+    fn consecutive_failed_scans_transfer_diagnostic_ownership() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let schemas = root.join("schemas");
+        std::fs::create_dir(&schemas).unwrap();
+        let a_envelope = schemas.join("a.trigger.yaml");
+        let a_payload = schemas.join("a.yaml");
+        let b_envelope = schemas.join("b.trigger.yaml");
+        let b_payload = schemas.join("b.yaml");
+        std::fs::write(
+            &a_envelope,
+            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: a.yaml\n",
+        )
+        .unwrap();
+        std::fs::write(&a_payload, "$schema:\n  model: string(required)\n").unwrap();
+        std::fs::write(
+            &b_envelope,
+            "kind: trigger-schema\nmatch:\n  task: string(required)\n$schema: b.yaml\n",
+        )
+        .unwrap();
+        std::fs::write(&b_payload, "$schema:\n  provider: string(required)\n").unwrap();
+
+        let path = root.join("doc.md");
+        let text = "---\nprompt: hello\n---\n\nbody\n";
+        let state = OverlayState::default();
+        let doc: Uri = url::Url::from_file_path(&path).unwrap().as_str().parse().unwrap();
+        let roots = [root.to_path_buf()];
+
+        let initial = state
+            .for_document(&doc, text, &path, &DmlsConfig::default(), &roots)
+            .unwrap();
+        let initial_report =
+            ready_bundle(&initial).effective.validate(&ready_bundle(&initial).frontmatter_json);
+        assert!(
+            initial_report.problems.iter().any(|problem| problem.message.contains("model")),
+            "the matching trigger must contribute to the last-good schema: {:?}",
+            initial_report.problems
+        );
+
+        std::fs::remove_file(&a_payload).unwrap();
+        let failed_a = state
+            .for_document(&doc, text, &path, &DmlsConfig::default(), &roots)
+            .unwrap();
+        let transitions = state.take_trigger_diagnostic_transitions();
+        assert_eq!(transitions.len(), 1);
+        assert_eq!(transitions[0].path, a_envelope);
+        assert!(transitions[0].error.is_some());
+
+        std::fs::write(&a_payload, "$schema:\n  model: string(required)\n").unwrap();
+        std::fs::remove_file(&b_payload).unwrap();
+        let failed_b = state
+            .for_document(&doc, text, &path, &DmlsConfig::default(), &roots)
+            .unwrap();
+        let transitions = state.take_trigger_diagnostic_transitions();
+        assert_eq!(transitions.len(), 2);
+        assert_eq!(transitions[0].path, a_envelope);
+        assert!(transitions[0].error.is_none(), "A's obsolete diagnostic must clear");
+        assert_eq!(transitions[1].path, b_envelope);
+        assert!(transitions[1].error.is_some(), "B must own the current diagnostic");
+
+        for overlay in [&failed_a, &failed_b] {
+            let bundle = ready_bundle(overlay);
+            let report = bundle.effective.validate(&bundle.frontmatter_json);
+            assert!(
+                report.problems.iter().any(|problem| problem.message.contains("model")),
+                "a failed replacement scan must retain the last-good consumer schema: {:?}",
+                report.problems
+            );
+        }
     }
 
     #[test]

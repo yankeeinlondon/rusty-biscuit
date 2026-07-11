@@ -297,6 +297,24 @@ impl ServerState {
         for uri in self.documents.open_uris() {
             self.refresh_diagnostics(&uri);
         }
+        for transition in self.overlay.take_trigger_diagnostic_transitions() {
+            let Some(uri) = crate::workspace::file_path_to_uri(&transition.path) else {
+                continue;
+            };
+            // Open-buffer diagnostics are versioned and derive from the
+            // authoritative in-memory text. Transitions cover disk-backed
+            // envelopes that otherwise have no diagnostics request path.
+            if self.documents.is_open(&uri) {
+                continue;
+            }
+            let diagnostics = transition
+                .error
+                .as_deref()
+                .map(crate::diagnostics::frontmatter::trigger_load_diagnostic)
+                .into_iter()
+                .collect();
+            self.diagnostics.publish(uri, None, diagnostics);
+        }
     }
 
     /// The filesystem paths of all currently open buffers (buffer authoritative
