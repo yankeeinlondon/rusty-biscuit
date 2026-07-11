@@ -71,7 +71,53 @@ documentation:
   - .opencode/skill/claudine/architecture.md
 packages:
   - claudine
-  - claudine-cli
+source_files_during_phase_1:
+  - claudine/lib/src/composition/mod.rs
+  - claudine/lib/src/composition/schema/mod.rs
+  - claudine/lib/src/composition/schema/translate.rs
+  - claudine/lib/src/composition/schema/classify.rs
+  - claudine/lib/src/composition/schema/tests.rs
+docs_updated_during_phase_1:
+  - claudine/features/2026-07-11-module-structure/strong-plan.md
+  - .claude/skills/claudine/architecture.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+  - .claude/skills/claudine/architecture.md
+source_files_during_phase_2:
+  - claudine/lib/src/composition/mod.rs
+  - claudine/lib/src/composition/lifecycle/mod.rs
+  - claudine/lib/src/composition/lifecycle/parse.rs
+  - claudine/lib/src/composition/looping/mod.rs
+  - claudine/lib/src/composition/looping/actions.rs
+  - claudine/lib/src/composition/looping/config.rs
+  - claudine/lib/src/composition/looping/dsl.rs
+  - claudine/lib/src/composition/looping/engine.rs
+  - claudine/lib/src/composition/looping/engine/tests.rs
+  - claudine/lib/src/composition/looping/expression.rs
+docs_updated_during_phase_2:
+  - claudine/features/2026-07-11-module-structure/strong-plan.md
+  - .claude/skills/claudine/architecture.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/claudine/architecture.md
+source_files_during_phase_3:
+  - claudine/lib/src/composition/error/mod.rs
+  - claudine/lib/src/composition/json_util.rs
+  - claudine/lib/src/composition/lifecycle/action_shape.rs
+  - claudine/lib/src/composition/lifecycle/mod.rs
+  - claudine/lib/src/composition/lifecycle/parse.rs
+  - claudine/lib/src/composition/looping/actions.rs
+  - claudine/lib/src/composition/looping/config.rs
+  - claudine/lib/src/composition/looping/dsl.rs
+  - claudine/lib/src/composition/mod.rs
+  - claudine/lib/src/composition/prepare.rs
+  - claudine/lib/src/composition/reserved.rs
+  - claudine/lib/src/composition/sequence.rs
+  - claudine/lib/src/composition/types.rs
+docs_updated_during_phase_3:
+  - claudine/features/2026-07-11-module-structure/strong-plan.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 
 # Strong-Candidate Module-Structure Refactor — Execution Plan
@@ -245,14 +291,14 @@ facade, so no consumer outside `composition/` is affected.
 - Create: `claudine/lib/src/composition/schema/translate.rs`
 - Create: `claudine/lib/src/composition/schema/classify.rs`
 
-- [ ] `git mv schema_validation.rs schema/mod.rs`
-- [ ] What stays in `schema/mod.rs`: `InteractiveSchemaOptions` (68),
+- [x] `git mv schema_validation.rs schema/mod.rs`
+- [x] What stays in `schema/mod.rs`: `InteractiveSchemaOptions` (68),
       `prepare_direct_with_schema` (119), `prepare_inline_with_schema` (133),
       `prepare_with_schema` (146), `run_prepare` (164), `post_shell_validate`
       (408), `load_effective_schema` (534), `PreValidatedSchema` (1,258),
       `pre_validate_schema` (1,311). Plus `pub mod translate; pub mod classify;`
       declarations.
-- [ ] Make the cross-module helpers (`atom_for_property`, `is_required`,
+- [x] Make the cross-module helpers (`atom_for_property`, `is_required`,
       `provided_partial_value`, `is_eager_file_problem`,
       `interactive_shape_for_atom`, `min_max_constraints`,
       `string_length_constraints`, `type_label_for_atom`) `pub(super)` so
@@ -272,9 +318,9 @@ Move the compose-error translation cluster:
 - `source_with_dropped_optionals` (596), `options_with_dropped_optionals`
   (634), `filter_droppable_invalid_optionals` (664)
 
-- [ ] Prefix with `use super::*;` (or targeted `use super::{…}` for the
+- [x] Prefix with `use super::*;` (or targeted `use super::{…}` for the
       `pub(super)` entry-layer helpers it calls)
-- [ ] Verify: `just test` + `just lint`
+- [x] Verify: `just test` + `just lint`
 
 ### Step 1.3 — Carve classification + status layer into `schema/classify.rs`
 
@@ -294,25 +340,25 @@ Move the problem-categorization + status-report cluster:
   them; otherwise they stay `pub(super)` in `mod.rs` and both submodules
   import them.
 
-- [ ] Verify: `just test` + `just lint`
+- [x] Verify: `just test` + `just lint`
 
 ### Step 1.4 — Preserve the barrel facade in `composition/mod.rs`
 
-- [ ] Replace `pub mod schema_validation;` (34) with `pub mod schema;`
-- [ ] Replace `pub use schema_validation::{…}` (89) with
+- [x] Replace `pub mod schema_validation;` (34) with `pub mod schema;`
+- [x] Replace `pub use schema_validation::{…}` (89) with
       `pub use schema::{…}` — same exported names, consumers unchanged
-- [ ] Grep for any `::schema_validation` deep-path import outside
+- [x] Grep for any `::schema_validation` deep-path import outside
       `composition/`; if found, point it at the facade (none expected per
       the barrel analysis)
-- [ ] Verify: `just test` + `just lint`
+- [x] Verify: `just test` + `just lint`
 
 ### Phase 1 Exit Criteria
 
-- [ ] `just test` + `just lint` pass for claudine lib
-- [ ] `schema/mod.rs` is the entry/prepare layer (~600 lines)
-- [ ] `schema/translate.rs` is the translation layer (~400 lines)
-- [ ] `schema/classify.rs` is the classification + status layer (~650 lines)
-- [ ] No consumer outside `composition/` needed modification
+- [x] `just test` + `just lint` pass for claudine lib
+- [x] `schema/mod.rs` is the entry/prepare layer (~600 lines)
+- [x] `schema/translate.rs` is the translation layer (~400 lines)
+- [x] `schema/classify.rs` is the classification + status layer (~650 lines)
+- [x] No consumer outside `composition/` needed modification
 
 ---
 
@@ -338,7 +384,7 @@ barrel (`pub use` at 70–79) is the only consumer surface.
 - Create: `looping/dsl.rs` (carved from `config.rs`)
 - Modify: `composition/mod.rs`
 
-- [ ] Create `looping/mod.rs`:
+- [x] Create `looping/mod.rs`:
       ```rust
       mod engine;
       mod config;
@@ -352,11 +398,11 @@ barrel (`pub use` at 70–79) is the only consumer surface.
       pub use expression::*;
       ```
       (visibility tuned so the existing barrel names still resolve)
-- [ ] `git mv` each file into `looping/`; fix any `use super::…` paths that
+- [x] `git mv` each file into `looping/`; fix any `use super::…` paths that
       referenced the old `composition` parent to `use super::…` within the new
       parent (sibling references between the four files become
       `use super::{config, actions, expression}`)
-- [ ] The sibling `tests.rs` files (engine/tests.rs etc., created by C1) move
+- [x] The sibling `tests.rs` files (engine/tests.rs etc., created by C1) move
       with their parents; `#[cfg(test)] mod tests;` declarations travel
 
 ### Step 2.2 — Carve the DSL parsers out of `config.rs` into `dsl.rs`
@@ -383,27 +429,28 @@ What stays in `config.rs`: env resolution (`resolve_fail_fast_from_env`,
       `collect_identifiers`, `is_reserved_identifier`), condition parsing
       (`parse_condition`), and `json_type_name` (handled in Phase 3).
 
-- [ ] `config.rs` declares `mod dsl;` and calls into it; `dsl.rs` uses
+- [x] `config.rs` calls into the sibling `dsl` module declared by `looping/mod.rs`;
+      `dsl.rs` uses
       `super::*` for shared types (`LoopAction`, `CompositionError`,
       `ActionContext`)
-- [ ] Verify: `just test` + `just lint`
+- [x] Verify: `just test` + `just lint`
 
 ### Step 2.3 — Preserve the barrel facade in `composition/mod.rs`
 
-- [ ] Replace the four module declarations (26–29) with `pub mod looping;`
-- [ ] Replace the four `pub use loop_*::{…}` (70–79) with the equivalent
+- [x] Replace the four module declarations (26–29) with `pub mod looping;`
+- [x] Replace the four `pub use loop_*::{…}` (70–79) with the equivalent
       `pub use looping::{…}` — same exported names
-- [ ] Update internal `composition` references: `preflight.rs`, `prepare.rs`,
+- [x] Update internal `composition` references: `preflight.rs`, `prepare.rs`,
       `sequence.rs`, and the `lifecycle/` submodules that reference
       `super::loop_engine` etc. now reference `super::looping` (or the barrel)
-- [ ] Verify: `just test` + `just lint` across claudine lib + claudine-cli
+- [x] Verify: `just test` + `just lint` across claudine lib + claudine-cli
 
 ### Phase 2 Exit Criteria
 
-- [ ] `just test` + `just lint` pass
-- [ ] The loop family lives under `composition/looping/`
-- [ ] No consumer outside `composition/` needed modification
-- [ ] `config.rs` is env-resolution + key validation only; `dsl.rs` holds the
+- [x] `just test` + `just lint` pass
+- [x] The loop family lives under `composition/looping/`
+- [x] No consumer outside `composition/` needed modification
+- [x] `config.rs` is env-resolution + key validation only; `dsl.rs` holds the
       action parsers
 
 ---
@@ -430,14 +477,14 @@ in `lifecycle/validate.rs`).
   `composition/looping/actions.rs`, `composition/prepare.rs`,
   `composition/sequence.rs`
 
-- [ ] Create `json_util.rs` with:
+- [x] Create `json_util.rs` with:
       ```rust
       pub(crate) fn json_type_name(value: &serde_json::Value) -> &'static str { … }
       ```
-- [ ] Declare `pub(crate) mod json_util;` in `composition/mod.rs`
-- [ ] Delete the five private copies; replace call sites with
+- [x] Declare `pub(crate) mod json_util;` in `composition/mod.rs`
+- [x] Delete the five private copies; replace call sites with
       `super::json_util::json_type_name(…)` (or `crate::composition::json_util::…`)
-- [ ] Verify: `just test` + `just lint`
+- [x] Verify: `just test` + `just lint`
 
 ### Step 3.2 — Unify the index-annotating error wrappers
 
@@ -455,12 +502,12 @@ produce differs (`StackItem`-flavored vs `Action`-flavored), so they may not
 collapse to one fn — but the *pattern* (extract-index, rewrap) should live in
 one place.
 
-- [ ] If both produce the same variant shape, collapse to one generic
+- [x] If both produce the same variant shape, collapse to one generic
       `annotate_with_index(err, idx) -> CompositionError`
-- [ ] If they produce different variants (likely), extract only the shared
+- [x] If they produce different variants (likely), extract only the shared
       index-extraction logic and leave each variant constructor local — do not
       force a false unification
-- [ ] Verify: `just test`
+- [x] Verify: `just test`
 
 ### Step 3.3 — Introduce a reserved-roots registry
 
@@ -475,23 +522,23 @@ The three reserved checks guard different layers (verified fact #8). Do **not**
 collapse the predicates. Instead, give each layer one place to declare its
 reserved set and cross-reference the others:
 
-- [ ] `reserved.rs` holds the canonical string constants:
+- [x] `reserved.rs` holds the canonical string constants:
       `AMBIENT_VARIABLE_NAMES` (the five `_loop_*`), `EXPRESSION_RESERVED_ROOTS`
       (`true`/`false`/`doc`/`env`), `SET_ACTION_BLOCKLIST` (`loop`/`replace`),
       and re-exports `LATE_BINDING_ROOTS` from `lifecycle` (or moves it here and
       has `lifecycle` re-export — pick one owner, prefer `reserved.rs` as the
       single source)
-- [ ] `AmbientVariable::is_reserved`, `is_reserved_identifier`, and
+- [x] `AmbientVariable::is_reserved`, `is_reserved_identifier`, and
       `reject_reserved_property` query `reserved.rs` instead of inlining
       literals
-- [ ] Verify: `just test` + `just lint`
+- [x] Verify: `just test` + `just lint`
 
 ### Phase 3 Exit Criteria
 
-- [ ] `just test` + `just lint` pass
-- [ ] Exactly one `json_type_name` definition
-- [ ] Reserved string literals declared once in `reserved.rs`
-- [ ] No behavior change (all reserved-check tests pass)
+- [x] `just test` + `just lint` pass
+- [x] Exactly one `json_type_name` definition
+- [x] Reserved string literals declared once in `reserved.rs`
+- [x] No behavior change (all reserved-check tests pass)
 
 ---
 
