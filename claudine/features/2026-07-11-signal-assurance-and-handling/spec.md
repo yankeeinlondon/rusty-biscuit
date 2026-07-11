@@ -825,7 +825,7 @@ Notes:
     "throttled":   { "strategy": "wait_until_reset", "max_wait": "10m" },
     // decision-heavy families — typed option enums (§2.2):
     "usage_capped": { "option": "change_provider_else_wait",
-                      "map": "org-approved",       // named → repo-only + remote trust
+                      "map": "org-approved",       // named → repo-only, committed at HEAD
                       "time_limit": 30 },          // minutes
     "no_funds":     { "option": "none" },
     "auth_invalid": { "option": "change_provider" }  // unnamed → default map

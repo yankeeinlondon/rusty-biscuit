@@ -187,18 +187,18 @@ has an explicit `support`, config, schema, and runtime-injection contract.
 
 Current compiled-provider coverage is:
 
-| Provider | Native posture in current research | Claudine import/export | Runtime injection |
-|---|---|---:|---:|
-| Claude | import/sync plus native one-run config | yes | no |
-| Codex | import/sync | yes | yes |
-| Gemini | import/sync | yes | yes |
-| Goose | import/sync plus argv one-run activation | no | no |
-| Kimi | import/sync | no | no |
-| OpenCode | runtime injection | yes | yes |
-| Qwen | import/sync | no | no |
-| Kilo | runtime injection | no | no |
-| Pi | no native MCP | explicitly unsupported | no |
-| Antigravity | import/sync | no | no |
+| Provider    | Native posture in current research       | Claudine import/export | Runtime injection |
+| ----------- | ---------------------------------------- | ---------------------: | ----------------: |
+| Claude      | import/sync plus native one-run config   |                    yes |                no |
+| Codex       | import/sync                              |                    yes |               yes |
+| Gemini      | import/sync                              |                    yes |               yes |
+| Goose       | import/sync plus argv one-run activation |                     no |                no |
+| Kimi        | import/sync                              |                     no |                no |
+| OpenCode    | runtime injection                        |                    yes |               yes |
+| Qwen        | import/sync                              |                     no |                no |
+| Kilo        | runtime injection                        |                     no |                no |
+| Pi          | no native MCP                            | explicitly unsupported |                no |
+| Antigravity | import/sync                              |                     no |                no |
 
 The metadata spec had already identified Goose, Kimi, Qwen, and Claude runtime
 injection as unintended last-mile gaps
@@ -292,18 +292,18 @@ implementation disposition and fixture coverage.
 
 The following matrix describes Claudine behavior, not provider-native capability.
 
-| Provider | Skills | Commands/prompts | Agents/subagents | MCP |
-|---|---|---|---|---|
-| Claude | source-only implementation | source-only implementation | source-only implementation | import/export; no native one-run injector |
-| Codex | path/link metadata only | user Markdown prompt links; deprecated surface | **incorrectly treated as Markdown; native format is TOML** | import/export/runtime |
-| Gemini | branded-root links only; generic root omitted | TOML conversion absent | Markdown link path, semantics not mapped | wired but schema handling is unsafe |
-| Goose | relies on Claude compatibility scan | native recipe/config conversion absent | YAML conversion absent | no Claudine behavior |
-| Kimi | relies on compatibility roots | correctly not linked as custom command | YAML conversion absent | no Claudine behavior |
-| OpenCode | relies on Claude compatibility scan | direct Markdown links | direct Markdown links without semantic mapping | import/export/runtime |
-| Qwen | direct Markdown links | direct Markdown links | direct Markdown links without asymmetric mapping | no Claudine behavior |
-| Kilo | relies on Claude compatibility scan | direct Markdown links | direct Markdown links without semantic mapping | no Claudine behavior |
-| Pi | generic-root suppression only | direct Markdown prompt links | explicitly unsupported | explicitly unsupported |
-| Antigravity | invalid user path; repo direct link | skill-derived command rewrite absent | inventory/support absent | no Claudine behavior |
+| Provider    | Skills                                        | Commands/prompts                               | Agents/subagents                                           | MCP                                       |
+| ----------- | --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------- |
+| Claude      | source-only implementation                    | source-only implementation                     | source-only implementation                                 | import/export; no native one-run injector |
+| Codex       | path/link metadata only                       | user Markdown prompt links; deprecated surface | **incorrectly treated as Markdown; native format is TOML** | import/export/runtime                     |
+| Gemini      | branded-root links only; generic root omitted | TOML conversion absent                         | Markdown link path, semantics not mapped                   | wired but schema handling is unsafe       |
+| Goose       | relies on Claude compatibility scan           | native recipe/config conversion absent         | YAML conversion absent                                     | no Claudine behavior                      |
+| Kimi        | relies on compatibility roots                 | correctly not linked as custom command         | YAML conversion absent                                     | no Claudine behavior                      |
+| OpenCode    | relies on Claude compatibility scan           | direct Markdown links                          | direct Markdown links without semantic mapping             | import/export/runtime                     |
+| Qwen        | direct Markdown links                         | direct Markdown links                          | direct Markdown links without asymmetric mapping           | no Claudine behavior                      |
+| Kilo        | relies on Claude compatibility scan           | direct Markdown links                          | direct Markdown links without semantic mapping             | no Claudine behavior                      |
+| Pi          | generic-root suppression only                 | direct Markdown prompt links                   | explicitly unsupported                                     | explicitly unsupported                    |
+| Antigravity | invalid user path; repo direct link           | skill-derived command rewrite absent           | inventory/support absent                                   | no Claudine behavior                      |
 
 No row is complete across all four surfaces. Skills have the broadest native
 convergence, but the inventory/canonical/precedence layer is still incomplete. Commands
