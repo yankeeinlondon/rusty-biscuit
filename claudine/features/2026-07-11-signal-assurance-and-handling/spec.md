@@ -1,6 +1,7 @@
 ---
 created: 2026-07-11
-status: DRAFT (finalized) — 17 rulings ratified; §Proposed Resolutions carries PROPOSAL-marked answers to the remaining questions, awaiting review
+reviewed: true
+status: ready for planning and implementation
 ---
 
 # Signal Assurance and Configurable Handling
@@ -35,9 +36,14 @@ providers additionally classify overload vocabulary in their stream parsers
 (`SemanticErrorKind`), but that layer feeds rendering, not signals.
 
 This spec addresses both gaps as two workstreams that share one contract:
-**every critical signal is either detected, researched-and-attested-absent,
+**every critical signal is either detected, researched and attested absent,
 or loudly flagged — and every detected critical signal has a configurable
 handling strategy with a sensible default.**
+
+In this document, **signal** always means a diagnostic `SignalEvent`, not an
+operating-system process signal such as `SIGINT`. Process-signal behavior is
+an input to the handling engine's cancellation contract but is otherwise
+unchanged.
 
 ---
 
@@ -181,15 +187,17 @@ not_found:
     reason: "exec --json flattens ServerOverloaded to message text; no
              stable discriminator found at rust-v0.142.5"
     confidence: source_code              # same ladder as records
+    verified_against: "rust-v0.142.5"
 ```
 
 **(b) Codegen enforces the contract.** `claudine-gen generate` (and the
 CI drift check) computes, per provider: `critical ∖ (records ∪ not_found)`.
 A non-empty set is a **generate-time error** — the pipeline refuses to
-produce a `data.rs`/signal table for a provider that neither detects nor
-attests a critical signal. Expected-tier gaps produce warnings in the
-generate report. `not_found` attestations are stamped into the generated
-table (so the runtime knows the difference between "absent, attested" and
+produce provider metadata when a provider neither detects nor attests a
+critical signal. Expected-tier gaps produce warnings in the generate
+report. `not_found` attestations are stamped into generated provider
+metadata (not into a second runtime detection table), so the runtime knows
+the difference between "absent, attested" and
 "absent, unresearched" — relevant for §1.5 alerting).
 
 **(c) A coverage report command.** `claudine signals coverage` renders the
@@ -252,6 +260,16 @@ state is an **attested absence**, and the user must see it:
 - An *unattested* gap (should be impossible once the generate gate lands)
   renders as an error-severity cell — it means someone bypassed the
   pipeline.
+
+Attestations are versioned evidence, not permanent waivers. Each
+`not_found` entry must carry `verified_against`, using the provider version
+already captured by the research document. When the installed provider's
+major version exceeds that value, coverage reports render the attestation
+as **stale / re-verify**. Staleness remains non-blocking so a provider update
+cannot break unrelated CI, but it is included in the next fleet research
+worklist. Versions are compared through the generated provider-version
+parser; an installed or attested version that cannot produce a numeric
+major is conservatively stale rather than silently current.
 
 ---
 
@@ -318,7 +336,7 @@ Mechanics:
   layers; lifecycle `retry` budgets and config strategy budgets are tracked
   separately but draw from the same clock.
 - `start` re-fires on every config-driven attempt (per-attempt heartbeat,
-  no error semantics — see Proposed Resolutions #3).
+  no error semantics — see Review Decision #3).
 
 > **RULING (2026-07-11): `finalize` becomes purely observational.** With the
 > hoisting, `finalize` **loses its recovery dispatch**: its stack may no
@@ -371,7 +389,7 @@ pub struct HandlingMeta {
     resumed: bool,
     /// Audit trail for named-map substitution decisions:
     /// which config version supplied the map.
-    map_source: Option<MapSource>, // "repo-remote" | "repo-local" | "user"
+    map_source: Option<MapSource>, // "repo-committed" | "repo" | "user"
 }
 ```
 
@@ -393,6 +411,12 @@ In events that fire *before* config handling (`failure`, `success` on a
 retried attempt), `handler` reflects handling completed *so far* — e.g. a
 `success` stack after a prompt-stack retry sees
 `handler.source == 'prompt'`.
+
+`Handler::NoError` and `Handler::NotHandled` are falsey; only
+`Handler::Handled(_)` is truthy. Projections from either falsey state yield
+`null`, following the existing late-binding null-propagation rules. The
+serialized expression names are stable snake_case values (`no_error`,
+`not_handled`, `handled`; sources `prompt`, `configuration`).
 
 ### 2.2 The grouping axis: dispositions, not signals
 
@@ -460,7 +484,7 @@ pub enum UsageCapHandlingOptions {
     /// - Unnamed → the _default_ ProviderMap, looked up in both user and
     ///   repo scoped configurations.
     /// - Named → repo configuration ONLY (user scope ignored), with the
-    ///   remote-trust constraint of §2.4b.
+    ///   committed-revision constraint of §2.4b.
     /// - When the referenced map (default when unnamed) cannot be found —
     ///   or matches no entry for the failed agent/model — **warn + fail
     ///   fast** (ruling, 2026-07-11). Only `ChangeProviderElseWait`
@@ -475,6 +499,12 @@ pub enum UsageCapHandlingOptions {
     ChangeProviderElseWait(Option<String>, Option<u32>),
 }
 ```
+
+`WaitForCap` requires a future, valid `lifts_at`. A missing, malformed, or
+already-past reset time warns and fails fast; it never guesses a sleep
+duration. The wait is clamped to the strategy's time limit and the run's
+remaining wall-clock timeout. `ChangeProviderElseWait` follows the same rule
+when it reaches its wait branch.
 
 > **RULING (2026-07-11): sibling enums.** `NoFunds` and `AuthInvalid` get
 > their own typed enums, both `None | ChangeProvider(Option<String>)` in
@@ -580,6 +610,11 @@ work the failed attempt already did. Mechanism:
     window, so the message **becomes the new prompt** that kicks off the
     resumed session.
 
+Any handling entry may set an optional `message` override. `message: ""`
+explicitly suppresses the catalog default. In v1 only the session-limit
+family has non-empty defaults; overload and throttle errors commonly happen
+before generation, so claiming that partial work exists would be misleading.
+
 Ratified defaults for the session-limit family:
 
 - Retry:
@@ -591,8 +626,7 @@ Ratified defaults for the session-limit family:
   > session limits being hit before the task was able to adequately
   > complete the work.`
 
-*(Override surface: see Proposed Resolutions #1 — optional `message` key
-on any handling entry; non-session-limit kinds default to empty in v1.)*
+### 2.3 Mechanical handling strategies
 
 Per the two-philosophies ruling (§2.2), this generic table now covers the
 **mechanical families only** (`Transient`, `Throttled`); the decision-heavy
@@ -606,7 +640,7 @@ typed enums' `ChangeProvider*` variants):
 | `fail_fast` | No config-layer recovery. Surface immediately to lifecycle/terminal error. | any (it's the escape hatch) | — |
 | `delayed_retry` | Wait a fixed delay, retry **once**, then fail. | `Transient` | `delay` (default `15s`) |
 | `incremental_retry` | Retry with growing delay up to a cap. | `Transient` | `initial_delay` (`5s`), `multiplier` (`2.0`), `max_attempts` (`4`), `max_delay` (`2m`), `jitter` (bool) |
-| `wait_until_reset` | Sleep until the signal's own `reset_at`/`retry_after`, then **resume** the session where possible, degrading to retry (§2.2 ruling); fall back to `incremental_retry` semantics when the payload carries no time. | `Throttled` | `max_wait` (`30m` — beyond it, fail), `fallback_delay` |
+| `wait_until_reset` | Sleep until the signal's own `reset_at`/`retry_after`, then **resume** the session where possible, degrading to retry (§2.2 ruling). It permits one post-wait launch. If the payload has no usable time, wait `fallback_delay` and launch once; a repeated throttle then fails. | `Throttled` | `max_wait` (`30m` — beyond it, fail), `fallback_delay` (`15s`) |
 | `defer` *(reserved)* | Queue the prompt with the Rendezvous daemon for scheduled re-execution. Config-layer counterpart of the lifecycle `defer` verb; surfaces not-implemented until the backend lands. | `Throttled` with a distant reset | `at` / `after` |
 
 > **RULING (2026-07-11): transient retries stay on the same model.**
@@ -618,7 +652,7 @@ typed enums' `ChangeProvider*` variants):
 > a typed-enum decision on the decision-heavy families — the mechanical
 > table has no `change_provider` at all.
 
-Built-in defaults (proposal — deliberately conservative):
+Built-in defaults (deliberately conservative):
 
 - `Transient` → `incremental_retry` (initial `5s`, ×2, 4 attempts),
   same agent, same model — *this alone fixes the motivating incident for
@@ -664,11 +698,15 @@ sketch) expresses that ordered preference:
 }
 ```
 
-Match/walk semantics (open for debate):
+Match/walk semantics:
 
 - **Entry match**: first `when` clause matching the *failed* `(agent,
-  model)` wins; `model` patterns use the same fuzzy/glob conventions as
-  provider fuzzy matching. A map with no matching entry = no change.
+  model)` wins. `agent` is either an exact canonical provider name or `*`;
+  `model` is an anchored glob where `*` matches zero or more characters
+  and `?` matches one character. Matching is ASCII case-insensitive, as
+  model identifiers are. No fuzzy/contains matching is permitted in policy
+  because a typo must not silently select a different provider. A map with
+  no matching entry means no change.
 - **Candidate walk**: candidates are tried in order. A candidate that fails
   with a condition in the same disposition group advances to the next; a
   candidate that fails otherwise surfaces that failure. Candidate omitting
@@ -685,47 +723,37 @@ Match/walk semantics (open for debate):
   records the full hop chain so `claudine logs` can report change-provider
   frequency per provider.
 
-### 2.4a Default vs. named maps — scoping (ruling, 2026-07-11)
+### 2.4a Default vs. named maps — scoping
 
 - **Default map** (`ChangeProvider(None)`): resolved from **both** user and
-  repo scoped configurations (merge precedence: open question — repo-wins
-  vs. user-wins vs. key-wise merge).
+  repo scoped configurations. Entry lists are concatenated repo-first and
+  first-match wins. Entries are atomic; there is no entry-level deep merge.
 - **Named map** (`ChangeProvider(Some("overnight"))`): resolved from the
   **repo configuration only**; user scope is ignored entirely.
 
-### 2.4b Named-map remote-trust constraint (ruling, 2026-07-11)
+### 2.4b Named-map committed-revision constraint
 
-Named maps exist so a company/organization can control how agent/model
-substitution is managed — ensuring replacements meet company requirements
-and are of comparable capability to the capped agent/model. That control is
-only meaningful if the map actually reflects the *reviewed, accepted* state
-of the repo, not somebody's local edit. Therefore, when resolving a
-**named** map, if the repo's configuration file is **dirty in git** or its
-current state **exists only locally** (not on the remote):
+Named maps exist so a repository can govern agent/model substitution. A
+named map is therefore read from the `.claudine/config.json` blob committed
+at the current `HEAD`, never from the working-tree copy. If the file is
+untracked or absent at `HEAD`, no named map matches and Claudine warns. If
+the working-tree file differs, Claudine warns that local changes were
+ignored. The default map remains a personal/local convenience surface and
+uses normal merged configuration.
 
-- **With network access to the git remote**: resolve the named map from the
-  **remote's version** of the configuration, and warn the user that this
-  substitution happened.
-- **Without network access to the remote**: match **no** named maps at all,
-  and warn the user.
+Repository discovery uses `sniff`; committed-blob access uses an in-process,
+cross-platform git library and never shells out to `git`.
 
-Notes recorded with the ruling:
-
-- This safeguard is not foolproof — it *encourages* organizational
-  consistency; it does not enforce it. It presumes the org has adequate
-  review gates on changes to the repo config reaching the remote's `main`.
-- Named maps may have other uses that don't need this constraint, but maps
-  should change rarely, so the constraint is not a burden and is worth
-  keeping to preserve the organizational-control benefit.
-- The **default** map is deliberately exempt: it is a personal/local
-  convenience surface and follows normal config semantics.
-
-*(Implementation open questions: which remote ref is authoritative — the
-remote default branch (`origin/HEAD`) or the current branch's upstream?
-What counts as "the configuration file" for dirtiness — only
-`.claudine/config.json`, or any file it references? Is the remote read a
-live fetch per run (cost) or a cached-with-TTL read of the already-fetched
-`origin/*` refs?)*
+> **Reader's note — review revision:** the draft required a live fetch from
+> the remote default branch when local state was dirty or unpushed. That
+> design put network latency, credentials, remote naming, and offline
+> failure into the recovery path and still could not prove organizational
+> approval. Reading the current committed blob is deterministic, offline,
+> cross-platform, and gives the runtime an honest contract: "committed in
+> the revision being executed." Branch protection and review remain the
+> repository host's responsibility. A future cryptographically attested
+> policy bundle can strengthen this guarantee without changing map
+> semantics.
 
 ### 2.5 Runtime wiring (the missing signal-to-handler bridge)
 
@@ -746,8 +774,8 @@ dispatch falls through (with `finalize` deferred until handling concludes):
 
 ```
 AttemptOutcome + drained ObservedSignals   (failure fired, no lifecycle
-    → highest-priority handling-relevant    recovery; finalize deferred)
-      signal (if any)
+    → select the handling-relevant          recovery; finalize deferred)
+      signal by explicit precedence
     → its Disposition
     → configured HandlingStrategy
     → Retry-with-delay | Wait-until | Change-provider hop | Surface
@@ -760,9 +788,24 @@ Notes:
 - Signals are already available before summary emission (the hub is drained
   in the wrapper attempt path); the change is threading them into the
   attempt-outcome decision rather than past it.
-- Precedence among multiple fired signals reuses the record `priority`
-  ordering (the same mechanism that makes Codex's `usage_capped` records
-  beat its generic `rate_limit` record today).
+- Detection-record `priority` is scoped to records of the same signal kind;
+  it is not a cross-kind severity order. Handling uses this explicit
+  precedence, from strongest safety constraint to weakest:
+  `Interrupted` → runaway/exit/taint guards → `AuthInvalid` → `NoFunds` →
+  `UsageCapped` → session limits → `RateLimited` → transient kinds. User
+  interruption suppresses config handling entirely. If two kinds at the
+  same level fire, the most recently observed event wins and all events
+  remain in the summary for diagnosis.
+- Selection is **attempt-local**. At attempt completion the hub produces an
+  immutable snapshot for classification and separately appends those events
+  to the run-level audit summary. The next attempt starts with an empty
+  handling snapshot, so a prior overload cannot cause a later unrelated
+  failure to retry.
+- Config handling is eligible only when the attempt failed and its selected
+  signal is causally terminal. Informational signals observed during an
+  otherwise successful attempt never trigger handling. A provider's
+  non-zero exit plus a matched terminal diagnostic is sufficient causality;
+  an earlier diagnostic followed by a provider success is not.
 - The stream parsers' `SemanticErrorKind` layer stays what it is
   (rendering); handling keys off signals only. Where a provider's overload
   vocabulary exists in a parser but not as a detection record, Part 1's
@@ -780,7 +823,6 @@ Notes:
                      "initial_delay": "5s", "multiplier": 2.0,
                      "max_attempts": 4, "max_delay": "2m" },
     "throttled":   { "strategy": "wait_until_reset", "max_wait": "10m" },
-    "needs_input": { "strategy": "fail_fast" },
     // decision-heavy families — typed option enums (§2.2):
     "usage_capped": { "option": "change_provider_else_wait",
                       "map": "org-approved",       // named → repo-only + remote trust
@@ -800,17 +842,32 @@ Notes:
 - Frontmatter surface (per-document override) is deliberately minimal in
   v1: `handling: { map: <name> }` and `handling: false` (= `fail_fast`
   everything, "my lifecycle stacks own recovery").
+- `max_attempts` means total provider launches in that strategy, including
+  the failed launch that selected it. Consequently the built-in transient
+  default of `4` permits at most three additional launches. Zero is invalid.
+  The session-limit enum's continuation/retry counts remain *additional*
+  attempts because those fields are explicitly named maximum continuations
+  or retries.
+- Retry jitter uses bounded full jitter in `[0, computed_delay]`; tests use
+  an injectable clock and deterministic RNG. Waiting and backoff are async,
+  cancellation-aware operations on every OS and must not block a runtime
+  worker thread.
+- Config handling is bypassed for user interruption, lifecycle `stop` or
+  `skip`, policy/protect denial, schema/preparation failure, and the
+  `claudine-contract` adapter. The adapter retains hard fail-fast behavior;
+  its callers own latency and retry policy. Signal detection and logging
+  remain enabled in all bypass cases.
 
 ---
 
-## Phasing (proposal)
+## Phasing
 
 | Phase | Contents | Unblocks |
 |---|---|---|
 | **A** | Criticality tier in `catalog-types`; sidecar `not_found` schema; `claudine signals coverage` command; coverage matrix baseline committed | visibility |
 | **B** | Research fleet re-run for critical-signal gaps (Codex `ProviderOverloaded` first — the motivating fix); generate-time coverage gate; `signals check` evidence rule | detection |
 | **C** | Disposition mapping ratified; mechanical-family `handling` config + strategy engine (`fail_fast`/`delayed_retry`/`incremental_retry`/`wait_until_reset`) wired into the harness attempt loop; `failure`-once + `finalize` hoisting + `handler` global; built-in defaults live | the incident never recurs |
-| **D** | `ProviderMap` (incl. named-map remote-trust); typed option enums for the decision-heavy families (`UsageCapHandlingOptions` + siblings); logs reporting of hops | cap/auth resilience |
+| **D** | `ProviderMap` (including named-map committed-revision reads); typed option enums for the decision-heavy families (`UsageCapHandlingOptions` + siblings); logs reporting of hops | cap/auth resilience |
 | **E** | Lifecycle-driven research gap follow-up (resume-based); wrap-time attested-absence notices | pipeline self-healing |
 
 Phase C is deliberately shippable *before* provider maps: retry strategies
@@ -840,10 +897,9 @@ alone resolve the motivating incident class.
 5. **Wait-and-resume degrades to retry** — resume the interrupted session
    where the provider supports non-interactive resume; re-run from scratch
    where it does not (§2.2).
-6. **Named `ProviderMap`s are org-governed** — named maps resolve from repo
-   config only, verified against the git remote when the local config is
-   dirty or unpushed (remote version used when reachable, no match when
-   offline — warned either way). The default map is exempt (§2.4a/§2.4b).
+6. **Named `ProviderMap`s are revision-governed** — named maps resolve from
+   the repo config committed at the current `HEAD`; working-tree changes are
+   ignored with a warning. The default map is exempt (§2.4a/§2.4b).
 7. **`finalize` is purely observational** — post-hoisting, `finalize`
    loses its recovery dispatch (parse-time placement error); recovery
    lives in `failure`/`blocked` stacks and config handling only (§2.1).
@@ -887,7 +943,7 @@ alone resolve the motivating incident class.
     resume sends it as the new kick-off prompt; session-limit defaults
     ratified (§2.2b).
 
-## Proposed Resolutions (PROPOSAL — awaiting review; not rulings)
+## Review Decisions
 
 1. **Recovery-message override surface (§2.2b).** An optional `message`
    key on any handling entry overrides the signal kind's default recovery
@@ -916,22 +972,11 @@ alone resolve the motivating incident class.
    Consistent with lifecycle-driven retries today. Only `failure` (once,
    Ruling #10) and `finalize` (once, Rulings #1/#7) are special-cased.
 
-4. **Remote-trust mechanics (§2.4b).**
-   - *Authoritative ref:* the **remote default branch** (`origin/HEAD`
-     resolution, falling back to `origin/main`/`origin/master` probing) —
-     NOT the current branch's upstream. The governance story is "what the
-     org reviewed into main," and a feature branch's upstream is exactly
-     the thing that hasn't been reviewed yet.
-   - *Dirtiness scope:* only `<repo>/.claudine/config.json` itself —
-     dirty in the working tree, or its HEAD blob differing from the
-     remote-default-branch blob (the "local-only state" case).
-   - *Network:* when (and only when) the trust check is triggered, attempt
-     a fetch of the remote default branch with a short timeout (~5s) via
-     gix (pure-Rust, matching the sniff migration precedent); on success
-     read the config blob from the fetched ref, on failure take the
-     offline path (no named-map match, warned). Result cached per run —
-     at most one fetch per wrapped execution, and none at all when the
-     local config is clean and pushed.
+4. **Named-map revision mechanics (§2.4b).** Read only the
+   `.claudine/config.json` blob at the current `HEAD`. Do not fetch or invoke
+   credential helpers in the run path. Ignore and warn on working-tree
+   differences; an absent committed blob means no named-map match. This is
+   revision governance, not a claim that the revision was remotely reviewed.
 
 5. **Default-map merge precedence.** Entry-list concatenation, **repo
    entries first**, first-matching-`when` wins. This keeps the org theme
@@ -968,6 +1013,19 @@ alone resolve the motivating incident class.
    before the execution header), and the notice is advisory, not
    actionable-before-run. `--silent` suppresses it; it renders at most
    once per session.
+
+9. **Handling arbitration.** Matcher priority remains an intra-kind
+   detection detail. Cross-kind handling uses the explicit safety-first
+   precedence in §2.5, and only attempt-local terminal signals participate.
+
+10. **Attempt counting and cancellation.** Mechanical `max_attempts`
+    includes the triggering launch; waits use async cancellation-aware
+    primitives with injectable time/randomness for deterministic tests.
+
+11. **Embedding boundary.** `claudine-contract`, user interruptions,
+    policy/protect denials, and preparation failures bypass config handling.
+    This prevents hidden latency and prevents safety decisions from being
+    reinterpreted as recoverable provider failures.
 
 ## Follow-up work items (out of scope for this spec)
 
