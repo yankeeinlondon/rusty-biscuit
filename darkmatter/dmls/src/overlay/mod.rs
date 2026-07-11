@@ -675,6 +675,53 @@ mod tests {
     }
 
     #[test]
+    fn trigger_payload_edit_retains_last_good_registry() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_trigger_fixture(root);
+        let path = root.join("doc.md");
+        let good = "---\nprompt: hello\n---\n\nbody\n";
+        let state = OverlayState::default();
+        let doc: Uri = url::Url::from_file_path(&path).unwrap().as_str().parse().unwrap();
+        let roots = [root.to_path_buf()];
+
+        // Seed: the trigger activates and contributes its `model` required
+        // property, so the document is invalid (missing `model`).
+        let first = state
+            .for_document(&doc, good, &path, &DmlsConfig::default(), &roots)
+            .unwrap();
+        let first_report =
+            ready_bundle(&first).effective.validate(&ready_bundle(&first).frontmatter_json);
+        assert!(
+            first_report.problems.iter().any(|p| p.message.contains("model")),
+            "initial activation must contribute the `model` required property: {:?}",
+            first_report.problems
+        );
+
+        // Edit the PAYLOAD file to an invalid shape (root union). The envelope
+        // is untouched; only the payload becomes non-mergeable. `scan` must now
+        // fail, so the last-good registry is retained — the document must NOT
+        // flap to `SchemaOutcome::Failed` and must keep the prior activation.
+        std::fs::write(
+            root.join("schemas/prompt.yaml"),
+            "$schema:\n  - model: string(required)\n  - title: string(required)\n",
+        )
+        .unwrap();
+
+        let retained = state
+            .for_document(&doc, good, &path, &DmlsConfig::default(), &roots)
+            .unwrap();
+        let retained_report = ready_bundle(&retained)
+            .effective
+            .validate(&ready_bundle(&retained).frontmatter_json);
+        assert!(
+            retained_report.problems.iter().any(|p| p.message.contains("model")),
+            "a payload edit must retain the last-good registry and activation: {:?}",
+            retained_report.problems
+        );
+    }
+
+    #[test]
     fn dialect_family_matches_cli_parity_corpus() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
