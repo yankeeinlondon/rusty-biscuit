@@ -53,6 +53,21 @@ impl WrapperProfile for GooseWrapper {
         None
     }
 
+    fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
+        // Explicit `--session-id` is mandatory: plain `goose run --resume`
+        // selects globally (not repo-scoped) and name-based selection can
+        // drop the session's saved provider/model metadata
+        // (session-resumption research, 2026-07-03). The `run` entrypoint is
+        // included so `prompt_delivery` inserts `-t <prompt>` after it.
+        Ok(vec![
+            "goose".to_string(),
+            "run".to_string(),
+            "--resume".to_string(),
+            "--session-id".to_string(),
+            session_id.to_string(),
+        ])
+    }
+
     fn prompt_delivery(
         &self,
         args: &[String],

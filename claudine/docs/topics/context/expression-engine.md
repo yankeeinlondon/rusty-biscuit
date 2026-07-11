@@ -93,8 +93,8 @@ The function forms `and(...)` / `or(...)` are valid in *both* modes.
 
 ## Functions
 
-Functions are the extensible part of the language. They are registered in
-domain-owned typed registration slices under
+Functions are the extensible part of the language. Each domain owns an
+authoritative typed registration slice under
 `darkmatter/lib/src/markdown/compose/expression/functions/`:
 
 - `FunctionHandler::Pure` — functions resolved by `dispatch()` (type predicates,
@@ -103,15 +103,15 @@ domain-owned typed registration slices under
 - `FunctionHandler::Context` — functions resolved by `dispatch_fs()` that need
   a `ResolutionContext` (`absolute`, `relative`, `file_exists`, `frontmatter`,
   `markdown_body_empty`, `markdown_title`, `validate_schema`).
-- **Lazy logical operators** — `and(...)` / `or(...)`, which short-circuit and
-  therefore use `FunctionHandler::Lazy` instead of the eager dispatchers.
+- `FunctionHandler::Lazy` — `and(...)` / `or(...)`, which short-circuit and
+  therefore cannot go through the eager dispatchers.
 
-Each registration carries the full set of **signatures** it answers to,
+Each registration carries the full set of typed **descriptors** it answers to,
 including overloads and optional/variadic arity:
 
 ```rust
-PureFunction { canonical: "number", aliases: &[], signatures: &["number(x, [default])"], handler: number_fn }
-FsFunction   { canonical: "frontmatter", aliases: &[], signatures: &["frontmatter(file)", "frontmatter(file, prop)"], handler: … }
+FunctionRegistration { canonical: "number", aliases: &[], descriptors: &[...], handler: FunctionHandler::Pure(number_fn) }
+FunctionRegistration { canonical: "frontmatter", aliases: &[], descriptors: &[..., ...], handler: FunctionHandler::Context(frontmatter_fn) }
 ```
 
 These tables are the single source of truth for *what the evaluator recognizes*.
@@ -146,10 +146,11 @@ committed doc diverges from the catalog output.
 
 ## How to add an expression function
 
-1. **Implement and register it.** Add the handler and one `FunctionRegistration`
-   to the owning domain module, listing every descriptor/overload there.
-2. The `--expressions` function table needs **no change** — it reads
-   `expression_function_descriptors()`.
+1. **Implement and register it.** Add the handler and its
+   `FunctionRegistration` to the owning domain module, listing every descriptor
+   and overload on that one registration.
+2. The `--expressions` function table needs **no change** — it reads the
+   registration projection through `expression_function_descriptors()`.
 
 ## Drift control for the function catalog
 

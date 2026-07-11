@@ -1,0 +1,49 @@
+# SimplifiedSchema for the agent-models research topic.
+#
+# Referenced by each provider research document via `$schema: ./_schema.yaml`.
+# The root `$schema:` key is REQUIRED — it is how darkmatter's resolver
+# classifies this file as a SimplifiedSchema rather than raw JSON Schema
+# (a bare property mapping would validate vacuously).
+#
+# Nested shapes use quoted inline-object literals — YAML-native nested
+# mappings are rejected by the SimplifiedSchema parser today.
+$schema:
+    created: date
+    last_updated: date(required)
+    agent: string(required)
+    model: string(required)
+
+    # Does the provider publish a schema for its model configuration?
+    has_official_schema: enum(formal,informal,none; required)
+    schema_url: url
+
+    # One record per model available out of the box (feeds expected_offerings).
+    # `id` is the exact string the CLI/config accepts.
+    default_models: "{ id: string(required), alias: string, context_window: number, is_default: boolean, notes: string }[]"
+
+    # One record per mechanism for selecting a model at launch/runtime
+    # (feeds model_cli_flag / model_env_vars / wire-envelope knowledge).
+    # `site` is exactly ONE canonical token: the long-form flag (`--model`), a
+    # single env var (`UPPER_SNAKE_CASE`), config key, or slash command — NEVER a
+    # compound like `"--model / -m"` (the generator skips compound sites, and a
+    # semantically-wrong alternate can win). Put short/alternate forms (`-m`) in
+    # `aliases` so they are captured without polluting `site`.
+    model_selection: "{ method: enum(cli_flag,env_var,config_file,interactive_command,wire_envelope; required), site: string(required), aliases: string[], example: string, notes: string }[]"
+
+    # Highest-wins ordering across the model_selection mechanisms.
+    precedence: string
+
+    # Can the CLI enumerate its model catalog programmatically?
+    # (feeds model_catalog_source / ModelCatalogSource) — capture the mechanism
+    # STRUCTURALLY, not just as prose, so the generator can build a catalog
+    # source without a hand-authored override:
+    #   `list_program` + `list_args` = the exact shell listing command split into
+    #     the executable and its argument tokens (e.g. program `kilo`, args
+    #     `["models"]`) → ModelCatalogSource::ShellCommand.
+    #   `rest_endpoint` = an HTTP listing endpoint when that is the mechanism.
+    # `method`/`example` stay as the human-readable description.
+    dynamic_listing: "{ available: boolean(required), list_program: string, list_args: string[], rest_endpoint: url, method: string, example: string }"
+
+    changes: string[]
+    requires_claudine_update: boolean(required)
+    reason: string

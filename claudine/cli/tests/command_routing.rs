@@ -69,11 +69,15 @@ fn hooks_support_command_routes_without_detected_agents() {
 
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(
-        stdout.contains("Event") || stdout.contains("Table could not be rendered"),
+        stdout.contains("Event"),
         "unexpected hooks support output: {stdout}"
     );
     assert!(
-        stdout.contains("SessionStart") || stdout.contains("hook support"),
+        !stdout.contains("Table could not be rendered"),
+        "support view must chunk instead of refusing: {stdout}"
+    );
+    assert!(
+        stdout.contains("SessionStart"),
         "unexpected hooks support output: {stdout}"
     );
 }

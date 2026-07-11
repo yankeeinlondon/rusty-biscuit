@@ -1,0 +1,85 @@
+# SimplifiedSchema for the MCP research topic.
+#
+# Captures provider MCP configuration, protocol coverage, security,
+# sync/import/export, and runtime injection behavior for Claudine's mcp module.
+$schema:
+    # Date the research file was first created.
+    created: date
+
+    # Date the provider MCP behavior was last verified.
+    last_updated: date(required)
+
+    # Agent/model that produced the research.
+    agent: string(required)
+    model: string(required)
+
+    # Primary official MCP/provider documentation URL.
+    docs: url
+
+    # Highest-value integration path for Claudine.
+    support: enum(import_sync,runtime_injection,manual_config,partial,none,unknown; required)
+
+    # MCP protocol and transport coverage. Use protocol version dates when docs
+    # expose them (for example 2025-06-18 or 2025-11-25); otherwise describe the
+    # observed feature generation in notes.
+    protocol: "{ versions: string[], transports: enum(stdio,streamable_http,http_sse,sse,websocket,custom,unknown)[], lifecycle: string, notes: string }"
+
+    # MCP config files by OS/scope.
+    config_files: "{ os: enum(macos,linux,windows; required), scope: enum(user,repo,local,system,managed,plugin,remote,other; required), path: string(required), format: enum(json,jsonc,yaml,toml,ini,text,other), notes: string }[]"
+
+    # CLI and env surfaces for MCP config.
+    cli_params: "{ flag: string(required), description: string(required), example: string }[]"
+    env_vars: "{ name: string(required), effect: string(required) }[]"
+
+    # Server definition shape and supported transports.
+    server_schema: "{ transports: string[], command_fields: string[], http_fields: string[], env_shape: string, auth_shape: string, notes: string }"
+
+    # MCP server-side feature coverage surfaced by this provider. Tools are
+    # model-controlled, resources are application-controlled context, and prompts
+    # are user-controlled templates; providers vary substantially in which of
+    # these surfaces are exposed to the model or UI.
+    server_capabilities: "{ tools: enum(full,partial,none,unknown; required), resources: enum(full,partial,none,unknown; required), prompts: enum(full,partial,none,unknown; required), tool_list_changed: boolean, resource_subscribe: boolean, resource_list_changed: boolean, prompt_list_changed: boolean, notes: string }"
+
+    # MCP client-side feature coverage the provider offers to servers. Roots
+    # bound filesystem access; sampling lets servers request LLM completions
+    # through the client; elicitation lets servers request structured user input.
+    client_capabilities: "{ roots: enum(full,partial,none,unknown; required), sampling: enum(full,partial,none,unknown; required), elicitation: enum(full,partial,none,unknown; required), notes: string }"
+
+    # Tool exposure and execution semantics: discovery, filtering, approval, and
+    # how results are handled before being returned to the model.
+    tool_surface: "{ discovery: string, filtering: string, approval: string, result_handling: string, annotations_trusted: string, notes: string }"
+
+    # Resource exposure semantics: URI schemes, templates, subscriptions, and how
+    # users or models select resources.
+    resource_surface: "{ supported: boolean(required), uri_schemes: string[], templates: boolean, subscriptions: boolean, exposure_model: string, notes: string }"
+
+    # Prompt-template exposure semantics, including where prompts appear in the
+    # provider UI and how arguments are supplied.
+    prompt_surface: "{ supported: boolean(required), invocation: string, arguments: string, exposure_model: string, notes: string }"
+
+    # Import/export/sync behavior Claudine can automate.
+    sync_behavior: "{ import_supported: boolean(required), export_supported: boolean(required), apply_supported: boolean, merge_strategy: enum(none,shallow,deep,nearest,replace,unknown), notes: string }"
+
+    # Runtime injection support without mutating user config.
+    runtime_injection: "{ supported: boolean(required), mechanism: string, limitations: string }"
+
+    # MCP authorization and credential handling. HTTP transports may use OAuth;
+    # stdio transports normally receive secrets through explicit environment
+    # variables or provider credential stores instead.
+    authorization: "{ oauth: boolean(required), credential_storage: string, token_scope: string, stdio_secret_delivery: string, notes: string }"
+
+    # MCP permission/security model.
+    security: "{ tool_filtering: string, server_trust: string, env_sanitization: string, sandbox_interaction: string, response_filtering: string, notes: string }"
+
+    # Claims that could not be verified or protocol surfaces the provider docs do
+    # not describe clearly enough.
+    gaps: string[]
+
+    # Update-mode changelog entries. Fresh first-run documents should use [].
+    changes: string[]
+
+    # Whether discovered behavior requires Claudine code/generated metadata changes.
+    requires_claudine_update: boolean(required)
+
+    # Short explanation for `requires_claudine_update`.
+    reason: string

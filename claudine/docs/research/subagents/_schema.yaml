@@ -1,0 +1,31 @@
+# SimplifiedSchema for the subagents research topic.
+#
+# Captures provider agent/subagent definitions for Claudine's agent linking and
+# future lifecycle resume/proxy behavior.
+$schema:
+    created: date
+    last_updated: date(required)
+    agent: string(required)
+    model: string(required)
+
+    homepage: url
+    docs: url
+    subagent_docs: url
+    support: enum(first_class,partial,convention_only,none,unknown; required)
+
+    locations: "{ os: enum(macos,linux,windows; required), scope: enum(user,repo,system,extension,other; required), path: string(required), notes: string }[]"
+    format: "{ file_names: string[], frontmatter: boolean, required_fields: string[], optional_fields: string[], body_format: enum(markdown,yaml,json,toml,text,other,unknown), notes: string }"
+
+    # Runtime behavior and inheritance from parent sessions.
+    runtime: "{ invocation: string, parent_child_context: string, permissions_inheritance: string, model_inheritance: string, tool_inheritance: string, max_turns: string, notes: string }"
+
+    # Whether subagent lifecycle is visible in streams/hooks.
+    observability: "{ stream_events: string[], hook_events: string[], session_ids: boolean, notes: string }"
+
+    portability: "{ portable: boolean(required), non_portable_assets: string[], rewrite_needed: boolean, notes: string }"
+    cli_params: "{ flag: string(required), description: string, example: string }[]"
+    env_vars: "{ name: string(required), effect: string(required) }[]"
+
+    changes: string[]
+    requires_claudine_update: boolean(required)
+    reason: string

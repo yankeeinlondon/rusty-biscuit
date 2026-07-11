@@ -1,0 +1,45 @@
+kind: sequence
+template:
+    desc: "{{name}} (_binary: {{binary}}, default port: {{default_port}}, site: {{site}}_)"
+list:
+    - name: Ollama
+      file: ollama.md
+      binary: ollama
+      default_port: 11434
+      user_dir: "~/.ollama"
+      site: https://ollama.com
+      docs: https://docs.ollama.com
+      repo: https://github.com/ollama/ollama
+    - name: LM Studio
+      file: lmstudio.md
+      binary: lms
+      default_port: 1234
+      user_dir: "~/.lmstudio"
+      site: https://lmstudio.ai
+      docs: https://lmstudio.ai/docs
+      # core desktop app is closed-source; the lms CLI and SDKs are open
+      repo: https://github.com/lmstudio-ai/lms
+    - name: oMLX
+      file: omlx.md
+      binary: omlx
+      default_port: 8000
+      user_dir: "~/.omlx"
+      site: https://omlx.ai
+      docs: https://github.com/jundot/omlx
+      repo: https://github.com/jundot/omlx
+    - name: Llama.cpp
+      file: llamacpp.md
+      binary: llama-server
+      default_port: 8080
+      user_dir: ""
+      site: https://github.com/ggml-org/llama.cpp
+      docs: https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md
+      repo: https://github.com/ggml-org/llama.cpp
+    - name: vLLM
+      file: vllm.md
+      binary: vllm
+      default_port: 8000
+      user_dir: "~/.cache/vllm"
+      site: https://docs.vllm.ai
+      docs: https://docs.vllm.ai/en/latest/
+      repo: https://github.com/vllm-project/vllm

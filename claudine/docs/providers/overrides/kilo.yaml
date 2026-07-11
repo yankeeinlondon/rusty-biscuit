@@ -1,0 +1,24 @@
+# Human-owned overrides for the kilo provider. Each entry WINS over the
+# field's declared source during generation (whole-key replacement) and MUST
+# carry a `reason:`. Keys are catalog field names; an override for a field
+# with no mapping-registry entry is a generation error.
+model_catalog_source:
+    value:
+        shell_command:
+            program: kilo
+            args: ["models"]
+    reason: >-
+        agent-models research reports dynamic_listing.available: true
+        (`kilo models [--refresh]`, plus the REST gateway endpoint), but the
+        research boolean cannot express a shell-command mechanism
+        (program/args). Pin the ShellCommand object until the agent-models
+        schema grows a typed catalog-source key (pending schema addition).
+        Mirrors the opencode/codex/kimi precedent.
+model_cli_flag:
+    value: "--model"
+    reason: >-
+        agent-models records the model flag as the compound site
+        "--model / -m", which the bare-token rule skips loudly, leaving
+        None even though the flag clearly exists. Pin the long-form
+        `--model` (Kilo precedence: cli_flag --model). Mirrors the
+        opencode/codex model_cli_flag precedent.

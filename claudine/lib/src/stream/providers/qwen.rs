@@ -3,7 +3,8 @@
 //!
 //! Structurally similar to Gemini but tolerates Qwen-specific event names
 //! (`tool_call`/`tool_response`, `assistant_message`, `summary` in place of
-//! `result`, `system/session_start` in place of `init`, etc.).
+//! `result`, `system/session_start` or `system/init` in place of `init`,
+//! etc.).
 
 use std::collections::HashMap;
 
@@ -502,6 +503,36 @@ mod tests {
         ));
         let summary = parser.finish(0);
         assert_eq!(summary.session_id.as_deref(), Some("q2"));
+    }
+
+    #[test]
+    fn system_init_maps_to_session_start() {
+        // Serializer-faithful wire sample from the signals corpus
+        // (qwen.md record `stream-model_resolved-system-init`, since 0.19.6).
+        const QWEN_SYSTEM_INIT: &str = include_str!(
+            "../../../../docs/research/signals/fixtures/qwen/system-init-model-version.jsonl"
+        );
+        let (events, mut parser) = new_parser();
+        parser.feed_line(QWEN_SYSTEM_INIT.trim()).unwrap();
+        assert!(matches!(
+            events.lock().unwrap()[0],
+            SemanticEvent::SessionStart { .. }
+        ));
+        let summary = parser.finish(0);
+        assert_eq!(summary.session_id.as_deref(), Some("qw-1"));
+        assert_eq!(summary.model.as_deref(), Some("qwen3-coder-plus"));
+    }
+
+    #[test]
+    fn system_unknown_subtype_stays_provider_extension() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"system","subtype":"telemetry","session_id":"qx"}"#)
+            .unwrap();
+        assert!(matches!(
+            events.lock().unwrap()[0],
+            SemanticEvent::ProviderExtension { .. }
+        ));
     }
 
     #[test]

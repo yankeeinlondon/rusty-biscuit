@@ -2,7 +2,7 @@
 //!
 //! Phase 5 of the centralized providers refactor replaces the
 //! free-form `supplement_sources` / `replacement_mechanisms` strings on
-//! [`SystemPromptCapabilities`](crate::agents::SystemPromptCapabilities)
+//! the retired legacy `SystemPromptCapabilities` tree
 //! with structured [`SystemPromptDelivery`] enums describing how each
 //! provider accepts system-prompt overrides in interactive vs
 //! non-interactive mode.
@@ -79,8 +79,6 @@ pub enum SystemPromptCustomTag {
         note = "Replaced by ConfigKeyFile/ConfigKeyInline in SystemPromptDelivery; kept for one deprecation cycle"
     )]
     CodexInstructionsFile,
-    /// Roo Code: per-mode system prompt files under `.roo/`.
-    RooModePromptFile,
 }
 
 /// System-prompt delivery split by entrypoint mode.

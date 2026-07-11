@@ -367,7 +367,7 @@ fn session_start_updates_cached_state_and_emits_session_header() {
     });
     assert_eq!(sink.session_id.as_deref(), Some("s1"));
     assert_eq!(sink.model.as_deref(), Some("claude"));
-    assert_eq!(sink.claude_api_key_source.as_deref(), Some("none"));
+    assert_eq!(sink.renderer.api_key_source(), Some("none"));
     // Task 3.2 routes the session header through the section-aware
     // emit path so the `emit_stderr` closure captures it. The header
     // line must appear; a trailing blank is allowed but not required.

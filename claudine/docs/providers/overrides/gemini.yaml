@@ -1,0 +1,11 @@
+# Human-owned overrides for the gemini provider. Each entry WINS over the
+# field's declared source during generation (whole-key replacement) and MUST
+# carry a `reason:`. Keys are catalog field names; an override for a field
+# with no mapping-registry entry is a generation error.
+model_cli_flag:
+    value: "--model"
+    reason: >-
+        agent-models records the model flag as the compound site
+        "--model / -m", which the bare-token rule skips loudly, leaving
+        None even though the flag clearly exists. Pin the long-form
+        `--model`. Ruled at Phase D wave 1 (2026-07-04).

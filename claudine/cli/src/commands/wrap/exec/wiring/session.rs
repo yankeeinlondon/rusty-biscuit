@@ -173,9 +173,16 @@ pub(crate) fn run_kimi_wire_session(
                 // arrives. `close_stdin` is the graceful path (Kimi exits
                 // on EOF), and `prompt_finished` is the hard fallback so
                 // the wait loop forces exit if Kimi keeps the channel
-                // open after responding.
+                // open after responding. An error response to `init-1` is
+                // equally terminal — a server that rejects the handshake
+                // never processes the prompt, so waiting on `prompt-2`
+                // would hang until the wall-clock timeout.
                 if is_prompt_response_line(trimmed) {
                     info!("kimi prompt response received; closing wire stdin");
+                    writer_for_reader.close_stdin();
+                    prompt_finished_for_reader.store(true, Ordering::SeqCst);
+                } else if is_initialize_error_line(trimmed) {
+                    info!("kimi initialize error response received; closing wire stdin");
                     writer_for_reader.close_stdin();
                     prompt_finished_for_reader.store(true, Ordering::SeqCst);
                 }
@@ -333,6 +340,7 @@ pub(crate) fn run_kimi_wire_session(
         },
         agent_pid: Some(captured_pid),
         guard_context,
+        signals: Vec::new(),
     })
 }
 /// Grace period after the `prompt-2` response arrives before tree termination.

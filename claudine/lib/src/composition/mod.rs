@@ -93,7 +93,8 @@ pub use schema_validation::{
 };
 pub use select::{
     build_candidate_set, build_installed_snapshot, build_picker_plan, build_picker_plan_with_hints,
-    classify_agent_resolution, resolve_model, resolve_model_with_catalog, resolve_model_with_hints,
+    classify_agent_resolution, detect_installed_providers, resolve_model,
+    resolve_model_with_catalog, resolve_model_with_hints,
     resolve_target_non_tty, resolve_target_non_tty_with_catalog, resolve_target_non_tty_with_hints,
     select_provider,
 };

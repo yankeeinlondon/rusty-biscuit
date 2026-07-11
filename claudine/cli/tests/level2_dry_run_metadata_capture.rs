@@ -46,7 +46,7 @@ use std::time::Duration;
 use test_toolkit::{Level, require_level};
 
 mod common;
-use common::{TestWorkspace, augmented_path, write_executable};
+use common::{TestWorkspace, write_executable};
 
 /// The composition fixture: a `name`/`description` frontmatter (so the Document
 /// cell uses the name and the Description row is present) and a body with no
@@ -69,11 +69,11 @@ Just a body.
 ";
 
 /// Fixture with a valid but not-installed `agent` frontmatter value.
-/// The test harness only stubs `goose` on PATH, so `roo` is not installed.
+/// The test harness only stubs `goose` on PATH, so `qwen` is not installed.
 const FIXTURE_NOT_INSTALLED: &str = "\
 ---
 name: Not Installed Doc
-agent: roo
+agent: qwen
 ---
 Just a body.
 ";
@@ -119,8 +119,10 @@ fn run_dry_run_compose<H: TerminalHarness>(harness: &mut H) -> DryRunCapture {
     fs::write(&doc, FIXTURE_DOC).unwrap();
 
     let claudine = cargo_bin!("claudine").display().to_string();
-    let path = augmented_path(&bin_dir);
-    let path = path.to_string_lossy().into_owned();
+    // Hermetic PATH: exactly the stub bin dir, so installed/not-installed is
+    // a fact of the fixture, never of the host (a host-installed provider
+    // must not flip the resolution state under test).
+    let path = bin_dir.to_string_lossy().into_owned();
     let home = workspace.path().to_string_lossy().into_owned();
 
     // Run from the (non-repo) workspace so no monorepo `Area` row appears and
@@ -179,8 +181,10 @@ fn run_dry_run_compose_with_doc<H: TerminalHarness>(
     fs::write(&doc, doc_content).unwrap();
 
     let claudine = cargo_bin!("claudine").display().to_string();
-    let path = augmented_path(&bin_dir);
-    let path = path.to_string_lossy().into_owned();
+    // Hermetic PATH: exactly the stub bin dir, so installed/not-installed is
+    // a fact of the fixture, never of the host (a host-installed provider
+    // must not flip the resolution state under test).
+    let path = bin_dir.to_string_lossy().into_owned();
     let home = workspace.path().to_string_lossy().into_owned();
 
     harness
@@ -624,8 +628,10 @@ fn run_dry_run_compose_plain<H: TerminalHarness>(harness: &mut H) -> DryRunCaptu
     fs::write(&doc, FIXTURE_DOC).unwrap();
 
     let claudine = cargo_bin!("claudine").display().to_string();
-    let path = augmented_path(&bin_dir);
-    let path = path.to_string_lossy().into_owned();
+    // Hermetic PATH: exactly the stub bin dir, so installed/not-installed is
+    // a fact of the fixture, never of the host (a host-installed provider
+    // must not flip the resolution state under test).
+    let path = bin_dir.to_string_lossy().into_owned();
     let home = workspace.path().to_string_lossy().into_owned();
 
     harness
@@ -745,7 +751,7 @@ fn level2_dry_run_not_installed_renders_yellow_dim_in_tmux() {
         "expected 'Agent Not Installed' in Agent cell.\nplain:\n{plain}",
     );
     assert!(
-        plain.contains("Roo"),
+        plain.contains("Qwen"),
         "expected the not-installed provider name in Agent cell.\nplain:\n{plain}",
     );
 

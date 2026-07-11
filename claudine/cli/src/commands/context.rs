@@ -9,6 +9,7 @@ use darkmatter::effects::{effect_descriptors, EffectDescriptor, EffectSafety};
 use darkmatter::markdown::compose::context::{
     context_variable_descriptors, ContextValueType, ContextVariableDescriptor,
 };
+use darkmatter::markdown::schemas::SimplifiedType;
 use darkmatter::markdown::compose::expression::{
     expression_function_descriptors, ExpressionFunctionDescriptor,
 };
@@ -116,18 +117,22 @@ fn format_context_value_type(ty: &ContextValueType, term: &Terminal) -> String {
     Prose::new(context_value_type_markup(ty)).render(term)
 }
 
-/// Builds the Prose markup for a type label, coloring each type by category.
-///
-/// `Nullable(inner)` wraps the inner type's own colored markup in grey
-/// `Nullable(…)` so the report shows `Nullable(String)`, `Nullable(Integer)`,
-/// etc. rather than a bare `Nullable`.
+/// Builds the Prose markup for a type label, coloring each type by its base
+/// SimplifiedSchema type family. The label is the schema keyword form
+/// (`string`, `string[]`, `number(integer)`, …) from the type's `Display`.
 fn context_value_type_markup(ty: &ContextValueType) -> String {
-    let color = match ty.base.as_keyword() {
-        "number" => "green",
-        "boolean" | "boolish" => "orange",
-        "date" | "datetime" | "time" => "violet",
-        "object" => "cyan",
-        _ => "blue",
+    let color = match ty.base {
+        SimplifiedType::Number | SimplifiedType::NumberLike => "green",
+        SimplifiedType::Boolean | SimplifiedType::Boolish => "orange",
+        SimplifiedType::Date | SimplifiedType::DateTime | SimplifiedType::Time => "violet",
+        SimplifiedType::Object | SimplifiedType::Any => "cyan",
+        SimplifiedType::String
+        | SimplifiedType::Enum
+        | SimplifiedType::File
+        | SimplifiedType::Url
+        | SimplifiedType::Email
+        | SimplifiedType::Yaml
+        | SimplifiedType::Json => "blue",
     };
     format!("<{color}>{ty}</{color}>")
 }

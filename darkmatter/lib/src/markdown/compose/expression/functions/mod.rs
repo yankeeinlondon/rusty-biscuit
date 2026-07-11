@@ -8,7 +8,7 @@
 //! call as `Value::Null`, while a value of the wrong domain returns an
 //! evaluator error.
 
-use chrono::{Datelike, Local, NaiveDate, NaiveDateTime, Utc};
+use chrono::{Datelike, Duration, Local, Months, NaiveDate, NaiveDateTime, Utc};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -122,7 +122,7 @@ const LAZY_REGISTRATIONS: &[FunctionRegistration] = &[
     FunctionRegistration {
         canonical: "and",
         aliases: &[],
-        catalog_order: 46,
+        catalog_order: 49,
         descriptors: &[ExpressionFunctionDescriptor {
             signature: "and(...)",
             parameters: super::catalog::P_VARIADIC,
@@ -137,7 +137,7 @@ const LAZY_REGISTRATIONS: &[FunctionRegistration] = &[
     FunctionRegistration {
         canonical: "or",
         aliases: &[],
-        catalog_order: 47,
+        catalog_order: 50,
         descriptors: &[ExpressionFunctionDescriptor {
             signature: "or(...)",
             parameters: super::catalog::P_VARIADIC,
@@ -2188,6 +2188,133 @@ pub fn round_fn(args: &[Value]) -> Result<Value, String> {
     Ok(Value::Number(serde_json::Number::from(number)))
 }
 
+// ── Date arithmetic ─────────────────────────────────────────────────
+//
+// `date_delta`/`older_than`/`newer_than` share the signature
+// `(date1, date2, diff)` where `diff` is a duration string (`14d`, `2mo`,
+// `1 hour`). They differ only in direction: `date_delta` is magnitude-only
+// (are the two dates at least `diff` apart?), `older_than` asks whether `date1`
+// precedes `date2` by at least `diff`, `newer_than` the reverse. The threshold
+// is inclusive (`>=`). Month/year components are calendar-aware (chrono
+// `Months`); day-and-smaller components are fixed `Duration`s. Date args parse
+// through the module's `parse_date_or_datetime` (date granularity, local) like
+// the relative validators, then anchor at midnight so a sub-day `diff` still
+// compares meaningfully.
+
+/// A parsed `diff` duration: a calendar-month component plus a fixed span.
+struct DurationSpec {
+    months: u32,
+    fixed: Duration,
+}
+
+/// Parses a single-term duration string like `14d`, `2mo`, or `1 hour`.
+///
+/// Grammar: a non-negative integer count, optional whitespace, then a
+/// case-insensitive unit. `mo`/`month(s)` are months and `y`/`year(s)` are
+/// years (both calendar-aware); `m`/`min`/`minute(s)` are minutes — so the
+/// bare `m` always means minutes, never months.
+fn parse_duration_spec(s: &str) -> Result<DurationSpec, String> {
+    let trimmed = s.trim();
+    let digits_end = trimmed
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(trimmed.len());
+    if digits_end == 0 {
+        return Err(format!("expected a leading number in {trimmed:?}"));
+    }
+    let count: i64 = trimmed[..digits_end]
+        .parse()
+        .map_err(|_| format!("invalid count in {trimmed:?}"))?;
+    let unit = trimmed[digits_end..].trim().to_ascii_lowercase();
+    let (months, fixed): (i64, Duration) = match unit.as_str() {
+        "s" | "sec" | "secs" | "second" | "seconds" => (0, Duration::seconds(count)),
+        "m" | "min" | "mins" | "minute" | "minutes" => (0, Duration::minutes(count)),
+        "h" | "hr" | "hrs" | "hour" | "hours" => (0, Duration::hours(count)),
+        "d" | "day" | "days" => (0, Duration::days(count)),
+        "w" | "wk" | "wks" | "week" | "weeks" => (0, Duration::weeks(count)),
+        "mo" | "mos" | "month" | "months" => (count, Duration::zero()),
+        "y" | "yr" | "yrs" | "year" | "years" => (
+            count
+                .checked_mul(12)
+                .ok_or_else(|| format!("duration overflow in {trimmed:?}"))?,
+            Duration::zero(),
+        ),
+        "" => return Err(format!("missing unit in {trimmed:?}")),
+        other => return Err(format!("unknown duration unit {other:?}")),
+    };
+    let months =
+        u32::try_from(months).map_err(|_| format!("duration must be non-negative: {trimmed:?}"))?;
+    Ok(DurationSpec { months, fixed })
+}
+
+/// Adds a parsed duration to a base instant (calendar months first, then the
+/// fixed span). Returns `None` on overflow.
+fn add_duration_spec(base: NaiveDateTime, spec: &DurationSpec) -> Option<NaiveDateTime> {
+    base.checked_add_months(Months::new(spec.months))?
+        .checked_add_signed(spec.fixed)
+}
+
+/// Parses a date/datetime arg to a midnight-anchored `NaiveDateTime`.
+fn date_arg_to_instant(name: &str, s: &str) -> Result<NaiveDateTime, String> {
+    parse_date_or_datetime(s, false)
+        .and_then(|date| date.and_hms_opt(0, 0, 0))
+        .ok_or_else(|| format!("{name}() invalid ISO date or datetime: {s:?}"))
+}
+
+/// Shared front-half for the date-arithmetic functions: three string args →
+/// two midnight-anchored instants + a parsed duration.
+fn two_dates_and_duration(
+    name: &str,
+    args: &[Value],
+) -> Result<(NaiveDateTime, NaiveDateTime, DurationSpec), String> {
+    let dt1 = date_arg_to_instant(name, require_string(name, &args[0])?)?;
+    let dt2 = date_arg_to_instant(name, require_string(name, &args[1])?)?;
+    let diff = require_string(name, &args[2])?;
+    let spec = parse_duration_spec(diff)
+        .map_err(|reason| format!("{name}() invalid duration {diff:?}: {reason}"))?;
+    Ok((dt1, dt2, spec))
+}
+
+/// `date_delta(date1, date2, diff)` — true when the two dates are at least
+/// `diff` apart, regardless of order.
+pub fn date_delta(args: &[Value]) -> Result<Value, String> {
+    require_args("date_delta", args, 3)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let (a, b, spec) = two_dates_and_duration("date_delta", args)?;
+    let (earlier, later) = if a <= b { (a, b) } else { (b, a) };
+    let threshold = add_duration_spec(earlier, &spec)
+        .ok_or_else(|| "date_delta() duration arithmetic overflowed".to_string())?;
+    Ok(Value::Bool(later >= threshold))
+}
+
+/// `older_than(date1, date2, diff)` — true when `date1` is at least `diff`
+/// older (earlier) than `date2`.
+pub fn older_than(args: &[Value]) -> Result<Value, String> {
+    require_args("older_than", args, 3)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let (d1, d2, spec) = two_dates_and_duration("older_than", args)?;
+    let threshold = add_duration_spec(d1, &spec)
+        .ok_or_else(|| "older_than() duration arithmetic overflowed".to_string())?;
+    Ok(Value::Bool(d2 >= threshold))
+}
+
+/// `newer_than(date1, date2, diff)` — true when `date1` is at least `diff`
+/// newer (later) than `date2`.
+pub fn newer_than(args: &[Value]) -> Result<Value, String> {
+    require_args("newer_than", args, 3)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let (d1, d2, spec) = two_dates_and_duration("newer_than", args)?;
+    let threshold = add_duration_spec(d2, &spec)
+        .ok_or_else(|| "newer_than() duration arithmetic overflowed".to_string())?;
+    Ok(Value::Bool(d1 >= threshold))
+}
+
+
 /// Logical short-circuit operators handled directly in `evaluate_function`
 /// (they evaluate their arguments lazily and so cannot live in the pure
 /// `&[Value]` table). Listed here so the dispatchable-name enumeration stays
@@ -2278,6 +2405,87 @@ mod tests {
 
     fn vv(a: Value, b: Value) -> Vec<Value> {
         vec![a, b]
+    }
+
+    mod fn_date_arithmetic {
+        use super::*;
+
+        fn args3(a: &str, b: &str, d: &str) -> Vec<Value> {
+            vec![json!(a), json!(b), json!(d)]
+        }
+
+        #[test]
+        fn date_delta_is_direction_neutral() {
+            // 19 days apart, either order → ≥ 14d.
+            assert_eq!(date_delta(&args3("2024-06-01", "2024-06-20", "14d")).unwrap(), json!(true));
+            assert_eq!(date_delta(&args3("2024-06-20", "2024-06-01", "14d")).unwrap(), json!(true));
+            // 5 days apart → not ≥ 14d.
+            assert_eq!(date_delta(&args3("2024-06-01", "2024-06-06", "14d")).unwrap(), json!(false));
+        }
+
+        #[test]
+        fn threshold_is_inclusive() {
+            // Exactly 14 days apart is "at least 14d".
+            assert_eq!(date_delta(&args3("2024-06-01", "2024-06-15", "14d")).unwrap(), json!(true));
+            assert_eq!(date_delta(&args3("2024-06-01", "2024-06-14", "14d")).unwrap(), json!(false));
+        }
+
+        #[test]
+        fn older_than_and_newer_than_are_directional() {
+            // 2024-06-01 is 19 days older (earlier) than 2024-06-20.
+            assert_eq!(older_than(&args3("2024-06-01", "2024-06-20", "14d")).unwrap(), json!(true));
+            assert_eq!(older_than(&args3("2024-06-20", "2024-06-01", "14d")).unwrap(), json!(false));
+            // 2024-06-20 is 19 days newer (later) than 2024-06-01.
+            assert_eq!(newer_than(&args3("2024-06-20", "2024-06-01", "14d")).unwrap(), json!(true));
+            assert_eq!(newer_than(&args3("2024-06-01", "2024-06-20", "14d")).unwrap(), json!(false));
+        }
+
+        #[test]
+        fn months_and_years_are_calendar_aware() {
+            // Jan 15 → Mar 15 is exactly 2 calendar months (spanning short Feb),
+            // which a fixed 60-day threshold would misjudge.
+            assert_eq!(older_than(&args3("2024-01-15", "2024-03-15", "2mo")).unwrap(), json!(true));
+            assert_eq!(older_than(&args3("2024-01-15", "2024-03-14", "2mo")).unwrap(), json!(false));
+            // Years fold to 12 months each.
+            assert_eq!(older_than(&args3("2022-06-01", "2024-06-01", "2y")).unwrap(), json!(true));
+        }
+
+        #[test]
+        fn duration_units_and_word_forms_parse() {
+            // 2024-06-01 .. 2024-08-01 is 61 days, ≥ every 14-day-ish threshold.
+            for diff in ["14d", "14 days", "2w", "336h", "2mo", "2 months"] {
+                assert_eq!(
+                    date_delta(&args3("2024-06-01", "2024-08-01", diff)).unwrap(),
+                    json!(true),
+                    "diff {diff:?}"
+                );
+            }
+            // Bare `m` is minutes, not months: two same-day instants are 0 apart.
+            assert_eq!(date_delta(&args3("2024-06-01", "2024-06-01", "5m")).unwrap(), json!(false));
+        }
+
+        #[test]
+        fn datetime_args_reduce_to_date() {
+            assert_eq!(
+                date_delta(&args3("2024-06-01T09:00:00", "2024-06-20T23:00:00", "14d")).unwrap(),
+                json!(true)
+            );
+        }
+
+        #[test]
+        fn null_propagates_and_bad_input_errors() {
+            assert_eq!(
+                date_delta(&[json!(null), json!("2024-06-20"), json!("14d")]).unwrap(),
+                json!(null)
+            );
+            // Non-string date arg → type-mismatch error.
+            assert!(date_delta(&[json!(5), json!("2024-06-20"), json!("14d")]).is_err());
+            // Unparseable date and unknown duration unit both error.
+            assert!(date_delta(&args3("not-a-date", "2024-06-20", "14d")).is_err());
+            assert!(date_delta(&args3("2024-06-01", "2024-06-20", "3 fortnights")).is_err());
+            // Wrong arity errors.
+            assert!(date_delta(&vv(json!("2024-06-01"), json!("2024-06-20"))).is_err());
+        }
     }
 
     mod fn_list_formatting {

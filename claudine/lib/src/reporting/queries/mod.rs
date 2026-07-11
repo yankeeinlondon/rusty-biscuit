@@ -1,4 +1,5 @@
 mod common;
+mod drift;
 mod errors;
 mod repos;
 mod sessions;
@@ -11,6 +12,7 @@ mod month;
 mod sync;
 mod week;
 
+pub(crate) use drift::drift;
 pub(crate) use errors::errors;
 pub(crate) use repos::repos;
 pub(crate) use sessions::{session_detail, sessions};

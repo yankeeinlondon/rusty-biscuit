@@ -150,9 +150,13 @@ check:
 generate-models *args="":
     @echo ""
     @echo -e "{{ BOLD }}Regenerating unchained-ai provider models & metadata{{ RESET }}"
-    @echo -e "{{ ITALIC }}Fetching live model lists from provider APIs and metadata from Parsera...{{ RESET }}"
+    @echo -e "{{ ITALIC }}Fetching live model lists from provider APIs and metadata from models.dev...{{ RESET }}"
     @echo ""
     @cargo run -p unchained-ai-gen -- -v {{ args }}
+
+# Re-emit the committed model-catalog artifact (offline; see artifacts/README.md)
+artifact:
+    @cargo run -p unchained-ai-gen --bin emit-catalog
 
 # Outdated packages
 outdated:

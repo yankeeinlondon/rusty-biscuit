@@ -150,13 +150,36 @@ impl WrapperProfile for OpencodeWrapper {
                     prompt.len() / 1024
                 );
             }
-            Ok(PromptDelivery::AppendArgs(vec![
-                "--prompt".to_string(),
-                prompt.to_string(),
-            ]))
+            // A prompt beginning with `-` (composed prompts commonly open
+            // with a Markdown bullet) makes OpenCode's yargs parser treat the
+            // value as an option: it prints its top-level help and exits 1.
+            // The attached `--prompt=<value>` form binds the value to the flag
+            // unambiguously, mirroring the non-interactive `--` guard above.
+            Ok(if prompt.starts_with('-') {
+                PromptDelivery::AppendArgs(vec![format!("--prompt={prompt}")])
+            } else {
+                PromptDelivery::AppendArgs(vec!["--prompt".to_string(), prompt.to_string()])
+            })
         }
     }
 
+    fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
+        // Explicit `--session <ses_...>` is the automation-safe selector;
+        // `--continue` is a human convenience whose implicit "latest" can
+        // pick the wrong session (session-resumption research, 2026-07-03).
+        // The `run` entrypoint is included because resume args replace the
+        // base argv wholesale in the harness relaunch.
+        Ok(vec![
+            "opencode".to_string(),
+            "run".to_string(),
+            "--session".to_string(),
+            session_id.to_string(),
+        ])
+    }
+
+    // Kept as an override (ratified 2026-07-04): these flags bundle the
+    // stderr log-promotion contract (--print-logs --log-level INFO) with
+    // the stream selector — behavior, not catalog data.
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         // OpenCode uses --format json (cataloged) plus --print-logs and
         // --log-level INFO for reliable structured streaming. INFO provides
@@ -170,24 +193,6 @@ impl WrapperProfile for OpencodeWrapper {
         args.push("--log-level".to_string());
         args.push("INFO".to_string());
     }
-
-    fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
-        opencode_default_tui_noise_prefixes()
-    }
-}
-
-/// The default-mode TUI formatter lines that OpenCode keeps emitting to
-/// stderr even when `--format json` is set. Suppressed when wrapping
-/// OpenCode so the NDJSON stream on stdout is the only visible output
-/// surface.
-pub(crate) fn opencode_default_tui_noise_prefixes() -> &'static [&'static str] {
-    &[
-        "\u{2731} ",                         // ✱  — bullet used for Glob/Grep/Read status lines
-        "$ ",                                // bare shell command echo lines
-        "> build ",                          // session banner
-        "\u{2588}\u{2588}\u{2588}\u{2588} ", // ████  — subheader marker
-        "\u{2699} ", // ⚙  — MCP tool-invocation prefix (see investigations.md §0b)
-    ]
 }
 
 #[cfg(test)]

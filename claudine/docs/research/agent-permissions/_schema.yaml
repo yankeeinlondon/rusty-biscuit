@@ -1,0 +1,141 @@
+# SimplifiedSchema for the agent-permissions research topic.
+#
+# Referenced by each provider research document via `$schema: ./_schema.yaml`.
+# The root `$schema:` key is REQUIRED — it is how darkmatter's resolver
+# classifies this file as a SimplifiedSchema rather than raw JSON Schema
+# (a bare property mapping would validate vacuously).
+#
+# Nested shapes use quoted inline-object literals — YAML-native nested
+# mappings are rejected by the SimplifiedSchema parser today.
+$schema:
+    # Date the research file was first created. Optional because update-mode
+    # legacy docs may predate the schema contract.
+    created: date
+
+    # Date the provider research was last verified or refreshed.
+    last_updated: date(required)
+
+    # Agentic CLI wrapper that produced the research, e.g. `open_code`.
+    agent: string(required)
+
+    # Model id used for the research run.
+    model: string(required)
+
+    # One record per permissions-related CLI parameter. `style` captures whether
+    # the provider exposes it as `--flag value`, `key=value`, or a positional arg;
+    # examples should be complete enough to drive future wrapper/catalog tests.
+    cli_params: "{ param: string(required), style: enum(equals,switch,positional; required), description: string(required), example: string, example_description: string }[]"
+
+    # One record per environment variable that influences permissions or adjacent
+    # security posture. `effect` prose stays authoritative for specifics (value
+    # sets, version gates, precedence quirks, hardening direction); the derived
+    # `effect_category` is the queryable index. `none` is a first-class category
+    # for verified non-permission vars; use `other` only when nothing fits.
+    # Optional until the next refresh backfills it (established widening pattern).
+    env_vars: "{ name: string(required), effect: string(required), effect_category: enum(sandbox_control,none,state_home_relocation,config_path_override,tool_surface,security_hardening,customization_lockdown,credential,threat_detection,policy_overlay,config_injection,config_source_toggle,approval_mode,network_control,workspace_trust,other) }[]"
+
+    # Config files that define permissions. File paths must be recorded separately
+    # for macOS, Linux, and Windows. Relative user paths are from $HOME; repo paths
+    # are from repo root.
+    config_files: "{ os: enum(macos,linux,windows; required), user: string(required), repo: string(required), notes: string }[]"
+
+    # Ordered highest-to-lowest policy source precedence. `scope` uses the enum
+    # vocabulary derived from the landed 2026-07-03 fleet data (ratified
+    # 2026-07-05); anything the vocabulary can't express belongs in `notes`.
+    # `merge_strategy: none` means source replacement, `shallow` means top-level
+    # merge, `deep` means nested merge, and `nearest` means closest/most-specific
+    # source wins within that source family.
+    precedence: "{ source: string(required), scope: enum(rules,mcp,approval_mode,sandbox,tool_visibility,general_config,config_loading,agents,extensions,hooks,skills,slash_commands,customization_resources,security_controls,trust,workspace,provider_model,other)[](required), merge_strategy: enum(none,shallow,deep,nearest; required), notes: string }[]"
+
+    # What the effective permissions are when nothing is configured anywhere:
+    # no CLI flags, env vars, user config, repo config, managed policy, or trust
+    # state changes.
+    default_posture: string(required)
+
+    # CLI-only way to start from no permissions for one session, intended for a
+    # future Claudine wrapper feature that disables all provider capabilities and
+    # then explicitly adds back only what the user requested. Do not include
+    # persistent config-file approaches here unless the CLI has no equivalent;
+    # record that limitation instead.
+    cli_zero_permissions: "{ supported: boolean(required), invocation: string, mechanism: string, limitations: string }"
+
+    # Can permissions be scoped per agent/subagent? `fm_properties` lists the
+    # frontmatter/config properties involved when the provider has agent-scoped
+    # config; leave it empty/omitted when `allowed` is false.
+    agent_permissions: "{ allowed: boolean(required), fm_properties: string[] }"
+
+    # YOLO / auto-approve support (feeds YoloSupport). `mechanism` names the
+    # flag/env/config switch used and should distinguish interactive and
+    # non-interactive availability.
+    yolo: "{ has_interactive_yolo: boolean(required), has_non_interactive_yolo: boolean(required), mechanism: string }"
+
+    # Fit assessment of claudine's PolicyEngine for this provider. `ergonomic`
+    # means the provider maps naturally to the current API; `provides_coverage`
+    # means the current API can express the important behavior even if awkwardly.
+    policy_engine: "{ ergonomic: boolean(required), provides_coverage: boolean(required), gaps: string[] }"
+
+    # Widened fields for the merged legacy `permissions/` topic. These are optional
+    # so existing docs stay valid until the approved update-mode fleet populates them.
+
+    # Native permission targets or adjacent security-control targets. Use this to
+    # avoid collapsing very different provider concepts into "tool permission":
+    # commands, paths, MCP servers/tools/resources, agents, modes, sandboxes,
+    # hooks, extensions, and slash commands may each be separate entities.
+    permission_entities: "{ entity: enum(tool,tool_group,command,path,workspace,mcp_server,mcp_tool,mcp_resource,agent,subagent,mode,approval_category,sandbox,hook,extension,slash_command,unknown; required), native_names: string[], notes: string }[]"
+
+    # Coarse session modes that change approval behavior, such as plan,
+    # auto-edit, accept-edits, auto/classifier mode, YOLO, or provider-specific
+    # mode names. `aliases` carries CLI/env/config/slash-command spellings.
+    approval_modes: "{ name: string(required), effect: string(required), interactive: boolean, non_interactive: boolean, aliases: string[] }[]"
+
+    # Fine-grained rule system summary. This is about rule semantics inside the
+    # effective policy, not source precedence: decision vocabulary, syntax,
+    # conflict ordering, scope merge behavior, matcher semantics, and fallback.
+    rule_model: "{ decisions: string[], syntax: string, precedence: string, merge_semantics: string, matcher_semantics: string, default_decision: string }"
+
+    # Whether the provider can hide or restrict the tool surface separately from
+    # approving visible tools. Examples include `--tools`, include/exclude lists,
+    # disabled slash commands, or agent tool allowlists.
+    tool_visibility: "{ supported: boolean(required), mechanisms: string[], notes: string }"
+
+    # Provider sandboxing or isolation controls, separate from approval prompts.
+    # Capture OS/container backends and the actual filesystem/network guarantees;
+    # do not call advisory prompts a sandbox.
+    sandbox: "{ supported: boolean(required), modes: string[], backends: string[], filesystem_control: string, network_control: string, notes: string }"
+
+    # Trust and administrator policy controls that gate or constrain ordinary
+    # config. Includes folder/project trust, managed policy/MDM, safe mode, and
+    # similar mechanisms that disable or override lower-precedence sources.
+    trust_and_admin: "{ folder_trust: string, managed_policy: string, safe_mode: string, notes: string }"
+
+    # MCP-specific policy controls. Capture server filters, tool filters, trust
+    # flags, resource access, response interception/sanitization, and whether MCP
+    # execution is inside or outside the provider sandbox.
+    mcp_permissions: "{ supported: boolean(required), server_filters: string[], tool_filters: string[], trust_model: string, notes: string }"
+
+    # Permission behavior in non-interactive/headless/print/exec/run modes:
+    # prompts, programmatic approval channels, automatic exclusion, failure, or
+    # hanging behavior.
+    headless_behavior: string
+
+    # Whether approvals can persist and at what lifetime/granularity: once,
+    # session, project, command pattern, path, permanent, or never.
+    approval_persistence: string
+
+    # Provider-reserved paths or patterns that receive special protection, even
+    # when broad write/YOLO settings would otherwise allow changes.
+    protected_paths: string[]
+
+    # Honest classification of the provider's controls: OS-enforced sandbox,
+    # static policy, managed policy, advisory UX guardrail, or some combination.
+    security_posture: string
+
+    # Update-mode changelog entries. Fresh first-run documents should use [].
+    changes: string[]
+
+    # Whether the research found behavior that requires Claudine code changes,
+    # not just docs or generated metadata updates.
+    requires_claudine_update: boolean(required)
+
+    # Required when `requires_claudine_update` is true; optional otherwise.
+    reason: string

@@ -1,0 +1,66 @@
+# SimplifiedSchema for the model-config research topic (user-extension focus:
+# how users ADD models beyond the out-of-box set — cloud and local).
+# The out-of-box model set is the agent-models topic's job, not this one.
+#
+# Referenced by each provider research document via `$schema: ./_schema.yaml`.
+# The root `$schema:` key is REQUIRED — it is how darkmatter's resolver
+# classifies this file as a SimplifiedSchema rather than raw JSON Schema
+# (a bare property mapping would validate vacuously).
+#
+# Nested shapes use quoted inline-object literals — YAML-native nested
+# mappings are rejected by the SimplifiedSchema parser today.
+$schema:
+    created: date
+    last_updated: date(required)
+    agent: string(required)
+    model: string(required)
+
+    # Does the provider publish a schema for its config file(s)?
+    # (e.g. OpenCode's https://opencode.ai/config.json)
+    has_official_schema: enum(formal,informal,none; required)
+    schema_url: url
+
+    # One record per config file where model configuration can live.
+    model_config_paths: "{ scope: enum(user,repo,env; required), path: string(required), format: enum(json,jsonc,toml,yaml,other; required), notes: string }[]"
+
+    # One record per API standard the provider supports for user-added models.
+    # `base_url_site` / `auth_site` name the config keys or env vars involved;
+    # `adapter` names any extra shim mechanism (e.g. OpenCode's `npm` ai-sdk key).
+    api_standards: "{ standard: enum(openai_compatible,anthropic_compatible,bespoke; required), base_url_site: string(required), auth_site: string, adapter: string, notes: string }[]"
+
+    # Per-model metadata keys a user may declare when adding a model
+    # (e.g. name, cost, limit, modalities, reasoning).
+    metadata_overrides: string[]
+
+    # How user-added models interact with the built-in catalog: merge alongside,
+    # shadow (override same-id entries), or replace the catalog entirely.
+    merge_semantics: enum(merge,shadow,replace,unknown; required)
+
+    # One record per local-model runner. Support is a property of API-standard
+    # BRIDGING, not of the provider "knowing about" the runner:
+    #   first_class       = the provider ships explicit runner integration
+    #   base_url_override = works by pointing the provider's OpenAI/Anthropic-
+    #                       compatible client at the runner's endpoint
+    #   proxy_required    = needs a translation shim between the provider's
+    #                       API standard and what the runner speaks
+    #   unsupported       = no path (requires that the provider has no
+    #                       base-URL override on any standard the runner speaks)
+    # `standard` names the API standard the integration path rides on.
+    # Runner-side facts (ports, endpoint paths, standards) come from the
+    # local_runners research topic's frontmatter — the ground truth.
+    local_runners: "{ runner: enum(ollama,omlx,lmstudio,llamacpp,vllm,other; required), integration: enum(first_class,base_url_override,proxy_required,unsupported; required), standard: enum(openai_compatible,anthropic_compatible,bespoke), example: string, notes: string }[]"
+
+    # Can the user route this provider at a DIFFERENT cloud vendor's API
+    # (e.g. a non-OpenAI model on Codex) via the same override mechanisms?
+    cloud_bridge: "{ supported: boolean(required), mechanism: string, example: string }"
+
+    # Where the user pins their default model (config key, env var, flag).
+    default_model_site: string
+
+    # Environment variables that redirect model endpoints or selection
+    # (e.g. ANTHROPIC_BASE_URL-style overrides).
+    env_vars: "{ name: string(required), effect: string(required) }[]"
+
+    changes: string[]
+    requires_claudine_update: boolean(required)
+    reason: string

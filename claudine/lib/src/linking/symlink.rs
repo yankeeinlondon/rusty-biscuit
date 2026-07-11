@@ -156,7 +156,7 @@ pub fn create_skill_link(
 /// ## Examples
 ///
 /// ```ignore
-/// let from = Path::new("/repo/.roo/skills");
+/// let from = Path::new("/repo/.opencode/skills");
 /// let target = Path::new("/repo/.claude/skills/my-skill");
 /// assert_eq!(
 ///     relative_path(from, target),
@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn relative_path_computes_correct_result() {
-        let from = Path::new("/repo/.roo/skills");
+        let from = Path::new("/repo/.opencode/skills");
         let target = Path::new("/repo/.claude/skills/my-skill");
         let result = relative_path(from, target);
         assert_eq!(result, PathBuf::from("../../.claude/skills/my-skill"));
@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn relative_path_sibling_directories() {
-        let from = Path::new("/home/user/.roo/skills");
+        let from = Path::new("/home/user/.opencode/skills");
         let target = Path::new("/home/user/.claude/skills/clap");
         let result = relative_path(from, target);
         assert_eq!(result, PathBuf::from("../../.claude/skills/clap"));
@@ -310,7 +310,7 @@ mod tests {
     fn repo_scope_creates_relative_symlink() {
         let tmp = TempDir::new().unwrap();
         let source = tmp.path().join("repo/.claude/skills/my-skill");
-        let dest_dir = tmp.path().join("repo/.roo/skills");
+        let dest_dir = tmp.path().join("repo/.opencode/skills");
         fs::create_dir_all(&source).unwrap();
         fs::write(source.join("SKILL.md"), "# Skill").unwrap();
         fs::create_dir_all(&dest_dir).unwrap();

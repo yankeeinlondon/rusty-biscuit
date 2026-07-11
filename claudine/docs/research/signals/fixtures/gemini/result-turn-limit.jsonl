@@ -1,0 +1,2 @@
+{"type":"result","status":"error","error":{"type":"FatalTurnLimitedError","message":"Reached max turns"}}
+{"type":"result","status":"error","error":{"type":"FatalTurnLimited","message":"max turns"}}

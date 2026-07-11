@@ -638,6 +638,9 @@ fn reasoning_emits_block_quote_to_stderr_in_thinking_section() {
         text: "considering the options".into(),
         extra: json!({}),
     });
+    // A lone thought stays buffered until a boundary; with no following
+    // event, the `Drop` close-flush renders it. Drop before inspecting.
+    drop(sink);
     let rendered = lines.lock().unwrap().join("\n");
     assert!(
         rendered.contains("considering the options"),

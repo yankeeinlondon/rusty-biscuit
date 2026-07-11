@@ -1,0 +1,42 @@
+# Human-owned overrides for the codex provider. Each entry WINS over the
+# field's declared source during generation (whole-key replacement) and MUST
+# carry a `reason:`. Keys are catalog field names; an override for a field
+# with no mapping-registry entry is a generation error.
+model_catalog_source:
+    value: none
+    reason: >-
+        agent-models research reports dynamic_listing.available: true, but
+        the boolean cannot select a catalog mechanism (program/args).
+        `codex debug models [--bundled]` is the future ShellCommand
+        candidate, pending verification of its output shape. Pin today's
+        `none` (no drift-channel listing; expected_offerings is the
+        validation baseline) until that verification lands or the
+        agent-models schema grows a typed catalog-source key (pending
+        schema addition).
+model_env_vars:
+    value: ["CODEX_MODEL", "OPENAI_MODEL"]
+    reason: >-
+        agent-models research records no bare env_var model-selection site
+        for Codex (its selection surface is flags/config), so the coercion
+        yields an empty list — but the wrapper MODEL selection chain
+        (composition::select) still honors Claudine's CODEX_MODEL /
+        OPENAI_MODEL pair. Pin today's pair until the wrapper env contract
+        is redesigned (Phase D).
+config_paths:
+    value: ["~/.codex/config.toml", ".codex/config.toml"]
+    reason: >-
+        The agent-cli macOS records for Codex use `$CODEX_HOME` /
+        annotated-compound grammar ("config.toml; default ...") that the
+        bare-path rule skips loudly, which would leave a wrong primary
+        entry — config_paths[0] is the load-bearing user-level config path
+        for agent discovery (discover_agents_full). Pin today's pair until
+        agent-cli mandates one bare path per record.
+model_cli_flag:
+    value: "--model"
+    reason: >-
+        agent-models records the dedicated model flag as the compound site
+        "--model, -m", which the bare-token rule skips loudly — leaving
+        `--oss` (a provider switch to the local open-source backend, not a
+        model selector) as the first bare cli_flag site, so the mechanical
+        result would be wrong. Pin the long-form `--model`. Ruled at
+        Phase D wave 1 (2026-07-04).

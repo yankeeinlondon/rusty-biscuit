@@ -25,7 +25,7 @@ pub fn build_installed_snapshot(
     let runnable: Vec<Provider> = installed
         .iter()
         .copied()
-        .filter(|p| !excluded.contains(p) && *p != Provider::RooCode)
+        .filter(|p| !excluded.contains(p))
         .collect();
 
     let mut binary_paths = BTreeMap::new();
@@ -41,6 +41,31 @@ pub fn build_installed_snapshot(
         all_installed: installed.to_vec(),
         binary_paths,
     }
+}
+
+/// Detect which providers have a runnable agentic CLI on `PATH`.
+///
+/// Only `ExecutableSource::Path` discoveries count as installed. sniff's
+/// program lookup falls back to macOS app bundles when the `PATH` probe
+/// misses, and for agentic providers that fallback finds the *desktop* GUI
+/// app (`/Applications/Claude.app`, `/Applications/Qwen.app`, ...) — a
+/// binary that cannot run a terminal session. Counting it would select a
+/// provider the harness cannot actually launch and would leak host state
+/// past a deliberately restricted `PATH`. This mirrors the direct wrapper's
+/// `which`-based binary resolution, so "installed" means the same thing on
+/// both surfaces.
+pub fn detect_installed_providers(
+    clients: &sniff::programs::InstalledAiClients,
+) -> Vec<Provider> {
+    PROVIDERS_DISPLAY_ORDER
+        .into_iter()
+        .filter(|p| {
+            matches!(
+                clients.path_with_source(p.sniff_ai_cli()),
+                Some((_, sniff::programs::ExecutableSource::Path))
+            )
+        })
+        .collect()
 }
 
 /// Classify a frontmatter `agent` value against the installed-provider
@@ -238,8 +263,9 @@ where
     let (model, model_reason) =
         resolve_model_with_env(provider, hints, cli_model, &env_lookup, catalog);
 
-    // OpenCode non-TTY hard error: model is required
-    if provider == Provider::OpenCode && model.is_none() {
+    // Providers that require an explicit model in non-interactive mode (catalog
+    // `model_required_in_non_tty`; OpenCode today) hard-error when none resolved.
+    if provider_info(provider).model_required_in_non_tty && model.is_none() {
         return Err(CompositionError::ModelSelectionFailed {
             provider,
             reason: "OpenCode requires a model in non-interactive mode; set --model, OPENCODE_MODEL, or MODEL".into(),
@@ -564,8 +590,6 @@ pub fn build_candidate_set(installed: &[Provider], excluded: &BTreeSet<Provider>
         .iter()
         .copied()
         .filter(|p| !excluded.contains(p))
-        // RooCode is a VS Code extension, not a wrappable CLI
-        .filter(|p| *p != Provider::RooCode)
         .collect()
 }
 
@@ -613,7 +637,7 @@ mod tests {
         let runnable: Vec<Provider> = installed
             .iter()
             .copied()
-            .filter(|p| !excluded.contains(p) && *p != Provider::RooCode)
+            .filter(|p| !excluded.contains(p))
             .collect();
         InstalledProviderSnapshot {
             runnable,
@@ -868,7 +892,7 @@ mod tests {
     fn model_catalog_skips_invalid_list_entries() {
         let prepared = make_prepared_composition(
             None,
-            Some(ModelHint::List(vec!["not-real".into(), "o3-mini".into()])),
+            Some(ModelHint::List(vec!["not-real".into(), "gpt-5.5".into()])),
         );
         let cache = tempfile::TempDir::new().unwrap();
         let catalog = crate::model_catalog::ModelCatalogService::with_cache_dir(
@@ -881,7 +905,7 @@ mod tests {
             |_| None,
             Some(&catalog),
         );
-        assert_eq!(model, Some("o3-mini".to_string()));
+        assert_eq!(model, Some("gpt-5.5".to_string()));
         assert!(matches!(reason, ModelResolutionReason::FrontmatterList));
     }
 
@@ -908,7 +932,7 @@ mod tests {
 
     #[test]
     fn model_catalog_valid_single_hint_accepted() {
-        let prepared = make_prepared_composition(None, Some(ModelHint::Single("o3-mini".into())));
+        let prepared = make_prepared_composition(None, Some(ModelHint::Single("gpt-5.5".into())));
         let cache = tempfile::TempDir::new().unwrap();
         let catalog = crate::model_catalog::ModelCatalogService::with_cache_dir(
             cache.path().to_path_buf(),
@@ -920,7 +944,7 @@ mod tests {
             |_| None,
             Some(&catalog),
         );
-        assert_eq!(model, Some("o3-mini".to_string()));
+        assert_eq!(model, Some("gpt-5.5".to_string()));
         assert!(matches!(reason, ModelResolutionReason::FrontmatterSingle));
     }
 
@@ -935,7 +959,7 @@ mod tests {
         );
 
         let plan = build_picker_plan(&prepared, &snapshot, None).unwrap();
-        // Should be in display order, excluding RooCode
+        // Should be in display order
         assert_eq!(plan.options.len(), 3);
         assert_eq!(plan.options[0].provider, Provider::Claude);
         assert_eq!(plan.options[1].provider, Provider::Codex);
@@ -1297,5 +1321,33 @@ mod tests {
         .unwrap();
         assert_eq!(target.provider, Provider::OpenCode);
         assert_eq!(target.model, Some("gpt-4o".to_string()));
+    }
+
+    // -- detect_installed_providers ---------------------------------------
+
+    /// A macOS app-bundle discovery is the provider's *desktop* app, not the
+    /// CLI; it must never count as an installed agentic CLI.
+    #[test]
+    fn detect_installed_providers_ignores_app_bundle_discoveries() {
+        use sniff::programs::{AiCli, ExecutableSource, InstalledAiClients};
+
+        let clients = InstalledAiClients::default()
+            .with_program(
+                AiCli::Claude,
+                PathBuf::from("/stub/bin/claude"),
+                ExecutableSource::Path,
+            )
+            .with_program(
+                AiCli::QwenCli,
+                PathBuf::from("/Applications/Qwen.app/Contents/MacOS/Qwen"),
+                ExecutableSource::MacOsAppBundle,
+            );
+
+        let installed = detect_installed_providers(&clients);
+        assert!(installed.contains(&Provider::Claude));
+        assert!(
+            !installed.contains(&Provider::QwenCode),
+            "bundle-sourced Qwen must not be treated as installed: {installed:?}"
+        );
     }
 }

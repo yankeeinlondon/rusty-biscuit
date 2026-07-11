@@ -7,7 +7,6 @@
 //! inline arm it replaced.
 
 use std::collections::HashMap;
-use std::io::{IsTerminal, Write};
 use std::sync::{Arc, Mutex};
 
 use biscuit_terminal::terminal::Terminal;
@@ -83,8 +82,17 @@ pub(crate) fn run_structured_stream_session(
     // path (CLI > env > built-in `10m`; no frontmatter layer here). Only the
     // OpenCode branch of `build_structured_plumbing` consumes it.
     let stall_timeout = composition::resolve_stall_timeout(args.stall_timeout.clone());
-    let (build_parser, stderr_bridge, content_early_rx) =
-        policy::build_structured_plumbing(provider, sink, parser_config, stall_timeout);
+    // One signal hub per run: shared by the stdout reader thread, the
+    // OpenCode stderr bridge, and the post-wait termination synthesis.
+    // Harvest opt-in (E6) is resolved inside the builder.
+    let signal_hub = policy::provider_signal_hub(provider);
+    let (build_parser, stderr_bridge, content_early_rx) = policy::build_structured_plumbing(
+        provider,
+        sink,
+        parser_config,
+        stall_timeout,
+        &signal_hub,
+    );
     let mut _spawned = false;
     let stream_result = if let Some(wire_prompt) = wire_prompt.clone() {
         let runtime_context =
@@ -147,6 +155,7 @@ pub(crate) fn run_structured_stream_session(
             watchdog_state,
             Some(section_stream.tracker()),
             content_early_rx,
+            signal_hub,
         )?
     };
     let mut summary = stream_result.data;
@@ -169,21 +178,7 @@ pub(crate) fn run_structured_stream_session(
         && !summary.assistant_text.is_empty()
         && !crate::output::user_interrupt_observed()
     {
-        section_stream.enter_final_stdout();
-        let text = &summary.assistant_text;
-        if std::io::stdout().is_terminal() {
-            let rendered = crate::output::render_assistant_markdown(text, term);
-            std::io::stdout().write_all(rendered.as_bytes())?;
-            if !rendered.ends_with('\n') {
-                std::io::stdout().write_all(b"\n")?;
-            }
-        } else {
-            std::io::stdout().write_all(text.as_bytes())?;
-            if !text.ends_with('\n') {
-                std::io::stdout().write_all(b"\n")?;
-            }
-        }
-        std::io::stdout().flush()?;
+        crate::output::emit_final_message(&summary.assistant_text, term, Some(&section_stream))?;
     }
 
     policy::emit_stream_summary(
@@ -195,6 +190,8 @@ pub(crate) fn run_structured_stream_session(
         &summary_details.lock().unwrap().clone(),
         Some(&section_stream),
         stream_result.agent_pid,
+        &stream_result.signals,
+        args.model.as_deref(),
     );
 
     let stderr_text = summary.stderr_text.clone();

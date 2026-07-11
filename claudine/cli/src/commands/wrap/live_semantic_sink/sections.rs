@@ -2,8 +2,6 @@
 
 use super::LiveSemanticSink;
 use super::Section;
-use biscuit_terminal::components::renderable::TerminalRenderable;
-use biscuit_terminal::components::status::{Status, StatusState};
 
 impl LiveSemanticSink {
     /// Section-aware stderr emit used by every status render path.
@@ -49,34 +47,5 @@ impl LiveSemanticSink {
     /// rollup).
     pub(crate) fn emit_trailer_line(&mut self, line: &str) {
         self.emit_section_line(Section::TrailerMetadata, line);
-    }
-
-    pub(crate) fn render_status(
-        &mut self,
-        section: Section,
-        state: StatusState,
-        description: String,
-    ) {
-        let rendered = Status::new(description).state(state).render(&self.terminal);
-        self.emit_section_line(section, &rendered);
-    }
-
-    pub(crate) fn render_status_prose(
-        &mut self,
-        section: Section,
-        state: StatusState,
-        description: String,
-    ) {
-        let mut status = Status::from_prose(description).state(state);
-        // Tool-call and tool-result lines are the only consumers of this
-        // helper today and they render as `→ Name(details)` / `← Name(…)`.
-        // The Status default hanging indent of 2 lines continuation lines
-        // up under the tool name glyph — but not under the text past the
-        // `→ ` arrow. Bumping the hanging indent by 2 (one for the arrow,
-        // one for the trailing space) lines the wrap under the first
-        // letter of the tool name, which is what users expect.
-        status.layout_mut().word_wrap = status.layout().word_wrap.clone().with_hanging_indent(4);
-        let rendered = status.render(&self.terminal);
-        self.emit_section_line(section, &rendered);
     }
 }

@@ -6,6 +6,7 @@
 //! prompt-scoped timing monitor (periodic timing header + the fire-once
 //! `timeout_warn` / `step_timeout_warn` messages).
 
+use std::io::Write;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
@@ -22,14 +23,15 @@ use claudine::stream::prompt_timing::{HeaderKind, PromptTimingContext};
 
 use super::super::subagent_watchdog::WatchdogState;
 use super::super::timeouts::TimeoutConfig;
-use super::super::{StreamTextRenderer, TickerCancel};
+use super::super::TickerCancel;
+use claudine::render::{AssistantStream, StreamRenderable};
 use super::super::super::section::{Section, SectionStream, SectionTracker};
 use super::super::super::stream_io::StreamOutput;
 use super::breach::{format_duration, render_watchdog_error_to_stream};
 use super::evaluate::{WatchdogTickResult, evaluate_timeout_tick};
 
-/// Spawn a dedicated ticker that runs [`StreamTextRenderer::flush_if_idle`]
-/// every 30 seconds.
+/// Spawn a dedicated ticker that runs `AssistantStream`'s idle flush
+/// (`StreamRenderable::flush_idle`) every 30 seconds.
 ///
 /// Independent from the prompt-scoped timing monitor so buffered markdown
 /// reaches stdout even on runs that have no prompt context (wrapper
@@ -47,7 +49,7 @@ use super::evaluate::{WatchdogTickResult, evaluate_timeout_tick};
 /// consistent with the live sink.
 pub(crate) fn spawn_flush_if_idle_ticker(
     stream_output: Arc<StreamOutput>,
-    text_renderer: Arc<std::sync::Mutex<StreamTextRenderer>>,
+    text_renderer: Arc<std::sync::Mutex<AssistantStream>>,
     watchdog_state: Option<Arc<std::sync::Mutex<WatchdogState>>>,
     section_tracker: Option<Arc<Mutex<SectionTracker>>>,
     timeout_config: TimeoutConfig,
@@ -66,7 +68,10 @@ pub(crate) fn spawn_flush_if_idle_ticker(
             if now >= next_tick {
                 if let Ok(mut r) = text_renderer.lock() {
                     let mut writer = stream_output.stdout_writer();
-                    r.flush_if_idle(&mut writer, SILENCE_WINDOW);
+                    for frame in r.flush_idle(SILENCE_WINDOW) {
+                        let _ = writer.write_all(frame.as_bytes());
+                    }
+                    let _ = writer.flush();
                 }
 
                 // Emit subagent idle diagnostics only when the unified

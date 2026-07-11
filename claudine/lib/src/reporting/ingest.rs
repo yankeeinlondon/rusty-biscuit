@@ -75,6 +75,26 @@ struct PreparedEvent {
     claudine_pid: Option<i64>,
     /// Immediate child PID returned by the wrapper spawn operation.
     agent_pid: Option<i64>,
+    /// `extra["family_latest"]` alias stamp lifted from SessionEnd rows.
+    family_latest_json: Option<String>,
+    /// `extra["signals"]` observations exploded from SessionEnd rows.
+    signals: Vec<PreparedSignal>,
+}
+
+/// One `session_signals` row exploded from a SessionEnd summary event.
+#[derive(Debug)]
+struct PreparedSignal {
+    /// Position within the summary row's `signals` array; part of the
+    /// primary key so re-ingesting a line stays idempotent.
+    signal_index: i64,
+    /// The signal's own `first_seen` when present, else the event
+    /// timestamp — signals can predate the summary row by minutes.
+    timestamp: String,
+    kind: String,
+    source: String,
+    occurrences: i64,
+    /// The full signal object, `event` payload included.
+    payload_json: String,
 }
 
 /// Sync JSONL event logs into the SQLite reporting index.
@@ -200,6 +220,11 @@ fn sync_file(
             params![source_file_str],
         )
         .map_err(|e| fail!(0, e))?;
+        tx.execute(
+            "DELETE FROM session_signals WHERE source_file = ?1",
+            params![source_file_str],
+        )
+        .map_err(|e| fail!(0, e))?;
     }
 
     let mut file = BufReader::new(File::open(path).map_err(|e| fail!(0, e))?);
@@ -263,6 +288,7 @@ fn sync_file(
         if inserted {
             stats.inserted += 1;
             stats.anonymous_session_fallbacks += u64::from(prepared.anonymous_session_fallback);
+            insert_session_signals(&tx, &prepared).map_err(|e| fail!(line_number, e))?;
 
             if !rebuild {
                 upsert_session(&tx, &prepared).map_err(|e| fail!(line_number, e))?;
@@ -385,6 +411,22 @@ fn prepare_event(path: &Path, source_offset: i64, meta: EventMeta) -> Result<Pre
     let extra_json = serde_json::to_string(&meta.extra)?;
     let env_json = serde_json::to_string(&meta.env)?;
 
+    // Signals and the family_latest stamp are only written by the
+    // SessionEnd summary builder; gate on the event so stray keys on
+    // other rows can never fabricate signal history.
+    let (family_latest_json, signals) = if meta.event == crate::events::AgenticEvent::SessionEnd {
+        (
+            meta.extra
+                .get("family_latest")
+                .filter(|value| value.is_object())
+                .map(serde_json::to_string)
+                .transpose()?,
+            prepare_signals(&meta),
+        )
+    } else {
+        (None, Vec::new())
+    };
+
     let prepared = PreparedEvent {
         source_file,
         source_offset,
@@ -432,9 +474,79 @@ fn prepare_event(path: &Path, source_offset: i64, meta: EventMeta) -> Result<Pre
             .map(|v| v == "true"),
         claudine_pid: meta.env.claudine_pid.map(i64::from),
         agent_pid: meta.agent_pid.map(i64::from),
+        family_latest_json,
+        signals,
     };
 
     Ok(prepared)
+}
+
+/// Explode `extra["signals"]` into `session_signals` row material.
+///
+/// Tolerant by design: entries missing a string `kind` are skipped (the
+/// full array still lives in `extra_json` for forensics), and missing
+/// `source`/`occurrences`/`first_seen` fall back to `unknown`/`1`/the
+/// event timestamp rather than failing the line.
+fn prepare_signals(meta: &EventMeta) -> Vec<PreparedSignal> {
+    let Some(entries) = meta.extra.get("signals").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+
+    entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| {
+            let kind = entry.get("kind").and_then(Value::as_str)?.to_string();
+            Some(PreparedSignal {
+                signal_index: index as i64,
+                timestamp: entry
+                    .get("first_seen")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_else(|| meta.timestamp.to_rfc3339()),
+                kind,
+                source: entry
+                    .get("source")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+                    .to_string(),
+                occurrences: entry
+                    .get("occurrences")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(1),
+                payload_json: entry.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// Insert the prepared event's exploded signal rows (no-op when empty).
+fn insert_session_signals(tx: &Transaction<'_>, row: &PreparedEvent) -> Result<()> {
+    for signal in &row.signals {
+        tx.execute(
+            r#"
+            INSERT OR IGNORE INTO session_signals (
+                source_file, source_offset, signal_index, session_key, session_id,
+                provider, timestamp, source_date, kind, source, occurrences, payload_json
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            "#,
+            params![
+                row.source_file,
+                row.source_offset,
+                signal.signal_index,
+                row.session_key,
+                row.session_id,
+                row.provider,
+                signal.timestamp,
+                row.source_date,
+                signal.kind,
+                signal.source,
+                signal.occurrences,
+                signal.payload_json,
+            ],
+        )?;
+    }
+    Ok(())
 }
 
 fn session_key(meta: &EventMeta, source_file: &str, _source_offset: i64) -> (String, bool) {
@@ -573,13 +685,14 @@ fn upsert_session(tx: &Transaction<'_>, row: &PreparedEvent) -> Result<()> {
             branch, package_area, package, model, permission_mode, hostname, primary_language,
             event_count, turn_count, tool_call_count, tool_error_count, turn_error_count,
             subagent_count, total_input_tokens, total_output_tokens, total_tokens,
-            total_cache_read_tokens, total_cost_usd, interactive, claudine_pid, agent_pid
+            total_cache_read_tokens, total_cost_usd, interactive, claudine_pid, agent_pid,
+            family_latest
         ) VALUES (
             ?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7,
             ?8, ?9, ?10, ?11, ?12, ?13, ?14, 1,
             ?15, ?16, ?17, ?18, ?19,
             ?20, ?21, ?22, ?23, ?24, ?25,
-            ?26, ?27
+            ?26, ?27, ?28
         )
         ON CONFLICT(session_key) DO UPDATE SET
             session_id = COALESCE(excluded.session_id, sessions.session_id),
@@ -599,6 +712,7 @@ fn upsert_session(tx: &Transaction<'_>, row: &PreparedEvent) -> Result<()> {
             interactive = COALESCE(excluded.interactive, sessions.interactive),
             claudine_pid = COALESCE(excluded.claudine_pid, sessions.claudine_pid),
             agent_pid = COALESCE(excluded.agent_pid, sessions.agent_pid),
+            family_latest = COALESCE(excluded.family_latest, sessions.family_latest),
             event_count = sessions.event_count + 1,
             turn_count = sessions.turn_count + excluded.turn_count,
             tool_call_count = sessions.tool_call_count + excluded.tool_call_count,
@@ -639,6 +753,7 @@ fn upsert_session(tx: &Transaction<'_>, row: &PreparedEvent) -> Result<()> {
             row.interactive,
             row.claudine_pid,
             row.agent_pid,
+            row.family_latest_json,
         ],
     )?;
 
@@ -654,7 +769,8 @@ fn rebuild_sessions(tx: &Transaction<'_>) -> Result<()> {
             branch, package_area, package, model, permission_mode, hostname, primary_language,
             event_count, turn_count, tool_call_count, tool_error_count, turn_error_count,
             subagent_count, total_input_tokens, total_output_tokens, total_tokens,
-            total_cache_read_tokens, total_cost_usd, interactive, claudine_pid, agent_pid
+            total_cache_read_tokens, total_cost_usd, interactive, claudine_pid, agent_pid,
+            family_latest
         )
         SELECT
             session_key,
@@ -687,7 +803,12 @@ fn rebuild_sessions(tx: &Transaction<'_>) -> Result<()> {
                      WHEN json_extract(extra_json, '$.interactive') = 'false' THEN 0
                      ELSE NULL END),
             MAX(claudine_pid),
-            MAX(agent_pid)
+            MAX(agent_pid),
+            -- json_extract yields the stamp object's JSON text; MAX picks
+            -- the single SessionEnd stamp (NULL rows lose).
+            MAX(CASE WHEN event = 'session_end'
+                     THEN json_extract(extra_json, '$.family_latest')
+                     ELSE NULL END)
         FROM events
         GROUP BY session_key;
         "#,
@@ -999,6 +1120,40 @@ mod tests {
 
         assert_eq!(claudine_pid, Some(11_111));
         assert_eq!(agent_pid, None);
+    }
+
+    /// Signals are only exploded from SessionEnd rows — a stray
+    /// `signals` key on any other event never fabricates signal history.
+    #[test]
+    fn signals_on_non_session_end_rows_are_ignored() {
+        let dir = tempdir().unwrap();
+        let (logs_dir, mut conn) = open_store(&dir);
+
+        let mut meta = sample_meta();
+        meta.extra.insert(
+            "signals".to_string(),
+            serde_json::json!([{
+                "kind": "model_catalog_drift",
+                "source": "wrapper",
+                "occurrences": 1,
+                "first_seen": "2026-04-03T10:00:00Z",
+                "event": { "kind": "model_catalog_drift", "unexpected": [], "missing": [], "observed_via": "listing" }
+            }]),
+        );
+
+        let log_path = logs_dir.join("2026-04-03.jsonl");
+        fs::write(
+            &log_path,
+            format!("{}\n", serde_json::to_string(&meta).unwrap()),
+        )
+        .unwrap();
+
+        sync(&mut conn, &logs_dir, crate::reporting::SyncRequest::All).unwrap();
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM session_signals", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
     }
 
     /// Phase 4 — session aggregation surfaces the maximum PID values.

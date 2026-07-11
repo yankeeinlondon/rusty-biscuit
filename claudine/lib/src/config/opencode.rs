@@ -536,7 +536,7 @@ mod tests {
         let source = generate_bridge(&plan.events);
         assert!(source.contains("execFileSync(CLAUDINE_BIN"));
         assert!(source.contains("invokeClaudine"));
-        assert!(source.contains("createClaudineInvoker(\"open_code\")"));
+        assert!(source.contains("createClaudineInvoker(\"opencode\")"));
         assert!(source.contains("[\"handle\","));
         assert!(source.contains("\"--provider\", provider]"));
     }

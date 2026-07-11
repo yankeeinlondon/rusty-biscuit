@@ -1,0 +1,17 @@
+# Human-owned overrides for the pi provider. Each entry WINS over the
+# field's declared source during generation (whole-key replacement) and MUST
+# carry a `reason:`. Keys are catalog field names; an override for a field
+# with no mapping-registry entry is a generation error.
+model_catalog_source:
+    value: none
+    reason: >-
+        agent-models research reports dynamic_listing.available: true
+        (`pi --list-models [search]`), but the research boolean cannot select a
+        catalog mechanism and `pi --list-models` prints a human-formatted table
+        (provider, model id, context window, max-out, thinking/image support),
+        not a machine-parseable JSON list — so no clean ShellCommand candidate
+        exists today. `none` is correct: no drift-channel listing, and
+        expected_offerings (research default_models) is the validation baseline.
+        Mirrors the codex/kimi precedent. Pin until `pi --list-models` output is
+        verified parseable or the agent-models schema grows a typed
+        catalog-source key (pending schema addition).

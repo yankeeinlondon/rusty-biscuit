@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn native_mapping_matrix_matches_provider_api() {
-        let providers = [Provider::Claude, Provider::OpenCode, Provider::RooCode];
+        let providers = [Provider::Claude, Provider::OpenCode, Provider::QwenCode];
         let matrix = event_native_mapping_matrix(&providers);
 
         assert_eq!(matrix.len(), AgenticEvent::ALL.len());

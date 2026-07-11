@@ -6,9 +6,8 @@
 
 use std::collections::HashMap;
 
-use unchained_ai::models::model_metadata::{Modality, ModelModalities, ProviderModelMetadata};
-
-use crate::parsera::ParseraModel;
+use unchained_ai::models::identity::ModelIdentity;
+use unchained_ai::models::model_metadata::{Modality, ProviderModelMetadata};
 
 /// Generates metadata lookup table code.
 pub struct MetadataGenerator {
@@ -25,25 +24,36 @@ impl MetadataGenerator {
     }
 
     /// Registers a model ID with optional merged metadata.
+    ///
+    /// When no metadata source supplied a `family`, it is
+    /// filled from the id's parsed identity so the family index has full
+    /// coverage regardless of upstream data quality.
     pub fn register(&mut self, model_id: String, metadata: Option<ProviderModelMetadata>) {
+        let metadata = metadata.map(|mut meta| {
+            if meta.family.is_none() {
+                meta.family = ModelIdentity::parse(&model_id)
+                    .family_or_none()
+                    .map(str::to_string);
+            }
+            meta
+        });
         self.entries.insert(model_id, metadata);
     }
 
-    /// Merges provider-native metadata with Parsera data.
+    /// Merges provider-native metadata with source enrichment data.
     ///
-    /// Priority: Provider-Native > Parsera. When both sources provide the same
+    /// Priority: provider-native > enrichment. When both sources provide the same
     /// field (e.g., `context_window`), the provider-native value wins. Fields
-    /// only available from one source (e.g., `pricing` from OpenRouter, `family`
-    /// from Parsera) are used as-is.
+    /// only available from one source are used as-is.
     pub fn merge_metadata(
         provider_native: Option<ProviderModelMetadata>,
-        parsera: Option<&ParseraModel>,
+        enrichment: Option<ProviderModelMetadata>,
     ) -> Option<ProviderModelMetadata> {
-        match (provider_native, parsera) {
+        match (provider_native, enrichment) {
             (None, None) => None,
             (Some(native), None) => Some(native),
-            (None, Some(parsera)) => Some(parsera_to_metadata(parsera)),
-            (Some(native), Some(parsera)) => Some(merge_native_with_parsera(native, parsera)),
+            (None, Some(enrichment)) => Some(enrichment),
+            (Some(native), Some(enrichment)) => Some(merge_native_with_enrichment(native, enrichment)),
         }
     }
 
@@ -253,6 +263,15 @@ impl MetadataGenerator {
             entry.push_str("        created: None,\n");
         }
 
+        if let Some(release_date) = &meta.release_date {
+            entry.push_str(&format!(
+                "        release_date: Some(\"{}\".to_string()),\n",
+                escape_string(release_date)
+            ));
+        } else {
+            entry.push_str("        release_date: None,\n");
+        }
+
         entry.push_str("    });\n");
         entry
     }
@@ -264,43 +283,28 @@ impl Default for MetadataGenerator {
     }
 }
 
-fn parsera_to_metadata(p: &ParseraModel) -> ProviderModelMetadata {
-    ProviderModelMetadata {
-        display_name: Some(p.name.clone()),
-        family: p.family.clone(),
-        context_window: p.context_window,
-        max_output_tokens: p.max_output_tokens,
-        modalities: p.modalities.as_ref().map(|m| ModelModalities {
-            input: m.input.iter().filter_map(|s| s.parse().ok()).collect(),
-            output: m.output.iter().filter_map(|s| s.parse().ok()).collect(),
-        }),
-        capabilities: p.capabilities.clone().unwrap_or_default(),
-        ..Default::default()
-    }
-}
-
-fn merge_native_with_parsera(
+fn merge_native_with_enrichment(
     native: ProviderModelMetadata,
-    parsera: &ParseraModel,
+    enrichment: ProviderModelMetadata,
 ) -> ProviderModelMetadata {
-    let parsera_meta = parsera_to_metadata(parsera);
     ProviderModelMetadata {
-        display_name: native.display_name.or(parsera_meta.display_name),
-        family: native.family.or(parsera_meta.family),
-        context_window: native.context_window.or(parsera_meta.context_window),
-        max_output_tokens: native.max_output_tokens.or(parsera_meta.max_output_tokens),
-        modalities: native.modalities.or(parsera_meta.modalities),
+        display_name: native.display_name.or(enrichment.display_name),
+        family: native.family.or(enrichment.family),
+        context_window: native.context_window.or(enrichment.context_window),
+        max_output_tokens: native.max_output_tokens.or(enrichment.max_output_tokens),
+        modalities: native.modalities.or(enrichment.modalities),
         capabilities: if native.capabilities.is_empty() {
-            parsera_meta.capabilities
+            enrichment.capabilities
         } else {
             native.capabilities
         },
-        description: native.description,
-        pricing: native.pricing,
-        supported_parameters: native.supported_parameters,
-        default_parameters: native.default_parameters,
-        knowledge_cutoff: native.knowledge_cutoff,
+        description: native.description.or(enrichment.description),
+        pricing: native.pricing.or(enrichment.pricing),
+        supported_parameters: native.supported_parameters.or(enrichment.supported_parameters),
+        default_parameters: native.default_parameters.or(enrichment.default_parameters),
+        knowledge_cutoff: native.knowledge_cutoff.or(enrichment.knowledge_cutoff),
         created: native.created,
+        release_date: enrichment.release_date,
     }
 }
 
@@ -346,27 +350,26 @@ fn format_option_u32(v: Option<u32>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parsera::ParseraModalities;
     use unchained_ai::models::model_default_parameters::ModelDefaultParameters;
-    use unchained_ai::models::model_metadata::Modality;
+    use unchained_ai::models::model_metadata::{Modality, ModelModalities};
     use unchained_ai::models::model_pricing::ModelPricing;
 
-    fn sample_parsera_model() -> ParseraModel {
-        ParseraModel {
-            id: "gpt-4o".to_string(),
-            name: "GPT-4o".to_string(),
-            provider: "openai".to_string(),
+    fn sample_enrichment_metadata() -> ProviderModelMetadata {
+        ProviderModelMetadata {
+            display_name: Some("GPT-4o".to_string()),
             family: Some("gpt-4o".to_string()),
             context_window: Some(128000),
             max_output_tokens: Some(16384),
-            modalities: Some(ParseraModalities {
-                input: vec!["text".to_string(), "image".to_string()],
-                output: vec!["text".to_string()],
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Text, Modality::Image],
+                output: vec![Modality::Text],
             }),
-            capabilities: Some(vec![
+            capabilities: vec![
                 "function_calling".to_string(),
                 "structured_output".to_string(),
-            ]),
+            ],
+            release_date: Some("2025-04-14".to_string()),
+            ..Default::default()
         }
     }
 
@@ -385,8 +388,7 @@ mod tests {
     fn test_single_entry() {
         let mut generator = MetadataGenerator::new();
 
-        let meta = parsera_to_metadata(&sample_parsera_model());
-        generator.register("gpt-4o".to_string(), Some(meta));
+        generator.register("gpt-4o".to_string(), Some(sample_enrichment_metadata()));
 
         let code = generator.generate();
 
@@ -427,24 +429,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parsera_to_metadata() {
-        let parsera = sample_parsera_model();
-        let meta = parsera_to_metadata(&parsera);
-
-        assert_eq!(meta.display_name.as_deref(), Some("GPT-4o"));
-        assert_eq!(meta.family.as_deref(), Some("gpt-4o"));
-        assert_eq!(meta.context_window, Some(128000));
-        assert_eq!(meta.max_output_tokens, Some(16384));
-        assert!(meta.pricing.is_none());
-        assert!(meta.description.is_none());
-        assert!(meta.supported_parameters.is_none());
-        assert!(meta.default_parameters.is_none());
-        assert!(meta.knowledge_cutoff.is_none());
-        assert!(meta.created.is_none());
-        assert_eq!(meta.capabilities.len(), 2);
-    }
-
-    #[test]
     fn test_merge_none_none() {
         let result = MetadataGenerator::merge_metadata(None, None);
         assert!(result.is_none());
@@ -469,43 +453,44 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_parsera_only() {
-        let parsera = sample_parsera_model();
-        let result = MetadataGenerator::merge_metadata(None, Some(&parsera));
+    fn test_merge_enrichment_only() {
+        let result = MetadataGenerator::merge_metadata(None, Some(sample_enrichment_metadata()));
         let merged = result.unwrap();
         assert_eq!(merged.display_name.as_deref(), Some("GPT-4o"));
         assert_eq!(merged.family.as_deref(), Some("gpt-4o"));
         assert_eq!(merged.context_window, Some(128000));
         assert!(merged.pricing.is_none());
+        assert_eq!(merged.release_date.as_deref(), Some("2025-04-14"));
     }
 
     #[test]
-    fn test_merge_native_wins_over_parsera() {
+    fn test_merge_native_wins_over_enrichment() {
         let native = ProviderModelMetadata {
             display_name: Some("Native Name".to_string()),
             context_window: Some(50000),
+            created: Some(1700000000),
             ..Default::default()
         };
-        let parsera = sample_parsera_model();
 
-        let result = MetadataGenerator::merge_metadata(Some(native), Some(&parsera));
+        let result = MetadataGenerator::merge_metadata(Some(native), Some(sample_enrichment_metadata()));
         let merged = result.unwrap();
 
         assert_eq!(merged.display_name.as_deref(), Some("Native Name"));
         assert_eq!(merged.context_window, Some(50000));
         assert_eq!(merged.family.as_deref(), Some("gpt-4o"));
         assert_eq!(merged.capabilities.len(), 2);
+        assert_eq!(merged.created, Some(1700000000));
+        assert_eq!(merged.release_date.as_deref(), Some("2025-04-14"));
     }
 
     #[test]
-    fn test_merge_parsera_fills_gaps() {
+    fn test_merge_enrichment_fills_gaps() {
         let native = ProviderModelMetadata {
             display_name: Some("Native Name".to_string()),
             ..Default::default()
         };
-        let parsera = sample_parsera_model();
 
-        let result = MetadataGenerator::merge_metadata(Some(native), Some(&parsera));
+        let result = MetadataGenerator::merge_metadata(Some(native), Some(sample_enrichment_metadata()));
         let merged = result.unwrap();
 
         assert_eq!(merged.display_name.as_deref(), Some("Native Name"));
@@ -531,9 +516,7 @@ mod tests {
             created: Some(1700000000),
             ..Default::default()
         };
-        let parsera = sample_parsera_model();
-
-        let result = MetadataGenerator::merge_metadata(Some(native), Some(&parsera));
+        let result = MetadataGenerator::merge_metadata(Some(native), Some(sample_enrichment_metadata()));
         let merged = result.unwrap();
 
         assert_eq!(merged.description.as_deref(), Some("A test model."));
@@ -551,9 +534,8 @@ mod tests {
             capabilities: vec!["vision".to_string()],
             ..Default::default()
         };
-        let parsera = sample_parsera_model();
 
-        let result = MetadataGenerator::merge_metadata(Some(native), Some(&parsera));
+        let result = MetadataGenerator::merge_metadata(Some(native), Some(sample_enrichment_metadata()));
         let merged = result.unwrap();
 
         assert_eq!(merged.capabilities, vec!["vision"]);
@@ -581,6 +563,7 @@ mod tests {
             }),
             knowledge_cutoff: Some("2025-04-30".to_string()),
             created: Some(1777591821),
+            release_date: Some("2026-01-15".to_string()),
             ..Default::default()
         };
 
@@ -598,8 +581,25 @@ mod tests {
         assert!(code.contains("Some(0.9_f32)"));
         assert!(code.contains("Some(1777591821)"));
         assert!(code.contains("\"2025-04-30\""));
+        assert!(code.contains("release_date: Some(\"2026-01-15\".to_string())"));
         assert!(code.contains("\"temperature\""));
         assert!(code.contains("\"max_tokens\""));
+    }
+
+    #[test]
+    fn test_entry_emits_release_date_when_present() {
+        let mut generator = MetadataGenerator::new();
+
+        let meta = ProviderModelMetadata {
+            display_name: Some("Released Model".to_string()),
+            release_date: Some("2025-11-01".to_string()),
+            ..Default::default()
+        };
+        generator.register("test/released".to_string(), Some(meta));
+
+        let code = generator.generate();
+
+        assert!(code.contains("release_date: Some(\"2025-11-01\".to_string())"));
     }
 
     #[test]

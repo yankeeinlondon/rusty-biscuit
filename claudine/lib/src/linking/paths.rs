@@ -391,7 +391,6 @@ mod tests {
         assert!(providers.contains(&Provider::Codex));
         assert!(providers.contains(&Provider::OpenCode));
         assert!(providers.contains(&Provider::QwenCode));
-        assert!(providers.contains(&Provider::RooCode));
 
         // Gemini commands are TOML, not Markdown-linkable.
         assert!(!providers.contains(&Provider::Gemini));

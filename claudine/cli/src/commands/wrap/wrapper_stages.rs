@@ -10,8 +10,8 @@ use color_eyre::eyre::{Result, eyre};
 use super::flags::WrapperArgs;
 use super::profile::{self, WrapperProfile};
 use super::{
-    McpRuntimeInfo, StructuredCodexOutput, env, exec, flags, harness_orch, policy,
-    structured_verbosity, system_prompt, wrap_terminal, wrapper_exec,
+    McpRuntimeInfo, StructuredCodexOutput, env, exec, flags, harness_orch, structured_verbosity,
+    system_prompt, wrapper_exec,
 };
 use crate::log;
 
@@ -82,33 +82,6 @@ pub(crate) fn parse_cli_timeouts(args: &WrapperArgs) -> Result<Option<std::time:
     }
 
     Ok(cli_timeout_duration)
-}
-
-pub(crate) fn resolve_opencode_model(
-    provider: Provider,
-    _profile: &dyn WrapperProfile,
-    child_args: &mut Vec<String>,
-    env_overrides: &mut Vec<(String, String)>,
-    model: Option<&str>,
-    non_interactive_requested: bool,
-) -> Result<Option<profile::OpenCodeModelSource>> {
-    let has_model = env_overrides.iter().any(|(k, _)| k == "MODEL");
-    match profile::apply_opencode_model_resolution(
-        child_args,
-        &mut |k, v| env_overrides.push((k, v)),
-        has_model,
-        model,
-        non_interactive_requested,
-        &profile::OpenCodeEnvSnapshot::from_system(),
-    ) {
-        Ok(source) => Ok(source),
-        Err(_) => {
-            let term = wrap_terminal();
-            let report = crate::output::error_report::AgentErrorReport::no_model_provided(provider);
-            report.render(&term);
-            std::process::exit(1);
-        }
-    }
 }
 
 /// Stage 10.5 — merge the YOLO permission overlay into `OPENCODE_CONFIG_CONTENT`.
@@ -359,11 +332,12 @@ pub(crate) fn prepare_stream_and_prompt(
         profile.apply_structured_stream(child_args);
     }
 
-    let structured_codex_output = if use_structured && provider == Provider::Codex {
-        Some(StructuredCodexOutput::prepare(child_args))
-    } else {
-        None
-    };
+    let structured_codex_output = crate::commands::exec_prep::prepare_codex_structured_output(
+        provider,
+        use_structured,
+        false,
+        child_args,
+    );
 
     let mut wire_prompt: Option<String> = None;
     let stdin_seed: Option<String> = if let Some(prompt) = prompt_source.as_inline() {

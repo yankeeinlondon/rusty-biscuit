@@ -5,6 +5,27 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::rigging::providers::models::ProviderModel;
 
+/// Canonical serialized capability token for function/tool calling.
+pub const CAPABILITY_FUNCTION_CALLING: &str = "function_calling";
+/// Canonical serialized capability token for structured output.
+pub const CAPABILITY_STRUCTURED_OUTPUT: &str = "structured_output";
+/// Canonical serialized capability token for reasoning models.
+pub const CAPABILITY_REASONING: &str = "reasoning";
+/// Canonical serialized capability token for file input support.
+pub const CAPABILITY_FILE_INPUT: &str = "file_input";
+
+/// Maps a models.dev boolean capability field to Claudine's canonical token.
+#[must_use]
+pub fn canonical_models_dev_capability(field: &str) -> Option<&'static str> {
+    match field {
+        "tool_call" => Some(CAPABILITY_FUNCTION_CALLING),
+        "structured_output" => Some(CAPABILITY_STRUCTURED_OUTPUT),
+        "reasoning" => Some(CAPABILITY_REASONING),
+        "attachment" => Some(CAPABILITY_FILE_INPUT),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelCapability {
     /// Use this when you want a fast and cheap model and you're sure that
@@ -306,5 +327,26 @@ mod tests {
 
         let expected = ModelCapability::Specific(ProviderModel::OpenAi(ProviderModelOpenAi::O3));
         assert_eq!(parsed, expected);
+    }
+
+    #[test]
+    fn test_canonical_models_dev_capability_mapping() {
+        assert_eq!(
+            canonical_models_dev_capability("tool_call"),
+            Some(CAPABILITY_FUNCTION_CALLING)
+        );
+        assert_eq!(
+            canonical_models_dev_capability("structured_output"),
+            Some(CAPABILITY_STRUCTURED_OUTPUT)
+        );
+        assert_eq!(
+            canonical_models_dev_capability("reasoning"),
+            Some(CAPABILITY_REASONING)
+        );
+        assert_eq!(
+            canonical_models_dev_capability("attachment"),
+            Some(CAPABILITY_FILE_INPUT)
+        );
+        assert_eq!(canonical_models_dev_capability("unknown"), None);
     }
 }

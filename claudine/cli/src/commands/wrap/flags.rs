@@ -510,7 +510,6 @@ mod tests {
                 && !helper_source.contains("Provider::OpenCode")
                 && !helper_source.contains("Provider::QwenCode")
                 && !helper_source.contains("Provider::Goose")
-                && !helper_source.contains("Provider::RooCode")
                 && helper_source.contains("provider_info(provider)")
                 && helper_source.contains(".output_formats"),
             "native-output detection must remain catalog-derived: {helper_source}"

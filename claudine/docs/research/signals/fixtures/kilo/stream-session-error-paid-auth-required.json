@@ -1,0 +1,18 @@
+{
+  "directory": "/workspace/project",
+  "payload": {
+    "id": "evt_scrubbed_paid_auth",
+    "type": "session.error",
+    "properties": {
+      "sessionID": "ses_scrubbed",
+      "error": {
+        "name": "APIError",
+        "data": {
+          "message": "Authentication required",
+          "isRetryable": false,
+          "responseBody": "{\"error\":{\"code\":\"PAID_MODEL_AUTH_REQUIRED\",\"message\":\"Authentication required\"}}"
+        }
+      }
+    }
+  }
+}

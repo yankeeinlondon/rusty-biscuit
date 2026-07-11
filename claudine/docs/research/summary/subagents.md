@@ -1,0 +1,210 @@
+---
+sequence:
+- name: draft
+- name: iterate
+- name: finalize
+prompt: |-
+  Subagent definitions — named, specialized agents that a session can delegate work to, often with their own prompt, model, and tool restrictions — vary widely across agentic CLIs, from first-class definition files to nothing at all. Claudine links agent definitions across providers and also has to reason about subagent observability during wrapped runs.
+
+  ## Task
+
+  Your task is to report on agent/subagent definition support across the Agentic CLI providers Claudine supports.
+
+  - your report should start by outlining why subagent definitions matter to agentic processes (delegation, context management, specialization)
+  - and then shift its focus to how providers differ: definition format and metadata, user/repo scopes, model and tool restriction support, invocation mechanics, and what a wrapper can observe while a subagent runs
+  - close with a point of view on the implications for Claudine's linking strategy and for wrapped-run observability
+
+  As background material we have subagents research documents for each provider that Claudine supports. They can be found at `@claudine/docs/research/subagents/*.md`.
+
+  Important: your final response is saved verbatim as the body of this summary document, so it must be the complete document text and nothing else — no preamble, no commentary. Never write to this document yourself.
+
+  ::block when="state.name == 'draft'"
+  - Iterate over the first three research documents to develop a point of view on how to write this document and then produce an initial draft of the document
+  ::end-block
+  ::block when="state.name == 'iterate'"
+
+  - Note: the initial draft has already been created — it is the body of `@claudine/docs/research/summary/subagents.md` (everything below the frontmatter); read it from there
+  - Act as an orchestrator and iterate over each remaining provider's research document:
+      - provide the subagent the current draft and ask them to return an improved draft based on the research document they've been assigned
+  - Once every remaining provider has been incorporated, your final response is the fully updated draft
+  ::end-block
+
+  ::block when="state.name == 'finalize'"
+
+  The document has now gone through several rounds of improvement and your task is just to make sure the document is consistent in tone and detail and that nothing looks incorrect or incomplete. The current draft is the body of `@claudine/docs/research/summary/subagents.md` (everything below the frontmatter); read it from there, make any adjustments, and your final response will be considered the finalized summary document.
+  ::end-block
+hash: 62f49479730df658-ba4d71d247a03041
+last_updated: 2026-07-03
+---
+# Agent and Subagent Definition Support Across Providers
+
+Subagent definitions matter because they turn delegation from an ad hoc prompt pattern into a reusable part of an agentic process. A parent agent can hand a bounded task to a named specialist, keep the specialist's context separate from the main conversation, and receive a compact result instead of dragging every intermediate read, tool call, and reasoning trail back into the parent window. That separation controls context growth, lets teams encode domain-specific behavior once, and gives orchestration logic something concrete to route to.
+
+They also matter because specialization is only safe when the runtime boundary is visible. A "code reviewer", "explorer", or "test runner" is not just a different prompt. It may have a different model, a narrower tool set, its own MCP servers, a separate permission posture, a turn or step cap, a transcript, and a failure mode that should not necessarily fail the parent session. Claudine therefore has two jobs: link static definitions across provider homes and repos, and observe the dynamic parent-child relationship during wrapped runs.
+
+The research roster is broader than Claudine's compiled provider set. Claude Code, Codex, Gemini CLI, Goose, Kimi Code, OpenCode, Qwen Code, and Roo Code are represented by Claudine's compiled `Provider` enum today. Pi and Kilo Code are research-roster providers, not compiled Claudine providers. They still matter as design input: Kilo shows an OpenCode-family implementation with provider-specific extensions, while Pi shows a convention-only, extension-driven approach where subagents are not built into the platform.
+
+The provider pattern is clear: several CLIs expose first-class subagent definitions, but they disagree on nearly every operational detail. Claude Code uses Markdown files with YAML frontmatter and exposes subagent lifecycle hooks. Codex uses TOML files that behave like full config layers for child sessions. Gemini CLI uses Markdown definitions too, but invokes subagents as ordinary tools and exposes lifecycle through `tool_use` / `tool_result` rather than dedicated subagent events. Goose uses Markdown custom-agent files plus recipe subagents and external MCP subagents through the Summon extension. Kimi's legacy implementation uses YAML agent packages with nested subagent registries. OpenCode and Qwen overlap with Claude-style Markdown while adding their own runtime fields. The feature names are similar enough to link, but the semantics are not portable without translation.
+
+## Provider Shape
+
+| Provider             | Claudine Status             | Support                                                        | Definition Shape                                                                                   | Main Scopes                                                                                      | Invocation Model                                                                                                | Observability Shape                                                                                                                                 |
+|----------------------|-----------------------------|---------------------------------------------------------------:|----------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
+| Claude Code          | compiled                    | first-class                                                    | `*.md` with YAML frontmatter; body is the subagent system prompt                                   | managed/system, user, repo, plugin, inline `--agents`                                            | natural language, `@` mention, `Agent` tool, `--agent` whole-session mode, background agents                    | `SubagentStart` / `SubagentStop` hooks; optional stream-json hook events; child JSONL transcript path                                               |
+| Codex                | compiled                    | first-class                                                    | `*.toml`; each file is a config layer with `name`, `description`, `developer_instructions`         | user, repo, managed config, plugin, `agents.<name>.config_file`                                  | explicit delegation through multi-agent tools; no `--agent` main-session mode                                   | subagent hooks plus `agent_id`, `agent_type`, optional transcript path; regular JSON stream has session and item events                             |
+| Gemini CLI           | compiled                    | first-class                                                    | `*.md` with YAML frontmatter; body is the subagent system prompt; remote A2A definitions supported | user, repo, extension, admin-managed extensions, settings overrides                              | automatic delegation through tool registry, forced `@<agent>`, `/agents` management                             | no dedicated subagent stream events; subagent call is `tool_use.name = <agent>` and result is `tool_result`                                         |
+| Goose                | compiled                    | first-class                                                    | `*.md` with YAML frontmatter; recipe `sub_recipes`; external MCP `subagent:` entries               | user, repo, Goose config dir, Claude-compatible dirs, recipes, external MCP config               | Summon `delegate` / `load`; `@` mention; sync or async background tasks                                         | `subagent_tool_request` MCP notifications, `subagent_session_id`, `load()` status meta, regular Goose session export                                |
+| Kimi CLI / Kimi Code | compiled, version-sensitive | first-class in legacy `kimi-cli`; reduced in newer `kimi-code` | legacy YAML `agent.yaml` plus separate system prompt Markdown and nested `subagents:` registry     | built-in package agents, `--agent-file`; runtime subagent store                                  | parent `Agent` tool with `subagent_type`, optional `model`, `resume`, background, timeout                       | legacy `SubagentEvent` wire envelopes, `SubagentStart` / `SubagentStop`, per-subagent store files                                                   |
+| OpenCode             | compiled                    | first-class                                                    | Markdown frontmatter files or `agent.<name>` JSON config; body or `prompt` is system prompt        | user, repo walk-up, config overlays, managed config, plugins                                     | primary agent via `--agent` / TUI; subagent via `task` tool, `@` mention, or description-based selection        | child sessions: parent `subtask` part, child `session.created parentID`, child `session.idle`, `/session/:id/children`                              |
+| Qwen Code            | compiled                    | first-class                                                    | Claude-compatible Markdown frontmatter with Qwen-specific fields and bridges                       | session injection, repo, user, extension records, built-ins                                      | `agent` tool, built-in default, background, fork pseudo-agent; no current `--agent` main-session flag           | `SubagentStart` / `SubagentStop`, agent event emitter, spans, transcript path, persisted metadata                                                   |
+| Kilo Code            | research only               | first-class                                                    | Markdown frontmatter files or `agent.<name>` JSON config; body or `prompt` is system prompt        | built-in, user, repo, custom config dir, managed/system, plugin, organization, inline env config | primary agent via `--agent`; subagent via `task` tool, `@` mention, `task_id` resume, optional background tasks | no dedicated subagent hook pair; child `session.created parentID`, `session.idle`, raw bus events via `kilo run --format json`, resumable `task_id` |
+| Pi                   | research only               | convention-only via extensions; not built in                   | extension-read `agents/*.md`; `presets.json`; TypeScript extensions                                | user, repo when trusted, extension directories                                                   | custom `subagent` tool spawns child `pi --mode json -p --no-session`; presets reconfigure current session       | parent sees one custom tool execution; child JSON is captured inside the tool result; no child session ID or transcript                             |
+
+Roo Code is in Claudine's compiled provider set, but it is not represented in the current `docs/research/subagents/` fleet, so this summary does not assert Roo subagent-definition behavior.
+
+## Definition Format and Metadata
+
+The most important portability split is not "Markdown versus config file"; it is whether the provider treats the file as a prompt, a config layer, a registry, a recipe source, or an extension convention.
+
+Claude Code, Gemini CLI, Goose, OpenCode, Qwen Code, Kilo Code, and Pi all accept or can consume Markdown-oriented definitions where the body is, or can be, the agent prompt. That makes the agent's purpose relatively easy to preserve. The frontmatter is the hard part. `name` and `description` are broadly portable, but identifier rules differ: Claude Code prefers lowercase hyphenated names, Gemini allows underscores, Qwen allows Unicode letters/numbers plus `_` and `-`, Goose accepts spaces and loose names up to its limits, OpenCode and Kilo can derive identity from filename or config key, and Pi's example extension skips files missing `name` or `description`.
+
+Codex is different. A Codex custom agent is TOML and can include nearly any normal `config.toml` key: model, reasoning effort, sandbox, approval policy, MCP servers, skill config, web search, personality, and developer instructions. That makes Codex definitions powerful but less mechanically portable. A linker cannot simply symlink a Claude Markdown file into Codex and expect behavior to carry over; it must move the body into `developer_instructions` and translate frontmatter into TOML configuration.
+
+Goose's Markdown shape is intentionally permissive. A Goose custom agent is a `*.md` file with YAML frontmatter; `name` is required, `description` is recommended, `model` is accepted, and arbitrary additional keys are preserved in a `properties` bag. The body becomes the instructions for `load(source: "<name>")` or `delegate(source: "<name>", instructions: ...)`. The important caveat is that Goose frontmatter `model` is effectively metadata-only today: runtime model selection comes from the parent provider/model, explicit `delegate` overrides, or recipe settings. Goose also has two non-file definition families: recipe `sub_recipes` and external MCP subagents declared in `config.yaml` under `subagent:`.
+
+Kimi's legacy Python `kimi-cli` shape is different again. A root `agent.yaml` is a `version: 1` plus `agent:` YAML envelope. The agent mapping points at a separate `system_prompt_path`, supports shallow inheritance through `extend`, accepts `${VAR}`-style system prompt substitutions through `system_prompt_args`, and declares available child types through a nested `subagents:` map. Built-in root agents ship inside the Python wheel, with built-in `coder`, `explore`, and `plan` subagent YAMLs beside them. User custom agents are loaded per invocation with `--agent-file`; they are not discovered from user or repo directories. Newer TypeScript `kimi-code` keeps built-in subagent behavior but does not expose the same YAML `--agent-file` surface, so Claudine should treat Kimi linking as version-sensitive.
+
+OpenCode has two equivalent declaration surfaces: Markdown files with YAML frontmatter and JSON `agent.<name>` entries in config. The shared schema requires `description`, defaults `mode` to `all`, and accepts `mode`, `model`, `prompt`, `temperature`, `top_p`, `variant`, `permission`, `hidden`, `disable`, `color`, `steps`, and provider `options`. In Markdown form, the body becomes the prompt unless frontmatter `prompt` is set; if both exist, `prompt` wins. `prompt` also supports OpenCode-specific `{file:...}` and `{env:...}` substitutions.
+
+Qwen ports much of Claude Code's declarative-agent schema into `.qwen/agents/*.md`: `name`, `description`, `model`, `tools`, `disallowedTools`, `permissionMode`, `mcpServers`, `hooks`, `maxTurns`, `color`, and `background` are meaningful today; `effort`, `skills`, `initialPrompt`, `memory`, and `isolation` are carried as deferred no-op metadata. Qwen also adds `approvalMode`, legacy `runConfig`, `fast` model selection, `<authType>:<model-id>` selectors, and a fork pseudo-agent.
+
+Kilo follows the OpenCode-style `AgentConfig` shape and adds Kilo-specific fields such as `displayName`, `source`, `deprecated`, and `requirements`, plus Kilo-specific built-ins and runtime behavior. Pi is different because its Markdown file is not a native platform contract: the documented extension reads `agents/*.md`, writes the body to a temporary prompt file, and passes it to a spawned child process with `--append-system-prompt`. Pi's `presets.json` convention changes the current session; it does not create child agents.
+
+## Scopes and Discovery
+
+Scope behavior is provider-specific enough that Claudine should model it explicitly rather than derive it from directory names.
+
+Claude Code has the richest file-scope hierarchy: managed/system, inline session definitions, project, personal, and plugin agents. Plugin namespacing changes the identifier, and plugin security strips some fields. Claude also watches existing directories for changes but does not necessarily detect a newly-created `agents/` directory mid-session.
+
+Codex has user and repo `agents/` directories, managed config layers, plugin-bundled agents, and `agents.<name>.config_file` indirection. Repo agents are trust-gated; user agents remain available in untrusted projects. Because agent files are config layers, a definition can live outside the conventional directory and be referenced.
+
+Gemini CLI has user and repo directories plus extension-bundled agents and settings-based overrides. It also has built-ins that can be tuned through `agents.overrides`. Its `/agents reload` surface makes live refresh explicit.
+
+Goose scans a broader compatibility set than its canonical docs imply. The primary user location is `~/.agents/agents/`; the primary project location is `.agents/agents/`. It also scans `.goose/agents/`, `.claude/agents/`, `~/.goose/agents/`, `~/.claude/agents/`, and the Goose config-dir agents path. `GOOSE_PATH_ROOT` can redirect these roots for tests or sandboxes. Project agents shadow user agents by lowercased `name`, not filename. This is useful for Claudine linking because Goose can already see Claude-authored files, but it is not semantic compatibility: Claude-only frontmatter lands in Goose `properties`, and body prompts that mention Claude tools need rewriting.
+
+OpenCode has several independent discovery channels. It reads user agents from `~/.config/opencode/agents/`, project agents from `.opencode/agents/` discovered while walking upward, custom config-dir agents from `OPENCODE_CONFIG_DIR`, JSON `agent.<name>` blocks from config files and inline config, symlinked files, managed config, remote organizational config, and plugins.
+
+Qwen has five resolution levels with a concrete precedence order: session, project, user, extension, then builtin. User agents live under `~/.qwen/agents/`, redirected by `QWEN_HOME`; project agents live under `<projectRoot>/.qwen/agents/`; extension agents come from active extension `agents` records and are not necessarily file-based; built-ins are hardcoded records such as `general-purpose`, `Explore`, and `statusline-setup`; session agents are injected in memory through `SubagentManager.loadSessionSubagents()`. There is no managed/system policy directory, no `.agents/agents/` alias, no `--agents` inline CLI flag today, and no standalone `qwen agents list` command.
+
+Kilo Code has an OpenCode-like but Kilo-specific discovery surface. It accepts user Markdown under `~/.config/kilo/agent/` or `~/.config/kilo/agents/`, project Markdown under `.kilo/agent/` or `.kilo/agents/`, legacy `.kilocode/agents/`, custom config directories through `KILO_CONFIG_DIR`, inline `agent.<name>` JSON in `kilo.json[c]`, `KILO_CONFIG`, or `KILO_CONFIG_CONTENT`, plugin-contributed agents, managed system config, and organization-managed agents. This is research-only for Claudine today.
+
+Pi's example extension has user and repo scopes, but only when the extension is installed. User agents live under `~/.pi/agent/agents/*.md` by default, or under `PI_CODING_AGENT_DIR/agents/*.md`. Project agents live under `.pi/agents/*.md`, discovered by walking upward, but load only when `agentScope` is `project` or `both`. The default scope is `user`, and project extension/content loading is trust-gated. Discovery is repeated on every `subagent` tool call.
+
+Kimi legacy custom agents are not auto-discovered from user or repo directories. They are loaded with `--agent-file <path/to/agent.yaml>` for that session only. Runtime child state under the Kimi session directory is an instance store, not reusable definition discovery. That makes Kimi a poor target for filesystem linking in the same way Claude, Codex, Gemini, Goose, OpenCode, and Qwen are targets.
+
+## Models, Tools, MCP, and Permissions
+
+Model inheritance differs in ways that affect both cost and correctness.
+
+Claude Code resolves subagent model from an environment override, then a per-invocation value, then frontmatter, then the parent model. Codex lets the parent CLI/model config win, then the custom-agent file, then parent inheritance. Gemini uses settings overrides and model config override scopes before frontmatter and `inherit`. Goose mostly inherits the parent's provider/model unless delegation or recipe settings override it; its agent frontmatter `model` is not currently the runtime authority. Kimi legacy resolves from `Agent(model="<alias>")`, then the launch spec, then the subagent type's YAML `model`, then the parent session model. OpenCode subagents inherit the invoking primary agent's model unless they declare their own. Qwen supports `inherit`, `fast`, raw model IDs, and `<authType>:<model-id>` selectors; unresolvable selectors fall back to inherit, and cross-authType selection creates a dedicated content generator without changing the parent auth type. Kilo follows the OpenCode family. Pi's extension passes frontmatter `model` as `--model`; otherwise the child resolves its own default provider/model from Pi configuration.
+
+Tool inheritance is even less portable. Claude Code starts from the parent's tool surface and narrows with `tools` and `disallowedTools`, including MCP tool patterns. Codex inherits the parent surface but can alter the full config layer, including approval rules, MCP servers, and skill config. Gemini exposes subagents as tools and uses a `tools:` allowlist plus wildcards; subagents cannot call other subagents. Goose delegates extension sets, not individual tool names: omitted `delegate.extensions` inherits all enabled extensions, an explicit list narrows, and an empty list disables all. Goose blocks subagent recursion.
+
+Kimi does not bulk-inherit the parent's tool set. Each subagent declares its own surface through `tools`, `allowed_tools`, and `exclude_tools` using Kimi-specific tool class identifiers. Built-in `coder` can read, search, shell, write, and fetch; `explore` removes write tools; `plan` removes shell and writes. Plugin and MCP tools are not inherited automatically just because the parent has them.
+
+OpenCode starts from the tools available to the invoking agent, then narrows through per-agent `permission`. Permissions cover native tools such as `edit`, `bash`, `webfetch`, `websearch`, `skill`, `question`, `read`, `glob`, `grep`, `list`, `task`, `todowrite`, and `lsp`; some keys accept glob-to-action maps. MCP tools participate in the same permission vocabulary. `experimental.primary_tools` is stronger than ordinary denial because listed tools are removed from subagents entirely.
+
+Qwen starts from the parent's available tools, then applies `tools` as an allowlist and `disallowedTools` as a denylist. `disallowedTools` understands MCP server and tool patterns such as `mcp__server` and `mcp__server__tool`. Per-agent `mcpServers` are shallow-merged over session servers, with the agent winning on collision. Qwen also rebuilds the child tool registry and file-read cache so child read/edit/write tools operate against child runtime state rather than parent cached instances.
+
+Kilo uses a permission-class model rather than a simple tool-name allowlist. Fields such as `bash`, `read`, `edit`, `glob`, `grep`, `webfetch`, `websearch`, `task`, `todowrite`, `lsp`, `skill`, `question`, and `interactive_terminal` carry allow/ask/deny behavior or glob rules. It also has `permission.task` for controlling which subagent types an agent may spawn, `experimental.primary_tools` for removing selected tools from all subagents, and a Kilo-only nested-task guard.
+
+Pi's `tools` frontmatter is a comma-separated list passed to the child as `--tools`. If omitted, the child falls back to Pi's default tool set. There is no incremental allowlist/denylist contract in the subagent definition itself.
+
+Permission inheritance has no common contract. Claude and Qwen both have parent-mode-wins cases where permissive parent modes cannot be narrowed by child metadata. Codex reapplies live parent runtime overrides when spawning a child, which means interactive changes can override the custom-agent file. Gemini policies can target either the subagent-as-tool or tool calls made by a named subagent. Goose subagents are available only when the parent is in Auto mode and are forced into Auto because approval forwarding is not available. OpenCode merges per-agent permission blocks over global permissions; `--auto` upgrades `ask` to `allow` but never downgrades explicit `deny`. Kimi shares the parent's approval runtime, including allow/deny rules and always-approve history. Kilo derives child permissions from parent agent denies, parent session denies and external-directory rules, default child restrictions, and the child's own permission block. Pi has no built-in permission system; the child subprocess runs with the same user, environment, and filesystem access as the parent.
+
+The conclusion is that `model`, `tools`, MCP, and permissions should be classified as provider-specific metadata. Claudine can preserve intent, but it should not present these fields as safely portable unless a provider-specific rewrite has mapped them.
+
+## Invocation Mechanics
+
+Invocation falls into several families.
+
+Claude Code has the broadest invocation surface: natural-language delegation, `@` mention, built-in types, parent `Agent` tool calls, whole-session `--agent`, and background agents. That makes Claude definitions usable both as child workers and as replacement primary agents.
+
+Codex is explicit-delegation oriented. Custom agents are not launched directly with a CLI flag; the main session remains the default agent, and child agents appear only when the parent is asked to delegate through the multi-agent tool family. This is an important linking distinction: a Codex custom agent is not equivalent to an OpenCode, Kilo, or Claude primary agent.
+
+Gemini and Goose both route through tool-like invocation, but the mechanics differ. Gemini registers subagents as tools by name; the parent calls the tool and receives a result. Goose routes through the default-enabled Summon platform extension. `delegate` creates an isolated subagent session from a named agent, recipe, subrecipe, external MCP subagent, or ad hoc instructions. `load` either injects a named source's instructions into the current context or retrieves an async background task by session/task ID. Goose also supports natural-language delegation and `@<agent>` forcing because Summon injects the available source roster into the parent prompt. There is no Goose `--agent <name>` whole-session replacement equivalent in the researched surface.
+
+Kimi legacy routes through the parent `Agent` tool. The parent passes a short `description`, full `prompt`, `subagent_type`, optional model override, optional `resume` agent ID, optional `run_in_background`, and optional timeout. A newly-created Kimi subagent does not see the parent's conversation, so the prompt must carry the needed context. A resumed subagent restores its own previous context from `context.jsonl`. Foreground runs return the final assistant text to the parent; background runs return a structured handle with task and agent identifiers.
+
+OpenCode and Kilo use both primary and subagent modes. A definition can be `primary`, `subagent`, or `all`, so the same file may be selected as the main agent or invoked through the `task` tool. OpenCode supports TUI and CLI primary selection, `@<name>` mentions, description-based automatic selection, and `permission.task` rules that can remove subagents from the task-tool description. Kilo similarly supports direct CLI selection, manual mentions, `kilo agent create`, `kilo agent list`, `kilo debug agent`, `task_id` resume, and optional background subagents.
+
+Qwen currently invokes through the `agent` tool. The tool accepts a delegated prompt, short description, optional `subagent_type`, optional background execution, and optional worktree isolation. If `subagent_type` is omitted, Qwen uses the `general-purpose` built-in. If `subagent_type` is `fork`, Qwen runs a special background pseudo-agent that inherits the parent's full conversation, system prompt, tools, and prompt-cache prefix; fork output does not return to the parent conversation. A direct `qwen --agent <name>` main-session mode is planned but not present in the current research.
+
+Pi's canonical example is a custom `subagent` tool registered by an extension. The tool supports a single `{ agent, task }` call, parallel `tasks` with a hard cap of 8 tasks and 4 concurrent children, and sequential `chain` calls where `{previous}` is replaced by the prior child's final assistant text. Each child is spawned as `pi --mode json -p --no-session`, receives no parent conversation history, and returns final assistant text through the parent tool result.
+
+## What a Wrapper Can Observe
+
+For wrapped-run observability, providers split into four categories.
+
+Claude Code, Codex, Qwen, and legacy Kimi expose explicit subagent lifecycle concepts. Claude and Qwen have `SubagentStart` / `SubagentStop` with stable child IDs and transcript paths. Codex has comparable hook events with `agent_id`, `agent_type`, and optional child transcript path. Legacy Kimi has hook events, stream-json `SubagentEvent` envelopes carrying `parent_tool_call_id`, `agent_id`, `subagent_type`, and nested child events, plus per-subagent store files containing metadata, context, wire logs, prompts, and output. Newer TypeScript `kimi-code` documents hooks and persisted subagent state, but its stream-event surface should be treated as partial until confirmed from the runtime source.
+
+Qwen's observable surface is especially useful for a wrapper. `SubagentStart` carries a stable `agent_id`, `agent_type`, and resolved `permission_mode`. `SubagentStop` adds the JSONL transcript path, last assistant message, stop-hook state, and permission mode. The Agent tool event emitter also produces live progress events for starts, tool calls, tool results, finish, errors, usage metadata, and approval waits. Persisted sidecars under the runtime project directory store metadata, transcript JSONL, and CLI flags needed for later monitoring or resume-like behavior.
+
+Gemini, OpenCode, and Kilo expose subagents through more general runtime primitives. Gemini has no dedicated subagent start/stop stream event; a wrapper watches `tool_use` where the tool name is the subagent name and pairs it with `tool_result`. OpenCode has child sessions rather than subagent events: the parent records a `subtask` message part, a new session appears with `parentID`, and completion is `session.idle` for the child. Kilo similarly uses child session bus events: `session.created` with `parentID`, followed by events such as `session.updated`, `messageV2.*`, `session.error`, and `session.idle`. The child `SessionID` is also the `task_id` used to resume that subagent.
+
+Goose sits between those categories. Each delegated child gets a stable `subagent_session_id` and is stored as a normal Goose session with `SessionType::SubAgent`. The runtime does not emit a simple `subagent_start` / `subagent_stop` pair on stream-json, and there is no documented Goose CLI hook event for subagent lifecycle. Instead, wrappers observe the MCP-side `LoggingMessageNotification` channel: logger `subagent:<id>`, structured data `type: "subagent_tool_request"`, and tool call details. Completion and background-task state come through `load()` result metadata such as `task_status`, `turns_taken`, `duration_secs`, and `subagent_session_id`. Transcripts are exported through normal Goose session diagnostics.
+
+Pi is weaker from the outside. The parent stream sees one custom tool execution cycle for the `subagent` tool, not child lifecycle events. The extension captures the child's JSON-line stdout and stores aggregated output in the parent tool result details, but the child runs with `--no-session`, so there is no child session file, stable child session ID, or transcript path to tail.
+
+The practical implication is that Claudine cannot rely on a single "subagent started" event model. It needs provider-specific observation adapters with a normalized output shape. The normalized shape should include at least:
+
+- parent session ID
+- child agent ID or child session ID when available
+- agent type/name
+- invocation prompt or description when visible
+- start timestamp when observable
+- stop timestamp, idle marker, or task-status marker
+- final text summary when available
+- transcript path, store path, session export handle, or child-session lookup handle
+- failure/timeout/termination reason when available
+- resolved permission mode when available
+
+Some providers can fill all fields directly. Others can only infer start and stop from tool envelopes, notification side channels, subprocess output captured by an extension, or session status.
+
+## Linking Implications
+
+Claudine should treat subagent linking as intent-preserving synchronization, not byte-for-byte portability.
+
+The portable core is small: `name`, `description`, and the instruction body are often reusable after identifier normalization and provider vocabulary cleanup. Everything else should be classified as non-portable unless a provider-specific translator owns it. Tool names, MCP server shapes, permission modes, model aliases, hook schemas, background behavior, memory fields, worktree isolation, turn limits, recipe syntax, nested-subagent registries, inheritance rules, prompt substitution syntax, built-in agent names, fork behavior, and extension-only orchestration all vary.
+
+A good linking strategy is therefore layered:
+
+1. Discover native definitions in every compiled provider's real scopes, including user, repo, managed, extension/plugin, inline config, session-injected, built-in, config-root, recipe-derived, and external-subagent records where they are enumerable.
+2. Track research-only providers like Kilo and Pi separately from compiled providers. Their definitions can inform Claudine's intermediate model, but Claudine should not present them as supported link targets until they become compiled providers.
+3. Normalize each definition into a Claudine intermediate record: identity, provider, scope, path or config origin, prompt body, routing description, model intent, tool intent, permission intent, MCP references, invocation capability, and observability capability.
+4. Classify each field as portable, translatable, ignored-by-target, or unsafe. For example, Claude `description` can map to Gemini or Qwen `description`; Claude `tools: Read, Grep, Bash` must map to target tool identifiers; Goose `delegate.extensions` has to become target-specific tool or MCP policy; Qwen `approvalMode: bubble` has no safe generic equivalent; Kilo `permission.task` is provider-specific; Pi `tools: read, grep, find, ls` is only meaningful when the target has equivalent tools.
+5. Prefer generated target-native files over symlinked files when semantics differ. Symlinking Claude Markdown into Goose, OpenCode, Kilo, Qwen, or Pi-shaped folders may parse, but parsing is not correctness. A linked file whose body names the wrong tools is a latent runtime bug.
+6. Preserve source provenance. If an OpenCode, Qwen, Goose, or future Kilo/Pi file is generated from another provider's agent, Claudine should know the source provider and source path so future sync can explain which fields were dropped or rewritten.
+
+Goose deserves special handling because its compatibility directories mean Claudine may find the same Claude-authored agent through both Claude and Goose discovery. That should not be treated as two semantically equivalent native agents. Claudine should tag Goose-discovered `.claude/agents` files as compatibility-origin definitions and report ignored Claude-only frontmatter separately from Goose-native metadata.
+
+Qwen sharpens the same point from the other direction. A `.claude/agents/*.md` file can land in `.qwen/agents/` and parse successfully because Qwen deliberately bridges Claude declarative agents. The reverse direction is lossy when the Qwen file uses `approvalMode`, `bubble`, `fast`, `<authType>:<model-id>`, Qwen tool names, Qwen extension records, or Qwen runtime hints. Claudine should represent that as asymmetric compatibility, not general portability.
+
+The core point of view is this: Claudine should link subagents through a provider-aware translation layer, not through a shared "agents folder" abstraction. The folder abstraction is attractive because many providers use Markdown files, but it hides the semantic differences that matter during execution.
+
+## Wrapped-Run Observability Implications
+
+For observability, Claudine should normalize subagent runtime activity independently from static linking.
+
+A wrapped run should not assume that a provider emits `SubagentStart` and `SubagentStop`. Claude, Codex, Qwen, and legacy Kimi can map close to that model. Gemini must synthesize the lifecycle from `tool_use` and `tool_result`. OpenCode must synthesize it from `subtask` parts, child session creation, child-session message events, and `session.idle`. Goose must combine `delegate` / `load` result metadata, `subagent_session_id`, and `subagent_tool_request` notifications. Kilo, if added later, should be observed through the raw JSON bus stream, child `sessionID`, `parentID`, `session.idle`, and `task_id` resume handle. Pi, if added later, would need to synthesize subagent activity from parent custom-tool execution and extension-captured child JSON, with no stable child session identity unless Pi adds one.
+
+The wrapper should distinguish four child-state strengths:
+
+- Strong child identity: stable `agent_id` plus transcript path, store, or wire log, as in Claude, Qwen, Codex, and legacy Kimi.
+- Session child identity: child session ID and parent linkage, as in OpenCode, Kilo, and Goose.
+- Tool-call identity with captured child output: parent tool envelope plus child JSON/details, as in Pi's example extension.
+- Tool-call identity only: subagent name and tool-call envelope, as in Gemini.
+
+That distinction should drive what Claudine can promise. Strong child identity can support future `resume`, `proxy`, and child transcript reporting. Qwen is a strong candidate here because the wrapper can capture `agent_id` at `SubagentStart`, read status from metadata sidecars, and correlate the transcript path delivered at `SubagentStop`; fork children are the exception because their output is deliberately fire-and-forget. Session child identity can support diagnostics and maybe manual re-entry; for Goose, `goose session --resume --session-id <id>` is more forensic than automatic, while active async tasks are addressed through `load(source: "<id>")`, `peek`, and `cancel`. Tool-call identity with captured child output is enough for timing, summaries, and failure attribution, but not for independent child resume. Tool-call identity only is narrower and should be treated as parent-session evidence rather than a durable child session.
+
+The final implication is that Claudine's agent-linking and wrapped-run observability should share provider metadata but remain separate systems. Linking answers "what definitions exist and how can they be synchronized?" Observability answers "what child work happened during this run and what can we correlate?" Providers blur those ideas differently, and research-only entries like Kilo and Pi widen the design space without changing Claudine's current compiled support. Claudine should keep both the normalized model and the provider-status boundary explicit rather than pretending all subagents are the same feature.

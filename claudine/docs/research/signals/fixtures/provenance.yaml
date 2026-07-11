@@ -1,0 +1,341 @@
+# Fixture provenance manifest — one entry per file under fixtures/ (relative
+# path from this directory). CI-enforced by `gen/tests/fixtures_provenance.rs`:
+# every fixture file must have exactly one entry, every entry must point at an
+# existing file, `class` must be one of the four values below, and `source`
+# must be non-empty. `README.md`, `.gitkeep`, and this manifest are not
+# fixtures and carry no entries.
+#
+# Provenance classes (ruling 2026-07-06):
+#
+#   capture      — real wire/live-run bytes captured from an actual provider
+#                  session. `source` records "live capture <date>".
+#   test_vector  — originates from claudine's committed parser test data (the
+#                  2026-07-05 seed pass): inline Rust test payloads unescaped
+#                  to the real wire line, or verbatim/curated copies of
+#                  committed fixture files. `source` is the repo path + line.
+#   source_shape — synthesized byte-shape verified VERBATIM against pinned
+#                  provider source. Legitimate ONLY when labeled as such here.
+#                  `source` is the provider repo + pinned commit/tag.
+#   docs_example — verbatim from official provider documentation. `source` is
+#                  the URL.
+#
+# Rule: a fixture you typed from memory is not evidence — `source_shape`
+# requires verbatim verification against pinned source. Anything less is
+# fabrication and must not enter this corpus.
+#
+# Path shorthand for test_vector sources: `protocol/` and `providers/` mean
+# `claudine/lib/src/stream/protocol/` and `claudine/lib/src/stream/providers/`;
+# `errors.rs` means `claudine/lib/src/stream/logs/opencode/errors.rs`;
+# `lib/tests/...` means `claudine/lib/tests/...`. Line numbers are as of the
+# 2026-07-05 seed pass.
+
+fixtures:
+  # antigravity/ — live local capture from installed `agy` 1.0.6 on
+  # 2026-07-08. The internal language-server process reported 1.1.0 in the
+  # configured log file; the public release manifest also reported 1.1.0.
+  - file: antigravity/exit-auth-invalid-models.json
+    class: capture
+    source: "live capture 2026-07-08: `AGY_CLI_NO_UPDATE=1 agy --log-file <tmp>/agy.log models`, stdout and exit code scrubbed"
+  - file: antigravity/app-log-auth-version.txt
+    class: capture
+    source: "live capture 2026-07-08: `AGY_CLI_NO_UPDATE=1 agy --log-file <tmp>/agy.log models`, log lines scrubbed for pid and local paths"
+  - file: antigravity/exit-auth-invalid-print.json
+    class: capture
+    source: "live capture 2026-07-08: `AGY_CLI_NO_UPDATE=1 agy --log-file <tmp>/agy.log --print-timeout 15s --print <prompt>`, stdout and exit code scrubbed"
+
+  # claude/ — seed pass 2026-07-05
+  - file: claude/rate-limit-throttled-message.jsonl
+    class: test_vector
+    source: "protocol/claude.rs:676 (also providers/claude.rs:1321,1920)"
+  - file: claude/rate-limit-info-approaching.jsonl
+    class: test_vector
+    source: "protocol/claude.rs:694 (also providers/claude.rs:1341)"
+  - file: claude/rate-limit-info-allowed-warning-seven-day.jsonl
+    class: test_vector
+    source: "providers/claude.rs:1386"
+  - file: claude/rate-limit-info-five-hour.jsonl
+    class: docs_example
+    source: "SDK 0.3.201 SDKRateLimitInfo.rateLimitType='five_hour'; synthetic rate_limit_event mirroring the observed seven_day shape (more-struture Cluster 0)"
+  - file: claude/rate-limit-info-seven-day-opus.jsonl
+    class: docs_example
+    source: "SDK 0.3.201 SDKRateLimitInfo.rateLimitType='seven_day_opus'; synthetic rate_limit_event mirroring the observed seven_day shape (more-struture Cluster 0)"
+  - file: claude/rate-limit-info-seven-day-sonnet.jsonl
+    class: docs_example
+    source: "SDK 0.3.201 SDKRateLimitInfo.rateLimitType='seven_day_sonnet'; synthetic rate_limit_event mirroring the observed seven_day shape (more-struture Cluster 0)"
+  - file: claude/rate-limit-not-throttled.jsonl
+    class: test_vector
+    source: "providers/claude.rs:1421"
+  - file: claude/error-billing.jsonl
+    class: test_vector
+    source: "protocol/claude.rs:604"
+  - file: claude/assistant-error-rate-limit.jsonl
+    class: test_vector
+    source: "protocol/claude.rs:616"
+  - file: claude/billing-error-synthetic-result.jsonl
+    class: test_vector
+    source: "lib/tests/fixtures/providers/claude.ndjson:6-7 (live capture)"
+  - file: claude/result-usage-cost-fields.jsonl
+    class: test_vector
+    source: "protocol/claude.rs:628,651"
+  - file: claude/init-model.jsonl
+    class: test_vector
+    source: "protocol/claude.rs:502"
+
+  # codex/ — seed pass 2026-07-05
+  - file: codex/error-rate-limit.jsonl
+    class: test_vector
+    source: "protocol/codex.rs:774 (also providers/codex.rs:1057)"
+  - file: codex/turn-failed-usage-limit.jsonl
+    class: test_vector
+    source: "providers/codex.rs:1128,1133"
+  - file: codex/stream-error-network.jsonl
+    class: test_vector
+    source: "protocol/codex.rs:786"
+  - file: codex/turn-completed-usage.jsonl
+    class: test_vector
+    source: "protocol/codex.rs:758"
+  - file: codex/turn-completed-usage-live.jsonl
+    class: test_vector
+    source: "lib/tests/fixtures/providers/codex.ndjson:64 (live capture)"
+  - file: codex/thread-started-docs.jsonl
+    class: docs_example
+    source: "https://developers.openai.com/codex/noninteractive"
+  - file: codex/turn-completed-usage-reasoning-docs.jsonl
+    class: docs_example
+    source: "https://developers.openai.com/codex/noninteractive"
+
+  # gemini/ — seed pass 2026-07-05
+  - file: gemini/init-model-resolved.jsonl
+    class: test_vector
+    source: "lib/tests/fixtures/providers/gemini.ndjson:1 (live capture)"
+  - file: gemini/error-warning-loop.jsonl
+    class: test_vector
+    source: "protocol/gemini.rs:279 (also providers/gemini.rs:671)"
+  - file: gemini/error-fatal.jsonl
+    class: test_vector
+    source: "providers/gemini.rs:686"
+  - file: gemini/result-turn-limit.jsonl
+    class: test_vector
+    source: "protocol/gemini.rs:327 (line 1), providers/gemini.rs:730 (line 2)"
+  - file: gemini/result-usage-stats.jsonl
+    class: test_vector
+    source: "protocol/gemini.rs:290"
+  - file: gemini/result-usage-per-model-live.jsonl
+    class: test_vector
+    source: "lib/tests/fixtures/providers/gemini.ndjson:78 (live capture)"
+
+  # goose/ — fleet pass; re-derived 2026-07-06 per provenance ruling (the
+  # originals were fabricated and replaced). Live captures should supersede.
+  - file: goose/stream-credits-exhausted.jsonl
+    class: source_shape
+    source: "block/goose 65eed515559af22dde2ba965335e331422f60c26 — re-derived 2026-07-06 per provenance ruling"
+  - file: goose/stream-authentication-error-message.jsonl
+    class: source_shape
+    source: "block/goose 65eed515559af22dde2ba965335e331422f60c26 — re-derived 2026-07-06 per provenance ruling"
+  - file: goose/stream-rate-limit-error-message.jsonl
+    class: source_shape
+    source: "block/goose 65eed515559af22dde2ba965335e331422f60c26 — re-derived 2026-07-06 per provenance ruling"
+  - file: goose/stream-server-error-message.jsonl
+    class: source_shape
+    source: "block/goose 65eed515559af22dde2ba965335e331422f60c26 — re-derived 2026-07-06 per provenance ruling"
+  - file: goose/stream-complete-usage.jsonl
+    class: source_shape
+    source: "block/goose 65eed515559af22dde2ba965335e331422f60c26 — re-derived 2026-07-06 per provenance ruling"
+  - file: goose/stream-error-then-complete.jsonl
+    class: source_shape
+    source: "block/goose 65eed515559af22dde2ba965335e331422f60c26 — re-derived 2026-07-06 per provenance ruling"
+  - file: goose/sqlite-usage-ledger-row.json
+    class: source_shape
+    source: "block/goose 65eed515559af22dde2ba965335e331422f60c26 — re-derived 2026-07-06 per provenance ruling"
+
+  # kilo/ — fleet pass; byte-shapes verified vs pinned Kilo Code source
+  - file: kilo/stream-session-error-promotion-limit.json
+    class: source_shape
+    source: "Kilo-Org/kilocode 1fc8f066fd263455d77fed269a8bcfcd57309a55 (pkg 7.4.1)"
+  - file: kilo/stream-session-error-insufficient-balance.json
+    class: source_shape
+    source: "Kilo-Org/kilocode 1fc8f066fd263455d77fed269a8bcfcd57309a55 (pkg 7.4.1)"
+  - file: kilo/stream-session-error-paid-auth-required.json
+    class: source_shape
+    source: "Kilo-Org/kilocode 1fc8f066fd263455d77fed269a8bcfcd57309a55 (pkg 7.4.1)"
+  - file: kilo/stream-session-error-aborted.json
+    class: source_shape
+    source: "Kilo-Org/kilocode 1fc8f066fd263455d77fed269a8bcfcd57309a55 (pkg 7.4.1)"
+  - file: kilo/stream-session-status-rate-limit.json
+    class: source_shape
+    source: "Kilo-Org/kilocode 1fc8f066fd263455d77fed269a8bcfcd57309a55 (pkg 7.4.1)"
+  - file: kilo/stream-session-status-overloaded.json
+    class: source_shape
+    source: "Kilo-Org/kilocode 1fc8f066fd263455d77fed269a8bcfcd57309a55 (pkg 7.4.1)"
+  - file: kilo/stream-session-status-offline-question.json
+    class: source_shape
+    source: "Kilo-Org/kilocode 1fc8f066fd263455d77fed269a8bcfcd57309a55 (pkg 7.4.1)"
+  - file: kilo/stream-session-retried.json
+    class: source_shape
+    source: "Kilo-Org/kilocode 1fc8f066fd263455d77fed269a8bcfcd57309a55 (pkg 7.4.1)"
+  - file: kilo/stream-model-switched.json
+    class: source_shape
+    source: "Kilo-Org/kilocode 1fc8f066fd263455d77fed269a8bcfcd57309a55 (pkg 7.4.1)"
+  - file: kilo/stream-session-step-ended.json
+    class: source_shape
+    source: "Kilo-Org/kilocode 1fc8f066fd263455d77fed269a8bcfcd57309a55 (pkg 7.4.1)"
+  - file: kilo/sqlite-part-step-finish.json
+    class: source_shape
+    source: "Kilo-Org/kilocode 1fc8f066fd263455d77fed269a8bcfcd57309a55 (pkg 7.4.1)"
+  - file: kilo/sqlite-message-aborted.json
+    class: source_shape
+    source: "Kilo-Org/kilocode 1fc8f066fd263455d77fed269a8bcfcd57309a55 (pkg 7.4.1)"
+
+  # kimi/ — seed pass copies of claudine's committed wire corpus, plus fleet
+  # additions verified verbatim vs pinned kimi-cli source
+  - file: kimi/wire-auth-expired.jsonl
+    class: test_vector
+    source: "protocol/fixtures/kimi/wire-auth-expired.jsonl (verbatim copy)"
+  - file: kimi/wire-protocol-110.jsonl
+    class: test_vector
+    source: "protocol/fixtures/kimi/wire-protocol-110.jsonl (verbatim copy)"
+  - file: kimi/wire-cancelled-interrupt.jsonl
+    class: test_vector
+    source: "protocol/fixtures/kimi/wire-cancelled.jsonl lines 2,3,82,94,95,96 (curated subset)"
+  - file: kimi/status-update-token-usage.jsonl
+    class: test_vector
+    source: "protocol/fixtures/kimi/wire-greet.jsonl line 53"
+  - file: kimi/wire-max-steps-reached.jsonl
+    class: source_shape
+    source: "MoonshotAI/kimi-cli 2c34efbbc6c7cfe40770623281e87c138ff8eb6c (tag 1.48.0) — verified verbatim vs wire typed models"
+  - file: kimi/wire-question-request.jsonl
+    class: source_shape
+    source: "MoonshotAI/kimi-cli 2c34efbbc6c7cfe40770623281e87c138ff8eb6c (tag 1.48.0) — verified verbatim vs wire typed models"
+  - file: kimi/step-retry-rate-limit.jsonl
+    class: source_shape
+    source: "MoonshotAI/kimi-cli 2c34efbbc6c7cfe40770623281e87c138ff8eb6c (tag 1.48.0) — verified verbatim vs wire typed models"
+
+  # opencode/ — seed pass 2026-07-05
+  - file: opencode/usage-cap-legacy-retry-wrapped.txt
+    class: test_vector
+    source: "lib/tests/fixtures/logs/opencode-rate-limit.txt (verbatim copy)"
+  - file: opencode/stream-error-legacy-usage-cap.txt
+    class: test_vector
+    source: "errors.rs:875"
+  - file: opencode/stream-error-1178-usage-cap.txt
+    class: test_vector
+    source: "errors.rs:903"
+  - file: opencode/usage-cap-kimi-403-billing-cycle.txt
+    class: test_vector
+    source: "errors.rs:1493"
+  - file: opencode/usage-cap-exceeded-quota.txt
+    class: test_vector
+    source: "errors.rs:1512"
+  - file: opencode/usage-cap-wins-over-retries.txt
+    class: test_vector
+    source: "errors.rs:1552"
+  - file: opencode/429-retry-exhausted.txt
+    class: test_vector
+    source: "errors.rs:1468, with the providerID/modelID tags real service=llm lines carry added so `signals check` can replay the provider/model extractions"
+  - file: opencode/usage-cap-advisory-no-error-tag.txt
+    class: test_vector
+    source: "errors.rs:1531"
+  - file: opencode/429-overload.txt
+    class: test_vector
+    source: "lib/tests/fixtures/logs/opencode-429-overload.txt (verbatim copy; same line at errors.rs:1430)"
+  - file: opencode/429-plain-rate-limited.txt
+    class: test_vector
+    source: "errors.rs:1449, with the providerID/modelID tags real service=llm lines carry added so `signals check` can replay the provider/model extractions"
+  - file: opencode/stream-start-1178.txt
+    class: test_vector
+    source: "errors.rs:937"
+  - file: opencode/auth-failure-invalid-key.txt
+    class: test_vector
+    source: "errors.rs:1018"
+  - file: opencode/api-failure-500.txt
+    class: test_vector
+    source: "errors.rs:958"
+  - file: opencode/error-new-format-inline-json.txt
+    class: test_vector
+    source: "errors.rs:1304"
+  - file: opencode/uncaught-error-fatal.txt
+    class: test_vector
+    source: "lib/tests/fixtures/logs/opencode-uncaught-error.txt (verbatim copy)"
+  - file: opencode/version-announcement.txt
+    class: test_vector
+    source: "lib/tests/fixtures/logs/opencode-new-format-lifecycle.txt:1 and opencode-new-format-serviceless.txt:1"
+  - file: opencode/config-asset-load-failed.txt
+    class: test_vector
+    source: "lib/tests/fixtures/logs/opencode-malformed-assets.txt:1,5,6"
+
+  # pi/ — fleet pass; byte-shapes verified vs pinned earendil-works/pi source.
+  # The two auth fixtures and the exit fixture carry VERBATIM source message
+  # templates; the exemplar-text entries carry realistic provider message text
+  # that is not a verbatim source string (the event shape is what is verified).
+  - file: pi/stream-auth-invalid-no-api-key.jsonl
+    class: source_shape
+    source: "earendil-works/pi 2e4ad6a09423002f58b9a5dc2749f7db7929d0f0 — verbatim source message template (agent-session.ts:371-395)"
+  - file: pi/stream-auth-invalid-oauth.jsonl
+    class: source_shape
+    source: "earendil-works/pi 2e4ad6a09423002f58b9a5dc2749f7db7929d0f0 — verbatim source message template (agent-session.ts:371-395)"
+  - file: pi/exit-no-models-available.json
+    class: source_shape
+    source: "earendil-works/pi 2e4ad6a09423002f58b9a5dc2749f7db7929d0f0 — verbatim source message template (main.ts:793-798)"
+  - file: pi/stream-usage-capped-quota.jsonl
+    class: source_shape
+    source: "earendil-works/pi 2e4ad6a09423002f58b9a5dc2749f7db7929d0f0 — event shape verified; provider message text is exemplar, not verbatim source"
+  - file: pi/stream-no-funds-billing.jsonl
+    class: source_shape
+    source: "earendil-works/pi 2e4ad6a09423002f58b9a5dc2749f7db7929d0f0 — event shape verified; provider message text is exemplar, not verbatim source"
+  - file: pi/stream-rate-limited-message.jsonl
+    class: source_shape
+    source: "earendil-works/pi 2e4ad6a09423002f58b9a5dc2749f7db7929d0f0 — event shape verified; provider message text is exemplar, not verbatim source"
+  - file: pi/stream-provider-overloaded-message.jsonl
+    class: source_shape
+    source: "earendil-works/pi 2e4ad6a09423002f58b9a5dc2749f7db7929d0f0 — event shape verified; provider message text is exemplar, not verbatim source"
+  - file: pi/rpc-extension-ui-request.jsonl
+    class: source_shape
+    source: "earendil-works/pi 2e4ad6a09423002f58b9a5dc2749f7db7929d0f0 — event shape verified; provider message text is exemplar, not verbatim source"
+  - file: pi/stream-interrupted-aborted.jsonl
+    class: source_shape
+    source: "earendil-works/pi 2e4ad6a09423002f58b9a5dc2749f7db7929d0f0 — byte-shape verified vs typed models"
+  - file: pi/stream-message-end-usage.jsonl
+    class: source_shape
+    source: "earendil-works/pi 2e4ad6a09423002f58b9a5dc2749f7db7929d0f0 — byte-shape verified vs typed models"
+  - file: pi/stream-auto-retry-start.jsonl
+    class: source_shape
+    source: "earendil-works/pi 2e4ad6a09423002f58b9a5dc2749f7db7929d0f0 — byte-shape verified vs typed models"
+  - file: pi/stream-auto-retry-exhausted.jsonl
+    class: source_shape
+    source: "earendil-works/pi 2e4ad6a09423002f58b9a5dc2749f7db7929d0f0 — byte-shape verified vs typed models"
+  - file: pi/session-log-model-change.jsonl
+    class: source_shape
+    source: "earendil-works/pi 2e4ad6a09423002f58b9a5dc2749f7db7929d0f0 — byte-shape verified vs typed models"
+  - file: pi/session-log-message-usage.jsonl
+    class: source_shape
+    source: "earendil-works/pi 2e4ad6a09423002f58b9a5dc2749f7db7929d0f0 — byte-shape verified vs typed models"
+  - file: pi/session-log-header-resumable.jsonl
+    class: source_shape
+    source: "earendil-works/pi 2e4ad6a09423002f58b9a5dc2749f7db7929d0f0 — byte-shape verified vs typed models"
+
+  # qwen/ — seed pass 2026-07-05, plus fleet additions verified verbatim vs
+  # pinned QwenLM/qwen-code source
+  - file: qwen/error-rate-limit.jsonl
+    class: test_vector
+    source: "providers/qwen.rs:511"
+  - file: qwen/init-model.jsonl
+    class: test_vector
+    source: "protocol/qwen.rs:286"
+  - file: qwen/system-session-start-model.jsonl
+    class: test_vector
+    source: "protocol/qwen.rs:296"
+  - file: qwen/result-usage.jsonl
+    class: test_vector
+    source: "protocol/qwen.rs:353"
+  - file: qwen/summary-token-usage.jsonl
+    class: test_vector
+    source: "protocol/qwen.rs:386 (also providers/qwen.rs:475)"
+  - file: qwen/result-auth-missing-api-key.jsonl
+    class: source_shape
+    source: "QwenLM/qwen-code v0.19.6 — verbatim strings verified"
+  - file: qwen/result-loop-detected.jsonl
+    class: source_shape
+    source: "QwenLM/qwen-code v0.19.6 — verbatim strings verified"
+  - file: qwen/system-init-model-version.jsonl
+    class: source_shape
+    source: "QwenLM/qwen-code v0.19.6 — verbatim strings verified"

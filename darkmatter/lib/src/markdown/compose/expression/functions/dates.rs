@@ -1,5 +1,7 @@
 use super::{FunctionHandler, FunctionRegistration};
-use super::super::catalog::{ExpressionFunctionDescriptor, P_ANY, P_STRING2, R_BOOL, R_STRING_ERR};
+use super::super::catalog::{
+    ExpressionFunctionDescriptor, P_ANY, P_STRING2, P_STRING3, R_BOOL, R_BOOL_ERR, R_STRING_ERR,
+};
 use crate::catalog::{Example, ExampleVerification};
 
 pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
@@ -213,4 +215,46 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Pure(super::is_this_year_utc) },
+    FunctionRegistration { canonical: "date_delta", aliases: &["datedelta"], catalog_order: 46, descriptors: &[
+        ExpressionFunctionDescriptor {
+
+                signature: "date_delta(date1, date2, diff)",
+                parameters: P_STRING3,
+                returns: R_BOOL_ERR,
+                description: "Returns true when the two dates are at least the given duration apart, ignoring order (duration like 14d, 2mo, 1 hour).",
+                category: "Date Arithmetic",
+                order: 1,
+
+                example: Some(Example { invocation: "date_delta(\"2024-06-01\", \"2024-06-20\", \"14d\")", result: "true", verification: ExampleVerification::Executable }),
+
+            },
+    ], handler: FunctionHandler::Pure(super::date_delta) },
+    FunctionRegistration { canonical: "older_than", aliases: &["olderthan"], catalog_order: 47, descriptors: &[
+        ExpressionFunctionDescriptor {
+
+                signature: "older_than(date1, date2, diff)",
+                parameters: P_STRING3,
+                returns: R_BOOL_ERR,
+                description: "Returns true when date1 is at least the given duration older (earlier) than date2.",
+                category: "Date Arithmetic",
+                order: 2,
+
+                example: Some(Example { invocation: "older_than(\"2024-06-01\", \"2024-06-20\", \"14d\")", result: "true", verification: ExampleVerification::Executable }),
+
+            },
+    ], handler: FunctionHandler::Pure(super::older_than) },
+    FunctionRegistration { canonical: "newer_than", aliases: &["newerthan"], catalog_order: 48, descriptors: &[
+        ExpressionFunctionDescriptor {
+
+                signature: "newer_than(date1, date2, diff)",
+                parameters: P_STRING3,
+                returns: R_BOOL_ERR,
+                description: "Returns true when date1 is at least the given duration newer (later) than date2.",
+                category: "Date Arithmetic",
+                order: 3,
+
+                example: Some(Example { invocation: "newer_than(\"2024-06-20\", \"2024-06-01\", \"14d\")", result: "true", verification: ExampleVerification::Executable }),
+
+            },
+    ], handler: FunctionHandler::Pure(super::newer_than) },
 ];

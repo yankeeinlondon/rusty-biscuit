@@ -3,7 +3,7 @@ use super::super::catalog::{ExpressionFunctionDescriptor, P_FILE, P_FILE_OBJ, P_
 use crate::catalog::{Example, ExampleVerification};
 
 pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
-    FunctionRegistration { canonical: "frontmatter", aliases: &[], catalog_order: 56, descriptors: &[
+    FunctionRegistration { canonical: "frontmatter", aliases: &[], catalog_order: 59, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "frontmatter(file)",
@@ -29,7 +29,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Context(super::frontmatter_fn) },
-    FunctionRegistration { canonical: "markdown_body_empty", aliases: &["markdownbodyempty"], catalog_order: 58, descriptors: &[
+    FunctionRegistration { canonical: "markdown_body_empty", aliases: &["markdownbodyempty"], catalog_order: 61, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "markdown_body_empty(file)",
@@ -43,7 +43,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Context(super::markdown_body_empty_fn) },
-    FunctionRegistration { canonical: "markdown_title", aliases: &["markdowntitle"], catalog_order: 59, descriptors: &[
+    FunctionRegistration { canonical: "markdown_title", aliases: &["markdowntitle"], catalog_order: 62, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "markdown_title(file)",
@@ -57,7 +57,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Context(super::markdown_title_fn) },
-    FunctionRegistration { canonical: "validate_schema", aliases: &["validateschema"], catalog_order: 60, descriptors: &[
+    FunctionRegistration { canonical: "validate_schema", aliases: &["validateschema"], catalog_order: 63, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "validate_schema(file)",

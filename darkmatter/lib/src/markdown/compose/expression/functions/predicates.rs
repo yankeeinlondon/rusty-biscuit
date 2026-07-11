@@ -169,7 +169,7 @@ pub(super) const REGISTRATIONS: &[FunctionRegistration] = &[
 
             },
     ], handler: FunctionHandler::Pure(super::abs_fn) },
-    FunctionRegistration { canonical: "round", aliases: &[], catalog_order: 52, descriptors: &[
+    FunctionRegistration { canonical: "round", aliases: &[], catalog_order: 55, descriptors: &[
         ExpressionFunctionDescriptor {
 
                 signature: "round(x, [default])",

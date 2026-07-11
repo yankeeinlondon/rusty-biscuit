@@ -342,6 +342,9 @@ pub enum AiCli {
     Goose,
     KimiCli,
     QwenCli,
+    Kilo,
+    Pi,
+    Antigravity,
 }
 
 // ============================================================================

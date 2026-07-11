@@ -44,7 +44,6 @@ Current shadow-home exclusions:
 | Kimi | `skills`, `agents` |
 | OpenCode | `skills` |
 | Qwen | `skills`, `commands` |
-| Roo | No wrapper command, so no `--repo` wrapper mode |
 
 Two consequences follow from that table:
 
@@ -148,7 +147,6 @@ Some provider-specific nuances are worth calling out explicitly:
 - Codex is also strong, but prompt isolation is handled through a dedicated overlay path rather than through repo-scoped command directories.
 - Gemini, OpenCode, and Qwen are only partially isolated today because some user resource directories are still preserved in the shadow home.
 - Goose and Kimi do not have user command masking because their command story differs from markdown slash-command directories.
-- Roo Code has no standalone wrapper command, so this document does not apply to Roo sessions.
 
 ## Non-Goals
 

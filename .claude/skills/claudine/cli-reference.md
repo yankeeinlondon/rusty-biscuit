@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-3c4993b2ba6a72be
-last_updated: 2026-06-30
+hash: ef46db3751d8e999-7a4665dac765b3c8
+last_updated: 2026-07-06
 ---
 # Claudine CLI Reference
 
@@ -68,10 +68,11 @@ claudine hooks [OPTIONS] [PROVIDER]
 
 | Option | Description |
 |--------|-------------|
-| *(none)* | Table of providers with install status and subscribed hooks |
+| *(none)* | Status report: install state, registration drift per provider, legend, protect status, `claudine sync --fix` hint when drift exists |
 | `-v` | Adds action count indicators per event |
-| `<provider>` | Detailed event/action view for one provider (fuzzy matching) |
-| `--support` | Event support matrix across all providers (✅ hook / ⛔️ non-hook / ❌ none) |
+| `<provider>` | Detailed event/action view for one provider (fuzzy matching), including per-event capture method and its unmapped native events |
+| `--support` | Event support glyph matrix across all providers (✅ hook / 🔶 indirect / 🅐 acp / – none) |
+| `--capture-method` | Hidden alias of `--support` (its per-level detail moved to the provider detail view) |
 | `--mapping` | Native event name mappings per provider |
 | `--describe` | Event descriptions, payload schemas, and return schemas |
 | `--variables` | All 28 template variables with current detected values |
@@ -90,13 +91,15 @@ Gemini      ✓          -
 OpenCode    ✗          -
 ```
 
+Event names in the Subscribed Hooks column are color coded, and the legend below the table documents the coding: yellow = missing (not yet registered), red = stale (registered but no longer configured), red strikethrough = unsupported (won't fire). When any drift exists the report closes with a hint to run `claudine sync --fix`.
+
 **Provider detail view:**
 
 ```bash
 claudine hooks claude
 ```
 
-Shows detailed event/action configuration for a specific provider.
+Shows detailed event/action configuration for a specific provider. The Capture column carries the per-event capture method — `hook`, `stream-parse (protocol)`, `wire-proxy (mode)`, `wrapper`, or `acp`. Providers with native hook phases Claudine's 16-event model cannot represent (e.g. Gemini `BeforeToolSelection`, OpenCode `tool.definition`) get a closing "Not mappable — configure natively" section with remediation guidance.
 
 **Support matrix:**
 
@@ -104,10 +107,13 @@ Shows detailed event/action configuration for a specific provider.
 claudine hooks --support
 ```
 
-Shows which events each provider supports:
-- ✓ = Hook support (config file registration)
-- ○ = NonHook support (wrapper/proxy required)
-- - = Not supported
+Shows which events each provider supports as a glyph matrix. One glyph vocabulary drives both cells and legend:
+- ✅ = hook (config-file registration)
+- 🔶 = indirect (delivered via wrapper, stream parsing, or wire proxy)
+- 🅐 = acp (captured via the Agent Client Protocol)
+- – = not supported (no capture path)
+
+When the terminal is too narrow for all seven provider columns, the matrix degrades into stacked tables of fewer providers (it never refuses to render). `--support` and `--mapping` both close with the "Not mappable — configure natively" list of provider-native events with no canonical mapping.
 
 ---
 
@@ -179,6 +185,15 @@ Show a compact provider capability matrix with provider name as an OSC8 link to 
 ```bash
 claudine providers
 ```
+
+**`claudine providers generate [slug]`** shells out to the `claudine-gen` binary (the CLI never links the generator). Default: forwards to `claudine-gen generate` with inherited stdio — per-file diff + `[y/N/q]` confirmation on a TTY, report-only otherwise; declined drift prints the field-keyed override snippet and exits non-zero.
+
+| Option | Description |
+|--------|-------------|
+| `--dry-run` | Report-only regardless of TTY (forwarded) |
+| `--yes` | Write every drifted file without prompting (forwarded) |
+| `--mapping` | Render the field → source → coercion mapping registry as a table |
+| `--mapping --json` | Raw mapping JSON pass-through |
 
 ---
 
@@ -346,6 +361,7 @@ Shared filters: `--provider`, `--repo`, `--package-area`, `--package`. Read comm
 | `errors` | Error log |
 | `repos` | Per-repo summary |
 | `trends` | Usage trends over time |
+| `drift` | Model-catalog drift signals and family-latest alias resolutions |
 | `sync` | Force re-sync of JSONL logs into SQLite |
 
 ---

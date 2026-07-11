@@ -3,7 +3,7 @@ use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
 use color_eyre::eyre::Result;
 use std::path::Path;
 
-use super::{PromptDelivery, WrapperProfile, has_flag};
+use super::{PromptDelivery, WrapperProfile};
 use std::io::Write;
 
 pub(crate) struct KimiWrapper;
@@ -11,10 +11,6 @@ pub(crate) struct KimiWrapper;
 impl WrapperProfile for KimiWrapper {
     fn provider(&self) -> Provider {
         Provider::KimiCode
-    }
-
-    fn allowed_env_keys(&self) -> &'static [&'static str] {
-        &["KIMI_API_KEY"]
     }
 
     fn apply_system_prompt(
@@ -84,15 +80,5 @@ impl WrapperProfile for KimiWrapper {
             session_id.to_string(),
             "--wire".to_string(),
         ])
-    }
-
-    fn apply_structured_stream(&self, args: &mut Vec<String>) {
-        // Wire mode is the structured-stream channel for Kimi: a single
-        // `--wire` flag selects the JSON-RPC line protocol on stdin/stdout
-        // and replaces the legacy `--print` + `--output-format stream-json`
-        // pair used by other providers.
-        if !has_flag(args, "--wire") {
-            args.push("--wire".to_string());
-        }
     }
 }

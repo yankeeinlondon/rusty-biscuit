@@ -37,14 +37,12 @@ pub(crate) fn find_wrapper_harness_source(
     repo_root: Option<&Path>,
     cwd: &Path,
 ) -> Option<PathBuf> {
-    let capabilities = claudine::provider::provider_info(provider).agent_capabilities();
+    let info = claudine::provider::provider_info(provider);
     let search_root = repo_root.unwrap_or(cwd);
 
-    capabilities
-        .runtime
-        .system_prompt
-        .memory_files
+    info.memory_files
         .iter()
+        .map(|template| template.raw())
         .filter(|path| !path.starts_with('~'))
         .map(PathBuf::from)
         .find_map(|relative| {

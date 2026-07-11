@@ -1,0 +1,116 @@
+# Declared benign fixture↔record overlaps for `claudine signals check`.
+#
+# The check's negative-overlap assertion replays every evidence fixture
+# against its provider×source group and fails when a record fires on a
+# fixture that is not its evidence. Each entry here declares one such
+# firing as benign — a fixture's secondary frame legitimately carrying
+# another signal's shape — and the check reports every applied entry as an
+# INFO line so exclusions stay visible. Add entries ONLY for self-evidently
+# benign overlaps; a surprising overlap is a distinguishability problem and
+# must stay failing.
+#
+# Entry shape: fixture (path relative to fixtures/), record (the record id
+# that fires), reason (non-empty prose).
+exclusions:
+  - fixture: claude/billing-error-synthetic-result.jsonl
+    record: stream-tokens_consumed-total_cost_usd
+    reason: >-
+      The synthetic billing-error terminal `result` frame carries zeroed
+      `total_cost_usd`/`usage` fields, so the cost-bearing tokens_consumed
+      record legitimately matches this no_funds evidence (ratified seed,
+      2026-07-06).
+  - fixture: goose/stream-error-then-complete.jsonl
+    record: stream-tokens_consumed-complete
+    reason: >-
+      Line 2 of the session-taint fixture is a genuine trailing `complete`
+      frame; the bespoke session_tainted record owns the fixture for its
+      error→complete sequence, and the tokens_consumed record correctly
+      recognizes the complete frame (ratified seed, 2026-07-06).
+  - fixture: codex/turn-failed-usage-limit.jsonl
+    record: stream-rate_limited-error_type
+    reason: >-
+      Line 2's legacy error frame carries `error_type: rate_limit` AND the
+      usage-limit message; per-kind selection correctly emits rate_limited
+      alongside usage_capped on that frame.
+  - fixture: kimi/step-retry-rate-limit.jsonl
+    record: stream-generation_retried-step_retry
+    reason: >-
+      A 429 StepRetry is genuinely both a rate limit and a generation
+      retry; the two records deliberately co-fire on the same frame
+      (different kinds), each citing its own evidence fixture.
+  - fixture: kimi/wire-auth-expired.jsonl
+    record: stream-provider_version-init
+    reason: >-
+      The auth fixture opens with a genuine initialize result frame
+      carrying the "Kimi Code CLI" server banner the provider_version
+      record matches.
+  - fixture: kimi/wire-protocol-110.jsonl
+    record: stream-tokens_consumed-status_update
+    reason: >-
+      The protocol fixture's StatusUpdate frame genuinely carries
+      token_usage accounting; tokens_consumed fires on every such frame by
+      design.
+  - fixture: pi/stream-auth-invalid-no-api-key.jsonl
+    record: stream-tokens_consumed-message_end
+    reason: >-
+      pi delivers this error inside a `message_end` frame, which is also
+      the per-message token-accounting frame; tokens_consumed co-fires by
+      design on every message_end.
+  - fixture: pi/stream-auth-invalid-oauth.jsonl
+    record: stream-tokens_consumed-message_end
+    reason: >-
+      pi delivers this error inside a `message_end` frame, which is also
+      the per-message token-accounting frame; tokens_consumed co-fires by
+      design on every message_end.
+  - fixture: pi/stream-auto-retry-exhausted.jsonl
+    record: stream-tokens_consumed-message_end
+    reason: >-
+      pi delivers this error inside a `message_end` frame, which is also
+      the per-message token-accounting frame; tokens_consumed co-fires by
+      design on every message_end.
+  - fixture: pi/stream-auto-retry-exhausted.jsonl
+    record: stream-generation_retried-auto_retry_start
+    reason: >-
+      The retry-exhaustion sequence fixture opens with a genuine
+      `auto_retry_start` frame (final attempt); the bespoke
+      retries_exhausted record owns the fixture for the full sequence.
+  - fixture: pi/stream-interrupted-aborted.jsonl
+    record: stream-tokens_consumed-message_end
+    reason: >-
+      pi delivers the aborted stop inside a `message_end` frame, which is
+      also the per-message token-accounting frame; tokens_consumed
+      co-fires by design on every message_end.
+  - fixture: pi/stream-no-funds-billing.jsonl
+    record: stream-tokens_consumed-message_end
+    reason: >-
+      pi delivers this error inside a `message_end` frame, which is also
+      the per-message token-accounting frame; tokens_consumed co-fires by
+      design on every message_end.
+  - fixture: pi/stream-provider-overloaded-message.jsonl
+    record: stream-tokens_consumed-message_end
+    reason: >-
+      pi delivers this error inside a `message_end` frame, which is also
+      the per-message token-accounting frame; tokens_consumed co-fires by
+      design on every message_end.
+  - fixture: pi/stream-rate-limited-message.jsonl
+    record: stream-tokens_consumed-message_end
+    reason: >-
+      pi delivers this error inside a `message_end` frame, which is also
+      the per-message token-accounting frame; tokens_consumed co-fires by
+      design on every message_end.
+  - fixture: pi/stream-usage-capped-quota.jsonl
+    record: stream-tokens_consumed-message_end
+    reason: >-
+      pi delivers this error inside a `message_end` frame, which is also
+      the per-message token-accounting frame; tokens_consumed co-fires by
+      design on every message_end.
+  - fixture: qwen/result-auth-missing-api-key.jsonl
+    record: stream-tokens_consumed-result-usage
+    reason: >-
+      The error `result` frame genuinely carries a `usage` block;
+      tokens_consumed co-fires by design on every result with usage.
+  - fixture: qwen/result-loop-detected.jsonl
+    record: stream-tokens_consumed-result-usage
+    reason: >-
+      The error `result` frame genuinely carries a `usage` block;
+      tokens_consumed co-fires by design on every result with usage.

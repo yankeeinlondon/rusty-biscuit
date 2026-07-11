@@ -1,0 +1,6 @@
+{"jsonrpc":"2.0","method":"event","params":{"type":"TurnBegin","payload":{"user_input":"Count from 1 to 100 slowly, taking your time and explaining each number."}}}
+{"jsonrpc":"2.0","method":"event","params":{"type":"StepBegin","payload":{"n":1}}}
+{"jsonrpc":"2.0","method":"event","params":{"type":"ContentPart","payload":{"type":"text","text":"I"}}}
+{"jsonrpc":"2.0","id":"cancel-3","result":{}}
+{"jsonrpc":"2.0","method":"event","params":{"type":"TurnEnd","payload":{}}}
+{"jsonrpc":"2.0","id":"prompt-2","result":{"status":"cancelled"}}

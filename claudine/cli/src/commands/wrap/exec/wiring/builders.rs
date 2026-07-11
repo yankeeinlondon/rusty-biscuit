@@ -2,10 +2,13 @@
 #![allow(unused_imports)]
 use super::*;
 
-/// Wire protocol version Claudine negotiates with Kimi. Phase 0 evidence
-/// confirmed `1.9` is the minimum revision the live `kimi 1.38.0` build
-/// accepts. The parser keys initialize-response handling on this id.
-pub(crate) const WIRE_PROTOCOL_VERSION: &str = "1.9";
+/// Wire protocol version Claudine requests on `initialize`. Live Kimi
+/// servers now speak Wire 1.10 and reject a client that requests 1.9, so
+/// Claudine advertises 1.10; the lib parser accepts any response version in
+/// `claudine::stream::protocol::kimi::SUPPORTED_WIRE_PROTOCOL_VERSIONS`
+/// (currently 1.9 and 1.10), so an older server that answers 1.9 still
+/// works.
+pub(crate) const WIRE_PROTOCOL_VERSION: &str = "1.10";
 
 /// JSON-RPC id used for the `initialize` request. Matches the literal id
 /// the Kimi semantic parser routes through `handle_initialize_response`.
@@ -223,57 +226,6 @@ impl HookDispatchResult {
         Self {
             outcome: HookOutcome::allow_default(),
             warning: Some(warning.into()),
-        }
-    }
-}
-/// Validate that the server's initialize response uses a protocol version
-/// Claudine knows how to drive. Returns `Ok(())` on a recognized version
-/// and an error otherwise so the caller can convert into a terminal
-/// `SemanticEvent::Error { kind: Configuration }`.
-#[allow(dead_code)]
-pub(crate) fn validate_initialize_response(
-    result: &KimiInitializeResult,
-) -> std::result::Result<(), WireInitError> {
-    let Some(version) = result.protocol_version.as_deref() else {
-        return Err(WireInitError::MissingProtocolVersion);
-    };
-    if version != WIRE_PROTOCOL_VERSION {
-        return Err(WireInitError::UnsupportedProtocolVersion {
-            negotiated: version.to_string(),
-            expected: WIRE_PROTOCOL_VERSION.to_string(),
-        });
-    }
-    Ok(())
-}
-
-/// Failure modes produced by [`validate_initialize_response`]. Maps onto a
-/// terminal `SemanticEvent::Error { kind: Configuration }` at the call site.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
-pub(crate) enum WireInitError {
-    MissingProtocolVersion,
-    UnsupportedProtocolVersion {
-        negotiated: String,
-        expected: String,
-    },
-}
-
-impl std::fmt::Display for WireInitError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::MissingProtocolVersion => {
-                write!(
-                    f,
-                    "kimi initialize response did not include protocol_version"
-                )
-            }
-            Self::UnsupportedProtocolVersion {
-                negotiated,
-                expected,
-            } => write!(
-                f,
-                "kimi negotiated protocol version {negotiated} is not supported by this Claudine release (expected {expected})"
-            ),
         }
     }
 }

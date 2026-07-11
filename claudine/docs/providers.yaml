@@ -1,9 +1,29 @@
+# The provider research roster. Each entry's `slug:` is the canonical provider
+# slug and its `file:` stem must equal that slug (`docs/research/<topic>/<slug>.md`).
+#
+# `skip_research: true` — keep the entry's identity in the roster but exclude it
+# from research fleet fan-out and from claudine-gen generation (the loader fails
+# loudly when asked to generate a skipped provider). Use it for deprecations and
+# pauses instead of deleting or commenting out an entry.
+#
+# Major-version changes (new binary, new wire protocol/parsing, new config
+# surface) enter as a NEW roster entry with its own slug rather than mutating an
+# existing one; see "Major-version changes are new providers" in
+# features/2026-07-02-provider-metadata/spec.md.
 kind: sequence
 template:
     desc: "{{name}} (_site: {{site}}, repo: {{ repo || 'n/a' }}_)"
 list:
     - name: Claude Code
       file: claude.md
+      slug: claude
+      binary: claude
+      display_name: Claude
+      short_name: claude
+      cli_aliases: ["claude"]
+      docs_url: https://docs.anthropic.com/en/docs/claude-code
+      usage_dashboard_url: https://console.anthropic.com/settings/billing
+      sniff_binding: Claude
       user_dir: "~/.claude"
       repo_dir: ".claude"
       vendor: Anthropic
@@ -12,6 +32,14 @@ list:
       repo:
     - name: Codex CLI
       file: codex.md
+      slug: codex
+      binary: codex
+      display_name: Codex
+      short_name: codex
+      cli_aliases: ["codex"]
+      docs_url: https://github.com/openai/codex
+      usage_dashboard_url: https://platform.openai.com/usage
+      sniff_binding: Codex
       user_dir: "~/.codex"
       repo_dir: ".codex"
       vendor: OpenAI
@@ -21,6 +49,14 @@ list:
       repo: https://github.com/openai/codex
     - name: Gemini CLI
       file: gemini.md
+      slug: gemini
+      binary: gemini
+      display_name: Gemini
+      short_name: gemini
+      cli_aliases: ["gemini"]
+      docs_url: https://github.com/google-gemini/gemini-cli
+      usage_dashboard_url: https://aistudio.google.com/billing
+      sniff_binding: GeminiCli
       user_dir: "~/.gemini"
       repo_dir: ".gemini"
       vendor: Google
@@ -29,17 +65,43 @@ list:
       repo: https://github.com/google-gemini/gemini-cli
     - name: Goose CLI
       file: goose.md
+      slug: goose
+      binary: goose
+      display_name: Goose
+      short_name: goose
+      cli_aliases: ["goose"]
+      docs_url: https://block.github.io/goose/
+      sniff_binding: Goose
+      repo_dir: ".goose"
       vendor: Block
       model_provider: false
       site: https://block.github.io/goose/
       repo: https://github.com/block/goose
     - name: Kimi Code CLI
-      file: ./kimi.md
+      file: kimi.md
+      slug: kimi
+      binary: kimi
+      display_name: Kimi Code
+      short_name: kimi
+      cli_aliases: ["kimi", "kimicode", "kimi_code", "kimi-code"]
+      docs_url: https://moonshotai.github.io/kimi-cli/en/
+      usage_dashboard_url: https://platform.moonshot.cn/console/account
+      sniff_binding: KimiCli
+      repo_dir: ".kimi"
       vendor: Moonshot AI
       site: https://moonshotai.github.io/kimi-cli/
       repo: https://github.com/MoonshotAI/kimi-cli
     - name: OpenCode CLI
       file: opencode.md
+      slug: opencode
+      binary: opencode
+      display_name: OpenCode
+      short_name: opencode
+      cli_aliases: ["opencode", "open_code", "open-code"]
+      # 2026-07-04: pre-rename GitHub URL (opencode-ai org) replaced with the
+      # product docs site — field-source matrix drift finding 1.
+      docs_url: https://opencode.ai/docs
+      sniff_binding: Opencode
       user_dir: "~/.config/opencode"
       repo_dir: ".opencode"
       vendor: Anomalyco
@@ -47,29 +109,65 @@ list:
       site: https://opencode.ai
       repo: https://github.com/anomalyco/opencode
     - name: Qwen CLI
-      file: qwen-cli.md
+      file: qwen.md
+      slug: qwen
+      binary: qwen
+      display_name: Qwen Code
+      short_name: qwen
+      cli_aliases: ["qwen", "qwencode", "qwen_code", "qwen-code"]
+      docs_url: https://qwenlm.github.io/qwen-code-docs/
+      usage_dashboard_url: https://bailian.console.aliyun.com/
+      sniff_binding: QwenCli
+      repo_dir: ".qwen"
       vendor: Alibaba Cloud
       model_provider: true
       site: https://qwenlm.github.io/qwen-code-docs/en/users/overview
       repo: https://github.com/QwenLM/qwen-code
-    # - name: Roo Code
-    #   file: roo-code.md
-    #   user_dir: "~/.roo"
-    #   repo_dir: ".roo"
-    #   vendor: Roo Code, Inc.
-    #   site: https://roocode.com/
-    #   repo: https://github.com/RooCodeInc/Roo-Code
     - name: Pi
       file: pi.md
-      user_dir: ""
-      repo_dir: ""
+      slug: pi
+      binary: pi
+      display_name: Pi
+      short_name: pi
+      cli_aliases: ["pi"]
+      docs_url: https://pi.dev/docs/latest
+      sniff_binding: Pi
+      user_dir: "~/.pi"
+      repo_dir: ".pi"
       vendor: Pi
       site: https://pi.dev/
       repo: https://github.com/earendil-works/pi
     - name: Kilo Code
       file: kilo.md
+      slug: kilo
+      binary: kilo
+      display_name: Kilo Code
+      short_name: kilo
+      cli_aliases: ["kilo"]
+      docs_url: https://kilo.ai/docs
+      sniff_binding: Kilo
       user_dir: "~/.kilo"
       repo_dir: ".kilo"
       vendor: Kilo
       site: https://kilo.ai/
       repo: https://github.com/Kilo-Org/kilocode
+    - name: Antigravity
+      file: antigravity.md
+      slug: antigravity
+      # Identity confirmed at graduation (M-Antigravity) against the installed
+      # `agy` 1.1.0 and the research: the CLI binary is `agy`; user CLI state
+      # lives under `~/.gemini/antigravity-cli` (NOT `~/.antigravity`, which is
+      # the separate desktop-IDE app-shell dir), and repo-level agent config
+      # lives under `.agents/`. `sniff_binding` names the wired AiCli variant.
+      binary: agy
+      display_name: Antigravity
+      short_name: antigravity
+      cli_aliases: ["antigravity"]
+      docs_url: https://antigravity.google/product/antigravity-cli
+      sniff_binding: Antigravity
+      user_dir: "~/.gemini/antigravity-cli"
+      repo_dir: ".agents"
+      vendor: Google
+      model_provider: true
+      site: https://antigravity.google/product/antigravity-cli
+      repo: https://github.com/google-antigravity/antigravity-cli

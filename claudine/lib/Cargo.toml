@@ -13,6 +13,7 @@ harness = false
 
 [dependencies]
 # Internal
+claudine-catalog-types = { path = "../catalog-types" }
 sniff = { path = "../../sniff/lib" }
 biscuit-hash = { path = "../../biscuit-hash/lib", features = ["xx_hash", "blake3"] }
 biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml", "json5"] }
@@ -22,6 +23,7 @@ biscuit-speaks = { path = "../../biscuit-speaks/lib", features = ["playa"] }
 messenger = { path = "../../messenger/lib", default-features = false, features = ["discord", "slack", "signal", "whatsapp", "desktop"] }
 secrecy = "0.10"
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
+renderable = { path = "../../renderable" }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -77,6 +79,9 @@ which = "8"
 
 # Shell-words parsing for bash params
 shell-words = "1"
+
+# Enum variant-name reflection for the render dispatch-table completeness test
+strum = { version = "0.28", features = ["derive"] }
 
 [dev-dependencies]
 tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros", "sync", "time"] }

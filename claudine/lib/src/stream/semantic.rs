@@ -68,7 +68,12 @@ impl SemanticErrorKind {
 /// variant carries an `extra` JSON object for provider-specific fields, and
 /// [`SemanticEvent::ProviderExtension`] is the catch-all for kinds that have
 /// not (yet) graduated to a typed variant.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+///
+/// `strum::VariantNames` supplies the PascalCase variant-name set the render
+/// dispatch table checks itself against (`render::event_renderer::DISPATCH`),
+/// so a new variant that lacks a dispatch entry fails a completeness test
+/// rather than silently rendering nothing.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, strum::VariantNames)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SemanticEvent {
     SessionStart {
