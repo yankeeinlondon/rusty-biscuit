@@ -93,8 +93,9 @@ The function forms `and(...)` / `or(...)` are valid in *both* modes.
 
 ## Functions
 
-Functions are the extensible part of the language. Each domain owns an
-authoritative typed registration slice under
+Functions are the extensible part of the language. Handler-free metadata is
+authored in `darkmatter/docs/schemas/expression-functions.yaml`; runtime
+behavior is bound by canonical name in domain slices under
 `darkmatter/lib/src/markdown/compose/expression/functions/`:
 
 - `FunctionHandler::Pure` — functions resolved by `dispatch()` (type predicates,
@@ -103,18 +104,21 @@ authoritative typed registration slice under
 - `FunctionHandler::Context` — functions resolved by `dispatch_fs()` that need
   a `ResolutionContext` (`absolute`, `relative`, `file_exists`, `frontmatter`,
   `markdown_body_empty`, `markdown_title`, `validate_schema`).
-- `FunctionHandler::Lazy` — `and(...)` / `or(...)`, which short-circuit and
-  therefore cannot go through the eager dispatchers.
+- lazy bindings — `and(...)` / `or(...)`, which short-circuit and therefore do
+  not carry an eager handler.
 
-Each registration carries the full set of typed **descriptors** it answers to,
-including overloads and optional/variadic arity:
+Each runtime binding carries only its canonical name, aliases, evaluation mode,
+and handler. The cached registry joins it to catalog descriptors, including
+overloads and optional/variadic arity:
 
 ```rust
-FunctionRegistration { canonical: "number", aliases: &[], descriptors: &[...], handler: FunctionHandler::Pure(number_fn) }
-FunctionRegistration { canonical: "frontmatter", aliases: &[], descriptors: &[..., ...], handler: FunctionHandler::Context(frontmatter_fn) }
+FunctionBinding { canonical: "number", aliases: &[], evaluation: EvaluationMode::Pure, handler: Some(FunctionHandler::Pure(number_fn)) }
+FunctionBinding { canonical: "frontmatter", aliases: &[], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(frontmatter_fn)) }
 ```
 
-These tables are the single source of truth for *what the evaluator recognizes*.
+The catalog is the source of truth for metadata; bindings are the source of
+truth for executable behavior and aliases. Registry initialization requires
+bidirectional canonical-name parity between them.
 
 ## How the `--expressions` report is built
 
@@ -146,20 +150,19 @@ committed doc diverges from the catalog output.
 
 ## How to add an expression function
 
-1. **Implement and register it.** Add the handler and its
-   `FunctionRegistration` to the owning domain module, listing every descriptor
-   and overload on that one registration.
-2. The `--expressions` function table needs **no change** — it reads the
-   registration projection through `expression_function_descriptors()`.
+1. Add signatures, descriptions, ordering, and examples to
+   `darkmatter/docs/schemas/expression-functions.yaml`.
+2. Add the handler and its runtime binding to the owning domain module.
+3. The `--expressions` function table needs **no change** — it reads the
+   catalog projection through `expression_function_descriptors()`.
 
 ## Drift control for the function catalog
 
-The catalog and runtime registry are one domain-owned model, guarded by registry
-invariants and behavior tests:
+The authored catalog and runtime bindings are joined by canonical name and
+guarded by registry invariants and behavior tests:
 
-- Registration invariants reject duplicate canonical names, aliases, and
-  signatures, empty descriptor sets, and descriptors whose leading name differs
-  from the registration canonical name.
+- Registry invariants reject duplicate canonical names, alias collisions, and
+  missing entries on either side of the catalog/binding boundary.
 - **`every_descriptor_overload_is_dispatchable_at_its_declared_arity`** — an
   end-to-end proof: each descriptor is parsed and run through the real
   `evaluate` pipeline at its declared arity. A descriptor whose handler was
