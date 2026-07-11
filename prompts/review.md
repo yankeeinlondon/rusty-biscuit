@@ -27,19 +27,19 @@ initialize:
     stack:
         - when: "spec && ( frontmatter(spec, 'reviewed') == true || frontmatter(spec, 'implemented') == true )"
           action:
-              - proxy: "prompts/_reviews/review-feature.md"
+              - proxy: "./_reviews/review-feature.md"
         - when: "spec"
           action:
-              - proxy: "prompts/_reviews/review-spec-inline.md"
+              - proxy: "./_reviews/review-spec-inline.md"
         - when: "plan && file_exists(dirname(plan) + '/' + replace(basename(plan),'plan','spec'))"
           action:
-              - proxy: "prompts/_reviews/review-feature.md"
+              - proxy: "./_reviews/review-feature.md"
         - when: "plan"
           action:
-              - proxy: "prompts/_reviews/review-implementation.md"
+              - proxy: "./_reviews/review-implementation.md"
         - when: "review"
           action:
-              - proxy: "prompts/_reviews/review-suggestions-implementation.md"
+              - proxy: "./_reviews/review-suggestions-implementation.md"
 ---
 
 You asked for a review but didn't pass in the right parameters to get proxied to
