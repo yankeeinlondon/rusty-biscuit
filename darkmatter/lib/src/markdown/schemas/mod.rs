@@ -459,15 +459,33 @@ impl DarkmatterSchemas {
         // Frontmatter snapshot for matching (strip the `$schema` control key).
         let fm_json = frontmatter_as_json(source);
 
-        let matched = triggers::assemble::matched_triggers(registry, &fm_json, &normalized_path);
-        let mut layers = Vec::with_capacity(matched.len());
-        for trigger in matched {
-            let payload =
-                triggers::assemble::resolve_trigger_payload(trigger, &registry.roots)?;
+        // Registries built by `scan` carry pre-resolved payloads; programmatically
+        // constructed registries do not and fall back to on-demand resolution.
+        let pre_resolved = !registry.payloads.is_empty();
+
+        let evaluations =
+            triggers::assemble::evaluate_registry(registry, &fm_json, &normalized_path);
+        let mut layers = Vec::with_capacity(
+            evaluations.iter().filter(|eval| eval.matched).count(),
+        );
+        for (idx, eval) in evaluations.into_iter().enumerate() {
+            if !eval.matched {
+                continue;
+            }
+            let (json_schema, dependencies) = if pre_resolved {
+                let payload = &registry.payloads[idx];
+                (payload.json_schema.clone(), payload.dependencies.clone())
+            } else {
+                let payload = triggers::assemble::resolve_trigger_payload(
+                    eval.trigger,
+                    &registry.roots,
+                )?;
+                (payload.json_schema, payload.dependencies)
+            };
             layers.push(TriggerLayer {
-                source: trigger.source.clone(),
-                json_schema: payload.json_schema,
-                dependencies: payload.dependencies,
+                source: eval.trigger.source.clone(),
+                json_schema,
+                dependencies,
             });
         }
         Ok(layers)
@@ -2682,14 +2700,14 @@ mod phase4_trigger_assembly {
         let doc_path = root.join("doc.md");
         write(&doc_path, "---\nprompt: hello\n---\nbody\n");
 
-        let api = DarkmatterSchemas::new()
+        let err = DarkmatterSchemas::new()
             .with_trigger_discovery(&doc_path, root)
-            .unwrap();
-
-        let err = unwrap_effective_err(api.effective_for(&md_from_file(&doc_path)));
+            .err()
+            .expect("non-mergeable payload must fail at scan time");
         assert!(
-            matches!(err, SchemaError::TriggerPayloadNotMergeable { .. }),
-            "root union payload must be rejected: {err:?}"
+            matches!(err, SchemaError::TriggerLoad { ref source, .. }
+                if matches!(**source, SchemaError::TriggerPayloadNotMergeable { .. })),
+            "root union payload must be rejected at scan time: {err:?}"
         );
     }
 
@@ -2741,14 +2759,14 @@ mod phase4_trigger_assembly {
         let doc_path = root.join("doc.md");
         write(&doc_path, "---\nprompt: hello\n---\nbody\n");
 
-        let api = DarkmatterSchemas::new()
+        let err = DarkmatterSchemas::new()
             .with_trigger_discovery(&doc_path, root)
-            .unwrap();
-
-        let err = unwrap_effective_err(api.effective_for(&md_from_file(&doc_path)));
+            .err()
+            .expect("self-referencing payload must fail at scan time");
         assert!(
-            matches!(err, SchemaError::TriggerPayloadCycle { .. }),
-            "self-referencing payload must fail: {err:?}"
+            matches!(err, SchemaError::TriggerLoad { ref source, .. }
+                if matches!(**source, SchemaError::TriggerPayloadCycle { .. })),
+            "self-referencing payload must fail at scan time: {err:?}"
         );
     }
 
@@ -2773,14 +2791,14 @@ mod phase4_trigger_assembly {
         let doc_path = root.join("doc.md");
         write(&doc_path, "---\nprompt: hello\n---\nbody\n");
 
-        let api = DarkmatterSchemas::new()
+        let err = DarkmatterSchemas::new()
             .with_trigger_discovery(&doc_path, root)
-            .unwrap();
-
-        let err = unwrap_effective_err(api.effective_for(&md_from_file(&doc_path)));
+            .err()
+            .expect("payload referencing a trigger must fail at scan time");
         assert!(
-            matches!(err, SchemaError::TriggerPayloadCycle { .. }),
-            "payload referencing another trigger must fail: {err:?}"
+            matches!(err, SchemaError::TriggerLoad { ref source, .. }
+                if matches!(**source, SchemaError::TriggerPayloadCycle { .. })),
+            "payload referencing another trigger must fail at scan time: {err:?}"
         );
     }
 

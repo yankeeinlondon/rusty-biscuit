@@ -71,6 +71,11 @@ pub struct TriggerRegistry {
     /// The ordered, deduped set of loaded triggers (nearest root first,
     /// filename-lexicographic within a root). Shadowed filenames are absent.
     pub triggers: Vec<LoadedTrigger>,
+    /// Resolved payloads parallel to [`triggers`](Self::triggers) — one per
+    /// trigger, in the same order. Populated by [`scan`] so `effective_for`
+    /// does not resolve payloads twice. Empty for programmatically
+    /// constructed registries, which fall back to on-demand resolution.
+    pub(crate) payloads: Vec<super::assemble::ResolvedPayload>,
     /// Files shadowed by a nearer root's file of the same name.
     pub shadowed: Vec<ShadowedFile>,
 }
@@ -82,6 +87,7 @@ impl TriggerRegistry {
             boundary: boundary.into(),
             roots: Vec::new(),
             triggers: Vec::new(),
+            payloads: Vec::new(),
             shadowed: Vec::new(),
         }
     }
@@ -278,10 +284,14 @@ pub fn normalize_path(document: &Path, boundary: &Path) -> Option<String> {
 /// boundary.
 ///
 /// Walks ancestor `schemas/` roots, enumerates files, applies filename
-/// shadowing, classifies each unshadowed file, and loads trigger envelopes.
+/// shadowing, classifies each unshadowed file, loads trigger envelopes, and
+/// resolves every payload.
 ///
 /// Loading is **transactional**: if any unshadowed opted-in trigger file is
-/// malformed, no registry is installed (an error is returned).
+/// malformed or its payload fails to resolve (missing file, cyclic reference,
+/// non-mergeable shape), no registry is installed (an error is returned).
+/// Payload resolution runs regardless of whether any current document matches
+/// the trigger, so a registry is never installed with a known-bad payload.
 ///
 /// A document outside the boundary yields an empty registry (not an error).
 pub fn scan(document: &Path, boundary: &Path) -> Result<TriggerRegistry, SchemaError> {
@@ -346,10 +356,25 @@ pub fn scan(document: &Path, boundary: &Path) -> Result<TriggerRegistry, SchemaE
         }
     }
 
+    // Resolve every payload (transactional). Payload failures — missing files,
+    // cycles, non-mergeable shapes — are hard load errors at scan time,
+    // independent of whether any current document matches the trigger.
+    let mut payloads = Vec::with_capacity(triggers.len());
+    for trigger in &triggers {
+        let payload = super::assemble::resolve_trigger_payload(trigger, &roots).map_err(
+            |source| SchemaError::TriggerLoad {
+                path: trigger.source.clone(),
+                source: Box::new(source),
+            },
+        )?;
+        payloads.push(payload);
+    }
+
     Ok(TriggerRegistry {
         boundary: boundary.to_path_buf(),
         roots,
         triggers,
+        payloads,
         shadowed,
     })
 }
@@ -377,12 +402,23 @@ mod tests {
         fs::write(path, content).unwrap();
     }
 
-    /// A minimal valid trigger envelope.
-    const VALID_TRIGGER: &str = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n";
+    /// A minimal valid trigger envelope with a payload reference.
+    const VALID_TRIGGER: &str =
+        "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: payload-a.yaml\n";
 
     /// A second minimal trigger with a different match key.
     const VALID_TRIGGER_2: &str =
-        "kind: trigger-schema\nmatch:\n  title: string(required)\n";
+        "kind: trigger-schema\nmatch:\n  title: string(required)\n$schema: payload-b.yaml\n";
+
+    /// A simple mergeable payload for test fixtures.
+    const PAYLOAD_A: &str = "$schema:\n  model: string(required)\n";
+    const PAYLOAD_B: &str = "$schema:\n  owner: string(required)\n";
+
+    /// Writes a payload file (`payload-a.yaml` / `payload-b.yaml`) into `dir`.
+    fn write_payloads(dir: &Path) {
+        write_file(&dir.join("payload-a.yaml"), PAYLOAD_A);
+        write_file(&dir.join("payload-b.yaml"), PAYLOAD_B);
+    }
 
     // ── Ancestor walk ───────────────────────────────────────────────────
 
@@ -653,6 +689,8 @@ mod tests {
             VALID_TRIGGER_2,
         )
         .unwrap();
+        // Payload for the winning (nearest) trigger.
+        write_payloads(&root.join("pkg/schemas"));
 
         let doc = root.join("pkg/sub/doc.md");
         let registry = scan(&doc, root).unwrap();
@@ -683,6 +721,10 @@ mod tests {
             VALID_TRIGGER_2,
         )
         .unwrap();
+        // Each trigger's payload must be co-located; using distinct payload
+        // filenames keeps shadowing empty.
+        write_file(&root.join("pkg/schemas/payload-a.yaml"), PAYLOAD_A);
+        write_file(&root.join("schemas/payload-b.yaml"), PAYLOAD_B);
 
         let doc = root.join("pkg/sub/doc.md");
         let registry = scan(&doc, root).unwrap();
@@ -709,6 +751,7 @@ mod tests {
             VALID_TRIGGER,
         )
         .unwrap();
+        write_payloads(&root.join("schemas"));
 
         let doc = root.join("doc.md");
         let registry = scan(&doc, root).unwrap();
@@ -751,6 +794,7 @@ mod tests {
             "kind: trigger-schema\n",
         )
         .unwrap();
+        write_payloads(&root.join("schemas"));
 
         let doc = root.join("doc.md");
         let result = scan(&doc, root);
@@ -799,6 +843,7 @@ mod tests {
             &root.join("schemas/a.trigger.yaml"),
             VALID_TRIGGER_2,
         );
+        write_payloads(&root.join("pkg/schemas"));
 
         let doc = root.join("pkg/sub/doc.md");
         let registry = scan(&doc, root).unwrap();
@@ -856,6 +901,7 @@ mod tests {
             &root.join("schemas/b.trigger.yaml"),
             VALID_TRIGGER_2,
         );
+        write_payloads(&root.join("schemas"));
 
         let doc = root.join("doc.md");
         let registry = scan(&doc, root).unwrap();
@@ -886,10 +932,87 @@ mod tests {
             VALID_TRIGGER,
         )
         .unwrap();
+        write_payloads(&root.join("schemas"));
 
         let doc = root.join("doc.md");
         let registry = scan(&doc, root).unwrap();
         assert_eq!(registry.triggers.len(), 1);
+    }
+
+    // ── Payload resolution is transactional at scan time ───────────────
+
+    #[test]
+    fn unmatched_trigger_with_missing_payload_is_hard_error() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        // The trigger matches on `prompt`, which no document in this test
+        // provides — but the payload file is absent, so scan must fail
+        // regardless of whether any document would match.
+        fs::write(
+            root.join("schemas/lonely.trigger.yaml"),
+            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n\
+             $schema: does-not-exist.yaml\n",
+        )
+        .unwrap();
+
+        let doc = root.join("doc.md");
+        let err = scan(&doc, root).unwrap_err();
+        assert!(
+            matches!(err, SchemaError::TriggerLoad { .. }),
+            "missing payload must be a hard load error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn unmatched_trigger_with_non_mergeable_payload_is_hard_error() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        // Inline root-union payload — not merge-compatible. The match key
+        // (`prompt`) is absent from every document in this test.
+        fs::write(
+            root.join("schemas/union.trigger.yaml"),
+            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n\
+             $schema:\n  - model: string(required)\n  - title: string(required)\n",
+        )
+        .unwrap();
+
+        let doc = root.join("doc.md");
+        let err = scan(&doc, root).unwrap_err();
+        match err {
+            SchemaError::TriggerLoad { source, .. } => {
+                assert!(
+                    matches!(*source, SchemaError::TriggerPayloadNotMergeable { .. }),
+                    "inner error must be TriggerPayloadNotMergeable: {source:?}"
+                );
+            }
+            other => panic!("expected TriggerLoad wrapping TriggerPayloadNotMergeable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn payload_resolution_failure_is_transactional() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        // One valid trigger with a proper payload.
+        write_file(&root.join("schemas/good.trigger.yaml"), VALID_TRIGGER);
+        write_payloads(&root.join("schemas"));
+        // One trigger whose payload file does not exist.
+        fs::write(
+            root.join("schemas/bad.trigger.yaml"),
+            "kind: trigger-schema\nmatch:\n  title: string(required)\n\
+             $schema: missing.yaml\n",
+        )
+        .unwrap();
+
+        let doc = root.join("doc.md");
+        let result = scan(&doc, root);
+        assert!(
+            result.is_err(),
+            "a single bad payload must fail the whole scan transactionally"
+        );
     }
 
     // ── Error display ───────────────────────────────────────────────────

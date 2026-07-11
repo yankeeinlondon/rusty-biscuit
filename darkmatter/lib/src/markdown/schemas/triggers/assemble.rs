@@ -178,7 +178,7 @@ pub fn matched_triggers<'a>(
 // ── Payload resolution + merge-compatibility gate ───────────────────────────
 
 /// A resolved trigger payload ready for layering.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ResolvedPayload {
     /// The resolved JSON Schema (guaranteed simple-object by the gate).
     pub json_schema: Value,
@@ -405,6 +405,17 @@ mod tests {
         Value::Object(map)
     }
 
+    /// Builds a `LoadedTrigger` directly from envelope source text, bypassing
+    /// [`discovery::scan`] (which now eagerly resolves payloads). Used to unit-
+    /// test [`resolve_trigger_payload`] against payloads that would be rejected
+    /// at load time.
+    fn make_trigger(content: &str, source: &Path) -> LoadedTrigger {
+        let envelope = parse_trigger_envelope_from_str(content)
+            .expect("envelope should parse")
+            .expect("content should claim trigger-schema");
+        LoadedTrigger { source: source.to_path_buf(), envelope }
+    }
+
     // ── Matching ────────────────────────────────────────────────────────
 
     #[test]
@@ -486,16 +497,19 @@ mod tests {
         let repo = repo_fixture();
         let root = repo.path();
         fs::create_dir_all(root.join("schemas")).unwrap();
+        let source = root.join("schemas/union.trigger.yaml");
         write(
-            &root.join("schemas/union.trigger.yaml"),
+            &source,
             "kind: trigger-schema\nmatch:\n  prompt: string(required)\n\
              $schema:\n  - model: string(required)\n  - title: string(required)\n",
         );
 
-        let doc = root.join("doc.md");
-        let registry = discovery::scan(&doc, root).unwrap();
-        let trigger = &registry.triggers[0];
-        let err = resolve_trigger_payload(trigger, &registry.roots).unwrap_err();
+        let trigger = make_trigger(
+            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n\
+             $schema:\n  - model: string(required)\n  - title: string(required)\n",
+            &source,
+        );
+        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")]).unwrap_err();
         assert!(
             matches!(err, SchemaError::TriggerPayloadNotMergeable { .. }),
             "root union payload must be rejected: {err:?}"
@@ -506,16 +520,13 @@ mod tests {
     fn rejects_payload_with_no_schema() {
         let repo = repo_fixture();
         let root = repo.path();
-        fs::create_dir_all(root.join("schemas")).unwrap();
-        write(
-            &root.join("schemas/empty.trigger.yaml"),
-            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n",
-        );
+        let source = root.join("schemas/empty.trigger.yaml");
 
-        let doc = root.join("doc.md");
-        let registry = discovery::scan(&doc, root).unwrap();
-        let trigger = &registry.triggers[0];
-        let err = resolve_trigger_payload(trigger, &registry.roots).unwrap_err();
+        let trigger = make_trigger(
+            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n",
+            &source,
+        );
+        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")]).unwrap_err();
         assert!(
             matches!(err, SchemaError::TriggerPayloadNotMergeable { .. }),
             "missing payload must be rejected: {err:?}"
@@ -530,16 +541,19 @@ mod tests {
         let root = repo.path();
         fs::create_dir_all(root.join("schemas")).unwrap();
         // Payload references its own envelope file.
+        let source = root.join("schemas/self.trigger.yaml");
         write(
-            &root.join("schemas/self.trigger.yaml"),
+            &source,
             "kind: trigger-schema\nmatch:\n  prompt: string(required)\n\
              $schema: self.trigger.yaml\n",
         );
 
-        let doc = root.join("doc.md");
-        let registry = discovery::scan(&doc, root).unwrap();
-        let trigger = &registry.triggers[0];
-        let err = resolve_trigger_payload(trigger, &registry.roots).unwrap_err();
+        let trigger = make_trigger(
+            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n\
+             $schema: self.trigger.yaml\n",
+            &source,
+        );
+        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")]).unwrap_err();
         assert!(
             matches!(err, SchemaError::TriggerPayloadCycle { .. }),
             "self-referencing payload must be rejected: {err:?}"
@@ -551,8 +565,9 @@ mod tests {
         let repo = repo_fixture();
         let root = repo.path();
         fs::create_dir_all(root.join("schemas")).unwrap();
+        let a_source = root.join("schemas/a.trigger.yaml");
         write(
-            &root.join("schemas/a.trigger.yaml"),
+            &a_source,
             "kind: trigger-schema\nmatch:\n  prompt: string(required)\n\
              $schema: b.trigger.yaml\n",
         );
@@ -562,14 +577,12 @@ mod tests {
         );
         write(&root.join("schemas/claudine.yaml"), PAYLOAD);
 
-        let doc = root.join("doc.md");
-        let registry = discovery::scan(&doc, root).unwrap();
-        let trigger = &registry
-            .triggers
-            .iter()
-            .find(|t| t.source.ends_with("a.trigger.yaml"))
-            .unwrap();
-        let err = resolve_trigger_payload(trigger, &registry.roots).unwrap_err();
+        let trigger = make_trigger(
+            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n\
+             $schema: b.trigger.yaml\n",
+            &a_source,
+        );
+        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")]).unwrap_err();
         assert!(
             matches!(err, SchemaError::TriggerPayloadCycle { .. }),
             "payload referencing another trigger must be rejected: {err:?}"
