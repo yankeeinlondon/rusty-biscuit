@@ -2,8 +2,8 @@
 //!
 //! Each [`ExpressionFunctionDescriptor`] describes a single callable function
 //! available in Darkmatter expressions. The public catalog is projected once
-//! from domain-owned registrations; reading it performs no host probes, no I/O,
-//! and no runtime context capture.
+//! from the embedded authored schema; reading it performs no host probes, no
+//! filesystem I/O, and no runtime context capture.
 //!
 //! Each descriptor now also carries a **typed signature** ([`ParamType`] per
 //! parameter plus a [`ReturnType`]). The type vocabulary is the schema-plus
@@ -13,7 +13,16 @@
 //! function-type variant, and `error` is a return-position flag — never a
 //! parameter type — so a frontmatter property can never be typed as a function
 //! or as `error` (spec D7, schema-plus § Type domains).
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
 use crate::catalog::{Described, Example, ExampleVerification};
+
+pub(crate) mod ast;
+pub(crate) mod parser;
+
+use ast::{CatalogVerification, ExpressionFunctionCatalog};
+use parser::{CatalogParseError, parse_expression_function_catalog};
 
 /// A data type usable in a function **parameter** or (non-`error`) **return**
 /// position.
@@ -55,6 +64,33 @@ pub enum DataType {
 }
 
 impl DataType {
+    /// Parses a canonical function-catalog type keyword.
+    pub fn from_keyword(keyword: &str) -> Option<Self> {
+        use crate::markdown::schemas::SimplifiedType;
+
+        if keyword == "number(integer)" {
+            return Some(Self::Integer);
+        }
+        Some(match SimplifiedType::from_keyword(keyword)? {
+            SimplifiedType::String => Self::String,
+            SimplifiedType::Number => Self::Number,
+            SimplifiedType::Boolean => Self::Boolean,
+            SimplifiedType::Date => Self::Date,
+            SimplifiedType::DateTime => Self::DateTime,
+            SimplifiedType::Time => Self::Time,
+            SimplifiedType::Object => Self::Object,
+            SimplifiedType::File => Self::File,
+            SimplifiedType::Url => Self::Url,
+            SimplifiedType::Email => Self::Email,
+            SimplifiedType::Yaml => Self::Yaml,
+            SimplifiedType::Json => Self::Json,
+            SimplifiedType::Any => Self::Any,
+            SimplifiedType::NumberLike | SimplifiedType::Boolish | SimplifiedType::Enum => {
+                return None;
+            }
+        })
+    }
+
     /// Canonical type keyword (`string`, `datetime`, `any`, …).
     pub const fn as_keyword(self) -> &'static str {
         match self {
@@ -229,49 +265,101 @@ impl Described for ExpressionFunctionDescriptor {
     }
 }
 
+fn leak(value: String) -> &'static str {
+    Box::leak(value.into_boxed_str())
+}
 
-// Shared typed parameter lists, referenced by the descriptors below to keep
-// each entry compact. Names are irrelevant here (they live in the signature);
-// only the type shape is shared.
-pub(super) const P_ANY: &[ParamType] = &[ParamType::val(DataType::Any)];
-pub(super) const P_ANY2: &[ParamType] = &[ParamType::val(DataType::Any), ParamType::val(DataType::Any)];
-pub(super) const P_STRING: &[ParamType] = &[ParamType::val(DataType::String)];
-pub(super) const P_STRING2: &[ParamType] =
-    &[ParamType::val(DataType::String), ParamType::val(DataType::String)];
-pub(super) const P_STRING3: &[ParamType] = &[
-    ParamType::val(DataType::String),
-    ParamType::val(DataType::String),
-    ParamType::val(DataType::String),
-];
-pub(super) const P_NUM: &[ParamType] = &[ParamType::val(DataType::Number)];
-pub(super) const P_NUM2: &[ParamType] = &[ParamType::val(DataType::Number), ParamType::val(DataType::Number)];
-pub(super) const P_LIST: &[ParamType] = &[ParamType::array(DataType::Any)];
-pub(super) const P_VARIADIC: &[ParamType] = &[ParamType::variadic(DataType::Any)];
-pub(super) const P_OBJ_STRING: &[ParamType] =
-    &[ParamType::val(DataType::Object), ParamType::val(DataType::String)];
-pub(super) const P_NUM_CONV: &[ParamType] =
-    &[ParamType::val(DataType::Any), ParamType::optional(DataType::Any)];
-pub(super) const P_ROUND: &[ParamType] =
-    &[ParamType::val(DataType::Number), ParamType::optional(DataType::Number)];
-pub(super) const P_FILE: &[ParamType] = &[ParamType::val(DataType::File)];
-pub(super) const P_FILE_STRING: &[ParamType] =
-    &[ParamType::val(DataType::File), ParamType::val(DataType::String)];
-pub(super) const P_FILE_OBJ: &[ParamType] =
-    &[ParamType::val(DataType::File), ParamType::val(DataType::Object)];
+fn project_descriptors(
+    catalog: ExpressionFunctionCatalog,
+) -> Vec<ExpressionFunctionDescriptor> {
+    let mut functions = catalog.functions;
+    functions.sort_by_key(|function| function.order);
 
-// Shared typed returns.
-pub(super) const R_BOOL: ReturnType = ReturnType::plain(DataType::Boolean);
-pub(super) const R_BOOL_ERR: ReturnType = ReturnType::fallible(DataType::Boolean);
-pub(super) const R_NUM: ReturnType = ReturnType::plain(DataType::Number);
-pub(super) const R_NUM_ERR: ReturnType = ReturnType::fallible(DataType::Number);
-pub(super) const R_STRING_ERR: ReturnType = ReturnType::fallible(DataType::String);
-pub(super) const R_FILE_ERR: ReturnType = ReturnType::fallible(DataType::File);
-pub(super) const R_OBJ_ERR: ReturnType = ReturnType::fallible(DataType::Object);
-pub(super) const R_ANY_ERR: ReturnType = ReturnType::fallible(DataType::Any);
+    let mut category_orders = HashMap::<String, usize>::new();
+    let mut descriptors = Vec::new();
+    for function in functions {
+        let category_order = category_orders.entry(function.category.clone()).or_default();
+        let category = leak(function.category);
+        let description = leak(function.description);
+        for overload in function.overloads {
+            *category_order += 1;
+            let parameter_names = overload
+                .parameters
+                .iter()
+                .map(|parameter| {
+                    if parameter.variadic {
+                        "...".to_string()
+                    } else if parameter.optional {
+                        format!("[{}]", parameter.name)
+                    } else {
+                        parameter.name.clone()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let signature = leak(format!("{}({parameter_names})", function.name));
+            let parameters = overload
+                .parameters
+                .into_iter()
+                .map(|parameter| ParamType {
+                    ty: parameter.ty,
+                    array: parameter.array,
+                    optional: parameter.optional,
+                    variadic: parameter.variadic,
+                })
+                .collect::<Vec<_>>();
+            let parameters = Box::leak(parameters.into_boxed_slice());
+            let verification = match overload.example.verification {
+                CatalogVerification::Executable => ExampleVerification::Executable,
+                CatalogVerification::DisplayOnly(reason) => {
+                    ExampleVerification::DisplayOnly(leak(reason))
+                }
+            };
+            descriptors.push(ExpressionFunctionDescriptor {
+                signature,
+                description,
+                category,
+                order: *category_order,
+                parameters,
+                returns: ReturnType {
+                    ty: overload.returns.ty,
+                    array: overload.returns.array,
+                    fallible: overload.returns.fallible,
+                },
+                example: Some(Example {
+                    invocation: leak(overload.example.expression),
+                    result: leak(overload.example.result),
+                    verification,
+                }),
+            });
+        }
+    }
+    descriptors
+}
+
+pub(crate) fn expression_function_catalog() -> &'static ExpressionFunctionCatalog {
+    static CATALOG: LazyLock<ExpressionFunctionCatalog> = LazyLock::new(|| {
+        parse_expression_function_catalog(include_str!(
+            "../../../../../../docs/schemas/expression-functions.yaml"
+        ))
+        .expect("embedded expression-function catalog must parse")
+    });
+    &CATALOG
+}
+
+#[allow(dead_code)]
+pub(crate) fn try_parse_catalog(
+    yaml: &str,
+) -> Result<Vec<ExpressionFunctionDescriptor>, CatalogParseError> {
+    parse_expression_function_catalog(yaml).map(project_descriptors)
+}
 
 /// Returns all expression function descriptors in display order.
 pub fn expression_function_descriptors() -> &'static [ExpressionFunctionDescriptor] {
-    super::functions::expression_function_descriptors()
+    static DESCRIPTORS: LazyLock<Vec<ExpressionFunctionDescriptor>> = LazyLock::new(|| {
+        project_descriptors(expression_function_catalog().clone())
+    });
+    &DESCRIPTORS
 }
 
 /// Generates a Markdown function-reference table from the expression catalog.
@@ -315,6 +403,13 @@ mod tests {
     };
     use serde_json::Value;
     use std::collections::HashSet;
+
+    #[test]
+    fn malformed_catalog_is_rejected_before_projection() {
+        let error = try_parse_catalog("kind: expression-function-catalog\nfunctions: []\n")
+            .expect_err("an empty catalog must not reach descriptor projection");
+        assert!(error.to_string().contains("function"));
+    }
 
     /// The number of arguments to pass when exercising a signature: the count
     /// of comma-separated parameters, with a variadic `...` exercised at two
