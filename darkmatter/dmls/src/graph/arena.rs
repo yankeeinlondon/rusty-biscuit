@@ -1196,6 +1196,28 @@ mod tests {
     }
 
     #[test]
+    fn test_interpolation_literal_creates_no_graph_node_or_edge() {
+        let g = graph(&[(
+            "/w/a.md",
+            "---\ntitle: Hello\n---\n\n# Body\n\nSee {{{ title }}} and {{{ ctx.today }}}.\n",
+        )]);
+        let a = g.document_id(Path::new("/w/a.md")).unwrap();
+
+        assert_eq!(g.variable_uses(a).count(), 0);
+        let uses_variable_edges = (0..g.node_count())
+            .map(|index| g.outgoing(NodeId(index as u32), EdgeKind::UsesVariable).count())
+            .sum::<usize>();
+        assert_eq!(uses_variable_edges, 0);
+        assert_eq!(
+            (0..g.node_count())
+                .filter_map(|index| g.node(NodeId(index as u32)))
+                .filter(|node| node.kind == NodeKind::Interpolation)
+                .count(),
+            0
+        );
+    }
+
+    #[test]
     fn test_deterministic_document_ids_regardless_of_insert_order() {
         let g1 = graph(&[("/w/a.md", "# A\n"), ("/w/b.md", "# B\n")]);
         let g2 = graph(&[("/w/b.md", "# B\n"), ("/w/a.md", "# A\n")]);

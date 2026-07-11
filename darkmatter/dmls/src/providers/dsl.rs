@@ -229,12 +229,16 @@ fn interpolation_candidates(
 
 // ── Hover ─────────────────────────────────────────────────────────────────
 
-/// Hover for a directive, interpolation, or frontmatter `$()` value.
+/// Hover for a directive, interpolation, frontmatter `$()` value, or
+/// interpolation literal.
 pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     if let Some(hover) = directive_hover(ctx, offset) {
         return Some(hover);
     }
     if let Some(hover) = shell_block_hover(ctx, offset) {
+        return Some(hover);
+    }
+    if let Some(hover) = literal_hover(ctx, offset) {
         return Some(hover);
     }
     if let Some(hover) = interpolation_hover(ctx, offset) {
@@ -283,6 +287,45 @@ fn interpolation_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
         frontmatter_scalar(ctx, name)
     });
     Some(markup_hover(ctx, interpolation.outer.clone(), value))
+}
+
+/// Hover on a `{{{ … }}}` interpolation literal: identifies the span and shows
+/// the composed output (`{{ content }}`) with a note that the content is inert.
+fn literal_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
+    let body_base = body_base(ctx.text);
+    let literal = expressions::literal_at(ctx.text, body_base, offset)?;
+    Some(markup_hover(
+        ctx,
+        literal.outer.clone(),
+        literal_hover_markdown(&literal.content),
+    ))
+}
+
+/// Pure Markdown body for a literal hover.
+fn literal_hover_markdown(content: &str) -> String {
+    let mut composed = String::new();
+    composed.push_str("{{");
+    composed.push_str(content);
+    composed.push_str("}}");
+    let longest_backtick_run = composed
+        .split(|character| character != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or(0);
+    let fence = "`".repeat(longest_backtick_run.saturating_add(1).max(1));
+    let rendered = if composed.contains('\n') || composed.contains('\r') {
+        let fence = if fence.len() < 3 {
+            "```".to_string()
+        } else {
+            fence
+        };
+        format!("{fence}\n{composed}\n{fence}")
+    } else {
+        format!("{fence}{composed}{fence}")
+    };
+    format!(
+        "**Interpolation literal**\n\n{rendered}\n\nThe content is rendered as literal `{{{{ … }}}}` text and is not interpolated."
+    )
 }
 
 /// The Markdown body of an interpolation hover. Pure (no [`DocumentContext`])
@@ -857,7 +900,7 @@ fn levenshtein(a: &str, b: &str) -> usize {
 }
 
 /// The document byte offset where the body begins (after any frontmatter block).
-fn body_base(text: &str) -> usize {
+pub(crate) fn body_base(text: &str) -> usize {
     match extract_frontmatter_block(text) {
         Ok(Some(extraction)) => extraction.body_span.start,
         _ => 0,
@@ -1093,6 +1136,17 @@ fn diagnostic(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    use lsp_types::{Position, Uri};
+
+    use crate::capabilities::{ClientProfile, HoverMediaProfile};
+    use crate::config::DmlsConfig;
+    use crate::graph::WorkspaceGraph;
+    use crate::providers::ProviderRegistry;
+    use crate::source_map::PositionEncoding;
 
     #[test]
     fn shell_block_commands_enumerates_body_lines() {
@@ -1396,6 +1450,175 @@ mod tests {
     }
 
     #[test]
+    fn literal_provider_diagnostics_and_hover_respect_utf16_and_body_boundary() {
+        let text = "---\nexample: '{{{ frontmatter }}}'\n---\n\n😀 See {{{ > invalid }}} here.\n";
+        let uri: Uri = "file:///literal.md".parse().unwrap();
+        let path = Path::new("/literal.md");
+        let source_map = SourceMap::new(
+            uri.clone(),
+            7,
+            PositionEncoding::Utf16,
+            Arc::from(text),
+        );
+        let graph = WorkspaceGraph::build(&BTreeMap::new(), 1);
+        let config = DmlsConfig::default();
+        let profile = ClientProfile {
+            client_name: None,
+            client_version: None,
+            position_encoding: PositionEncoding::Utf16,
+            supports_resource_operations: false,
+            supports_change_annotations: false,
+            supports_code_action_resolve: false,
+            supports_completion_resolve: false,
+            resolve_provides_text_edit: false,
+            supports_snippets: false,
+            client_watches_files: false,
+            needs_watch_fallback: false,
+            supports_file_operations: false,
+            supports_workspace_configuration: false,
+            supports_folding: false,
+            folding_line_only: false,
+            supports_selection_range: false,
+            supports_linked_editing: false,
+            supports_work_done_progress: false,
+            hover_media: HoverMediaProfile::default(),
+            helix_one_char_selection_is_empty: false,
+        };
+        let ctx = DocumentContext {
+            uri: &uri,
+            path,
+            text,
+            source_map: &source_map,
+            graph: &graph,
+            doc_id: None,
+            config: &config,
+            profile: &profile,
+            overlay: None,
+        };
+        let registry = ProviderRegistry::with_substrate();
+
+        let diagnostics = registry.diagnostics(&ctx);
+        assert!(
+            diagnostics.iter().all(|diagnostic| !matches!(
+                &diagnostic.code,
+                Some(NumberOrString::String(code)) if code.starts_with("dm.expression.")
+            )),
+            "literal produced expression diagnostics: {diagnostics:#?}"
+        );
+
+        let frontmatter_cursor = text.find("frontmatter").unwrap();
+        assert!(
+            crate::providers::dsl::hover(&ctx, frontmatter_cursor).is_none(),
+            "DSL literal hover must not cross the frontmatter/body boundary"
+        );
+
+        let literal_start = text.find("{{{ > invalid }}}").unwrap();
+        let cursor = source_map
+            .lsp_to_byte(Position::new(4, 13))
+            .expect("UTF-16 cursor inside the body literal");
+        let hover = registry.hover(&ctx, cursor).expect("literal hover");
+        assert_eq!(
+            hover.range,
+            source_map.byte_range_to_lsp(literal_start..literal_start + "{{{ > invalid }}}".len())
+        );
+        assert_eq!(hover.range.unwrap().start, Position::new(4, 7));
+        match hover.contents {
+            HoverContents::Markup(MarkupContent { kind, value }) => {
+                assert_eq!(kind, MarkupKind::Markdown);
+                assert!(value.contains("**Interpolation literal**"));
+                assert!(value.contains("`{{ > invalid }}`"));
+                assert!(value.contains("not interpolated"));
+            }
+            other => panic!("literal hover must use Markdown markup, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn literal_provider_hover_safely_preserves_backticks_multiline_and_unicode() {
+        let text = "Backticks: {{{ use `x` and ``y`` }}}\n\nMultiline: {{{ first\nsecond }}}\n\nUnicode: {{{ café 😀 東京 }}}\n";
+        let uri: Uri = "file:///literal-content.md".parse().unwrap();
+        let path = Path::new("/literal-content.md");
+        let source_map = SourceMap::new(
+            uri.clone(),
+            8,
+            PositionEncoding::Utf16,
+            Arc::from(text),
+        );
+        let graph = WorkspaceGraph::build(&BTreeMap::new(), 1);
+        let config = DmlsConfig::default();
+        let profile = ClientProfile {
+            client_name: None,
+            client_version: None,
+            position_encoding: PositionEncoding::Utf16,
+            supports_resource_operations: false,
+            supports_change_annotations: false,
+            supports_code_action_resolve: false,
+            supports_completion_resolve: false,
+            resolve_provides_text_edit: false,
+            supports_snippets: false,
+            client_watches_files: false,
+            needs_watch_fallback: false,
+            supports_file_operations: false,
+            supports_workspace_configuration: false,
+            supports_folding: false,
+            folding_line_only: false,
+            supports_selection_range: false,
+            supports_linked_editing: false,
+            supports_work_done_progress: false,
+            hover_media: HoverMediaProfile::default(),
+            helix_one_char_selection_is_empty: false,
+        };
+        let ctx = DocumentContext {
+            uri: &uri,
+            path,
+            text,
+            source_map: &source_map,
+            graph: &graph,
+            doc_id: None,
+            config: &config,
+            profile: &profile,
+            overlay: None,
+        };
+        let registry = ProviderRegistry::with_substrate();
+        let hover_value = |literal: &str| {
+            let cursor = text.find(literal).unwrap() + 3;
+            let hover = registry.hover(&ctx, cursor).expect("literal hover");
+            match hover.contents {
+                HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value,
+                }) => value,
+                other => panic!("literal hover must use Markdown markup, got {other:?}"),
+            }
+        };
+
+        let backticks = hover_value("{{{ use `x` and ``y`` }}}");
+        assert!(backticks.contains("```{{ use `x` and ``y`` }}```"));
+
+        let multiline = hover_value("{{{ first\nsecond }}}");
+        assert!(multiline.contains("```\n{{ first\nsecond }}\n```"));
+
+        let unicode = hover_value("{{{ café 😀 東京 }}}");
+        assert!(unicode.contains("`{{ café 😀 東京 }}`"));
+    }
+
+    #[test]
+    fn literal_hover_markdown_identifies_span_and_composed_output() {
+        let markdown = literal_hover_markdown(" name ");
+        assert!(markdown.contains("**Interpolation literal**"));
+        assert!(markdown.contains("`{{ name }}`"));
+        assert!(markdown.contains("not interpolated"));
+    }
+
+    #[test]
+    fn literal_hover_markdown_preserves_content_with_inner_expression() {
+        let markdown = literal_hover_markdown(" {{ x }} ");
+        assert!(markdown.contains("**Interpolation literal**"));
+        assert!(markdown.contains("`{{ {{ x }} }}`"));
+        assert!(markdown.contains("not interpolated"));
+    }
+
+    #[test]
     fn text_edit_item_carries_eager_edit_and_markdown_documentation() {
         use crate::source_map::PositionEncoding;
         let text = "hello {{ ctx.pa";
@@ -1435,4 +1658,3 @@ mod tests {
         assert_eq!(item.detail.as_deref(), Some("string[]"));
     }
 }
-
