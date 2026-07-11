@@ -115,7 +115,13 @@ pub fn schema_roots(document_dir: &Path, boundary: &Path) -> Vec<PathBuf> {
     let mut current = document_dir.to_path_buf();
     loop {
         let schemas_dir = current.join(SCHEMAS_DIR_NAME);
-        if schemas_dir.is_dir() {
+        let is_real_directory = std::fs::symlink_metadata(&schemas_dir)
+            .map(|metadata| {
+                let file_type = metadata.file_type();
+                file_type.is_dir() && !file_type.is_symlink()
+            })
+            .unwrap_or(false);
+        if is_real_directory {
             roots.push(schemas_dir);
         }
         if current == boundary {
@@ -492,6 +498,31 @@ mod tests {
     }
 
     // ── File enumeration ────────────────────────────────────────────────
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn ancestor_walk_excludes_symlinked_schemas_root() {
+        let repo = repo_fixture();
+        let external = repo_fixture();
+        let external_schemas = external.path().join("schemas");
+        fs::create_dir_all(&external_schemas).unwrap();
+
+        let schemas_link = repo.path().join("schemas");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&external_schemas, &schemas_link).unwrap();
+        #[cfg(windows)]
+        if let Err(error) = std::os::windows::fs::symlink_dir(&external_schemas, &schemas_link) {
+            if error.kind() == std::io::ErrorKind::PermissionDenied
+                || error.raw_os_error() == Some(1314)
+            {
+                return;
+            }
+            panic!("failed to create directory symlink: {error}");
+        }
+
+        let roots = schema_roots(repo.path(), repo.path());
+        assert!(roots.is_empty(), "symlinked schema root must be excluded");
+    }
 
     #[test]
     fn enumerate_yaml_and_yml() {
