@@ -393,7 +393,7 @@ mod tests {
 
     #[test]
     fn test_function_descriptor_fallible_signature_has_error_suffix() {
-        // `length` is fallible (`R_NUM_ERR`), so its typed signature carries the
+        // `length` is fallible, so its typed signature carries the
         // `| error` union suffix that the untyped `signature` lacks.
         let length = function_descriptor("length").expect("`length` is a known function");
         assert!(length.signature.contains("length("));
