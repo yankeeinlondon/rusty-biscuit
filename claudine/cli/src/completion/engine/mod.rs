@@ -41,6 +41,13 @@ use crate::completion::scopes::{ComposeMode, ScopeContext};
 use crate::completion::setter_value;
 use std::ffi::OsString;
 
+mod tokens;
+
+use tokens::{
+    is_flag_token, is_global_bool_flag, is_setter_name_partial, is_setter_shaped,
+    is_value_bearing_flag, split_setter,
+};
+
 /// Top-level classification of the cursor position in argv.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CompletionTarget {
@@ -272,43 +279,6 @@ fn collect_supplied_setter_names(argv: &[String], current_index: usize) -> HashS
         }
     }
     out
-}
-
-/// Split a `name=value` token into its parts. Returns `None` when the token
-/// shape does not match `^[A-Za-z_][A-Za-z0-9_-]*=`.
-fn split_setter(token: &str) -> Option<(&str, &str)> {
-    let eq_pos = token.find('=')?;
-    if eq_pos == 0 {
-        return None;
-    }
-    let bytes = token.as_bytes();
-    if !(bytes[0].is_ascii_alphabetic() || bytes[0] == b'_') {
-        return None;
-    }
-    if !bytes[1..eq_pos]
-        .iter()
-        .all(|&c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
-    {
-        return None;
-    }
-    Some((&token[..eq_pos], &token[eq_pos + 1..]))
-}
-
-/// `^[A-Za-z_][A-Za-z0-9_-]*$` — the partial-name shape recognized as a
-/// setter-name candidate (e.g. `tit`, `prompt_for`, `count-down`). Differs
-/// from [`is_setter_shaped`] in that there is no `=` separator: the user
-/// has not yet typed past the name.
-fn is_setter_name_partial(token: &str) -> bool {
-    if token.is_empty() {
-        return false;
-    }
-    let bytes = token.as_bytes();
-    if !(bytes[0].is_ascii_alphabetic() || bytes[0] == b'_') {
-        return false;
-    }
-    bytes[1..]
-        .iter()
-        .all(|&c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
 }
 
 /// Fall back to clap's dynamic completion for slots the custom engine does
@@ -558,56 +528,6 @@ fn scan_committed_positional(
     (file_arg, seen)
 }
 
-fn is_flag_token(token: &str) -> bool {
-    token.starts_with('-') && token != "-" && token != "--"
-}
-
-/// Value-bearing flag surface for composition subcommands. Mirrors
-/// [`crate::argv::COMPOSITION_FLAGS_WITH_VALUE`] but is duplicated here so
-/// the classifier stays self-contained.
-fn is_value_bearing_flag(token: &str) -> bool {
-    matches!(
-        token,
-        "--provider"
-            | "--exclude"
-            | "--include"
-            | "--model"
-            | "-m"
-            | "--output"
-            | "-o"
-            | "--append-system-prompt"
-            | "--asp"
-            | "--replace-system-prompt"
-            | "--rsp"
-            | "--timeout"
-            | "-t"
-            | "--operation"
-            | "--op"
-            | "--set"
-            | "--use"
-            | "--fail-fast"
-    )
-}
-
-/// `^[A-Za-z_][A-Za-z0-9_-]*=` — same shape as
-/// [`crate::argv::looks_like_setter`]. Duplicated here so the engine stays
-/// self-contained.
-fn is_setter_shaped(token: &str) -> bool {
-    let Some(eq_pos) = token.find('=') else {
-        return false;
-    };
-    if eq_pos == 0 {
-        return false;
-    }
-    let bytes = token.as_bytes();
-    if !(bytes[0].is_ascii_alphabetic() || bytes[0] == b'_') {
-        return false;
-    }
-    bytes[1..eq_pos]
-        .iter()
-        .all(|&c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
-}
-
 fn classify_root_partial(token: &str) -> RootPartial {
     if token.is_empty() {
         RootPartial::Empty
@@ -616,13 +536,6 @@ fn classify_root_partial(token: &str) -> RootPartial {
     } else {
         RootPartial::Word(token.to_string())
     }
-}
-
-fn is_global_bool_flag(token: &str) -> bool {
-    matches!(
-        token,
-        "--plain" | "--verbose" | "-v" | "-vv" | "-vvv" | "--help" | "-h"
-    )
 }
 
 /// Return `true` when a user-scope Claudine config exists under `$HOME`.
