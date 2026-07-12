@@ -8,13 +8,13 @@ expression: text
 [1mWindows app id:[0m [2mMessengerApp[0m
 
 [1mNotification helpers[0m
-┌───────────────────┬───────────┬─────────┬────────────────────────────────────┐
-│ Helper            │ Installed │ Version │ Install hint                       │
-├───────────────────┼───────────┼─────────┼────────────────────────────────────┤
-│ dunstify          │     ✓     │ 1.2.0   │                                    │
-│ notify-send       │     —     │         │ sudo apt install libnotify-bin     │
-│ terminal-notifier │     ✓     │ 2.0.0   │                                    │
-└───────────────────┴───────────┴─────────┴────────────────────────────────────┘
+┌───────────────────┬───────────┬─────────┬────────────────────────────────┐
+│ Helper            │ Installed │ Version │ Install hint                   │
+├───────────────────┼───────────┼─────────┼────────────────────────────────┤
+│ dunstify          │     ✓     │ 1.2.0   │                                │
+│ notify-send       │     —     │         │ sudo apt install libnotify-bin │
+│ terminal-notifier │     ✓     │ 2.0.0   │                                │
+└───────────────────┴───────────┴─────────┴────────────────────────────────┘
 
 [1mElection order on this host[0m
   [2m1.[0m dunstify
