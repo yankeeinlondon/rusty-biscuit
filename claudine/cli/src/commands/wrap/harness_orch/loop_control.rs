@@ -978,19 +978,8 @@ fn run_harness_loop_inner(ctx: HarnessLoopCtx<'_, '_>) -> Result<LoopStep> {
             return Ok(LoopStep::Return((outcome.exit_code, harness_perf, terminal_signals)));
         }
 
-        if let Some(failure_event) = claudine::harness::classify_failure(&outcome) {
-            let message = match failure_event {
-                claudine::harness::FailureEvent::Timeout => {
-                    format!("provider timed out (attempt {attempt})")
-                }
-                claudine::harness::FailureEvent::AgentFailure => {
-                    format!(
-                        "agent exited with error code {} (attempt {attempt})",
-                        outcome.exit_code
-                    )
-                }
-                _ => format!("failure on attempt {attempt}"),
-            };
+        if claudine::harness::classify_failure(&outcome).is_some() {
+            let message = claudine::harness::failure_message(&outcome, attempt);
             if show_checks {
                 claudine::harness::report::report_unhandled_failure(&message, term);
             }

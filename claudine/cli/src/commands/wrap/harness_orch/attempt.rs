@@ -133,6 +133,8 @@ pub(crate) fn execute_harness_attempt(
         iteration_signals,
         error_kind,
         guard_context,
+        error_message,
+        timeout_secs,
     ) = if use_structured
     {
         let summary_details = Arc::new(Mutex::new(
@@ -289,6 +291,21 @@ pub(crate) fn execute_harness_attempt(
         // guard context from the synthesized summary / process result into
         // the attempt outcome.
         let error_kind = summary.error_kind.clone();
+        // Which timeout rule fired is disambiguated by the synthesized
+        // `error_kind`; thread the matching configured duration so the
+        // failure message can name it.
+        let timeout_secs = matches!(
+            termination,
+            claudine::harness::ProcessTermination::TimedOut
+        )
+        .then(|| {
+            match error_kind.as_deref() {
+                Some("step_timeout") => launch.timeout_config.step_timeout,
+                _ => launch.timeout_config.timeout,
+            }
+            .map(|duration| duration.as_secs())
+        })
+        .flatten();
 
         (
             summary.exit_code,
@@ -300,6 +317,8 @@ pub(crate) fn execute_harness_attempt(
             iteration_signals,
             error_kind,
             stream_guard_context,
+            summary.error_message.clone(),
+            timeout_secs,
         )
     } else if effective_non_interactive {
         let capture = super::super::exec::run_child_capture(
@@ -341,6 +360,15 @@ pub(crate) fn execute_harness_attempt(
             eprintln!("{stderr}");
         }
 
+        // No stream parser on this path, so no synthesized error message;
+        // only the wall-clock `timeout` rule applies here.
+        let capture_timeout_secs = matches!(
+            termination,
+            claudine::harness::ProcessTermination::TimedOut
+        )
+        .then(|| launch.timeout_config.timeout.map(|duration| duration.as_secs()))
+        .flatten();
+
         (
             capture.data.exit_code,
             termination,
@@ -351,6 +379,8 @@ pub(crate) fn execute_harness_attempt(
             None,
             capture_error_kind,
             capture_guard_context,
+            None,
+            capture_timeout_secs,
         )
     } else {
         // Interactive TUI path: inherit stdout/stderr directly so the
@@ -378,6 +408,14 @@ pub(crate) fn execute_harness_attempt(
         let response = structured_codex_output
             .map(|output| output.take_last_message())
             .unwrap_or_default();
+        // No stream parser on this path, so no synthesized error message;
+        // only the wall-clock `timeout` rule applies here.
+        let interactive_timeout_secs = matches!(
+            termination,
+            claudine::harness::ProcessTermination::TimedOut
+        )
+        .then(|| launch.timeout_config.timeout.map(|duration| duration.as_secs()))
+        .flatten();
 
         (
             result.data,
@@ -389,6 +427,8 @@ pub(crate) fn execute_harness_attempt(
             None,
             None,
             None,
+            None,
+            interactive_timeout_secs,
         )
     };
 
@@ -415,6 +455,8 @@ pub(crate) fn execute_harness_attempt(
             stderr_text,
             error_kind,
             guard_context,
+            error_message,
+            timeout_secs,
         },
         perf,
         iteration_signals,
