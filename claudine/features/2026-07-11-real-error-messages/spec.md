@@ -130,33 +130,38 @@ function.
 
 #### The cascade
 
-The function prefers the most contextual source available, with one
-termination-aware refinement over a naive priority list: **when the wrapper
-itself killed the run (`termination == Aborted` — a content-guard trip), the
-guard is the cause of death and outranks any provider `error_message`** (a
-stream error emitted earlier in the run is stale relative to the trip).
+**As implemented** (`harness/runtime.rs::failure_message`). The staleness
+concern behind "guard outranks provider message on `Aborted`" turned out to
+be structurally impossible: on the structured path,
+`apply_early_termination_to_summary` **overwrites** `summary.error_message`
+with the guard/timeout prose at trip time, so on `Aborted` the
+`error_message` *is* the guard message (and richer than anything
+reconstructable from `GuardContext`). The implemented order therefore
+leads with `error_message`:
 
-1. **Guard context** (`outcome.guard_context`, when
-   `termination == Aborted`) — describe the trip with structured detail
+1. **Error message** (`outcome.error_message`) — the provider's own error
+   text (`"Too many requests"`, `"Insufficient credits"`), or the wrapper's
+   synthesized guard/timeout prose on the structured path.
+
+2. **Guard context** (`outcome.guard_context`, when
+   `termination == Aborted`) — render the trip from structured detail
    (exit-expression pattern, repetition cycle, volume counters, stall
-   duration).
+   duration). Reached only on the capture path, which has no stream
+   summary and therefore no synthesized `error_message`.
 
-2. **Provider error message** (`outcome.error_message`) — the most useful
-   for provider-side failures, e.g. `"Too many requests"`,
-   `"Insufficient credits"`.
+3. **Timeout phrasing** (when `termination == TimedOut`) — from
+   `error_kind` (`"step_timeout"` vs wall-clock) plus the configured
+   `timeout_secs`. Reached only on the capture/interactive paths (the
+   structured path's timeout message arrives via source 1).
 
-3. **Stderr text** (`outcome.stderr_text`) — extract a useful line when the
-   provider didn't surface a structured `error_message` but did write to
-   stderr. Extraction rule: last non-empty line after sanitization (see
-   [Message hygiene](#message-hygiene)); `stderr_text` is already
-   noise-filtered by the per-provider `stderr_noise_prefixes`, so no second
-   noise pass is needed.
+4. **Stderr text** (`outcome.stderr_text`) — the last non-empty line after
+   sanitization (see [Message hygiene](#message-hygiene)); `stderr_text` is
+   already noise-filtered by the per-provider `stderr_noise_prefixes`, so
+   no second noise pass is needed.
 
-4. **Termination label** (`outcome.termination`) — e.g.
-   `"failed to launch provider process"` for `LaunchFailed` when none of the
-   above produced text.
-
-5. **Fallback** — the current generic exit-code message.
+5. **Termination label / fallback** — `"failed to launch provider process"`
+   for `LaunchFailed`, `"aborted by content guard"` for a context-less
+   `Aborted`, else the generic exit-code message.
 
 The `(attempt N)` suffix is appended **only when `attempt > 1`** — uniformly,
 whatever cascade step produced the text. When `attempt == 1` the suffix is
@@ -217,11 +222,14 @@ The `Timeout` arm at `loop_control.rs:983-985` and the `_` catch-all at
   (`step timeout (no output for 30m)`) is threaded via the new
   `AttemptOutcome.timeout_secs` (see Rulings §1).
 
-- **Catch-all** (`ShellAuditDenied`) — `"failure on attempt {attempt}"` is
-  similarly generic. At minimum name the event:
-  `"shell command denied by audit"`.
+- **Catch-all** (`ShellAuditDenied`) — `"failure on attempt {attempt}"` was
+  dead in practice: `classify_failure` never returns `ShellAuditDenied`
+  (shell-audit denials surface through their own typed error path before an
+  attempt outcome exists). The per-event `match` disappeared entirely — the
+  builder is termination-driven, and the call site keeps only the
+  `classify_failure(...).is_some()` gate.
 
-All three arms apply the same `(attempt N)` policy: only when `attempt > 1`.
+All messages apply the same `(attempt N)` policy: only when `attempt > 1`.
 
 ## Interaction with signal-assurance
 
@@ -346,8 +354,9 @@ code"`, `"provider timed out"`, or `"failure on attempt"` before landing.
 
 2. A content-guard trip (exit-expression, runaway repetition, volume cap,
    stalled generation) produces an `err.msg` describing the guard and its
-   key parameters — and outranks any stale provider `error_message` on an
-   `Aborted` termination.
+   key parameters — a stale provider `error_message` cannot win on an
+   `Aborted` termination (on the structured path the wrapper overwrites it
+   with the guard prose at trip time; on the capture path there is none).
 
 3. The `(attempt N)` suffix only appears when `attempt > 1`, across all
    three `FailureEvent` arms.
