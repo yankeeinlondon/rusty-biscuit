@@ -61,6 +61,17 @@ details do not belong here.
 - Feed commit messages through `-F -` and a single-quoted heredoc. Do not place
   messages containing backticks, dollar signs, or other shell metacharacters in
   a double-quoted `-m` argument.
+- **Always pass `-F -` explicitly — a bare `git commit -- <paths> <<EOF` heredoc
+  is not enough (2026-07-11 claudine strong-plan batch).** When git's
+  configured editor (e.g. `core.editor = nvim`) is set, a heredoc-piped stdin
+  may not suppress the editor invocation depending on git's stdin/TTY
+  detection; git then opens the editor and blocks indefinitely waiting for a
+  TTY in the non-interactive session. The fix is to always pair the heredoc
+  with explicit `-F -` so git reads the message from stdin as the message,
+  not as editor input. Verified by the strong-plan subagent: first attempt
+  used `git commit -- <path> <<EOF ... EOF` with no `-F -`; the run hung past
+  the 90s timeout with nvim waiting on stdin. Re-running with `-F -` and the
+  same heredoc committed cleanly.
 
 ## Commit Messages
 
