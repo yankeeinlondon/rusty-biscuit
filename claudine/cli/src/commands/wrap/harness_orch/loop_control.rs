@@ -20,7 +20,8 @@ use tracing::info_span;
 
 use super::{
     CachedHarnessLoopContext, HarnessPromptState, MaterializedHarnessPrompt, build_harness_launch,
-    execute_harness_attempt, harness_prompt_mode_label, materialize_harness_prompt, HarnessPromptMode,
+    execute_harness_attempt, harness_prompt_mode_label, materialize_harness_prompt,
+    preflight_proxy_target, HarnessPromptMode,
 };
 
 type HarnessLoopResult = (
@@ -256,6 +257,54 @@ fn run_harness_loop_inner(ctx: HarnessLoopCtx<'_, '_>) -> Result<LoopStep> {
         // `source_path` already swapped to the target.
         if proxy_tracking.pending && !silent {
             claudine::harness::report::report_proxy_handoff(&prompt_state.source_path, term);
+        }
+        // A `proxy` hand-off is "a fresh prompt run, including pre-flight"
+        // (lifecycle spec). The proxying document's pre-flight never saw the
+        // target's own frontmatter `$(...)` / `::shell` commands, so audit them
+        // now and fold the approvals into the carried pre-approved set before the
+        // re-materialize compose below expands them — otherwise a whitelisted
+        // command still trips `NotPreApproved`. Skipped when a seed prompt is
+        // already staged (the original prepared prompt was preflighted upstream).
+        if proxy_tracking.pending && initial_materialized.is_none() {
+            if let Err(e) = info_span!(
+                "harness_proxy_target_preflight",
+                attempt,
+                source_path = %prompt_state.source_path.display(),
+            )
+            .in_scope(|| {
+                preflight_proxy_target(
+                    prompt_state,
+                    harness_context.shell_options(),
+                    child_cwd,
+                )
+            }) {
+                // A denial is a composition-preflight blocked path: route through
+                // the stack-aware runner so `blocked`/`finalize` fire, matching the
+                // primary pre-flight's shell-audit handling.
+                let err_info =
+                    LifecycleErrorInfo::from_action_failure("shell_approval", e.to_string());
+                let empty = MaterializedHarnessPrompt {
+                    frontmatter: serde_json::Value::Null,
+                    prompt: String::new(),
+                    env_overrides: Vec::new(),
+                    inline_closure_plan: None,
+                    live_frontmatter: MaterializedHarnessPrompt::live_cell_from(
+                        &serde_json::Value::Null,
+                    ),
+                };
+                return Err(emit_blocked_finalize_with_err(
+                    lifecycle_guard,
+                    &empty,
+                    &prompt_state.source_path,
+                    repo_root,
+                    term,
+                    &effect_engine,
+                    &err_info,
+                    loop_start,
+                )
+                .map(color_eyre::eyre::Report::from)
+                .unwrap_or_else(|| eyre!("{e}")));
+            }
         }
         let materialized = if let Some(seed) = initial_materialized.take() {
             seed

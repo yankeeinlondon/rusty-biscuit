@@ -1237,6 +1237,42 @@ fn level2_lifecycle_initialize_proxy_reports_redirect_and_target_prompt() {
     );
 }
 
+/// A proxied target's composed body must keep its authored line structure. The
+/// re-materialization path must set `IncidentalNewlineMode::Preserve` (as
+/// `prepare_direct` does); otherwise incidental single newlines are stripped and
+/// an author's block-quoted list collapses onto one line in the agent prompt.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_initialize_proxy_target_preserves_line_structure() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let source_doc = "---\ninitialize:\n  stack:\n    \
+         - action: {proxy: '@target.md'}\n---\nsource body\n";
+    // A block-quoted unordered list: each item must stay on its own line.
+    let target_doc = "---\nsuccess:\n  stack:\n    \
+         - action: {append_line: ['events.log', 'target-done']}\n---\n\
+         > - ALPHAITEM\n> - BETAITEM\n> - GAMMAITEM\n";
+    let staged = stage_proxy_pair(source_doc, target_doc, true);
+
+    let pane = run_in_tmux_for(&staged, "target-done");
+
+    // Each list item renders on its own line, so no single rendered line holds
+    // both the first and last item (the collapsed form is
+    // "- ALPHAITEM - BETAITEM - GAMMAITEM" on one line).
+    let collapsed = pane
+        .lines()
+        .any(|l| l.contains("ALPHAITEM") && l.contains("GAMMAITEM"));
+    assert!(
+        !collapsed,
+        "the block-quoted list must keep each item on its own line (line structure \
+         preserved on re-materialization); pane:\n{pane}"
+    );
+    assert!(
+        pane.contains("ALPHAITEM") && pane.contains("GAMMAITEM"),
+        "the agent-prompt preview must show the proxied target's list; pane:\n{pane}"
+    );
+}
+
 /// A proxied target's lifecycle events must resolve `ctx.*` groups the
 /// proxying *source* never referenced. The composition-start `ctx.*` snapshot is
 /// demand-driven for the source, so it omits e.g. `ctx.os`; after a proxy the
