@@ -58,6 +58,9 @@ struct HarnessLoopCtx<'a, 'guard> {
     show_checks: bool,
     stream_verbosity: Verbosity,
     detail_requested: bool,
+    // Suppresses the flow-control proxy INFO line and the proxy-target agent
+    // prompt preview when the caller requested a silent run.
+    silent: bool,
     env_context: &'a EnvironmentContext,
     dispatch_context: &'a HashMap<String, serde_json::Value>,
     initial_materialized: Option<MaterializedHarnessPrompt>,
@@ -104,6 +107,7 @@ pub(crate) fn run_harness_loop(
     show_checks: bool,
     stream_verbosity: Verbosity,
     detail_requested: bool,
+    silent: bool,
     env_context: &EnvironmentContext,
     dispatch_context: &HashMap<String, serde_json::Value>,
     initial_materialized: Option<MaterializedHarnessPrompt>,
@@ -144,6 +148,7 @@ pub(crate) fn run_harness_loop(
         show_checks,
         stream_verbosity,
         detail_requested,
+        silent,
         env_context,
         dispatch_context,
         initial_materialized,
@@ -183,6 +188,7 @@ fn run_harness_loop_inner(ctx: HarnessLoopCtx<'_, '_>) -> Result<LoopStep> {
         show_checks,
         stream_verbosity,
         detail_requested,
+        silent,
         env_context,
         dispatch_context,
         initial_materialized,
@@ -243,6 +249,14 @@ fn run_harness_loop_inner(ctx: HarnessLoopCtx<'_, '_>) -> Result<LoopStep> {
         )
         .entered();
         harness_context.refresh(&prompt_state.source_path, repo_root);
+        // Announce a pending proxy hand-off before the target is materialized,
+        // so the redirect is reported even if the target then fails to compose
+        // (e.g. a bad transclusion). Fires for every proxy — `initialize` or
+        // recovery — because both re-enter here with `pending` set and
+        // `source_path` already swapped to the target.
+        if proxy_tracking.pending && !silent {
+            claudine::harness::report::report_proxy_handoff(&prompt_state.source_path, term);
+        }
         let materialized = if let Some(seed) = initial_materialized.take() {
             seed
         } else {
@@ -286,7 +300,12 @@ fn run_harness_loop_inner(ctx: HarnessLoopCtx<'_, '_>) -> Result<LoopStep> {
                     loop_start,
                 ) {
                     Some(ce) => ce.into(),
-                    None => eyre!("{e}"),
+                    // Return the original report unflattened: it wraps the typed
+                    // Darkmatter compose/transclusion `BlockError`, so the CLI's
+                    // top-level walker renders it as a styled block instead of a
+                    // crude `Error: <string>`. `eyre!("{e}")` would discard the
+                    // type and defeat that path.
+                    None => e,
                 }
             })?
         };
@@ -374,18 +393,29 @@ fn run_harness_loop_inner(ctx: HarnessLoopCtx<'_, '_>) -> Result<LoopStep> {
                     prompt_state.next_resume_session_id = None;
                     proxy_tracking.chain.push(resolved.clone());
                     proxy_tracking.pending = true;
-                    if show_checks {
-                        claudine::harness::report::report_lifecycle_recovery(
-                            &format!("lifecycle proxy: handing off to {}", resolved.display()),
-                            term,
-                        );
-                    }
+                    // The next iteration's pending-adoption point announces the
+                    // hand-off via `report_proxy_handoff`, so no message here.
                     // Re-enter at attempt 1 so the target document gets a clean
                     // pre-flight / freeze cycle rather than inheriting the
                     // proxying document's attempt count.
                     attempt = 1;
                     continue;
                 }
+            }
+            // Reached only when the target's `initialize` returned `Proceed`
+            // (the other arms return/continue above), so this is the settled
+            // document that actually runs. Its composed body — not the proxying
+            // source's — is the agent prompt; the pre-loop preview was
+            // suppressed for an `initialize` proxy, so emit it here. Gated to
+            // non-interactive runs to mirror the pre-loop preview.
+            if effective_non_interactive {
+                crate::output::log_compose_prompt(
+                    &materialized.prompt,
+                    detail_requested,
+                    silent,
+                    false,
+                    term,
+                );
             }
         }
 

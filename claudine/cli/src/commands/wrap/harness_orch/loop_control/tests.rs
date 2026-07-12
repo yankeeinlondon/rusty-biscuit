@@ -1158,6 +1158,7 @@ mod terminal_event_tests {
             prompt_tail: Vec::new(),
             next_prompt_override: None,
             next_resume_session_id: None,
+            rematerialize: Default::default(),
         }
     }
 
@@ -3231,6 +3232,7 @@ mod requeue_fallback_tests {
             prompt_tail: Vec::new(),
             next_prompt_override: None,
             next_resume_session_id: None,
+            rematerialize: Default::default(),
         }
     }
 

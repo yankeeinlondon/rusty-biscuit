@@ -51,6 +51,32 @@ pub(crate) fn find_wrapper_harness_source(
         })
 }
 
+/// Re-apply the caller's compose inputs onto a re-materialization's
+/// [`ComposeOptions`], mirroring [`prepare_direct`]/[`prepare_inline`].
+///
+/// Without this a `retry`/`resume`/`proxy` re-composition drops the caller's
+/// `--set` params, launch-area file-ref anchor, and pre-approved shell
+/// commands, so a `$schema`-bearing target validates against inputs it was
+/// never handed.
+///
+/// [`prepare_direct`]: claudine::composition::prepare_direct
+/// [`prepare_inline`]: claudine::composition::prepare_inline
+fn apply_rematerialize_inputs(
+    mut options: darkmatter::markdown::compose::ComposeOptions,
+    inputs: &claudine::composition::RematerializeInputs,
+) -> darkmatter::markdown::compose::ComposeOptions {
+    if let Some(overrides) = inputs.set_overrides.clone() {
+        options = options.with_set_overrides(overrides);
+    }
+    if let Some(approved) = inputs.pre_approved_commands.clone() {
+        options = options.with_pre_approved_commands(approved);
+    }
+    if let Some(fallback) = inputs.file_ref_fallback_dir.clone() {
+        options = options.with_file_ref_fallback_dir(fallback);
+    }
+    options
+}
+
 pub(crate) fn materialize_harness_prompt(
     state: &HarnessPromptState,
     _repo_root: Option<&Path>,
@@ -66,15 +92,18 @@ pub(crate) fn materialize_harness_prompt(
 
     let (mut prompt, frontmatter, env_overrides, inline_closure_plan) = match state.mode {
         HarnessPromptMode::Passthrough => {
-            let options = claudine::composition::bind_agent_workspace(
-                darkmatter::markdown::compose::ComposeOptions::new(),
-                &state.source_path,
-                Some(child_cwd),
-            )
-            .with_exclude_keys(
-                claudine::composition::LIFECYCLE_EVENT_KEYS
-                    .iter()
-                    .copied(),
+            let options = apply_rematerialize_inputs(
+                claudine::composition::bind_agent_workspace(
+                    darkmatter::markdown::compose::ComposeOptions::new(),
+                    &state.source_path,
+                    Some(child_cwd),
+                )
+                .with_exclude_keys(
+                    claudine::composition::LIFECYCLE_EVENT_KEYS
+                        .iter()
+                        .copied(),
+                ),
+                &state.rematerialize,
             );
             let (composed, _report) = effective_markdown.compose_with(options)?;
             let prompt = state.base_prompt.clone().ok_or_else(|| {
@@ -97,15 +126,18 @@ pub(crate) fn materialize_harness_prompt(
             // is the re-materialization path (retries and proxy hand-offs);
             // without the deferral a proxy target's lifecycle `{{ err.* }}`
             // spans resolve here, before the run, and bake to empty.
-            let options = claudine::composition::bind_agent_workspace(
-                darkmatter::markdown::compose::ComposeOptions::new(),
-                &state.source_path,
-                Some(child_cwd),
-            )
-            .with_exclude_keys(
-                claudine::composition::LIFECYCLE_EVENT_KEYS
-                    .iter()
-                    .copied(),
+            let options = apply_rematerialize_inputs(
+                claudine::composition::bind_agent_workspace(
+                    darkmatter::markdown::compose::ComposeOptions::new(),
+                    &state.source_path,
+                    Some(child_cwd),
+                )
+                .with_exclude_keys(
+                    claudine::composition::LIFECYCLE_EVENT_KEYS
+                        .iter()
+                        .copied(),
+                ),
+                &state.rematerialize,
             );
             let (composed, _report) = effective_markdown.compose_with(options)?;
             let body = composed.content().to_string();
@@ -130,7 +162,12 @@ pub(crate) fn materialize_harness_prompt(
             };
             let prepared = claudine::composition::prepare_inline(
                 &source,
-                claudine::composition::PrepareOptions::default(),
+                claudine::composition::PrepareOptions {
+                    set_overrides: state.rematerialize.set_overrides.clone(),
+                    pre_approved_commands: state.rematerialize.pre_approved_commands.clone(),
+                    file_ref_fallback_dir: state.rematerialize.file_ref_fallback_dir.clone(),
+                    ..claudine::composition::PrepareOptions::default()
+                },
             )?;
             (
                 prepared.prompt,

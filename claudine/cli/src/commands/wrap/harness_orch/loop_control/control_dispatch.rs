@@ -199,12 +199,8 @@ pub(super) fn dispatch_terminal_control(
             // would re-fire, looping forever).
             proxy.chain.push(resolved.clone());
             proxy.pending = true;
-            if show_checks {
-                claudine::harness::report::report_lifecycle_recovery(
-                    &format!("lifecycle proxy: handing off to {}", resolved.display()),
-                    term,
-                );
-            }
+            // The loop's pending-adoption point announces the hand-off via
+            // `report_proxy_handoff` on re-entry, so no message here.
             // Re-enter at attempt 1 so the target document gets a clean
             // pre-flight / freeze cycle rather than inheriting the proxying
             // document's attempt count.

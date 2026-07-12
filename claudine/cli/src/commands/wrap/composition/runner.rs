@@ -383,7 +383,11 @@ pub(super) fn run_composition_body(
             crate::log::message("");
         }
 
-        if effective_non_interactive {
+        // Skip the pre-loop agent-prompt preview when an `initialize` proxy
+        // redirected the run: `request.prepared.prompt` is the proxying
+        // *source* document's body, which never reaches the agent. The harness
+        // loop emits the settled *target* document's prompt after the hand-off.
+        if effective_non_interactive && proxy_source.is_none() {
             crate::output::log_compose_prompt(
                 &request.prepared.prompt,
                 detail_requested,
@@ -437,6 +441,11 @@ pub(super) fn run_composition_body(
         prompt_tail: Vec::new(),
         next_prompt_override: None,
         next_resume_session_id: None,
+        // Carried so a `retry`/`resume`/`proxy` re-materialization re-applies
+        // the caller's `--set` params, launch-area file-ref anchor, and
+        // pre-approved shell commands (a proxy target with a `$schema` needs
+        // the same inputs the original document was prepared with).
+        rematerialize: request.prepared.rematerialize.clone(),
     };
 
     let mut harness_base_args = args_before_prompt.clone();
@@ -466,6 +475,7 @@ pub(super) fn run_composition_body(
         show_checks,
         stream_verbosity,
         detail_requested,
+        silent,
         &env_context,
         &dispatch_context,
         seed_materialized,
