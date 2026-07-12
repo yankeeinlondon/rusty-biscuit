@@ -182,6 +182,7 @@ pub fn prepare_direct(
         set_overrides: options.set_overrides.clone(),
         file_ref_fallback_dir: options.file_ref_fallback_dir.clone(),
         pre_approved_commands: options.pre_approved_commands.clone(),
+        env_overrides: options.env_overrides.clone(),
     };
     if let Some(overrides) = options.set_overrides {
         compose_opts = compose_opts.with_set_overrides(overrides);
@@ -357,6 +358,7 @@ pub fn prepare_inline(
         set_overrides: options.set_overrides.clone(),
         file_ref_fallback_dir: options.file_ref_fallback_dir.clone(),
         pre_approved_commands: options.pre_approved_commands.clone(),
+        env_overrides: options.env_overrides.clone(),
     };
     if let Some(overrides) = options.set_overrides {
         compose_opts = compose_opts.with_set_overrides(overrides);

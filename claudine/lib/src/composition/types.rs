@@ -500,6 +500,16 @@ pub struct RematerializeInputs {
     pub file_ref_fallback_dir: Option<PathBuf>,
     /// Shell commands approved during the original pre-flight discovery.
     pub pre_approved_commands: Option<HashSet<String>>,
+    /// Composition env overrides (e.g. `AGENT`, `MODEL`, `YOLO`) injected into
+    /// the [`ComposeContext`][darkmatter::markdown::compose::ComposeContext] for
+    /// the run.
+    ///
+    /// A `retry`/`resume`/`proxy` re-composition builds a fresh context; without
+    /// these the env-derived `ctx.agent`/`ctx.model` values collapse to their
+    /// `"unknown"`/`"default"` fallbacks, so a proxy target's body
+    /// `{{ ctx.agent }}` bakes to `unknown` even though the run has a resolved
+    /// provider.
+    pub env_overrides: BTreeMap<String, String>,
 }
 
 /// A composition prepared with effective (composed) frontmatter.
