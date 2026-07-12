@@ -1,6 +1,6 @@
 ---
 $schema:
-    spec: file(required)
+    spec: file(required) -> the specification file that will be reviewed
 description: Reviews a draft specification inline and updates the spec file
 
 basename: "$(basename '{{ spec }}')"

@@ -40,7 +40,12 @@ initialize:
         - when: "review"
           action:
               - proxy: "./_reviews/review-suggestions-implementation.md"
+        - action:
+              - warn: "using the parameters passed in, we found no match for a review type!"
+              - stop
 ---
 
 You asked for a review but didn't pass in the right parameters to get proxied to
-the right prompt.
+the right prompt. 
+
+- when the correct parameters are passed this prompt will _proxy_ to the appropriate review prompt.

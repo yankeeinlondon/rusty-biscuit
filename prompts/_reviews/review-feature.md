@@ -39,7 +39,7 @@ failure:
 > - Review File (_output_): `@{{review}}`
 > - Review Iteration: #{{iteration}}
 
-::file _senior-reviewer.md
+::file ../_senior-reviewer.md
 
 ## Context
 

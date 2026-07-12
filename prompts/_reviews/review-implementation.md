@@ -1,6 +1,6 @@
 ---
 $schema:
-    review: file(required; match(**/*review*.md; eager))
+    review: file(required; match(**/*review*.md); eager)
     template: file(required; match(prompts/*.md,.claudine/prompts/*.md); eager)
     plan: file
 description: Reviews how well the _implementation_ of a certain set of review findings addressed the underlying problems which were raised.
