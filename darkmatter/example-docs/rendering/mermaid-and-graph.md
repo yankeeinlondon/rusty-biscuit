@@ -11,14 +11,14 @@ flowchart LR
     A(First)
     B(Second)
     Choice{ Feeling Lucky? }
-    Shebang(Shebang)
+    Wowsa(Wowsa)
     Whoopsie(Whoopsie)
     
 
     A -->|then| B
     B -->|and then| Choice
 
-    Choice -->|yes| Shebang
+    Choice -->|yes| Wowsa
     Choice -->|no| Whoopsie
 ```
 
