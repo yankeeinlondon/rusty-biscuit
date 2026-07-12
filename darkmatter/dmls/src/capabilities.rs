@@ -120,7 +120,7 @@ pub fn server_capabilities(profile: &ClientProfile) -> ServerCapabilities {
 fn semantic_tokens_capabilities() -> SemanticTokensServerCapabilities {
     SemanticTokensOptions {
         work_done_progress_options: WorkDoneProgressOptions::default(),
-        legend: crate::providers::semantic_tokens::legend(),
+        legend: crate::semantic_legend::legend(),
         range: Some(true),
         full: Some(SemanticTokensFullOptions::Bool(true)),
     }
@@ -683,7 +683,7 @@ mod tests {
         else {
             panic!("expected semantic-token options for a capable client");
         };
-        assert_eq!(options.legend, crate::providers::semantic_tokens::legend());
+        assert_eq!(options.legend, crate::semantic_legend::legend());
         assert_eq!(options.range, Some(true));
         assert_eq!(options.full, Some(SemanticTokensFullOptions::Bool(true)));
 

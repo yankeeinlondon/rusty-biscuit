@@ -172,20 +172,36 @@ impl ClientFixture {
     /// within a short window (the in-memory pair delivers immediately, so a
     /// miss reliably means the server never sent it).
     fn wait_for_server_request(&mut self, method: &str) -> bool {
+        self.take_server_request(method).is_some()
+    }
+
+    /// Like [`wait_for_server_request`], but returns the matched `Request` so a
+    /// caller can inspect its `id` (e.g. proving two refreshes carry distinct
+    /// request ids); `None` on the same short-window miss.
+    fn take_server_request(&mut self, method: &str) -> Option<Request> {
         loop {
             if let Some(position) =
                 self.server_requests.iter().position(|request| request.method == method)
             {
-                self.server_requests.remove(position);
-                return true;
+                return Some(self.server_requests.remove(position));
             }
             match self.client.receiver.recv_timeout(Duration::from_secs(1)) {
                 Ok(Message::Request(request)) => self.server_requests.push(request),
                 Ok(Message::Notification(notification)) => self.notifications.push(notification),
                 Ok(Message::Response(_)) => {}
-                Err(_) => return false,
+                Err(_) => return None,
             }
         }
+    }
+
+    /// Sends a client → server response, e.g. answering a server-initiated
+    /// `workspace/semanticTokens/refresh` so it routes through the loop's
+    /// `Message::Response` arm and into the `RefreshLedger`.
+    fn respond(&self, response: Response) {
+        self.client
+            .sender
+            .send(Message::Response(response))
+            .expect("send response");
     }
 
     fn shutdown(self) {
@@ -2491,7 +2507,7 @@ fn period_trigger_outside_interpolation_offers_nothing() {
 // ── Phase 5: semantic tokens end-to-end ──
 //
 // The V1 legend indices, mirrored here as the wire contract the session tests
-// assert against (kept in lock-step with `providers::semantic_tokens::legend`).
+// assert against (kept in lock-step with `semantic_legend::legend`).
 const TT_MACRO: u32 = 0;
 const TT_PROPERTY: u32 = 3;
 const TT_STRING: u32 = 4;
@@ -2952,6 +2968,70 @@ fn semantic_tokens_master_switch_toggles_and_requests_refresh() {
         "re-enabling emission must request a refresh"
     );
     assert_eq!(semantic_full(&mut fixture, uri.as_str()), enabled);
+
+    fixture.shutdown();
+}
+
+#[test]
+fn semantic_tokens_two_configs_issue_distinct_refreshes_routed_through_loop() {
+    // Criterion 7, through the real router loop: two token-affecting config
+    // changes sent before either refresh is answered must issue two distinct
+    // `workspace/semanticTokens/refresh` request ids, and routing a success and
+    // an error `Message::Response` back into the `RefreshLedger` must neither
+    // terminate nor disturb the session.
+    let workspace = tempfile::tempdir().unwrap();
+    let text = "Body {{ title }} here.\n";
+    std::fs::write(workspace.path().join("doc.md"), text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(semantic_capable_params(workspace.path(), "utf-16", true));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let enabled = semantic_full(&mut fixture, uri.as_str());
+    assert_eq!(enabled, vec![tok(0, 5, 11, TT_MACRO, TM_INTERPOLATION)]);
+
+    // Two token-affecting changes back-to-back, before replying to either
+    // refresh: disabling then re-enabling the master switch each warrants a
+    // refresh, so the ledger must allocate two ids in flight at once.
+    fixture.notify(
+        "workspace/didChangeConfiguration",
+        json!({ "settings": { "dmls": { "semantic_tokens": { "enable": false } } } }),
+    );
+    fixture.notify(
+        "workspace/didChangeConfiguration",
+        json!({ "settings": { "dmls": { "semantic_tokens": { "enable": true } } } }),
+    );
+
+    let first = fixture
+        .take_server_request("workspace/semanticTokens/refresh")
+        .expect("first refresh request");
+    let second = fixture
+        .take_server_request("workspace/semanticTokens/refresh")
+        .expect("second refresh request");
+    assert_ne!(
+        first.id, second.id,
+        "two in-flight refreshes must carry distinct request ids: {:?} vs {:?}",
+        first.id, second.id
+    );
+
+    // Answer the first with a success and the second with a client rejection;
+    // both route through the loop's `Message::Response` arm. The error must be
+    // retired at warn (not fail the loop), the success retired quietly.
+    fixture.respond(Response::new_ok(first.id.clone(), Value::Null));
+    fixture.respond(Response::new_err(
+        second.id.clone(),
+        -32803,
+        "client rejected refresh".to_string(),
+    ));
+
+    // The session stays fully responsive: a normal follow-up request answers,
+    // and the net `false -> true` toggle leaves the token stream restored.
+    assert_eq!(
+        semantic_full(&mut fixture, uri.as_str()),
+        enabled,
+        "the server must remain responsive after routing both refresh responses"
+    );
 
     fixture.shutdown();
 }
