@@ -1672,6 +1672,66 @@ fn dsl_valid_document_has_no_dsl_diagnostics() {
     fixture.shutdown();
 }
 
+/// A schema-declared-but-unset property is a valid body interpolation, and
+/// `json5` / `mermaid` are recognized fenced languages: none of the three emit a
+/// DSL diagnostic. The `spec` property is declared by the inline `$schema` (a
+/// caller-supplied `file` parameter) yet never set in the document frontmatter,
+/// exactly the compose-time-merge pattern; `{{ spec }}` must not be flagged as
+/// an unknown identifier, and its hover surfaces the schema type/description.
+const SCHEMA_PROPERTY_DOC: &str = "---\ntitle: Review\n$schema:\n  spec: file(required) -> the specification file being reviewed\n---\n\n# Review\n\nReviewing {{ spec }}.\n\n```json5\n{ id: \"one\" }\n```\n\n```mermaid\ngraph TD; A-->B;\n```\n";
+
+#[test]
+fn schema_declared_property_and_json5_mermaid_have_no_dsl_diagnostics() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("review.md"), SCHEMA_PROPERTY_DOC).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("review.md")).unwrap();
+    open(&fixture, uri.as_str(), SCHEMA_PROPERTY_DOC);
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    let codes: Vec<&str> = diagnostics
+        .iter()
+        .filter_map(|diagnostic| diagnostic["code"].as_str())
+        .collect();
+    assert!(
+        !codes.contains(&"dm.expression.unknown_identifier"),
+        "schema-declared `spec` must not be flagged: {codes:?}"
+    );
+    assert!(
+        !codes.contains(&"dm.fence.unknown_language"),
+        "json5 and mermaid are recognized: {codes:?}"
+    );
+
+    // Hover on `{{ spec }}` (line 8, `spec` starts at character 13) surfaces the
+    // schema type and description even though the property is unset.
+    let hover = fixture
+        .request(
+            "textDocument/hover",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 8, "character": 14 }
+            }),
+        )
+        .result
+        .expect("interpolation hover");
+    let hover_text = hover["contents"]["value"].as_str().unwrap_or_default();
+    assert!(hover_text.contains("file"), "schema type in hover: {hover_text}");
+    assert!(
+        hover_text.contains("the specification file being reviewed"),
+        "schema description in hover: {hover_text}"
+    );
+    // The name appears once (in the `**Expression**` header); the schema details
+    // carry no second `**`spec`**` heading.
+    assert!(
+        !hover_text.contains("**`spec`**"),
+        "property name must not render twice: {hover_text}"
+    );
+
+    fixture.shutdown();
+}
+
 /// Layer-3 shell awareness reaches into `::shell-block` bodies: a disallowed
 /// command inside the block is flagged with `dm.security.disallowed_command`,
 /// ranged on the offending body line, while a benign sibling line is not — and
