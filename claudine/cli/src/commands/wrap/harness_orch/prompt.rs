@@ -136,6 +136,14 @@ pub(crate) fn materialize_harness_prompt(
                     claudine::composition::LIFECYCLE_EVENT_KEYS
                         .iter()
                         .copied(),
+                )
+                // Preserve authored line breaks in the delivered body, mirroring
+                // `prepare_direct`. Without this the re-materialized body (a proxy
+                // hand-off / retry) is stripped of incidental single newlines, so
+                // an author's line-structured prompt — e.g. a block-quoted list —
+                // collapses into one paragraph and the agent prompt mis-renders.
+                .with_incidental_newline_mode(
+                    darkmatter::markdown::cleanup::IncidentalNewlineMode::Preserve,
                 ),
                 &state.rematerialize,
             );
