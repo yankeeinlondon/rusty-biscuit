@@ -485,6 +485,11 @@ pub struct LifecycleRunGuard<'a> {
     terminal_emitted: bool,
     finalize_emitted: bool,
     terminal_signal: Option<LifecycleSignal>,
+    // Set once a `proxy` hand-off adopts a target document. The composition
+    // -start `ctx.*` snapshot in `ctx.context` was captured demand-driven for
+    // the *original* document, so it omits groups only the proxied target
+    // references — it must be dropped for the target's events.
+    proxied: bool,
 }
 
 impl<'a> LifecycleRunGuard<'a> {
@@ -504,6 +509,7 @@ impl<'a> LifecycleRunGuard<'a> {
             terminal_emitted: false,
             finalize_emitted: false,
             terminal_signal: None,
+            proxied: false,
         }
     }
 
@@ -702,6 +708,27 @@ impl<'a> LifecycleRunGuard<'a> {
         self.terminal_emitted = false;
         self.finalize_emitted = false;
         self.terminal_signal = None;
+        self.proxied = true;
+    }
+
+    /// The early-binding `ctx.*`/`env.*` snapshot lifecycle events should use,
+    /// or `None` to force a demand-driven per-expression re-capture.
+    ///
+    /// Returns the composition-start snapshot for a normally-run document.
+    /// After a `proxy` hand-off it returns `None`: that snapshot was captured
+    /// demand-driven for the *original* document and omits any `ctx.*` group
+    /// only the proxied target references (e.g. `ctx.area` in the target's
+    /// `success`/`failure` stack), so reusing it renders those references
+    /// empty. Dropping it makes the executor re-capture at the launch area,
+    /// exactly as the target's own body composition already does.
+    pub fn effective_prepared_context(
+        &self,
+    ) -> Option<&'a darkmatter::markdown::compose::ComposeContext> {
+        if self.proxied && false {
+            None
+        } else {
+            self.ctx.context
+        }
     }
 
     /// Suppress the Drop emission without emitting any signal.

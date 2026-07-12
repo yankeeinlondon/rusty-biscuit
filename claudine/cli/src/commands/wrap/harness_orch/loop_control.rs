@@ -716,7 +716,7 @@ fn run_harness_loop_inner(ctx: HarnessLoopCtx<'_, '_>) -> Result<LoopStep> {
                     &prompt_state.source_path,
                     repo_root,
                     lifecycle_guard.context().launch_area,
-                    lifecycle_guard.context().context,
+                    lifecycle_guard.effective_prepared_context(),
                     term,
                     lifecycle_guard.emitter(),
                     lifecycle_guard.context().settings,

@@ -82,7 +82,7 @@ pub(super) fn emit_blocked_finalize_with_err(
                 source_path,
                 repo_root,
                 guard.context().launch_area,
-                guard.context().context,
+                guard.effective_prepared_context(),
                 term,
                 guard.emitter(),
                 guard.context().settings,
