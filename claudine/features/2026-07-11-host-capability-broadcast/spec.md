@@ -11,6 +11,7 @@ In this section we will detail out what is expressed a capability or characteris
 All of the below are detectable using the sniff library:
 
 - `os`: enum(macOs,Linux,Windows) 
+- `os_version`
 - `memory`: number
     - the amount of RAM the machine has
 - `cpu_cores`: number
