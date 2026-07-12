@@ -129,6 +129,58 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
   - .claude/skills/claudine/architecture.md
+source_files_during_phase_5:
+  - claudine/lib/src/stream/logs/opencode/mod.rs
+  - claudine/lib/src/stream/logs/opencode/bridge/mod.rs
+  - claudine/lib/src/stream/logs/opencode/bridge/errors.rs
+  - claudine/lib/src/stream/logs/opencode/bridge/session.rs
+  - claudine/lib/src/stream/logs/opencode/bridge/stall_guard.rs
+  - claudine/lib/src/stream/logs/opencode/bridge/signals.rs
+  - claudine/lib/src/stream/logs/opencode/bridge/format.rs
+  - claudine/lib/src/stream/logs/opencode/bridge/tests.rs
+  - claudine/lib/src/stream/logs/opencode/state.rs
+  - claudine/lib/src/stream/logs/opencode/classify/mod.rs
+  - claudine/lib/src/stream/logs/opencode/classify/asset.rs
+  - claudine/lib/src/stream/logs/opencode/classify/llm.rs
+  - claudine/lib/src/stream/logs/opencode/classify/session.rs
+  - claudine/lib/src/stream/logs/opencode/classify/text_util.rs
+  - claudine/lib/src/stream/logs/opencode/classify/tests.rs
+  - claudine/lib/src/stream/logs/opencode/events.rs
+  - claudine/lib/src/runaway/mod.rs
+  - claudine/lib/src/stream/semantic.rs
+  - claudine/docs/providers/dispatch-inventory.json
+docs_updated_during_phase_5:
+  - claudine/features/2026-07-11-module-structure/strong-plan.md
+  - .opencode/skill/claudine/architecture.md
+  - .opencode/skill/claudine/opencode-event-sources.md
+  - .opencode/skill/claudine/timeline.md
+  - .claude/skills/claudine/architecture.md
+  - .claude/skills/claudine/opencode-event-sources.md
+  - .claude/skills/claudine/timeline.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .opencode/skill/claudine/architecture.md
+  - .opencode/skill/claudine/opencode-event-sources.md
+  - .opencode/skill/claudine/timeline.md
+  - .claude/skills/claudine/architecture.md
+  - .claude/skills/claudine/opencode-event-sources.md
+  - .claude/skills/claudine/timeline.md
+source_files_during_phase_6:
+  - claudine/lib/src/permissions/providers/common.rs
+  - claudine/lib/src/permissions/providers/mod.rs
+  - claudine/lib/src/permissions/providers/codex.rs
+  - claudine/lib/src/permissions/providers/gemini.rs
+  - claudine/lib/src/permissions/providers/claude.rs
+  - claudine/lib/src/permissions/providers/qwen.rs
+  - claudine/docs/providers/dispatch-inventory.json
+docs_updated_during_phase_6:
+  - claudine/features/2026-07-11-module-structure/strong-plan.md
+  - .opencode/skill/claudine/architecture.md
+  - .claude/skills/claudine/architecture.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .opencode/skill/claudine/architecture.md
+  - .claude/skills/claudine/architecture.md
 ---
 
 # Strong-Candidate Module-Structure Refactor — Execution Plan
@@ -654,12 +706,12 @@ Split `impl OpenCodeLogBridge` (375–1,470) by its existing seams:
 | `bridge/format.rs` | `format_llm_call_message` (1,552), `format_permission_message` (1,583), `summarize_permission_action` (1,599), `format_http_response_message` (1,614), `format_snapshot_message` (1,643), `summarize_snapshot_tags` (1,659), `truncate_for_inline` (1,687), `base_extra` (1,696), `non_empty` (1,498), `duration_as_millis_u64` (1,505) |
 | `state.rs` (sibling of `bridge/`, under `opencode/`) | `SharedStderrState` (342) + `merge_stderr_state_into_summary` (1,722) if they are consumed outside the bridge; otherwise keep in `bridge/mod.rs` |
 
-- [ ] Each submodule starts with `use super::*;`
-- [ ] Update `opencode/mod.rs:20` (`pub mod reasoning;`) →
+- [x] Each submodule starts with `use super::*;`
+- [x] Update `opencode/mod.rs:20` (`pub mod reasoning;`) →
       `pub mod bridge;` and the `pub use reasoning::{…}` (27) →
       `pub use bridge::{…}` — same exported names (`OpenCodeLogBridge`,
       `StderrIngestOutcome`, etc.)
-- [ ] Verify: `just test` + `just lint`
+- [x] Verify: `just test` + `just lint`
 
 ### Step 5.2 — S2: Split `errors.rs` into `classify/` submodules
 
@@ -679,35 +731,35 @@ Keep the two public entry points (`classify` 31, `classify_raw` 72) and
 | `classify/session.rs` | `classify_session` (634), `classify_llm_call` (643), `classify_session_prompt` (660), `classify_permission` (684), `looks_like_uncaught_error` (722) |
 | `classify/text_util.rs` | `contains_any_ci` (698), `extract_status_code` (703), `extract_reset_at` (715) |
 
-- [ ] `classify/mod.rs` declares the four submodules and re-exports nothing
+- [x] `classify/mod.rs` declares the four submodules and re-exports nothing
       new (entry points stay put)
-- [ ] Update `opencode/mod.rs:18` (`pub mod errors;`) →
+- [x] Update `opencode/mod.rs:18` (`pub mod errors;`) →
       `pub mod classify;` and `pub use errors::{classify, classify_raw,
       merge_rate_limit};` (23) → `pub use classify::{…}`
-- [ ] Extract the `errors.rs` inline tests to `classify/tests.rs`
+- [x] Extract the `errors.rs` inline tests to `classify/tests.rs`
       (following the C1 convention)
-- [ ] Verify: `just test` + `just lint`
+- [x] Verify: `just test` + `just lint`
 
 ### Step 5.3 — Delete the orphaned `opencode_tests_final.rs`
 
 **Files:**
 - Delete: `claudine/lib/src/stream/logs/opencode_tests_final.rs`
 
-- [ ] Confirm it is not referenced by any `mod` declaration (grep
+- [x] Confirm it is not referenced by any `mod` declaration (grep
       `opencode_tests_final` across the crate)
-- [ ] Its 31 lines are a partial, unwrapped test fragment (starts
+- [x] Its 31 lines are a partial, unwrapped test fragment (starts
       mid-function, no `#[test]`, no module wrapper) — verified dead. If any
       assertion in it is still valuable, port it into
       `bridge/tests.rs` first; otherwise delete outright
-- [ ] Verify: `just test` (compile confirms no missing `mod`)
+- [x] Verify: `just test` (compile confirms no missing `mod`)
 
 ### Phase 5 Exit Criteria
 
-- [ ] `just test` + `just lint` pass for claudine lib
-- [ ] `reasoning.rs` is gone; the stderr bridge lives under `bridge/`
-- [ ] `errors.rs` is gone; classification lives under `classify/`
-- [ ] `opencode_tests_final.rs` is deleted
-- [ ] `opencode/mod.rs` exports are unchanged (consumers unaffected)
+- [x] `just test` + `just lint` pass for claudine lib
+- [x] `reasoning.rs` is gone; the stderr bridge lives under `bridge/`
+- [x] `errors.rs` is gone; classification lives under `classify/`
+- [x] `opencode_tests_final.rs` is deleted
+- [x] `opencode/mod.rs` exports are unchanged (consumers unaffected)
 
 ---
 
@@ -746,11 +798,11 @@ Hoist the format-agnostic helpers, parameterizing over the per-provider types:
       wrappers; do not force the `Result`-returning providers into the
       `Option` shape without checking their error paths
 
-- [ ] Declare `pub(crate) mod common;` in `providers/mod.rs`
-- [ ] For each hoisted helper, make the shared version generic over the
+- [x] Declare `pub(crate) mod common;` in `providers/mod.rs`
+- [x] For each hoisted helper, make the shared version generic over the
       provider-specific config struct (a trait bound or a closure that extracts
       the needed fields), keeping format-specific parsing local
-- [ ] Verify after each provider migration: `just test` + `just lint`
+- [x] Verify after each provider migration: `just test` + `just lint`
 
 ### Step 6.2 — Migrate each provider to the shared helpers
 
@@ -758,20 +810,20 @@ Hoist the format-agnostic helpers, parameterizing over the per-provider types:
 - `claude.rs`, `codex.rs`, `gemini.rs`, `qwen.rs`, `opencode.rs`
 
 For each:
-- [ ] Replace the local copy with a call (or trait impl) into `common`
-- [ ] Keep genuinely format-specific helpers (TOML serialization for codex,
+- [x] Replace the local copy with a call (or trait impl) into `common`
+- [x] Keep genuinely format-specific helpers (TOML serialization for codex,
       JSON for claude/gemini, YAML for qwen) local — `json_utils.rs` remains
       the JSON-specific hoist
-- [ ] Verify: `just test` (the `permissions` test suite + the dispatch
+- [x] Verify: `just test` (the `permissions` test suite + the dispatch
       inventory guard test)
 
 ### Phase 6 Exit Criteria
 
-- [ ] `just test` + `just lint` pass
-- [ ] `common.rs` holds the format-agnostic helpers
-- [ ] Each provider backend is smaller; no near-verbatim `first_source_id` /
+- [x] `just test` + `just lint` pass
+- [x] `common.rs` holds the format-agnostic helpers
+- [x] Each provider backend is smaller; no near-verbatim `first_source_id` /
       `has_cli` copies remain
-- [ ] `claudine-cli/tests/dispatch_inventory.rs` still passes
+- [x] `claudine-cli/tests/dispatch_inventory.rs` still passes
 
 ---
 
