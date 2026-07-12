@@ -1237,6 +1237,38 @@ fn level2_lifecycle_initialize_proxy_reports_redirect_and_target_prompt() {
     );
 }
 
+/// A proxied target's lifecycle events must resolve `ctx.*` groups the
+/// proxying *source* never referenced. The composition-start `ctx.*` snapshot is
+/// demand-driven for the source, so it omits e.g. `ctx.os`; after a proxy the
+/// guard drops that snapshot and the executor re-captures per expression. The
+/// source references no `ctx.*`; the target's `success` stack references
+/// `{{ctx.os}}`, which must render non-empty.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_initialize_proxy_target_resolves_ctx_not_in_source() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let source_doc = "---\ninitialize:\n  stack:\n    \
+         - action: {proxy: '@target.md'}\n---\nsource body\n";
+    let target_doc = "---\nsuccess:\n  stack:\n    - action:\n        \
+         - {append_line: ['events.log', 'osmarker=[{{ctx.os}}]']}\n        \
+         - {append_line: ['events.log', 'target-done']}\n---\ntarget body\n";
+    let staged = stage_proxy_pair(source_doc, target_doc, true);
+
+    let pane = run_in_tmux_for(&staged, "target-done");
+
+    let lines = event_lines(&staged);
+    let marker = lines
+        .iter()
+        .find(|l| l.starts_with("osmarker="))
+        .unwrap_or_else(|| panic!("target success stack must run; got {lines:?}; pane:\n{pane}"));
+    assert_ne!(
+        marker, "osmarker=[]",
+        "`ctx.os` must resolve in the proxied target even though the source \
+         never referenced it (demand-driven snapshot re-capture); got `{marker}`; pane:\n{pane}"
+    );
+}
+
 /// `initialize.stack` ending in `{proxy: "@target.md"}` hands off to a target
 /// whose own `initialize.stack` ends in `skip`. The run exits cleanly with
 /// no provider invocation and no source lifecycle beyond the proxy.
