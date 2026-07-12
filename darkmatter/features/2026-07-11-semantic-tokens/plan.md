@@ -383,7 +383,8 @@ V1 full/range endpoints.
 gates + capability advertisement + the standalone `full`/`range` handlers +
 router dispatch + `didChangeConfiguration` refresh wiring are implemented and
 tested. `just test` (486 dmls tests) and `just lint` green from `darkmatter/`.
-The L1/L2 session, no-side-effects, and editor/docs work remain Phases 5–6.
+The L1 in-process session tests, no-side-effects, and editor/docs work remain
+Phases 5–6 (real-editor verification is manual via the smoke checklist).
 
 ## Phase 5 — Protocol and side-effect acceptance coverage
 
@@ -392,12 +393,14 @@ the provider's passive-analysis contract.
 
 **Depends on:** Phase 4.
 
-**Validation checkpoint:** L1, L2 session, and no-side-effects suites pass with
-all ten V1 acceptance criteria represented by named tests.
+**Validation checkpoint:** L1 session tests and no-side-effects suites pass with
+all ten V1 acceptance criteria represented by named tests (real-editor L2
+verification is manual, per the smoke checklist).
 
-- [x] Extend `darkmatter/dmls/tests/lsp_session.rs` with Level-2 sessions for
-  semantic-token-capable and incapable clients, full and range requests,
-  UTF-8/UTF-16 negotiation, live configuration changes, and refresh support.
+- [x] Extend `darkmatter/dmls/tests/lsp_session.rs` with Level 1 (in-process)
+  sessions for semantic-token-capable and incapable clients, full and range
+  requests, UTF-8/UTF-16 negotiation, live configuration changes, and refresh
+  support.
   <!-- `semantic_capable_params(encoding, refresh)` + a `ClientFixture`
   server-request buffer (`wait_for_server_request`); tests span capable/incapable
   advertisement, full+range, utf-8/utf-16 negotiation, master-switch toggle with

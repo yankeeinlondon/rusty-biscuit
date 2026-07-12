@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-b91731297cf7c4cc
-last_updated: 2026-07-11
+hash: 87f17662fa397abe-4b2ea96f0a67fdf2
+last_updated: 2026-07-12
 ---
 
 # darkmatter
@@ -495,7 +495,10 @@ Semantic tokens (`darkmatter/features/2026-07-11-semantic-tokens/`) add a
 correct answer, like Phase 10's editing providers): the frozen V1 wire legend
 (standard types `macro`/`function`/`variable`/`property`/`string`/`number`/
 `operator`; custom modifiers `interpolation`/`inert`/`directive`/`closer`/`wiki`/
-`injected` then standard `defaultLibrary`/`readonly`), a private `RawToken`
+`injected` then standard `defaultLibrary`/`readonly` — the legend trio
+`TokenType`/`modifier`/`legend()` lives in the crate-level `semantic_legend`
+leaf module so `capabilities` can advertise it without importing a provider,
+keeping the module graph acyclic), a private `RawToken`
 model, three pure `(text, body_base) → Vec<RawToken>` family emitters over the
 existing passive scanners (F1 `overlay::expressions::{interpolations,literals}`
 → whole-span `macro.interpolation` `+inert`; F2 `scan_darkmatter_directives` +

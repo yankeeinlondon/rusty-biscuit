@@ -1,6 +1,7 @@
 ---
 status: ready for planning and implementation
 reviewed: true
+review_iterations: 4
 inputs:
   - ../../dmls/src/capabilities.rs
   - ../../dmls/src/overlay/expressions.rs
@@ -26,6 +27,17 @@ folded into the body.
 > clipping, configuration refresh, and the interaction between wiki tokens and
 > `wiki.enable`. It also excludes shell command payloads from F2 so the v1
 > scope remains consistent with the explicit F6 deferral.
+
+> **Revision note (2026-07-12, pending reapproval):** The Zed extension API
+> cannot inject semantic-token colors — this is a platform constraint, not an
+> implementation choice. The spec originally stated that styling defaults would
+> ship inside the `zed-dmls` extension; the actual implementation delivers Zed
+> styling as a documented copyable `experimental.theme_overrides` recipe
+> (in `zed-dmls/README.md` and `dmls/docs/editors/zed.md`), matching the
+> documentation-based approach already used for VS Code
+> (`editor.semanticTokenColorCustomizations`) and Neovim (`@lsp.*` highlight
+> links). This revision changes the accepted product behavior for Zed and is
+> **pending Ken's reapproval**.
 
 ## Goal
 
@@ -53,9 +65,12 @@ per-editor grammar forks.
 **LSP semantic tokens classify; they never style.** The server says "this span
 is a `macro` with modifier `interpolation`"; the *theme* decides what that
 looks like. "Dim" is therefore not something DMLS can emit — it is something
-DMLS makes *targetable*, plus per-editor styling defaults we ship where we
-control the surface (the `zed-dmls` extension) and document where we don't
-(VS Code settings, Neovim highlight groups).
+DMLS makes *targetable*, and then we provide documented per-editor styling
+recipes: VS Code `editor.semanticTokenColorCustomizations` snippets, Neovim
+`@lsp.*` highlight links, and Zed `experimental.theme_overrides` recipes.
+None of these editors allow DMLS to inject styling defaults via extension or
+LSP; all three rely on user-copyable configuration documented in
+`dmls/docs/editors/`.
 
 Consequences:
 
@@ -66,9 +81,11 @@ Consequences:
   naturally excluded by capability gating and loses nothing it has today.
 - Zed ships semantic tokens **disabled by default**; users must opt in
   (`"semantic_tokens": "combined"` or `"full"`). The
-  [zed-lsp design notes](../../dmls/design/zed-lsp.md) already anticipate the
-  extension carrying "semantic token styling defaults if DMLS emits custom
-  token types."
+  [zed-lsp design notes](../../dmls/design/zed-lsp.md) anticipated the
+  extension carrying semantic token styling defaults, but the Zed extension API
+  does not permit injecting semantic-token colors. The implementation delivers
+  a documented `experimental.theme_overrides` recipe instead (see the styling
+  table below).
 
 ## Legend
 
@@ -247,7 +264,7 @@ grammar concern, not ours. Deferred until someone misses it.
 
 | Editor | Mechanism | Ships where |
 |--------|-----------|-------------|
-| Zed | theme targets token types/modifiers; semantic tokens require user opt-in (`"semantic_tokens": "combined"`) | styling defaults in `zed-dmls` extension + setup doc |
+| Zed | theme targets token types/modifiers via `experimental.theme_overrides`; semantic tokens require user opt-in (`"semantic_tokens": "combined"`) | documented `experimental.theme_overrides` recipe in `zed-dmls/README.md` + `docs/editors/zed.md` |
 | VS Code | `editor.semanticTokenColorCustomizations` rules like `"*.interpolation": { "foreground": "#7d8590" }`; token colors cannot carry alpha, so "dim" = muted foreground per theme | documented snippet in `docs/editors/vscode.md` |
 | Neovim (0.9+) | built-in maps to `@lsp.type.macro`, `@lsp.mod.interpolation`, … — e.g. `vim.api.nvim_set_hl(0, '@lsp.mod.interpolation.markdown', { link = 'Comment' })` | documented snippet in `docs/editors/neovim.md` |
 | Helix | no semantic-token support; capability-gated off | note in `docs/editors/helix.md` |
@@ -311,7 +328,7 @@ analysis machinery.
 | Phase | Scope |
 |-------|-------|
 | P1 | Legend, capability + `ClientProfile` gates (including refresh support), encoder (precedence/range clipping/sort/multi-line split, both position encodings), `full` + `range` handlers, F1 + F2 + F4, master-switch config, refresh wiring, L2 session tests |
-| P2 | Per-editor styling defaults: `zed-dmls` extension defaults + all four editor docs; manual smoke checklist entries |
+| P2 | Per-editor styling recipes: all four editor docs (`docs/editors/{zed,vscode,neovim,helix}.md`) documenting copyable configuration snippets; Zed recipe in `zed-dmls/README.md`; manual smoke checklist entries |
 | P3 | F3 fine-grained expressions (replaces F1 spans) |
 | P4 | F5 frontmatter (default-off, brings the first per-family config toggle), `full/delta` if measurements show material cache or transfer pressure |
 
@@ -354,7 +371,8 @@ folded into the body above.
    `interpolation` + `inert`, **not** `comment`. One theme rule dims the
    whole family the same shade; comment-aware tooling (spell-check, TODO
    highlighters) never sees a false comment. The instant-styling advantage of
-   `comment` was moot because P2 ships styling defaults regardless.
+   `comment` was moot because P2 ships documented per-editor styling recipes
+   (copyable configuration snippets for VS Code, Neovim, and Zed) regardless.
 3. **All twelve directives share one base type (`macro`); the three
    structural closers carry the `closer` modifier.** Identical color out of
    the box (no accidental two-tone from theme defaults), with a one-word
