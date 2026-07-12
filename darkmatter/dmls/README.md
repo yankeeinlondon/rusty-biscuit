@@ -34,6 +34,7 @@ criterion 7).
 | **2 — Frontmatter intelligence** | effective-schema (base + configured extensions + document `$schema`) diagnostics with precise key/value ranges, key/enum/`file(...)`/`style.*` completion, type/constraint/`->`-description hover, `$schema`/`file(...)` navigation, frontmatter folding + symbols. Claudine activates as **pure config** (globs → baseline schema), no server-side special cases. |
 | **3 — Darkmatter DSL** | directive (`::file`/`::code`/`::shell`/`::block`/disclosure …) name/option completion, hover, folding, and diagnostics; transclusion links + definition + cycle detection + broken-path; interpolation (`{{ }}`) completion/hover/definition + malformed/unknown diagnostics; read-only shell-policy hover + `darkmatter.security.*`; fenced-language diagnostics. |
 | **Editing** | file + heading rename with workspace-wide reference updates (refusing ambiguous/unsafe edits atomically), the v1 code-action set, and `Markdown::cleanup`-backed formatting (byte-equivalent to `md clean`). |
+| **Semantic tokens** | LSP semantic tokens classifying interpolations (`macro.interpolation`, `+inert` literals), directive keywords/closers (`macro.directive`, `+closer`), targets/options (`string`/`property.directive`), and wiki frames/segments (`macro.wiki` / `string.wiki`) for theme-driven de-emphasis. `full` + `range`, non-overlapping in UTF-8/UTF-16, fence-excluded, capability-gated, `[semantic_tokens] enable` master switch. |
 
 For exact v1 scope and out-of-scope items see
 [spec.md](../features/2026-07-04-dmls/spec.md); for architecture see
@@ -113,7 +114,8 @@ Logs go to stderr or `--log-file` only; stdout is reserved for LSP framing.
 `.dmls.toml` at the workspace root (also the editor root marker), layered under
 LSP `workspace/configuration` and reloadable without restart. Keys cover wiki
 behavior, baseline schema extensions, strict schema/style modes, shell policy
-discovery, code-action categories, formatting, and diagnostics debounce. See
+discovery, code-action categories, formatting, semantic tokens
+(`[semantic_tokens] enable`), and diagnostics debounce. See
 [spec.md](../features/2026-07-04-dmls/spec.md) § Configuration.
 
 ## Editor setup

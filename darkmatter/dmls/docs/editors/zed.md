@@ -78,6 +78,45 @@ impl zed::Extension for DmlsExtension {
 zed::register_extension!(DmlsExtension);
 ```
 
+## Semantic tokens (de-emphasize Darkmatter machinery)
+
+`dmls` emits semantic tokens so a theme can dim interpolations (`{{ … }}`),
+directive lines (`::file`, `::block`, …), and wiki-link brackets while letting
+wiki inner text read link-like. Zed ships semantic tokens **disabled by
+default**, so this is opt-in per language in `settings.json`:
+
+```json
+{
+  "languages": {
+    "Markdown": { "semantic_tokens": "combined" }
+  }
+}
+```
+
+`"combined"` layers DMLS tokens over Zed's Markdown grammar highlighting;
+`"full"` uses the server tokens alone. Colors come from the **active theme**, not
+the extension — see [zed-dmls/README.md](../../zed-dmls/README.md#semantic-token-styling)
+for the recommended `experimental.theme_overrides` recipe (muted machinery vs.
+link-like wiki text). Server-side, semantic tokens are on by default and can be
+switched off with `[semantic_tokens] enable = false` in `.dmls.toml`.
+
+### Smoke example
+
+In a Markdown file, with the opt-in above:
+
+```md
+Deploy {{ project.name }} to {{ env.STAGE }}.
+
+::file ./intro.md
+
+See [[architecture#overview]] for the design.
+```
+
+Each `{{ … }}` span, the `::file` keyword and its `./intro.md` target, and the
+`[[ ]]` brackets/`#` separator should render muted; `architecture` and `overview`
+should read link-like. A `{{{ literal }}}` carries the extra `inert` modifier
+for themes that fade it further.
+
 ## Client quirks that affect `dmls`
 
 - **Never resolve `completionItem.textEdit`.** Zed intentionally does not resolve
@@ -92,4 +131,5 @@ zed::register_extension!(DmlsExtension);
 
 Navigation, diagnostics, completion, hover, frontmatter schema intelligence,
 directive/transclusion/interpolation intelligence, read-only shell-policy hover,
-heading + file rename, the v1 code-action set, and whole-document formatting.
+heading + file rename, the v1 code-action set, whole-document formatting, and
+semantic tokens (opt-in, see above).

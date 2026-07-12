@@ -47,9 +47,39 @@ vim.api.nvim_create_autocmd('FileType', {
   feature seems missing, check `client:supports_method()` rather than the static
   `server_capabilities` table.
 
+## Semantic tokens (de-emphasize Darkmatter machinery)
+
+Neovim 0.9+ applies LSP semantic tokens automatically (no opt-in) once `dmls`
+attaches, mapping them onto highlight groups: `@lsp.type.<type>`,
+`@lsp.mod.<modifier>`, and the combined `@lsp.typemod.<type>.<modifier>`, each
+optionally suffixed with the buffer filetype (`.markdown`). Link the Darkmatter
+modifiers to existing groups so machinery reads muted and wiki text reads
+link-like:
+
+```lua
+-- Muted machinery: interpolations, directive keywords, closers, wiki frames.
+vim.api.nvim_set_hl(0, '@lsp.mod.interpolation.markdown', { link = 'Comment' })
+vim.api.nvim_set_hl(0, '@lsp.mod.directive.markdown', { link = 'Comment' })
+vim.api.nvim_set_hl(0, '@lsp.mod.closer.markdown', { link = 'NonText' })
+vim.api.nvim_set_hl(0, '@lsp.typemod.macro.wiki.markdown', { link = 'Comment' })
+
+-- Link-like wiki inner text (path / heading / alias segments).
+vim.api.nvim_set_hl(0, '@lsp.typemod.string.wiki.markdown', { link = '@markup.link' })
+```
+
+`@lsp.mod.interpolation.markdown` matches every token carrying the
+`interpolation` modifier regardless of base type; the more specific
+`@lsp.typemod.string.wiki.markdown` wins over the broader `macro.wiki` frame for
+the inner segments. `{{{ literal }}}` spans additionally carry `inert`
+(`@lsp.mod.inert.markdown`). Set these in your colorscheme or a
+`ColorScheme`/`LspAttach` autocommand so they survive theme reloads. The
+server-side master switch is `[semantic_tokens] enable = false` in `.dmls.toml`;
+`wiki.enable = false` suppresses only wiki tokens.
+
 ## What you get
 
 Navigation, diagnostics, completion, hover, frontmatter schema intelligence,
 directive/transclusion/interpolation intelligence, read-only shell-policy hover,
-heading rename, the v1 code-action set, and whole-document formatting. Hover is
-rendered in a floating window (text-first Markdown; no inline images).
+heading rename, the v1 code-action set, whole-document formatting, and semantic
+tokens (see above). Hover is rendered in a floating window (text-first Markdown;
+no inline images).

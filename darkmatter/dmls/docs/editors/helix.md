@@ -37,6 +37,16 @@ Reload the language configuration with `:config-reload` or restart Helix.
 - **File operations are supported.** Helix advertises will/did create, rename,
   and delete, so `workspace/willRenameFiles` link rewriting works.
 
+## Semantic tokens
+
+Helix's LSP client does not advertise semantic-token support, so `dmls` does not
+offer the `semanticTokens` capability to Helix at all — it is **capability-gated
+off**. This is safe and lossless: Helix keeps its existing tree-sitter Markdown
+highlighting unchanged, and no configuration is needed or possible. If Helix adds
+semantic-token support in a future release, `dmls` will advertise the provider
+automatically with no server change. Interpolation/directive/wiki de-emphasis is
+available today in VS Code, Zed, and Neovim.
+
 ## What you get
 
 Navigation, diagnostics, completion, hover, frontmatter schema intelligence,
