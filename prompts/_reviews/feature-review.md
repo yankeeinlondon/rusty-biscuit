@@ -11,8 +11,8 @@ initialize:
 dir: "{{dirname(spec)}}"
 design: "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}"
 iteration: "{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1  : 1   }}"
-review_file: "{{dir}}/review-{{iteration}}.md"
 review: "{{ dirname(spec) + '/review-' + iteration + '.md' }}"
+previous: {{ iteration < 2 ? null : 'decrement_file_index(review)' }}
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 start:
     message: "👓 starting {{feature_or_fix}} review #{{iteration}} of `{{parent_dir(spec)}}` (_in the **{{ctx.area}}** package area_)"
@@ -101,11 +101,23 @@ test is at the wrong level under "Findings" with severity at least "high".
 ## Closure
 
 - Save your review suggestions to "@{{review}}"
-- Save the following frontmatter properties on "@{{review_file}}":
-    - set `$schema` to "@.claudine/schemas/review.yaml"
-    - based on your review suggestions indicate whether you think this feature is **ready for production** by setting the `ready` frontmatter property to `true` or `false`
-    - set the `agent` frontmatter property to "{{ctx.agent}}/{{ctx.model}}" 
-    - set the `created` frontmatter property to "{{ctx.now}}"
+- Save the following frontmatter properties to the review file (@{{review}}):
+    - set `$schema` to "feature-review.yaml"
+    - set `ready` to whether you think this feature is **ready for production** (boolean)
+    - set the `agent` property to "{{ctx.agent}}/{{ctx.model}}" 
+    - set the `created` property to "{{ctx.now}}"
+    - set the `spec` property to "{{ parent_dir(spec) }}/{{ basename(spec) }}"
+    - set the `implemented` property to `false`
+    - set the `description` property to "A **{{feature_or_fix}}** review of `{{ parent_dir(spec) }}/{{ basename(spec) }}`"
+    - set the `{{feature_or_fix}}` property to "{{ parent_dir(review) }}/{{ basename(review) }}"
+    ::block when="iteration < 2"
+    - set the `previous` property to "{{parent_dir(previous)}}/{{basename(previous)}}"
+    ::end-block
+::block when="iteration <  2"
+- Now set the frontmatter properties of the _previous review_ located at @{{previous}}:
+- set the `next` property on the _previous review_ to "{{parent_dir(review)}}/{{basename(review)}}"
+- set the `implemented` property to `true`
+::end-block
 - Set the spec file's ({{spec}}) `review_iterations` Frontmatter property to '{{iteration}}'
 - Summarize to the caller what was found and be sure to mention whether the review deemed the {{feature_or_fix}} to be **production ready** or not.
 

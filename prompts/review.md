@@ -33,13 +33,13 @@ initialize:
               - proxy: "./_reviews/review-spec-inline.md"
         - when: "plan && file_exists(dirname(plan) + '/' + replace(basename(plan),'plan','spec'))"
           action:
-              - proxy: "./_reviews/review-feature.md"
+              - proxy: "./_reviews/feature-review.md"
         - when: "plan"
           action:
               - proxy: "./_reviews/review-implementation.md"
         - when: "review"
           action:
-              - proxy: "./_reviews/review-suggestions-implementation.md"
+              - proxy: "./_reviews/suggestion-review.md"
         - action:
               - warn: "using the parameters passed in, we found no match for a review type!"
               - stop
