@@ -63,12 +63,22 @@ source_code:
   - claudine/lib/src/permissions/providers/opencode.rs
   - claudine/lib/src/permissions/providers/qwen.rs
   # Phase 7 — S5 wrap/composition/mod.rs cleanup
+  - claudine/cli/src/commands/compose/prep.rs
   - claudine/cli/src/commands/wrap/composition/mod.rs
+  - claudine/cli/src/commands/wrap/composition/launch.rs
+  - claudine/cli/src/commands/wrap/composition/preflight.rs
   - claudine/cli/src/commands/wrap/composition/selection.rs
   - claudine/cli/src/commands/wrap/composition/runner.rs
-  - claudine/cli/src/commands/wrap/composition/mod.rs
+  - claudine/cli/src/commands/wrap/composition/tests.rs
+  - claudine/cli/src/output/mod.rs
 documentation:
+  - claudine/features/2026-07-11-module-structure/strong-plan.md
+  - .claude/skills/claudine/architecture.md
   - .opencode/skill/claudine/architecture.md
+  - .claude/skills/claudine/opencode-event-sources.md
+  - .opencode/skill/claudine/opencode-event-sources.md
+  - .claude/skills/claudine/timeline.md
+  - .opencode/skill/claudine/timeline.md
 packages:
   - claudine
 source_files_during_phase_1:
@@ -181,6 +191,23 @@ docs_created_during_phase_6: []
 skills_files_updated_during_phase_6:
   - .opencode/skill/claudine/architecture.md
   - .claude/skills/claudine/architecture.md
+source_files_during_phase_7:
+  - claudine/cli/src/commands/compose/prep.rs
+  - claudine/cli/src/commands/wrap/composition/launch.rs
+  - claudine/cli/src/commands/wrap/composition/mod.rs
+  - claudine/cli/src/commands/wrap/composition/preflight.rs
+  - claudine/cli/src/commands/wrap/composition/runner.rs
+  - claudine/cli/src/commands/wrap/composition/selection.rs
+  - claudine/cli/src/commands/wrap/composition/tests.rs
+  - claudine/cli/src/output/mod.rs
+docs_updated_during_phase_7:
+  - claudine/features/2026-07-11-module-structure/strong-plan.md
+  - .claude/skills/claudine/architecture.md
+  - .opencode/skill/claudine/architecture.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/claudine/architecture.md
+  - .opencode/skill/claudine/architecture.md
 ---
 
 # Strong-Candidate Module-Structure Refactor — Execution Plan
@@ -848,8 +875,8 @@ The existing `composition/tests.rs` suite is the safety net.
 Move `SelectionConfig` (2,008), `load_selection_config` (2,014),
 `load_selection_config_for_repo` (2,028).
 
-- [ ] `mod.rs` declares `mod selection;` and re-exports if needed
-- [ ] Verify: `just test`
+- [x] `mod.rs` declares `mod selection;` and re-exports if needed
+- [x] Verify: `just test`
 
 ### Step 7.2 — Relocate `emit_execution_header` to output helpers
 
@@ -862,8 +889,8 @@ Move `SelectionConfig` (2,008), `load_selection_config` (2,014),
 Move `emit_execution_header` (479–526) next to the other stderr/header
 rendering helpers.
 
-- [ ] Update the call site in `execute_composition_request_inner_with_guard`
-- [ ] Verify: `just test` + `just lint`
+- [x] Update the call site in `execute_composition_request_inner_with_guard`
+- [x] Verify: `just test` + `just lint`
 
 ### Step 7.3 — Extract the launch-workspace + preflight-blocked helpers
 
@@ -879,11 +906,11 @@ Move the cluster that is incidental to the execution pipeline:
 `surface_preflight_catch_error` (199), `preflight_blocked_control_error` (353),
 `setup_phase_deferred` (371).
 
-- [ ] If C4 already routed `emit_preflight_blocked_and_finalize` to the lib,
+- [x] If C4 already routed `emit_preflight_blocked_and_finalize` to the lib,
       confirm `surface_preflight_catch_error` + `preflight_blocked_control_error`
       are now thin adapters over the lib API; co-locate them with the preflight
       call site or move to `preflight_lifecycle.rs`
-- [ ] Verify: `just test`
+- [x] Verify: `just test`
 
 ### Step 7.4 — Promote the `run_body` closure to a named function
 
@@ -896,33 +923,33 @@ The `run_body` closure (1,349–1,727) inside
 invoked twice (1,733 for the init-proxy/skip-preflight path; 2,003 for the
 main path). Same disease as C3's `run_harness_loop`.
 
-- [ ] Define a `CompositionRunCtx<'a>` context struct bundling the ~20
+- [x] Define a `CompositionRunCtx<'a>` context struct bundling the ~20
       captured locals (guard, skip_preflight, init_proxy_target, the shared
       mutable state, the preflight adapters, etc.)
-- [ ] Promote the closure to `fn run_composition_body(ctx: &mut
+- [x] Promote the closure to `fn run_composition_body(ctx: &mut
       CompositionRunCtx, …) -> …` in `runner.rs`
-- [ ] Replace both invocation sites (`return run_body(guard, …)` at 1,733 and
+- [x] Replace both invocation sites (`return run_body(guard, …)` at 1,733 and
       `run_body(&mut guard, false, …)` at 2,003) with calls to the named fn
-- [ ] Verify: `just test` — especially the preflight-skip, init-proxy, and
+- [x] Verify: `just test` — especially the preflight-skip, init-proxy, and
       normal-path tests in `composition/tests.rs`
 
 ### Step 7.5 — Slim `mod.rs` to the execution pipeline
 
-- [ ] `mod.rs` retains: `SingleCompositionOutcome` (380),
+- [x] `mod.rs` retains: `SingleCompositionOutcome` (380),
       `execute_composition_request` (528),
       `execute_composition_request_inner` (544),
       `execute_composition_attempt` (567),
       `execute_composition_request_inner_with_guard` (584, now much shorter),
       `record_substage` (613)
-- [ ] Confirm `mod.rs` is under ~800 lines (from 2,037)
-- [ ] Update `.opencode/skill/claudine/architecture.md`
+- [x] Confirm `mod.rs` is under ~800 lines (from 2,037)
+- [x] Update `.opencode/skill/claudine/architecture.md`
 
 ### Phase 7 Exit Criteria
 
-- [ ] `just test` + `just lint` pass for claudine-cli
-- [ ] `run_body` is a named function taking a context struct
-- [ ] `wrap/composition/mod.rs` is the execution pipeline only (~800 lines)
-- [ ] `SelectionConfig`, `emit_execution_header`, and the launch/preflight
+- [x] `just test` + `just lint` pass for claudine-cli
+- [x] `run_body` is a named function taking a context struct
+- [x] `wrap/composition/mod.rs` is the execution pipeline only (~800 lines)
+- [x] `SelectionConfig`, `emit_execution_header`, and the launch/preflight
       helpers each live in a named submodule
 
 ---
@@ -931,21 +958,21 @@ main path). Same disease as C3's `run_harness_loop`.
 
 After all 7 phases:
 
-- [ ] `just test claudine` passes at the repo root
-- [ ] `just lint` passes in the claudine area
-- [ ] No file in `claudine/lib/src/composition/` or
+- [x] `just test claudine` passes at the repo root
+- [x] `just lint` passes in the claudine area
+- [x] No file in `claudine/lib/src/composition/` or
       `claudine/lib/src/stream/logs/opencode/` exceeds ~1,000 production lines
-- [ ] The loop family is grouped under `composition/looping/`; the schema
+- [x] The loop family is grouped under `composition/looping/`; the schema
       family under `composition/schema/`; the OpenCode bridge under
       `logs/opencode/bridge/`; OpenCode classification under
       `logs/opencode/classify/`
-- [ ] `dispatch/mod.rs` is a declaration/entry root, not a logic file
-- [ ] Exactly one `json_type_name` and one reserved-roots registry in
+- [x] `dispatch/mod.rs` is a declaration/entry root, not a logic file
+- [x] Exactly one `json_type_name` and one reserved-roots registry in
       `composition/`
-- [ ] Permissions provider backends share format-agnostic helpers via
+- [x] Permissions provider backends share format-agnostic helpers via
       `permissions/providers/common.rs`
-- [ ] `wrap/composition/mod.rs` is the execution pipeline only
-- [ ] `.opencode/skill/claudine/architecture.md` reflects every new directory
+- [x] `wrap/composition/mod.rs` is the execution pipeline only
+- [x] `.opencode/skill/claudine/architecture.md` reflects every new directory
 
 ## Coordination hazards
 
