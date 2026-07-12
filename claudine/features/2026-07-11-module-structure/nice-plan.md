@@ -133,8 +133,34 @@ source_files_during_phase_4:
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - claudine/cli/src/commands/context/mod.rs
+  - claudine/cli/src/commands/context/format.rs
+  - claudine/cli/src/commands/context/expressions.rs
+  - claudine/cli/src/commands/context/effects.rs
+  - claudine/cli/src/commands/context/tests.rs
+  - claudine/cli/src/completion/schema_completion/mod.rs
+  - claudine/cli/src/completion/schema_completion/keys.rs
+  - claudine/cli/src/completion/schema_completion/candidates.rs
+  - claudine/cli/src/completion/schema_completion/tests.rs
+  - claudine/cli/src/commands/schema_interactive/mod.rs
+  - claudine/cli/src/commands/schema_interactive/status.rs
+  - claudine/cli/src/completion/engine/mod.rs
+  - claudine/cli/src/completion/engine/tokens.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+  - claudine/lib/src/stream/protocol/kimi.rs
+  - claudine/lib/tests/protocol_fixture_replay.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+packages_during_phase_6:
+  - claudine
 packages:
   - claudine
+  - claudine-cli
 ---
 
 # Nice-to-Have Module-Structure Refactor — Execution Plan
@@ -545,13 +571,13 @@ Keep in `mod.rs`: `ContextArgs` (36), `render_default_report` (204),
 (54), `group_expression_descriptors` (71), and the `mod`/`pub use`
 declarations.
 
-- [ ] **Merge the two `#[cfg(test)]` blocks** (review: lines 29 and 869).
+- [x] **Merge the two `#[cfg(test)]` blocks** (review: lines 29 and 869).
       The line-29 `#[cfg(test)]` is on a test-support item; fold it into the
       single test module (move to `context/tests.rs` per the C1 convention, or
       consolidate at the end of `mod.rs`)
-- [ ] Each submodule uses `use super::*;` for shared types (`Terminal`,
+- [x] Each submodule uses `use super::*;` for shared types (`Terminal`,
       `ContextValueType`, etc.)
-- [ ] Verify: `just test` + `just lint`
+- [x] Verify: `just test` + `just lint`
 
 ### Step 5.2 — Split `completion/schema_completion.rs`
 
@@ -567,8 +593,8 @@ Split the two separable clusters (1,438 lines):
 - → `candidates.rs`: file-candidate matching (resolving `@`-style file/path
       candidates)
 
-- [ ] Keep the public completion entry point and the dispatch glue in `mod.rs`
-- [ ] Verify: `just test` + `just lint`
+- [x] Keep the public completion entry point and the dispatch glue in `mod.rs`
+- [x] Verify: `just test` + `just lint`
 
 ### Step 5.3 — Split `commands/schema_interactive.rs`
 
@@ -581,9 +607,10 @@ Split (1,135 lines):
 - → `status.rs`: status rendering (57–154)
 - Keep in `mod.rs`: the interactive collection loop (463+) and its entry point
 
-- [ ] If the interactive-collection cluster is itself large (> ~500 lines),
+- [x] If the interactive-collection cluster is itself large (> ~500 lines),
       consider a second `collect.rs` submodule; otherwise leave it in `mod.rs`
-- [ ] Verify: `just test` + `just lint`
+      (~350-line collection cluster is below the threshold — left in `mod.rs`)
+- [x] Verify: `just test` + `just lint`
 
 ### Step 5.4 — Carve token predicates out of `completion/engine.rs`
 
@@ -591,20 +618,24 @@ Split (1,135 lines):
 - Modify: `claudine/cli/src/completion/engine.rs` → `engine/mod.rs`
 - Create: `claudine/cli/src/completion/engine/tokens.rs`
 
-- [ ] Move the token-predicate cluster (561–611) into `tokens.rs`
-- [ ] The review frames this as conditional ("if it grows further") — at 1,211
+- [x] Move the token-predicate cluster (561–611) into `tokens.rs`
+- [x] The review frames this as conditional ("if it grows further") — at 1,211
       lines the file is borderline; do the carve only if the predicates are a
       clean, self-contained cluster. If they are tangled with the engine core,
       defer this step and leave a note
-- [ ] Verify: `just test` + `just lint`
+      (the six token-shape predicates — `split_setter`, `is_setter_name_partial`,
+      `is_flag_token`, `is_value_bearing_flag`, `is_setter_shaped`,
+      `is_global_bool_flag` — are pure `&str` classifiers with no engine-state
+      coupling: a clean cluster, carved into `engine/tokens.rs`)
+- [x] Verify: `just test` + `just lint`
 
 ### Phase 5 Exit Criteria
 
-- [ ] `just test` + `just lint` pass for claudine-cli
-- [ ] `context.rs` is a `context/` directory; its two test blocks are merged
-- [ ] `schema_completion.rs`, `schema_interactive.rs`, and `engine.rs` each
+- [x] `just test` + `just lint` pass for claudine-cli
+- [x] `context.rs` is a `context/` directory; its two test blocks are merged
+- [x] `schema_completion.rs`, `schema_interactive.rs`, and `engine.rs` each
       delegate a separable cluster to a named submodule
-- [ ] No CLI command behavior changed
+- [x] No CLI command behavior changed
 
 ---
 
@@ -621,12 +652,21 @@ a go/no-go decision.
 
 ### Step 6.0 — Go/no-go decision
 
-- [ ] Confirm the goal is still worth it: the protocol modules are compiled
+- [x] Confirm the goal is still worth it: the protocol modules are compiled
       twice today (once as a lib unit, once as a test unit). Moving the
       fixture-replay tests to `claudine/lib/tests/` (a separate integration
       test binary) shrinks the lib's test build. **If** the compile-time win
       is negligible on this machine, **skip this phase** and leave the tests
       co-located — the review explicitly allows this.
+      **Decision: GO for kimi, no-op for codex.** `kimi.rs` carries 9 genuine
+      fixture-corpus replay tests (runtime `classify_lines` reads over
+      `fixtures/kimi/*.jsonl`, ~250 test lines + 3 helpers) that move cleanly
+      into a shared integration binary reusing the already-compiled lib rlib —
+      every referenced type/field/method is already `pub`, so no API widening.
+      `codex.rs` has **no fixture corpus** (verified: no `fixtures/codex/`
+      directory); all its `mod tests` are inline JSON-literal deserialization
+      unit tests, which the plan itself says to keep co-located — so `codex.rs`
+      is left unchanged.
 
 ### Step 6.1 — Move fixture-replay tests to an integration test
 
@@ -635,25 +675,35 @@ a go/no-go decision.
 - Modify: `claudine/lib/src/stream/protocol/codex.rs`
 - Create: `claudine/lib/tests/protocol_fixture_replay.rs`
 
-- [ ] Identify the fixture-replay tests in each `mod tests` block (the
+- [x] Identify the fixture-replay tests in each `mod tests` block (the
       deserialization-fidelity cases reading `fixtures/{kimi,codex}/*.jsonl`)
       vs. the genuinely unit-scoped helper tests. Move **only** the
       fixture-replay cases; keep helper unit tests co-located
-- [ ] Create `claudine/lib/tests/protocol_fixture_replay.rs` as an integration
+      (kimi: 9 `classify_lines` corpus tests moved; kimi's 2 single-line
+      `include_str!` decode tests + all inline-literal tests kept; codex: no
+      corpus, nothing to move)
+- [x] Create `claudine/lib/tests/protocol_fixture_replay.rs` as an integration
       test that `use claudine::stream::protocol::{kimi, codex};` and replays
       the same corpus with the same assertions
-- [ ] The fixture path must resolve from the integration-test working dir
+      (kimi only — glob-imports `claudine::stream::protocol::kimi::*`; codex has
+      no corpus so is not imported)
+- [x] The fixture path must resolve from the integration-test working dir
       (`CARGO_MANIFEST_DIR`-relative) — adjust the path helper so it points at
       `src/stream/protocol/fixtures/`
-- [ ] Verify: `just test` (the new integration test passes; the protocol
+- [x] Verify: `just test` (the new integration test passes; the protocol
       modules' test count drops accordingly)
 
 ### Phase 6 Exit Criteria
 
-- [ ] `just test` passes (including the new integration test)
-- [ ] `protocol/kimi.rs` and `protocol/codex.rs` hold only their models +
-      co-located unit helper tests
-- [ ] The fixture corpus is exercised exactly once, from the integration test
+- [x] `just test` passes (including the new integration test —
+      `protocol_fixture_replay`, 9 tests)
+- [x] `protocol/kimi.rs` and `protocol/codex.rs` hold only their models +
+      co-located unit helper tests (kimi's corpus replay moved out; kimi keeps
+      its inline-literal + single-line `include_str!` unit tests; codex was
+      already models + inline-literal tests, left unchanged)
+- [x] The fixture corpus is exercised exactly once at the typed-model layer,
+      from the integration test (the semantic-parser-layer replay in
+      `kimi_wire.rs` is a distinct layer and is unaffected)
 - [ ] **Or:** the phase was skipped at Step 6.0 with a recorded rationale
 
 ---
@@ -662,20 +712,23 @@ a go/no-go decision.
 
 After all 6 phases:
 
-- [ ] `just test claudine` passes at the repo root
-- [ ] `just lint` passes in the claudine area
-- [ ] `adapters/` is renamed to `hook_adapters/`; no stale `crate::adapters`
-      reference remains
-- [ ] `composition/prepare.rs` no longer holds hint parsing; `composition/
+- [x] `just test claudine` passes (verified via `just test` in the claudine
+      area — same curated package set: claudine, claudine-cli, claudine-contract,
+      catalog-types, claudine-gen, all green)
+- [x] `just lint` passes in the claudine area
+- [x] `adapters/` is renamed to `hook_adapters/`; no stale `crate::adapters`
+      reference remains (only historical `_completed` spec + this plan's prose
+      mention the old path)
+- [x] `composition/prepare.rs` no longer holds hint parsing; `composition/
       hints.rs` does
-- [ ] `composition/looping/engine.rs` holds only engine logic; types and seeds
+- [x] `composition/looping/engine.rs` holds only engine logic; types and seeds
       are in `looping/types.rs` / `looping/seed.rs`
-- [ ] `linking/compatibility/mod.rs` is a declaration root; `render/
+- [x] `linking/compatibility/mod.rs` is a declaration root; `render/
       event_renderer/mod.rs` free helpers are extracted
-- [ ] The four CLI files (`context.rs`, `schema_completion.rs`,
+- [x] The four CLI files (`context.rs`, `schema_completion.rs`,
       `schema_interactive.rs`, `engine.rs`) each delegate a separable cluster
       to a named submodule
-- [ ] `.opencode/skill/claudine/architecture.md` reflects every rename/new
+- [x] `.opencode/skill/claudine/architecture.md` reflects every rename/new
       directory
 
 ## Coordination hazards
