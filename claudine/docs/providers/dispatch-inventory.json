@@ -2966,216 +2966,6 @@
       "exempt_candidate": true
     },
     {
-      "path": "claudine/lib/src/adapters/antigravity.rs",
-      "line": 24,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Antigravity"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/adapters/antigravity.rs",
-      "line": 29,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Antigravity"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/adapters/claude.rs",
-      "line": 12,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Claude"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/adapters/claude.rs",
-      "line": 30,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Claude"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/adapters/claude.rs",
-      "line": 161,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Claude"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/adapters/codex.rs",
-      "line": 14,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Codex"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/adapters/codex.rs",
-      "line": 24,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Codex"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/adapters/gemini.rs",
-      "line": 12,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Gemini"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/adapters/gemini.rs",
-      "line": 24,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Gemini"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/adapters/gemini.rs",
-      "line": 148,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Gemini"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/adapters/goose.rs",
-      "line": 12,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Goose"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/adapters/goose.rs",
-      "line": 23,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Goose"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/adapters/kimicode.rs",
-      "line": 32,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "KimiCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/adapters/kimicode.rs",
-      "line": 44,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "KimiCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/adapters/opencode.rs",
-      "line": 15,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "OpenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/adapters/opencode.rs",
-      "line": 32,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "OpenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/adapters/opencode.rs",
-      "line": 183,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "OpenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/adapters/pi.rs",
-      "line": 22,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Pi"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/adapters/pi.rs",
-      "line": 32,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Pi"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/adapters/qwen.rs",
-      "line": 14,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "QwenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/adapters/qwen.rs",
-      "line": 26,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "QwenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
       "path": "claudine/lib/src/composition/error/tests.rs",
       "line": 563,
       "form": "direct-ref",
@@ -3643,6 +3433,216 @@
       "dispatch_class": "reference",
       "providers": [
         "Claude"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/hook_adapters/antigravity.rs",
+      "line": 24,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Antigravity"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/hook_adapters/antigravity.rs",
+      "line": 29,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Antigravity"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/hook_adapters/claude.rs",
+      "line": 12,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/hook_adapters/claude.rs",
+      "line": 30,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/hook_adapters/claude.rs",
+      "line": 161,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/hook_adapters/codex.rs",
+      "line": 14,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Codex"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/hook_adapters/codex.rs",
+      "line": 24,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Codex"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/hook_adapters/gemini.rs",
+      "line": 12,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Gemini"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/hook_adapters/gemini.rs",
+      "line": 24,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Gemini"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/hook_adapters/gemini.rs",
+      "line": 148,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Gemini"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/hook_adapters/goose.rs",
+      "line": 12,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Goose"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/hook_adapters/goose.rs",
+      "line": 23,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Goose"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/hook_adapters/kimicode.rs",
+      "line": 32,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "KimiCode"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/hook_adapters/kimicode.rs",
+      "line": 44,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "KimiCode"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/hook_adapters/opencode.rs",
+      "line": 15,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "OpenCode"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/hook_adapters/opencode.rs",
+      "line": 32,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "OpenCode"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/hook_adapters/opencode.rs",
+      "line": 183,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "OpenCode"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/hook_adapters/pi.rs",
+      "line": 22,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Pi"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/hook_adapters/pi.rs",
+      "line": 32,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Pi"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/hook_adapters/qwen.rs",
+      "line": 14,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "QwenCode"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/hook_adapters/qwen.rs",
+      "line": 26,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "QwenCode"
       ],
       "exempt_candidate": false
     },
