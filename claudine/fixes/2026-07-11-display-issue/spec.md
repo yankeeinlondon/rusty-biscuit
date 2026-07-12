@@ -98,20 +98,25 @@ classify each hit as static template (safe) vs. dynamic interpolation
 
 Prose already honors backslash escapes for its Markdown phase (`\_`, `\*`,
 `\[`, `\]`, `\(`, `\)`) and tag-open escapes for the block-tag grammar. The
-minimal fix is a claudine-side boundary discipline:
+work lands in the area that owns each concern:
 
-- Add a small `escape_prose(text: &str) -> String` helper (location:
-  `claudine-cli/src/log.rs` or a shared output util) that escapes the
-  Markdown-significant characters Prose recognizes, and route every dynamic
-  interpolation on an error/status surface through it. `log::error` escapes
-  `msg` before embedding it in the styled template.
-- Alternative worth evaluating during implementation: have `biscuit-terminal`
-  export the escaping helper (it owns the grammar, so the character set can
-  never drift), or grow a `Prose::text_raw(...)`-style constructor/segment API
-  that treats a span as literal text. Owning the escape set in
-  `biscuit-terminal` is the strategically better home if the API cost is
-  acceptable; a claudine-local helper hard-codes knowledge of another crate's
-  grammar.
+- **`biscuit-terminal` owns the escaping.** Prose owns the grammar, so Prose
+  exports the literal-text facility — the character set can then never drift
+  from the parser. Either shape is acceptable, chosen during implementation:
+  - a public `prose_escape(text: &str) -> String` (name per crate
+    conventions) that escapes every Markdown- and tag-significant character
+    the Prose pipeline recognizes, kept adjacent to the tokenizer it mirrors
+    and tested against it; or
+  - a `Prose::text_raw(...)`-style constructor/segment API that carries a
+    span through parsing as opaque literal text (analogous to the existing
+    fenced-code placeholder lift), which is the more robust long-term shape
+    since it cannot be defeated by future grammar growth.
+- **`claudine` owns the call sites.** `claudine-cli` routes every dynamic
+  interpolation on an error/status surface through the biscuit-terminal
+  facility (`log::error` escapes `msg` before embedding it in the styled
+  template), and performs the call-site audit below. No claudine-local copy
+  of the escape set: claudine must not hard-code knowledge of another
+  crate's grammar.
 
 Out of scope:
 
@@ -127,10 +132,12 @@ Out of scope:
 1. `claudine` reproduces the incident error (a `HarnessError` whose text
    contains two `_`-bearing paths) with both underscores displayed literally
    and no italic span, at `ColorDepth::None` and at a styled depth.
-2. A unit test on the escaping helper covers: two underscore paths in one
-   message, `*`-bearing text, `[text](ref)`-shaped text, backtick-bearing
-   text, and text containing a literal `<tag>`-like token.
+2. In `biscuit-terminal`: unit tests on the literal-text facility cover two
+   underscore paths in one message, `*`-bearing text, `[text](ref)`-shaped
+   text, backtick-bearing text, and text containing a literal `<tag>`-like
+   token — each asserting byte-for-byte round-trip through a Prose render.
 3. The `Error:` label keeps its red/bold styling on TTY output.
-4. Audit of `Prose::new(format!` interpolation sites in `claudine-cli`
-   completed; each dynamic-text site either routed through the escaper or
-   recorded as intentionally Markdown-aware.
+4. In `claudine`: audit of `Prose::new(format!` interpolation sites in
+   `claudine-cli` completed; each dynamic-text site either routed through
+   the biscuit-terminal facility or recorded as intentionally
+   Markdown-aware.
