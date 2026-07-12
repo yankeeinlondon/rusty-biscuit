@@ -7,11 +7,10 @@ Deep technical documentation for Claudine's event model, provider adapters, disp
 ```
 claudine/lib/src/
 ├── actions/      → Hook action types and response model
-├── adapters/     → Provider-specific event parsers (ProviderAdapter trait)
 ├── badges/       → Styled terminal badge constants (YOLO, Non-Interactive, Interactive, etc.)
 ├── composition/  → Markdown frontmatter composition (inline and chained prompt pipelines)
 │   ├── lifecycle/ → Lifecycle config/types, parsing, validation, actions, context, control, execution, and provider-neutral runtime routing
-│   ├── looping/   → Loop configuration, action DSL, condition evaluation, and execution orchestration
+│   ├── looping/   → Loop configuration, action DSL, condition evaluation, and execution orchestration (looping/{engine,types,seed,config,dsl,actions,expression}.rs — engine holds only execution/routing/gate logic; types holds the option/context/output/result value types; seed holds loop-seed construction)
 │   └── schema/    → Schema-aware preparation, error translation, problem classification, and status reporting
 ├── config/       → Agent detection, hook registration, atomic writes, backups
 ├── dispatch/     → Event processing pipeline
@@ -19,6 +18,7 @@ claudine/lib/src/
 │   ├── protect_bridge.rs → Protect observations mapped into hook responses
 │   └── wrapper_flags.rs  → Wrapper environment flags and repository root extraction
 ├── events/       → Normalized event model and types (16 events, 10 providers)
+├── hook_adapters/ → Native hook request/response adapters (ProviderAdapter trait) — parse provider hook payloads; distinct from stream/providers (stdout NDJSON parsers)
 ├── linking/      → Cross-provider skill synchronization (4 resource types) with portability classification
 ├── mcp/          → MCP catalog, defaults, import/export, session, and injection
 ├── permissions/  → Provider-agnostic PolicyEngine for permission queries and mutation planning
