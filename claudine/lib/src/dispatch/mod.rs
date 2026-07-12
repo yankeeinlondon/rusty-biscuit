@@ -14,7 +14,7 @@ use serde_json::Value;
 use tracing::{debug, info, info_span};
 
 use crate::actions::HookResponse;
-use crate::adapters::{self, AdapterError};
+use crate::hook_adapters::{self, AdapterError};
 use crate::error::Result;
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, ResolvedHook};
 use crate::protect::decision::ProtectDecision;
@@ -106,7 +106,7 @@ pub async fn dispatch(
 ) -> Result<DispatchOutcome> {
     let _span = info_span!("dispatch_event", %provider).entered();
 
-    let adapter = adapters::adapter_for(provider);
+    let adapter = hook_adapters::adapter_for(provider);
 
     let (event, mut meta) = match adapter.parse_event(raw) {
         Ok(parsed) => parsed,
@@ -178,7 +178,7 @@ pub async fn dispatch_canonical(
     provider: Provider,
     env: &EnvironmentContext,
 ) -> Result<DispatchOutcome> {
-    let adapter = adapters::adapter_for(provider);
+    let adapter = hook_adapters::adapter_for(provider);
 
     let (event, mut meta) = {
         let _span = info_span!("dispatch_adapter_parse", %provider).entered();
@@ -232,7 +232,7 @@ pub async fn dispatch_canonical_with_runtime(
     meta: EventMeta,
     runtime: &loader::CanonicalRuntimeConfig,
 ) -> Result<DispatchOutcome> {
-    let adapter = adapters::adapter_for(provider);
+    let adapter = hook_adapters::adapter_for(provider);
     let can_block = adapter.can_block(&event);
     let repo_root_display = meta
         .env
@@ -429,7 +429,7 @@ async fn dispatch_preparsed(
 }
 
 fn finalize_response(
-    adapter: &dyn adapters::ProviderAdapter,
+    adapter: &dyn hook_adapters::ProviderAdapter,
     event: &crate::events::AgenticEvent,
     can_block: bool,
     response: Option<HookResponse>,
@@ -572,7 +572,7 @@ mod tests {
 
     #[test]
     fn finalize_response_returns_non_blocking_ack_for_fire_and_forget_events() {
-        let adapter = adapters::adapter_for(Provider::Claude);
+        let adapter = hook_adapters::adapter_for(Provider::Claude);
 
         let outcome = finalize_response(
             adapter,
@@ -590,7 +590,7 @@ mod tests {
 
     #[test]
     fn finalize_response_keeps_blocking_events_empty_without_hook_response() {
-        let adapter = adapters::adapter_for(Provider::Claude);
+        let adapter = hook_adapters::adapter_for(Provider::Claude);
 
         let outcome =
             finalize_response(adapter, &AgenticEvent::BeforeTool, true, None, None, None).unwrap();
@@ -601,7 +601,7 @@ mod tests {
 
     #[test]
     fn finalize_response_formats_blocking_payload_and_exit_code() {
-        let adapter = adapters::adapter_for(Provider::Gemini);
+        let adapter = hook_adapters::adapter_for(Provider::Gemini);
         let response = HookResponse {
             decision: Some(HookDecision::Deny),
             reason: Some("blocked by tests".to_string()),
@@ -624,7 +624,7 @@ mod tests {
 
     #[test]
     fn finalize_response_preserves_protect_context() {
-        let adapter = adapters::adapter_for(Provider::Codex);
+        let adapter = hook_adapters::adapter_for(Provider::Codex);
         let protect_pre = ProtectDecision::allow();
         let protect_post = ProtectDecision::allow();
 

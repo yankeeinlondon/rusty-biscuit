@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::adapters::ProviderAdapter;
+use crate::hook_adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
 use crate::error::Result;
 use crate::mcp::export::ExportServer;
@@ -90,7 +90,7 @@ impl AdapterBehavior for ClaudeProvider {
     }
 
     fn provider_adapter(&self) -> &'static dyn ProviderAdapter {
-        &crate::adapters::CLAUDE_ADAPTER
+        &crate::hook_adapters::CLAUDE_ADAPTER
     }
 }
 impl ConfiguratorBehavior for ClaudeProvider {
