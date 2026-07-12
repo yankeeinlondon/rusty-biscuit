@@ -28,6 +28,7 @@ Mermaid charts are really useful and so we support rendering them in both the te
 
 ## Implementation Targets
 
+To ensure that our implementation of features has legs we will implement the following features:
+
 - mermaid feature
 - popover feature (CSS only)
--
