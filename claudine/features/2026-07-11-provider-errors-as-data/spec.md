@@ -1,7 +1,9 @@
 ---
 created: 2026-07-11
 status: draft — Q1–Q3 ruled; P4 corrected; P1–P3 + P5 proposals awaiting review
-reviewed: false
+reviewed: true
+reviewed_by: unknown/default
+reviewed_on: 2026-07-11
 ---
 
 # Provider Error Vocabulary as Data
@@ -23,6 +25,15 @@ Three phases:
 - **Phase C — Graduation + reconciliation.** Re-point generation from facts
   to research and adjudicate every vocabulary delta as a deliberate,
   test-covered behavior change under the reconciliation rules (D8).
+
+> **Reader's note (inline review, 2026-07-11):** the standalone artifact is
+> deliberately *not* registered as a `ProviderInfo` field. The catalog mapping
+> registry covers serialized `ProviderInfo` fields and rejects unrelated
+> entries; this emitter therefore owns a typed source loader with equivalent
+> facts-to-research collision and delete-on-graduate guarantees. The review
+> also makes parser identity explicit so Kilo can use Kilo research while
+> sharing OpenCode's wire parser, and adds a temporary table-to-table parity
+> gate because example-based tests cannot prove an exact transcription.
 
 > **RULINGS (Ken, 2026-07-11):**
 > **Q1** — Kimi's JSON-RPC numeric codes migrate as `code_buckets` (D5).
@@ -102,9 +113,11 @@ Two invariants every phase must preserve:
 - G2 — The 8 in-parser `ERROR_KEYWORDS` constants (and Kimi's code match)
   are deleted; parsers consume generated data through one accessor.
 - G3 — **Phase A is byte-for-byte behavior-preserving**: every existing
-  `classify_error_*` test passes unchanged. The tests are the acceptance
-  gate, not a new parity harness. (Behavior changes happen only in Phase C,
-  individually adjudicated under D8.)
+  `classify_error_*` test passes unchanged, and A2 mechanically compares
+  every generated ordered bucket and Kimi code mapping with the still-present
+  hand-written tables before A3 deletes them. Example-based tests cannot
+  prove that an untested needle was transcribed. (Behavior changes happen
+  only in Phase C, individually adjudicated under D8.)
 - G4 — A new provider's error vocabulary is authored as research, never as
   parser code.
 - G5 — CI drift-checks the generated artifact exactly like the rest of the
@@ -115,6 +128,9 @@ Two invariants every phase must preserve:
 - G7 — The research topic follows the provider-metadata recipe verbatim
   (sidecar rules, `_fleet.md`, pilot technique, lifecycle verification
   stacks) — no parallel research format.
+- G8 — Shared wire parsers select vocabulary by the provider being wrapped,
+  not by the parser module's name. Kilo retains OpenCode wire parsing but
+  consumes Kilo's researched vocabulary.
 
 ## Non-goals
 
@@ -139,6 +155,10 @@ Two invariants every phase must preserve:
   vocabulary. See D9 for the coordination contract between the two.
 - **Changing classification behavior in Phase A.** No keyword additions,
   removals, or re-ordering ride along with the migration.
+- **Changing the matching algorithm.** Classification remains
+  ASCII-lowercased, case-insensitive substring matching. Boundary, regex,
+  token, or Unicode-normalization semantics require a separate fix with
+  collision fixtures; research must propose literals safe for this matcher.
 
 ## Design
 
@@ -190,14 +210,17 @@ provider constants… delete-on-graduate when a research topic lands"):
 
 - **Phase A:** add an `error_vocabulary:` key to each provider's facts
   file, seeded by **transcribing the current in-code tables verbatim**
-  (they are the behavior-tested ground truth; several were empirically
+  (they are the current runtime ground truth; several were empirically
   hardened — OpenCode's `providermodelnotfound`, Antigravity's
-  OAuth-flavored `sign in`/`401`/`403`). Register the field in the gen
-  mapping registry like any other catalog field.
-- **Phase C:** the mapping registry re-points the field to the
-  `agent-errors/` research frontmatter; generation then ERRORS while the
-  facts file still carries the key (the standard delete-on-graduate
-  mechanism), forcing the facts entries to be deleted in the same change.
+  OAuth-flavored `sign in`/`401`/`403`). Register the source declaration in
+  the vocabulary emitter's typed loader, **not** the general mapping registry:
+  that registry is exhaustive over serialized `ProviderInfo` fields and this
+  vocabulary intentionally is not one.
+- **Phase C:** the vocabulary loader's declared source re-points to the
+  `agent-errors/` research frontmatter. Its collision check errors while a
+  facts file still carries `error_vocabulary`, reproducing the standard
+  delete-on-graduate guarantee. Unit tests cover facts-only, research-only,
+  missing declared input, and facts+research collision cases.
 
 ### D3 — Generated artifact: one lib module (signals precedent)
 
@@ -232,18 +255,28 @@ e.g. Goose, gets an explicit empty table rather than silently
 Generator validations at emit time: every `kind` is a known
 `SemanticErrorKind` name; every needle is non-empty and lowercase; every
 bucket has ≥1 needle; `msg_buckets` is non-empty for every provider that
-has a stream parser.
+has a stream parser. Exact duplicate needles and prefix/substring shadowing
+within one input branch are included in the C1 delta report; shadowing is
+accepted only when research explains the intended precedence. Empty tables
+are valid only for providers without a structured stream parser.
 
 ### D4 — Runtime wiring
 
 - Delete the 8 in-parser `ERROR_KEYWORDS` consts.
-- Each parser's `classify_error` delegation changes one argument:
-  `classify_error_by_keywords(vocabulary::error_keywords(Provider::X), …)`.
+- Each parser owns or receives its runtime `Provider` identity and delegates
+  with `vocabulary::error_keywords(self.provider)`. Dedicated parser
+  constructors stamp their fixed provider; the shared OpenCode parser
+  receives `Provider::OpenCode` or `Provider::Kilo` from `for_provider` and
+  rejects any other provider. This prevents Kilo research from becoming
+  generated-but-unreachable data.
 - `common.rs` (struct + cascade) gains the `code_buckets` field and a
   `code: Option<i32>` cascade input checked before the kind branch (D5).
 - The `classify_error_*` tests in each parser module are **not moved** —
   they keep asserting through the public parser behavior and become the
   regression gate for both the Phase A cutover and every Phase C delta.
+- Add an end-to-end Kilo error fixture whose winning classification differs
+  from OpenCode's test vocabulary so shared parsing cannot regress to a
+  hard-coded OpenCode lookup.
 
 ### D5 — Kimi numeric codes
 
@@ -255,6 +288,12 @@ has a stream parser.
 > in both places is accepted (small, comment-linked, and drift-checked by
 > the existing kimi classify tests).
 
+Code matching remains first and exact. All currently explicit standard
+JSON-RPC codes map to `AgentNative` in `code_buckets`, not only the two
+Kimi-specific codes; otherwise a standard code carrying auth/rate-limit prose
+would newly fall through to message matching. Unknown codes continue to fall
+through. The generator rejects duplicate codes within one provider.
+
 ### D6 — Drift and enforcement
 
 - The generated module carries the standard `GENERATED — DO NOT EDIT`
@@ -264,9 +303,14 @@ has a stream parser.
   from 8 parser files into `vocabulary.rs`; regenerate the committed
   inventory in the same change (`CLAUDINE_UPDATE_INVENTORY=1 cargo nextest
   run -p claudine-cli --test dispatch_inventory`).
-- One gen-side unit test per validation rule in D3 (unknown kind,
-  uppercase needle, empty bucket → generation error naming the offending
-  provider + bucket).
+- One gen-side unit test per validation rule in D3 (unknown kind, uppercase
+  needle, empty needle, empty bucket, duplicate code, missing required parser
+  vocabulary → generation error naming the provider + branch/bucket).
+- During A2, while local constants still exist, a temporary parity test
+  compares the complete generated tables against all eight local tables and
+  Kimi's full numeric mapping, preserving order and duplicates. A3 may remove
+  this migration-only test with the old constants; parser tests remain the
+  durable behavior suite.
 
 ### D7 — The `agent-errors/` research topic (Phase B)
 
@@ -305,6 +349,14 @@ finalized against the then-current Darkmatter grammar in increment B1
 (newer Darkmatter schema updates are landing; B1 re-verifies rather than
 trusting this sketch).
 
+For non-seed evidence, `source` is required by the deterministic coherence
+check even if the sidecar cannot express that conditional constraint. It must
+be a stable citation: an official documentation URL, a commit-pinned source
+permalink with record identity, or an issue URL with provider version/date.
+Search-result URLs and unversioned repository homepages are not evidence.
+`seed` may omit `source`; `empirical` requires a scrubbed fixture path and
+capture notes. Research documents retain citations after runtime projection.
+
 **`_fleet.md` prompt document** instructs each research session to:
 1. Read the provider's **seeded vocabulary** (the Phase A facts entry) as
    the starting point — every seeded needle must reappear in the output
@@ -318,6 +370,10 @@ trusting this sketch).
 4. Record unresearchable areas in `gaps` rather than guessing.
 5. Not research signal *detection* surfaces (exit codes → SignalKind, wire
    event shapes) — that is the `signals/` topic's territory (D9).
+6. Check proposed substrings against representative success/non-error prose
+   and earlier buckets. Broad fragments such as `rate`, `model`, `auth`,
+   `401`, and `403` require a collision/precedence note; evidence that a
+   phrase exists does not prove it is a safe substring classifier.
 
 **Pilot technique:** run ONE provider first, review with Ken, harden the
 sidecar/prompt from what the pilot exposes, then fleet the remaining
@@ -344,6 +400,10 @@ rules, with a Ken checkpoint on the consolidated delta report:
   `evidence: documented | source_code | issue_tracker` + `source`, and each
   addition (or coherent bucket of additions) gets a `classify_error_*` test
   in the same change.
+- **R2a — Additions require discrimination evidence.** Each accepted addition
+  includes a positive fixture and, for broad or overlapping substrings, a
+  negative/collision fixture. Tests assert the winning bucket, not merely
+  that the needle appears in generated output.
 - **R3 — Ordering changes are behavior changes.** A researched re-ordering
   of buckets (or a new bucket inserted mid-cascade) needs explicit
   justification in the delta report; default is to append new buckets after
@@ -403,6 +463,17 @@ only when findings exist. Exact wiring (findings via file read-side
 functions vs `merge_frontmatter`) is a B1 design detail; all primitives
 exist.
 
+The check action must use `no_error: true` (or exit zero after atomically
+writing findings); otherwise a non-zero validation exit stops the stack
+before `resume` can run. B1 chooses one transport and tests it end-to-end:
+the recommended design is an atomically replaced JSON findings file read by
+a read-side expression in both `when` and the resume message. The check first
+removes stale findings; success is absence/empty findings. B2 covers check
+failure → one resume → corrected document → no second resume, plus budget
+exhaustion. Exhaustion must leave a machine-visible failing validation result
+and make B3/C1 fail; it may fall through to **human adjudication**, but must
+not turn a known-bad research document into a successful fleet result.
+
 **Deterministic checks for `agent-errors` (initial set):**
 
 | Check | Catches | On failure |
@@ -426,15 +497,19 @@ checkpoints marked ◆.
 
 **Phase A — plumbing (byte-identical):**
 
-1. **A1 Facts seeding** — `error_vocabulary:` in the 8 stream-parser
-   providers' facts files (verbatim transcription, bucket order preserved,
-   Kimi codes included per Q1); register the field in the mapping registry.
+1. **A1 Facts seeding** — `error_vocabulary:` in the 8 dedicated
+   stream-parser providers' facts files (verbatim transcription, bucket order
+   preserved, Kimi's complete explicit code mapping included per Q1); add the
+   source declaration to the vocabulary loader. Kilo receives an explicit
+   seed copied from OpenCode because it shares that parser today; Phase B
+   researches the copy independently.
 2. **A2 Generator** — emitter + validations + `vocabulary.rs`; generated
-   consts eyeball-diffed against the parser consts before cutover.
+   consts mechanically compared with the still-present parser constants and
+   Kimi code match before cutover (an eyeball diff is supplementary).
 3. **A3 Cutover** — parsers consume `vocabulary::error_keywords(...)`;
-   delete the 8 local consts + kimi's code match; `code_buckets` cascade
-   input added to `common.rs`; full `classify_error_*` suite green;
-   regenerate dispatch inventory.
+   delete the 8 local consts + Kimi's code match; thread provider identity
+   through the shared OpenCode/Kilo parser; add `code_buckets` to the cascade;
+   full `classify_error_*` suite green; regenerate dispatch inventory.
 4. **A4 Docs** — architecture.md (skill) stream section; provider-ladder
    onboarding notes.
 
@@ -490,9 +565,11 @@ Proposals awaiting review (defaults applied unless overruled):
 - **P1 (D8/R1):** seeded/empirical needles are sticky — research never
   removes or re-kinds them; removals need a dedicated fix with a
   reproducing case.
-- **P2 (B3):** research the full 10-provider roster, including providers
-  without a stream parser today (Goose) — their vocabulary generates as
-  present-but-unconsumed, ready for the day they gain structured output.
+- **P2 (B3):** research the full 10-provider roster. Kilo's vocabulary is
+  consumed through the provider-aware shared OpenCode parser. Goose has no
+  structured stream parser, so its findings remain research-only and its
+  runtime table is explicitly empty until a parser lands; parser onboarding
+  is when accepted Goose records become executable and gain classifier tests.
 - **P3 (B2):** pilot provider = Codex (motivating incident, open source),
   explicitly sequenced/coordinated with the signal-assurance plan's Codex
   overload research (D9).
