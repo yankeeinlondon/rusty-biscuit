@@ -1,3 +1,4 @@
+
 ---
 area: "{{ ctx.area }}"
 scope: "{{ctx.area == 'root' ? 'package' : 'package area' }}"
@@ -18,6 +19,9 @@ mode: "append"
 ::block when="area == 'biscuit-tui'"
 - use the 'tui' and 'biscuit-tui' skills
 - use the 'cli' skills too when working with 'biscuit-tui-cli'
+- all scripts used in hook events or resources for slash commands/prompts should be saved to `.claudine/scripts`
+    - prefer Typescript (executed by tsx or bun) over other language choices
+    - bash script is an ok alternative where it's a better fit
 ::end-block
 
 ## Best Practices

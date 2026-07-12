@@ -27,7 +27,7 @@ initialize:
     stack:
         - when: "spec && ( frontmatter(spec, 'reviewed') == true || frontmatter(spec, 'implemented') == true )"
           action:
-              - proxy: "./_reviews/review-feature.md"
+              - proxy: "./_reviews/feature-review.md"
         - when: "spec"
           action:
               - proxy: "./_reviews/review-spec-inline.md"
