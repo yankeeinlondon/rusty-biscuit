@@ -80,6 +80,21 @@ details do not belong here.
 - Use `planning` for physical moves into a `_completed` directory or out of an
   `_unscheduled` directory. An in-place planning-document edit is normally
   `docs`, not `planning`.
+- Deleting a spec from `_unscheduled` with no destination (i.e., retiring an
+  obsolete spec) is `docs(darkmatter)`, not `planning`. The `planning` tag is
+  reserved for physical *moves* with a destination — into `_completed` (archived)
+  or out of `_unscheduled` into an active `features/YYYY-MM-DD-...` directory
+  (scheduled for implementation). A pure deletion with no replacement path
+  matches the established "remove deprecated feature specs" pattern (see
+  `59533a04a docs(darkmatter): remove deprecated feature specs`,
+  `2d24d1f4f docs(darkmatter): remove 2026-07-04-dmls spec and research-areas
+  stragglers`, `532bb8dfb docs(darkmatter): update yaml-component plan and remove
+  obsolete spec`). Verified 2026-07-11 in the darkmatter 2-commit batch: the
+  `_unscheduled/dmlsp/spec.md` retirement used `docs(darkmatter)`, which matches
+  the pattern set by prior `docs(darkmatter): remove deprecated feature specs`
+  commits and reads as "spec is being retired" rather than the misleading
+  "spec is being scheduled" that `planning` would imply when no destination
+  exists.
 - Keep a rename or move atomic and describe the semantic change, not Git's
   similarity score or mechanical file operation.
 
