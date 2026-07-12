@@ -3,8 +3,8 @@ $schema:
     spec: file(required) -> the specification file that will be reviewed
 description: Reviews a draft specification inline and updates the spec file
 
-basename: "$(basename '{{ spec }}')"
-dir: "$(dirname '{{ spec }}')"
+basename: "{{ basename(spec) }}"
+dir: "{{ dirname(spec) }}"
 
 start:
     message: "👀 reviewing the specification file: `{{spec}}`"
