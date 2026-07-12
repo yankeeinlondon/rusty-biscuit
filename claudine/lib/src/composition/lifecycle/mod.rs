@@ -724,7 +724,7 @@ impl<'a> LifecycleRunGuard<'a> {
     pub fn effective_prepared_context(
         &self,
     ) -> Option<&'a darkmatter::markdown::compose::ComposeContext> {
-        if self.proxied && false {
+        if self.proxied {
             None
         } else {
             self.ctx.context
