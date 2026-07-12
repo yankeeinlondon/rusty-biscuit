@@ -508,6 +508,8 @@ mod tests {
             needs_watch_fallback: false,
             supports_file_operations: false,
             supports_workspace_configuration: false,
+            supports_semantic_tokens: false,
+            supports_semantic_tokens_refresh: false,
             supports_folding: false,
             folding_line_only: false,
             supports_selection_range: false,
