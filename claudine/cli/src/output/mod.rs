@@ -22,7 +22,7 @@ use std::path::Path;
 
 use crate::commands::wrap::McpRuntimeInfo;
 use crate::commands::wrap::env::EnvPlan;
-use crate::commands::wrap::profile::WrapperProfile;
+use crate::commands::wrap::profile::{WrapperProfile, profile_for_provider};
 use crate::log;
 
 /// Context for compose/inline-compose mode display in the header.
@@ -713,6 +713,59 @@ pub(crate) fn capitalize_provider(provider: Provider) -> String {
         None => String::new(),
         Some(c) => c.to_uppercase().to_string() + chars.as_str(),
     }
+}
+
+/// Render the one-line execution header for a composition run.
+///
+/// Shared by the up-front emit in `compose` / `inline-compose` (which
+/// resolves the agent eagerly so the line appears immediately) and the
+/// in-pipeline emit for callers that did not pre-render it.
+///
+/// Returns `false` without emitting when `provider` has no wrapper
+/// profile, so the caller leaves the header to the executor rather than
+/// silently dropping it.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn emit_execution_header(
+    provider: Provider,
+    yolo: bool,
+    session_interactive: bool,
+    detail_requested: bool,
+    repo: bool,
+    is_inline: bool,
+    sequence: bool,
+    operation: Option<&str>,
+    file_ref: &str,
+    package_context: Option<claudine::composition::PackageContext>,
+    term: &Terminal,
+) -> bool {
+    let Some(profile) = profile_for_provider(provider) else {
+        return false;
+    };
+    let compose_display = if is_inline {
+        ComposeDisplay::InlineCompose
+    } else {
+        ComposeDisplay::Compose
+    };
+    let header_env_plan = EnvPlan {
+        package_context,
+        ..Default::default()
+    };
+    log_wrapper_header(
+        profile,
+        yolo,
+        !session_interactive,
+        session_interactive,
+        detail_requested,
+        repo,
+        Some(&compose_display),
+        sequence,
+        operation,
+        None, // no inline prompt text for compose
+        Some(file_ref),
+        &header_env_plan,
+        term,
+    );
+    true
 }
 
 #[cfg(test)]
