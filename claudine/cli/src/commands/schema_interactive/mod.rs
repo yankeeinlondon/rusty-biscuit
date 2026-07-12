@@ -16,8 +16,9 @@
 //! caller merges into the existing `--set` / shorthand overrides before
 //! retrying preparation.
 //!
-//! The status report is rendered separately via [`render_status_report`].
-//! Tests should assert on the structured [`SchemaStatusReport`] returned
+//! The status report is rendered separately via [`render_status_report`]
+//! (see the [`status`] submodule). Tests should assert on the structured
+//! [`SchemaStatusReport`](claudine::composition::SchemaStatusReport) returned
 //! by the library rather than the rendered terminal output.
 
 use std::io;
@@ -29,9 +30,8 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::{
     CompositionError, DroppedOptional, FileDetail, InteractiveSchemaOptions, InteractiveShape,
-    MissingProperty, PreValidatedSchema, PropertyState, PropertyStatus, ResolvedCompositionSource,
-    SchemaStatusReport, TextFormat, build_schema_status_report, extract_markdown_detail,
-    pre_validate_schema,
+    MissingProperty, PreValidatedSchema, ResolvedCompositionSource, TextFormat,
+    build_schema_status_report, extract_markdown_detail, pre_validate_schema,
 };
 use biscuit_tui::prelude::*;
 
@@ -40,110 +40,10 @@ use crate::completion::schema_completion::file_candidate_paths;
 use crate::completion::scopes::{self, ScopeContext};
 use crate::log;
 
-/// Render the schema status report to stderr using `biscuit-terminal::Prose`.
-///
-/// The report shows every required and optional property in declaration
-/// order, with state-specific glyphs:
-///
-/// - required + valid:   `<green>✓</green>`
-/// - required + missing: `<red>⍉</red>`
-/// - required + invalid: `!`
-/// - optional + valid:   `<green>✓</green>` (dim)
-/// - optional + missing: `<grey>⍉</grey>` (dim)
-/// - optional + invalid: `<yellow>!</yellow>` (dim)
-///
-/// When at least one optional property has an invalid value, a trailing
-/// note explains that the value will be dropped from the prompt context.
-pub fn render_status_report(report: &SchemaStatusReport, term: &Terminal) {
-    let path_display = report.source_path.display().to_string();
-    let path_escaped = escape_prose(&path_display);
-    let mut body = format!(
-        "- The [{path_label}]({path_url}) prompt has the following schema:",
-        path_label = path_escaped,
-        path_url = path_escaped,
-    );
+mod status;
 
-    if report.raw_json_schema {
-        body.push_str("\n  <dim><i>(raw JSON Schema — per-property metadata unavailable)</i></dim>");
-        let prose = Prose::new(body);
-        log::message(&prose.render(term));
-        return;
-    }
-
-    for status in &report.required {
-        body.push('\n');
-        body.push_str(&render_required_line(status));
-    }
-    for status in &report.optional {
-        body.push('\n');
-        body.push_str(&render_optional_line(status));
-    }
-
-    if report.has_invalid_optional {
-        body.push_str(
-            "\n- **Note:** _optional properties with invalid values will be dropped and the \
-             prompt will execute without them_",
-        );
-    }
-
-    let prose = Prose::new(body);
-    log::message(&prose.render(term));
-}
-
-fn render_required_line(status: &PropertyStatus) -> String {
-    let name = escape_prose(&status.name);
-    let ty = escape_prose(&status.type_label);
-    let desc = description_suffix(status.description.as_deref());
-    match status.state {
-        PropertyState::Valid => format!(
-            "<green>✓</green> <inverse>{name}</inverse>: {ty} <i><dim>- was defined correctly</dim></i>{desc}"
-        ),
-        PropertyState::Invalid => format!(
-            "! <inverse>{name}</inverse>: {ty} <i><dim>- was defined but with the wrong type</dim></i>{desc}"
-        ),
-        PropertyState::Missing => format!(
-            "<red>⍉</red> <inverse>{name}</inverse>: {ty} <i><dim>- was not defined but is required</dim></i>{desc}"
-        ),
-    }
-}
-
-fn render_optional_line(status: &PropertyStatus) -> String {
-    let name = escape_prose(&status.name);
-    let ty = escape_prose(&status.type_label);
-    let desc = description_suffix(status.description.as_deref());
-    match status.state {
-        PropertyState::Valid => format!(
-            "<green>✓</green> <dim><i><inverse>{name}</inverse>: {ty}</i></dim>{desc}"
-        ),
-        PropertyState::Missing => format!(
-            "<grey>⍉</grey> <dim><i><inverse>{name}</inverse>: {ty}</i></dim>{desc}"
-        ),
-        PropertyState::Invalid => format!(
-            "<yellow>!</yellow> <dim><i><inverse>{name}</inverse>: {ty}</i></dim>{desc}"
-        ),
-    }
-}
-
-fn description_suffix(description: Option<&str>) -> String {
-    match description.filter(|d| !d.trim().is_empty()) {
-        Some(desc) => format!(" <i><dim>— {}</dim></i>", escape_prose(desc)),
-        None => String::new(),
-    }
-}
-
-fn escape_prose(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for ch in input.chars() {
-        match ch {
-            '\\' | '<' | '>' | '{' | '"' => {
-                out.push('\\');
-                out.push(ch);
-            }
-            other => out.push(other),
-        }
-    }
-    out
-}
+pub use status::render_status_report;
+use status::escape_prose;
 
 /// Resolve [`InteractiveSchemaOptions`] from the user config plus
 /// current stdin/stderr TTY state and the `--silent` flag.
@@ -806,7 +706,9 @@ fn format_label(prop: &MissingProperty) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::status::{description_suffix, render_optional_line, render_required_line};
     use super::*;
+    use claudine::composition::{PropertyState, PropertyStatus};
 
     fn missing_with_shape(name: &str, shape: InteractiveShape) -> MissingProperty {
         MissingProperty {
