@@ -1,5 +1,11 @@
 # DMLS Manual Smoke Checklist
 
+**Status:** This checklist contains **manual** Level 2 (real-editor) verification
+steps that remain OUTSTANDING. The automated `darkmatter/dmls/tests/lsp_session.rs`
+tests are Level 1 (in-process JSON-RPC protocol tests) and do not exercise real
+editor GUIs or OS-specific rendering. The items below require execution in each
+real editor (VS Code, Zed, Neovim, Helix) on each target OS (macOS, Windows, Linux).
+
 Run this checklist once per target editor after installing `dmls` on `PATH` and
 wiring the editor per its guide in this folder. It exercises every v1 feature
 family end to end. Record results and any client-quirk observations in the
