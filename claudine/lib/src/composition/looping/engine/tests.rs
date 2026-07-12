@@ -8,6 +8,8 @@ use serde_json::json;
 use tempfile::TempDir;
 
 use super::*;
+use super::super::seed::build_loop_seed_with_lifecycle;
+use crate::composition::prepare::prepare_direct;
 use crate::composition::types::{LoopAction, LoopCondition};
 
 /// The loop-engine wiring captures non-empty `timing`/`current` globals so
