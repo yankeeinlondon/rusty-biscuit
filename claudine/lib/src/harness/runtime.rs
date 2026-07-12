@@ -96,17 +96,22 @@ const FAILURE_MESSAGE_MAX_CHARS: usize = 240;
 /// 5. a termination label, falling back to the generic exit-code message so
 ///    the operator is never left without any signal.
 ///
-/// Provider-derived text (sources 1 and 4) is clamped to a single
-/// escape-stripped line of at most [`FAILURE_MESSAGE_MAX_CHARS`] characters.
-/// The `(attempt N)` suffix is appended only when `attempt > 1` — at
-/// attempt 1 it would imply a retry that may never happen.
+/// The whole rendered message — every cascade branch (provider, guard,
+/// timeout, stderr, and the fallbacks) plus any `(attempt N)` suffix — is
+/// passed through one final hygiene stage: escapes stripped, collapsed to a
+/// single line, and clamped so the returned string is always ≤
+/// [`FAILURE_MESSAGE_MAX_CHARS`] characters. The suffix is budget-reserved,
+/// so it survives truncation rather than being cut off. The `(attempt N)`
+/// suffix is appended only when `attempt > 1` — at attempt 1 it would imply
+/// a retry that may never happen.
 pub fn failure_message(outcome: &AttemptOutcome, attempt: u32) -> String {
     let base = base_failure_message(outcome);
-    if attempt > 1 {
-        format!("{base} (attempt {attempt})")
+    let suffix = if attempt > 1 {
+        format!(" (attempt {attempt})")
     } else {
-        base
-    }
+        String::new()
+    };
+    sanitize_message(&base, &suffix)
 }
 
 fn base_failure_message(outcome: &AttemptOutcome) -> String {
@@ -212,10 +217,11 @@ enum LinePick {
     Last,
 }
 
-/// Reduce provider-derived text to a single sanitized headline: strip
-/// escapes, pick the first (structured error message) or last (stderr —
-/// providers print the fatal line last) non-empty line, and clamp to
-/// [`FAILURE_MESSAGE_MAX_CHARS`].
+/// Reduce provider-derived text to its headline line: strip escapes, then
+/// pick the first (structured error message) or last (stderr — providers
+/// print the fatal line last) non-empty line. Length clamping is deferred to
+/// [`sanitize_message`], the single final pass shared by every cascade
+/// branch, so provider text is never double-ellipsized.
 fn headline(text: &str, pick: LinePick) -> Option<String> {
     let stripped = strip_ansi_codes(text);
     let mut lines = stripped.lines().map(str::trim).filter(|line| !line.is_empty());
@@ -223,17 +229,46 @@ fn headline(text: &str, pick: LinePick) -> Option<String> {
         LinePick::First => lines.next(),
         LinePick::Last => lines.next_back(),
     }?;
-    Some(clamp_chars(line))
+    Some(line.to_string())
 }
 
-fn clamp_chars(line: &str) -> String {
-    let mut chars = line.chars();
-    let clamped: String = chars.by_ref().take(FAILURE_MESSAGE_MAX_CHARS).collect();
-    if chars.next().is_some() {
-        format!("{clamped}…")
-    } else {
-        clamped
+/// Final hygiene pass over the complete failure message. Runs over *every*
+/// cascade branch — including guard-context and timeout text that is
+/// interpolated from user-configured `pattern`/`scope` — so no unsanitized
+/// input can reach the lifecycle `err.msg` (TTS, messaging routes, desktop
+/// notifications, stderr banner).
+///
+/// Strips escapes, collapses any surviving newline/control characters to a
+/// single space-joined line, and clamps so that the returned `base + suffix`
+/// is always ≤ [`FAILURE_MESSAGE_MAX_CHARS`]. The suffix budget is reserved
+/// first (and the trailing `…` counts against the cap), so the `(attempt N)`
+/// suffix always survives intact.
+fn sanitize_message(base: &str, suffix: &str) -> String {
+    let single_line = collapse_to_line(&strip_ansi_codes(base));
+    let budget = FAILURE_MESSAGE_MAX_CHARS.saturating_sub(suffix.chars().count());
+    format!("{}{suffix}", clamp_chars(&single_line, budget))
+}
+
+/// Fold a (possibly multi-line) string to a single line: split on any control
+/// character (newlines, tabs, stray escape bytes), trim each segment, and
+/// rejoin with a single space.
+fn collapse_to_line(text: &str) -> String {
+    text.split(|c: char| c.is_control())
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Clamp `line` to at most `budget` characters, reserving one character for
+/// the trailing `…` when truncation occurs so the returned string never
+/// exceeds `budget`.
+fn clamp_chars(line: &str, budget: usize) -> String {
+    if line.chars().count() <= budget {
+        return line.to_string();
     }
+    let clamped: String = line.chars().take(budget.saturating_sub(1)).collect();
+    format!("{clamped}…")
 }
 
 #[cfg(test)]
@@ -255,11 +290,165 @@ mod tests {
         }
     }
 
+    /// One cascade branch, described by the outcome it needs and the headline
+    /// it must render. `build` is a non-capturing closure so each row is a
+    /// self-contained `AttemptOutcome` recipe (mirrors the field-update style
+    /// of the focused tests below).
+    struct Case {
+        name: &'static str,
+        build: fn() -> AttemptOutcome,
+        expected: &'static str,
+    }
+
+    /// Drive every cascade branch through `failure_message` and assert both the
+    /// bare attempt-1 headline and the attempt-2 `… (attempt 2)` form, so the
+    /// uniform suffix policy is demonstrated on *every* source in one place.
     #[test]
-    fn provider_error_message_is_the_message() {
-        let mut o = outcome(ProcessTermination::Completed);
-        o.error_message = Some("Too many requests".into());
-        assert_eq!(failure_message(&o, 1), "Too many requests");
+    fn cascade_and_suffix_matrix() {
+        let cases: &[Case] = &[
+            // Source 1: provider error_message, first non-empty line.
+            Case {
+                name: "provider error_message (rate limit)",
+                build: || {
+                    let mut o = outcome(ProcessTermination::Completed);
+                    o.error_message = Some("Too many requests".into());
+                    o
+                },
+                expected: "Too many requests",
+            },
+            // Source 2: guard context.
+            Case {
+                name: "guard exit-expression with scope",
+                build: || {
+                    let mut o = outcome(ProcessTermination::Aborted);
+                    o.guard_context = Some(GuardContext {
+                        pattern: Some("STOPWIRE".into()),
+                        scope: Some("opencode/kimi".into()),
+                        ..GuardContext::default()
+                    });
+                    o
+                },
+                expected: "exit expression matched (opencode/kimi): STOPWIRE",
+            },
+            Case {
+                name: "guard exit-expression without scope",
+                build: || {
+                    let mut o = outcome(ProcessTermination::Aborted);
+                    o.guard_context = Some(GuardContext {
+                        pattern: Some("STOPWIRE".into()),
+                        ..GuardContext::default()
+                    });
+                    o
+                },
+                expected: "exit expression matched: STOPWIRE",
+            },
+            Case {
+                name: "guard runaway repetition",
+                build: || {
+                    let mut o = outcome(ProcessTermination::Aborted);
+                    o.guard_context = Some(GuardContext {
+                        cycle_len: Some(4),
+                        repeats: Some(35),
+                        ..GuardContext::default()
+                    });
+                    o
+                },
+                expected: "runaway repetition detected (cycle length 4, 35 repeats)",
+            },
+            Case {
+                name: "guard volume cap",
+                build: || {
+                    let mut o = outcome(ProcessTermination::Aborted);
+                    o.guard_context = Some(GuardContext {
+                        lines: Some(52_000),
+                        bytes: Some(1024),
+                        ..GuardContext::default()
+                    });
+                    o
+                },
+                expected: "output volume cap exceeded (52000 lines, 1024 bytes)",
+            },
+            Case {
+                name: "guard stalled generation",
+                build: || {
+                    let mut o = outcome(ProcessTermination::Aborted);
+                    o.guard_context = Some(GuardContext {
+                        generation_count: Some(5),
+                        stall_duration_ms: Some(600_000),
+                        ..GuardContext::default()
+                    });
+                    o
+                },
+                expected: "stalled generation (5 attempts without progress, 10m silence)",
+            },
+            // Source 3: timeout phrasing.
+            Case {
+                name: "step timeout with configured duration",
+                build: || {
+                    let mut o = outcome(ProcessTermination::TimedOut);
+                    o.error_kind = Some("step_timeout".into());
+                    o.timeout_secs = Some(1_800);
+                    o
+                },
+                expected: "step timeout (no output for 30m)",
+            },
+            Case {
+                name: "wall-clock timeout with configured duration",
+                build: || {
+                    let mut o = outcome(ProcessTermination::TimedOut);
+                    o.timeout_secs = Some(7_200);
+                    o
+                },
+                expected: "provider timed out (wall-clock limit 2h)",
+            },
+            // Source 4: stderr last non-empty line wins over the fallback label.
+            Case {
+                name: "stderr last line over exit-code fallback",
+                build: || {
+                    let mut o = outcome(ProcessTermination::Completed);
+                    o.exit_code = 99;
+                    o.stderr_text = Some("warming up...\nError: invalid API key\n\n".into());
+                    o
+                },
+                expected: "Error: invalid API key",
+            },
+            // Source 5: termination-label fallbacks.
+            Case {
+                name: "launch-failure label",
+                build: || outcome(ProcessTermination::LaunchFailed),
+                expected: "failed to launch provider process",
+            },
+            Case {
+                name: "context-less abort label",
+                build: || outcome(ProcessTermination::Aborted),
+                expected: "aborted by content guard",
+            },
+            Case {
+                name: "generic exit-code fallback",
+                build: || {
+                    let mut o = outcome(ProcessTermination::Completed);
+                    o.exit_code = 99;
+                    o
+                },
+                expected: "agent exited with error code 99",
+            },
+        ];
+
+        for case in cases {
+            let o = (case.build)();
+            assert_eq!(
+                failure_message(&o, 1),
+                case.expected,
+                "attempt-1 headline for `{}`",
+                case.name
+            );
+            assert_eq!(
+                failure_message(&o, 2),
+                format!("{} (attempt 2)", case.expected),
+                "attempt-2 suffix for `{}`",
+                case.name
+            );
+        }
     }
 
     #[test]
@@ -271,8 +460,57 @@ mod tests {
 
         o.error_message = Some(long_tail);
         let rendered = failure_message(&o, 1);
-        assert_eq!(rendered.chars().count(), FAILURE_MESSAGE_MAX_CHARS + 1);
+        // The `…` counts against the cap now, so the whole string fits within
+        // FAILURE_MESSAGE_MAX_CHARS rather than spilling one char past it.
+        assert_eq!(rendered.chars().count(), FAILURE_MESSAGE_MAX_CHARS);
         assert!(rendered.ends_with('…'));
+    }
+
+    #[test]
+    fn guard_context_pattern_newline_collapsed_to_single_line() {
+        let mut o = outcome(ProcessTermination::Aborted);
+        o.guard_context = Some(GuardContext {
+            pattern: Some("STOP\nHERE".into()),
+            ..GuardContext::default()
+        });
+        let rendered = failure_message(&o, 1);
+        assert!(!rendered.contains('\n'));
+        assert_eq!(rendered, "exit expression matched: STOP HERE");
+    }
+
+    #[test]
+    fn guard_context_pattern_escapes_stripped() {
+        let mut o = outcome(ProcessTermination::Aborted);
+        o.guard_context = Some(GuardContext {
+            // SGR around the pattern, and an OSC hyperlink in the scope.
+            pattern: Some("\x1b[31mDANGER\x1b[0m".into()),
+            scope: Some("\x1b]8;;http://x\x07opencode\x1b]8;;\x07".into()),
+            ..GuardContext::default()
+        });
+        let rendered = failure_message(&o, 1);
+        assert!(!rendered.contains('\x1b'));
+        assert!(rendered.contains("DANGER"));
+    }
+
+    #[test]
+    fn guard_context_pattern_over_cap_is_clamped() {
+        let mut o = outcome(ProcessTermination::Aborted);
+        o.guard_context = Some(GuardContext {
+            pattern: Some("x".repeat(300)),
+            ..GuardContext::default()
+        });
+        let rendered = failure_message(&o, 1);
+        assert!(rendered.chars().count() <= FAILURE_MESSAGE_MAX_CHARS);
+        assert!(rendered.ends_with('…'));
+    }
+
+    #[test]
+    fn oversized_message_with_suffix_respects_cap_and_keeps_suffix() {
+        let mut o = outcome(ProcessTermination::Completed);
+        o.error_message = Some("x".repeat(300));
+        let rendered = failure_message(&o, 2);
+        assert!(rendered.chars().count() <= FAILURE_MESSAGE_MAX_CHARS);
+        assert!(rendered.ends_with("(attempt 2)"));
     }
 
     #[test]
@@ -291,110 +529,48 @@ mod tests {
     }
 
     #[test]
-    fn guard_context_exit_expression() {
-        let mut o = outcome(ProcessTermination::Aborted);
-        o.guard_context = Some(GuardContext {
-            pattern: Some("STOPWIRE".into()),
-            scope: Some("opencode/kimi".into()),
-            ..GuardContext::default()
-        });
-        assert_eq!(
-            failure_message(&o, 1),
-            "exit expression matched (opencode/kimi): STOPWIRE"
-        );
+    fn provider_error_message_outranks_stderr() {
+        // Source 1 beats source 4: a present provider message wins even when
+        // stderr also carries a plausible fatal line.
+        let mut o = outcome(ProcessTermination::Completed);
+        o.exit_code = 99;
+        o.error_message = Some("Too many requests".into());
+        o.stderr_text = Some("Error: invalid API key".into());
+        assert_eq!(failure_message(&o, 1), "Too many requests");
     }
 
     #[test]
-    fn guard_context_repetition_volume_stall() {
-        let mut o = outcome(ProcessTermination::Aborted);
-        o.guard_context = Some(GuardContext {
-            cycle_len: Some(4),
-            repeats: Some(35),
-            ..GuardContext::default()
-        });
-        assert_eq!(
-            failure_message(&o, 1),
-            "runaway repetition detected (cycle length 4, 35 repeats)"
-        );
-
-        o.guard_context = Some(GuardContext {
-            lines: Some(52_000),
-            bytes: Some(1024),
-            ..GuardContext::default()
-        });
-        assert_eq!(
-            failure_message(&o, 1),
-            "output volume cap exceeded (52000 lines, 1024 bytes)"
-        );
-
-        o.guard_context = Some(GuardContext {
-            generation_count: Some(5),
-            stall_duration_ms: Some(600_000),
-            ..GuardContext::default()
-        });
-        assert_eq!(
-            failure_message(&o, 1),
-            "stalled generation (5 attempts without progress, 10m silence)"
-        );
-    }
-
-    #[test]
-    fn aborted_without_context_falls_back_to_label() {
-        let o = outcome(ProcessTermination::Aborted);
-        assert_eq!(failure_message(&o, 1), "aborted by content guard");
-    }
-
-    #[test]
-    fn timeout_phrasing_by_error_kind_and_duration() {
+    fn timeout_phrasing_without_configured_duration() {
+        // The two no-`timeout_secs` timeout branches the matrix does not cover.
         let mut o = outcome(ProcessTermination::TimedOut);
         o.error_kind = Some("step_timeout".into());
-        o.timeout_secs = Some(1_800);
-        assert_eq!(failure_message(&o, 1), "step timeout (no output for 30m)");
-
-        o.timeout_secs = None;
         assert_eq!(failure_message(&o, 1), "step timeout (no stream output)");
 
         o.error_kind = None;
-        o.timeout_secs = Some(7_200);
-        assert_eq!(
-            failure_message(&o, 1),
-            "provider timed out (wall-clock limit 2h)"
-        );
-
-        o.timeout_secs = None;
         assert_eq!(failure_message(&o, 1), "provider timed out");
     }
 
     #[test]
-    fn stderr_last_nonempty_line_wins_over_fallback() {
+    fn stderr_last_line_ansi_stripped() {
+        // Source 4 is a distinct line-pick branch (LAST meaningful line) and
+        // must be escape-stripped like the provider branch.
         let mut o = outcome(ProcessTermination::Completed);
         o.exit_code = 99;
-        o.stderr_text = Some("warming up...\nError: invalid API key\n\n".into());
-        assert_eq!(failure_message(&o, 1), "Error: invalid API key");
+        o.stderr_text = Some("warming up...\n\x1b[31mError: invalid API key\x1b[0m".into());
+        let rendered = failure_message(&o, 1);
+        assert!(!rendered.contains('\x1b'));
+        assert_eq!(rendered, "Error: invalid API key");
     }
 
     #[test]
-    fn launch_failed_and_exit_code_fallbacks() {
-        let o = outcome(ProcessTermination::LaunchFailed);
-        assert_eq!(failure_message(&o, 1), "failed to launch provider process");
-
+    fn stderr_oversized_last_line_clamped_to_single_line() {
+        // Single-line + 240-char final length on a non-provider branch.
         let mut o = outcome(ProcessTermination::Completed);
         o.exit_code = 99;
-        assert_eq!(failure_message(&o, 1), "agent exited with error code 99");
-    }
-
-    #[test]
-    fn attempt_suffix_only_after_first_attempt() {
-        let mut o = outcome(ProcessTermination::Completed);
-        o.error_message = Some("Too many requests".into());
-        assert_eq!(failure_message(&o, 1), "Too many requests");
-        assert_eq!(failure_message(&o, 2), "Too many requests (attempt 2)");
-
-        o.error_message = None;
-        o.exit_code = 7;
-        assert_eq!(
-            failure_message(&o, 3),
-            "agent exited with error code 7 (attempt 3)"
-        );
+        o.stderr_text = Some(format!("warming up...\n{}", "x".repeat(300)));
+        let rendered = failure_message(&o, 1);
+        assert_eq!(rendered.lines().count(), 1);
+        assert!(rendered.chars().count() <= FAILURE_MESSAGE_MAX_CHARS);
+        assert!(rendered.ends_with('…'));
     }
 }

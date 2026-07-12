@@ -106,6 +106,7 @@ pub use types::{
     CompositionExecutionRequest, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
     InstalledProviderSnapshot, LoopAction, LoopCondition, LoopConfig, ModelHint,
     ModelResolutionReason, OnRateLimit, OutputFormat, PickerInfluence, PreparedComposition,
+    RematerializeInputs,
     ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason, ResolutionMode,
     ResolvedCompositionSource, ResolvedExecutionTarget, ResolvedSessionInteractivity,
     SelectedProvider, SelectionReason, SessionInteractivitySource, SequenceExecutionOptions,

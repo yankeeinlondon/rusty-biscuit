@@ -1,6 +1,6 @@
 //! Core types for composition workflows.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -481,6 +481,27 @@ pub struct EffectiveSelectionHints {
     pub agent_was_list: bool,
 }
 
+/// Caller-supplied compose inputs needed to faithfully re-materialize a
+/// composition on a later harness-loop iteration.
+///
+/// After a flow-control re-entry (`retry`/`resume`/`proxy`) the harness loop
+/// re-composes the document from disk rather than reusing the first attempt's
+/// prepared prompt. Re-composition must reproduce the same inputs the original
+/// [`prepare_direct`][super::prepare_direct] /
+/// [`prepare_inline`][super::prepare_inline] saw, or the re-materialized
+/// document loses the caller's `--set` params, launch-area file-ref anchor,
+/// and pre-approved shell commands — so a `$schema`-bearing target (e.g. a
+/// `proxy` hand-off) fails validation for a `spec` it was never handed.
+#[derive(Debug, Clone, Default)]
+pub struct RematerializeInputs {
+    /// Frontmatter `--set` overrides (JSON object) the caller supplied.
+    pub set_overrides: Option<serde_json::Value>,
+    /// Launch-area directory that anchors caller-supplied file references.
+    pub file_ref_fallback_dir: Option<PathBuf>,
+    /// Shell commands approved during the original pre-flight discovery.
+    pub pre_approved_commands: Option<HashSet<String>>,
+}
+
 /// A composition prepared with effective (composed) frontmatter.
 ///
 /// This struct carries the full effective frontmatter after Darkmatter
@@ -527,6 +548,10 @@ pub struct PreparedComposition {
     /// during the initial compose. Dry-run output consumes this so a raw
     /// span reads as intentional rather than as an unresolved-variable bug.
     pub deferred_lifecycle_keys: Vec<String>,
+    /// Caller-supplied inputs the harness loop re-applies when it re-composes
+    /// this document after a `retry`/`resume`/`proxy` re-entry. See
+    /// [`RematerializeInputs`].
+    pub rematerialize: RematerializeInputs,
 }
 
 /// How the composition result should be applied after provider execution.

@@ -175,6 +175,14 @@ pub fn prepare_direct(
     .with_incidental_newline_mode(
         darkmatter::markdown::cleanup::IncidentalNewlineMode::Preserve,
     );
+    // Retain the caller's inputs so the harness loop can re-apply them when it
+    // re-composes this document after a `retry`/`resume`/`proxy` re-entry (they
+    // are otherwise consumed into `compose_opts` below).
+    let rematerialize = super::RematerializeInputs {
+        set_overrides: options.set_overrides.clone(),
+        file_ref_fallback_dir: options.file_ref_fallback_dir.clone(),
+        pre_approved_commands: options.pre_approved_commands.clone(),
+    };
     if let Some(overrides) = options.set_overrides {
         compose_opts = compose_opts.with_set_overrides(overrides);
     }
@@ -273,6 +281,7 @@ pub fn prepare_direct(
         compose_perf: report.perf,
         dropped_optionals: Vec::new(),
         warnings: report.warnings.clone(),
+        rematerialize,
     })
 }
 
@@ -342,6 +351,13 @@ pub fn prepare_inline(
     .with_incidental_newline_mode(
         darkmatter::markdown::cleanup::IncidentalNewlineMode::Preserve,
     );
+    // Retain the caller's inputs for faithful re-materialization on a
+    // `retry`/`resume`/`proxy` re-entry (see `prepare_direct`).
+    let rematerialize = super::RematerializeInputs {
+        set_overrides: options.set_overrides.clone(),
+        file_ref_fallback_dir: options.file_ref_fallback_dir.clone(),
+        pre_approved_commands: options.pre_approved_commands.clone(),
+    };
     if let Some(overrides) = options.set_overrides {
         compose_opts = compose_opts.with_set_overrides(overrides);
     }
@@ -442,6 +458,7 @@ pub fn prepare_inline(
         compose_perf: report.perf,
         dropped_optionals: Vec::new(),
         warnings: report.warnings.clone(),
+        rematerialize,
     })
 }
 
