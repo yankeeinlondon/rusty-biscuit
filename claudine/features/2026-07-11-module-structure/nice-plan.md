@@ -68,6 +68,73 @@ documentation:
 packages:
   - claudine
   - claudine-cli
+source_files_during_phase_1:
+  - claudine/lib/src/lib.rs
+  - claudine/lib/src/hook_adapters/mod.rs
+  - claudine/lib/src/hook_adapters/claude.rs
+  - claudine/lib/src/hook_adapters/codex.rs
+  - claudine/lib/src/hook_adapters/gemini.rs
+  - claudine/lib/src/hook_adapters/goose.rs
+  - claudine/lib/src/hook_adapters/kimicode.rs
+  - claudine/lib/src/hook_adapters/opencode.rs
+  - claudine/lib/src/hook_adapters/qwen.rs
+  - claudine/lib/src/hook_adapters/pi.rs
+  - claudine/lib/src/hook_adapters/antigravity.rs
+  - claudine/lib/src/dispatch/mod.rs
+  - claudine/lib/src/error.rs
+  - claudine/lib/src/provider/behavior.rs
+  - claudine/lib/src/provider/claude/behavior.rs
+  - claudine/lib/src/provider/codex/behavior.rs
+  - claudine/lib/src/provider/gemini/behavior.rs
+  - claudine/lib/src/provider/goose/behavior.rs
+  - claudine/lib/src/provider/kimi/behavior.rs
+  - claudine/lib/src/provider/kilo/behavior.rs
+  - claudine/lib/src/provider/opencode/behavior.rs
+  - claudine/lib/src/provider/pi/behavior.rs
+  - claudine/lib/src/provider/qwen/behavior.rs
+  - claudine/lib/src/provider/antigravity/behavior.rs
+  - claudine/lib/tests/diagnostic_detail_conformance.rs
+  - claudine/docs/providers/dispatch-inventory.json
+docs_updated_during_phase_1:
+  - claudine/lib/README.md
+  - .claude/skills/claudine/architecture.md
+  - .claude/skills/claudine/SKILL.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+  - .claude/skills/claudine/architecture.md
+  - .claude/skills/claudine/SKILL.md
+source_files_during_phase_2:
+  - claudine/lib/src/composition/hints.rs
+  - claudine/lib/src/composition/prepare.rs
+  - claudine/lib/src/composition/mod.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/lib/src/composition/looping/types.rs
+  - claudine/lib/src/composition/looping/seed.rs
+  - claudine/lib/src/composition/looping/engine.rs
+  - claudine/lib/src/composition/looping/engine/tests.rs
+  - claudine/lib/src/composition/looping/mod.rs
+docs_updated_during_phase_3:
+  - .claude/skills/claudine/architecture.md
+  - .opencode/skill/claudine/architecture.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/claudine/architecture.md
+  - .opencode/skill/claudine/architecture.md
+source_files_during_phase_4:
+  - claudine/lib/src/linking/compatibility/mod.rs
+  - claudine/lib/src/linking/compatibility/classify.rs
+  - claudine/lib/src/linking/compatibility/frontmatter_io.rs
+  - claudine/lib/src/linking/compatibility/properties.rs
+  - claudine/lib/src/render/event_renderer/mod.rs
+  - claudine/lib/src/render/event_renderer/helpers.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+packages:
+  - claudine
 ---
 
 # Nice-to-Have Module-Structure Refactor — Execution Plan
@@ -206,9 +273,9 @@ trait via `provider::behavior`).
 - Move: `claudine/lib/src/adapters/` → `claudine/lib/src/hook_adapters/`
 - Modify: `claudine/lib/src/lib.rs`
 
-- [ ] `git mv claudine/lib/src/adapters claudine/lib/src/hook_adapters`
-- [ ] In `lib.rs:2` change `pub mod adapters;` → `pub mod hook_adapters;`
-- [ ] Verify the crate still compiles (errors will point at the 13 importers)
+- [x] `git mv claudine/lib/src/adapters claudine/lib/src/hook_adapters`
+- [x] In `lib.rs:2` change `pub mod adapters;` → `pub mod hook_adapters;`
+- [x] Verify the crate still compiles (errors will point at the 13 importers)
 
 ### Step 1.2 — Update the 13 external importers
 
@@ -219,10 +286,10 @@ trait via `provider::behavior`).
 - `claudine/lib/src/provider/{claude,codex,gemini,goose,kimi,kilo,opencode,pi,
   qwen,antigravity}/behavior.rs`
 
-- [ ] Find/replace `crate::adapters` → `crate::hook_adapters` in each
-- [ ] Update any doc comments / `///` references that spell out the
+- [x] Find/replace `crate::adapters` → `crate::hook_adapters` in each
+- [x] Update any doc comments / `///` references that spell out the
       `adapters::` path
-- [ ] Verify: `just test` + `just lint`
+- [x] Verify: `just test` + `just lint`
 
 ### Step 1.3 — Update internal cross-references and docs
 
@@ -237,14 +304,14 @@ trait via `provider::behavior`).
       doc pass (out of scope for a code move), but add a one-line note in the
       architecture doc that `hook_adapters/` ≠ `stream/providers/`
 
-- [ ] Verify: `just test` + `just lint`
+- [x] Verify: `just test` + `just lint`
 
 ### Phase 1 Exit Criteria
 
-- [ ] `just test` + `just lint` pass
-- [ ] No `crate::adapters` reference remains (`rg "crate::adapters"` returns
+- [x] `just test` + `just lint` pass
+- [x] No `crate::adapters` reference remains (`rg "crate::adapters"` returns
       nothing outside `hook_adapters/` itself)
-- [ ] `architecture.md` reflects the new name
+- [x] `architecture.md` reflects the new name
 
 ---
 
@@ -274,25 +341,25 @@ Move from `prepare.rs`:
   elsewhere and only assembled here, keep the assembly call site in `prepare.rs`
   and move only the parsing fns)
 
-- [ ] Create `hints.rs` with `use super::*;` (or targeted imports for
+- [x] Create `hints.rs` with `use super::*;` (or targeted imports for
       `CompositionError`, the `AgentHint`/`ModelHint`/`InteractiveHint` types,
       and the frontmatter `Map` accessors)
-- [ ] In `prepare.rs`, replace the two inline call sites (213, 370) with calls
+- [x] In `prepare.rs`, replace the two inline call sites (213, 370) with calls
       into `super::hints::…` (or keep the calls identical if the items are
       re-exported)
-- [ ] Declare `pub mod hints;` in `composition/mod.rs`; re-export
+- [x] Declare `pub mod hints;` in `composition/mod.rs`; re-export
       `parse_selection_hints_from_frontmatter` if it is currently public via
       the `prepare` barrel
-- [ ] Verify the public barrel (`composition/mod.rs:82` `pub use prepare::{…}`)
+- [x] Verify the public barrel (`composition/mod.rs:82` `pub use prepare::{…}`)
       still exports the same names
-- [ ] Verify: `just test` + `just lint`
+- [x] Verify: `just test` + `just lint`
 
 ### Phase 2 Exit Criteria
 
-- [ ] `just test` + `just lint` pass
-- [ ] `prepare.rs` no longer contains hint-parsing logic
-- [ ] `hints.rs` holds the hint cluster
-- [ ] No public-API name changed
+- [x] `just test` + `just lint` pass
+- [x] `prepare.rs` no longer contains hint-parsing logic
+- [x] `hints.rs` holds the hint cluster
+- [x] No public-API name changed
 
 ---
 
@@ -322,13 +389,13 @@ Move from `engine.rs` (lines 29–188):
 - `LoopIterationOutput` (88) + impl (124)
 - `LoopExecutionResult` (189) + impl (207)
 
-- [ ] `types.rs` starts with `use super::*;` for shared imports; make any
+- [x] `types.rs` starts with `use super::*;` for shared imports; make any
       cross-references (`LoopAmbient`, `LoopAction`, etc.) explicit
-- [ ] `engine.rs` declares `use super::types::*;` (or `mod types;` in
+- [x] `engine.rs` declares `use super::types::*;` (or `mod types;` in
       `looping/mod.rs` and import from there)
-- [ ] `looping/mod.rs` re-exports the types so the `composition` barrel
+- [x] `looping/mod.rs` re-exports the types so the `composition` barrel
       (`pub use looping::{…}`) is unchanged
-- [ ] Verify: `just test` + `just lint`
+- [x] Verify: `just test` + `just lint`
 
 ### Step 3.2 — Carve seed building into `looping/seed.rs`
 
@@ -341,25 +408,25 @@ Move from `engine.rs` (lines 276–370):
 - `LoopSeed` (294)
 - `build_loop_seed_with_lifecycle` (317)
 
-- [ ] `seed.rs` imports the types from `super::types`; the engine calls
+- [x] `seed.rs` imports the types from `super::types`; the engine calls
       `super::seed::build_loop_seed(…)`
-- [ ] Re-export through `looping/mod.rs` so the barrel is unchanged
-- [ ] Verify: `just test` + `just lint`
+- [x] Re-export through `looping/mod.rs` so the barrel is unchanged
+- [x] Verify: `just test` + `just lint`
 
 ### Step 3.3 — Confirm `engine.rs` is the engine only
 
-- [ ] `engine.rs` now starts at the `execute_loop` family (line ~371
+- [x] `engine.rs` now starts at the `execute_loop` family (line ~371
       pre-carve) and holds only the execution/routing/gate logic
-- [ ] Update `.opencode/skill/claudine/architecture.md` module map to note
+- [x] Update `.opencode/skill/claudine/architecture.md` module map to note
       `looping/{engine,types,seed,config,dsl,actions,expression}.rs`
-- [ ] Verify: `just test` + `just lint`
+- [x] Verify: `just test` + `just lint`
 
 ### Phase 3 Exit Criteria
 
-- [ ] `just test` + `just lint` pass
-- [ ] `engine.rs` contains only execution/routing/gate logic
-- [ ] `types.rs` and `seed.rs` hold the carved blocks
-- [ ] No public-API name changed (barrel unchanged)
+- [x] `just test` + `just lint` pass
+- [x] `engine.rs` contains only execution/routing/gate logic
+- [x] `types.rs` and `seed.rs` hold the carved blocks
+- [x] No public-API name changed (barrel unchanged)
 
 ---
 
@@ -401,16 +468,16 @@ Move:
       `yaml_value_to_string`, `get_frontmatter_value`, `frontmatter_has_value`,
       `yaml_value_has_data`, `hash_frontmatter`, `normalize_key`)
 
-- [ ] Each submodule starts with `use super::*;`; cross-cluster references go
+- [x] Each submodule starts with `use super::*;`; cross-cluster references go
       through `pub(super)`
-- [ ] `mod.rs` re-exports the public entry points (`classify_canonical_candidate`,
+- [x] `mod.rs` re-exports the public entry points (`classify_canonical_candidate`,
       `classify_target_reference`) so consumers of `linking::compatibility::…`
       are unchanged
-- [ ] The `mod tests` (648) stays in `mod.rs` or splits per submodule —
+- [x] The `mod tests` (648) stays in `mod.rs` or splits per submodule —
       prefer leaving it in `mod.rs` (it likely exercises the public entry
       points end-to-end); if a test is unit-scoped to a helper, move it with
       the helper
-- [ ] Verify: `just test` + `just lint`
+- [x] Verify: `just test` + `just lint`
 
 ### Step 4.2 — Modest carve for `render/event_renderer/mod.rs`
 
@@ -421,26 +488,27 @@ Move:
 This file already has three submodules (`error_block`, `provider_extension`,
 `tool_use`). The realistic move is limited:
 
-- [ ] Move the free helper `subagent_description` (436) and any other
+- [x] Move the free helper `subagent_description` (436) and any other
       self-contained free render helpers into `helpers.rs`
-- [ ] **Do not** force-split the `EventRenderer` impl (94–435) — it is a
+- [x] **Do not** force-split the `EventRenderer` impl (94–435) — it is a
       cohesive state machine; splitting it would create artificial coupling,
       the opposite of the hygiene goal
-- [ ] If, after moving the free helpers, `mod.rs` is still > ~400 logic lines,
+- [x] If, after moving the free helpers, `mod.rs` is still > ~400 logic lines,
       consider extracting the largest self-contained render *methods* (e.g. a
       tool-use rendering block) into an existing submodule — but only if the
       extraction is clean. If not, stop: the file already meets the "named
       submodules" bar better than `compatibility/mod.rs` did
-- [ ] Verify: `just test` + `just lint`
+- [x] Verify: `just test` + `just lint`
 
 ### Phase 4 Exit Criteria
 
-- [ ] `just test` + `just lint` pass
-- [ ] `linking/compatibility/mod.rs` is a declaration/re-export root (~100
-      lines, down from 1,186)
-- [ ] `render/event_renderer/mod.rs` free helpers are extracted; the impl is
+- [x] `just test` + `just lint` pass
+- [x] `linking/compatibility/mod.rs` is a declaration/re-export root (~40
+      lines of declarations/re-exports + co-located test module, down from
+      1,186)
+- [x] `render/event_renderer/mod.rs` free helpers are extracted; the impl is
       left cohesive
-- [ ] No public-API name changed
+- [x] No public-API name changed
 
 ---
 
