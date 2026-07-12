@@ -42,6 +42,17 @@ details do not belong here.
   paths rather than preserving a different staged snapshot. Therefore, do not
   use it on an `MM` or `AM` path unless the working tree and staged content have
   first become identical through changes made by the caller.
+- **For an `MM` path whose staged snapshot must be committed while preserving
+  unstaged edits, use a temporary-index plumbing fallback rather than
+  `git commit --only` (2026-07-11 claudine dispatch-inventory batch).** Capture
+  the original staged entry with `git ls-files -s -- <path>`, create a temp
+  index from the current HEAD with `git read-tree`, overlay that captured entry
+  via `git update-index --index-info`, write the tree, create the commit with
+  `git commit-tree -F -`, and advance `HEAD` with `git update-ref HEAD
+  <new-commit> <old-head>` so the ref update is CAS-protected. Rebuild the temp
+  index and retry if the CAS fails. This preserves the caller's working-tree
+  edits and avoids staging/unstaging in the real index; use it only when the
+  staged snapshot cannot safely be reported as blocked.
 - For a rename, include both the old and new paths so the deletion and addition
   remain in the same commit.
 - Put all Git options before `--`. For very large explicit path lists, use
@@ -81,6 +92,12 @@ details do not belong here.
   subagent with a successful commit on disk but no way to capture its hash
   for verification. Use `commit_status` (or similar) instead. The
   underlying commit is unaffected; the fix is to rename the local variable.
+- **In zsh, never use `path` as a shell variable name in commit wrappers
+  (2026-07-11 claudine dispatch-inventory batch).** `path` is tied to the
+  shell's executable search path; assigning a scalar like
+  `path="claudine/docs/providers/dispatch-inventory.json"` can clobber PATH
+  and make the next command fail with `zsh: command not found: git`. Use
+  `file_path`, `target_path`, or another non-special name instead.
 - **Never run `git commit --amend` after a successful commit in a concurrent
   batch (2026-07-09 dmls + darkmatter batch, stray `7873a9a05`).** Once
   `git commit` returns zero, treat the commit as final for that invocation.
