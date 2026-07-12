@@ -414,6 +414,20 @@ Markdown frontmatter-based composition pipelines for delivering prompts to provi
 - **Inline composition** (`--frontmatter-prompt`): reads frontmatter `prompt` field as input, replaces document body with provider output
 - **Chained composition** (`--compose`): composes full document as prompt without file mutation
 
+The CLI executor under `cli/src/commands/wrap/composition/` keeps the entry and
+setup pipeline in `mod.rs`, with incidental concerns split by responsibility:
+
+- `selection.rs` — favorite-provider and model-override configuration loading
+- `launch.rs` — launch-workspace selection and `--repo` detection enforcement
+- `preflight.rs` — blocked/finalize lifecycle routing before provider launch
+- `runner.rs` — the named per-iteration `run_composition_body` runner and its
+  `CompositionRunCtx`
+- `dry_run.rs`, `prep_context.rs`, `target.rs`, and `timeouts.rs` — rendering,
+  shared discovery context, execution-target resolution, and timeout resolution
+
+Composition execution headers are shared output helpers in
+`cli/src/output/mod.rs`; they do not live in the executor pipeline.
+
 ## Test Placement
 
 **Inline tests** (`#[cfg(test)] mod tests { … }`) are the default for small files. Once a file exceeds **~800 production lines** or its test module exceeds **~300 lines**, move tests to a sibling file declared via `#[cfg(test)] mod tests;` at the bottom of the parent. This pattern is already established in `lib/src/provider/`, `cli/…/wrap/composition/`, and `cli/…/wrap/exec/wiring/`.
