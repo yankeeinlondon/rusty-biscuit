@@ -505,4 +505,30 @@ mod tests {
         assert_eq!(found[0].content, " {{ x }} ");
         assert!(interpolations(text, 0).is_empty());
     }
+
+    #[test]
+    fn interpolations_inside_fenced_code_are_not_surfaced() {
+        // Semantic-token parity with diagnostics: a `{{ … }}` written inside a
+        // fenced code block must not become a token.
+        let text = "Real {{ shown }}\n\n```\n{{ hidden }}\n```\n";
+        let found = interpolations(text, 0);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].text, "shown");
+    }
+
+    #[test]
+    fn literals_inside_fenced_code_are_not_surfaced() {
+        let text = "Real {{{ shown }}}\n\n```\n{{{ hidden }}}\n```\n";
+        let found = literals(text, 0);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].content, " shown ");
+    }
+
+    #[test]
+    fn unclosed_interpolation_yields_no_token() {
+        // An unclosed or otherwise malformed construct emits nothing; guessing an
+        // end span would make token output flicker while the user types.
+        assert!(interpolations("Hello {{ title", 0).is_empty());
+        assert!(interpolations("Hello {{ title }", 0).is_empty());
+    }
 }

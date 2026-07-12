@@ -198,6 +198,25 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
     );
     assert!(links.error.is_none());
 
+    // Semantic tokens tokenize the `{{ }}`, `::shell`, `::url`, and image spans
+    // without executing or fetching anything (spec criterion 8).
+    let full = fixture.request(
+        "textDocument/semanticTokens/full",
+        json!({ "textDocument": { "uri": doc_uri.as_str() } }),
+    );
+    assert!(full.error.is_none(), "semanticTokens/full errored: {:?}", full.error);
+    let range = fixture.request(
+        "textDocument/semanticTokens/range",
+        json!({
+            "textDocument": { "uri": doc_uri.as_str() },
+            "range": {
+                "start": { "line": 0, "character": 0 },
+                "end": { "line": 20, "character": 0 }
+            }
+        }),
+    );
+    assert!(range.error.is_none(), "semanticTokens/range errored: {:?}", range.error);
+
     fixture.shutdown();
 
     // The marquee guarantee: no shell directive ran, so the sentinel was never

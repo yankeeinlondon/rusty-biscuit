@@ -623,6 +623,17 @@ mod tests {
     }
 
     #[test]
+    fn unknown_directive_is_not_surfaced_but_recognized_one_is() {
+        // A `::`-prefixed line that is not one of the twelve keywords never
+        // produces a `ParsedDirective`, so it stays distinguishable from a
+        // recognized directive (semantic tokens style only the recognized set).
+        let source = "::frobnicate ./x.md\n::file ./y.md\n";
+        let directives = scan_darkmatter_directives(source);
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].kind, DirectiveKind::File);
+    }
+
+    #[test]
     fn file_links_prefix_wins_over_file() {
         let source = "::file-links ./notes\n";
         let directives = scan_darkmatter_directives(source);

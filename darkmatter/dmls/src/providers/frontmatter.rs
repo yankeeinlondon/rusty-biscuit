@@ -362,8 +362,17 @@ fn schema_hover(ctx: &DocumentContext, entry: &FmEntry) -> Option<Hover> {
 /// default values. Kept pure (no `DocumentContext`) so the formatting rule is
 /// unit-testable without an LSP session.
 pub(crate) fn schema_hover_body(key: &str, def: &PropertyDef) -> Option<String> {
+    let details = schema_hover_details(def)?;
+    Some(format!("**`{key}`**\n\n{details}"))
+}
+
+/// The schema-hover body **without** the leading `**`key`**` heading: type,
+/// required, enum, default, and description. Callers that already display the
+/// property name in their own header (e.g. the interpolation hover's
+/// `**Expression**` block) use this to avoid repeating the name.
+pub(crate) fn schema_hover_details(def: &PropertyDef) -> Option<String> {
     let atom = primary_atom(def)?;
-    let mut lines = vec![format!("**`{key}`**")];
+    let mut lines = Vec::new();
 
     let type_line = match &atom.ty {
         TypeExpr::Primitive(ty) => {

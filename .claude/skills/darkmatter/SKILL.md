@@ -1,7 +1,7 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-20b7b5a7168eab1a
+hash: 87f17662fa397abe-b91731297cf7c4cc
 last_updated: 2026-07-11
 ---
 
@@ -489,6 +489,33 @@ the extension downloads by. The release-build performance sign-off
 AD-2 verdict — full repo (3,141 files) ~1.9 s cold, `vault-5k` ~0.5 s, both
 inside the R-6 budget — so the v1 in-memory-only model stands and no warm-start
 cache is built. See `darkmatter/features/2026-07-04-dmls/plan.md`.
+
+Semantic tokens (`darkmatter/features/2026-07-11-semantic-tokens/`) add a
+**standalone** `providers::semantic_tokens` module (not registry-merged — one
+correct answer, like Phase 10's editing providers): the frozen V1 wire legend
+(standard types `macro`/`function`/`variable`/`property`/`string`/`number`/
+`operator`; custom modifiers `interpolation`/`inert`/`directive`/`closer`/`wiki`/
+`injected` then standard `defaultLibrary`/`readonly`), a private `RawToken`
+model, three pure `(text, body_base) → Vec<RawToken>` family emitters over the
+existing passive scanners (F1 `overlay::expressions::{interpolations,literals}`
+→ whole-span `macro.interpolation` `+inert`; F2 `scan_darkmatter_directives` +
+`scan_disclosures` → `macro.directive` `+closer`, `string`/`property.directive`
+targets/options, disclosure style split at source `=`; F4 `scan_wiki_links` →
+`macro.wiki` frame + `string.wiki` segments), and one deterministic pipeline
+(family precedence F1 > F4 > F2 with clipping, half-open range intersection,
+per-line splitting via `SourceMap::split_span_by_line`, byte→position, sort/dedup,
+overlap assertion, LSP relative-delta encode). `ScannedWikiLink` gained
+`hash_span`/`pipe_span`/`alias_span` (source-derived, single-byte separators) so
+the provider never reconstructs spans from decoded strings. `full` + `range`
+handlers route through the router (standalone, missing-doc → `null`), gated on
+`ClientProfile.supports_semantic_tokens`; `SemanticTokensConfig { enable }`
+(default true) is the master switch and `wiki.enable = false` suppresses only F4;
+`didChangeConfiguration` sends `workspace/semanticTokens/refresh` when
+`supports_semantic_tokens_refresh`. Delta, F3 fine-grained expressions, F5
+frontmatter, and F6 shell payloads are deferred. Per-editor styling recipes
+(VS Code `semanticTokenColorCustomizations`, Neovim `@lsp.*` highlight links,
+Zed `"semantic_tokens": "combined"` opt-in + theme override — Helix is
+capability-gated off) live in `darkmatter/dmls/docs/editors/`.
 
 ## Expression Function Registrations
 

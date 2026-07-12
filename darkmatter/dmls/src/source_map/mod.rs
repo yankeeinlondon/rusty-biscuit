@@ -181,6 +181,46 @@ impl SourceMap {
         self.byte_range_to_lsp(region.project_span(relative)?)
     }
 
+    /// Splits a byte span into per-line content subspans.
+    ///
+    /// Each returned subspan is confined to a single line and excludes that
+    /// line's terminator (`\r\n`, `\n`, or lone `\r`), so a multi-line span is
+    /// projected to one non-empty token per line. Empty fragments (a span that
+    /// begins or ends inside a terminator, or covers only line breaks) are
+    /// omitted. This is the LSP-safe way to satisfy the semantic-token rule
+    /// that every token stays on one line regardless of client multiline
+    /// support.
+    ///
+    /// ## Returns
+    ///
+    /// An empty vector for an empty/inverted span or a `start` offset that is
+    /// out of bounds or mid-codepoint.
+    pub fn split_span_by_line(&self, span: SourceSpan) -> Vec<SourceSpan> {
+        let mut out = Vec::new();
+        if span.end <= span.start {
+            return out;
+        }
+        let Some(start_size) = u32::try_from(span.start).ok().map(TextSize::new) else {
+            return out;
+        };
+        let Some(start_lc) = self.index.try_line_col(start_size) else {
+            return out;
+        };
+        let mut line = start_lc.line;
+        while let Some((line_start, content_end, _line_end)) = self.line_bounds(line) {
+            if line_start >= span.end {
+                break;
+            }
+            let seg_start = span.start.max(line_start);
+            let seg_end = span.end.min(content_end);
+            if seg_start < seg_end {
+                out.push(seg_start..seg_end);
+            }
+            line += 1;
+        }
+        out
+    }
+
     /// `(line_start, content_end, line_end)` byte offsets for `line`.
     ///
     /// `content_end` excludes the line terminator (`\r\n`, `\n`, or lone
@@ -467,6 +507,53 @@ mod tests {
         // 5 Greek chars = 10 bytes, 5 UTF-16 units; space at byte 10.
         assert_eq!(sm.byte_to_lsp(10), Some(pos(0, 5)));
         assert_eq!(sm.lsp_to_byte(pos(0, 6)), Some(11));
+    }
+
+    #[test]
+    fn test_split_span_single_line() {
+        let sm = map16("hello world");
+        assert_eq!(sm.split_span_by_line(2..7), vec![2..7]);
+    }
+
+    #[test]
+    fn test_split_span_lf_excludes_terminator() {
+        // "ab\ncd\nef": span 0..8 covers all three lines; each subspan is the
+        // line's content only (no `\n`).
+        let sm = map16("ab\ncd\nef");
+        assert_eq!(sm.split_span_by_line(0..8), vec![0..2, 3..5, 6..8]);
+    }
+
+    #[test]
+    fn test_split_span_crlf_excludes_terminator() {
+        // "ab\r\ncd": span 0..6 excludes the two-byte CRLF.
+        let sm = map16("ab\r\ncd");
+        assert_eq!(sm.split_span_by_line(0..6), vec![0..2, 4..6]);
+    }
+
+    #[test]
+    fn test_split_span_lone_cr_excludes_terminator() {
+        let sm = map16("ab\rcd");
+        assert_eq!(sm.split_span_by_line(0..5), vec![0..2, 3..5]);
+    }
+
+    #[test]
+    fn test_split_span_blank_middle_line_yields_no_fragment() {
+        // "ab\n\ncd": the empty middle line contributes nothing.
+        let sm = map16("ab\n\ncd");
+        assert_eq!(sm.split_span_by_line(0..6), vec![0..2, 4..6]);
+    }
+
+    #[test]
+    fn test_split_span_starting_inside_line_clips_first_fragment() {
+        let sm = map16("abcd\nefgh");
+        assert_eq!(sm.split_span_by_line(2..7), vec![2..4, 5..7]);
+    }
+
+    #[test]
+    fn test_split_span_empty_and_inverted_yield_nothing() {
+        let sm = map16("abc");
+        assert!(sm.split_span_by_line(2..2).is_empty());
+        assert!(sm.split_span_by_line(SourceSpan { start: 3, end: 1 }).is_empty());
     }
 
     #[test]
