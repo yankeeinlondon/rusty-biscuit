@@ -34,9 +34,10 @@
 # (an official-docs URL, a commit-pinned source permalink with record identity,
 # or an issue URL with provider version/date); search-result URLs and
 # unversioned repository homepages are not evidence. `empirical` additionally
-# requires a scrubbed fixture path plus capture notes. The sidecar declares
-# `source` optional (a `seed` needle may omit it); the conditional requirement
-# is enforced by the deterministic gate
+# requires an `empirical` object with a scrubbed `./_fixtures/...` file
+# reference plus capture notes. The sidecar declares `source` and `empirical`
+# optional (a `seed` needle may omit them); the conditional requirement is
+# enforced by the deterministic gate
 # (`claudine-gen agent-errors check`, gen/src/agent_errors_check.rs).
 $schema:
     # Date the research document was first created. Optional so update-mode
@@ -58,17 +59,17 @@ $schema:
     # (Pi, Antigravity). `kind` is the snake_case `SemanticErrorKind` name.
     # Each needle carries its own provenance; `text` must be lowercase (the
     # matcher lowercases input) and free of leading/trailing whitespace.
-    kind_buckets: "{ kind: enum(configuration,agent_native,api_remote,interrupted,unknown; required), needles: { text: string(required), evidence: enum(documented,source_code,issue_tracker,empirical,seed; required), source: string }[] }[]"
+    kind_buckets: "{ kind: enum(configuration,agent_native,api_remote,interrupted,unknown; required), needles: { text: string(required), evidence: enum(documented,source_code,issue_tracker,empirical,seed; required), source: string, empirical: { fixture: string(required), capture_notes: string(required) } }[] }[]"
 
     # Ordered buckets checked against the FREE-FORM error message. Required
     # (non-empty) for every provider with a structured stream parser.
-    msg_buckets: "{ kind: enum(configuration,agent_native,api_remote,interrupted,unknown; required), needles: { text: string(required), evidence: enum(documented,source_code,issue_tracker,empirical,seed; required), source: string }[] }[]"
+    msg_buckets: "{ kind: enum(configuration,agent_native,api_remote,interrupted,unknown; required), needles: { text: string(required), evidence: enum(documented,source_code,issue_tracker,empirical,seed; required), source: string, empirical: { fixture: string(required), capture_notes: string(required) } }[] }[]"
 
     # Ordered buckets of NUMERIC wire codes (Kimi JSON-RPC; spec D5). Code
     # matching is the first exact step of the cascade. Absent for every
     # provider but Kimi. `name` links a code to its `protocol/<slug>.rs`
     # constant.
-    code_buckets: "{ kind: enum(configuration,agent_native,api_remote,interrupted,unknown; required), codes: { code: number(required), name: string, evidence: enum(documented,source_code,issue_tracker,empirical,seed; required), source: string }[] }[]"
+    code_buckets: "{ kind: enum(configuration,agent_native,api_remote,interrupted,unknown; required), codes: { code: number(required), name: string, evidence: enum(documented,source_code,issue_tracker,empirical,seed; required), source: string, empirical: { fixture: string(required), capture_notes: string(required) } }[] }[]"
 
     # Error surfaces the researcher could not confirm either way. The
     # capacity/overload motivating class MUST appear either as a bucket needle

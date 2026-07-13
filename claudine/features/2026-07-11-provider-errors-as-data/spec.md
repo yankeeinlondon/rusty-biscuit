@@ -348,9 +348,9 @@ own provenance:
 $schema: ./_schema.yaml
 # bucket sequence order IS the cascade order (invariant #1); needle objects
 # carry the per-needle provenance contract inline.
-kind_buckets: "{ kind: enum(configuration,agent_native,api_remote,interrupted,unknown; required), needles: { text: string(required), evidence: enum(documented,source_code,issue_tracker,empirical,seed; required), source: string }[] }[]"
-msg_buckets: "{ kind: enum(configuration,agent_native,api_remote,interrupted,unknown; required), needles: { text: string(required), evidence: enum(documented,source_code,issue_tracker,empirical,seed; required), source: string }[] }[]"
-code_buckets: "{ kind: enum(configuration,agent_native,api_remote,interrupted,unknown; required), codes: { code: number(required), name: string, evidence: enum(documented,source_code,issue_tracker,empirical,seed; required), source: string }[] }[]"
+kind_buckets: "{ kind: enum(configuration,agent_native,api_remote,interrupted,unknown; required), needles: { text: string(required), evidence: enum(documented,source_code,issue_tracker,empirical,seed; required), source: string, empirical: { fixture: string(required), capture_notes: string(required) } }[] }[]"
+msg_buckets: "{ kind: enum(configuration,agent_native,api_remote,interrupted,unknown; required), needles: { text: string(required), evidence: enum(documented,source_code,issue_tracker,empirical,seed; required), source: string, empirical: { fixture: string(required), capture_notes: string(required) } }[] }[]"
+code_buckets: "{ kind: enum(configuration,agent_native,api_remote,interrupted,unknown; required), codes: { code: number(required), name: string, evidence: enum(documented,source_code,issue_tracker,empirical,seed; required), source: string, empirical: { fixture: string(required), capture_notes: string(required) } }[] }[]"
 # gaps: error surfaces the researcher could not confirm either way.
 gaps: "{ area: string(required), notes: string(required) }[]"
 ```
@@ -367,8 +367,10 @@ check even if the sidecar cannot express that conditional constraint. It must
 be a stable citation: an official documentation URL, a commit-pinned source
 permalink with record identity, or an issue URL with provider version/date.
 Search-result URLs and unversioned repository homepages are not evidence.
-`seed` may omit `source`; `empirical` requires a scrubbed fixture path and
-capture notes. Research documents retain citations after runtime projection.
+`seed` may omit `source`; `empirical` requires a typed `empirical` object whose
+`fixture` is an existing, scrubbed `./_fixtures/...` file reference and whose
+`capture_notes` are non-empty. Research documents retain citations after
+runtime projection.
 
 **`_fleet.md` prompt document** instructs each research session to:
 1. Read the provider's **seeded vocabulary** from the immutable Phase-A
@@ -498,7 +500,7 @@ document into a successful fleet result.
 | Seed re-kind | a seeded needle/code moved to another semantic kind (R4) | resume, listing the old and new kinds for adjudication |
 | Seed reorder | a seeded needle/code changed bucket or item position (R3) | resume, listing the old and new positions for adjudication |
 | Needle hygiene | non-lowercase / leading-trailing-whitespace needles | resume with the offending needles |
-| Provenance coherence | `evidence: documented\|source_code\|issue_tracker` with empty `source`; `evidence: seed` on a needle not in the seed (invented provenance) | resume |
+| Provenance coherence | non-seed evidence with empty `source`; empirical evidence without a resolvable scoped fixture and capture notes; `evidence: seed` on a needle not in the seed (invented provenance) | resume |
 | Motivating-class coverage | no overload/capacity vocabulary in any bucket **and** no `gaps` entry acknowledging it | resume ("research capacity/overload error surfaces or record the gap") |
 | Cross-provider copy-paste smell | needle set verbatim-identical to an already-completed provider's doc (independent research should not be byte-identical) | flag in B3 review, not resume (needs the fleet's other outputs) |
 | Source liveness | cited URLs unresolvable | advisory only (network-flaky; never blocks) |

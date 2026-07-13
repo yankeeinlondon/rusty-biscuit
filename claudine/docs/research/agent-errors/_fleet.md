@@ -30,7 +30,8 @@ success:
               - stderr: "The step reported success but <b>{{file}}</b> was not updated — <code>last_updated</code> is not {{ctx.today}}."
               - error: "research file was not updated"
         # 2. Deterministic gate (spec D10): seed preservation, needle hygiene,
-        #    provenance coherence, invented-seed, and motivating-class coverage.
+        #    provenance coherence (including empirical capture fixtures),
+        #    invented-seed, and motivating-class coverage.
         #    A persistence failure stops the stack so stale state cannot be
         #    consumed. Completed executions atomically replace the report.
         - action:
@@ -55,7 +56,7 @@ success:
           action:
               - warn: "Deterministic checks flagged **{{state.name}}**'s agent-errors research — resuming to correct it."
               - action: resume
-                message: "The **agent-errors** research for **{{state.name}}** failed the deterministic gate. Read the outcome report at `{{findings}}` — its frontmatter lists each failed check (missing seed needle, non-lowercase needle, missing `source` citation, invented `seed` provenance, or uncovered capacity/overload class). Fix every listed issue in `{{file}}` (re-add dropped seeds with `evidence: seed`, cite non-seed additions, research or record-as-gap the capacity vocabulary), then re-save and re-run `md schema validate '{{file}}'`."
+                message: "The **agent-errors** research for **{{state.name}}** failed the deterministic gate. Read the outcome report at `{{findings}}` — its frontmatter lists each failed check (missing seed needle, non-lowercase needle, missing provenance data, invented `seed` provenance, or uncovered capacity/overload class). Fix every listed issue in `{{file}}` (re-add dropped seeds with `evidence: seed`, cite non-seed additions, attach a scrubbed `./_fixtures/...` file and capture notes to empirical rows, research or record-as-gap the capacity vocabulary), then re-save and re-run `md schema validate '{{file}}'`."
                 max_attempts: 2
         # 5. Clean: the document is written and explicitly passed the gate.
         - when: "frontmatter(findings, 'status') == 'clean'"
@@ -143,9 +144,9 @@ Follow these steps exactly:
     - `agent` — set to "{{env.AGENT}}"
     - `model` — set to "{{env.MODEL || 'default' }}"
     - `docs` — the best official URL for the provider's error documentation; omit and record a `gaps` entry if none exists
-    - `kind_buckets` — ordered buckets checked against the structured error-kind discriminator (omit entirely for a message-only classifier). Preserve seeded order; each needle carries `text` (lowercase), `evidence`, and — for non-`seed` evidence — a `source` citation
+    - `kind_buckets` — ordered buckets checked against the structured error-kind discriminator (omit entirely for a message-only classifier). Preserve seeded order; each needle carries `text` (lowercase), `evidence`, and — for non-`seed` evidence — a `source` citation. An `empirical` row also carries `empirical.fixture` (an existing, scrubbed `./_fixtures/...` file) and non-empty `empirical.capture_notes`
     - `msg_buckets` — ordered buckets checked against the free-form message; required (non-empty) for a parser-backed provider; same needle shape as `kind_buckets`
-    - `code_buckets` — ordered numeric wire-code buckets (only Kimi has these today); each code carries `code`, optional `name` (its protocol constant), `evidence`, and a `source` for non-`seed` evidence
+    - `code_buckets` — ordered numeric wire-code buckets (only Kimi has these today); each code carries `code`, optional `name` (its protocol constant), `evidence`, and a `source` for non-`seed` evidence; empirical codes use the same `empirical` capture object as needles
     - `gaps` — one entry per error surface you could not confirm; the capacity/overload class MUST appear here if it did not become a needle
     ::block when="update"
     - `changes` — a list of string descriptions of what changed since the last research
@@ -165,7 +166,7 @@ Follow these steps exactly:
 You are done when the Markdown "{{file}}" has been saved with:
 
 1. all research in the body, following the Document Structure
-2. all frontmatter properties set, every seeded needle/code preserved, and every non-`seed` needle/code carrying a `source`
+2. all frontmatter properties set, every seeded needle/code preserved, every non-`seed` needle/code carrying a `source`, and every empirical row carrying its scoped fixture and capture notes
 3. `md schema validate '{{file}}'` returns `true`
 
 - you do not need to run any tests or lints

@@ -6,8 +6,9 @@ agent: opencode
 model: kimi-for-coding/k2p7
 docs: https://ai.google.dev/gemini-api/docs
 # A research-shaped document: a message-only classifier (no `kind_buckets`),
-# seeded needles retained, a documented capacity addition with a citation, and
-# no code buckets. This is what a document with real additions looks like.
+# seeded needles retained, documented and empirical capacity additions with
+# complete provenance, and no code buckets. This is what a document with real
+# additions looks like.
 msg_buckets:
   - kind: configuration
     needles:
@@ -25,6 +26,12 @@ msg_buckets:
       - text: resource_exhausted
         evidence: source_code
         source: https://github.com/google-gemini/gemini-cli/blob/v0.1.0/packages/core/src/errors.ts#L40
+      - text: temporarily unavailable
+        evidence: empirical
+        source: https://example.com/provider/capture-contract
+        empirical:
+          fixture: ./_fixtures/research-shaped-empirical.json
+          capture_notes: Synthetic test capture with credentials and request identifiers removed.
 gaps: []
 changes: []
 requires_claudine_update: true
@@ -38,5 +45,5 @@ reason: >-
 
 This is a schema-validation fixture (not a real provider document). It exercises
 a message-only classifier with the optional `kind_buckets`/`code_buckets`
-branches absent, seeded needles preserved, and documented capacity additions
-carrying stable citations.
+branches absent, seeded needles preserved, and non-seed additions carrying
+their required documented or empirical provenance.
