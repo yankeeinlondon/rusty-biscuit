@@ -16,11 +16,12 @@
 //!   arms (a lone tagged arm is not a discriminated union);
 //! - the instance must carry an **authored** (present, non-null) value for at
 //!   least one discriminant key;
-//! - exactly **one** arm must match every present discriminant key it declares
-//!   (a *type-sensitive* match — the string `'2'` never satisfies a numeric
-//!   `literal(2)`); and
-//! - when the instance carries several discriminant keys, the matching arm must
-//!   **agree** across all of them.
+//! - **every** authored discriminant key must resolve to exactly **one** arm on
+//!   its own (a *type-sensitive* match — the string `'2'` never satisfies a
+//!   numeric `literal(2)`); a key whose value matches no arm (unknown) or more
+//!   than one arm (a duplicate literal) abandons narrowing; and
+//! - when the instance carries several discriminant keys, they must all resolve
+//!   to the **same** arm — any disagreement abandons narrowing.
 //!
 //! Absent, unknown, duplicate, ambiguous, or conflicting discriminants all
 //! yield `None`.
@@ -70,31 +71,31 @@ pub fn select_literal_discriminant_arm(arms: &[Value], instance: &Value) -> Opti
         return None;
     }
 
-    // An arm matches when, for every present discriminant key it declares, the
-    // instance value equals the const type-sensitively — and it declares (and
-    // matches) at least one present discriminant key. Exactly one match narrows.
-    let mut matched: Vec<usize> = Vec::new();
-    for (idx, consts) in &arm_consts {
-        let mut matched_any = false;
-        let mut agrees = true;
-        for key in &present {
-            let Some(const_value) = consts.get(*key) else {
-                continue;
-            };
-            // `obj.get(key)` is present (it is in `present`).
-            if obj.get(*key) == Some(*const_value) {
-                matched_any = true;
-            } else {
-                agrees = false;
-                break;
+    // Resolve each authored discriminant key independently, then require unanimity.
+    // A key selects an arm only when exactly one arm declares it with a
+    // type-sensitively equal const; zero matches (unknown value) or several
+    // (a duplicate literal across arms) abandons narrowing. Keys that resolve
+    // must all agree on the same arm.
+    let mut selected: Option<usize> = None;
+    for key in &present {
+        let instance_value = obj.get(*key)?; // present by construction
+        let mut key_arm: Option<usize> = None;
+        for (idx, consts) in &arm_consts {
+            if consts.get(*key) == Some(&instance_value) {
+                if key_arm.is_some() {
+                    return None; // duplicate literal → ambiguous
+                }
+                key_arm = Some(*idx);
             }
         }
-        if agrees && matched_any {
-            matched.push(*idx);
+        let arm = key_arm?; // unknown value → no arm
+        match selected {
+            Some(existing) if existing != arm => return None, // keys disagree
+            _ => selected = Some(arm),
         }
     }
 
-    (matched.len() == 1).then(|| matched[0])
+    selected
 }
 
 /// The literal-const discriminant properties of one arm, or `None` when the arm
@@ -289,6 +290,73 @@ mod tests {
             select_literal_discriminant_arm(arms, &json!({ "kind": "a", "mode": "y" })),
             None
         );
+    }
+
+    /// A sparse union whose two discriminant keys occur in *overlapping
+    /// subsets* of the arms: `kind` tags arms 0 and 1, `mode` tags arms 0 and
+    /// 2. Neither key alone covers every arm.
+    fn sparse_overlapping_union() -> Value {
+        json!([
+            {
+                "type": "object",
+                "properties": {
+                    "kind": { "const": "a" },
+                    "mode": { "const": "x" }
+                },
+                "additionalProperties": false
+            },
+            {
+                "type": "object",
+                "properties": { "kind": { "const": "b" } },
+                "additionalProperties": false
+            },
+            {
+                "type": "object",
+                "properties": { "mode": { "const": "y" } },
+                "additionalProperties": false
+            }
+        ])
+    }
+
+    #[test]
+    fn sparse_known_key_plus_unknown_key_abandons_narrowing() {
+        // `kind: a` alone selects arm 0, but the same instance also carries
+        // `mode: z`, a qualifying discriminant whose value matches no arm. An
+        // unknown second discriminant must preserve ordinary union behavior even
+        // though the arm declaring `kind` does not declare `mode`.
+        let arms = sparse_overlapping_union();
+        let arms = arms.as_array().unwrap();
+        let instance = json!({ "kind": "a", "mode": "z" });
+        assert_eq!(select_literal_discriminant_arm(arms, &instance), None);
+    }
+
+    #[test]
+    fn sparse_two_keys_select_different_arms_abandons_narrowing() {
+        // `kind: b` selects arm 1; `mode: y` selects arm 2. The two qualifying
+        // discriminants disagree, so narrowing is abandoned.
+        let arms = sparse_overlapping_union();
+        let arms = arms.as_array().unwrap();
+        let instance = json!({ "kind": "b", "mode": "y" });
+        assert_eq!(select_literal_discriminant_arm(arms, &instance), None);
+    }
+
+    #[test]
+    fn sparse_two_keys_agree_on_one_arm_narrows() {
+        // `kind: a` and `mode: x` both point at arm 0 — full agreement narrows.
+        let arms = sparse_overlapping_union();
+        let arms = arms.as_array().unwrap();
+        let instance = json!({ "kind": "a", "mode": "x" });
+        assert_eq!(select_literal_discriminant_arm(arms, &instance), Some(0));
+    }
+
+    #[test]
+    fn sparse_single_present_key_declared_in_subset_narrows() {
+        // Only `kind` is authored; `mode` (declared on a disjoint subset) is
+        // absent. The lone present discriminant selects arm 0 unambiguously.
+        let arms = sparse_overlapping_union();
+        let arms = arms.as_array().unwrap();
+        let instance = json!({ "kind": "a" });
+        assert_eq!(select_literal_discriminant_arm(arms, &instance), Some(0));
     }
 
     #[test]
