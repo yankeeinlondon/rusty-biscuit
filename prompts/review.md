@@ -1,8 +1,8 @@
 ---
 $schema:
-    - spec: file(required;eager) -> the specification file that is the basis of the review
-    - plan: "file(required;eager) -> the plan file who's implementation you want to review"
-    - review: "file(required;eager) -> the review file who's findings have now been implemented"
+    - spec: file(required;eager;match(**/*spec*.md)) -> the specification file that is the basis of the review
+    - plan: "file(required;eager;match(**/*plan*.md)) -> the plan file who's implementation you want to review"
+    - review: "file(required;eager;match(**/*review*.md)) -> the review file who's findings have now been implemented"
 description: |-
     This prompt can be used to perform a variety of review _types_. The specific type of
     review is determined by the parameters the user passes in and the frontmatter state
