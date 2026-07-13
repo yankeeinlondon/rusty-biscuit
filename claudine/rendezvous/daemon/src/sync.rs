@@ -30,7 +30,10 @@ use crate::session_log::{SessionLogError, SessionLogManager};
 use crate::storage::{AcceptedEnvelope, Storage};
 
 /// Wire-level protocol version advertised in [`SyncHello`].
-pub const SYNC_PROTOCOL_VERSION: u32 = 1;
+/// Version 2 added the snapshot-replace delta (`SyncDelta.replace` +
+/// `PayloadKind::SnapshotReplace`) for recovering peers whose version
+/// predates a document's shallow (compacted) history root.
+pub const SYNC_PROTOCOL_VERSION: u32 = 2;
 
 /// Maximum time the sync engine waits for a full session to finish.
 /// Phase 5 always runs in-process or LAN-local so a generous default
@@ -232,6 +235,11 @@ impl SyncService {
     /// disk, and if snapshot persistence fails after the envelope was
     /// saved, startup replay recovers from the persisted envelope.
     ///
+    /// `expected_kind` is derived from the frame's `is_snapshot` /
+    /// `replace` flags and must match the (signature-covered)
+    /// `payload_kind` inside the envelope. A `SnapshotReplace` payload
+    /// replaces the local replica wholesale; the other kinds merge.
+    ///
     /// Returns `true` when the local chunk state advanced.
     pub(crate) fn receive_delta(
         &self,
@@ -239,7 +247,7 @@ impl SyncService {
         chunk: &ChunkId,
         delta_chunk_id: &str,
         envelope: &rendezvous_core::SignedEnvelope,
-        is_snapshot: bool,
+        expected_kind: PayloadKind,
         inbox: &mut EnvelopeInbox,
     ) -> Result<bool, SyncError> {
         if hex_encode(&envelope.sender) != peer_node_id_hex {
@@ -259,15 +267,10 @@ impl SyncService {
                 owner: chunk.owner_node_id.clone(),
             });
         }
-        let expected_kind = if is_snapshot {
-            PayloadKind::Snapshot
-        } else {
-            PayloadKind::Delta
-        };
         if envelope.payload_kind != expected_kind {
             return Err(SyncError::protocol(format!(
-                "envelope payload_kind {:?} does not match delta is_snapshot {:?}",
-                envelope.payload_kind, is_snapshot,
+                "envelope payload_kind {:?} does not match delta frame kind {:?}",
+                envelope.payload_kind, expected_kind,
             )));
         }
         let msg_id_hex = envelope.message_id_hex();
@@ -280,7 +283,13 @@ impl SyncService {
         let payload = inbox.accept(envelope)?.to_vec();
 
         // Stage the import and validate schema WITHOUT persisting.
-        let staged = match self.session_log.stage_remote_update(chunk, &payload) {
+        let replace = expected_kind == PayloadKind::SnapshotReplace;
+        let stage_result = if replace {
+            self.session_log.stage_remote_replace(chunk, &payload)
+        } else {
+            self.session_log.stage_remote_update(chunk, &payload)
+        };
+        let staged = match stage_result {
             Ok(s) => s,
             Err(crate::session_log::SessionLogError::Loro(reason)) => {
                 return Err(SyncError::MalformedPayload {
@@ -321,7 +330,11 @@ impl SyncService {
 
         // Now commit the staged snapshot. If this fails after the envelope
         // was persisted, startup replay will recover.
-        let advanced = self.session_log.commit_staged_update(chunk, staged)?;
+        let advanced = if replace {
+            self.session_log.commit_staged_replace(chunk, staged)?
+        } else {
+            self.session_log.commit_staged_update(chunk, staged)?
+        };
 
         if advanced {
             self.session_log.submit_chunk_to_projection(chunk)?;
@@ -463,11 +476,7 @@ impl SyncService {
                     continue;
                 }
                 let document_id = chunk.as_path();
-                let payload_kind = if exported.is_snapshot {
-                    PayloadKind::Snapshot
-                } else {
-                    PayloadKind::Delta
-                };
+                let payload_kind = exported.kind;
                 // Seal and capture the following counter inside the same
                 // lock scope so the persisted counter cannot lag behind
                 // a concurrent seal.
@@ -489,7 +498,11 @@ impl SyncService {
                     kind: Some(sync_frame::Kind::Delta(SyncDelta {
                         chunk_id: document_id.clone(),
                         envelope: Some(SignedEnvelopeWire::from_envelope(&envelope)),
-                        is_snapshot: exported.is_snapshot,
+                        is_snapshot: matches!(
+                            payload_kind,
+                            PayloadKind::Snapshot | PayloadKind::SnapshotReplace
+                        ),
+                        replace: payload_kind == PayloadKind::SnapshotReplace,
                     })),
                 };
                 let sent = write_frame(&mut send, &frame).await?;
@@ -527,13 +540,19 @@ impl SyncService {
                         let envelope = wire.into_envelope()?;
                         // Run the synchronous redb persistence off the
                         // tokio worker thread.
+                        let expected_kind = if delta.replace {
+                            PayloadKind::SnapshotReplace
+                        } else if delta.is_snapshot {
+                            PayloadKind::Snapshot
+                        } else {
+                            PayloadKind::Delta
+                        };
                         let advanced = tokio::task::spawn_blocking({
                             let service = self.clone();
                             let peer_node_id_hex = peer_node_id_hex.clone();
                             let chunk = chunk.clone();
                             let delta_chunk_id = delta.chunk_id.clone();
                             let envelope = envelope.clone();
-                            let is_snapshot = delta.is_snapshot;
                             move || {
                                 let mut inbox = EnvelopeInbox::new();
                                 service.receive_delta(
@@ -541,7 +560,7 @@ impl SyncService {
                                     &chunk,
                                     &delta_chunk_id,
                                     &envelope,
-                                    is_snapshot,
+                                    expected_kind,
                                     &mut inbox,
                                 )
                             }
@@ -666,6 +685,7 @@ mod tests {
 
     struct Harness {
         service: SyncService,
+        manager: crate::session_log::SessionLogManager,
         storage: Storage,
         peer_identity: NodeIdentity,
         peer_sealer: EnvelopeSealer,
@@ -700,11 +720,12 @@ mod tests {
             .upsert_pairing(&peer_hex, 1_000, "test peer")
             .expect("pair");
 
-        let service = SyncService::new(manager, storage.clone(), identity);
+        let service = SyncService::new(manager.clone(), storage.clone(), identity);
         let peer_sealer = EnvelopeSealer::new(peer_identity.clone());
 
         Harness {
             service,
+            manager,
             storage,
             peer_identity,
             peer_sealer,
@@ -775,7 +796,7 @@ mod tests {
                 &chunk,
                 &chunk.as_path(),
                 &envelope,
-                true,
+                PayloadKind::Snapshot,
                 &mut inbox,
             )
             .expect("receive_delta");
@@ -812,7 +833,7 @@ mod tests {
             &chunk,
             &chunk.as_path(),
             &envelope,
-            true,
+            PayloadKind::Snapshot,
             &mut inbox,
         );
 
@@ -852,7 +873,7 @@ mod tests {
             &chunk,
             &chunk.as_path(),
             &envelope,
-            true,
+            PayloadKind::Snapshot,
             &mut inbox,
         );
 
@@ -890,7 +911,7 @@ mod tests {
             &chunk,
             &chunk.as_path(),
             &envelope,
-            true,
+            PayloadKind::Snapshot,
             &mut inbox,
         );
 
@@ -930,7 +951,7 @@ mod tests {
             &chunk,
             &chunk.as_path(),
             &envelope,
-            true,
+            PayloadKind::Snapshot,
             &mut inbox,
         );
 
@@ -968,7 +989,7 @@ mod tests {
             &foreign_chunk,
             &foreign_chunk.as_path(),
             &envelope,
-            true,
+            PayloadKind::Snapshot,
             &mut inbox,
         );
 
@@ -1003,7 +1024,7 @@ mod tests {
             &chunk,
             &chunk.as_path(),
             &envelope,
-            true,
+            PayloadKind::Snapshot,
             &mut inbox,
         );
         assert!(first.is_ok());
@@ -1016,7 +1037,7 @@ mod tests {
             &chunk,
             &chunk.as_path(),
             &envelope,
-            true,
+            PayloadKind::Snapshot,
             &mut inbox,
         );
         assert!(second.is_err(), "duplicate must be rejected");
@@ -1053,7 +1074,7 @@ mod tests {
             &chunk,
             &chunk.as_path(),
             &envelope,
-            true,
+            PayloadKind::Snapshot,
             &mut inbox,
         );
 
@@ -1091,7 +1112,7 @@ mod tests {
             &chunk,
             &chunk.as_path(),
             &envelope,
-            true,
+            PayloadKind::Snapshot,
             &mut inbox,
         );
 
@@ -1130,7 +1151,7 @@ mod tests {
             &chunk,
             &chunk.as_path(),
             &envelope,
-            true,
+            PayloadKind::Snapshot,
             &mut inbox,
         );
 
@@ -1213,7 +1234,7 @@ mod tests {
             &chunk,
             &chunk.as_path(),
             &envelope,
-            true,
+            PayloadKind::Snapshot,
             &mut inbox,
         );
 
@@ -1250,7 +1271,7 @@ mod tests {
             &chunk,
             &chunk.as_path(),
             &envelope,
-            true,
+            PayloadKind::Snapshot,
             &mut inbox,
         );
 
@@ -1287,7 +1308,7 @@ mod tests {
             &chunk,
             &chunk.as_path(),
             &envelope,
-            true,
+            PayloadKind::Snapshot,
             &mut inbox,
         );
 
@@ -1371,7 +1392,7 @@ mod tests {
             &chunk,
             &chunk.as_path(),
             &envelope,
-            true,
+            PayloadKind::Snapshot,
             &mut inbox,
         );
 
@@ -1415,7 +1436,7 @@ mod tests {
             &chunk,
             &chunk.as_path(),
             &envelope,
-            true,
+            PayloadKind::Snapshot,
             &mut inbox,
         );
 
@@ -1459,7 +1480,7 @@ mod tests {
             &chunk,
             &chunk.as_path(),
             &envelope,
-            true,
+            PayloadKind::Snapshot,
             &mut inbox,
         );
 
@@ -1503,7 +1524,7 @@ mod tests {
             &chunk,
             &chunk.as_path(),
             &envelope,
-            true,
+            PayloadKind::Snapshot,
             &mut inbox,
         );
 
@@ -1547,7 +1568,7 @@ mod tests {
             &chunk,
             &chunk.as_path(),
             &envelope,
-            true,
+            PayloadKind::Snapshot,
             &mut inbox,
         );
 
@@ -1591,7 +1612,7 @@ mod tests {
             &chunk,
             &chunk.as_path(),
             &envelope,
-            true,
+            PayloadKind::Snapshot,
             &mut inbox,
         );
 
@@ -1645,7 +1666,7 @@ mod tests {
         );
         let mut inbox = EnvelopeInbox::new();
         harness.service.receive_delta(
-            &peer_hex, &chunk, &chunk.as_path(), &first_envelope, true, &mut inbox,
+            &peer_hex, &chunk, &chunk.as_path(), &first_envelope, PayloadKind::Snapshot, &mut inbox,
         ).expect("first accept");
 
         let snapshots_after = baseline_snapshot_count(&harness);
@@ -1658,7 +1679,7 @@ mod tests {
             mutated,
         );
         let result = harness.service.receive_delta(
-            &peer_hex, &chunk, &chunk.as_path(), &second_envelope, true, &mut inbox,
+            &peer_hex, &chunk, &chunk.as_path(), &second_envelope, PayloadKind::Snapshot, &mut inbox,
         );
         assert!(result.is_err(), "mutated owner_node_id must be rejected on existing chunk");
         assert_eq!(harness.storage.snapshot_count().expect("count"), snapshots_after);
@@ -1680,7 +1701,7 @@ mod tests {
         );
         let mut inbox = EnvelopeInbox::new();
         harness.service.receive_delta(
-            &peer_hex, &chunk, &chunk.as_path(), &first_envelope, true, &mut inbox,
+            &peer_hex, &chunk, &chunk.as_path(), &first_envelope, PayloadKind::Snapshot, &mut inbox,
         ).expect("first accept");
 
         let snapshots_after = baseline_snapshot_count(&harness);
@@ -1693,7 +1714,7 @@ mod tests {
             mutated,
         );
         let result = harness.service.receive_delta(
-            &peer_hex, &chunk, &chunk.as_path(), &second_envelope, true, &mut inbox,
+            &peer_hex, &chunk, &chunk.as_path(), &second_envelope, PayloadKind::Snapshot, &mut inbox,
         );
         assert!(result.is_err(), "mutated session_id must be rejected on existing chunk");
         assert_eq!(harness.storage.snapshot_count().expect("count"), snapshots_after);
@@ -1715,7 +1736,7 @@ mod tests {
         );
         let mut inbox = EnvelopeInbox::new();
         harness.service.receive_delta(
-            &peer_hex, &chunk, &chunk.as_path(), &first_envelope, true, &mut inbox,
+            &peer_hex, &chunk, &chunk.as_path(), &first_envelope, PayloadKind::Snapshot, &mut inbox,
         ).expect("first accept");
 
         let snapshots_after = baseline_snapshot_count(&harness);
@@ -1728,7 +1749,7 @@ mod tests {
             mutated,
         );
         let result = harness.service.receive_delta(
-            &peer_hex, &chunk, &chunk.as_path(), &second_envelope, true, &mut inbox,
+            &peer_hex, &chunk, &chunk.as_path(), &second_envelope, PayloadKind::Snapshot, &mut inbox,
         );
         assert!(result.is_err(), "mutated chunk_index must be rejected on existing chunk");
         assert_eq!(harness.storage.snapshot_count().expect("count"), snapshots_after);
@@ -1750,7 +1771,7 @@ mod tests {
         );
         let mut inbox = EnvelopeInbox::new();
         harness.service.receive_delta(
-            &peer_hex, &chunk, &chunk.as_path(), &first_envelope, true, &mut inbox,
+            &peer_hex, &chunk, &chunk.as_path(), &first_envelope, PayloadKind::Snapshot, &mut inbox,
         ).expect("first accept");
 
         let snapshots_after = baseline_snapshot_count(&harness);
@@ -1763,7 +1784,7 @@ mod tests {
             mutated,
         );
         let result = harness.service.receive_delta(
-            &peer_hex, &chunk, &chunk.as_path(), &second_envelope, true, &mut inbox,
+            &peer_hex, &chunk, &chunk.as_path(), &second_envelope, PayloadKind::Snapshot, &mut inbox,
         );
         assert!(result.is_err(), "mutated created_at_unix_ms must be rejected on existing chunk");
         assert_eq!(harness.storage.snapshot_count().expect("count"), snapshots_after);
@@ -1785,7 +1806,7 @@ mod tests {
         );
         let mut inbox = EnvelopeInbox::new();
         harness.service.receive_delta(
-            &peer_hex, &chunk, &chunk.as_path(), &first_envelope, true, &mut inbox,
+            &peer_hex, &chunk, &chunk.as_path(), &first_envelope, PayloadKind::Snapshot, &mut inbox,
         ).expect("first accept");
 
         let snapshots_after = baseline_snapshot_count(&harness);
@@ -1798,11 +1819,145 @@ mod tests {
             mutated,
         );
         let result = harness.service.receive_delta(
-            &peer_hex, &chunk, &chunk.as_path(), &second_envelope, true, &mut inbox,
+            &peer_hex, &chunk, &chunk.as_path(), &second_envelope, PayloadKind::Snapshot, &mut inbox,
         );
         assert!(result.is_err(), "injected previous_chunk_id must be rejected on existing chunk");
         assert_eq!(harness.storage.snapshot_count().expect("count"), snapshots_after);
         assert_eq!(harness.storage.accepted_envelope_count().expect("count"), envelopes_after);
+        harness.worker.shutdown();
+    }
+
+    /// Owner-side live document for re-base scenarios (same shape as
+    /// [`make_valid_loro_snapshot`] but returned live so the test can
+    /// extend the lineage and export shallow snapshots from it).
+    fn make_owner_doc(owner_node_id: &str, session_id: &str, message: &str) -> LoroDoc {
+        let doc = LoroDoc::new();
+        let map = doc.get_map(METADATA_CONTAINER);
+        map.insert("owner_node_id", owner_node_id).unwrap();
+        map.insert("session_id", session_id).unwrap();
+        map.insert("chunk_index", 0i64).unwrap();
+        map.insert("created_at_unix_ms", 5_000_i64).unwrap();
+        let list = doc.get_list(ENTRIES_CONTAINER);
+        let entry = Entry {
+            sequence: 0,
+            created_at_unix_ms: 5_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: message.into(),
+            metadata: None,
+        };
+        list.push(serde_json::to_string(&entry).unwrap().as_str()).unwrap();
+        doc.commit();
+        doc
+    }
+
+    #[test]
+    fn snapshot_replace_swaps_replica_after_owner_rebase() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "rebase-session", 0);
+        let mut inbox = EnvelopeInbox::new();
+
+        let doc = make_owner_doc(&peer_hex, "rebase-session", "first");
+        let initial = doc.export(ExportMode::Snapshot).unwrap();
+        let envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            initial,
+        );
+        harness
+            .service
+            .receive_delta(
+                &peer_hex,
+                &chunk,
+                &chunk.as_path(),
+                &envelope,
+                PayloadKind::Snapshot,
+                &mut inbox,
+            )
+            .expect("initial snapshot");
+
+        // The owner appends and re-bases: the shallow export drops all
+        // history before the current frontier.
+        let list = doc.get_list(ENTRIES_CONTAINER);
+        let entry = Entry {
+            sequence: 1,
+            created_at_unix_ms: 5_001,
+            source: "remote".into(),
+            level: "info".into(),
+            message: "second".into(),
+            metadata: None,
+        };
+        list.push(serde_json::to_string(&entry).unwrap().as_str()).unwrap();
+        doc.commit();
+        let frontier = doc.oplog_frontiers();
+        let shallow = doc.export(ExportMode::shallow_snapshot(&frontier)).unwrap();
+        let envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::SnapshotReplace,
+            shallow,
+        );
+
+        let advanced = harness
+            .service
+            .receive_delta(
+                &peer_hex,
+                &chunk,
+                &chunk.as_path(),
+                &envelope,
+                PayloadKind::SnapshotReplace,
+                &mut inbox,
+            )
+            .expect("snapshot-replace");
+        assert!(advanced);
+
+        let messages: Vec<String> = harness
+            .manager
+            .list_chunk_entries(&chunk)
+            .expect("entries")
+            .into_iter()
+            .map(|e| e.message)
+            .collect();
+        assert_eq!(messages, vec!["first".to_string(), "second".to_string()]);
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn replace_frame_with_mismatched_envelope_kind_rejected() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "replace-kind-session", 0);
+        let snapshot = make_valid_loro_snapshot("kind", &peer_hex, "replace-kind-session", 0);
+        // Envelope signed as a plain Snapshot, but the frame claims
+        // replace semantics: the signature-covered kind wins.
+        let envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            snapshot,
+        );
+
+        let snapshots_before = baseline_snapshot_count(&harness);
+        let envelopes_before = baseline_envelope_count(&harness);
+        let mut inbox = EnvelopeInbox::new();
+
+        let result = harness.service.receive_delta(
+            &peer_hex,
+            &chunk,
+            &chunk.as_path(),
+            &envelope,
+            PayloadKind::SnapshotReplace,
+            &mut inbox,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            harness.storage.snapshot_count().expect("count"),
+            snapshots_before,
+        );
+        assert_eq!(
+            harness.storage.accepted_envelope_count().expect("count"),
+            envelopes_before,
+        );
         harness.worker.shutdown();
     }
 }
