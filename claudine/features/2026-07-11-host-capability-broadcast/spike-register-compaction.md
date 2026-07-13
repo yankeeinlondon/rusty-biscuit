@@ -122,10 +122,14 @@ reliable recovery is wholesale replacement (C2c) — which for a register costs 
   volatile writes cost ~3 B/write; still worth doing to keep sync traffic and history
   noise down.
 - **Dashboard S3** — `sessions-active` register churn is bounded by the same policy.
-- **Data-model doc** — the "register history compaction" open question is answered;
-  the remaining follow-up is *implementation*: add the shallow-root gate (+
-  snapshot-replace frame) to the daemon's sync engine, which today only speaks
-  advertise/delta (`daemon/src/sync.rs`).
+- **Data-model doc** — the "register history compaction" open question is answered.
+  **The shallow-root gate and snapshot-replace frame are IMPLEMENTED (2026-07-12,
+  sync protocol v2):** `export_updates_since` answers a peer whose version predates
+  the document's shallow root with `PayloadKind::SnapshotReplace`; the receiver
+  swaps its replica wholesale (`stage_remote_replace` / `commit_staged_replace`,
+  still enforcing metadata identity, schema, and the append-only entry prefix); and
+  a defense-in-depth pending guard fails any import whose `ImportStatus` parks ops
+  as pending instead of silently not converging.
 
 ## Caveats
 

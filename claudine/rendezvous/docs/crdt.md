@@ -283,8 +283,10 @@ Before adding a document type or DuckDB table, answer:
   (~256 KiB / 10k ops) suffice. One hard rule fell out: a reader behind the re-base
   point **silently** stops converging on delta sync, so the sync engine must gate
   updates-since requests on `shallow_since_vv` and respond with a snapshot-replace.
-  Remaining work is implementing that gate in `daemon/src/sync.rs` (see next bullet —
-  it composes with foreign-writer enforcement).
+  **The gate is implemented** (2026-07-12, sync protocol v2): `PayloadKind::SnapshotReplace`
+  + `SyncDelta.replace` on the wire, replica-swap semantics on receive
+  (`stage_remote_replace` / `commit_staged_replace`), and a pending-ops import guard
+  as defense-in-depth. It composes with foreign-writer enforcement (next bullet).
 - **Foreign-writer enforcement:** the single-writer rule is currently convention; the
   import path should reject deltas whose ops originate from a peer other than the
   document's `owner_node_id`. Decide where this check lives (sync engine vs storage).
