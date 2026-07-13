@@ -67,6 +67,29 @@ docs_updated_during_phase_3:
   - claudine/docs/providers/dispatch-inventory.json
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - claudine/gen/src/agent_errors_check.rs
+  - claudine/gen/src/lib.rs
+  - claudine/gen/src/main.rs
+  - claudine/gen/tests/agent_errors_check.rs
+  - claudine/lib/tests/agent_errors_fleet.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4:
+  - claudine/docs/research/agent-errors/_schema.yaml
+  - claudine/docs/research/agent-errors/_fleet.md
+  - claudine/docs/research/agent-errors/_fixtures/facts-derived.md
+  - claudine/docs/research/agent-errors/_fixtures/research-shaped.md
+  - claudine/docs/research/agent-errors/_fixtures/invalid-provenance.md
+  - claudine/docs/research/agent-errors/.gitignore
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+  - claudine/features/2026-07-11-provider-errors-as-data/plan.md
+docs_created_during_phase_5:
+  - claudine/docs/research/agent-errors/codex.md
+  - claudine/docs/research/agent-errors/_pilot-codex.md
+  - claudine/docs/research/agent-errors/_signals-overlap.md
+skills_files_updated_during_phase_5: []
 packages:
   - claudine
   - claudine-gen
@@ -228,42 +251,42 @@ unchanged.*
 *Goal: the `agent-errors` topic can produce provenance-complete, mechanically
 validated research and resume a session to repair deterministic failures.*
 
-- [ ] Create `docs/research/agent-errors/_schema.yaml` from the current
+- [x] Create `docs/research/agent-errors/_schema.yaml` from the current
   `docs/research/_TEMPLATE.md` and signals precedent; verify the actual
   Darkmatter `SimplifiedSchema` nested-object grammar before finalizing the
   `kind_buckets`, `msg_buckets`, `code_buckets`, and `gaps` shapes.
-- [ ] Require per-needle/per-code evidence classes and enforce stable `source`
+- [x] Require per-needle/per-code evidence classes and enforce stable `source`
   citations for `documented`, `source_code`, and `issue_tracker`; require a
   scrubbed fixture path plus capture notes for `empirical` evidence.
-- [ ] Create `docs/research/agent-errors/_fleet.md` for the ten-provider roster,
+- [x] Create `docs/research/agent-errors/_fleet.md` for the ten-provider roster,
   preserving seeded needles, researching structured and textual error
   surfaces, explicitly checking overload/capacity terms, recording gaps, and
   excluding signal-detection work.
-- [ ] Author a deterministic validator that atomically replaces a JSON
+- [x] Author a deterministic validator that atomically replaces a JSON
   findings file after checking seed preservation, lowercase/trim hygiene,
   provenance coherence, invented seed evidence, and motivating-class coverage.
-- [ ] Wire the fleet `success` stack to run the approved validator without
+- [x] Wire the fleet `success` stack to run the approved validator without
   prematurely stopping the stack, then conditionally `resume` the same session
   with late-bound findings and `max_attempts: 2`.
-- [ ] Ensure stale findings are removed first, clean validation leaves no
+- [x] Ensure stale findings are removed first, clean validation leaves no
   findings, budget exhaustion leaves a machine-visible failure, and B3/C1
   cannot treat a known-bad document as successful.
-- [ ] Add tests for clean pass, check failure → one resume → correction, stale
+- [x] Add tests for clean pass, check failure → one resume → correction, stale
   findings cleanup, non-convergence/budget exhaustion, and unsupported wrapper
   resume capability.
 
 **Parallelizable work:**
 
-- [ ] Draft the research prompt and schema in parallel with the standalone
+- [x] Draft the research prompt and schema in parallel with the standalone
   validator, then join them only after field names and findings transport are
   stable.
 
 **Validation checkpoint:**
 
-- [ ] Validate representative facts-derived and research-shaped fixtures with
+- [x] Validate representative facts-derived and research-shaped fixtures with
   `md schema validate`; include repeated kinds, optional branches, code rows,
   and an intentional invalid provenance case.
-- [ ] Run the focused lifecycle/compose tests and `just test`; verify the test
+- [x] Run the focused lifecycle/compose tests and `just test`; verify the test
   that exhausts retries leaves a failing artifact for human adjudication.
 
 ## Phase 5 — Pilot Codex and Harden the Workflow
@@ -271,32 +294,33 @@ validated research and resume a session to repair deterministic failures.*
 *Goal: one Codex research document passes the real schema and deterministic
 gate, and the validate-and-resume mechanism is reviewed before fleet scale.*
 
-- [ ] Coordinate with the signal-assurance Codex overload research so the two
+- [x] Coordinate with the signal-assurance Codex overload research so the two
   workstreams share citations and explicitly distinguish SemanticErrorKind
   rendering vocabulary from SignalKind detection records.
-- [ ] Run the Codex-only fleet pilot non-interactively, producing
+- [x] Run the Codex-only fleet pilot non-interactively, producing
   `docs/research/agent-errors/codex.md` with every seed retained or upgraded,
   per-needle provenance, collision notes, and overload/capacity coverage or an
   explicit gap.
-- [ ] Capture pilot telemetry: deterministic checks fired, findings emitted,
+- [x] Capture pilot telemetry: deterministic checks fired, findings emitted,
   number and content of resumes, whether correction converged, and whether the
   two-attempt budget was sufficient.
-- [ ] Review broad substrings (`rate`, `model`, `auth`, numeric HTTP terms) for
+- [x] Review broad substrings (`rate`, `model`, `auth`, numeric HTTP terms) for
   false positives and precedence collisions against representative non-error
   prose; harden prompt, schema, and validator based on observed failures.
-- [ ] Add or document an overlap exclusion with the signals topic if both
+- [x] Add or document an overlap exclusion with the signals topic if both
   research artifacts would otherwise claim the same detection record.
 - [ ] Hold the required human checkpoint: approve the Codex research output,
   validate-and-resume telemetry, and the decision on whether to propose this
   lifecycle pattern for the general fleet recipe. Do not start Phase 6 before
-  approval.
+  approval. *(PENDING — cannot be satisfied in a non-interactive session; all
+  mechanical prerequisites are green. See `docs/research/agent-errors/_pilot-codex.md`.)*
 
 **Validation checkpoint:**
 
-- [ ] Re-run the Codex pilot after hardening and verify schema validation,
+- [x] Re-run the Codex pilot after hardening and verify schema validation,
   deterministic checks, and source/citation coherence all pass with no stale
   findings.
-- [ ] Confirm the Codex runtime table is still facts-backed and byte-identical;
+- [x] Confirm the Codex runtime table is still facts-backed and byte-identical;
   research has not changed classification behavior.
 
 ## Phase 6 — Research and Review the Remaining Fleet
