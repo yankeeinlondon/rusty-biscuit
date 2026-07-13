@@ -210,6 +210,33 @@ There are a few more advanced techniques we allow for in dynamic sequences:
         sequence: list.ndjson -> map(color, name)
         ```
 
+### The `agent_output` Property
+
+Outside of a `sequence` operation, Claudine executes documents _atomically_ (aka, there is no chain of executions; only a single document that starts and eventually stops). The looping functionality is the one grey zone where `compose` operations can have multiple executions. In some ways, the ability to pass "state" are actually rather straight forward:
+
+- Each task is started with a dictionary of state
+- the task can mutate the state as they see fit
+    - in the example of a looping process you might increment a counter (aka, a Frontmatter property) on each loop as a way to know when the loop is done (this is exactly what @prompts/implement-plan.md does)
+
+This is probably the most commonly use of state that we have but one thing we have so far largely ignored is the Agent's final STDOUT reply. We have done this because for the prompts we've built so far the final STDOUT is usually just summary information that is most useful as information reported back to the user (via the terminal). This is what we do but we do not capture, let alone pass along this final output.
+
+As a part of this feature we are going to change that:
+
+- for normal **compose** and **inline-compose** operations the `success` lifecycle hook will be given access to a new global variable `agent_output` (a string)
+    - earlier lifecycle hooks simply can't have this output because it hasn't been produced yet
+    - the `failure` hook can't have it because this indicates a situation where there's an `err` instead
+    - we could provide `agent_output` to the `finalize` hook when a successful outcome were achieved (decision needs to be made)
+- for **sequence** operations our scope is no longer focused on a document but instead a _chain_ of documents
+    - whereas the Frontmatter payload is already transferred through that chain -- allowing convenient methods to build up state through the sequence -- the issue of the agent's output has no feed forward design.
+    - if there were a desire to capture this agent output and have some later part of the sequence react to it we'd have to catch the output in the `success` lifecycle event and set it's value into the Frontmatter dictionary.
+
+To aid in the accessibility of the agent's output, in this feature release we will start setting the `agent_output` property in Frontmatter. We need to decide between two schemas:
+
+1. the `agent_output` property is the output from the previous task
+2. the `agent_output` is an array and each task that executes pushes their output onto this array
+    - concurrent groups would push an array for their element of the outer array (multi-dimensional array)
+    - serial groups would push task by task (single dimensional array)
+
 ### Assigning Schemas to Step State
 
 We already defined the _broad_ schema type for a step's state in a sequence (e.g., a dictionary with a string value for "name" ) but if an author wants to add a stricter syntax they are allowed to do that. Here's an example using a _sequence schema_ document:
@@ -295,7 +322,6 @@ types:
           setup: (actions stack just like a lifecycle hook)
           teardown: (actions stack just like a lifecycle hook)
           passthrough: boolean
-                  
 ```
 
 **Notes:**
@@ -319,3 +345,71 @@ The tasks in a group will probably be largely just references to prompt document
     - allows the execution of one of the provided safe side effects that Darkmatter provides
 
 > IMPORTANT: I am using "task" and "step" fairly interchangeably in this document. Up until this point "step" was the most common vernacular but when we start talking about concurrent actions the more generic "task" feels more appropriate as "step" has an inferred sequential nature to it that doesn't fit concurrency.
+
+#### Example Task Definition
+
+An example of a task definition would be:
+
+```yaml
+kind: task
+prompt: review.md # execute the review.md file as the primary activity of this task
+setup: # a lifecycle hook for groups which is executed directly before the primary action (a prompt execution in this example)
+    - when: "file_exists(foo/bar/baz.md)"
+      action:
+          - message: "the file exists"
+          - shell: scream 'i'm gonna do it'
+    - action:
+          - set: title
+            value: About to do the thing
+teardown: 
+    - when: "ctx.dirty_files"
+      action:
+          - message: "i've made a mess of the place"
+    - when: "file_exists(foo/bar/baz.md)"
+      action:
+          - shell: scream 'I did it!'
+```
+
+In this example we see that a task can both _setup_ the environment before we run the prompt as well as _teardown_ the environment as we see fit after the prompt has completed. This behaves exactly the same regardless of whether the group is being run in parallel or serially.
+
+> Note: we didn't touch on the `passthrough` property in this example but it was shown in the schema definition; it is an optional property but it is used to express whether this task's final STDOUT output should be passed forward in the `output` variable.
+
+> Note: the action `set` is used in the example above which is meant to be one of the side effects which Darkmatter offers but I just realized that we didn't add this pretty basic (and important) side effect. It's utility is that it allows the frontmatter state to be mutated.
+
+In this example above we defined the task in it's own file using the `task` kind but tasks can also be defined inline with a `group` definition:
+
+```yaml
+kind: group
+name: Getting it Done
+execution: serial
+tasks:
+    - prompt: review.md
+      setup:
+          - when: file_exists(foo/bar/baz.md)
+            action: 
+                - message: "the file exists"
+                - shell: scream 'i'm gonna do it'
+    - side_effect: set(ready, true)
+    - shell: git commit
+      teardown:
+          - action:
+              - message: "files committed to git"
+```
+
+## Concurrency
+
+Concurrency is a powerful feature but it introduces a few new challenges:
+
+1. How to render multiple streams of work to the terminal?
+2. New failure scenarios?
+
+What else?
+
+### Reporting Concurrency
+
+In order to address what would otherwise be chaotic to look at, we will provide the simplest solution for reporting parallel streams as we can:
+
+- when a concurrent group starts, each task is assigned a color
+- when stream results are available we add the stream's color as vertical bar on the left
+- this would likely be achieve by using the BlockQuote component (but open to alternatives)
+- one visual nicety that we should account for is that if we're adding a vertical bar when concurrency hits we should probably also render with the same BlockQuote for non-concurrent work but where the vertical bar is invisible. Doing that means that when we switch between normal serial operation to concurrent operation we don't suddenly see the stream reporting lurch to the right to accommodate the new need for the vertical bar.
