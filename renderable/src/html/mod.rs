@@ -1,9 +1,10 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::{
     browser::{
         PageOptions, RelativeAssetPath,
-        feature::PageFeature,
+        feature::{DefaultFeatureResolver, FeatureContext, FeatureResolver, PageFeature},
         fragment::{BrowserFragment, ComposableNode, Ready},
     },
     html::tag::{BlockTag, link::LinkTag, meta::MetaTag},
@@ -51,6 +52,25 @@ pub struct HtmlPage {
     external_stylesheet: Option<RelativeAssetPath>,
     /// Inline-vs-external JS choice. `Some(path)` → external `<script src>`.
     external_code: Option<RelativeAssetPath>,
+    /// Resolves requested [`PageFeature`]s to their assets. Defaults to
+    /// [`DefaultFeatureResolver`]; Darkmatter installs its own. Consumed by
+    /// [`inject_resolved_features`](HtmlPage::inject_resolved_features).
+    feature_resolver: Rc<dyn FeatureResolver>,
+    /// Renderable-owned context threaded into feature resolution.
+    feature_context: FeatureContext,
+    /// Pre-serialized feature `<head>` assets, resolved once by
+    /// [`inject_resolved_features`](HtmlPage::inject_resolved_features) and
+    /// appended by [`render_head`](HtmlPage::render_head) after the page's
+    /// authored links / styles / scripts. Empty when no feature resolves.
+    ///
+    /// Resolution is done at the fallible browser entry points
+    /// ([`render_browser_document`]) so that
+    /// [`render`](HtmlPage::render) / [`render_head`](HtmlPage::render_head)
+    /// stay infallible for the component ecosystem while an unresolved browser
+    /// feature still fails the render.
+    ///
+    /// [`render_browser_document`]: crate::tree::render::render_browser_document
+    feature_head: String,
 }
 
 impl Default for HtmlPage {
@@ -66,6 +86,9 @@ impl Default for HtmlPage {
             css_variables: None,
             external_stylesheet: None,
             external_code: None,
+            feature_resolver: Rc::new(DefaultFeatureResolver),
+            feature_context: FeatureContext::default(),
+            feature_head: String::new(),
         }
     }
 }
@@ -121,6 +144,53 @@ impl HtmlPage {
     pub fn add_script_block(&mut self, code_block: impl Into<String>) -> &mut HtmlPage {
         self.script_blocks.push(code_block.into());
         self
+    }
+
+    /// Install the feature resolver used to turn requested
+    /// [`PageFeature`]s into assets. Defaults to [`DefaultFeatureResolver`].
+    pub fn set_feature_resolver(&mut self, resolver: Rc<dyn FeatureResolver>) -> &mut HtmlPage {
+        self.feature_resolver = resolver;
+        self
+    }
+
+    /// Install the renderable-owned [`FeatureContext`] threaded into feature
+    /// resolution.
+    pub fn set_feature_context(&mut self, context: FeatureContext) -> &mut HtmlPage {
+        self.feature_context = context;
+        self
+    }
+
+    /// Resolves this page's rolled-up [`features`](HtmlPage::features) through
+    /// the installed [`FeatureResolver`] for the Browser target and stores the
+    /// serialized `<head>` assets, ready for [`render_head`](HtmlPage::render_head)
+    /// to append.
+    ///
+    /// Assets are emitted in first-seen feature order, after the page's authored
+    /// links / styles / scripts, so a no-feature page is byte-for-byte unchanged.
+    /// This is the single injection point for the fragment/`HtmlPage` browser
+    /// path; the streaming full-document assembler resolves its own accumulated
+    /// features directly.
+    ///
+    /// ## Errors
+    ///
+    /// - [`FeatureResolveError::UnresolvedFeature`] when a requested browser
+    ///   feature has no assets under the installed resolver. Dropping a browser
+    ///   dependency silently is forbidden.
+    pub(crate) fn inject_resolved_features(
+        &mut self,
+    ) -> Result<(), crate::browser::feature::FeatureResolveError> {
+        let features = self.features();
+        if features.is_empty() {
+            return Ok(());
+        }
+        let resolved = crate::browser::feature::resolve_features(
+            &features,
+            self.feature_resolver.as_ref(),
+            crate::target::RenderTarget::Browser,
+            &self.feature_context,
+        )?;
+        self.feature_head = crate::browser::feature::serialize_features_head(&resolved);
+        Ok(())
     }
 
     /// Apply a [`PageOptions`] to this page in place.
@@ -277,7 +347,8 @@ impl HtmlPage {
 
     /// Builds the page `<head>` contents (everything between `<head>` and
     /// `</head>`), in the fixed order: charset, viewport, title, microdata
-    /// meta tags, deduped links, stylesheet, script blocks.
+    /// meta tags, deduped links, stylesheet, script blocks, then the resolved
+    /// feature assets (see [`inject_resolved_features`](HtmlPage::inject_resolved_features)).
     ///
     /// `fallback_title` supplies the `<title>` when no `Title` microdata key is
     /// present; [`render`](HtmlPage::render) passes [`first_h1_text`] so the
@@ -352,6 +423,10 @@ impl HtmlPage {
                 }
             }
         }
+        // 8. resolved feature assets — after the page's authored links / styles
+        // / scripts, so a no-feature page keeps its prior bytes. Empty unless
+        // `inject_resolved_features` resolved a requested feature.
+        head.push_str(&self.feature_head);
         head
     }
 

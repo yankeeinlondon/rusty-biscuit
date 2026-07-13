@@ -131,6 +131,9 @@ pub fn render_markdown_node(
     Ok(Rendered {
         output,
         diagnostics: writer.diagnostics,
+        // Markdown-family output never receives feature assets (spec: Markdown
+        // neutrality), so the feature side channel stays empty here.
+        features: Vec::new(),
     })
 }
 

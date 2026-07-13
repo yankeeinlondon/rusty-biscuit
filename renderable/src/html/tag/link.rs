@@ -13,6 +13,20 @@ pub struct LinkTag {
 }
 
 impl LinkTag {
+    /// Constructs a `<link>` tag with the given `rel` and `href`.
+    ///
+    /// The optional `hreflang`, `title`, and `media` attributes default to
+    /// unset; a feature or component that needs them can extend this later.
+    pub fn new(rel: LinkRel, href: impl Into<String>) -> LinkTag {
+        LinkTag {
+            rel,
+            href: Some(href.into()),
+            hreflang: None,
+            title: None,
+            media: None,
+        }
+    }
+
     /// Returns an identity key used for page-level deduplication.
     ///
     /// Two `<link>` tags are considered duplicates when they share the same

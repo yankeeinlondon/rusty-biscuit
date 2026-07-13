@@ -26,6 +26,10 @@
 use std::rc::Rc;
 
 use crate::browser::PageOptions;
+use crate::browser::feature::{
+    DefaultFeatureResolver, FeatureContext, FeatureResolver, PageFeature, dedup_features,
+    resolve_features, serialize_features_head,
+};
 use crate::browser::fragment::{BrowserFragment, ComposableNode, Ready, write_attributes};
 use crate::html::HtmlPage;
 use crate::html::attribute::{ClassDefinition, DomId, HtmlDataAttribute};
@@ -64,9 +68,9 @@ pub enum RawHtmlPolicy {
 /// Options controlling a browser render.
 ///
 /// The [`Default`] uses [`RenderStrictness::Warn`], [`RawHtmlPolicy::Escape`]
-/// (the safe choice — see [`RawHtmlPolicy`]), no [`PageOptions`], and no
-/// [`CodeRenderer`] (fenced code blocks fall back to plain `<pre><code>`).
-#[derive(Default)]
+/// (the safe choice — see [`RawHtmlPolicy`]), no [`PageOptions`], no
+/// [`CodeRenderer`] (fenced code blocks fall back to plain `<pre><code>`), a
+/// [`DefaultFeatureResolver`], and an empty [`FeatureContext`].
 pub struct BrowserRenderOptions {
     /// How strictly lossy or unsupported content is treated.
     pub strictness: RenderStrictness,
@@ -82,11 +86,43 @@ pub struct BrowserRenderOptions {
     pub graphics_mode: crate::tree::GraphicsMode,
     /// How Mermaid diagrams should be rendered in browser output.
     pub mermaid_mode: crate::tree::BrowserMermaidMode,
+    /// Resolves requested [`PageFeature`](crate::browser::feature::PageFeature)s
+    /// to their assets. Defaults to [`DefaultFeatureResolver`]; Darkmatter
+    /// installs its own on its browser entry points. Shared with [`Rc`] so the
+    /// options stay cheap to clone and the trait object stays object-safe.
+    pub feature_resolver: Rc<dyn FeatureResolver>,
+    /// Renderable-owned context threaded into feature resolution (color mode,
+    /// resolved semantic colors).
+    pub feature_context: FeatureContext,
+    /// When `true`, [`render_browser_document_html`] collects requested features
+    /// and returns them in [`Rendered::features`] **without** resolving or
+    /// injecting them into the document `<head>`. The caller becomes responsible
+    /// for placing the assets (e.g. a body-only embed that injects inline
+    /// `<style>`/`<script>` into a wrapper). The default is `false`: the standard
+    /// full-document path resolves and injects into `<head>` itself.
+    pub defer_feature_injection: bool,
+}
+
+impl Default for BrowserRenderOptions {
+    fn default() -> BrowserRenderOptions {
+        BrowserRenderOptions {
+            strictness: RenderStrictness::default(),
+            raw_html: RawHtmlPolicy::default(),
+            page: None,
+            code_renderer: None,
+            graphics_mode: crate::tree::GraphicsMode::default(),
+            mermaid_mode: crate::tree::BrowserMermaidMode::default(),
+            feature_resolver: Rc::new(DefaultFeatureResolver),
+            feature_context: FeatureContext::default(),
+            defer_feature_injection: false,
+        }
+    }
 }
 
 impl std::fmt::Debug for BrowserRenderOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // `dyn CodeRenderer` is not `Debug`; report only whether one is set.
+        // `dyn CodeRenderer` / `dyn FeatureResolver` are not `Debug`; report
+        // only whether a non-default one is installed.
         f.debug_struct("BrowserRenderOptions")
             .field("strictness", &self.strictness)
             .field("raw_html", &self.raw_html)
@@ -94,6 +130,8 @@ impl std::fmt::Debug for BrowserRenderOptions {
             .field("code_renderer", &self.code_renderer.is_some())
             .field("graphics_mode", &self.graphics_mode)
             .field("mermaid_mode", &self.mermaid_mode)
+            .field("feature_context", &self.feature_context)
+            .field("defer_feature_injection", &self.defer_feature_injection)
             .finish()
     }
 }
@@ -126,9 +164,14 @@ pub fn render_browser_node(
 ) -> Result<Rendered<BrowserFragment<Ready>>, RenderError> {
     let mut writer = gate(node, opts)?;
     let output = writer.render(node)?;
+    // The fragment carries its feature requests (interactive Mermaid, prompted
+    // links) on the fragments the writer built; roll them up recursively so the
+    // side channel mirrors what a whole page would collect.
+    let features = output.collect_features();
     Ok(Rendered {
         output,
         diagnostics: writer.diagnostics,
+        features,
     })
 }
 
@@ -171,9 +214,18 @@ pub fn render_browser_document(
     if let Some(page_options) = opts.page.clone() {
         page.apply_page_options(page_options);
     }
+    // Install the render's resolver/context so the page resolves its features
+    // with the same policy the streaming path uses, then resolve+serialize them
+    // once. `render`/`render_head` stay infallible; an unresolved browser
+    // feature fails here, at the fallible entry point.
+    page.set_feature_resolver(Rc::clone(&opts.feature_resolver));
+    page.set_feature_context(opts.feature_context.clone());
+    page.inject_resolved_features()?;
+    let features = page.features();
     Ok(Rendered {
         output: page,
         diagnostics: writer.diagnostics,
+        features,
     })
 }
 
@@ -222,6 +274,8 @@ pub fn render_browser_document_html(
         opts,
         diagnostics,
         hook_fragments: Vec::new(),
+        features: Vec::new(),
+        popover_ids: PopoverIdAllocator::default(),
         buf: String::new(),
     };
 
@@ -241,6 +295,7 @@ pub fn render_browser_document_html(
     let StreamWriter {
         diagnostics,
         hook_fragments,
+        features: collected_features,
         buf: body,
         ..
     } = writer;
@@ -257,11 +312,36 @@ pub fn render_browser_document_html(
     }
     let fallback_title = tree_first_h1_text(&doc.root);
     let head = head_page.render_head(fallback_title.as_deref());
-    let output = format!("<!DOCTYPE html><html><head>{head}</head><body>{body}</body></html>");
+
+    // Resolve the accumulated features once through the render's configured
+    // resolver/context and append the serialized assets after the page's
+    // authored `<head>` content — the same position (and same helper) the
+    // fragment path injects through `HtmlPage::render_head`, so the two paths
+    // stay byte-identical. An unresolved browser feature fails the render here.
+    //
+    // When `defer_feature_injection` is set the caller owns placement (e.g. a
+    // body-only embed), so the features are returned unresolved in the side
+    // channel and no `<head>` assets are emitted.
+    let features = dedup_features(&collected_features);
+    let feature_head = if features.is_empty() || opts.defer_feature_injection {
+        String::new()
+    } else {
+        let resolved = resolve_features(
+            &features,
+            opts.feature_resolver.as_ref(),
+            crate::target::RenderTarget::Browser,
+            &opts.feature_context,
+        )?;
+        serialize_features_head(&resolved)
+    };
+    let output = format!(
+        "<!DOCTYPE html><html><head>{head}{feature_head}</head><body>{body}</body></html>"
+    );
 
     Ok(Rendered {
         output,
         diagnostics,
+        features,
     })
 }
 
@@ -269,7 +349,11 @@ pub fn render_browser_document_html(
 /// warning-severity validation finding per the strictness model.
 fn gate<'a>(node: &RenderNode, opts: &'a BrowserRenderOptions) -> Result<Writer<'a>, RenderError> {
     let diagnostics = validate_and_collect_diagnostics(node, opts)?;
-    Ok(Writer { opts, diagnostics })
+    Ok(Writer {
+        opts,
+        diagnostics,
+        popover_ids: PopoverIdAllocator::default(),
+    })
 }
 
 /// Runs the shared validation gate for both the fragment writer
@@ -320,6 +404,9 @@ fn validate_and_collect_diagnostics(
 struct Writer<'a> {
     opts: &'a BrowserRenderOptions,
     diagnostics: Vec<Diagnostic>,
+    /// Document-scoped allocator for prompted-link popover ids, so repeated
+    /// identical links get unique, deterministic ids across the whole render.
+    popover_ids: PopoverIdAllocator,
 }
 
 impl Writer<'_> {
@@ -994,7 +1081,11 @@ impl Writer<'_> {
         for attr in node_attributes(&node.attrs, false) {
             fragment = fragment.add_attribute(attr);
         }
+        // The interactive form is inert without a client-side bootstrap; request
+        // the Mermaid feature so the page assembler injects it. Static SVG /
+        // code renderings are self-contained and request nothing.
         fragment
+            .add_feature(PageFeature::MermaidDiagram)
             .add_child(ComposableNode::TextFragment(value.to_string()))
             .finalize()
     }
@@ -1186,6 +1277,10 @@ impl Writer<'_> {
     }
 
     /// Renders a hyperlink as `<a href title>`.
+    ///
+    /// A Darkmatter-lowered prompt (`data-prompt`) promotes the link to the
+    /// accessible popover structure via [`Self::render_prompted_link`]; a plain
+    /// link renders as a bare anchor and requests no feature.
     fn render_link(
         &mut self,
         node: &RenderNode,
@@ -1193,6 +1288,11 @@ impl Writer<'_> {
         title: Option<&str>,
         children: &[RenderNode],
     ) -> Result<BrowserFragment<Ready>, RenderError> {
+        if let Some(prompt) = link_prompt(&node.attrs) {
+            let prompt = prompt.to_string();
+            return self.render_prompted_link(node, url, title, children, &prompt);
+        }
+
         let mut fragment = BrowserFragment::new().define_as_block_tag(BlockTag::A, "");
         for attr in node_attributes(&node.attrs, true) {
             fragment = fragment.add_attribute(attr);
@@ -1208,6 +1308,56 @@ impl Writer<'_> {
             fragment = fragment.add_component(self.render(child)?);
         }
         Ok(fragment.finalize())
+    }
+
+    /// Renders a prompted (enhanced) link as an accessible popover structure.
+    ///
+    /// The emitted shape is a `<span class="dm-popover-wrapper">` holding the
+    /// navigable anchor followed by a `<span … popover="hint">` prompt. The
+    /// anchor keeps every existing attribute and its real `href`; the internal
+    /// `data-prompt` transport is consumed here and never re-emitted. The
+    /// anchor's `interestfor` / `aria-describedby` associate the prompt through
+    /// a document-unique id, and the shared Popover CSS (requested here as
+    /// [`PageFeature::Popover`]) reveals the prompt on `:hover` / `:focus-within`
+    /// so it stays keyboard reachable even where native interest/popover
+    /// behavior is absent.
+    fn render_prompted_link(
+        &mut self,
+        node: &RenderNode,
+        url: &str,
+        title: Option<&str>,
+        children: &[RenderNode],
+        prompt: &str,
+    ) -> Result<BrowserFragment<Ready>, RenderError> {
+        let id = self.popover_ids.allocate(url);
+
+        let mut anchor = BrowserFragment::new().define_as_block_tag(BlockTag::A, "");
+        for attr in prompted_anchor_attributes(node, url, title, &id) {
+            anchor = anchor.add_attribute(attr);
+        }
+        for child in children {
+            anchor = anchor.add_component(self.render(child)?);
+        }
+
+        let mut prompt_span = BrowserFragment::new().define_as_block_tag(BlockTag::Span, "");
+        for attr in prompted_prompt_attributes(&id) {
+            prompt_span = prompt_span.add_attribute(attr);
+        }
+        // Escaped on emit by the fragment renderer.
+        let prompt_span = prompt_span
+            .add_child(ComposableNode::TextFragment(prompt.to_string()))
+            .finalize();
+
+        let wrapper = BrowserFragment::new()
+            .define_as_block_tag(BlockTag::Span, "")
+            .add_attribute(HtmlAttribute::Class(ClassDefinition::new(
+                "dm-popover-wrapper",
+            )))
+            .add_feature(PageFeature::Popover)
+            .add_component(anchor.finalize())
+            .add_component(prompt_span)
+            .finalize();
+        Ok(wrapper)
     }
 
     /// Renders an image as `<img src alt title>`.
@@ -1322,6 +1472,16 @@ struct StreamWriter<'a> {
     /// so their page-level stylesheet / metadata / dependency-link rollups feed
     /// the `<head>` exactly as they would through [`HtmlPage`].
     hook_fragments: Vec<BrowserFragment<Ready>>,
+    /// Feature requests accumulated in document order. Unlike the fragment
+    /// writer, this path builds no per-node fragment, so features requested at
+    /// the streamed nodes (interactive Mermaid, prompted links) plus those
+    /// merged from hook fragments are accumulated here for one deduplicated
+    /// resolution by the document assembler.
+    features: Vec<PageFeature>,
+    /// Document-scoped allocator for prompted-link popover ids, shared in spirit
+    /// with the fragment [`Writer`] so both paths derive the same deterministic,
+    /// collision-free ids in document order.
+    popover_ids: PopoverIdAllocator,
     buf: String,
 }
 
@@ -1533,7 +1693,12 @@ impl StreamWriter<'_> {
 
     /// Serializes a hook-returned fragment into the buffer and retains it for
     /// the `<head>` rollup. See [`StreamWriter::hook_fragments`].
+    ///
+    /// A hook fragment may itself request features; merge them at this document
+    /// position so the streaming path collects nested/hook features the same
+    /// way the fragment path's page rollup does.
     fn push_hook_fragment(&mut self, fragment: BrowserFragment<Ready>) {
+        self.features.extend(fragment.collect_features());
         self.buf.push_str(&fragment.render());
         self.hook_fragments.push(fragment);
     }
@@ -1826,6 +1991,9 @@ impl StreamWriter<'_> {
         let mut attrs: Vec<HtmlAttribute> =
             vec![HtmlAttribute::Class(ClassDefinition::new("mermaid"))];
         attrs.extend(node_attributes(&node.attrs, false));
+        // Request the Mermaid feature at the same semantic branch as the
+        // fragment writer, in document position (deduped at resolution).
+        self.features.push(PageFeature::MermaidDiagram);
         self.open_block(&BlockTag::Pre, &attrs);
         self.push_text(value);
         self.close_block(&BlockTag::Pre);
@@ -1987,6 +2155,11 @@ impl StreamWriter<'_> {
         title: Option<&str>,
         children: &[RenderNode],
     ) -> Result<(), RenderError> {
+        if let Some(prompt) = link_prompt(&node.attrs) {
+            let prompt = prompt.to_string();
+            return self.write_prompted_link(node, url, title, children, &prompt);
+        }
+
         let mut attrs = node_attributes(&node.attrs, true);
         attrs.push(HtmlAttribute::Other("href".into(), url.to_string()));
         if let Some(title) = title {
@@ -1997,6 +2170,41 @@ impl StreamWriter<'_> {
             self.write(child)?;
         }
         self.close_block(&BlockTag::A);
+        Ok(())
+    }
+
+    /// Streaming analogue of [`Writer::render_prompted_link`]; emits
+    /// byte-identical wrapper/anchor/prompt markup and requests
+    /// [`PageFeature::Popover`] in document position.
+    fn write_prompted_link(
+        &mut self,
+        node: &RenderNode,
+        url: &str,
+        title: Option<&str>,
+        children: &[RenderNode],
+        prompt: &str,
+    ) -> Result<(), RenderError> {
+        let id = self.popover_ids.allocate(url);
+        self.features.push(PageFeature::Popover);
+
+        self.open_block(
+            &BlockTag::Span,
+            &[HtmlAttribute::Class(ClassDefinition::new(
+                "dm-popover-wrapper",
+            ))],
+        );
+
+        self.open_block(&BlockTag::A, &prompted_anchor_attributes(node, url, title, &id));
+        for child in children {
+            self.write(child)?;
+        }
+        self.close_block(&BlockTag::A);
+
+        self.open_block(&BlockTag::Span, &prompted_prompt_attributes(&id));
+        self.push_text(prompt);
+        self.close_block(&BlockTag::Span);
+
+        self.close_block(&BlockTag::Span);
         Ok(())
     }
 
@@ -2454,6 +2662,118 @@ fn css_style_declarations(style: &crate::stylesheet::CssStyle) -> Vec<String> {
             }
         })
         .collect()
+}
+
+/// The Darkmatter-lowered prompt carried by a link node, if any.
+///
+/// The prompt is transported as a browser `data-prompt` attribute. Its presence
+/// promotes the link to the accessible popover structure and makes it request
+/// [`PageFeature::Popover`]; the value becomes the escaped prompt content.
+fn link_prompt(attrs: &NodeAttrs) -> Option<&str> {
+    attrs.browser_ref().and_then(|browser| {
+        browser
+            .data_attrs
+            .iter()
+            .find(|(name, _)| name.as_str() == "prompt")
+            .map(|(_, value)| value.as_str())
+    })
+}
+
+/// Builds the anchor attribute list for a prompted link.
+///
+/// Every existing node attribute is preserved except the internal `data-prompt`
+/// transport, which is consumed into the popover markup and never emitted. The
+/// real `href`, optional `title`, and the `interestfor` / `aria-describedby`
+/// association to the popover `id` follow. Both browser writers build the anchor
+/// from this one list so their bytes stay identical.
+fn prompted_anchor_attributes(
+    node: &RenderNode,
+    url: &str,
+    title: Option<&str>,
+    id: &str,
+) -> Vec<HtmlAttribute> {
+    let mut attrs: Vec<HtmlAttribute> = node_attributes(&node.attrs, true)
+        .into_iter()
+        .filter(|attr| !matches!(attr, HtmlAttribute::Other(key, _) if key == "data-prompt"))
+        .collect();
+    attrs.push(HtmlAttribute::Other("href".into(), url.to_string()));
+    if let Some(title) = title {
+        attrs.push(HtmlAttribute::Title(title.to_string()));
+    }
+    // `interestfor` is the progressive-enhancement invoker where supported;
+    // `aria-describedby` is the always-on accessible association.
+    attrs.push(HtmlAttribute::Other("interestfor".into(), id.to_string()));
+    attrs.push(HtmlAttribute::Other(
+        "aria-describedby".into(),
+        id.to_string(),
+    ));
+    attrs
+}
+
+/// Builds the attribute list for a prompted link's prompt element:
+/// `id`, the `dm-popover-prompt` class, `popover="hint"`, and `role="note"`.
+fn prompted_prompt_attributes(id: &str) -> Vec<HtmlAttribute> {
+    vec![
+        HtmlAttribute::Id(DomId::new(id.to_string())),
+        HtmlAttribute::Class(ClassDefinition::new("dm-popover-prompt")),
+        HtmlAttribute::Other("popover".into(), "hint".to_string()),
+        HtmlAttribute::Other("role".into(), "note".to_string()),
+    ]
+}
+
+/// Allocates document-unique, readable, deterministic ids for prompted-link
+/// popovers.
+///
+/// The id base is a readable slug derived from the link target; the first
+/// occurrence of a base uses it verbatim and each later occurrence appends an
+/// `-N` suffix, so repeated identical prompted links never collide. Both the
+/// fragment [`Writer`] and the streaming [`StreamWriter`] own one allocator per
+/// document render and walk links in document order, so they derive identical
+/// id sequences.
+#[derive(Default)]
+struct PopoverIdAllocator {
+    counts: std::collections::HashMap<String, usize>,
+}
+
+impl PopoverIdAllocator {
+    /// Allocates the next id for a popover anchored to `url`.
+    fn allocate(&mut self, url: &str) -> String {
+        let base = popover_id_base(url);
+        let count = self.counts.entry(base.clone()).or_insert(0);
+        let id = if *count == 0 {
+            format!("dm-popover-{base}")
+        } else {
+            format!("dm-popover-{base}-{count}")
+        };
+        *count += 1;
+        id
+    }
+}
+
+/// Derives a readable, stable id slug from a link target: ASCII alphanumerics
+/// are lowercased and every other run collapses to a single `-`, bounded to a
+/// modest length. Falls back to `link` when nothing survives.
+fn popover_id_base(url: &str) -> String {
+    let mut base = String::new();
+    let mut last_dash = false;
+    for ch in url.chars() {
+        if base.len() >= 40 {
+            break;
+        }
+        if ch.is_ascii_alphanumeric() {
+            base.push(ch.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash {
+            base.push('-');
+            last_dash = true;
+        }
+    }
+    let trimmed = base.trim_matches('-');
+    if trimmed.is_empty() {
+        "link".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 /// Appends the typed browser attributes carried by [`NodeAttrs::browser`].
@@ -3314,6 +3634,34 @@ mod tests {
                     .define_as_raw_html("<svg></svg>".to_string())
                     .finalize(),
             )
+        }
+    }
+
+    /// A resolver that owns `MermaidDiagram` (CSS + module bootstrap) — the
+    /// shape Darkmatter installs in Phase 5 — and delegates everything else to
+    /// [`DefaultFeatureResolver`], so tests can exercise interactive-Mermaid
+    /// injection without depending on Darkmatter.
+    struct MermaidFeatureResolver;
+    impl crate::browser::feature::FeatureResolver for MermaidFeatureResolver {
+        fn resolve(
+            &self,
+            feature: PageFeature,
+            target: crate::target::RenderTarget,
+            ctx: &FeatureContext,
+        ) -> Result<
+            Option<crate::browser::feature::FeatureAssets>,
+            crate::browser::feature::FeatureResolveError,
+        > {
+            use crate::browser::feature::{FeatureAssets, FeatureScript};
+            use crate::target::RenderTarget;
+            match (target, feature) {
+                (RenderTarget::Browser, PageFeature::MermaidDiagram) => Ok(Some(FeatureAssets {
+                    css: Some(".mermaid{display:block}".into()),
+                    js: Some(FeatureScript::Module("import('mermaid')".into())),
+                    links: Vec::new(),
+                })),
+                _ => DefaultFeatureResolver.resolve(feature, target, ctx),
+            }
         }
     }
 
@@ -4455,6 +4803,9 @@ mod tests {
                     graphics_mode,
                     mermaid_mode,
                     code_renderer: Some(Rc::new(MermaidSvgHook)),
+                    // Own `MermaidDiagram` so the interactive rung resolves; the
+                    // two paths must still inject byte-identical assets.
+                    feature_resolver: Rc::new(MermaidFeatureResolver),
                     ..BrowserRenderOptions::default()
                 };
                 let direct = render_browser_document_html(&doc, &o).expect("direct render");
@@ -4466,6 +4817,313 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Builds a document from a list of top-level nodes.
+    fn document_of(children: Vec<RenderNode>) -> Document {
+        Document {
+            sources: SourceRegistry::default(),
+            metadata: DocumentMetadata::default(),
+            root: RenderNode::root(children),
+        }
+    }
+
+    /// A link node carrying a Darkmatter-lowered `data-prompt` transport.
+    fn prompted_link(url: &str, prompt: &str) -> RenderNode {
+        let mut link = RenderNode::link(url.to_string(), None, vec![RenderNode::text("link")]);
+        link.attrs.browser_mut_or_default().data_attrs.insert(
+            crate::tree::DataAttrName::new("prompt").unwrap(),
+            prompt.to_string(),
+        );
+        link
+    }
+
+    /// Two Mermaid blocks resolve to exactly one CSS block and one module
+    /// script, deduped, on both the fragment and streaming paths — with
+    /// byte-identical output (spec acceptance criteria 1 and 10).
+    #[test]
+    fn two_mermaid_blocks_inject_one_css_one_script_on_both_paths() {
+        use crate::tree::{BrowserMermaidMode, GraphicsMode};
+
+        let doc = document_of(vec![
+            RenderNode::code(Some("mermaid".into()), None, "graph TD; A-->B"),
+            RenderNode::paragraph(vec![RenderNode::text("between")]),
+            RenderNode::code(Some("mermaid".into()), None, "sequenceDiagram; A->>B: hi"),
+        ]);
+        let opts = BrowserRenderOptions {
+            graphics_mode: GraphicsMode::Rich,
+            mermaid_mode: BrowserMermaidMode::Interactive,
+            feature_resolver: Rc::new(MermaidFeatureResolver),
+            ..BrowserRenderOptions::default()
+        };
+
+        let streaming = render_browser_document_html(&doc, &opts).expect("streaming");
+        let fragment = render_browser_document(&doc, &opts).expect("fragment");
+
+        assert_eq!(streaming.features, vec![PageFeature::MermaidDiagram]);
+        assert_eq!(fragment.features, vec![PageFeature::MermaidDiagram]);
+
+        let streamed_html = streaming.output;
+        let fragment_html = fragment.output.render();
+        assert_eq!(streamed_html, fragment_html, "paths must be byte-identical");
+
+        for html in [&streamed_html, &fragment_html] {
+            assert_eq!(
+                html.matches(r#"<script type="module">"#).count(),
+                1,
+                "exactly one module script: {html}"
+            );
+            assert_eq!(
+                html.matches(".mermaid{display:block}").count(),
+                1,
+                "one feature CSS block: {html}"
+            );
+            assert_eq!(
+                html.matches(r#"<pre class="mermaid">"#).count(),
+                2,
+                "both containers render: {html}"
+            );
+        }
+    }
+
+    /// A requested but unresolved browser feature fails both full-document
+    /// paths with the feature and target named (spec acceptance criterion 9).
+    #[test]
+    fn interactive_mermaid_unresolved_by_default_resolver_errors() {
+        use crate::tree::{BrowserMermaidMode, GraphicsMode};
+
+        let doc = document_of(vec![RenderNode::code(
+            Some("mermaid".into()),
+            None,
+            "graph TD; A-->B",
+        )]);
+        let opts = BrowserRenderOptions {
+            graphics_mode: GraphicsMode::Rich,
+            mermaid_mode: BrowserMermaidMode::Interactive,
+            ..BrowserRenderOptions::default()
+        };
+
+        for result in [
+            render_browser_document_html(&doc, &opts).err(),
+            render_browser_document(&doc, &opts).err(),
+        ] {
+            match result {
+                Some(RenderError::FeatureResolution(
+                    crate::browser::feature::FeatureResolveError::UnresolvedFeature {
+                        feature,
+                        target,
+                    },
+                )) => {
+                    assert_eq!(feature, PageFeature::MermaidDiagram);
+                    assert_eq!(target, crate::target::RenderTarget::Browser);
+                }
+                other => panic!("expected UnresolvedFeature, got {other:?}"),
+            }
+        }
+    }
+
+    /// Non-interactive Mermaid renderings (`Off`, `Code`, and the
+    /// `Vector` + `Interactive` static degrade) request no feature and inject
+    /// no interactive assets (spec acceptance criterion 4).
+    #[test]
+    fn non_interactive_mermaid_requests_no_feature() {
+        use crate::tree::{BrowserMermaidMode, GraphicsMode};
+
+        let doc = document_of(vec![RenderNode::code(
+            Some("mermaid".into()),
+            None,
+            "graph TD; A-->B",
+        )]);
+        for cases in [
+            (GraphicsMode::Off, BrowserMermaidMode::Interactive),
+            (GraphicsMode::Rich, BrowserMermaidMode::Code),
+            (GraphicsMode::Vector, BrowserMermaidMode::StaticSvg),
+            // Vector caps Interactive to the static SVG rung — no script.
+            (GraphicsMode::Vector, BrowserMermaidMode::Interactive),
+        ] {
+            let opts = BrowserRenderOptions {
+                graphics_mode: cases.0,
+                mermaid_mode: cases.1,
+                code_renderer: Some(Rc::new(MermaidSvgHook)),
+                feature_resolver: Rc::new(MermaidFeatureResolver),
+                ..BrowserRenderOptions::default()
+            };
+            let streaming = render_browser_document_html(&doc, &opts).expect("streaming");
+            let fragment = render_browser_document(&doc, &opts).expect("fragment");
+            assert!(
+                streaming.features.is_empty(),
+                "{cases:?} streaming must request no feature"
+            );
+            assert!(
+                fragment.features.is_empty(),
+                "{cases:?} fragment must request no feature"
+            );
+            assert!(
+                !streaming.output.contains(r#"<script type="module">"#),
+                "{cases:?} must inject no module script: {}",
+                streaming.output
+            );
+        }
+    }
+
+    /// A plain link requests no feature; a prompted link requests Popover and
+    /// injects its CSS once (no script), on both paths (spec criterion 7).
+    #[test]
+    fn prompted_link_requests_popover_plain_link_does_not() {
+        let plain = document_of(vec![RenderNode::paragraph(vec![RenderNode::link(
+            "https://example.com".to_string(),
+            None,
+            vec![RenderNode::text("plain")],
+        )])]);
+        let plain_out = render_browser_document_html(&plain, &BrowserRenderOptions::default())
+            .expect("plain render");
+        assert!(plain_out.features.is_empty(), "plain link requests nothing");
+        assert!(
+            !plain_out.output.contains("dm-popover"),
+            "no popover CSS for a plain link: {}",
+            plain_out.output
+        );
+
+        let prompted = document_of(vec![
+            RenderNode::paragraph(vec![prompted_link("https://example.com", "go home")]),
+            RenderNode::paragraph(vec![prompted_link("https://example.com", "go home")]),
+        ]);
+        let streaming =
+            render_browser_document_html(&prompted, &BrowserRenderOptions::default())
+                .expect("streaming");
+        let fragment =
+            render_browser_document(&prompted, &BrowserRenderOptions::default()).expect("fragment");
+
+        assert_eq!(streaming.features, vec![PageFeature::Popover]);
+        assert_eq!(fragment.features, vec![PageFeature::Popover]);
+        assert_eq!(streaming.output, fragment.output.render(), "byte parity");
+        assert_eq!(
+            streaming.output.matches(".dm-popover-wrapper{").count(),
+            1,
+            "popover CSS injected exactly once: {}",
+            streaming.output
+        );
+        assert!(
+            !streaming.output.contains("<script"),
+            "popover is CSS-only: {}",
+            streaming.output
+        );
+    }
+
+    /// A prompted link emits the accessible wrapper/anchor/prompt structure:
+    /// real `href` preserved, the internal `data-prompt` transport dropped, the
+    /// prompt escaped and associated through `interestfor` / `aria-describedby`
+    /// and the popover `id`.
+    #[test]
+    fn prompted_link_emits_accessible_popover_markup() {
+        let doc = document_of(vec![RenderNode::paragraph(vec![prompted_link(
+            "https://example.com/docs",
+            "explain this",
+        )])]);
+        let out = render_browser_document_html(&doc, &BrowserRenderOptions::default())
+            .expect("render")
+            .output;
+
+        assert!(
+            out.contains(r#"<span class="dm-popover-wrapper">"#),
+            "wrapper present: {out}"
+        );
+        assert!(
+            out.contains(r#"href="https://example.com/docs""#),
+            "real href preserved: {out}"
+        );
+        assert!(
+            !out.contains("data-prompt"),
+            "internal transport attribute is not emitted: {out}"
+        );
+        assert!(
+            out.contains(r#"interestfor="dm-popover-https-example-com-docs""#),
+            "interestfor names the id: {out}"
+        );
+        assert!(
+            out.contains(r#"aria-describedby="dm-popover-https-example-com-docs""#),
+            "aria association present: {out}"
+        );
+        assert!(
+            out.contains(
+                r#"<span class="dm-popover-prompt" id="dm-popover-https-example-com-docs" popover="hint" role="note">explain this</span>"#
+            ),
+            "prompt element carries id/class/popover/role and escaped text: {out}"
+        );
+    }
+
+    /// Two identical prompted links get distinct, deterministic ids so the
+    /// `aria-describedby` / popover association never collides (spec criterion 7).
+    #[test]
+    fn repeated_prompted_links_get_unique_ids() {
+        let doc = document_of(vec![
+            RenderNode::paragraph(vec![prompted_link("https://example.com", "one")]),
+            RenderNode::paragraph(vec![prompted_link("https://example.com", "two")]),
+        ]);
+        let streaming = render_browser_document_html(&doc, &BrowserRenderOptions::default())
+            .expect("streaming")
+            .output;
+        let fragment = render_browser_document(&doc, &BrowserRenderOptions::default())
+            .expect("fragment")
+            .output
+            .render();
+
+        assert_eq!(streaming, fragment, "byte parity across paths");
+        assert!(
+            streaming.contains(r#"id="dm-popover-https-example-com""#),
+            "first link uses the bare base id: {streaming}"
+        );
+        assert!(
+            streaming.contains(r#"id="dm-popover-https-example-com-1""#),
+            "second identical link gets an occurrence suffix: {streaming}"
+        );
+    }
+
+    /// Hostile HTML in a prompt is escaped in the emitted prompt content.
+    #[test]
+    fn prompted_link_escapes_hostile_prompt() {
+        let doc = document_of(vec![RenderNode::paragraph(vec![prompted_link(
+            "https://example.com",
+            "<script>alert(1)</script>",
+        )])]);
+        let out = render_browser_document_html(&doc, &BrowserRenderOptions::default())
+            .expect("render")
+            .output;
+        assert!(
+            !out.contains("<script>alert(1)</script>"),
+            "raw script must not survive: {out}"
+        );
+        assert!(
+            out.contains("&lt;script&gt;alert(1)&lt;/script&gt;"),
+            "prompt content is escaped: {out}"
+        );
+    }
+
+    /// A prompted link preserves its ordinary navigation attributes (class,
+    /// target) alongside the popover association.
+    #[test]
+    fn prompted_link_preserves_navigation_attributes() {
+        let mut link =
+            RenderNode::link("https://example.com".to_string(), None, vec![RenderNode::text("go")]);
+        link.attrs.id = None;
+        link.attrs.classes.push("nav".to_string());
+        {
+            let browser = link.attrs.browser_mut_or_default();
+            browser.data_attrs.insert(
+                crate::tree::DataAttrName::new("prompt").unwrap(),
+                "hint".to_string(),
+            );
+            browser.link.get_or_insert_with(Default::default).target =
+                Some(crate::tree::LinkTarget::Blank);
+        }
+        let doc = document_of(vec![RenderNode::paragraph(vec![link])]);
+        let out = render_browser_document_html(&doc, &BrowserRenderOptions::default())
+            .expect("render")
+            .output;
+        assert!(out.contains(r#"class="nav""#), "class preserved: {out}");
+        assert!(out.contains(r#"target="_blank""#), "target preserved: {out}");
+        assert!(out.contains("interestfor="), "still enhanced: {out}");
+        assert!(!out.contains("data-prompt"), "transport dropped: {out}");
     }
 
     #[test]

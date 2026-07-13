@@ -470,6 +470,38 @@ impl BrowserFragment<Ready> {
         &self.features
     }
 
+    /// Rolls up this fragment's declared features and those of every nested
+    /// component fragment, in first-seen order with duplicates removed.
+    ///
+    /// [`features`](BrowserFragment::features) returns only this fragment's own
+    /// top-level requests; a fragment composed of nested components (e.g. the
+    /// browser writer's document body) carries its feature requests on those
+    /// nested [`Component`](ComposableNode::Component) fragments. This is the
+    /// single-fragment analogue of [`HtmlPage::features`], so
+    /// [`render_browser_node`] can return the same first-seen rollup a whole
+    /// page would.
+    ///
+    /// [`HtmlPage::features`]: crate::html::HtmlPage::features
+    /// [`render_browser_node`]: crate::tree::render::render_browser_node
+    pub fn collect_features(&self) -> Vec<PageFeature> {
+        let mut out: Vec<PageFeature> = Vec::new();
+        self.push_features(&mut out);
+        out
+    }
+
+    /// Appends this fragment's own features, then recurses into nested
+    /// component fragments — first-seen order, duplicates skipped.
+    fn push_features(&self, out: &mut Vec<PageFeature>) {
+        for &feature in &self.features {
+            if !out.contains(&feature) {
+                out.push(feature);
+            }
+        }
+        if let Some(node) = &self.node {
+            push_node_features(node, out);
+        }
+    }
+
     /// The microdata key/value pairs this fragment contributes.
     pub fn metadata(&self) -> &HashMap<MicrodataKey, String> {
         &self.metadata
@@ -478,6 +510,21 @@ impl BrowserFragment<Ready> {
     /// The `<link>` dependencies this fragment declares.
     pub fn dependency_links(&self) -> &[LinkTag] {
         &self.dependency_links
+    }
+}
+
+/// Walks a composable node tree, descending into `BlockTag` children and
+/// recursing into every `Component` fragment to roll up its features — the
+/// feature analogue of [`HtmlPage`](crate::html::HtmlPage)'s fragment walk.
+fn push_node_features(node: &ComposableNode, out: &mut Vec<PageFeature>) {
+    match node {
+        ComposableNode::Component(child) => child.push_features(out),
+        ComposableNode::BlockTag(block) => {
+            for child in &block.content.children {
+                push_node_features(child, out);
+            }
+        }
+        _ => {}
     }
 }
 
