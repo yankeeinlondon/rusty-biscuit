@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
-use tokio::sync::{Mutex, mpsc, oneshot, watch};
+use tokio::sync::{mpsc, oneshot, watch, Mutex};
 use tokio::task::JoinHandle;
 /// Errors that can occur during WebSocket operations.
 #[derive(Debug, thiserror::Error)]
@@ -46,6 +46,17 @@ pub enum WsError {
     /// Correlation error (unmatched response).
     #[error("Correlation error: {0}")]
     Correlation(String),
+    /// A connection header could not be represented as an HTTP header.
+    ///
+    /// Returned instead of silently dropping the header, so a malformed
+    /// auth header surfaces here rather than as an opaque auth rejection.
+    #[error("Invalid connection header `{name}`: {reason}")]
+    InvalidHeader {
+        /// The offending header name.
+        name: String,
+        /// Why the name or value was rejected.
+        reason: String,
+    },
 }
 /// Options for configuring a WebSocket client connection.
 #[derive(Debug, Clone)]
@@ -67,7 +78,9 @@ pub struct WsClientOptions {
     /// Whether to disable Nagle's algorithm (TCP_NODELAY).
     pub disable_nagle: bool,
     /// Optional websocket transport configuration.
-    pub websocket_config: Option<tokio_tungstenite::tungstenite::protocol::WebSocketConfig>,
+    pub websocket_config: Option<
+        tokio_tungstenite::tungstenite::protocol::WebSocketConfig,
+    >,
 }
 impl Default for WsClientOptions {
     fn default() -> Self {
@@ -258,7 +271,10 @@ impl Drop for WsTransportHandle {
     }
 }
 /// Compute reconnect delay with capped exponential backoff and jitter.
-pub(crate) fn reconnect_delay(policy: &ReconnectPolicy, attempt: u32) -> std::time::Duration {
+pub(crate) fn reconnect_delay(
+    policy: &ReconnectPolicy,
+    attempt: u32,
+) -> std::time::Duration {
     let multiplier = policy.multiplier.max(1.0);
     let exp = multiplier.powi(i32::try_from(attempt).unwrap_or(i32::MAX));
     let base_secs = (policy.initial_backoff.as_secs_f64() * exp)
