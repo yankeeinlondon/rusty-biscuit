@@ -62,6 +62,10 @@ service Rendezvous {
     // state vectors and push missing deltas in both directions. The
     // RPC completes only after the protocol terminates (or fails).
     rpc SyncWithPeer(SyncWithPeerRequest) returns (SyncWithPeerResponse);
+
+    // Enumerate host-capability registers known to this daemon: its
+    // own plus the synced replica of every mesh peer's.
+    rpc ListHostCapabilities(ListHostCapabilitiesRequest) returns (ListHostCapabilitiesResponse);
 }
 
 message PingRequest {
@@ -325,6 +329,24 @@ message SyncWithPeerResponse {
     uint64 sent_bytes = 3;
     // Per-chunk outcome breakdown.
     repeated SyncChunkOutcome chunks = 4;
+}
+
+message ListHostCapabilitiesRequest {}
+
+// One host's capability register as currently known to this daemon.
+message HostCapability {
+    // Document path (`capability/{node_id}`).
+    string document_id = 1;
+    // Hex-encoded node the register describes (also its single writer).
+    string owner_node_id = 2;
+    // Current field values as a JSON object string. JSON keeps the
+    // wire stable while the capability schema evolves — readers ignore
+    // unknown fields and treat missing fields as "unknown".
+    string fields_json = 3;
+}
+
+message ListHostCapabilitiesResponse {
+    repeated HostCapability hosts = 1;
 }
 
 // ---------------------------------------------------------------------

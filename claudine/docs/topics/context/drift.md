@@ -14,7 +14,7 @@ exports, and the CLI renders that catalog directly:
 | Subsystem | Catalog (Darkmatter) | Accessor |
 |-----------|----------------------|----------|
 | Context variables | `CONTEXT_VARIABLE_DESCRIPTORS` | `context_variable_descriptors()` |
-| Expression functions | domain-owned `FunctionRegistration` slices | `expression_function_descriptors()` |
+| Expression functions | authored `expression-functions.yaml` catalog | `expression_function_descriptors()` |
 | Expression semantics | `OPERATOR_DESCRIPTORS`, `TRUTHINESS_DESCRIPTORS`, `MODE_DESCRIPTORS`, `NULL_PROPAGATION_DESCRIPTORS`, `UNARY_OPERATOR_DESCRIPTORS`, `COMPARISON_OPERATOR_DESCRIPTORS`, `ARITHMETIC_OPERATOR_DESCRIPTORS`, `VARIABLE_ACCESS_DESCRIPTORS` | accessors in `expression::semantics` |
 | Side-effect capabilities | `EFFECT_DESCRIPTORS` | `effect_descriptors()` |
 

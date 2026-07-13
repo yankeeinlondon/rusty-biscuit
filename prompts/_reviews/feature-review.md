@@ -1,9 +1,9 @@
 ---
 $schema:
-    spec: file(required;eager)
-    design: file
-    iteration: number
-    review: file
+    spec: file(required;eager) -> the specification file providing the basis for this review's findings
+    design: file -> the design file (_optional_) that compliments the spec
+    iteration: number -> the review's iteration number
+    review: file -> the review file which will be created based on this prompt's execution
 description: "Reviews a _feature specification_ to make sure that the specification has been fully implemented. This prompt is also aware of the likelihood of more than one review being necessary and therefore names the reviews `review-{iteration}.md` in the same folder where the feature was specified.\n\nThe caller can pass in the **iteration** number but it should be detected automatically."
 initialize: 
     info: "spec [{{spec}}]: {{file_exists(spec)}}"

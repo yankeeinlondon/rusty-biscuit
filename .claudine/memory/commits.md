@@ -98,6 +98,28 @@ details do not belong here.
   parameter-modifier interpretation.
 - For a rename, include both the old and new paths so the deletion and addition
   remain in the same commit.
+- **`git commit --only -- <dest-paths>` only commits the `A` half of a rename
+  (2026-07-11 darkmatter archive batch, `5728b87d6` + `637422fc6`).** A
+  rename staged as `D <old>` + `A <new>` is two index entries; passing only
+  the destination pathspec to `--only` commits the additions but leaves the
+  `D` entries stranded in the index. A subagent hit this when archiving
+  `darkmatter/features/2026-07-10-interpolation-literal/*` into
+  `_completed/...`: the first `--only -- <new paths>` commit
+  (`5728b87d6 planning(darkmatter): archive 2026-07-10-interpolation-literal
+  to _completed`) added the four files at their new locations; the staged
+  deletes at the old paths were *not* swept up, so a follow-up
+  `--only -- <old paths>` commit (`637422fc6 planning(darkmatter): drop old
+  paths after archive move`) was needed to retire them. The end tree is
+  correct, but the move is split across two commits when it could have been
+  one. Two reinforcing points: (1) for a rename, always pass *both* the old
+  and the new paths in the same `--` pathspec list so a single commit
+  captures the `D` + `A` pair; (2) if a subagent discovers stranded `D`
+  entries after a successful `--only` commit, the correct response is a
+  scoped follow-up commit (or, if HEAD has not moved and no concurrent
+  commits exist, `git commit --only -- <old paths>` is acceptable) — never
+  amend the prior commit, since the no-amend-after-success rule still
+  applies. The "include both old and new paths" rule is the prevention; the
+  follow-up commit is the cure.
 - Put all Git options before `--`. For very large explicit path lists, use
   `--pathspec-from-file`; inspect the generated list and ensure rename lists
   contain both source and destination paths.
@@ -152,6 +174,32 @@ details do not belong here.
   `path="claudine/docs/providers/dispatch-inventory.json"` can clobber PATH
   and make the next command fail with `zsh: command not found: git`. Use
   `file_path`, `target_path`, or another non-special name instead.
+- **Never proactively disable GPG signing in a subagent (2026-07-10
+  darkmatter 2-commit batch, stray `af09e75af`).** The repo has
+  `commit.gpgsign=true` and `tag.gpgsign=true` enabled at the global
+  git config level, so every `git commit` invocation in a subagent
+  implicitly attempts to sign. In a non-interactive session this is
+  racy: signing succeeds when `gpg-agent` has the passphrase cached,
+  and blocks indefinitely on `pinentry` when it does not. Verified
+  in the 2026-07-10 darkmatter 2-commit batch: subagent 1
+  (`6d28d5ae0 planning(darkmatter): archive 2026-07-09-godless-beauty
+  to _completed`) signed cleanly because the passphrase was cached
+  in `gpg-agent`; subagent 2 (`af09e75af docs(prompts): clarify plan
+  field description in plan prompt schema`) preemptively disabled
+  signing via `-c commit.gpgsign=false -c tag.gpgsign=false` to avoid
+  the perceived hang, producing an unsigned commit. The override
+  yielded a successful `git commit` (exit 0), but the commit landed
+  without a signature, weakening the audit chain silently (no record
+  in `git log` distinguishes it from a signed commit). Three
+  reinforcing points: (1) attempt the commit with the default signing
+  config first; if it hangs, abort and report to the orchestrator
+  instead of retrying with the override; (2) the existing rule "never
+  disable repository signing to bypass a failure" applies to
+  *proactive* overrides too — bypassing is bypassing regardless of
+  whether a failure has manifested yet; (3) if the orchestrator (or a
+  downstream human reviewer) later decides to accept an unsigned
+  commit, the subagent's report must make the unsigned state explicit
+  so the decision is visible in the trace.
 - **Never run `git commit --amend` after a successful commit in a concurrent
   batch (2026-07-09 dmls + darkmatter batch, stray `7873a9a05`).** Once
   `git commit` returns zero, treat the commit as final for that invocation.

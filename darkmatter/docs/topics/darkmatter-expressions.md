@@ -118,6 +118,17 @@ flags.
 - boolean literals: `true`, `false`
 - parentheses for grouping: `(env.AGENT == "claude" || env.AGENT == "opencode")`
 
+## Interpolation Literals
+
+A triple-brace span `{{{ ... }}}` is an **interpolation literal**. It is recognized on every expression-scanning surface but is **inert**: the content is never lexed, parsed, or evaluated, and it produces no diagnostic.
+
+- `{{{ name }}}` composes to the literal text `{{ name }}`.
+- `{{{ {{ x }} }}}` composes to `{{ {{ x }} }}` with `x` unevaluated.
+- The literal closes at the first subsequent `}}}`; an unclosed `{{{` falls back to legacy `{{` scanning.
+- Literals are inert on every scanner consumer: interpolation, DMLS diagnostics, demand-driven context capture, and remote-reference discovery.
+
+Use interpolation literals when documentation needs to display `{{ ... }}` syntax rather than evaluate it. The fenced-code-block alternative remains the way to show literal `{{{ ... }}}` syntax itself.
+
 ## Variable Access
 
 Supported variable forms:
@@ -300,7 +311,11 @@ Arithmetic errors fail composition:
 Function names are **case-insensitive**: `has_key`, `HasKey`, and `haskey` all
 resolve to the same function.
 
-The table below is generated from [`expression_function_descriptors()`](../../lib/src/markdown/compose/expression/catalog.rs). Run `just darkmatter regen-expr-doc` to refresh it.
+The authored source for this table is
+[`docs/schemas/expression-functions.yaml`](../schemas/expression-functions.yaml),
+projected through `expression_function_descriptors()`. Do not edit the generated
+table directly; run `just darkmatter regen-expr-doc` from the repository root to
+refresh it after changing the catalog.
 
 <!-- BEGIN GENERATED FUNCTION TABLE -->
 
@@ -366,11 +381,11 @@ The table below is generated from [`expression_function_descriptors()`](../../li
 | Filesystem | `relative(file)` | Returns a best-effort relative path from the document base directory. | `relative("fixture.md")` ⇒ `fixture.md` |
 | Filesystem | `file_exists(file)` | Returns true when the file exists (local or remote URL). | `file_exists("fixture.md")` ⇒ `true` |
 | Filesystem | `frontmatter(file)` | Reads the frontmatter of a Markdown file as an object. | `frontmatter("fixture.md")` ⇒ `{"title":"Fixture Title"}` |
-| Filesystem | `frontmatter(file, prop)` | Reads a single frontmatter property from a Markdown file. | `frontmatter("fixture.md", "title")` ⇒ `Fixture Title` |
+| Filesystem | `frontmatter(file, prop)` | Reads the frontmatter of a Markdown file as an object. | `frontmatter("fixture.md", "title")` ⇒ `Fixture Title` |
 | Filesystem | `markdown_body_empty(file)` | Returns true when the Markdown body has only whitespace. | `markdown_body_empty("fixture.md")` ⇒ `false` |
 | Filesystem | `markdown_title(file)` | Returns the title from frontmatter or the first H1 heading. | `markdown_title("fixture.md")` ⇒ `Fixture Title` |
 | Filesystem | `validate_schema(file)` | Validates a Markdown document against its declared schema. | `validate_schema("fixture.md")` ⇒ `true` |
-| Filesystem | `validate_schema(file, obj)` | Two-argument form accepted for forward compatibility. |  |
+| Filesystem | `validate_schema(file, obj)` | Validates a Markdown document against its declared schema. |  |
 | Filesystem | `is_indexed_file(file)` | Returns true when the filename stem matches the indexed grammar (base-NNN). | `is_indexed_file("review-1.md")` ⇒ `true` |
 | Filesystem | `file_index(file)` | Returns the parsed index suffix, or -1 when non-indexed. | `file_index("review-1.md")` ⇒ `1` |
 | Filesystem | `increment_file_index(file)` | Increments the numeric index suffix, preserving zero-padding width. | `increment_file_index("review-1.md")` ⇒ `review-2.md` |
@@ -384,7 +399,7 @@ The table below is generated from [`expression_function_descriptors()`](../../li
 | Filesystem | `dir_leading(file)` | Returns the directory path above the last directory segment, dropping the basename and its parent (the complement of file_trailing). | `dir_leading("sub/note.md")` ⇒ `` |
 | Filesystem | `join(left, right)` | Joins two path strings with normalized separators. | `join("sub", "note.md")` ⇒ `sub/note.md` |
 | Filesystem | `link(file)` | Creates a Markdown link to a local file, using its relative path as the link text. |  |
-| Filesystem | `link(target, desc)` | Creates a Markdown link to a local file or HTTP(S) URL with the given description. |  |
+| Filesystem | `link(target, desc)` | Creates a Markdown link to a local file, using its relative path as the link text. |  |
 | Filesystem | `has_command(cmd)` | Returns true when the command is found on PATH or is an existing executable absolute path. |  |
 | Context | `has_skill(name)` | Returns true when a skill directory exists in a user-scoped or local-scoped skill root. |  |
 | Context | `has_local_skill(name)` | Returns true when a skill directory exists in a local-scoped skill root. |  |
@@ -824,11 +839,13 @@ and share one registration model:
 
 To add a function:
 
-1. In the owning domain module, implement the handler and add one
-   `FunctionRegistration` containing its aliases, descriptors, and handler kind.
-2. Add overloads as multiple descriptors on that registration. Consumers read the
-   projected catalog through `expression_function_descriptors()`; there is no
-   second public descriptor table to update.
+1. Add its signatures, description, ordering, and examples to the authored
+   [`expression-functions.yaml`](../schemas/expression-functions.yaml) catalog.
+2. In the owning domain module, implement the handler and add one runtime binding
+   containing its canonical name, aliases, evaluation mode, and handler kind.
+   Consumers read the projected catalog through
+   `expression_function_descriptors()`; runtime bindings do not repeat authored
+   metadata.
 
 For a read-side function, obtain paths through the `ResolutionContext`
 (`base_dir`, magic search paths, optional remote runtime) rather than the

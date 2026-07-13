@@ -58,24 +58,36 @@ pub(crate) fn detect_wrap_startup(
         GitRequest::identity()
     };
 
+    let promptless_at_repo_root = !capture_git_status
+        && sniff::filesystem::git::GitRepo::discover(cwd)
+            .map_err(|e| eyre!("startup repo discovery failed for '{}': {e}", cwd.display()))?
+            .is_some_and(|repo| canonical_or_self(repo.repo_root()) == canonical_or_self(cwd));
+
+    let filesystem_request = FilesystemRequest::new()
+        .git(git_request)
+        .without_file_inventory()
+        .without_docs()
+        .without_formatting();
+    let filesystem_request = if promptless_at_repo_root {
+        // Enumerating every workspace member cannot refine a root launch's
+        // package scope, but it can dominate the terminal handoff latency.
+        filesystem_request.without_repo()
+    } else {
+        filesystem_request.repo(RepoRequest::structure())
+    };
+
     let plan = DetectionPlan::new()
         .base_dir(cwd.to_path_buf())
         .without_os()
         .without_hardware()
         .without_network()
-        .filesystem(
-            FilesystemRequest::new()
-                .git(git_request)
-                .repo(RepoRequest::structure())
-                .without_file_inventory()
-                .without_docs()
-                .without_formatting(),
-        );
+        .filesystem(filesystem_request);
 
     let result = sniff::detect_with_plan(plan)
         .map_err(|e| eyre!("startup detection failed for '{}': {e}", cwd.display()))?;
 
-    let launch_context = claudine::system_prompt::LaunchContext::from_sniff_result(&result, cwd);
+    let mut launch_context =
+        claudine::system_prompt::LaunchContext::from_sniff_result(&result, cwd);
 
     let (git_root, repo) = result
         .filesystem
@@ -90,8 +102,19 @@ pub(crate) fn detect_wrap_startup(
 
     // Direct wrapper has no composed-document source, so no source-repo
     // hint to pass. `repo_root` and `child_cwd` both follow the launch CWD.
-    let launch_workspace =
+    let mut launch_workspace =
         launch_workspace_context_from_repo_info(cwd, git_root.as_deref(), repo.as_ref(), None);
+
+    if promptless_at_repo_root
+        && let Some(repo_root) = git_root
+    {
+        launch_context.package_area_root = Some(repo_root);
+        launch_workspace.package_context = Some(PackageContext {
+            package_area: "root".to_string(),
+            package: None,
+            candidates: Vec::new(),
+        });
+    }
 
     let env_context = claudine::events::environment_context_from_sniff_result(result);
 

@@ -452,6 +452,79 @@ pub fn validation_behavior_descriptors() -> &'static [ValidationBehaviorDescript
     VALIDATION_BEHAVIOR_DESCRIPTORS
 }
 
+/// Trigger-schema grammar forms, in display order.
+pub const TRIGGER_GRAMMAR_DESCRIPTORS: &[TriggerGrammarDescriptor] = &[
+    TriggerGrammarDescriptor {
+        name: "Envelope",
+        form: "kind: trigger-schema",
+        description: "Claims a discovered YAML file as a trigger envelope; `$schema` is its merge-compatible object-schema payload.",
+    },
+    TriggerGrammarDescriptor {
+        name: "Property condition",
+        form: "property: type-expr",
+        description: "A bare expression is an optional guard; `required` makes it a presence gate. Present values must satisfy the type and match-safe constraints.",
+    },
+    TriggerGrammarDescriptor {
+        name: "$path",
+        form: "$path: glob | [glob, ...]",
+        description: "Matches the case-sensitive, boundary-relative path with `/` separators. Basename globs match in any directory and `!` patterns exclude.",
+    },
+    TriggerGrammarDescriptor {
+        name: "all",
+        form: "all: [condition, ...]",
+        description: "Matches when every child condition matches.",
+    },
+    TriggerGrammarDescriptor {
+        name: "any",
+        form: "any: [condition, ...]",
+        description: "Matches when at least one child condition matches.",
+    },
+    TriggerGrammarDescriptor {
+        name: "none",
+        form: "none: [condition, ...]",
+        description: "Matches when no child condition matches.",
+    },
+    TriggerGrammarDescriptor {
+        name: "min-match",
+        form: "min-match: { count: N, of: [condition, ...] }",
+        description: "Matches when at least N of the child conditions match.",
+    },
+    TriggerGrammarDescriptor {
+        name: "Outer OR arms",
+        form: "match: [arm, ...]",
+        description: "A mapping is one arm; a sequence of arm mappings is OR'd. Mixing property and structural keys in one mapping is invalid.",
+    },
+    TriggerGrammarDescriptor {
+        name: "Vacuous-arm lint",
+        form: "each arm requires a positive gate",
+        description: "Every satisfiable arm must require presence through `required` or `$path`, outside `none`; an arm that could match every document is rejected.",
+    },
+];
+
+/// Returns trigger-schema grammar descriptors in display order.
+pub fn trigger_grammar_descriptors() -> &'static [TriggerGrammarDescriptor] {
+    TRIGGER_GRAMMAR_DESCRIPTORS
+}
+
+/// Constraints accepted by trigger property conditions.
+pub const MATCH_SAFE_CONSTRAINT_DESCRIPTORS: &[MatchSafeConstraintDescriptor] = &[
+    MatchSafeConstraintDescriptor { keyword: "required", description: "Requires the property to be present." },
+    MatchSafeConstraintDescriptor { keyword: "<members>", description: "Restricts `enum` to literal members." },
+    MatchSafeConstraintDescriptor { keyword: "pattern", description: "Matches a string against a regular expression." },
+    MatchSafeConstraintDescriptor { keyword: "min", description: "Checks a minimum value, length, or item count." },
+    MatchSafeConstraintDescriptor { keyword: "max", description: "Checks a maximum value, length, or item count." },
+    MatchSafeConstraintDescriptor { keyword: "integer", description: "Requires an integral numeric value." },
+    MatchSafeConstraintDescriptor { keyword: "not-empty", description: "Requires non-whitespace string content." },
+    MatchSafeConstraintDescriptor { keyword: "unique", description: "Requires distinct array items." },
+    MatchSafeConstraintDescriptor { keyword: "min-keys", description: "Checks a minimum object key count." },
+    MatchSafeConstraintDescriptor { keyword: "max-keys", description: "Checks a maximum object key count." },
+];
+
+/// Returns the constraint subset accepted in trigger matches.
+pub fn match_safe_constraint_descriptors() -> &'static [MatchSafeConstraintDescriptor] {
+    MATCH_SAFE_CONSTRAINT_DESCRIPTORS
+}
+
 // ── Descriptor types ────────────────────────────────────────────────────
 
 /// Descriptor for a single schema-language type keyword.
@@ -533,6 +606,26 @@ pub struct ValidationBehaviorDescriptor {
     /// One-line rule summary.
     pub rule: &'static str,
     /// Short description.
+    pub description: &'static str,
+}
+
+/// Descriptor for one trigger-schema grammar form.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TriggerGrammarDescriptor {
+    /// Author-facing name of the grammar form.
+    pub name: &'static str,
+    /// Concise YAML surface form.
+    pub form: &'static str,
+    /// Semantics and relevant restrictions.
+    pub description: &'static str,
+}
+
+/// Descriptor for one constraint accepted in trigger matching.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchSafeConstraintDescriptor {
+    /// Canonical constraint keyword.
+    pub keyword: &'static str,
+    /// Match-time behavior.
     pub description: &'static str,
 }
 
@@ -753,6 +846,60 @@ mod tests {
         let _ = inline_object_rule_descriptors();
         let _ = coercion_rule_descriptors();
         let _ = validation_behavior_descriptors();
+        let _ = trigger_grammar_descriptors();
+        let _ = match_safe_constraint_descriptors();
+    }
+
+    #[test]
+    fn trigger_combinator_descriptor_set_matches_grammar() {
+        use crate::markdown::schemas::triggers::grammar::{COMBINATOR_KEYS, PATH_KEY};
+
+        let described: HashSet<&str> = TRIGGER_GRAMMAR_DESCRIPTORS
+            .iter()
+            .filter_map(|descriptor| {
+                COMBINATOR_KEYS.contains(&descriptor.name).then_some(descriptor.name)
+            })
+            .collect();
+        assert_eq!(described, COMBINATOR_KEYS.iter().copied().collect());
+        assert!(TRIGGER_GRAMMAR_DESCRIPTORS.iter().any(|d| d.name == PATH_KEY));
+    }
+
+    #[test]
+    fn match_safe_constraint_descriptor_set_matches_implementation() {
+        use crate::markdown::schemas::triggers::grammar::is_match_safe_constraint;
+
+        let constraints = [
+            Constraint::Required,
+            Constraint::Default(serde_json::Value::Null),
+            Constraint::Generated,
+            Constraint::Min(0.0),
+            Constraint::Max(0.0),
+            Constraint::Integer,
+            Constraint::MinLen(0),
+            Constraint::MaxLen(0),
+            Constraint::NotEmpty,
+            Constraint::Pattern(String::new()),
+            Constraint::Suggest(Vec::new()),
+            Constraint::Members(Vec::new()),
+            Constraint::Eager,
+            Constraint::Match(Vec::new()),
+            Constraint::Scheme(Vec::new()),
+            Constraint::Unique,
+            Constraint::MinItems(0),
+            Constraint::MaxItems(0),
+            Constraint::MinKeys(0),
+            Constraint::MaxKeys(0),
+        ];
+        let implemented: HashSet<&str> = constraints
+            .iter()
+            .filter(|constraint| is_match_safe_constraint(constraint))
+            .map(Constraint::keyword)
+            .collect();
+        let described: HashSet<&str> = MATCH_SAFE_CONSTRAINT_DESCRIPTORS
+            .iter()
+            .map(|descriptor| descriptor.keyword)
+            .collect();
+        assert_eq!(described, implemented);
     }
 
     /// Descriptor examples in the shape catalog parse to a

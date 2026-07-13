@@ -47,7 +47,7 @@ pub(crate) fn abbreviate_path(path: &Path) -> String {
 /// then let a `.git` in a shared ancestor (e.g. `$TMPDIR`) hijack the resolved
 /// root. Checking `start.join(".git")` first keeps a pinned repo root
 /// (including a tempdir with its own `.git` marker) authoritative.
-pub(crate) fn find_git_root_from(start: &Path) -> Option<PathBuf> {
+pub fn find_git_root_from(start: &Path) -> Option<PathBuf> {
     let mut dir = start.to_path_buf();
     loop {
         if dir.join(".git").exists() {

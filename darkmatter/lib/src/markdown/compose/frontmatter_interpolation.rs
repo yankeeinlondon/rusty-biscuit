@@ -29,7 +29,7 @@
 
 use super::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS;
 use super::expression::{EvaluationLookup, Expr, ExpressionFinder, ResolutionContext, doc_namespace, parse};
-use super::interpolation::{Evaluator, interpolate_value};
+use super::interpolation::{Evaluator, convert_literals, interpolate_value, ScanMode};
 use super::{ComposeContext, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
 use crate::markdown::types::{MarkdownError, SourceRef};
@@ -209,6 +209,36 @@ fn rewrite_value<L: EvaluationLookup>(
     }
 }
 
+/// Converts `{{{ ... }}}` interpolation literals in every string value of
+/// `frontmatter` to `{{ ... }}`.
+///
+/// This is applied once, after the final interpolation pass, so literals
+/// survive both frontmatter passes when shell expansion is enabled. The
+/// replacement is not counted as an interpolation replacement.
+pub(crate) fn convert_frontmatter_literals(frontmatter: &mut Frontmatter) {
+    fn convert_value(value: &mut Value) {
+        match value {
+            Value::String(s) => {
+                *value = Value::String(convert_literals(s, ScanMode::Plain));
+            }
+            Value::Array(arr) => {
+                for item in arr.iter_mut() {
+                    convert_value(item);
+                }
+            }
+            Value::Object(obj) => {
+                for (_, val) in obj.iter_mut() {
+                    convert_value(val);
+                }
+            }
+            _ => {}
+        }
+    }
+    for val in frontmatter.as_map_mut().values_mut() {
+        convert_value(val);
+    }
+}
+
 /// Attaches the receiving frontmatter `key` to a whole-value interpolation
 /// failure so the rendered error names the offending property as structured
 /// scope rather than as a prose prefix. Non-`Interpolation` errors pass through
@@ -378,6 +408,9 @@ fn interpolate_frontmatter_impl(
     }
 
     if templated_keys.is_empty() {
+        if shell_pending_keys.is_empty() {
+            convert_frontmatter_literals(frontmatter);
+        }
         return Ok(FrontmatterInterpolationReport {
             replacements: 0,
             warnings: vec![],
@@ -552,6 +585,10 @@ fn interpolate_frontmatter_impl(
         seed_map.insert(key.clone(), new_value);
         total_replacements += count;
         all_warnings.extend(warnings);
+    }
+
+    if shell_pending_keys.is_empty() {
+        convert_frontmatter_literals(frontmatter);
     }
 
     Ok(FrontmatterInterpolationReport {
@@ -1004,6 +1041,11 @@ mod tests {
         #[test]
         fn null_returns_false() {
             assert!(!contains_interpolation(&json!(null)));
+        }
+
+        #[test]
+        fn literal_returns_false() {
+            assert!(!contains_interpolation(&json!("{{{ x }}}")));
         }
     }
 
@@ -1716,6 +1758,57 @@ mod tests {
             // With defer disabled, the literal `$(pwd)` flows through.
             let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new()).unwrap();
             assert_eq!(fm.as_map().get("combined"), Some(&json!("cwd is $(pwd)")));
+            assert_eq!(report.replacements, 1);
+        }
+
+        #[test]
+        fn pure_literal_is_converted_after_final_pass() {
+            let mut fm = fm_from_json(json!({
+                "title": "{{{ name }}}"
+            }));
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new()).unwrap();
+            assert_eq!(fm.as_map().get("title"), Some(&json!("{{ name }}")));
+            assert_eq!(report.replacements, 0);
+        }
+
+        #[test]
+        fn literal_containing_expression_is_not_evaluated() {
+            let mut fm = fm_from_json(json!({
+                "x": "replaced",
+                "title": "{{{ {{ x }} }}}"
+            }));
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false, None, &HashSet::new()).unwrap();
+            assert_eq!(fm.as_map().get("title"), Some(&json!("{{ {{ x }} }}")));
+            assert_eq!(report.replacements, 0);
+        }
+
+        #[test]
+        fn literal_in_templated_value_survives_deferral_and_converts_after_second_pass() {
+            // Simulate a document with shell-pending value and a templated key
+            // that also contains a literal.
+            let mut fm = fm_from_json(json!({
+                "y": "$(echo hi)",
+                "greeting": "{{{ x }}} {{ y }}"
+            }));
+
+            // First pass: shell-pending `y` defers `greeting`; literal untouched.
+            interpolate_frontmatter(&mut fm, &test_context(), false, true, None, &HashSet::new()).unwrap();
+            assert_eq!(fm.as_map().get("greeting"), Some(&json!("{{{ x }}} {{ y }}")));
+
+            // Simulate frontmatter shell expansion completing.
+            fm.as_map_mut().insert("y".to_string(), json!("hi"));
+
+            // Second pass: resolve expression and convert literal.
+            let report = interpolate_frontmatter(
+                &mut fm,
+                &test_context(),
+                false,
+                false,
+                None,
+                &HashSet::new(),
+            )
+            .unwrap();
+            assert_eq!(fm.as_map().get("greeting"), Some(&json!("{{ x }} hi")));
             assert_eq!(report.replacements, 1);
         }
     }

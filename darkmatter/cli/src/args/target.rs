@@ -78,6 +78,17 @@ pub enum SchemaTarget {
         /// Suppress success lines; only failures print
         #[arg(long)]
         quiet: bool,
+
+        /// Disable trigger discovery and bare-name schema-root lookup
+        #[arg(long)]
+        no_trigger_schemas: bool,
+    },
+
+    /// Explain trigger-schema discovery and activation for a document.
+    Triggers {
+        /// Markdown file to inspect
+        #[arg(value_name = "FILE", add = ArgValueCompleter::new(complete_markdown_files))]
+        file: PathBuf,
     },
 
     /// Detect a SimplifiedSchema from one or more markdown documents.

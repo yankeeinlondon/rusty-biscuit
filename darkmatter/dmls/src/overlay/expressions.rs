@@ -17,6 +17,37 @@ use darkmatter::markdown::compose::expression::{
 };
 use darkmatter::markdown::span::SourceSpan;
 
+/// One `{{{ … }}}` interpolation literal with a document-relative span.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Literal {
+    /// Byte span of the whole `{{{ … }}}` construct (braces included).
+    pub outer: SourceSpan,
+    /// The literal content between `{{{` and `}}}`, preserved verbatim.
+    pub content: String,
+}
+
+/// All body interpolation literals at or after `body_base` (frontmatter literals
+/// are not body literals), in document order.
+pub fn literals(text: &str, body_base: usize) -> Vec<Literal> {
+    ExpressionFinder::new(text)
+        .scan()
+        .literals
+        .into_iter()
+        .filter(|literal| literal.start >= body_base)
+        .map(|literal| Literal {
+            outer: literal.start..literal.end,
+            content: literal.content,
+        })
+        .collect()
+}
+
+/// The literal whose span contains `offset`, if any.
+pub fn literal_at(text: &str, body_base: usize, offset: usize) -> Option<Literal> {
+    literals(text, body_base)
+        .into_iter()
+        .find(|literal| literal.outer.start <= offset && offset <= literal.outer.end)
+}
+
 /// One `{{ … }}` interpolation with document-relative spans.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Interpolation {
@@ -362,7 +393,7 @@ mod tests {
 
     #[test]
     fn test_function_descriptor_fallible_signature_has_error_suffix() {
-        // `length` is fallible (`R_NUM_ERR`), so its typed signature carries the
+        // `length` is fallible, so its typed signature carries the
         // `| error` union suffix that the untyped `signature` lacks.
         let length = function_descriptor("length").expect("`length` is a known function");
         assert!(length.signature.contains("length("));
@@ -421,5 +452,57 @@ mod tests {
         assert!(block.contains(&length.typed_signature()));
         assert!(block.contains("| error"));
         assert!(block.contains(length.description));
+    }
+
+    #[test]
+    fn literals_finds_simple_literal_and_excludes_expressions() {
+        let text = "Hello {{{ name }}} and {{ title }}.";
+        let found = literals(text, 0);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].content, " name ");
+        assert_eq!(&text[found[0].outer.clone()],
+            "{{{ name }}}"
+        );
+    }
+
+    #[test]
+    fn literals_inside_inline_code_are_found() {
+        let text = "Code: `{{{ also_this }}}`";
+        let found = literals(text, 0);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].content, " also_this ");
+    }
+
+    #[test]
+    fn literals_body_base_filters_frontmatter_region() {
+        let text = "---\ntitle: {{{ seed }}}\n---\n\n{{{ body_var }}}\n";
+        let body_base = text.find("\n\n").unwrap() + 2;
+        let found = literals(text, body_base);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].content, " body_var ");
+    }
+
+    #[test]
+    fn literal_at_matches_cursor_on_braces_and_content() {
+        let text = "See {{{ name }}}.";
+        let literal = literal_at(text, 0, text.find("{{{").unwrap()).expect("on opening brace");
+        assert_eq!(literal.content, " name ");
+
+        let inside = literal_at(text, 0, text.find('n').unwrap()).expect("on content");
+        assert_eq!(inside.content, " name ");
+
+        let end = literal_at(text, 0, text.find("}}}.").unwrap() + 2).expect("on closing brace");
+        assert_eq!(end.content, " name ");
+
+        assert!(literal_at(text, 0, 2).is_none());
+    }
+
+    #[test]
+    fn literal_containing_expression_is_inert() {
+        let text = "{{{ {{ x }} }}}";
+        let found = literals(text, 0);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].content, " {{ x }} ");
+        assert!(interpolations(text, 0).is_empty());
     }
 }

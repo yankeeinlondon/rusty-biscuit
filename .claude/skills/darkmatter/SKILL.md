@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-6461c42470661700
-last_updated: 2026-07-10
+hash: 87f17662fa397abe-20b7b5a7168eab1a
+last_updated: 2026-07-11
 ---
 
 # darkmatter
@@ -65,10 +65,42 @@ pass trait or implicit chaining.
 | Compose pipeline, interpolation, shell directives, transclusion | `darkmatter` |
 | Frontmatter extraction and Markdown-aware hashing | `darkmatter` / `md hash` |
 | `$schema` / SimplifiedSchema validation, detection, compose integration | `darkmatter::markdown::schemas` |
+| Expression-function signatures, descriptions, ordering, and examples | `darkmatter/docs/schemas/expression-functions.yaml` |
 | `style:` frontmatter parsing and application | `darkmatter::style` |
 | HTML and terminal Markdown renderers | `darkmatter` |
 | Terminal capability detection, images, Mermaid, graph adapters | `biscuit-terminal` |
 | Shared render tree and target-agnostic layout/style types | `renderable` |
+
+## Expression-Function Catalog
+
+`darkmatter/docs/schemas/expression-functions.yaml` is the authored authority
+for expression-function descriptors. The library embeds and validates it once,
+then projects the public `expression_function_descriptors()` values with stable
+static lifetimes. Runtime handlers and aliases remain Rust-owned under
+`markdown/compose/expression/functions/`; do not duplicate handler-free
+descriptor metadata there.
+
+## Trigger-Schema CLI Integration
+
+Repository-scoped trigger schemas are opt-in for library hosts through
+`ComposeOptions::with_trigger_schemas(true)` or
+`DarkmatterSchemas::with_trigger_discovery(document_path, boundary)`. The `md`
+CLI opts in by default for file-backed `compose` and `schema validate` commands,
+using the discovered Git root as the inclusive boundary. Stdin, URL, and
+in-memory sources do not discover roots. `--no-trigger-schemas` disables both
+discovery and schema-root bare-name lookup, while path-qualified schema
+references continue to resolve normally.
+
+Use `md schema triggers <file>` to inspect roots, shadowed envelopes, matching
+triggers, and arm-level defeat explanations. Its presentation-neutral library
+model is `schemas::TriggerTrace`, built with `trace_registry`.
+
+Trigger payloads layer in deterministic baseline → matching triggers → document
+order and must resolve to merge-compatible object schemas. Match expressions
+reuse SimplifiedSchema types but permit only pure constraints; `all`, `any`,
+`none`, `min-match`, outer-OR arms, and case-sensitive boundary-relative
+`$path` globs are supported. Keep dialect families disjoint with explicit
+`none:` carve-outs, and keep every envelope separate from its payload.
 
 ## Demand-Driven Context Capture
 
@@ -359,6 +391,18 @@ provider's `$schema`/`file(...)` navigation keeps its own request-time path
 resolution because it also honors extension-baseline `file(...)` properties the
 pure index-time slice does not see.
 
+Schema-trigger integration extends that overlay without adding a second
+assembler. DMLS selects the nearest containing workspace folder as the
+discovery boundary, narrowed to a Git root when that root remains inside the
+workspace. `OverlayState` caches transactionally loaded trigger registries and
+the last-good frontmatter source: malformed YAML retains the previous
+activation set, and a malformed trigger envelope retains the previous registry
+while publishing a schema diagnostic on the envelope. Dynamic watchers include
+`**/schemas/*.yaml` and `**/schemas/*.yml`; watcher-less clients rescan trigger
+state on save. Effective assembly still routes through
+`DarkmatterSchemas::with_trigger_registry`, preserving baseline → triggers →
+document precedence and the library's dependency/origin accounting.
+
 Phase 9 (Layer-3 Darkmatter DSL overlay) adds `dmls::overlay::{directives,
 expressions, shell}` (thin passive wrappers over the Phase-8 library scanners —
 `scan_darkmatter_directives`/`_blocks`, `scan_disclosures`, `ExpressionFinder` +
@@ -448,11 +492,14 @@ cache is built. See `darkmatter/features/2026-07-04-dmls/plan.md`.
 
 ## Expression Function Registrations
 
-Expression callables are registered once in the owning module under
-`markdown/compose/expression/functions/`. A `FunctionRegistration` contains the
-canonical name, aliases, every overload descriptor, and a `FunctionHandler`
-kind (`Pure`, `Context`, or `Lazy`). Add a callable or overload to that domain
-slice; do not create a parallel dispatch or descriptor table.
+Expression callables are bound once in the owning module under
+`markdown/compose/expression/functions/`. A runtime-only `FunctionBinding`
+contains the canonical name, aliases, explicit evaluation mode, and optional
+handler pointer (`None` for lazy operators). The cached registry joins bindings
+to the authored catalog by canonical name with bidirectional parity and derives
+dispatch arity eligibility from catalog parameter shapes. Add descriptive
+metadata and overloads to the authored catalog; add executable behavior and
+aliases to the owning Rust domain slice.
 
 Public consumers must read the projected, handler-free catalog through
 `expression_function_descriptors()`. The accessor is backed by one `LazyLock`

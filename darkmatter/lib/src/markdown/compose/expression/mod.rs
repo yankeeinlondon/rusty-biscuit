@@ -88,8 +88,8 @@ pub use file_suggestions::{collect_sibling_candidates, suggest_sibling_files};
 pub(crate) use path_projection::{make_portable_relative, make_relative};
 pub use resolve_ctx::ResolutionContext;
 pub use lexer::{
-    ComparisonOp, ExpressionFinder, ExpressionLocation, Lexer, LexerError, ParseMode, Token,
-    lex_spanned,
+    ComparisonOp, ExpressionFinder, ExpressionLocation, ExpressionScanResult, InterpolationLiteral,
+    Lexer, LexerError, ParseMode, Token, lex_spanned,
 };
 pub use parser::{
     ParseError, Parser, parse, parse_condition, parse_condition_spanned, parse_spanned,
@@ -646,6 +646,13 @@ fn evaluate_function<L: EvaluationLookup>(
         // `and`/`or` short-circuit, so they must evaluate their arguments
         // lazily and stay here rather than in the eagerly-evaluated registries.
         "and" => {
+            match functions::lazy_arity_eligibility("and", args.len()) {
+                Some(functions::LazyArityEligibility::Eligible) => {}
+                Some(functions::LazyArityEligibility::Ineligible(message)) => {
+                    return Err(classify_function_error("and", message));
+                }
+                None => return Err(unknown_function_error("and")),
+            }
             for arg in args {
                 let value = evaluate(arg, lookup)?;
                 if !is_truthy(&value) {
@@ -655,6 +662,13 @@ fn evaluate_function<L: EvaluationLookup>(
             Ok(Value::Bool(true))
         }
         "or" => {
+            match functions::lazy_arity_eligibility("or", args.len()) {
+                Some(functions::LazyArityEligibility::Eligible) => {}
+                Some(functions::LazyArityEligibility::Ineligible(message)) => {
+                    return Err(classify_function_error("or", message));
+                }
+                None => return Err(unknown_function_error("or")),
+            }
             for arg in args {
                 let value = evaluate(arg, lookup)?;
                 if is_truthy(&value) {
@@ -886,6 +900,26 @@ mod tests {
             };
 
             assert_eq!(evaluate(&expr, &state).unwrap(), json!(false));
+        }
+
+        #[test]
+        fn lazy_operators_accept_authored_minimum_arity() {
+            let state = lookup(json!({}));
+            assert_eq!(evaluate(&parse("and()").unwrap(), &state).unwrap(), json!(true));
+            assert_eq!(evaluate(&parse("or()").unwrap(), &state).unwrap(), json!(false));
+        }
+
+        #[test]
+        fn lazy_operators_accept_representative_variadic_arity() {
+            let state = lookup(json!({}));
+            assert_eq!(
+                evaluate(&parse("and(true, 1, \"yes\")").unwrap(), &state).unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                evaluate(&parse("or(false, null, \"yes\")").unwrap(), &state).unwrap(),
+                json!(true)
+            );
         }
 
         #[test]

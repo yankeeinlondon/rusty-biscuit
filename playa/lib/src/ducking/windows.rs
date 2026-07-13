@@ -35,6 +35,9 @@ use windows::Win32::{
     },
     System::Com::{CLSCTX_ALL, CoCreateInstance},
 };
+// `Interface::cast` is used to query sibling COM interfaces off the base
+// `IAudioSessionControl`; the trait must be in scope for the method to resolve.
+use windows::core::Interface;
 
 use crate::ducking::{
     DuckConfig, DuckResult, DuckingBackend, DuckingError, FadeStep, SessionId, SessionVolume,
@@ -101,10 +104,7 @@ impl VolumeWriter for WasapiVolumeWriter {
     fn set_mute(&self, mute: bool) -> Result<(), String> {
         unsafe {
             self.simple_vol
-                .SetMute(
-                    windows::Win32::Foundation::VARIANT_BOOL::from(mute),
-                    std::ptr::null(),
-                )
+                .SetMute(mute, std::ptr::null())
                 .map_err(|e| format!("SetMute failed: {e}"))
         }
     }

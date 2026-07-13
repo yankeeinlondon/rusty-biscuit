@@ -85,9 +85,16 @@ impl ClientFixture {
     /// Waits for the latest `publishDiagnostics` for `uri`, returning its
     /// `diagnostics` array. Drains buffered notifications first.
     fn wait_for_diagnostics(&mut self, uri: &str) -> Vec<Value> {
+        self.wait_for_diagnostics_params(uri)["diagnostics"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn wait_for_diagnostics_params(&mut self, uri: &str) -> Value {
         loop {
-            if let Some(diagnostics) = self.take_buffered_diagnostics(uri) {
-                return diagnostics;
+            if let Some(params) = self.take_buffered_diagnostics(uri) {
+                return params;
             }
             let message = self
                 .client
@@ -102,18 +109,13 @@ impl ClientFixture {
         }
     }
 
-    fn take_buffered_diagnostics(&mut self, uri: &str) -> Option<Vec<Value>> {
+    fn take_buffered_diagnostics(&mut self, uri: &str) -> Option<Value> {
         let position = self.notifications.iter().rposition(|notification| {
             notification.method == "textDocument/publishDiagnostics"
                 && notification.params["uri"] == json!(uri)
         })?;
         let notification = self.notifications.remove(position);
-        Some(
-            notification.params["diagnostics"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default(),
-        )
+        Some(notification.params)
     }
 
     /// Drains messages until the startup-index `workDoneProgress` `end` arrives,
@@ -154,6 +156,11 @@ impl ClientFixture {
         response.result.expect("initialize result")
     }
 
+    fn flush_server(&mut self) {
+        let response = self.request("workspace/symbol", json!({ "query": "" }));
+        assert!(response.error.is_none(), "server flush request failed: {:?}", response.error);
+    }
+
     fn shutdown(self) {
         let mut fixture = self;
         let response = fixture.request("shutdown", Value::Null);
@@ -185,6 +192,14 @@ fn neovim_like_initialize_params(root: &std::path::Path) -> Value {
             { "uri": root_uri.as_str(), "name": "scratch" }
         ]
     })
+}
+
+fn watched_initialize_params(root: &std::path::Path) -> Value {
+    let mut params = neovim_like_initialize_params(root);
+    params["clientInfo"] = json!({ "name": "Watched Client", "version": "1.0" });
+    params["capabilities"]["workspace"]["didChangeWatchedFiles"] =
+        json!({ "dynamicRegistration": true });
+    params
 }
 
 #[test]
@@ -539,6 +554,273 @@ fn server_rescan_fallback_tracks_unopened_files_on_save() {
     );
 
     fixture.shutdown();
+}
+
+#[test]
+fn trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope() {
+    let workspace = tempfile::tempdir().unwrap();
+    let schemas = workspace.path().join("schemas");
+    std::fs::create_dir(&schemas).unwrap();
+    std::fs::write(workspace.path().join(".dmls.toml"), "[schema]\nstrict = true\n").unwrap();
+    let envelope_path = schemas.join("prompt.trigger.yaml");
+    let payload_path = schemas.join("prompt.yaml");
+    let document_path = workspace.path().join("prompt.md");
+    let envelope = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+    let payload = "$schema:\n  model: string(required)\n";
+    let document = "---\nprompt: hello\n---\n\nBody\n";
+    std::fs::write(&envelope_path, envelope).unwrap();
+    std::fs::write(&payload_path, payload).unwrap();
+    std::fs::write(&document_path, document).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let envelope_uri = url::Url::from_file_path(&envelope_path).unwrap();
+    let document_uri = url::Url::from_file_path(&document_path).unwrap();
+    open(&fixture, envelope_uri.as_str(), envelope);
+    let initial_envelope = fixture.wait_for_diagnostics(envelope_uri.as_str());
+    assert!(initial_envelope.is_empty(), "valid envelope diagnostics: {initial_envelope:?}");
+    open(&fixture, document_uri.as_str(), document);
+
+    let initial = fixture.wait_for_diagnostics(document_uri.as_str());
+    assert!(
+        initial.iter().any(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.missing_required")
+                && diagnostic["message"].as_str().is_some_and(|message| message.contains("model"))
+        }),
+        "the trigger must initially contribute its required property: {initial:?}"
+    );
+    let refreshed_envelope = fixture.wait_for_diagnostics(envelope_uri.as_str());
+    assert!(
+        refreshed_envelope.is_empty(),
+        "valid envelope diagnostics after consumer open: {refreshed_envelope:?}"
+    );
+
+    std::fs::remove_file(&payload_path).unwrap();
+    fixture.notify(
+        "textDocument/didSave",
+        json!({ "textDocument": { "uri": envelope_uri.as_str() } }),
+    );
+
+    let envelope_diagnostics = fixture.wait_for_diagnostics(envelope_uri.as_str());
+    assert!(
+        envelope_diagnostics.iter().any(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.prepare")
+                && diagnostic["source"] == json!("darkmatter.schema")
+                && diagnostic["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("prompt.trigger.yaml"))
+        }),
+        "the failed scan must publish a schema-load diagnostic on the envelope: \
+         {envelope_diagnostics:?}"
+    );
+
+    let retained = fixture.wait_for_diagnostics(document_uri.as_str());
+    assert!(
+        retained.iter().any(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.missing_required")
+                && diagnostic["message"].as_str().is_some_and(|message| message.contains("model"))
+        }),
+        "the consumer must retain the prior effective schema after payload removal: {retained:?}"
+    );
+
+    fixture.shutdown();
+}
+
+fn closed_trigger_envelope_diagnostic_round_trip(client_watched: bool) {
+    let workspace = tempfile::tempdir().unwrap();
+    let schemas = workspace.path().join("schemas");
+    std::fs::create_dir(&schemas).unwrap();
+    std::fs::write(workspace.path().join(".dmls.toml"), "[schema]\nstrict = true\n").unwrap();
+    let envelope_path = schemas.join("prompt.trigger.yaml");
+    let payload_path = schemas.join("prompt.yaml");
+    let document_path = workspace.path().join("prompt.md");
+    let envelope = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+    let payload = "$schema:\n  model: string(required)\n";
+    let document = "---\nprompt: hello\n---\n\nBody\n";
+    std::fs::write(&envelope_path, envelope).unwrap();
+    std::fs::write(&payload_path, payload).unwrap();
+    std::fs::write(&document_path, document).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    let init = if client_watched {
+        watched_initialize_params(workspace.path())
+    } else {
+        neovim_like_initialize_params(workspace.path())
+    };
+    fixture.initialize(init);
+    let envelope_uri = url::Url::from_file_path(&envelope_path).unwrap();
+    let payload_uri = url::Url::from_file_path(&payload_path).unwrap();
+    let document_uri = url::Url::from_file_path(&document_path).unwrap();
+    open(&fixture, document_uri.as_str(), document);
+    let initial = fixture.wait_for_diagnostics(document_uri.as_str());
+    assert!(
+        initial.iter().any(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.missing_required")
+                && diagnostic["message"].as_str().is_some_and(|message| message.contains("model"))
+        }),
+        "the trigger must initially contribute its required property: {initial:?}"
+    );
+
+    std::fs::remove_file(&payload_path).unwrap();
+    if client_watched {
+        fixture.notify(
+            "workspace/didChangeWatchedFiles",
+            json!({ "changes": [{ "uri": payload_uri.as_str(), "type": 3 }] }),
+        );
+    } else {
+        fixture.notify(
+            "textDocument/didSave",
+            json!({ "textDocument": { "uri": document_uri.as_str() } }),
+        );
+    }
+
+    let failed = fixture.wait_for_diagnostics(envelope_uri.as_str());
+    assert!(
+        failed.iter().any(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.prepare")
+                && diagnostic["source"] == json!("darkmatter.schema")
+        }),
+        "an unopened envelope must receive the failed registry diagnostic: {failed:?}"
+    );
+    let retained = fixture.wait_for_diagnostics(document_uri.as_str());
+    assert!(
+        retained.iter().any(|diagnostic| diagnostic["code"] == json!("dm.schema.missing_required")),
+        "the consumer must retain its last-good trigger schema: {retained:?}"
+    );
+
+    std::fs::write(&payload_path, payload).unwrap();
+    if client_watched {
+        fixture.notify(
+            "workspace/didChangeWatchedFiles",
+            json!({ "changes": [{ "uri": payload_uri.as_str(), "type": 1 }] }),
+        );
+    } else {
+        fixture.notify(
+            "textDocument/didSave",
+            json!({ "textDocument": { "uri": document_uri.as_str() } }),
+        );
+    }
+    let repaired = fixture.wait_for_diagnostics(envelope_uri.as_str());
+    assert!(repaired.is_empty(), "repair must clear the unopened envelope: {repaired:?}");
+
+    fixture.shutdown();
+}
+
+#[test]
+fn server_rescan_publishes_and_clears_unopened_trigger_envelope_diagnostic() {
+    closed_trigger_envelope_diagnostic_round_trip(false);
+}
+
+#[test]
+fn client_watcher_publishes_and_clears_unopened_trigger_envelope_diagnostic() {
+    closed_trigger_envelope_diagnostic_round_trip(true);
+}
+
+#[test]
+fn repairing_trigger_payload_clears_open_envelope_immediately() {
+    let workspace = tempfile::tempdir().unwrap();
+    let schemas = workspace.path().join("schemas");
+    std::fs::create_dir(&schemas).unwrap();
+    let envelope_path = schemas.join("prompt.trigger.yaml");
+    let payload_path = schemas.join("prompt.yaml");
+    let document_path = workspace.path().join("prompt.md");
+    let envelope = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+    let document = "---\nprompt: hello\n---\n\nBody\n";
+    std::fs::write(&envelope_path, envelope).unwrap();
+    std::fs::write(&document_path, document).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let envelope_uri = url::Url::from_file_path(&envelope_path).unwrap();
+    let document_uri = url::Url::from_file_path(&document_path).unwrap();
+    open(&fixture, envelope_uri.as_str(), envelope);
+    open(&fixture, document_uri.as_str(), document);
+    fixture.flush_server();
+    let failed = fixture.wait_for_diagnostics(envelope_uri.as_str());
+    assert!(
+        failed.iter().any(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare")),
+        "the open envelope must receive its trigger-load diagnostic: {failed:?}"
+    );
+    let _ = fixture.wait_for_diagnostics(document_uri.as_str());
+
+    std::fs::write(&payload_path, "$schema:\n  model: string(required)\n").unwrap();
+    fixture.notify(
+        "textDocument/didSave",
+        json!({ "textDocument": { "uri": document_uri.as_str() } }),
+    );
+    fixture.flush_server();
+
+    let repaired = fixture.wait_for_diagnostics_params(envelope_uri.as_str());
+    assert_eq!(repaired["version"], json!(1), "open-envelope diagnostics must be versioned");
+    assert_eq!(repaired["diagnostics"], json!([]), "repair must clear the open envelope");
+
+    fixture.shutdown();
+}
+
+fn open_trigger_failure_transfer_round_trip(envelope_first: bool) {
+    let workspace = tempfile::tempdir().unwrap();
+    let schemas = workspace.path().join("schemas");
+    std::fs::create_dir(&schemas).unwrap();
+    let envelope_a_path = schemas.join("a.trigger.yaml");
+    let envelope_b_path = schemas.join("b.trigger.yaml");
+    let payload_a_path = schemas.join("a.yaml");
+    let payload_b_path = schemas.join("b.yaml");
+    let document_path = workspace.path().join("consumer.md");
+    let envelope_a = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: a.yaml\n";
+    let envelope_b = "kind: trigger-schema\nmatch:\n  other: string(required)\n$schema: b.yaml\n";
+    let document = "---\nprompt: hello\n---\n\nBody\n";
+    std::fs::write(&envelope_a_path, envelope_a).unwrap();
+    std::fs::write(&envelope_b_path, envelope_b).unwrap();
+    std::fs::write(&payload_b_path, "$schema:\n  beta: string\n").unwrap();
+    std::fs::write(&document_path, document).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let envelope_a_uri = url::Url::from_file_path(&envelope_a_path).unwrap();
+    let envelope_b_uri = url::Url::from_file_path(&envelope_b_path).unwrap();
+    let document_uri = url::Url::from_file_path(&document_path).unwrap();
+    if envelope_first {
+        open(&fixture, envelope_a_uri.as_str(), envelope_a);
+        open(&fixture, document_uri.as_str(), document);
+    } else {
+        open(&fixture, document_uri.as_str(), document);
+        open(&fixture, envelope_a_uri.as_str(), envelope_a);
+    }
+    fixture.flush_server();
+    let _ = fixture.wait_for_diagnostics(document_uri.as_str());
+    let failed_a = fixture.wait_for_diagnostics(envelope_a_uri.as_str());
+    assert!(
+        failed_a.iter().any(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare")),
+        "envelope A must initially own the trigger-load diagnostic: {failed_a:?}"
+    );
+
+    std::fs::write(&payload_a_path, "$schema:\n  alpha: string\n").unwrap();
+    std::fs::remove_file(&payload_b_path).unwrap();
+    fixture.notify(
+        "textDocument/didSave",
+        json!({ "textDocument": { "uri": document_uri.as_str() } }),
+    );
+    fixture.flush_server();
+
+    let repaired_a = fixture.wait_for_diagnostics_params(envelope_a_uri.as_str());
+    assert_eq!(repaired_a["version"], json!(1), "open envelope A must be versioned");
+    assert_eq!(repaired_a["diagnostics"], json!([]), "envelope A must clear immediately");
+    let failed_b = fixture.wait_for_diagnostics_params(envelope_b_uri.as_str());
+    assert!(failed_b["version"].is_null(), "closed envelope B must remain file-level");
+    assert!(
+        failed_b["diagnostics"].as_array().is_some_and(|diagnostics| {
+            diagnostics.iter().any(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare"))
+        }),
+        "envelope B must receive transferred trigger-load ownership immediately: {failed_b:?}"
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn trigger_failure_transfer_republishes_open_envelope_for_either_open_order() {
+    open_trigger_failure_transfer_round_trip(true);
+    open_trigger_failure_transfer_round_trip(false);
 }
 
 #[test]
