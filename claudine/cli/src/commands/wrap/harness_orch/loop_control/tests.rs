@@ -1597,6 +1597,47 @@ mod terminal_event_tests {
     }
 
     #[test]
+    fn dispatch_error_aborts_without_changing_stop_semantics() {
+        let fx = fixture(serde_json::json!({}));
+        let emitter = RecordingEmitter::default();
+        let ctx = LifecycleRuntimeContext {
+            settings: &fx.settings,
+            messaging: &fx.messaging,
+            term: &fx.term,
+            source_path: &fx.source_path,
+            repo_root: Some(fx._dir.path()),
+            launch_area: None,
+            context: None,
+        };
+        let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
+        let mut state = prompt_state(&fx.source_path);
+        let mut budgets = ControlBudgets::default();
+        let action = dispatch_terminal_control(
+            &outcome_with(StackControl::Error {
+                reason: Some("durable findings remain".to_string()),
+            }),
+            1,
+            &mut budgets,
+            None,
+            resume_capable_profile(),
+            Provider::Goose,
+            &mut state,
+            &fx.materialized,
+            Some(fx._dir.path()),
+            &mut guard,
+            &mut ProxyTracking::default(),
+            &fx.term,
+            false,
+        );
+        match action {
+            TerminalControlAction::Abort(error) => {
+                assert_eq!(error.to_string(), "durable findings remain");
+            }
+            other => panic!("expected Error to abort, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn dispatch_no_control_falls_through() {
         let fx = fixture(serde_json::json!({}));
         let emitter = RecordingEmitter::default();

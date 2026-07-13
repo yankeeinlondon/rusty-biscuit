@@ -27,7 +27,7 @@ impl ControlBudgets {
 /// What the loop should do after dispatching a terminal-event control.
 #[derive(Debug)]
 pub(super) enum TerminalControlAction {
-    /// No actionable control (Stop/Skip/Error/None) — fall through to the
+    /// No actionable control (Stop/Skip/None) — fall through to the
     /// loop's normal terminal handling (finalize + return).
     Fallthrough,
     /// Re-enter the loop for another attempt at `next_attempt`.
@@ -94,7 +94,16 @@ pub(super) fn dispatch_terminal_control(
     );
 
     match dispatch {
-        ControlDispatch::Stop | ControlDispatch::Exhausted => TerminalControlAction::Fallthrough,
+        ControlDispatch::Stop => match control {
+            StackControl::Error { reason } => TerminalControlAction::Abort(eyre!(
+                "{}",
+                reason
+                    .as_deref()
+                    .unwrap_or("lifecycle stack marked the run as failed")
+            )),
+            _ => TerminalControlAction::Fallthrough,
+        },
+        ControlDispatch::Exhausted => TerminalControlAction::Fallthrough,
         ControlDispatch::Retry {
             delay,
             reenter_preflight,

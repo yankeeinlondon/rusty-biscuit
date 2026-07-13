@@ -1151,14 +1151,14 @@ const GUARD_ALLOWLIST: &[GuardEntry] = &[
         reason: "Claude is the canonical native home for linked agents.",
     },
     // --- Lib: the OpenCode NDJSON parser backs both OpenCode and its Kilo fork
-    //     and no other provider; this identity guard coerces any misuse to
-    //     OpenCode so it can never borrow a third provider's error vocabulary.
+    //     and no other provider; this identity guard rejects any misuse before
+    //     vocabulary selection.
     GuardEntry {
         path: "claudine/lib/src/stream/providers/opencode.rs",
         form: FORM_MATCH,
         providers: &["Kilo", "OpenCode"],
         tag: KEEP,
-        reason: "OpenCode wire parser speaks only for OpenCode and its Kilo fork; identity guard coerces misuse.",
+        reason: "OpenCode wire parser speaks only for OpenCode and its Kilo fork; identity guard rejects misuse.",
     },
 ];
 
