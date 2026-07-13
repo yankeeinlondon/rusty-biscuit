@@ -42,8 +42,21 @@ pub(crate) struct WrapStartupDetection {
 /// `LaunchContext::from_cwd`, and twice inside `build_child_env`). This
 /// helper collapses that into a single scan and then builds the three
 /// consumer contexts from borrowed data.
-pub(crate) fn detect_wrap_startup(cwd: &Path) -> Result<WrapStartupDetection> {
+pub(crate) fn detect_wrap_startup(
+    cwd: &Path,
+    capture_git_status: bool,
+) -> Result<WrapStartupDetection> {
     use sniff::request::*;
+
+    // Promptless interactive wrappers hand the terminal directly to the child
+    // and never dispatch the captured EnvironmentContext. Repository identity
+    // is still needed for launch/package resolution, but a full working-tree
+    // status walk would have no consumer on that path.
+    let git_request = if capture_git_status {
+        GitRequest::summary()
+    } else {
+        GitRequest::identity()
+    };
 
     let plan = DetectionPlan::new()
         .base_dir(cwd.to_path_buf())
@@ -52,7 +65,7 @@ pub(crate) fn detect_wrap_startup(cwd: &Path) -> Result<WrapStartupDetection> {
         .without_network()
         .filesystem(
             FilesystemRequest::new()
-                .git(GitRequest::summary())
+                .git(git_request)
                 .repo(RepoRequest::structure())
                 .without_file_inventory()
                 .without_docs()
@@ -117,10 +130,11 @@ pub(crate) fn fallback_wrap_startup(cwd: &Path) -> WrapStartupDetection {
 /// without repo context.
 pub(crate) fn detect_wrap_startup_or_fallback(
     cwd: &Path,
+    capture_git_status: bool,
     repo_requested: bool,
     deferred_warnings: &mut Vec<String>,
 ) -> Result<WrapStartupDetection> {
-    match detect_wrap_startup(cwd) {
+    match detect_wrap_startup(cwd, capture_git_status) {
         Ok(startup) => Ok(startup),
         Err(error) => {
             if repo_requested {
