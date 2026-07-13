@@ -261,7 +261,8 @@ fn char_component_color_inherit_with_opacity() {
 #[test]
 fn char_structured_link_attributes() {
     // Directive in the title position: class, inline style, target, plain title,
-    // prompt -> data-prompt, and a custom data-* attribute.
+    // a `prompt` (consumed into the Phase-4 popover structure), and a custom
+    // data-* attribute.
     let md = Markdown::try_from_content(
         "[Click](https://example.com \"class='btn' style='color: blue;' target='_blank' title='Go' prompt='Run it' data-id='42'\")\n",
     )
@@ -269,7 +270,16 @@ fn char_structured_link_attributes() {
     let body = render_as_html_body(&md);
     assert!(body.contains(r#"class="btn""#), "class lost. body:\n{body}");
     assert!(body.contains(r#"target="_blank""#), "target lost. body:\n{body}");
-    assert!(body.contains(r#"data-prompt="Run it""#), "prompt lost. body:\n{body}");
+    // Phase 4: the prompt lowers to the accessible popover markup rather than a
+    // `data-prompt` transport attribute.
+    assert!(
+        !body.contains("data-prompt="),
+        "internal prompt transport leaked. body:\n{body}"
+    );
+    assert!(
+        body.contains(r#"popover="hint""#) && body.contains("Run it"),
+        "prompt lost from popover markup. body:\n{body}"
+    );
     assert!(body.contains(r#"data-id="42""#), "custom data-* lost. body:\n{body}");
     insta::assert_snapshot!("char_structured_link_attributes_html", body);
 }

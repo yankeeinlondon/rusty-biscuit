@@ -1321,3 +1321,76 @@ async fn browser_nested_disclosure_toggles_independently() {
 
     harness.shutdown().await;
 }
+
+/// Phase 4 (Popover): a prompted link's CSS-only enhancement must actually work
+/// in a real browser. Proven against computed styles / live focus rather than
+/// HTML-source substrings:
+///
+/// - the prompt's computed `display` is `block` — our author rule overrides the
+///   popover-supporting UA `[popover]{display:none}` rule, so the `:hover` /
+///   `:focus-within` fallback is never defeated (the key cross-browser point);
+/// - the prompt is `visibility:hidden` by default and becomes `visible` when the
+///   anchor is keyboard-focused (`:focus-within` — keyboard reachable, no JS);
+/// - the anchor keeps its real `href` and the `aria-describedby` association
+///   names the prompt element's `id`.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_prompted_link_popover_reveals_on_focus() {
+    if !require_browser() {
+        return;
+    }
+
+    let md: Markdown =
+        "[Click](https://example.com \"prompt='Extra detail'\")\n".into();
+    let doc = md.as_html(HtmlOptions::default()).expect("as_html");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    // Everything runs in one page load: fresh `page()` calls do not share focus
+    // state, so the focus + re-query must happen inside a single evaluate.
+    let probe = "(() => {\
+        const p = document.querySelector('.dm-popover-prompt');\
+        const a = document.querySelector('.dm-popover-wrapper a');\
+        if (!p || !a) return 'err=missing';\
+        const cs = getComputedStyle(p);\
+        const display = cs.display;\
+        const visDefault = cs.visibility;\
+        a.focus();\
+        const visFocus = getComputedStyle(p).visibility;\
+        return `display=${display};visDefault=${visDefault};visFocus=${visFocus};` +\
+            `href=${a.getAttribute('href')};describedby=${a.getAttribute('aria-describedby')};promptId=${p.id}`;\
+    })()";
+    let result = harness.evaluate(probe).await.expect("evaluate popover probe");
+    assert!(!result.starts_with("err="), "popover DOM probe failed: {result}");
+    let kv = parse_kv(&result);
+
+    assert_eq!(
+        kv.get("display").map(String::as_str),
+        Some("block"),
+        "the prompt must override the UA [popover] display:none; got {result}",
+    );
+    assert_eq!(
+        kv.get("visDefault").map(String::as_str),
+        Some("hidden"),
+        "the prompt must be hidden by default; got {result}",
+    );
+    assert_eq!(
+        kv.get("visFocus").map(String::as_str),
+        Some("visible"),
+        "keyboard focus must reveal the prompt via :focus-within; got {result}",
+    );
+    assert_eq!(
+        kv.get("href").map(String::as_str),
+        Some("https://example.com"),
+        "the anchor must keep its real href; got {result}",
+    );
+    assert_eq!(
+        kv.get("describedby"),
+        kv.get("promptId"),
+        "aria-describedby must name the prompt element id; got {result}",
+    );
+
+    harness.shutdown().await;
+}

@@ -2,4 +2,4 @@
 source: darkmatter/lib/tests/tree_features_characterization.rs
 expression: body
 ---
-<p><a class="btn" style="color:blue" target="_blank" data-id="42" data-prompt="Run it" href="https://example.com" title="Go">Click</a></p>
+<p><span class="dm-popover-wrapper"><a class="btn" style="color:blue" target="_blank" data-id="42" href="https://example.com" title="Go" interestfor="dm-popover-https-example-com" aria-describedby="dm-popover-https-example-com">Click</a><span class="dm-popover-prompt" id="dm-popover-https-example-com" popover="hint" role="note">Run it</span></span></p>
