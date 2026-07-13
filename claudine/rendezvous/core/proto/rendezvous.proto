@@ -110,6 +110,10 @@ message StatusResponse {
     int64 uptime_seconds = 2;
     // Daemon start time in milliseconds since the Unix epoch.
     int64 started_at_unix_ms = 3;
+    // Hex-encoded public key of THIS daemon's node. Lets a reader
+    // (e.g. the dashboard) tell its own registers — always fresh —
+    // apart from synced replicas of mesh peers.
+    string node_id = 4;
 }
 
 // Generic session-log entry. Mirrors `rendezvous_core::session_log::Entry`.
@@ -237,10 +241,20 @@ message PeerInfo {
     // Current connection state.
     PeerConnectionState state = 4;
     // Last observation timestamp, in milliseconds since the Unix epoch.
+    // Bumped by mDNS re-announcements and connection-state changes —
+    // a reachability signal, NOT proof that data actually synced.
     int64 last_seen_unix_ms = 5;
     // If the most recent connection attempt failed, this carries a
     // short human-readable description of the failure.
     string last_error = 6;
+    // Timestamp of the most recent SUCCESSFUL direct-sync round with
+    // this peer, in milliseconds since the Unix epoch (0 = never
+    // synced). This is the honest freshness clock for the peer's
+    // synced register replicas: unlike `last_seen_unix_ms` it does not
+    // advance on mDNS chatter, so a peer that stays discoverable while
+    // its sync fails reads stale. The dashboard's 60s staleness
+    // threshold keys off this field.
+    int64 last_synced_unix_ms = 7;
 }
 
 message CreateInvitationRequest {
