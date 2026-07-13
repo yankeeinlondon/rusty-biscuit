@@ -307,15 +307,16 @@ the intended criterion-9 behavior — a requested-but-unowned browser feature is
 hard error, not a silent inert element. The Phase 1 renderable baseline
 `two_mermaid_document_injects_no_assets_on_either_path` was replaced by
 `two_interactive_mermaid_are_unresolved_by_default_resolver`; the inline
-`document_html_mermaid_mode_parity` gained a test-local `MermaidFeatureResolver`.
+`document_html_mermaid_mode_parity` gained a test-local `SyntheticFeatureResolver`.
 `render_browser_node` does *not* resolve (fragment-level), so the many
 `render_browser_node(...).output.render()` interactive-mermaid unit tests are
 unaffected.
 
 ### Tests added (`browser.rs` inline)
 
-- `two_mermaid_blocks_inject_one_css_one_script_on_both_paths` (dedup + byte
-  parity, criteria 1/10),
+- `two_feature_requests_inject_one_css_one_script_on_both_paths` (generic
+  feature-asset dedup + byte parity via a synthetic CSS+JS probe resolver,
+  criterion 10 — *not* production Mermaid CSS, which is script-only),
 - `interactive_mermaid_unresolved_by_default_resolver_errors` (criterion 9),
 - `non_interactive_mermaid_requests_no_feature` (Off / Code / Vector-static /
   Vector+Interactive degrade — criterion 4),
@@ -464,9 +465,12 @@ assets ride the embeddable surface regardless of the inner document's `<head>`.
 
 ### DarkmatterFeatureResolver (`mermaid/feature.rs`, new)
 
-- Owns `PageFeature::MermaidDiagram` on Browser → theme CSS variables
-  (`prefers-color-scheme` light+dark, derived from the page's resolved
-  `ThemePair`) + an inline `<script type="module">` bootstrap. Delegates every
+- Owns `PageFeature::MermaidDiagram` on Browser → a script-only inline
+  `<script type="module">` bootstrap. The palette (derived from the page's
+  resolved `ThemePair` and color mode) rides Mermaid `themeVariables` baked into
+  `mermaid.initialize`, not CSS — Mermaid does not read CSS custom properties, so
+  a single fixed palette is emitted with no `prefers-color-scheme` switch.
+  Delegates every
   other feature (Popover) and every non-Browser target to
   `DefaultFeatureResolver` (single-owner delegation, never a merged bundle).
 - `MERMAID_VERSION = "11.6.0"` (exact, never a floating major tag). Bootstrap
@@ -522,8 +526,9 @@ assets ride the embeddable surface regardless of the inner document's `<head>`.
   → code, and a durable `insta` snapshot of the exact injected mermaid assets
   (CSP origins + exact version). Body-only `HeadRequired` and the empty-feature
   case are unit tests in `layout/page/tests.rs` (they need `pub(crate)` access).
-- `mermaid/feature.rs` unit tests pin the resolver (mermaid → CSS + Module,
-  delegate Popover, asset-free off-Browser, CDN/version contract).
+- `mermaid/feature.rs` unit tests pin the resolver (mermaid → Module only, no
+  CSS; palette via `themeVariables`; delegate Popover, asset-free off-Browser,
+  CDN/version contract).
 
 ### Deviation
 
@@ -633,7 +638,7 @@ No unexpected flow.
 
 | # | Criterion | Verification |
 |---|-----------|--------------|
-| 1 | Dedup: two mermaid blocks → one script + one CSS | `renderable` inline `two_mermaid_blocks_inject_one_css_one_script_on_both_paths`; `darkmatter` `style_features_phase5` dedup test |
+| 1 | Dedup: two mermaid blocks → one injected module script (script-only; palette via `themeVariables`, no CSS) | `darkmatter` `style_features_phase5::two_mermaid_blocks_inject_one_module_script` (authoritative production dedup); generic CSS+JS dedup is covered separately by `renderable` inline `two_feature_requests_inject_one_css_one_script_on_both_paths` (criterion 10, synthetic probe) |
 | 2 | Markdown neutrality (a snapshots unchanged, b no injected markup) | `render_comparison`/`disclosure_render_targets` snapshots unchanged; `style_features_phase5` MarkdownPlus-neutrality test; `render/markdown.rs` `features: Vec::new()` audit |
 | 3 | Browser default = Interactive `<pre class="mermaid">` + ESM bootstrap | `full_page_browser_mermaid_defaults_to_interactive` (browser tier) + `style_features_phase5` asset snapshot |
 | 4 | Compatibility defaults (default/terminal stay code, no I/O) | `non_interactive_mermaid_requests_no_feature` (renderable); `entrypoints.rs` mode-map unit tests; `image_mode=Never → code` test |

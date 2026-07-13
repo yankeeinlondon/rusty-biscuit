@@ -85,9 +85,12 @@ resolver then supplies the shared assets, which are injected once per page
 - **Body** — a `<pre class="mermaid">` element whose contents are the
   HTML-escaped diagram source, so a screen reader (and any reader whose browser
   cannot load the module) sees readable source.
-- **Injected CSS** — fourteen `--mermaid-*` CSS variables for the default (light)
-  palette plus a `@media (prefers-color-scheme: dark)` override, so light/dark
-  switching is purely CSS-driven and respects the reader's color-scheme.
+- **Palette** — delivered through Mermaid's own `themeVariables` (baked into the
+  bootstrap's `mermaid.initialize` call with `theme: 'base'`), never through CSS:
+  Mermaid does not read CSS custom properties, so **no CSS block is injected**.
+  A single palette is resolved for the document's color mode and fixed at init;
+  there is no live `prefers-color-scheme` switch, because Mermaid's SVG colors
+  are chosen once at init and would require a JS re-render to change.
 - **Injected script** — an inline `<script type="module">` bootstrap that
   dynamically imports the exact `MERMAID_VERSION` (never a floating major tag)
   from `cdn.jsdelivr.net` (primary), retries the identical version from

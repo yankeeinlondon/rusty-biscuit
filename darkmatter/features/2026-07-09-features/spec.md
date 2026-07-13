@@ -1,6 +1,7 @@
 ---
 clarified: claude/fable
 reviewed: true
+review_iterations: 4
 status: ready for planning and implementation
 ---
 
@@ -189,6 +190,24 @@ The emitting link component requests `PageFeature::Popover` (a new variant; use 
 rather than coupling the identity to links). The resolver supplies only shared CSS. Markup,
 accessibility attributes, and unique-ID allocation remain the component/renderer's responsibility.
 
+### Supported-engine contract (v1)
+
+The viewport-safe edge-flip is **Chromium-verified**. Chrome 125+ ships CSS anchor positioning,
+and automated headless-Chrome geometry tests assert the panel stays on-screen when the link is
+pinned to either viewport edge.
+
+On engines **without** CSS anchor positioning — Firefox and WebKit at the time of writing — the
+panel falls back to a `max-width`-capped (`min(20rem, calc(100vw - 1rem))`), left-anchored layout.
+Ordinary inline links stay on-screen and long prompts wrap inside the cap, but a link positioned
+very near the **right** viewport edge can have its panel's right edge overflow. This is an
+**accepted, documented v1 limitation, not a defect**: a portable pure-CSS edge-flip is not
+achievable without CSS anchor positioning or JavaScript, and JavaScript is explicitly out of v1
+scope (the popover is CSS-only in v1). A future vendored or JS-enhanced path could close the gap.
+
+Firefox and WebKit are **not** part of the automated verification set in v1 — the repo has no
+automation harness for those engines, and they are not installed. The `prefers-reduced-motion`
+override applies on all engines.
+
 ## Deduplication
 
 When a page is rendered, all the renderable components' requests for features are collected and de-duplicated so that a feature's assets are injected at most once.
@@ -209,12 +228,12 @@ one resolver/context pair applies to the whole page.
 
 To ensure that our implementation of features has legs we will implement the following features:
 
-- mermaid feature (JS and CSS)
+- mermaid feature (JS-only: an inline ESM module; the palette is delivered via Mermaid `themeVariables`, not CSS)
 - popover feature (CSS-only implementation)
 
 ## Acceptance Criteria
 
-1. **Dedup** — a page containing two mermaid blocks emits exactly one injected mermaid `<script type="module">` block and one mermaid CSS block.
+1. **Dedup** — a page containing two mermaid blocks emits exactly one injected mermaid `<script type="module">` block (deduplicated). The Mermaid feature is **script-only**: the resolved palette is delivered through Mermaid's own `themeVariables` (baked into the bootstrap's `mermaid.initialize` call), not through CSS — Mermaid does not read CSS custom properties, so no mermaid CSS block is emitted.
 2. **Markdown neutrality** — (a) existing Markdown and MarkdownPlus snapshot tests are unchanged by this feature landing, and (b) a page whose components request features produces Markdown-family output containing no injected asset markup.
 3. **Browser default** — rendering a Mermaid fence through Darkmatter's full-page browser path
    with default settings emits the Interactive markup (`<pre class="mermaid">`) plus the inline
@@ -285,10 +304,16 @@ unavailable in clients that do not implement it.
 
 **Recommendation:** choose option 1. It is the only CSS-only design that preserves an ordinary
 link as the primary control while making prompt content available across a broad range of mouse
-and keyboard clients. Planning must validate the final markup in Chromium, Firefox, and WebKit
-and include a reduced-motion rule for any transition.
+and keyboard clients. The final markup is validated in Chromium (automated headless-Chrome
+geometry, focus, color-mode, and reduced-motion tests), and every transition carries a
+reduced-motion override. Firefox and WebKit are **not** validated in v1 — no automation harness
+exists for those engines and they fall back to the left-anchored, `max-width`-capped layout whose
+supported-engine contract and accepted right-edge limitation are recorded in the
+[Popover Feature](#popover-feature) section. A portable pure-CSS edge-flip across all three engines
+is not achievable without CSS anchor positioning (Chromium-only) or JavaScript (out of v1 scope),
+so the contract is honestly scoped to what ships rather than claiming three-engine parity.
 
 Popover colors, spacing, maximum width, stacking, and motion should use existing renderable style
 tokens where available. The implementation may tune those values without revisiting the
-architecture, but snapshots must cover long wrapped prompts, viewport edges, focus, dark/light
-color modes, and `prefers-reduced-motion`.
+architecture. Snapshots and Chromium geometry tests cover long wrapped prompts, viewport edges,
+focus, dark/light color modes, and `prefers-reduced-motion`.

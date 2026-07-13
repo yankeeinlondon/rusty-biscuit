@@ -66,9 +66,19 @@ attribute and the real `href`/`title` are preserved):
   `:focus-within` fallback (author rules beat the UA sheet). Visibility is
   governed by the injected stylesheet everywhere.
 - A `@media (prefers-reduced-motion: reduce)` rule disables the fade transition.
-- Colors use the shared `--color-bg` / `--color-fg` / `--color-border` semantic
-  tokens with dark-mode-safe literal fallbacks; a fixed `max-width` plus
-  `left:0; right:auto` keeps the panel inside the viewport for inline links.
+- The light panel uses the shared `--color-bg` / `--color-fg` / `--color-border`
+  semantic tokens (with light literal fallbacks); a `@media
+  (prefers-color-scheme: dark)` rule switches to a dark palette so the tooltip
+  stays legible on an OS-dark page.
+- **Viewport safety.** The base rule left-anchors the panel (`left:0`) and lets
+  it grow to `max-content`, which alone would overflow when the link sits near
+  the **right** edge. Two guards prevent that: a
+  `max-width:min(20rem, calc(100vw - 1rem))` cap so the panel is never wider
+  than the viewport (long prompts wrap), and a `@supports
+  (position-try-fallbacks: flip-inline)` block that re-anchors the panel to the
+  link with CSS anchor positioning and flips it to the opposite side when it
+  would overflow — keeping the bounding box on-screen at either edge. Engines
+  without anchor positioning keep the `max-width`-capped, left-anchored layout.
 
 ### Unique IDs
 
@@ -104,13 +114,38 @@ A page with no prompted link gets no Popover CSS at all.
 
 ## Cross-browser verification
 
-Chromium behavior is verified by an automated headless-Chrome test
-(`darkmatter/lib/tests/browser_render.rs`) that asserts against *computed*
-styles and live focus (the prompt's `display` is `block`, it is hidden by
-default and becomes visible on keyboard focus, and the anchor keeps its `href`
-and `aria-describedby` association). The CSS-only fallback is engine-portable;
-Firefox and WebKit are verified with the manual checklist below (no automation
-harness for those engines exists in the repo):
+**Chromium is the only automatically-verified engine.** Automated
+headless-Chrome tests (`darkmatter/lib/tests/browser_render.rs`) assert against
+*computed* styles, live geometry, and browser-dispatched input:
+
+- `browser_prompted_link_popover_reveals_on_focus` — `display:block`, hidden by
+  default, revealed on keyboard focus, `href` and `aria-describedby` preserved.
+- `browser_popover_stays_within_viewport_{right,left}_edge` — the revealed panel
+  stays on-screen when the link is pinned to either viewport edge (validates the
+  anchor-positioning flip).
+- `browser_popover_long_prompt_wraps_within_viewport` — a long prompt wraps
+  inside the `max-width` cap with no horizontal overflow.
+- `browser_popover_color_modes_differ` — the panel's applied colors differ
+  between an emulated dark and light `prefers-color-scheme`.
+- `browser_popover_reduced_motion_suppresses_transition` — the transition
+  collapses to `0s` under `prefers-reduced-motion: reduce`.
+- `browser_popover_{tab_reaches_anchor,enter_activates_link,pointer_hover_reveals_prompt}`
+  — CDP input proves Tab focus reveals the prompt, Enter navigation, and pointer
+  hover while Chrome remains headless and isolated from the host OS input state.
+
+**Firefox and WebKit are NOT part of the automated verification set** — the repo
+has no automation harness for those engines, and CSS anchor positioning (which
+powers the edge-flip) is Chromium-only at the time of writing. On Firefox/WebKit
+the panel falls back to the `max-width`-capped, left-anchored layout. Ordinary
+inline links stay on-screen and long prompts wrap inside the cap, but a link
+positioned very near the **right** viewport edge can have its panel's right edge
+overflow. This is an **accepted, documented v1 limitation, not a defect**: a
+portable pure-CSS edge-flip is not achievable without CSS anchor positioning or
+JavaScript, and JavaScript is out of v1 scope (the popover is CSS-only). A future
+vendored or JS-enhanced path could close the gap. The spec's
+[Popover Feature](../../features/2026-07-09-features/spec.md) section records the
+same supported-engine contract. Treat the manual checklist below as unverified
+guidance for those engines, not an automated support claim:
 
 1. Render a doc with a `prompt='…'` structured link to HTML
    (`md compose … | md render --html`, or `Markdown::as_html`).
