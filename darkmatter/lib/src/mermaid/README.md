@@ -8,7 +8,7 @@ Darkmatter provides a `Mermaid` struct for representing diagrams with theming an
 |------|---------|
 | `mod.rs` | `Mermaid` struct, builder API, `detect_diagram_type()`, `render_for_terminal()` |
 | `theme.rs` | `MermaidTheme` struct, JSON parsing, built-in theme presets |
-| `feature.rs` | `DarkmatterFeatureResolver`: browser Mermaid CSS variables and the inline ESM bootstrap (the single owner of Mermaid browser assets) |
+| `feature.rs` | `DarkmatterFeatureResolver`: the inline ESM bootstrap and its `themeVariables` palette — a script-only bundle, the single owner of Mermaid browser assets (no CSS; Mermaid does not read CSS custom properties) |
 | `render_terminal.rs` | Thin wrapper delegating to `biscuit_terminal::components::mermaid` |
 
 ## Mermaid Struct

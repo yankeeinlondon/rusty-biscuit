@@ -8,7 +8,8 @@
 //!
 //! - [`theme`] - Mermaid theme color schemes and JSON parsing
 //! - [`feature`] - Darkmatter's browser [`FeatureResolver`], the single owner of
-//!   Mermaid browser CSS and the inline ESM bootstrap
+//!   the inline ESM bootstrap (a script-only bundle; the palette rides Mermaid
+//!   `themeVariables`, not CSS)
 //! - [`render_terminal`] - Terminal rendering via local mmdc CLI
 
 pub mod feature;

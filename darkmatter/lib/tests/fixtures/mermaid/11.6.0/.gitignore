@@ -1,0 +1,4 @@
+# Vendored Mermaid runtime (test fixture, not build output).
+# Repo root ignores **/dist/; re-include it here.
+!dist/
+!dist/**
