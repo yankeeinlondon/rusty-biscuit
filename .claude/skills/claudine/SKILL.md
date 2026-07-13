@@ -211,6 +211,12 @@ roster, with structured facts in frontmatter validated by a `_schema.yaml` sidec
 - `agent-logging/` — log surfaces, per-site time semantics (unit/zone), record types
 - `agent-models/` — out-of-box models, selection mechanisms, precedence, dynamic listing
 - `agent-permissions/` — permission CLI params, config files, YOLO, PolicyEngine fit
+- `agent-errors/` — ordered structured-stream error vocabularies with
+  per-needle provenance; generation projects these research records into
+  `lib/src/stream/providers/vocabulary.rs`. Immutable Phase-A baselines under
+  `agent-errors/_seeds/` let the deterministic gate detect removals, re-kinds,
+  and reorders after facts graduation. New parser-backed providers must research
+  this topic rather than add keyword constants or facts seeds.
 - `model-config/` — user-side model extension (cloud + local) across all 9 roster
   providers: config files/formats, API standards spoken (`api_standards`), local-runner
   integration paths framed as API-standard bridging

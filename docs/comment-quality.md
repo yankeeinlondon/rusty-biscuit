@@ -17,8 +17,7 @@ them, and which patterns to avoid.
 Prose that restates the implementation step-by-step. The code already
 says this; the prose drifts when the implementation changes.
 
-**Before** (historical state of
-`claudine/lib/src/stream/reporting.rs::summary_to_event_meta`, pre-cleanup):
+**Before** (historical state of `claudine/lib/src/stream/reporting.rs::summary_to_event_meta`, pre-cleanup):
 
 ```rust
 /// Convert a `StreamExecutionSummary` into an `EventMeta` suitable for

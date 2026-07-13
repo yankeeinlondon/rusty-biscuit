@@ -11,7 +11,7 @@ initialize:
 dir: "{{dirname(spec)}}"
 design: "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}"
 iteration: "{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1  : 1   }}"
-review: "{{ dirname(spec) + '/review-' + iteration + '.md' }}"
+review: {{ dirname(spec) + '/review-' + iteration + '.md' }}
 previous: {{ iteration < 2 ? null : 'decrement_file_index(review)' }}
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 start:
@@ -19,16 +19,22 @@ start:
     info: "spec [{{spec}}]: {{file_exists(spec)}}"
 success:
     stack:
-        - when: "frontmatter(review_file,'ready') == true"
+        - when: "file_exists(review) && frontmatter(review,'ready') == true"
           action:
               - success: "{{feature_or_fix}} review {{iteration}} in **{{ctx.area}}** finished and deemed code to be **production ready**"
               - message: "✅  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed successfully (_**production ready**_)"
               - effect: small-group-cheer
-        - when: "frontmatter(review_file,'ready') != true"
+        - when: "file_exists(review) && frontmatter(review,'ready') != true"
           action:
               - warn: "{{feature_or_fix}} review {{iteration}} in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready: <blue>{{link(review)}}</blue>"
               - message: "⚠️  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed but was deemed NOT production ready"
               - effect: sad-trombone
+        - when: "!file_exists(review)"
+          action:
+              - message: "💥 the agent 'successfully' completed the review but the review does not exist (at least in the location it was supposed to)!"
+              - warn: "the agent believes it successful completed the review but it does not exist (at least not in the location it was supposed to): {{review}} ... will try to resume and get the agent to correct this"
+              - effect: sneeze
+              - resume: "the review file was supposed to be saved to '{{review}}' but there is no file saved to that location!"
 failure:
     stderr: "{{feature_or_fix}} review {{iteration}} for `{{parent_dir(spec)}}` in the {{ctx.area}} package area failed to complete!"
     message: "💥 {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area }}** failed to complete ({{err.msg}})!"
