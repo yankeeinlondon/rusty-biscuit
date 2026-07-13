@@ -6,11 +6,11 @@
 //! providers): per-provider union merging would push the overlap invariant
 //! into the merge policy, but semantic tokens have exactly one right answer.
 //!
-//! The module is split into three concerns that this file builds bottom-up:
+//! The module is split into three concerns that this file builds bottom-up
+//! (the **frozen V1 legend** itself lives in the [`crate::semantic_legend`]
+//! leaf so [`crate::capabilities`] can advertise it without importing a
+//! provider):
 //!
-//! - the **frozen V1 legend** ([`legend`], [`TokenType`], [`modifier`]) — its
-//!   order is a wire contract; reordering invalidates every client's token
-//!   cache and is effectively a protocol migration,
 //! - the canonical [`RawToken`] a family emitter produces, carrying a byte span
 //!   plus the priority a family/structural role gives it,
 //! - the three V1 family emitters ([`family_tokens`]) — F1 body interpolations,
@@ -29,69 +29,13 @@
 use darkmatter::markdown::compose::directives_api::{DirectiveKind, scan_darkmatter_directives};
 use darkmatter::markdown::render_tree::disclosure_scan::scan_disclosures;
 use darkmatter::markdown::span::SourceSpan;
-use lsp_types::{Range, SemanticToken, SemanticTokens, SemanticTokensLegend};
+use lsp_types::{Range, SemanticToken, SemanticTokens};
 
 use super::DocumentContext;
 use crate::overlay::expressions;
+use crate::semantic_legend::{TokenType, modifier};
 use crate::source_map::SourceMap;
 use crate::wiki::scan_wiki_links;
-
-/// Standard LSP token types used by the V1 legend, in protocol order.
-///
-/// The discriminant **is** the legend index encoded on the wire, so the
-/// declaration order is frozen. `function`, `variable`, `number`, and
-/// `operator` are unused by the V1 families (F1/F2/F4) but are reserved so the
-/// fine-grained expression phase (F3) never has to reorder the legend.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u32)]
-pub enum TokenType {
-    /// `macro` — interpolation spans and directive keywords.
-    Macro = 0,
-    /// `function` — expression function names (reserved for F3).
-    Function = 1,
-    /// `variable` — expression identifiers (reserved for F3).
-    Variable = 2,
-    /// `property` — directive option keys.
-    Property = 3,
-    /// `string` — directive option values and wiki inner segments.
-    Str = 4,
-    /// `number` — expression number literals (reserved for F3).
-    Number = 5,
-    /// `operator` — expression operators (reserved for F3).
-    Operator = 6,
-}
-
-impl TokenType {
-    /// The wire legend index for this type.
-    fn index(self) -> u32 {
-        self as u32
-    }
-}
-
-/// Custom + standard token modifiers, as single-bit masks.
-///
-/// The bit position **is** the legend index (bit `n` ⇒ legend entry `n`), so
-/// this order is frozen alongside [`TokenType`]. The five custom modifiers come
-/// first (the V1 targeting surface), then the two standard modifiers required
-/// by the future fine-grained phase.
-pub mod modifier {
-    /// Every token inside (and including) a `{{ }}` / `{{{ }}}` span.
-    pub const INTERPOLATION: u32 = 1 << 0;
-    /// A `{{{ … }}}` literal span (same family as interpolation, distinguishable).
-    pub const INERT: u32 = 1 << 1;
-    /// Every token on a directive line.
-    pub const DIRECTIVE: u32 = 1 << 2;
-    /// The three structural closers (`::end-block`, `::details`, `::end-disclosure`).
-    pub const CLOSER: u32 = 1 << 3;
-    /// Every token in a `[[wiki]]` link.
-    pub const WIKI: u32 = 1 << 4;
-    /// Reserved: transcluded-target paths (future).
-    pub const INJECTED: u32 = 1 << 5;
-    /// Standard `defaultLibrary` — `ctx.*` / `env.*` roots and functions (F3).
-    pub const DEFAULT_LIBRARY: u32 = 1 << 6;
-    /// Standard `readonly` — `ctx.*` (F3).
-    pub const READONLY: u32 = 1 << 7;
-}
 
 /// Family a raw token belongs to, ordered by precedence.
 ///
@@ -161,35 +105,6 @@ impl AbsToken {
             self.token_type,
             self.modifiers,
         )
-    }
-}
-
-/// The frozen V1 legend, in the exact wire order [`TokenType`] and [`modifier`]
-/// encode.
-///
-/// Reordering either list is a protocol migration; keep this in lock-step with
-/// the discriminants above.
-pub fn legend() -> SemanticTokensLegend {
-    SemanticTokensLegend {
-        token_types: [
-            "macro", "function", "variable", "property", "string", "number", "operator",
-        ]
-        .into_iter()
-        .map(Into::into)
-        .collect(),
-        token_modifiers: [
-            "interpolation",
-            "inert",
-            "directive",
-            "closer",
-            "wiki",
-            "injected",
-            "defaultLibrary",
-            "readonly",
-        ]
-        .into_iter()
-        .map(Into::into)
-        .collect(),
     }
 }
 
@@ -675,6 +590,7 @@ mod tests {
     use crate::capabilities::{ClientProfile, HoverMediaProfile};
     use crate::config::DmlsConfig;
     use crate::graph::WorkspaceGraph;
+    use crate::semantic_legend::legend;
     use crate::source_map::PositionEncoding;
 
     fn source_map(text: &str, encoding: PositionEncoding) -> SourceMap {

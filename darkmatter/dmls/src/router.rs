@@ -552,11 +552,64 @@ impl CancelLedger {
     }
 }
 
+/// Tracks outstanding server-initiated `workspace/semanticTokens/refresh`
+/// requests.
+///
+/// Each send gets a unique id (`dmls/semantic-tokens-refresh/<n>`) so two
+/// config changes in flight before the first response do not collide on one
+/// id and make the client's responses ambiguous. The loop retires responses by
+/// id and logs a client rejection.
+#[derive(Debug, Default)]
+struct RefreshLedger {
+    next: u64,
+    outstanding: HashSet<RequestId>,
+}
+
+impl RefreshLedger {
+    const PREFIX: &'static str = "dmls/semantic-tokens-refresh";
+
+    /// Allocates a unique refresh request id and records it as outstanding.
+    fn issue(&mut self) -> RequestId {
+        let id = RequestId::from(format!("{}/{}", Self::PREFIX, self.next));
+        self.next += 1;
+        self.outstanding.insert(id.clone());
+        id
+    }
+
+    /// Consumes a client response addressed to a refresh request.
+    ///
+    /// A matching outstanding id is retired; a carried error is logged at
+    /// `warn` (a client refusing the refresh must surface, but must not fail
+    /// the loop), a success is retired quietly at `debug`.
+    ///
+    /// ## Returns
+    ///
+    /// `true` when the response matched a tracked refresh id (now retired);
+    /// `false` when the id is not a refresh request the caller should keep its
+    /// existing handling for.
+    fn consume(&mut self, response: &Response) -> bool {
+        if !self.outstanding.remove(&response.id) {
+            return false;
+        }
+        match &response.error {
+            Some(error) => tracing::warn!(
+                id = %response.id,
+                code = error.code,
+                "client rejected semantic-tokens refresh: {}",
+                error.message
+            ),
+            None => tracing::debug!(id = %response.id, "semantic-tokens refresh acknowledged"),
+        }
+        true
+    }
+}
+
 /// The dispatch loop.
 pub struct Router {
     connection: Connection,
     state: ServerState,
     cancelled: CancelLedger,
+    refresh: RefreshLedger,
 }
 
 impl Router {
@@ -566,6 +619,7 @@ impl Router {
             connection,
             state,
             cancelled: CancelLedger::default(),
+            refresh: RefreshLedger::default(),
         }
     }
 
@@ -591,7 +645,11 @@ impl Router {
                     self.handle_notification(notification);
                 }
                 Message::Response(response) => {
-                    tracing::debug!(id = %response.id, "ignoring client response");
+                    // Retire an outstanding refresh (logging a client rejection);
+                    // an untracked id keeps the original ignore behavior.
+                    if !self.refresh.consume(&response) {
+                        tracing::debug!(id = %response.id, "ignoring client response");
+                    }
                 }
             }
         }
@@ -972,7 +1030,7 @@ impl Router {
                 };
                 tracing::debug!("didChangeConfiguration");
                 if self.state.reload_config(params.settings) {
-                    send_semantic_tokens_refresh(&self.connection.sender);
+                    self.send_semantic_tokens_refresh();
                 }
             }
             DidChangeWatchedFiles::METHOD => {
@@ -1052,6 +1110,13 @@ impl Router {
             tracing::warn!("failed to send response: {error}");
         }
     }
+
+    /// Requests `workspace/semanticTokens/refresh` with a freshly allocated,
+    /// unique id, tracked as outstanding until the client responds.
+    fn send_semantic_tokens_refresh(&mut self) {
+        let id = self.refresh.issue();
+        send_refresh_request(&self.connection.sender, id);
+    }
 }
 
 /// Builds an `InvalidParams` error response for a malformed request payload.
@@ -1084,14 +1149,15 @@ fn should_request_semantic_tokens_refresh(
     profile.supports_semantic_tokens_refresh && semantic_tokens_refresh_needed(before, after)
 }
 
-/// Sends `workspace/semanticTokens/refresh` to the client.
+/// Sends a `workspace/semanticTokens/refresh` request under a pre-allocated id.
 ///
-/// Fire-and-forget: the client's response is ignored, and a send failure (the
-/// client is gone) is logged rather than propagated, so a token-config change
-/// never fails the `didChangeConfiguration` notification that triggered it.
-fn send_semantic_tokens_refresh(sender: &Sender<Message>) {
+/// The client's response is retired later by the loop via [`RefreshLedger`]; a
+/// send failure (the client is gone) is logged rather than propagated, so a
+/// token-config change never fails the `didChangeConfiguration` notification
+/// that triggered it.
+fn send_refresh_request(sender: &Sender<Message>, id: RequestId) {
     let request = Request::new(
-        RequestId::from("dmls/semantic-tokens-refresh".to_string()),
+        id,
         SemanticTokensRefresh::METHOD.to_string(),
         serde_json::Value::Null,
     );
@@ -1201,11 +1267,63 @@ mod tests {
     }
 
     #[test]
-    fn test_send_semantic_tokens_refresh_isolates_failure() {
+    fn test_send_refresh_request_isolates_failure() {
         let (sender, receiver) = crossbeam_channel::unbounded::<Message>();
         // The client is gone: the send fails and is swallowed rather than
         // panicking or failing the notification.
         drop(receiver);
-        send_semantic_tokens_refresh(&sender);
+        send_refresh_request(
+            &sender,
+            RequestId::from("dmls/semantic-tokens-refresh/0".to_string()),
+        );
+    }
+
+    #[test]
+    fn test_refresh_ledger_issues_distinct_tracked_ids() {
+        let mut ledger = RefreshLedger::default();
+        let first = ledger.issue();
+        let second = ledger.issue();
+        // Two sends before any response must not collide on one id, or the
+        // client's responses become ambiguous.
+        assert_ne!(first, second);
+        assert!(ledger.outstanding.contains(&first));
+        assert!(ledger.outstanding.contains(&second));
+        assert_eq!(ledger.outstanding.len(), 2);
+    }
+
+    #[test]
+    fn test_refresh_ledger_consumes_error_response() {
+        let mut ledger = RefreshLedger::default();
+        let id = ledger.issue();
+        let response = Response::new_err(
+            id.clone(),
+            ErrorCode::InternalError as i32,
+            "client refused refresh".to_string(),
+        );
+        // A rejection is consumed (and logged) without failing the loop, and
+        // the id is retired from tracking.
+        assert!(ledger.consume(&response));
+        assert!(!ledger.outstanding.contains(&id));
+    }
+
+    #[test]
+    fn test_refresh_ledger_consumes_success_response() {
+        let mut ledger = RefreshLedger::default();
+        let id = ledger.issue();
+        let response = Response::new_ok(id.clone(), serde_json::Value::Null);
+        assert!(ledger.consume(&response));
+        assert!(!ledger.outstanding.contains(&id));
+    }
+
+    #[test]
+    fn test_refresh_ledger_ignores_unrelated_response() {
+        let mut ledger = RefreshLedger::default();
+        let tracked = ledger.issue();
+        let response = Response::new_ok(RequestId::from(999), serde_json::Value::Null);
+        // An unrelated id is not a refresh response: the caller keeps its own
+        // handling and the outstanding set is undisturbed.
+        assert!(!ledger.consume(&response));
+        assert!(ledger.outstanding.contains(&tracked));
+        assert_eq!(ledger.outstanding.len(), 1);
     }
 }

@@ -1,6 +1,10 @@
 ---
 features:
   - 2026-07-04-dmls
+  - 2026-07-09-suggest-constraint
+  - 2026-07-10-interpolation-literal
+  - 2026-07-10-schema-triggers
+  - 2026-07-11-semantic-tokens
 ---
 # DMLS Features
 
@@ -82,10 +86,14 @@ Schema-aware editing inside a document's YAML frontmatter block, driven by
 Darkmatter's **SimplifiedSchema**:
 
 - **Effective schema** — the Darkmatter base schema, plus any configured
-  extension schemas whose globs match the file, plus the document's own
-  `$schema`, merged with compose precedence.
+  extension schemas whose globs match the file, plus repository-scoped
+  **trigger schemas** (content-triggered envelopes discovered under `schemas/`
+  roots within the workspace boundary — watched for changes, with last-good
+  retention and a file-level diagnostic on a malformed envelope), plus the
+  document's own `$schema`, merged with compose precedence.
 - **Completion** — schema keys (required keys marked), enum values, boolish
-  scaffolds, `file(...)` paths, and `style.*` keys.
+  scaffolds, `file(...)` paths, `style.*` keys, and advisory `suggest(...)`
+  value candidates (including block-sequence items).
 - **Hover** — a key's type, constraints, default, and `->` description, plus
   annotations for generated `ctx.*` keys.
 - **Navigation** — go-to-definition and document links for `$schema` and
@@ -94,7 +102,8 @@ Darkmatter's **SimplifiedSchema**:
   document symbols.
 - **Diagnostics** — precise key/value ranges for YAML parse errors, type
   mismatches, constraint violations, missing required keys, unknown keys,
-  invalid file references, and `style.*` problems.
+  invalid file references, invalid `suggest(...)` candidates, malformed
+  standalone schema envelopes, and `style.*` problems.
 
 Claudine (and any other tool) activates as **pure configuration**: point a
 `[schema.extensions.*]` entry at a schema file and a set of globs. There is no
@@ -114,8 +123,14 @@ Intelligence for Darkmatter's composition DSL — all **read-only**:
   broken-path diagnostics, and **cycle detection** (with the cycle ancestry
   reported).
 - **Interpolation** (`{{ }}`) — completion (frontmatter keys, `ctx.*`,
-  functions), hover showing the resolved static value, variable → frontmatter-key
-  definition, and malformed / unknown-identifier diagnostics.
+  functions), hover showing the resolved static value (falling back to the
+  effective-schema property description for a declared-but-unset key),
+  variable → frontmatter-key definition, and malformed / unknown-identifier
+  diagnostics (a schema-declared property counts as known).
+- **Interpolation literals** (`{{{ … }}}`) — recognized as inert: hover shows
+  the composed `{{ … }}` output with an inertness note, the content produces
+  no interpolation diagnostics, and a quick-fix can wrap a spurious malformed
+  interpolation into a literal.
 - **Shell awareness** — `::shell` and frontmatter `$()` values hover with an
   approved / denied / unknown policy verdict, and denied built-ins raise a
   `darkmatter.security.*` diagnostic. Nothing is ever executed.
@@ -165,8 +180,9 @@ Refactoring and formatting that respect workspace-wide references:
   on any conflict — never a partial rename. (Requires client file-operation
   support; see the matrix below.)
 - **Code actions** (diagnostic-driven): create the missing file / wiki note,
-  add a missing required schema key, migrate a deprecated `style:` key, and
-  close an unclosed `::block`.
+  add a missing required schema key, migrate a deprecated `style:` key,
+  close an unclosed `::block`, and wrap a malformed `{{ … }}` in an
+  interpolation literal (`{{{ … }}}`).
 - **Formatting** — whole-document formatting that is byte-equivalent to the
   `md clean` cleanup sequence, with optional reflow to a fixed width.
 

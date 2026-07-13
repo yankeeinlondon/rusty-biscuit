@@ -2,6 +2,7 @@
 features:
 - 2026-07-04-dmls
 - 2026-07-08-modal-and-autocomplete
+- 2026-07-10-interpolation-literal
 ---
 # DMLS Hover Effects
 
@@ -79,6 +80,14 @@ A cursor on a known function-name identifier — the name token of a `FunctionCa
 
 Cursor precedence: the function name wins on its own name identifier; an offset on an argument, parenthesis, or comma falls through to that inner expression's `ctx.*` or frontmatter hover (`function_call_at` declines on a non-name offset, so `expression_at` serves the argument). Unknown functions keep the generic `**Expression**` hover. The hover range remains the complete `{{ … }}` expression.
 
+## Formatting rule: bare-identifier (frontmatter variable) hover
+
+A bare identifier inside `{{ … }}` is a **frontmatter variable** (the D2 rule above). When the document sets the key, hover shows its static value. When the key is *declared by the effective schema but unset in the document* — a caller-supplied parameter injected at compose time — hover falls back to the schema block: type, constraints, and `->` description, rendered by `frontmatter::schema_hover_details` (the schema body without the leading `` `key` `` heading, so the name is not duplicated under the `**Expression**` header). A set frontmatter value always wins over the schema block.
+
+## Formatting rule: interpolation literal hover
+
+A cursor anywhere inside an interpolation literal (`{{{ … }}}`) renders an `**Interpolation literal**` block showing the composed output — the inner content wrapped in `{{ … }}` as inline code (a fenced block when multiline, with backtick fences sized to survive content containing backticks) — followed by the note that the content is rendered as literal `{{ … }}` text and is not interpolated. The body is assembled by the pure `literal_hover_markdown` function in `src/providers/dsl.rs`. The hover range is the literal's complete outer `{{{ … }}}` span.
+
 ## What answers a hover
 
 Hover is a provider-chain capability: each provider may contribute, and the registry keeps the **first non-empty** result. Providers run in registration order, so a more specific overlay wins over the substrate for the same offset.
@@ -88,7 +97,7 @@ Hover is a provider-chain capability: each provider may contribute, and the regi
 | substrate (Markdown) | a link                                               | graph-sourced target preview (no disk read)                                                               |
 | wiki                 | `[[target]]` / `[[target#heading]]`                  | resolved target + heading preview                                                                         |
 | frontmatter          | a frontmatter key or its value                       | schema type/required/enum/default/description; or a `ctx.*` generated-key annotation                      |
-| DSL                  | a directive, `{{ }}` interpolation, or a `$()` value | directive semantics + resolved target; interpolation's static value or `ctx.*` note; shell policy verdict |
+| DSL                  | a directive, `{{ }}` interpolation, `{{{ }}}` literal, or a `$()` value | directive semantics + resolved target; interpolation's static value, schema-property fallback, or `ctx.*` note; literal composed-output + inert note; shell policy verdict |
 
 Because the chain stops at the first non-empty hover, a schema-defined frontmatter key whose value contains `{{ }}` is explained by the **frontmatter** provider (the schema description), while an *undefined* key's `{{ … }}` value falls through to the **DSL** provider's interpolation hover.
 
