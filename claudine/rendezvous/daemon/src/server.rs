@@ -8,6 +8,19 @@
 //! removed automatically when the handle is dropped (or when shutdown
 //! completes), so tests can spawn ephemeral servers without leaking
 //! filesystem state.
+//!
+//! ## Platform support (review Finding 9)
+//!
+//! The local-IPC server is currently **Unix-only**: [`spawn_uds_server`]
+//! binds a `UnixListener`, and there is no Windows named-pipe server yet.
+//! The gRPC *client* ([`rendezvous_client`]) is already portable (UDS on
+//! Unix, named pipe on Windows), so the missing half is the server. Until
+//! a `spawn_named_pipe_server` lands (a tracked follow-up that needs a
+//! Windows runner to verify — see
+//! `claudine/features/2026-07-12-rendezvous-dashboard/windows-support-followup.md`),
+//! the daemon — and therefore `claudine dashboard` end-to-end — does not
+//! run on Windows. Consumers that spawn this daemon in tests gate those
+//! tests with `#[cfg(unix)]`.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
