@@ -6,10 +6,12 @@
 //! spawn a child process.
 
 pub mod batcher;
+pub mod capability;
 pub mod discovery;
 pub mod peers;
 pub mod projection;
 pub mod quic;
+pub mod register;
 pub mod server;
 pub mod service;
 pub mod session_log;
@@ -20,6 +22,7 @@ pub use batcher::{BatcherConfig, BatcherHandle, BatcherWorker};
 pub use discovery::{DiscoveredPeer, DiscoveryError, DiscoveryHandle};
 pub use peers::{PeerRecord, PeerRegistry, PeerRegistryWorkers};
 pub use projection::{Projection, ProjectionError, ProjectionRow};
+pub use register::{RegisterError, RegisterStore, owner_peer_id};
 pub use quic::{ALPN_PROTOCOL, InboundConnection, QuicEndpoint, QuicError};
 pub use server::{DaemonConfig, ServerError, ServerHandle, spawn_uds_server};
 pub use service::RendezvousService;

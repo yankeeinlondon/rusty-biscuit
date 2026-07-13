@@ -21,12 +21,14 @@ use prost::Message;
 use quinn::{Connection, RecvStream, SendStream};
 use rendezvous_core::sync::{SyncWireError, encode_frame};
 use rendezvous_core::{
-    ChunkId, ChunkIdParseError, EnvelopeError, EnvelopeInbox, EnvelopeSealer, NodeIdentity,
-    PayloadKind, SignedEnvelopeWire, SyncAdvertiseEnd, SyncChunkAdvertise,
-    SyncDelta, SyncEnd, SyncFrame, SyncHello, identity::PUBLIC_KEY_LENGTH, sync_frame,
+    ChunkId, ChunkIdParseError, DocumentId, DocumentIdParseError, EnvelopeError, EnvelopeInbox,
+    EnvelopeSealer, NodeIdentity, PayloadKind, SignedEnvelopeWire, SyncAdvertiseEnd,
+    SyncChunkAdvertise, SyncDelta, SyncEnd, SyncFrame, SyncHello,
+    identity::PUBLIC_KEY_LENGTH, sync_frame,
 };
 
-use crate::session_log::{SessionLogError, SessionLogManager};
+use crate::register::{RegisterError, RegisterStore};
+use crate::session_log::{ExportedUpdate, SessionLogError, SessionLogManager};
 use crate::storage::{AcceptedEnvelope, Storage};
 
 /// Wire-level protocol version advertised in [`SyncHello`].
@@ -88,9 +90,20 @@ pub enum SyncError {
     #[error("malformed chunk id: {0}")]
     ChunkIdParse(#[from] ChunkIdParseError),
 
+    /// A document-id string sent by the remote was malformed — a
+    /// *known* domain with the wrong shape. (Unknown domains are
+    /// skipped with a warning, not fatal, so a newer peer can sync
+    /// document kinds this daemon has not learned yet.)
+    #[error("malformed document id: {0}")]
+    DocumentIdParse(#[from] DocumentIdParseError),
+
     /// Local session-log persistence failed.
     #[error(transparent)]
     SessionLog(#[from] SessionLogError),
+
+    /// Local register persistence or validation failed.
+    #[error(transparent)]
+    Register(#[from] RegisterError),
 
     /// Pairing-store access failed.
     #[error(transparent)]
@@ -146,6 +159,7 @@ impl SyncError {
 #[derive(Clone)]
 pub struct SyncService {
     session_log: SessionLogManager,
+    registers: RegisterStore,
     storage: Storage,
     identity: Arc<NodeIdentity>,
     sealer: Arc<Mutex<EnvelopeSealer>>,
@@ -158,12 +172,14 @@ impl SyncService {
     #[must_use]
     pub fn new(
         session_log: SessionLogManager,
+        registers: RegisterStore,
         storage: Storage,
         identity: Arc<NodeIdentity>,
     ) -> Self {
         let sealer = session_log.sealer();
         Self {
             session_log,
+            registers,
             storage,
             identity,
             sealer,
@@ -250,37 +266,14 @@ impl SyncService {
         expected_kind: PayloadKind,
         inbox: &mut EnvelopeInbox,
     ) -> Result<bool, SyncError> {
-        if hex_encode(&envelope.sender) != peer_node_id_hex {
-            return Err(SyncError::protocol(
-                "delta envelope sender does not match hello node_id",
-            ));
-        }
-        if envelope.document_id != delta_chunk_id {
-            return Err(SyncError::protocol(format!(
-                "envelope document_id {:?} does not match delta chunk_id {:?}",
-                envelope.document_id, delta_chunk_id,
-            )));
-        }
-        if chunk.owner_node_id != peer_node_id_hex {
-            return Err(SyncError::OwnershipViolation {
-                sender: peer_node_id_hex.to_string(),
-                owner: chunk.owner_node_id.clone(),
-            });
-        }
-        if envelope.payload_kind != expected_kind {
-            return Err(SyncError::protocol(format!(
-                "envelope payload_kind {:?} does not match delta frame kind {:?}",
-                envelope.payload_kind, expected_kind,
-            )));
-        }
-        let msg_id_hex = envelope.message_id_hex();
-        let sender_hex = envelope.sender_node_id();
-        if self.storage.has_accepted_envelope(&sender_hex, &msg_id_hex)? {
-            return Err(SyncError::Envelope(
-                EnvelopeError::DuplicateMessageId(msg_id_hex),
-            ));
-        }
-        let payload = inbox.accept(envelope)?.to_vec();
+        let payload = self.validate_and_accept_envelope(
+            peer_node_id_hex,
+            delta_chunk_id,
+            &chunk.owner_node_id,
+            envelope,
+            expected_kind,
+            inbox,
+        )?;
 
         // Stage the import and validate schema WITHOUT persisting.
         let replace = expected_kind == PayloadKind::SnapshotReplace;
@@ -308,25 +301,7 @@ impl SyncService {
 
         // Persist the accepted envelope BEFORE the snapshot so a failure
         // here leaves no durable snapshot on disk.
-        let now_unix_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
-        let accepted = AcceptedEnvelope {
-            sender_hex: sender_hex.clone(),
-            message_id_hex: msg_id_hex.clone(),
-            document_id: envelope.document_id.clone(),
-            payload_kind: envelope.payload_kind.to_byte(),
-            content_hash_hex: hex_encode(&envelope.content_hash),
-            signature_hex: hex_encode(&envelope.signature),
-            payload_bytes: payload,
-            accepted_at_unix_ms: i64::try_from(now_unix_ms).unwrap_or(i64::MAX),
-        };
-        self.storage.save_accepted_envelope(
-            &sender_hex,
-            &msg_id_hex,
-            &accepted,
-        )?;
+        self.persist_accepted_envelope(envelope, payload)?;
 
         // Now commit the staged snapshot. If this fails after the envelope
         // was persisted, startup replay will recover.
@@ -341,6 +316,168 @@ impl SyncService {
         }
 
         Ok(advanced)
+    }
+
+    /// Validate, apply, and persist a single incoming register delta.
+    /// Same envelope discipline as [`Self::receive_delta`], but staging
+    /// and commit run through the [`RegisterStore`] (owner-peer binding,
+    /// replica-swap replace semantics, no chunk schema).
+    pub(crate) fn receive_register(
+        &self,
+        peer_node_id_hex: &str,
+        doc: &DocumentId,
+        delta_doc_id: &str,
+        envelope: &rendezvous_core::SignedEnvelope,
+        expected_kind: PayloadKind,
+        inbox: &mut EnvelopeInbox,
+    ) -> Result<bool, SyncError> {
+        let payload = self.validate_and_accept_envelope(
+            peer_node_id_hex,
+            delta_doc_id,
+            doc.owner_node_id(),
+            envelope,
+            expected_kind,
+            inbox,
+        )?;
+
+        let staged = match self.registers.stage_remote(doc, &payload, expected_kind) {
+            Ok(s) => s,
+            Err(RegisterError::Loro(reason)) => {
+                return Err(SyncError::MalformedPayload {
+                    chunk_id: doc.as_path(),
+                    reason,
+                });
+            }
+            Err(other) => return Err(SyncError::Register(other)),
+        };
+
+        self.persist_accepted_envelope(envelope, payload)?;
+
+        Ok(self.registers.commit_staged(doc, staged)?)
+    }
+
+    /// Shared front half of every delta receive: sender/document/owner
+    /// consistency, signed payload-kind match, durable replay
+    /// protection, and signature verification (via the inbox). Returns
+    /// the verified payload bytes.
+    fn validate_and_accept_envelope(
+        &self,
+        peer_node_id_hex: &str,
+        wire_doc_id: &str,
+        owner_node_id: &str,
+        envelope: &rendezvous_core::SignedEnvelope,
+        expected_kind: PayloadKind,
+        inbox: &mut EnvelopeInbox,
+    ) -> Result<Vec<u8>, SyncError> {
+        if hex_encode(&envelope.sender) != peer_node_id_hex {
+            return Err(SyncError::protocol(
+                "delta envelope sender does not match hello node_id",
+            ));
+        }
+        if envelope.document_id != wire_doc_id {
+            return Err(SyncError::protocol(format!(
+                "envelope document_id {:?} does not match delta chunk_id {:?}",
+                envelope.document_id, wire_doc_id,
+            )));
+        }
+        if owner_node_id != peer_node_id_hex {
+            return Err(SyncError::OwnershipViolation {
+                sender: peer_node_id_hex.to_string(),
+                owner: owner_node_id.to_string(),
+            });
+        }
+        if envelope.payload_kind != expected_kind {
+            return Err(SyncError::protocol(format!(
+                "envelope payload_kind {:?} does not match delta frame kind {:?}",
+                envelope.payload_kind, expected_kind,
+            )));
+        }
+        let msg_id_hex = envelope.message_id_hex();
+        let sender_hex = envelope.sender_node_id();
+        if self.storage.has_accepted_envelope(&sender_hex, &msg_id_hex)? {
+            return Err(SyncError::Envelope(
+                EnvelopeError::DuplicateMessageId(msg_id_hex),
+            ));
+        }
+        Ok(inbox.accept(envelope)?.to_vec())
+    }
+
+    /// Durably record an accepted envelope for replay protection and
+    /// crash recovery. Callers persist this BEFORE committing the
+    /// staged document state.
+    fn persist_accepted_envelope(
+        &self,
+        envelope: &rendezvous_core::SignedEnvelope,
+        payload: Vec<u8>,
+    ) -> Result<(), SyncError> {
+        let msg_id_hex = envelope.message_id_hex();
+        let sender_hex = envelope.sender_node_id();
+        let now_unix_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let accepted = AcceptedEnvelope {
+            sender_hex: sender_hex.clone(),
+            message_id_hex: msg_id_hex.clone(),
+            document_id: envelope.document_id.clone(),
+            payload_kind: envelope.payload_kind.to_byte(),
+            content_hash_hex: hex_encode(&envelope.content_hash),
+            signature_hex: hex_encode(&envelope.signature),
+            payload_bytes: payload,
+            accepted_at_unix_ms: i64::try_from(now_unix_ms).unwrap_or(i64::MAX),
+        };
+        self.storage
+            .save_accepted_envelope(&sender_hex, &msg_id_hex, &accepted)?;
+        Ok(())
+    }
+
+    /// Seal an exported document payload into a signed envelope and
+    /// write it as a delta frame, updating the per-document outcome.
+    /// Empty exports are skipped (nothing to send).
+    async fn send_signed_delta(
+        &self,
+        send: &mut SendStream,
+        outcome: &mut SyncOutcome,
+        chunk_outcomes: &mut HashMap<String, SyncChunkOutcome>,
+        doc_path: String,
+        exported: ExportedUpdate,
+    ) -> Result<(), SyncError> {
+        if exported.bytes.is_empty() {
+            return Ok(());
+        }
+        let payload_kind = exported.kind;
+        // Seal and capture the following counter inside the same lock
+        // scope so the persisted counter cannot lag behind a concurrent
+        // seal.
+        let (envelope, counter_to_persist) = {
+            let mut sealer = self.sealer.lock();
+            let envelope = sealer.seal(doc_path.clone(), payload_kind, exported.bytes);
+            let counter = sealer.next_counter();
+            (envelope, counter)
+        };
+        self.storage
+            .save_outbound_counter(&self.identity.node_id(), counter_to_persist)?;
+        let frame = SyncFrame {
+            kind: Some(sync_frame::Kind::Delta(SyncDelta {
+                chunk_id: doc_path.clone(),
+                envelope: Some(SignedEnvelopeWire::from_envelope(&envelope)),
+                is_snapshot: matches!(
+                    payload_kind,
+                    PayloadKind::Snapshot | PayloadKind::SnapshotReplace
+                ),
+                replace: payload_kind == PayloadKind::SnapshotReplace,
+            })),
+        };
+        let sent = write_frame(send, &frame).await?;
+        outcome.sent_bytes += sent;
+        chunk_outcomes
+            .entry(doc_path.clone())
+            .or_insert(SyncChunkOutcome {
+                chunk_id: doc_path,
+                ..Default::default()
+            })
+            .sent_bytes += sent;
+        Ok(())
     }
 
     async fn run_session(
@@ -408,22 +545,31 @@ impl SyncService {
                 callback(peer_node_id_hex.clone());
             }
 
-            // ---- Advertise phase (we send all chunks we have) ----
+            // ---- Advertise phase (we send all documents we have) ----
             let local_node_id = self.identity.node_id();
             let local_chunks = self.session_log.list_all_chunks()?;
+            let local_registers = self.registers.list_documents()?;
             let mut chunk_outcomes: HashMap<String, SyncChunkOutcome> = HashMap::new();
+            let mut advertisements: Vec<(String, Vec<u8>)> = Vec::new();
             for chunk in &local_chunks {
                 let vv = self.session_log.chunk_state_vector(chunk)?.unwrap_or_default();
+                advertisements.push((chunk.as_path(), vv));
+            }
+            for doc in &local_registers {
+                let vv = self.registers.state_vector(doc)?.unwrap_or_default();
+                advertisements.push((doc.as_path(), vv));
+            }
+            for (doc_path, vv) in advertisements {
                 let frame = SyncFrame {
                     kind: Some(sync_frame::Kind::Advertise(SyncChunkAdvertise {
-                        chunk_id: chunk.as_path(),
+                        chunk_id: doc_path.clone(),
                         version_vector: vv,
                     })),
                 };
                 let sent = write_frame(&mut send, &frame).await?;
                 outcome.sent_bytes += sent;
-                chunk_outcomes.entry(chunk.as_path()).or_insert(SyncChunkOutcome {
-                    chunk_id: chunk.as_path(),
+                chunk_outcomes.entry(doc_path.clone()).or_insert(SyncChunkOutcome {
+                    chunk_id: doc_path,
                     ..Default::default()
                 });
             }
@@ -437,14 +583,29 @@ impl SyncService {
             outcome.sent_bytes += sent;
 
             // ---- Read remote advertisements (all namespaces) --------
-            let mut remote_state: HashMap<ChunkId, Vec<u8>> = HashMap::new();
+            let mut remote_state: HashMap<String, Vec<u8>> = HashMap::new();
             loop {
                 let (frame, received) = read_frame(&mut recv).await?;
                 outcome.received_bytes += received;
                 match frame.kind {
                     Some(sync_frame::Kind::Advertise(ad)) => {
-                        let chunk: ChunkId = ad.chunk_id.parse()?;
-                        remote_state.insert(chunk, ad.version_vector);
+                        match ad.chunk_id.parse::<DocumentId>() {
+                            Ok(doc) => {
+                                remote_state.insert(doc.as_path(), ad.version_vector);
+                            }
+                            // Forward compatibility: a newer peer may
+                            // advertise domains we have not learned;
+                            // skip them instead of failing the session.
+                            Err(DocumentIdParseError::UnknownDomain { domain, .. }) => {
+                                tracing::warn!(
+                                    target: "rendezvous_daemon::sync",
+                                    %domain,
+                                    doc = %ad.chunk_id,
+                                    "skipping advertisement for unknown document domain",
+                                );
+                            }
+                            Err(err) => return Err(err.into()),
+                        }
                     }
                     Some(sync_frame::Kind::AdvertiseEnd(_)) => break,
                     Some(sync_frame::Kind::Error(err)) => {
@@ -462,60 +623,34 @@ impl SyncService {
             }
 
             // ---- Push deltas the remote is missing ---------------
-            // Only push deltas for chunks WE own. The remote will push
-            // their own namespace deltas to us in the reading phase.
+            // Only push deltas for documents WE own. The remote will
+            // push their own namespace deltas to us in the reading
+            // phase.
             for chunk in local_chunks.iter().filter(|c| c.owner_node_id == local_node_id) {
-                let remote_vv = remote_state.get(chunk).and_then(|v| {
+                let path = chunk.as_path();
+                let remote_vv = remote_state.get(&path).and_then(|v| {
                     if v.is_empty() { None } else { Some(v.as_slice()) }
                 });
                 let Some(exported) = self.session_log.export_updates_since(chunk, remote_vv)?
                 else {
                     continue;
                 };
-                if exported.bytes.is_empty() {
+                self.send_signed_delta(&mut send, &mut outcome, &mut chunk_outcomes, path, exported)
+                    .await?;
+            }
+            for doc in local_registers
+                .iter()
+                .filter(|d| d.owner_node_id() == local_node_id)
+            {
+                let path = doc.as_path();
+                let remote_vv = remote_state.get(&path).and_then(|v| {
+                    if v.is_empty() { None } else { Some(v.as_slice()) }
+                });
+                let Some(exported) = self.registers.export_updates_since(doc, remote_vv)? else {
                     continue;
-                }
-                let document_id = chunk.as_path();
-                let payload_kind = exported.kind;
-                // Seal and capture the following counter inside the same
-                // lock scope so the persisted counter cannot lag behind
-                // a concurrent seal.
-                let (envelope, counter_to_persist) = {
-                    let mut sealer = self.sealer.lock();
-                    let envelope = sealer.seal(
-                        document_id.clone(),
-                        payload_kind,
-                        exported.bytes,
-                    );
-                    let counter = sealer.next_counter();
-                    (envelope, counter)
                 };
-                self.storage.save_outbound_counter(
-                    &self.identity.node_id(),
-                    counter_to_persist,
-                )?;
-                let frame = SyncFrame {
-                    kind: Some(sync_frame::Kind::Delta(SyncDelta {
-                        chunk_id: document_id.clone(),
-                        envelope: Some(SignedEnvelopeWire::from_envelope(&envelope)),
-                        is_snapshot: matches!(
-                            payload_kind,
-                            PayloadKind::Snapshot | PayloadKind::SnapshotReplace
-                        ),
-                        replace: payload_kind == PayloadKind::SnapshotReplace,
-                    })),
-                };
-                let sent = write_frame(&mut send, &frame).await?;
-                outcome.sent_bytes += sent;
-                if let Some(o) = chunk_outcomes.get_mut(&chunk.as_path()) {
-                    o.sent_bytes += sent;
-                } else {
-                    chunk_outcomes.insert(chunk.as_path(), SyncChunkOutcome {
-                        chunk_id: chunk.as_path(),
-                        sent_bytes: sent,
-                        ..Default::default()
-                    });
-                }
+                self.send_signed_delta(&mut send, &mut outcome, &mut chunk_outcomes, path, exported)
+                    .await?;
             }
             let sent = write_frame(
                 &mut send,
@@ -533,7 +668,24 @@ impl SyncService {
                 outcome.received_bytes += received;
                 match frame.kind {
                     Some(sync_frame::Kind::Delta(delta)) => {
-                        let chunk: ChunkId = delta.chunk_id.parse()?;
+                        let doc: DocumentId = match delta.chunk_id.parse() {
+                            Ok(doc) => doc,
+                            // Unknown domains are skipped in the
+                            // advertise phase, so a delta for one is a
+                            // peer pushing a document kind we cannot
+                            // validate — skip it the same way.
+                            Err(DocumentIdParseError::UnknownDomain { domain, .. }) => {
+                                tracing::warn!(
+                                    target: "rendezvous_daemon::sync",
+                                    %domain,
+                                    doc = %delta.chunk_id,
+                                    "skipping delta for unknown document domain",
+                                );
+                                continue;
+                            }
+                            Err(err) => return Err(err.into()),
+                        };
+                        let doc_path = doc.as_path();
                         let wire = delta
                             .envelope
                             .ok_or_else(|| SyncError::protocol("delta missing envelope"))?;
@@ -550,26 +702,36 @@ impl SyncService {
                         let advanced = tokio::task::spawn_blocking({
                             let service = self.clone();
                             let peer_node_id_hex = peer_node_id_hex.clone();
-                            let chunk = chunk.clone();
-                            let delta_chunk_id = delta.chunk_id.clone();
+                            let doc = doc.clone();
+                            let delta_doc_id = delta.chunk_id.clone();
                             let envelope = envelope.clone();
                             move || {
                                 let mut inbox = EnvelopeInbox::new();
-                                service.receive_delta(
-                                    &peer_node_id_hex,
-                                    &chunk,
-                                    &delta_chunk_id,
-                                    &envelope,
-                                    expected_kind,
-                                    &mut inbox,
-                                )
+                                match &doc {
+                                    DocumentId::SessionChunk(chunk) => service.receive_delta(
+                                        &peer_node_id_hex,
+                                        chunk,
+                                        &delta_doc_id,
+                                        &envelope,
+                                        expected_kind,
+                                        &mut inbox,
+                                    ),
+                                    DocumentId::Capability { .. } => service.receive_register(
+                                        &peer_node_id_hex,
+                                        &doc,
+                                        &delta_doc_id,
+                                        &envelope,
+                                        expected_kind,
+                                        &mut inbox,
+                                    ),
+                                }
                             }
                         })
                         .await
                         .map_err(|e| SyncError::protocol(e.to_string()))??;
-                        let entry = chunk_outcomes.entry(chunk.as_path()).or_insert(
+                        let entry = chunk_outcomes.entry(doc_path.clone()).or_insert(
                             SyncChunkOutcome {
-                                chunk_id: chunk.as_path(),
+                                chunk_id: doc_path,
                                 ..Default::default()
                             },
                         );
@@ -720,7 +882,9 @@ mod tests {
             .upsert_pairing(&peer_hex, 1_000, "test peer")
             .expect("pair");
 
-        let service = SyncService::new(manager.clone(), storage.clone(), identity);
+        let registers = RegisterStore::new(storage.clone(), Arc::clone(&identity))
+            .expect("registers");
+        let service = SyncService::new(manager.clone(), registers, storage.clone(), identity);
         let peer_sealer = EnvelopeSealer::new(peer_identity.clone());
 
         Harness {
