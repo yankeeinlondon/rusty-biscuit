@@ -1010,7 +1010,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/attempt.rs",
-      "line": 256,
+      "line": 257,
       "form": "eq-comparison",
       "dispatch_class": "conditional",
       "providers": [
@@ -2706,7 +2706,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/repo_home.rs",
-      "line": 207,
+      "line": 209,
       "form": "matches-macro",
       "dispatch_class": "conditional",
       "providers": [
@@ -2716,7 +2716,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/repo_home.rs",
-      "line": 286,
+      "line": 288,
       "form": "eq-comparison",
       "dispatch_class": "conditional",
       "providers": [
@@ -2847,7 +2847,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/wrapper_exec.rs",
-      "line": 177,
+      "line": 179,
       "form": "eq-comparison",
       "dispatch_class": "conditional",
       "providers": [
