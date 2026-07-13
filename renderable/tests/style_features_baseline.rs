@@ -27,9 +27,12 @@ fn mermaid_node(source: &str) -> RenderNode {
     RenderNode::code(Some("mermaid".into()), None, source)
 }
 
-/// A document with two distinct Mermaid fences — the dedup fixture: after the
-/// resolver lands, two Mermaid blocks must inject exactly one script and one CSS
-/// block (spec acceptance criterion 1). Today neither is injected.
+/// A document with two distinct Mermaid fences — the dedup fixture. With a
+/// Mermaid-owning resolver installed, the two blocks dedup to exactly one
+/// injected `<script type="module">` bootstrap (script-only; the palette rides
+/// Mermaid `themeVariables`, not CSS — spec acceptance criterion 1). This
+/// baseline test instead exercises the *default* resolver, which leaves the
+/// feature unresolved.
 fn two_mermaid_document() -> Document {
     Document {
         sources: SourceRegistry::default(),
@@ -149,7 +152,7 @@ fn no_feature_page_head_injects_no_assets() {
             "plain".to_string(),
         ))
         .finalize();
-    let html = HtmlPage::from(body).render();
+    let html = HtmlPage::from(body).render().expect("no-feature page renders");
     assert!(
         html.starts_with("<!DOCTYPE html><html><head><meta charset=\"utf-8\">"),
         "head must open with the fixed charset meta, got: {html}"

@@ -30,7 +30,9 @@ use crate::browser::feature::{
     DefaultFeatureResolver, FeatureContext, FeatureResolver, PageFeature, dedup_features,
     resolve_features, serialize_features_head,
 };
-use crate::browser::fragment::{BrowserFragment, ComposableNode, Ready, write_attributes};
+use crate::browser::fragment::{
+    BrowserFragment, ComposableNode, PopoverIdAllocator, PopoverNode, Ready, write_attributes,
+};
 use crate::html::HtmlPage;
 use crate::html::attribute::{ClassDefinition, DomId, HtmlDataAttribute};
 use crate::html::tag::{BlockTag, HtmlAttribute, HtmlType, VoidTag};
@@ -214,13 +216,16 @@ pub fn render_browser_document(
     if let Some(page_options) = opts.page.clone() {
         page.apply_page_options(page_options);
     }
-    // Install the render's resolver/context so the page resolves its features
-    // with the same policy the streaming path uses, then resolve+serialize them
-    // once. `render`/`render_head` stay infallible; an unresolved browser
-    // feature fails here, at the fallible entry point.
+    // Install the render's resolver/context so the returned page resolves its
+    // features (via `HtmlPage::render`) with the same policy the streaming path
+    // uses. Resolving here as well surfaces an unresolved browser feature at
+    // this fallible entry point, so the fragment path fails identically to the
+    // streaming full-document path (`render_browser_document_html`). This eager
+    // call populates the page's memoized head, so the later `render` reuses it
+    // and a possibly-impure resolver runs exactly once per feature.
     page.set_feature_resolver(Rc::clone(&opts.feature_resolver));
     page.set_feature_context(opts.feature_context.clone());
-    page.inject_resolved_features()?;
+    page.resolved_feature_head()?;
     let features = page.features();
     Ok(Rendered {
         output: page,
@@ -269,6 +274,137 @@ pub fn render_browser_document_html(
     doc: &Document,
     opts: &BrowserRenderOptions,
 ) -> Result<Rendered<String>, RenderError> {
+    let StreamedDocument {
+        body,
+        head_page,
+        features,
+        diagnostics,
+    } = stream_browser_document(doc, opts)?;
+    let output = assemble_full_document(doc, opts, &head_page, &body, &features)?;
+    Ok(Rendered {
+        output,
+        diagnostics,
+        features,
+    })
+}
+
+/// A [`Document`] rendered in both the standalone full-document form and the
+/// embeddable body-fragment form, for callers (like Darkmatter's page frame)
+/// that decide between the two **after** rendering — e.g. once the requested
+/// [`features`](Rendered::features) are known.
+///
+/// Produced by [`render_browser_document_body`] from a single streaming pass so
+/// the two forms cannot drift.
+pub struct BrowserDocumentBody {
+    /// The standalone full document (`<!DOCTYPE html><html><head>…</head><body>…
+    /// </body></html>`) — byte-identical to [`render_browser_document_html`].
+    /// Use this when the output stands alone rather than embedding.
+    pub document: String,
+    /// The `<body>` inner HTML only: the root's children streamed in order (a
+    /// styled root as its own wrapping `<div>`), carrying **no** `<!DOCTYPE>`,
+    /// `<html>`, `<head>`, or `<body>` element, so it can be spliced directly
+    /// into a host wrapper.
+    pub body: String,
+    /// The page-level `<style>` / `<script>` assets rolled up from the render
+    /// (design-token `:root` block, page and component stylesheets, and script
+    /// blocks), already wrapped in their elements so a caller can embed a
+    /// self-contained fragment. Empty when the render produced no CSS or JS.
+    ///
+    /// Requested [`features`](Rendered::features) are **not** part of this
+    /// string — an embeddable body has no `<head>` to inject into, so the
+    /// features are returned in the side channel for the caller to resolve and
+    /// place (see [`BrowserRenderOptions::defer_feature_injection`]).
+    pub assets: String,
+}
+
+/// Renders a whole [`Document`] to both the standalone document and an
+/// embeddable body fragment (plus its rolled-up page-level assets) in one pass.
+///
+/// This is the embeddable companion to [`render_browser_document_html`]: it
+/// streams the body once and returns both [`BrowserDocumentBody::document`]
+/// (the full `<!DOCTYPE html>…` form, byte-identical to the full-document path)
+/// and [`BrowserDocumentBody::body`] — the same body **without** the
+/// surrounding document scaffold, so an embedding caller never nests a full
+/// document inside a host element. The page-level `<style>` / `<script>` the
+/// full-document path places in `<head>` are also returned separately in
+/// [`BrowserDocumentBody::assets`] for inline embedding.
+///
+/// Requested features are always returned in [`Rendered::features`]. Whether
+/// they are injected into [`BrowserDocumentBody::document`]'s `<head>` follows
+/// [`BrowserRenderOptions::defer_feature_injection`] exactly as for
+/// [`render_browser_document_html`]; they are never part of `body`/`assets`.
+///
+/// ## Errors
+///
+/// Propagates the same fatal errors as [`render_browser_document_html`]: a
+/// [`RenderError::InvalidTree`] from structural validation (or a strict
+/// warning), and any [`RenderError`] raised while streaming a node or resolving
+/// a non-deferred feature for the standalone document.
+pub fn render_browser_document_body(
+    doc: &Document,
+    opts: &BrowserRenderOptions,
+) -> Result<Rendered<BrowserDocumentBody>, RenderError> {
+    let StreamedDocument {
+        body,
+        head_page,
+        features,
+        diagnostics,
+    } = stream_browser_document(doc, opts)?;
+
+    let document = assemble_full_document(doc, opts, &head_page, &body, &features)?;
+
+    // Roll up the page-level CSS/JS the full-document path would place in
+    // `<head>` so the caller can embed them inline. `stylesheet()` always
+    // carries at least the `:root` design-token block; `inline_code()` is empty
+    // unless a component contributed a script block.
+    let mut assets = String::new();
+    let css = head_page.stylesheet();
+    if !css.is_empty() {
+        assets.push_str("<style>");
+        assets.push_str(&css);
+        assets.push_str("</style>");
+    }
+    let js = head_page.inline_code();
+    if !js.is_empty() {
+        assets.push_str("<script>");
+        assets.push_str(&js);
+        assets.push_str("</script>");
+    }
+
+    Ok(Rendered {
+        output: BrowserDocumentBody {
+            document,
+            body,
+            assets,
+        },
+        diagnostics,
+        features,
+    })
+}
+
+/// The intermediate product of streaming a [`Document`]'s body: the body HTML,
+/// the [`HtmlPage`] seeded with the render's hook fragments and page options
+/// (the head-rollup source), the deduped feature requests, and the folded
+/// diagnostics. Shared by [`render_browser_document_html`] and
+/// [`render_browser_document_body`] so the two paths cannot drift.
+struct StreamedDocument {
+    body: String,
+    head_page: HtmlPage,
+    features: Vec<PageFeature>,
+    diagnostics: Vec<Diagnostic>,
+}
+
+/// Streams a [`Document`]'s body into a single buffer and seeds the head-rollup
+/// [`HtmlPage`] from the render's hook fragments and page options.
+///
+/// The shared front half of both browser document paths; the callers differ
+/// only in whether they wrap the body in a full document
+/// ([`render_browser_document_html`]) or return it as an embeddable fragment
+/// ([`render_browser_document_body`]).
+fn stream_browser_document(
+    doc: &Document,
+    opts: &BrowserRenderOptions,
+) -> Result<StreamedDocument, RenderError> {
     let diagnostics = validate_and_collect_diagnostics(&doc.root, opts)?;
     let mut writer = StreamWriter {
         opts,
@@ -304,12 +440,33 @@ pub fn render_browser_document_html(
     // the two paths cannot drift. Only hook fragments contribute head rollups
     // (page-level structural fragments carry no stylesheet / metadata / links),
     // so a page seeded with just those fragments produces an identical head.
-    // `first_h1_text` walks fragments, which this path does not build, so the
-    // equivalent first-`<h1>` text is computed from the tree and passed in.
     let mut head_page = HtmlPage::from_fragments(hook_fragments);
     if let Some(page_options) = opts.page.clone() {
         head_page.apply_page_options(page_options);
     }
+
+    Ok(StreamedDocument {
+        body,
+        head_page,
+        features: dedup_features(&collected_features),
+        diagnostics,
+    })
+}
+
+/// Assembles the full standalone document string from a streamed body and its
+/// head-rollup page, resolving and injecting requested features into `<head>`
+/// unless [`BrowserRenderOptions::defer_feature_injection`] is set.
+///
+/// `first_h1_text` walks fragments, which the streaming path does not build, so
+/// the equivalent first-`<h1>` text is computed from the tree and passed to
+/// [`HtmlPage::render_head`].
+fn assemble_full_document(
+    doc: &Document,
+    opts: &BrowserRenderOptions,
+    head_page: &HtmlPage,
+    body: &str,
+    features: &[PageFeature],
+) -> Result<String, RenderError> {
     let fallback_title = tree_first_h1_text(&doc.root);
     let head = head_page.render_head(fallback_title.as_deref());
 
@@ -322,38 +479,27 @@ pub fn render_browser_document_html(
     // When `defer_feature_injection` is set the caller owns placement (e.g. a
     // body-only embed), so the features are returned unresolved in the side
     // channel and no `<head>` assets are emitted.
-    let features = dedup_features(&collected_features);
     let feature_head = if features.is_empty() || opts.defer_feature_injection {
         String::new()
     } else {
         let resolved = resolve_features(
-            &features,
+            features,
             opts.feature_resolver.as_ref(),
             crate::target::RenderTarget::Browser,
             &opts.feature_context,
         )?;
         serialize_features_head(&resolved)
     };
-    let output = format!(
+    Ok(format!(
         "<!DOCTYPE html><html><head>{head}{feature_head}</head><body>{body}</body></html>"
-    );
-
-    Ok(Rendered {
-        output,
-        diagnostics,
-        features,
-    })
+    ))
 }
 
 /// Validates `node` and builds a [`Writer`], folding (or escalating) every
 /// warning-severity validation finding per the strictness model.
 fn gate<'a>(node: &RenderNode, opts: &'a BrowserRenderOptions) -> Result<Writer<'a>, RenderError> {
     let diagnostics = validate_and_collect_diagnostics(node, opts)?;
-    Ok(Writer {
-        opts,
-        diagnostics,
-        popover_ids: PopoverIdAllocator::default(),
-    })
+    Ok(Writer { opts, diagnostics })
 }
 
 /// Runs the shared validation gate for both the fragment writer
@@ -404,9 +550,6 @@ fn validate_and_collect_diagnostics(
 struct Writer<'a> {
     opts: &'a BrowserRenderOptions,
     diagnostics: Vec<Diagnostic>,
-    /// Document-scoped allocator for prompted-link popover ids, so repeated
-    /// identical links get unique, deterministic ids across the whole render.
-    popover_ids: PopoverIdAllocator,
 }
 
 impl Writer<'_> {
@@ -1315,12 +1458,19 @@ impl Writer<'_> {
     /// The emitted shape is a `<span class="dm-popover-wrapper">` holding the
     /// navigable anchor followed by a `<span … popover="hint">` prompt. The
     /// anchor keeps every existing attribute and its real `href`; the internal
-    /// `data-prompt` transport is consumed here and never re-emitted. The
-    /// anchor's `interestfor` / `aria-describedby` associate the prompt through
-    /// a document-unique id, and the shared Popover CSS (requested here as
-    /// [`PageFeature::Popover`]) reveals the prompt on `:hover` / `:focus-within`
-    /// so it stays keyboard reachable even where native interest/popover
-    /// behavior is absent.
+    /// `data-prompt` transport is consumed here and never re-emitted.
+    ///
+    /// The prompt's document-unique id is **not** allocated here: this returns a
+    /// typed [`PopoverNode`] carrying the id-independent pieces plus a readable
+    /// slug base, and the id is allocated when the composed page renders (see
+    /// [`PopoverNode`] / [`HtmlPage::render`](crate::html::HtmlPage::render)).
+    /// That defers allocation to the true final-document assembly point, so two
+    /// prompted links rendered independently and composed via
+    /// [`HtmlPage::from_fragments`](crate::html::HtmlPage::from_fragments) get
+    /// distinct ids instead of colliding (spec criterion 7). The shared Popover
+    /// CSS (requested here as [`PageFeature::Popover`]) reveals the prompt on
+    /// `:hover` / `:focus-within` so it stays keyboard reachable even where
+    /// native interest/popover behavior is absent.
     fn render_prompted_link(
         &mut self,
         node: &RenderNode,
@@ -1329,35 +1479,22 @@ impl Writer<'_> {
         children: &[RenderNode],
         prompt: &str,
     ) -> Result<BrowserFragment<Ready>, RenderError> {
-        let id = self.popover_ids.allocate(url);
-
-        let mut anchor = BrowserFragment::new().define_as_block_tag(BlockTag::A, "");
-        for attr in prompted_anchor_attributes(node, url, title, &id) {
-            anchor = anchor.add_attribute(attr);
-        }
+        let mut anchor_children = Vec::with_capacity(children.len());
         for child in children {
-            anchor = anchor.add_component(self.render(child)?);
+            anchor_children.push(ComposableNode::Component(Box::new(self.render(child)?)));
         }
 
-        let mut prompt_span = BrowserFragment::new().define_as_block_tag(BlockTag::Span, "");
-        for attr in prompted_prompt_attributes(&id) {
-            prompt_span = prompt_span.add_attribute(attr);
-        }
-        // Escaped on emit by the fragment renderer.
-        let prompt_span = prompt_span
-            .add_child(ComposableNode::TextFragment(prompt.to_string()))
-            .finalize();
+        let popover = PopoverNode {
+            id_base: popover_id_base(url),
+            anchor_attrs: prompted_anchor_base_attributes(node, url, title),
+            anchor_children,
+            prompt_text: prompt.to_string(),
+        };
 
-        let wrapper = BrowserFragment::new()
-            .define_as_block_tag(BlockTag::Span, "")
-            .add_attribute(HtmlAttribute::Class(ClassDefinition::new(
-                "dm-popover-wrapper",
-            )))
+        Ok(BrowserFragment::new()
+            .define_as_popover(popover)
             .add_feature(PageFeature::Popover)
-            .add_component(anchor.finalize())
-            .add_component(prompt_span)
-            .finalize();
-        Ok(wrapper)
+            .finalize())
     }
 
     /// Renders an image as `<img src alt title>`.
@@ -2184,7 +2321,7 @@ impl StreamWriter<'_> {
         children: &[RenderNode],
         prompt: &str,
     ) -> Result<(), RenderError> {
-        let id = self.popover_ids.allocate(url);
+        let id = self.popover_ids.allocate(&popover_id_base(url));
         self.features.push(PageFeature::Popover);
 
         self.open_block(
@@ -2679,18 +2816,18 @@ fn link_prompt(attrs: &NodeAttrs) -> Option<&str> {
     })
 }
 
-/// Builds the anchor attribute list for a prompted link.
+/// Builds the id-independent anchor attributes for a prompted link.
 ///
 /// Every existing node attribute is preserved except the internal `data-prompt`
-/// transport, which is consumed into the popover markup and never emitted. The
-/// real `href`, optional `title`, and the `interestfor` / `aria-describedby`
-/// association to the popover `id` follow. Both browser writers build the anchor
-/// from this one list so their bytes stay identical.
-fn prompted_anchor_attributes(
+/// transport, which is consumed into the popover markup and never emitted, then
+/// the real `href` and optional `title`. The id-dependent `interestfor` /
+/// `aria-describedby` are appended separately once the popover id is known —
+/// eagerly by [`prompted_anchor_attributes`] (streaming path) or at render by
+/// [`PopoverNode`] (fragment path) — so both browser paths stay byte-identical.
+fn prompted_anchor_base_attributes(
     node: &RenderNode,
     url: &str,
     title: Option<&str>,
-    id: &str,
 ) -> Vec<HtmlAttribute> {
     let mut attrs: Vec<HtmlAttribute> = node_attributes(&node.attrs, true)
         .into_iter()
@@ -2700,6 +2837,20 @@ fn prompted_anchor_attributes(
     if let Some(title) = title {
         attrs.push(HtmlAttribute::Title(title.to_string()));
     }
+    attrs
+}
+
+/// Builds the full anchor attribute list for a prompted link, appending the
+/// `id`-dependent association attributes to
+/// [`prompted_anchor_base_attributes`]. Used by the streaming writer, which
+/// allocates the id eagerly.
+fn prompted_anchor_attributes(
+    node: &RenderNode,
+    url: &str,
+    title: Option<&str>,
+    id: &str,
+) -> Vec<HtmlAttribute> {
+    let mut attrs = prompted_anchor_base_attributes(node, url, title);
     // `interestfor` is the progressive-enhancement invoker where supported;
     // `aria-describedby` is the always-on accessible association.
     attrs.push(HtmlAttribute::Other("interestfor".into(), id.to_string()));
@@ -2710,44 +2861,26 @@ fn prompted_anchor_attributes(
     attrs
 }
 
-/// Builds the attribute list for a prompted link's prompt element:
-/// `id`, the `dm-popover-prompt` class, `popover="hint"`, and `role="note"`.
-fn prompted_prompt_attributes(id: &str) -> Vec<HtmlAttribute> {
+/// Builds the id-independent prompt-element attributes for a prompted link:
+/// the `dm-popover-prompt` class, `popover="hint"`, and `role="note"`. The
+/// `id` is prepended once allocated (see [`prompted_prompt_attributes`] /
+/// [`PopoverNode`]).
+fn prompted_prompt_base_attributes() -> Vec<HtmlAttribute> {
     vec![
-        HtmlAttribute::Id(DomId::new(id.to_string())),
         HtmlAttribute::Class(ClassDefinition::new("dm-popover-prompt")),
         HtmlAttribute::Other("popover".into(), "hint".to_string()),
         HtmlAttribute::Other("role".into(), "note".to_string()),
     ]
 }
 
-/// Allocates document-unique, readable, deterministic ids for prompted-link
-/// popovers.
-///
-/// The id base is a readable slug derived from the link target; the first
-/// occurrence of a base uses it verbatim and each later occurrence appends an
-/// `-N` suffix, so repeated identical prompted links never collide. Both the
-/// fragment [`Writer`] and the streaming [`StreamWriter`] own one allocator per
-/// document render and walk links in document order, so they derive identical
-/// id sequences.
-#[derive(Default)]
-struct PopoverIdAllocator {
-    counts: std::collections::HashMap<String, usize>,
-}
-
-impl PopoverIdAllocator {
-    /// Allocates the next id for a popover anchored to `url`.
-    fn allocate(&mut self, url: &str) -> String {
-        let base = popover_id_base(url);
-        let count = self.counts.entry(base.clone()).or_insert(0);
-        let id = if *count == 0 {
-            format!("dm-popover-{base}")
-        } else {
-            format!("dm-popover-{base}-{count}")
-        };
-        *count += 1;
-        id
-    }
+/// Builds the full attribute list for a prompted link's prompt element:
+/// `id` first, then [`prompted_prompt_base_attributes`]. Used by the streaming
+/// writer, which allocates the id eagerly.
+fn prompted_prompt_attributes(id: &str) -> Vec<HtmlAttribute> {
+    let mut attrs = Vec::with_capacity(4);
+    attrs.push(HtmlAttribute::Id(DomId::new(id.to_string())));
+    attrs.extend(prompted_prompt_base_attributes());
+    attrs
 }
 
 /// Derives a readable, stable id slug from a link target: ASCII alphanumerics
@@ -3637,12 +3770,21 @@ mod tests {
         }
     }
 
-    /// A resolver that owns `MermaidDiagram` (CSS + module bootstrap) — the
-    /// shape Darkmatter installs in Phase 5 — and delegates everything else to
-    /// [`DefaultFeatureResolver`], so tests can exercise interactive-Mermaid
-    /// injection without depending on Darkmatter.
-    struct MermaidFeatureResolver;
-    impl crate::browser::feature::FeatureResolver for MermaidFeatureResolver {
+    /// A **synthetic** resolver that attaches both a CSS block and a module
+    /// script to `MermaidDiagram`, delegating everything else to
+    /// [`DefaultFeatureResolver`]. It exercises the pipeline's generic
+    /// feature-asset dedup path (CSS + JS deduped, first-seen order, byte-identical
+    /// fragment/streaming output — spec criterion 10) without depending on
+    /// Darkmatter.
+    ///
+    /// The CSS below is a **pipeline probe, not production Mermaid output**:
+    /// production Darkmatter resolves `MermaidDiagram` to a *script-only* bundle
+    /// (`css: None`) and delivers the palette through Mermaid `themeVariables`,
+    /// because Mermaid does not read CSS custom properties. This fixture pairs a
+    /// throwaway CSS rule with the script purely so the CSS-dedup path has an
+    /// asset to dedup; it does not model production Mermaid CSS.
+    struct SyntheticFeatureResolver;
+    impl crate::browser::feature::FeatureResolver for SyntheticFeatureResolver {
         fn resolve(
             &self,
             feature: PageFeature,
@@ -3656,7 +3798,9 @@ mod tests {
             use crate::target::RenderTarget;
             match (target, feature) {
                 (RenderTarget::Browser, PageFeature::MermaidDiagram) => Ok(Some(FeatureAssets {
-                    css: Some(".mermaid{display:block}".into()),
+                    // Synthetic dedup probe — NOT production Mermaid CSS (which
+                    // is `None`; see the resolver doc above).
+                    css: Some(".synthetic-probe{display:block}".into()),
                     js: Some(FeatureScript::Module("import('mermaid')".into())),
                     links: Vec::new(),
                 })),
@@ -4306,10 +4450,82 @@ mod tests {
         };
         let rendered =
             render_browser_document(&doc, &BrowserRenderOptions::default()).expect("render");
-        let html = rendered.output.render();
+        let html = rendered.output.render().expect("render");
         assert!(
             html.contains("<body><h1>Title</h1><p>Body</p></body>"),
             "{html}"
+        );
+    }
+
+    #[test]
+    fn document_body_is_a_fragment_with_no_document_scaffold() {
+        let doc = Document {
+            sources: SourceRegistry::default(),
+            metadata: DocumentMetadata::default(),
+            root: RenderNode::root(vec![
+                RenderNode::heading(
+                    HeadingDepth::new(1).unwrap(),
+                    vec![RenderNode::text("Title")],
+                ),
+                RenderNode::paragraph(vec![RenderNode::text("Body")]),
+            ]),
+        };
+        let opts = BrowserRenderOptions::default();
+        let rendered = render_browser_document_body(&doc, &opts).expect("render");
+
+        // The body is a bare fragment: rendered markdown, no document scaffold.
+        assert_eq!(rendered.output.body, "<h1>Title</h1><p>Body</p>");
+        for forbidden in ["<!DOCTYPE", "<html", "<head", "<body"] {
+            assert!(
+                !rendered.output.body.contains(forbidden),
+                "body fragment must not carry `{forbidden}`, got: {}",
+                rendered.output.body
+            );
+        }
+
+        // The standalone `document` field stays byte-identical to the
+        // full-document path so callers that don't embed keep the same output.
+        let full = render_browser_document_html(&doc, &opts).expect("render");
+        assert_eq!(rendered.output.document, full.output);
+    }
+
+    #[test]
+    fn document_body_assets_carry_page_stylesheet_without_a_head() {
+        let doc = Document {
+            sources: SourceRegistry::default(),
+            metadata: DocumentMetadata::default(),
+            root: RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text("x")])]),
+        };
+        let mut sheet = crate::stylesheet::Stylesheet::new();
+        sheet.push(crate::stylesheet::CssRule::new(
+            ".panel",
+            crate::stylesheet::CssStyle::new(),
+        ));
+        let opts = BrowserRenderOptions {
+            page: Some(PageOptions {
+                stylesheet: Some(sheet),
+                css_variables: Some(vec![("primary".into(), "#336699".into())]),
+                external_stylesheet: None,
+                external_code: None,
+            }),
+            ..BrowserRenderOptions::default()
+        };
+        let rendered = render_browser_document_body(&doc, &opts).expect("render");
+
+        // The page-level CSS the full-document path would place in `<head>` is
+        // returned in `assets`, wrapped in a `<style>` for inline embedding —
+        // not inside a `<head>`.
+        assert!(
+            rendered.output.assets.starts_with("<style>")
+                && rendered.output.assets.contains("--primary: #336699;")
+                && rendered.output.assets.contains(".panel"),
+            "assets must embed the page stylesheet inline, got: {}",
+            rendered.output.assets
+        );
+        assert!(
+            !rendered.output.assets.contains("<head"),
+            "assets carry no `<head>`, got: {}",
+            rendered.output.assets
         );
     }
 
@@ -4337,7 +4553,7 @@ mod tests {
             ..BrowserRenderOptions::default()
         };
         let rendered = render_browser_document(&doc, &opts).expect("render");
-        let html = rendered.output.render();
+        let html = rendered.output.render().expect("render");
         assert!(html.contains("--primary: #336699;"), "{html}");
     }
 
@@ -4356,7 +4572,7 @@ mod tests {
         };
         let rendered =
             render_browser_document(&doc, &BrowserRenderOptions::default()).expect("render");
-        let html = rendered.output.render();
+        let html = rendered.output.render().expect("render");
         assert!(html.contains("<body><p>Body</p></body>"), "{html}");
         assert!(!html.contains("Ignored"), "{html}");
     }
@@ -4389,7 +4605,8 @@ mod tests {
         let via_page = render_browser_document(&doc, &opts)
             .expect("render")
             .output
-            .render();
+            .render()
+            .expect("render");
         let direct = render_browser_document_html(&doc, &opts)
             .expect("render")
             .output;
@@ -4572,7 +4789,8 @@ mod tests {
             let via_page = render_browser_document(&doc, &opts)
                 .expect("fragment render")
                 .output
-                .render();
+                .render()
+                .expect("fragment render");
             assert_eq!(direct.output, via_page, "byte mismatch under {mode:?}");
         }
     }
@@ -4606,7 +4824,8 @@ mod tests {
         let via_page = render_browser_document(&doc, &opts)
             .expect("render")
             .output
-            .render();
+            .render()
+            .expect("render");
         assert_eq!(direct.output, via_page);
     }
 
@@ -4638,7 +4857,8 @@ mod tests {
         let via_page = render_browser_document(&doc, &opts)
             .expect("render")
             .output
-            .render();
+            .render()
+            .expect("render");
         assert_eq!(direct.output, via_page);
     }
 
@@ -4701,7 +4921,8 @@ mod tests {
         let via_page = render_browser_document(&doc, &opts)
             .expect("render")
             .output
-            .render();
+            .render()
+            .expect("render");
         assert_eq!(direct.output, via_page);
     }
 
@@ -4719,7 +4940,7 @@ mod tests {
         let warn = opts(RenderStrictness::Warn, RawHtmlPolicy::Escape);
         let direct = render_browser_document_html(&doc, &warn).expect("render");
         let via_page = render_browser_document(&doc, &warn).expect("render");
-        assert_eq!(direct.output, via_page.output.render());
+        assert_eq!(direct.output, via_page.output.render().expect("render"));
         assert_eq!(direct.diagnostics.len(), via_page.diagnostics.len());
         assert_eq!(direct.diagnostics.len(), 1);
 
@@ -4763,7 +4984,7 @@ mod tests {
                 let via_page = render_browser_document(&doc, &o).expect("fragment render");
                 assert_eq!(
                     direct.output,
-                    via_page.output.render(),
+                    via_page.output.render().expect("fragment render"),
                     "byte mismatch under {raw:?}/{strictness:?}"
                 );
                 assert_eq!(
@@ -4805,14 +5026,14 @@ mod tests {
                     code_renderer: Some(Rc::new(MermaidSvgHook)),
                     // Own `MermaidDiagram` so the interactive rung resolves; the
                     // two paths must still inject byte-identical assets.
-                    feature_resolver: Rc::new(MermaidFeatureResolver),
+                    feature_resolver: Rc::new(SyntheticFeatureResolver),
                     ..BrowserRenderOptions::default()
                 };
                 let direct = render_browser_document_html(&doc, &o).expect("direct render");
                 let via_page = render_browser_document(&doc, &o).expect("fragment render");
                 assert_eq!(
                     direct.output,
-                    via_page.output.render(),
+                    via_page.output.render().expect("fragment render"),
                     "byte mismatch under {graphics_mode:?}/{mermaid_mode:?}"
                 );
             }
@@ -4838,11 +5059,18 @@ mod tests {
         link
     }
 
-    /// Two Mermaid blocks resolve to exactly one CSS block and one module
-    /// script, deduped, on both the fragment and streaming paths — with
-    /// byte-identical output (spec acceptance criteria 1 and 10).
+    /// Generic feature-asset dedup (spec criterion 10): two feature requests for
+    /// the same feature resolve to exactly one CSS block and one module script,
+    /// deduped and in first-seen order, on both the fragment and streaming paths —
+    /// with byte-identical output.
+    ///
+    /// The CSS asserted here is [`SyntheticFeatureResolver`]'s throwaway probe
+    /// rule, **not** a production Mermaid CSS block: production Mermaid is
+    /// script-only (`css: None`; palette via `themeVariables`). Criterion 1's
+    /// production Mermaid dedup lives in Darkmatter's
+    /// `style_features_phase5::two_mermaid_blocks_inject_one_module_script`.
     #[test]
-    fn two_mermaid_blocks_inject_one_css_one_script_on_both_paths() {
+    fn two_feature_requests_inject_one_css_one_script_on_both_paths() {
         use crate::tree::{BrowserMermaidMode, GraphicsMode};
 
         let doc = document_of(vec![
@@ -4853,7 +5081,7 @@ mod tests {
         let opts = BrowserRenderOptions {
             graphics_mode: GraphicsMode::Rich,
             mermaid_mode: BrowserMermaidMode::Interactive,
-            feature_resolver: Rc::new(MermaidFeatureResolver),
+            feature_resolver: Rc::new(SyntheticFeatureResolver),
             ..BrowserRenderOptions::default()
         };
 
@@ -4864,7 +5092,7 @@ mod tests {
         assert_eq!(fragment.features, vec![PageFeature::MermaidDiagram]);
 
         let streamed_html = streaming.output;
-        let fragment_html = fragment.output.render();
+        let fragment_html = fragment.output.render().expect("fragment render");
         assert_eq!(streamed_html, fragment_html, "paths must be byte-identical");
 
         for html in [&streamed_html, &fragment_html] {
@@ -4874,9 +5102,9 @@ mod tests {
                 "exactly one module script: {html}"
             );
             assert_eq!(
-                html.matches(".mermaid{display:block}").count(),
+                html.matches(".synthetic-probe{display:block}").count(),
                 1,
-                "one feature CSS block: {html}"
+                "one deduped feature CSS block: {html}"
             );
             assert_eq!(
                 html.matches(r#"<pre class="mermaid">"#).count(),
@@ -4945,7 +5173,7 @@ mod tests {
                 graphics_mode: cases.0,
                 mermaid_mode: cases.1,
                 code_renderer: Some(Rc::new(MermaidSvgHook)),
-                feature_resolver: Rc::new(MermaidFeatureResolver),
+                feature_resolver: Rc::new(SyntheticFeatureResolver),
                 ..BrowserRenderOptions::default()
             };
             let streaming = render_browser_document_html(&doc, &opts).expect("streaming");
@@ -4996,7 +5224,11 @@ mod tests {
 
         assert_eq!(streaming.features, vec![PageFeature::Popover]);
         assert_eq!(fragment.features, vec![PageFeature::Popover]);
-        assert_eq!(streaming.output, fragment.output.render(), "byte parity");
+        assert_eq!(
+            streaming.output,
+            fragment.output.render().expect("fragment render"),
+            "byte parity"
+        );
         assert_eq!(
             streaming.output.matches(".dm-popover-wrapper{").count(),
             1,
@@ -5066,7 +5298,8 @@ mod tests {
         let fragment = render_browser_document(&doc, &BrowserRenderOptions::default())
             .expect("fragment")
             .output
-            .render();
+            .render()
+            .expect("fragment render");
 
         assert_eq!(streaming, fragment, "byte parity across paths");
         assert!(
@@ -5076,6 +5309,112 @@ mod tests {
         assert!(
             streaming.contains(r#"id="dm-popover-https-example-com-1""#),
             "second identical link gets an occurrence suffix: {streaming}"
+        );
+    }
+
+    /// Two identical prompted links rendered as **separate** fragments and then
+    /// composed with [`HtmlPage::from_fragments`] still get document-unique ids,
+    /// and each anchor's `interestfor` / `aria-describedby` names its OWN prompt.
+    ///
+    /// This is the collision the finding targeted: independently rendering each
+    /// prompted-link node reset the per-writer id allocator, so both fragments
+    /// baked the same `dm-popover-<base>` id. Deferring allocation to the page's
+    /// final render (one allocator threaded across every fragment) fixes it
+    /// (spec criterion 7).
+    #[test]
+    fn composed_prompted_link_fragments_get_unique_ids() {
+        let opts = BrowserRenderOptions::default();
+        let first = render_browser_node(
+            &RenderNode::paragraph(vec![prompted_link("https://example.com", "one")]),
+            &opts,
+        )
+        .expect("first fragment")
+        .output;
+        let second = render_browser_node(
+            &RenderNode::paragraph(vec![prompted_link("https://example.com", "two")]),
+            &opts,
+        )
+        .expect("second fragment")
+        .output;
+
+        let html = HtmlPage::from_fragments(vec![first, second])
+            .render()
+            .expect("compose render");
+
+        // Distinct ids across the two independently-rendered fragments.
+        assert!(
+            html.contains(r#"id="dm-popover-https-example-com""#),
+            "first composed link uses the bare base id: {html}"
+        );
+        assert!(
+            html.contains(r#"id="dm-popover-https-example-com-1""#),
+            "second composed link gets an occurrence suffix: {html}"
+        );
+
+        // Each prompt span keeps its own id and matching text.
+        assert!(
+            html.contains(
+                r#"<span class="dm-popover-prompt" id="dm-popover-https-example-com" popover="hint" role="note">one</span>"#
+            ),
+            "first prompt keeps the base id and its text: {html}"
+        );
+        assert!(
+            html.contains(
+                r#"<span class="dm-popover-prompt" id="dm-popover-https-example-com-1" popover="hint" role="note">two</span>"#
+            ),
+            "second prompt keeps the suffixed id and its text: {html}"
+        );
+
+        // Each anchor associates with its OWN prompt id (interestfor and
+        // aria-describedby both name the same occurrence).
+        assert!(
+            html.contains(
+                r#"interestfor="dm-popover-https-example-com" aria-describedby="dm-popover-https-example-com""#
+            ),
+            "first anchor points at its own prompt: {html}"
+        );
+        assert!(
+            html.contains(
+                r#"interestfor="dm-popover-https-example-com-1" aria-describedby="dm-popover-https-example-com-1""#
+            ),
+            "second anchor points at its own prompt: {html}"
+        );
+    }
+
+    /// Composing duplicate prompted-link fragments keeps every prompt HTML-escaped
+    /// and still yields document-unique ids.
+    #[test]
+    fn composed_duplicate_prompted_links_escape_and_stay_unique() {
+        let opts = BrowserRenderOptions::default();
+        let render_one = || {
+            render_browser_node(
+                &RenderNode::paragraph(vec![prompted_link(
+                    "https://example.com",
+                    "<b>hi</b>",
+                )]),
+                &opts,
+            )
+            .expect("fragment")
+            .output
+        };
+
+        let html = HtmlPage::from_fragments(vec![render_one(), render_one()])
+            .render()
+            .expect("compose render");
+
+        assert_eq!(
+            html.matches("&lt;b&gt;hi&lt;/b&gt;").count(),
+            2,
+            "both duplicate prompts stay escaped: {html}"
+        );
+        assert!(
+            !html.contains("<b>hi</b>"),
+            "raw prompt markup must not survive: {html}"
+        );
+        assert!(
+            html.contains(r#"id="dm-popover-https-example-com""#)
+                && html.contains(r#"id="dm-popover-https-example-com-1""#),
+            "duplicate links still get unique ids: {html}"
         );
     }
 
@@ -6137,11 +6476,8 @@ mod tests {
         };
         let rendered =
             render_browser_document(&doc, &BrowserRenderOptions::default()).expect("render");
-        assert!(
-            rendered.output.render().contains("<body><p>x</p></body>"),
-            "{}",
-            rendered.output.render()
-        );
+        let html = rendered.output.render().expect("render");
+        assert!(html.contains("<body><p>x</p></body>"), "{html}");
     }
 
     #[test]

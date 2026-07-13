@@ -326,20 +326,49 @@ fn push_inline_assets(out: &mut String, assets: &FeatureAssets) {
 /// UA stylesheet also sets `[popover]{display:none}`, which would defeat the
 /// CSS-only fallback; the explicit `display:block` on `.dm-popover-prompt`
 /// overrides it (author rules beat the UA sheet), so visibility is governed by
-/// this stylesheet's `:hover` / `:focus-within` toggle everywhere. Colors use
-/// the shared semantic tokens with dark-mode-safe literal fallbacks; the fixed
-/// `max-width` plus `right:auto`/`left:0` keeps the panel inside the viewport
-/// for ordinary inline links.
+/// this stylesheet's `:hover` / `:focus-within` toggle everywhere. The light
+/// panel uses the shared semantic tokens (with light literal fallbacks when the
+/// page defines none); under a dark `prefers-color-scheme` the panel switches to
+/// a dark palette so a floating tooltip stays legible against an OS-dark page —
+/// the semantic tokens are theme-invariant today, so this override, not the
+/// tokens, provides dark-mode contrast.
+///
+/// ## Viewport safety
+///
+/// The base rule anchors the panel's inline-start edge to the link
+/// (`left:0`) and lets it grow to `max-content`, so a link near the **right**
+/// edge would overflow the viewport. Two guards prevent that:
+///
+/// - `max-width:min(20rem,calc(100vw - 1rem))` caps the panel so it can never
+///   be wider than the viewport (long prompts wrap instead of overflowing);
+/// - the `@supports (position-try-fallbacks:flip-inline)` block re-anchors the
+///   panel to the link with CSS anchor positioning and adds `flip-inline`
+///   (plus `flip-block`) fallbacks, so a browser that supports it flips the
+///   panel to the opposite side when it would otherwise overflow — keeping the
+///   bounding box on-screen at either edge.
+///
+/// Verified in Chromium (Chrome 125+ ships anchor positioning; the geometry is
+/// asserted by the `browser_popover_*` tests). Firefox and WebKit have **not**
+/// been executed against this CSS; they fall back to the `max-width`-capped,
+/// left-anchored layout, which stays on-screen for ordinary inline links but
+/// is not edge-flip-verified there.
 const POPOVER_CSS: &str = "\
-.dm-popover-wrapper{position:relative;display:inline-block}\
+.dm-popover-wrapper{position:relative;display:inline-block;anchor-scope:--dm-popover}\
+.dm-popover-wrapper a{anchor-name:--dm-popover}\
 .dm-popover-prompt{display:block;position:absolute;left:0;right:auto;top:100%;\
-z-index:30;max-width:20rem;width:max-content;margin-top:.25rem;\
+z-index:30;max-width:min(20rem,calc(100vw - 1rem));width:max-content;margin-top:.25rem;\
 padding:var(--space-2,.5rem);border-radius:.25rem;\
 font-size:.875rem;line-height:1.4;white-space:normal;\
-background:var(--color-bg,#111);color:var(--color-fg,#eee);\
-border:1px solid var(--color-border,#444);\
+background:var(--color-bg,#fff);color:var(--color-fg,#1a1a1a);\
+border:1px solid var(--color-border,#d0d0d0);\
 box-shadow:0 2px 8px rgba(0,0,0,.4);\
 visibility:hidden;opacity:0;transition:opacity .12s ease}\
+@supports (position-try-fallbacks:flip-inline){\
+.dm-popover-prompt{position:fixed;left:auto;right:auto;top:auto;bottom:auto;\
+position-anchor:--dm-popover;position-area:bottom span-right;\
+position-try-fallbacks:flip-inline,flip-block}}\
+@media (prefers-color-scheme:dark){.dm-popover-prompt{\
+background:#111;color:#eee;border-color:#444}}\
 .dm-popover-wrapper:hover .dm-popover-prompt,\
 .dm-popover-wrapper:focus-within .dm-popover-prompt{visibility:visible;opacity:1}\
 @media(prefers-reduced-motion:reduce){.dm-popover-prompt{transition:none}}";
