@@ -113,9 +113,30 @@ fn boundary_at_exactly_threshold_is_still_fresh() {
 }
 
 #[test]
-fn remote_never_synced_when_absent_or_zero() {
+fn direct_peer_with_zero_last_synced_is_never_synced() {
     let now = 1_000_000;
-    // REMOTE has a register replica (capability) but no peer entry.
+    // REMOTE is a direct peer (present in ListPeers) but has never
+    // completed a sync — last_synced_unix_ms is 0.
+    let snap = MeshSnapshot::fold(
+        LOCAL,
+        now,
+        &synced(&[(REMOTE, 0)]),
+        &[],
+        &[],
+        &[],
+        false,
+    );
+    let remote = snap.hosts.iter().find(|h| !h.is_local).expect("peer row");
+    assert_eq!(remote.staleness, Staleness::NeverSynced);
+    assert!(!remote.sessions_trusted());
+}
+
+#[test]
+fn replica_without_direct_peer_is_freshness_unknown() {
+    let now = 1_000_000;
+    // REMOTE has a register replica (capability) that reached us
+    // transitively but no direct peer entry — freshness is unknown, NOT
+    // never-synced (Finding 7).
     let snap = MeshSnapshot::fold(
         LOCAL,
         now,
@@ -126,8 +147,27 @@ fn remote_never_synced_when_absent_or_zero() {
         false,
     );
     let remote = snap.hosts.iter().find(|h| !h.is_local).expect("remote host");
-    assert_eq!(remote.staleness, Staleness::NeverSynced);
+    assert_eq!(remote.staleness, Staleness::FreshnessUnknown);
     assert!(!remote.sessions_trusted());
+}
+
+#[test]
+fn peer_only_host_appears_with_empty_sessions() {
+    let now = 1_000_000;
+    // A fresh direct peer with NO register documents of any kind must
+    // still render a row (Finding 7: every remote host is accounted for).
+    let snap = MeshSnapshot::fold(
+        LOCAL,
+        now,
+        &synced(&[(REMOTE, now - 5_000)]),
+        &[],
+        &[],
+        &[],
+        false,
+    );
+    let remote = snap.hosts.iter().find(|h| !h.is_local).expect("peer-only row");
+    assert!(matches!(remote.staleness, Staleness::Fresh { .. }));
+    assert!(remote.sessions.is_empty());
 }
 
 #[test]
@@ -150,7 +190,7 @@ fn empty_mesh_still_lists_the_local_host() {
     let snap = MeshSnapshot::fold(LOCAL, 1_000_000, &synced(&[]), &[], &[], &[], false);
     assert_eq!(snap.hosts.len(), 1);
     assert!(snap.hosts[0].is_local);
-    assert_eq!(snap.total_sessions(), 0);
+    assert_eq!(snap.trusted_live_sessions(), 0);
 }
 
 #[test]
@@ -194,6 +234,11 @@ fn report_html_fragment_carries_the_figures() {
 /// End-to-end: spawn a real daemon, report a live session over gRPC,
 /// then drive the command's own `fetch_snapshot` against it. Guards the
 /// RPC-response → fold field mapping the unit tests above stub out.
+///
+/// Unix-only: spawns the real `rendezvous-daemon`, a `cfg(unix)`-gated
+/// dev-dependency (its server binds a `UnixListener`). The Windows
+/// named-pipe daemon server is a tracked follow-up.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fetch_snapshot_reflects_a_live_session() {
     use std::time::{Duration, Instant};
@@ -243,4 +288,135 @@ async fn fetch_snapshot_reflects_a_live_session() {
     assert_eq!(snapshot.local_node_id, host.node_id);
 
     daemon.shutdown().await.expect("daemon shutdown");
+}
+
+#[test]
+fn stale_sessions_excluded_from_live_count() {
+    let now = 1_000_000;
+    let active = vec![
+        (LOCAL, r#"{"s-local":{"agent":"claude","status":"active"}}"#),
+        (REMOTE, r#"{"s-remote":{"agent":"codex","status":"active"}}"#),
+    ];
+    let snap = MeshSnapshot::fold(
+        LOCAL,
+        now,
+        // REMOTE is stale — its session is last-known, not live.
+        &synced(&[(REMOTE, now - STALENESS_THRESHOLD_MS - 60_000)]),
+        &active,
+        &[],
+        &[],
+        false,
+    );
+    assert_eq!(snap.trusted_live_sessions(), 1, "only the local session is live");
+    assert_eq!(snap.last_known_sessions(), 1, "the stale remote session is last-known");
+
+    // The headline must count only the live session, and flag the
+    // last-known one separately.
+    let report = DashboardReport::new(snap, "mesh")
+        .with_inline_terminal(Terminal::new_optimistic(160));
+    let out = report.render(&Terminal::new_optimistic(160));
+    assert!(out.contains("1 session"), "headline must count the live session: {out}");
+    assert!(!out.contains("2 session"), "headline must not count stale as live: {out}");
+    assert!(out.contains("1 last-known"), "last-known missing from headline: {out}");
+}
+
+#[test]
+fn local_session_renders_reported_age() {
+    let now = 1_000_000;
+    let active = vec![(
+        LOCAL,
+        r#"{"s-local":{"agent":"claude","status":"active","updated_at_unix_ms":997000}}"#,
+    )];
+    let snap = MeshSnapshot::fold(LOCAL, now, &synced(&[]), &active, &[], &[], false);
+    let local = snap.hosts.iter().find(|h| h.is_local).expect("local host");
+    let session = &local.sessions[0];
+    assert_eq!(session.updated_at_unix_ms, Some(997_000));
+    assert_eq!(session.reported_age_ms, Some(3_000));
+
+    let report = DashboardReport::new(snap, "local")
+        .with_inline_terminal(Terminal::new_optimistic(180));
+    let out = report.render(&Terminal::new_optimistic(180));
+    assert!(out.contains("3s ago"), "reported age missing: {out}");
+}
+
+#[test]
+fn remote_session_has_no_reported_age() {
+    let now = 1_000_000;
+    // Remote wall-clock skew is out of scope: never derive age remotely.
+    let active = vec![(
+        REMOTE,
+        r#"{"s-remote":{"agent":"codex","status":"active","updated_at_unix_ms":500000}}"#,
+    )];
+    let snap = MeshSnapshot::fold(
+        LOCAL,
+        now,
+        &synced(&[(REMOTE, now - 5_000)]),
+        &active,
+        &[],
+        &[],
+        false,
+    );
+    let remote = snap.hosts.iter().find(|h| !h.is_local).expect("remote host");
+    let session = &remote.sessions[0];
+    assert_eq!(session.updated_at_unix_ms, Some(500_000));
+    assert_eq!(session.reported_age_ms, None);
+}
+
+#[test]
+fn aged_needs_input_badge_shows_its_age() {
+    let now = 1_000_000;
+    // A LOCAL waiting_on_user entry last stamped 30 minutes ago — a
+    // phantom left by a crashed producer. It stays a needs-input signal
+    // but must render visibly aged, not freshly urgent.
+    let payload = format!(
+        r#"{{"s":{{"agent":"claude","status":"waiting_on_user","updated_at_unix_ms":{}}}}}"#,
+        now - 1_800_000
+    );
+    let active = vec![(LOCAL, payload.as_str())];
+    let snap = MeshSnapshot::fold(LOCAL, now, &synced(&[]), &active, &[], &[], false);
+    let local = snap.hosts.iter().find(|h| h.is_local).expect("local host");
+    let session = &local.sessions[0];
+    assert_eq!(session.intervention, Intervention::NeedsInput);
+    assert_eq!(session.reported_age_ms, Some(1_800_000));
+
+    let report = DashboardReport::new(snap, "local")
+        .with_inline_terminal(Terminal::new_optimistic(200));
+    let out = report.render(&Terminal::new_optimistic(200));
+    assert!(out.contains("30m ago"), "aged badge missing its age: {out}");
+}
+
+#[test]
+fn malformed_and_duplicate_registers_are_tolerated() {
+    let now = 1_000_000;
+    let active = vec![
+        (REMOTE, "not json at all"),
+        // Duplicate owner — last blob wins, no panic.
+        (REMOTE, r#"{"s":{"agent":"codex"}}"#),
+        // Wrong shape: array, not object.
+        (LOCAL, "[]"),
+    ];
+    let snap = MeshSnapshot::fold(
+        LOCAL,
+        now,
+        &synced(&[(REMOTE, now - 5_000)]),
+        &active,
+        &[(LOCAL, "garbage"), (REMOTE, "{")],
+        &[(LOCAL, "not json")],
+        false,
+    );
+    assert!(snap.hosts.iter().any(|h| h.is_local), "local host must survive bad blobs");
+    // The report renders without panicking on any of the above.
+    let report = DashboardReport::new(snap, "mesh")
+        .with_inline_terminal(Terminal::new_optimistic(140));
+    let _ = report.render(&Terminal::new_optimistic(140));
+}
+
+#[tokio::test]
+async fn fetch_within_deadline_degrades_when_the_daemon_stalls() {
+    // A connected-but-wedged daemon: the fetch future never resolves.
+    // The wrapper must give up at the deadline and return None so the
+    // command can degrade instead of hanging (Finding 10).
+    let stalled = std::future::pending::<color_eyre::eyre::Result<MeshSnapshot>>();
+    let out = super::fetch_within_deadline(std::time::Duration::from_millis(50), stalled).await;
+    assert!(out.is_none(), "a stalled fetch must time out to None");
 }

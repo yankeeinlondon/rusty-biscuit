@@ -294,6 +294,11 @@ mod tests {
         assert!(presence.session_id.is_none());
     }
 
+    // Spawns the real `rendezvous-daemon`, which is a `cfg(unix)`-only
+    // dev-dependency (its server binds a `UnixListener`; the Windows
+    // named-pipe server is a tracked follow-up). Gate so the crate still
+    // compiles on Windows.
+    #[cfg(unix)]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn round_trip_against_live_daemon() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -362,6 +367,8 @@ mod tests {
         daemon.shutdown().await.expect("daemon shutdown");
     }
 
+    // Unix-only: spawns the `cfg(unix)`-gated `rendezvous-daemon`.
+    #[cfg(unix)]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn status_reporter_flips_and_clears_waiting() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -412,7 +419,8 @@ mod tests {
 
     /// Poll the active-sessions register until `session_id` carries
     /// `expected` status, since `StatusReporter::report` is
-    /// fire-and-forget.
+    /// fire-and-forget. Only used by the Unix-only live-daemon test.
+    #[cfg(unix)]
     async fn await_status(
         client: &mut rendezvous_core::RendezvousClient<tonic::transport::Channel>,
         session_id: &str,

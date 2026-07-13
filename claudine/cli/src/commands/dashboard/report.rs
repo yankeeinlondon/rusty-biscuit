@@ -48,13 +48,21 @@ impl DashboardReport {
     }
 
     fn heading_text(&self) -> String {
-        format!(
+        // The headline counts only trusted-live sessions; stale
+        // last-known observations are reported separately so they are
+        // never presented as live (dashboard spec D4).
+        let mut heading = format!(
             "Rendezvous Dashboard ▸ {} · {} · {} · {}",
             self.scope_label,
             plural(self.snapshot.hosts.len(), "host", "hosts"),
-            plural(self.snapshot.total_sessions(), "session", "sessions"),
+            plural(self.snapshot.trusted_live_sessions(), "session", "sessions"),
             needs_input_phrase(self.snapshot.needs_input_count()),
-        )
+        );
+        let last_known = self.snapshot.last_known_sessions();
+        if last_known > 0 {
+            heading.push_str(&format!(" · {last_known} last-known"));
+        }
+        heading
     }
 }
 
@@ -87,6 +95,14 @@ impl TerminalRenderable for DashboardReport {
             }
 
             let trusted = host.sessions_trusted();
+            if !trusted {
+                lines.push(
+                    Prose::new(
+                        "<dim>  last known — host is stale, not counted as live</dim>",
+                    )
+                    .render(term),
+                );
+            }
             let mut table = base_table(vec![
                 TableColumn::new("Session"),
                 TableColumn::new("Agent"),
@@ -102,7 +118,7 @@ impl TerminalRenderable for DashboardReport {
                     dash(session.model.as_deref()).into(),
                     dash(session.repo_root.as_deref().map(basename)).into(),
                     status_cell(session, trusted).into(),
-                    needs_cell(session.intervention, &self.inline).into(),
+                    needs_cell(session, &self.inline).into(),
                 ]);
             }
             lines.push(table.render(term));
@@ -166,6 +182,13 @@ impl BrowserRenderable for DashboardReport {
             }
 
             let trusted = host.sessions_trusted();
+            if !trusted {
+                section = section.add_component(block_text(
+                    BlockTag::P,
+                    format!("{base}__host-last-known"),
+                    "last known — host is stale, not counted as live".to_string(),
+                ));
+            }
             let mut table = Table::new().with_columns(vec![
                 TableColumn::new("Session"),
                 TableColumn::new("Agent"),
@@ -181,7 +204,7 @@ impl BrowserRenderable for DashboardReport {
                     dash(session.model.as_deref()).into(),
                     dash(session.repo_root.as_deref().map(basename)).into(),
                     status_cell(session, trusted).into(),
-                    needs_plain(session.intervention).to_string().into(),
+                    needs_plain(session).into(),
                 ]);
             }
             section = section.add_component(BrowserRenderable::render_html_fragment(&table));
@@ -249,6 +272,9 @@ fn staleness_markup(staleness: &Staleness) -> String {
             format_age(*age_ms)
         ),
         Staleness::NeverSynced => "<red>never synced — sessions unknown</red>".to_string(),
+        Staleness::FreshnessUnknown => {
+            "<yellow>freshness unknown · no direct peer — sessions unknown</yellow>".to_string()
+        }
     }
 }
 
@@ -260,6 +286,9 @@ fn staleness_plain(staleness: &Staleness) -> String {
             format!("stale · last sync {} ago — sessions unknown", format_age(*age_ms))
         }
         Staleness::NeverSynced => "never synced — sessions unknown".to_string(),
+        Staleness::FreshnessUnknown => {
+            "freshness unknown · no direct peer — sessions unknown".to_string()
+        }
     }
 }
 
@@ -290,22 +319,40 @@ fn status_cell(session: &SessionRow, trusted: bool) -> String {
     if !trusted {
         return "unknown".to_string();
     }
-    session.status.clone().unwrap_or_else(|| "—".to_string())
+    let status = session.status.clone().unwrap_or_else(|| "—".to_string());
+    // Local host only: surface how long ago the producer last stamped
+    // this entry, so a crashed-producer phantom reads as stale.
+    match session.reported_age_ms {
+        Some(age) => format!("{status} · reported {} ago", format_age(age)),
+        None => status,
+    }
 }
 
-fn needs_cell(intervention: Intervention, inline: &Terminal) -> String {
-    match intervention {
+fn needs_cell(session: &SessionRow, inline: &Terminal) -> String {
+    match session.intervention {
         Intervention::NeedsInput => {
-            Prose::new("<yellow><bold>⚠ input</bold></yellow>").render(inline)
+            let badge = match session.reported_age_ms {
+                // Age the urgency: a needs-input backed by a very old
+                // entry must not read as freshly urgent.
+                Some(age) => format!(
+                    "<yellow><bold>⚠ input</bold></yellow> <dim>· {} ago</dim>",
+                    format_age(age)
+                ),
+                None => "<yellow><bold>⚠ input</bold></yellow>".to_string(),
+            };
+            Prose::new(badge).render(inline)
         }
         Intervention::None => "—".to_string(),
     }
 }
 
-fn needs_plain(intervention: Intervention) -> &'static str {
-    match intervention {
-        Intervention::NeedsInput => "needs input",
-        Intervention::None => "—",
+fn needs_plain(session: &SessionRow) -> String {
+    match session.intervention {
+        Intervention::NeedsInput => match session.reported_age_ms {
+            Some(age) => format!("needs input · {} ago", format_age(age)),
+            None => "needs input".to_string(),
+        },
+        Intervention::None => "—".to_string(),
     }
 }
 

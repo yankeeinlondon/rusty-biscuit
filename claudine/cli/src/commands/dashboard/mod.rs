@@ -26,6 +26,11 @@ mod tests;
 use model::MeshSnapshot;
 use report::DashboardReport;
 
+/// Total wall-clock budget for the snapshot's read RPCs. A daemon that
+/// accepts the IPC connection but then stalls in a handler must not hang
+/// the CLI: past this we degrade to the not-responding note and exit 0.
+const FETCH_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Arguments for the `claudine dashboard` subcommand.
 #[derive(Debug, Args)]
 pub struct DashboardArgs {
@@ -54,7 +59,25 @@ pub async fn run(args: DashboardArgs) -> Result<()> {
         }
     };
 
-    let snapshot = fetch_snapshot(&mut client, unix_now_ms(), args.local).await?;
+    let fetch = fetch_snapshot(&mut client, unix_now_ms(), args.local);
+    let snapshot = match fetch_within_deadline(FETCH_DEADLINE, fetch).await {
+        Some(result) => result?,
+        None => {
+            tracing::debug!(
+                target: "claudine::dashboard",
+                "daemon accepted the connection but stalled past the fetch deadline"
+            );
+            log::message(
+                &Prose::new(
+                    "<dim>The rendezvous daemon is not responding — it accepted the connection \
+                     but did not answer in time. Check </dim><bold>rendezvous-daemon</bold><dim>.\
+                     </dim>",
+                )
+                .render(&term),
+            );
+            return Ok(());
+        }
+    };
 
     let scope = if args.local { "local" } else { "mesh" };
     let report = DashboardReport::new(snapshot, scope).with_inline_terminal(log::terminal());
@@ -126,6 +149,21 @@ async fn fetch_snapshot(
         &repo_blobs,
         local_only,
     ))
+}
+
+/// Await `fetch` but never longer than `deadline`.
+///
+/// ## Returns
+///
+/// `Some(result)` when the fetch completed in time (carrying its own
+/// success or RPC error), or `None` when the deadline elapsed first —
+/// the caller treats `None` as "the daemon accepted IPC but stalled" and
+/// degrades gracefully rather than hanging.
+async fn fetch_within_deadline(
+    deadline: std::time::Duration,
+    fetch: impl std::future::Future<Output = Result<MeshSnapshot>>,
+) -> Option<Result<MeshSnapshot>> {
+    tokio::time::timeout(deadline, fetch).await.ok()
 }
 
 fn unix_now_ms() -> i64 {

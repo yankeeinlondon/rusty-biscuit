@@ -57,9 +57,15 @@ pub enum Staleness {
     /// Remote host last synced longer ago than the threshold — its
     /// sessions are shown as unknown.
     Stale { age_ms: i64 },
-    /// Remote host present in the mesh (we hold a register replica) but
-    /// we have never completed a sync round with it.
+    /// This host is a direct peer that has never completed a sync round
+    /// with us (its `last_synced_unix_ms` is 0).
     NeverSynced,
+    /// We hold a register replica for this host but have no direct peer
+    /// record for it — the data reached us transitively (synced via
+    /// another peer), so we cannot attribute a freshness age to it.
+    /// Its sessions are untrusted, same as [`Staleness::Stale`], but the
+    /// label stays honest rather than over-claiming "never synced".
+    FreshnessUnknown,
 }
 
 /// One live session in a host's `sessions-active` register.
@@ -71,6 +77,14 @@ pub struct SessionRow {
     pub interactive: Option<bool>,
     pub repo_root: Option<String>,
     pub status: Option<String>,
+    /// Raw `updated_at_unix_ms` the producer stamped on this entry.
+    pub updated_at_unix_ms: Option<i64>,
+    /// Age of this entry (capture instant − `updated_at_unix_ms`),
+    /// populated only for the LOCAL host. Remote wall-clock skew makes
+    /// this meaningless across hosts, so it stays `None` there (a
+    /// separate Trigger-2 concern). Exposes a crashed producer that left
+    /// a phantom entry behind on an otherwise-fresh host.
+    pub reported_age_ms: Option<i64>,
     pub intervention: Intervention,
 }
 
@@ -102,11 +116,17 @@ pub type RegisterBlob<'a> = (&'a str, &'a str);
 impl MeshSnapshot {
     /// Fold the daemon's read-RPC payloads into the mesh view.
     ///
-    /// `last_synced` maps a remote node id to its
-    /// `last_synced_unix_ms` (from `ListPeers`); a node absent from the
-    /// map that is not local is treated as never-synced. `now_ms` is
-    /// the local clock — the same clock that stamped `last_synced`, so
-    /// the age math is skew-free.
+    /// `last_synced` maps a direct-peer node id to its
+    /// `last_synced_unix_ms` (from `ListPeers`). Presence in this map is
+    /// the sole evidence of a *direct* peer relationship: a value of 0
+    /// is a direct peer we have never synced with ([`Staleness::NeverSynced`]),
+    /// a positive value drives the Fresh/Stale age math, and a node that
+    /// only appears via a register replica but is absent here reached us
+    /// transitively — it becomes [`Staleness::FreshnessUnknown`] rather
+    /// than being mislabeled never-synced. Every peer id also joins the
+    /// host union, so a peer with no register documents still renders a
+    /// row (with empty sessions). `now_ms` is the local clock — the same
+    /// clock that stamped `last_synced`, so the age math is skew-free.
     ///
     /// When `local_only` is set, only the local host is retained.
     pub fn fold(
@@ -118,13 +138,17 @@ impl MeshSnapshot {
         repos: &[RegisterBlob<'_>],
         local_only: bool,
     ) -> Self {
-        // Union every node id that appears in any register domain, plus
-        // ourselves, so a host with (say) a capability register but no
-        // active sessions still shows up.
+        // Union every node id that appears in any register domain, every
+        // direct peer, plus ourselves. A capability-only host still shows
+        // up; a peer with no register documents at all still gets a row
+        // (D4: every remote host is accounted for).
         let mut node_ids: BTreeMap<String, ()> = BTreeMap::new();
         node_ids.insert(local_node_id.to_string(), ());
         for (owner, _) in active.iter().chain(capabilities).chain(repos) {
             node_ids.insert((*owner).to_string(), ());
+        }
+        for node_id in last_synced.keys() {
+            node_ids.insert(node_id.clone(), ());
         }
 
         let active_by_owner = index(active);
@@ -142,7 +166,9 @@ impl MeshSnapshot {
                     Staleness::Local
                 } else {
                     match last_synced.get(node_id).copied() {
-                        None | Some(0) => Staleness::NeverSynced,
+                        // A direct peer we hold a record for but have
+                        // never completed a sync round with.
+                        Some(0) => Staleness::NeverSynced,
                         Some(ts) => {
                             let age = (now_ms - ts).max(0);
                             if age <= STALENESS_THRESHOLD_MS {
@@ -151,6 +177,9 @@ impl MeshSnapshot {
                                 Staleness::Stale { age_ms: age }
                             }
                         }
+                        // No direct peer record: this replica reached us
+                        // transitively, so its freshness is unknown.
+                        None => Staleness::FreshnessUnknown,
                     }
                 };
 
@@ -160,7 +189,7 @@ impl MeshSnapshot {
                 let trusted = matches!(staleness, Staleness::Local | Staleness::Fresh { .. });
                 let sessions = active_by_owner
                     .get(node_id.as_str())
-                    .map(|json| parse_sessions(json, trusted))
+                    .map(|json| parse_sessions(json, trusted, is_local, now_ms))
                     .unwrap_or_default();
                 let repo_count = repos_by_owner
                     .get(node_id.as_str())
@@ -192,9 +221,24 @@ impl MeshSnapshot {
         }
     }
 
-    /// Total live sessions across every retained host.
-    pub fn total_sessions(&self) -> usize {
-        self.hosts.iter().map(|h| h.sessions.len()).sum()
+    /// Sessions on trusted hosts — the only ones we can honestly present
+    /// as live. This is what the headline "N sessions" must count.
+    pub fn trusted_live_sessions(&self) -> usize {
+        self.hosts
+            .iter()
+            .filter(|h| h.sessions_trusted())
+            .map(|h| h.sessions.len())
+            .sum()
+    }
+
+    /// Sessions on untrusted (stale / freshness-unknown / never-synced)
+    /// hosts — last-known observations, never counted as live.
+    pub fn last_known_sessions(&self) -> usize {
+        self.hosts
+            .iter()
+            .filter(|h| !h.sessions_trusted())
+            .map(|h| h.sessions.len())
+            .sum()
     }
 
     /// Count of sessions flagged as needing input across trusted hosts.
@@ -244,7 +288,12 @@ fn count_repos(repos_json: &str) -> usize {
         .unwrap_or(0)
 }
 
-fn parse_sessions(sessions_json: &str, trusted: bool) -> Vec<SessionRow> {
+fn parse_sessions(
+    sessions_json: &str,
+    trusted: bool,
+    is_local: bool,
+    now_ms: i64,
+) -> Vec<SessionRow> {
     let Ok(Value::Object(map)) = serde_json::from_str::<Value>(sessions_json) else {
         return Vec::new();
     };
@@ -260,6 +309,14 @@ fn parse_sessions(sessions_json: &str, trusted: bool) -> Vec<SessionRow> {
             } else {
                 Intervention::None
             };
+            let updated_at_unix_ms = entry.get("updated_at_unix_ms").and_then(Value::as_i64);
+            // Skew-free only for the local host; remote clocks make this
+            // meaningless, so it stays None there.
+            let reported_age_ms = if is_local {
+                updated_at_unix_ms.map(|ts| (now_ms - ts).max(0))
+            } else {
+                None
+            };
             SessionRow {
                 session_id,
                 agent: str_field("agent"),
@@ -267,6 +324,8 @@ fn parse_sessions(sessions_json: &str, trusted: bool) -> Vec<SessionRow> {
                 interactive: entry.get("interactive").and_then(Value::as_bool),
                 repo_root: str_field("repo_root"),
                 status,
+                updated_at_unix_ms,
+                reported_age_ms,
                 intervention,
             }
         })
