@@ -755,6 +755,18 @@ fn type_fragment(
         // coercion pass before validation.
         SimplifiedType::Yaml => content_format_fragment(name, "yaml", DARKMATTER_YAML_FORMAT, constraints),
         SimplifiedType::Json => content_format_fragment(name, "json", DARKMATTER_JSON_FORMAT, constraints),
+        // `literal` (→ `const`) and `expression` (→ `{ type: string, format:
+        // darkmatter-expression }`) lowering lands in Phase 3 of the
+        // `2026-07-12-literal-expression` feature. Phase 2 delivers only the
+        // grammar and canonical serialization, so a schema that reaches
+        // conversion with either type is rejected until then.
+        SimplifiedType::Literal | SimplifiedType::Expression => Err(SchemaError::Convert {
+            property: name.to_string(),
+            message: format!(
+                "`{}` JSON Schema conversion is not implemented yet",
+                ty.as_keyword()
+            ),
+        }),
         SimplifiedType::Any => any_fragment(name, constraints),
     }
 }

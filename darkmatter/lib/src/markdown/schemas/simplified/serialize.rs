@@ -186,6 +186,7 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: SimplifiedType) {
                 write_arg(out, m);
             }
         }
+        Constraint::LiteralValue(value) => write_literal_value(out, value),
         Constraint::Match(globs) => {
             out.push_str("match(");
             for (i, g) in globs.iter().enumerate() {
@@ -245,17 +246,51 @@ fn write_default_value(out: &mut String, value: &serde_json::Value, _ty: Simplif
 /// terminate a bare word.
 fn write_arg(out: &mut String, value: &str) {
     if needs_quoting(value) {
-        out.push('\'');
-        for c in value.chars() {
-            if c == '\\' || c == '\'' {
-                out.push('\\');
-            }
-            out.push(c);
-        }
-        out.push('\'');
+        write_quoted(out, value);
     } else {
         out.push_str(value);
     }
+}
+
+/// Serialize a `literal(...)` positional value with its lexed type, so it
+/// re-parses to the same JSON value. Numbers/booleans emit their canonical
+/// spelling; strings are quoted when a bare form would either terminate the
+/// token or re-type on re-parse (`'2'`, `'true'`, `'a, b'`).
+fn write_literal_value(out: &mut String, value: &serde_json::Value) {
+    match value {
+        serde_json::Value::Bool(b) => {
+            let _ = write!(out, "{b}");
+        }
+        serde_json::Value::Number(n) => {
+            let _ = write!(out, "{n}");
+        }
+        serde_json::Value::String(s) => {
+            if needs_quoting(s) || !super::grammar::bare_literal_round_trips_as_string(s) {
+                write_quoted(out, s);
+            } else {
+                out.push_str(s);
+            }
+        }
+        // A literal value is only ever a scalar (string / number / boolean);
+        // any other JSON shape is unreachable from the grammar. Serialize
+        // defensively so the function stays total.
+        other => {
+            let _ = write!(out, "\"{other}\"");
+        }
+    }
+}
+
+/// Write `value` as a single-quoted SimplifiedSchema argument, escaping `\`
+/// and `'`.
+fn write_quoted(out: &mut String, value: &str) {
+    out.push('\'');
+    for c in value.chars() {
+        if c == '\\' || c == '\'' {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out.push('\'');
 }
 
 fn needs_quoting(value: &str) -> bool {
@@ -374,6 +409,108 @@ mod tests {
                 "needs, quoting".into(),
                 "plain".into(),
             ])],
+            array_constraints: vec![],
+            description: None,
+        });
+    }
+
+    fn literal_atom(value: serde_json::Value) -> PropertyAtom {
+        PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::Literal),
+            is_array: false,
+            constraints: vec![Constraint::LiteralValue(value)],
+            array_constraints: vec![],
+            description: None,
+        }
+    }
+
+    #[test]
+    fn serializes_string_literal() {
+        assert_eq!(
+            serialize_property_atom(&literal_atom(serde_json::json!("spec"))),
+            "literal(spec)"
+        );
+    }
+
+    #[test]
+    fn serializes_typed_literals() {
+        assert_eq!(
+            serialize_property_atom(&literal_atom(serde_json::json!(2))),
+            "literal(2)"
+        );
+        assert_eq!(
+            serialize_property_atom(&literal_atom(serde_json::json!(false))),
+            "literal(false)"
+        );
+    }
+
+    #[test]
+    fn quotes_literal_strings_that_would_re_type() {
+        // A string that looks like a number / boolean / null must be quoted so
+        // it re-parses as a string rather than the scalar it resembles.
+        assert_eq!(
+            serialize_property_atom(&literal_atom(serde_json::json!("2"))),
+            "literal('2')"
+        );
+        assert_eq!(
+            serialize_property_atom(&literal_atom(serde_json::json!("true"))),
+            "literal('true')"
+        );
+        assert_eq!(
+            serialize_property_atom(&literal_atom(serde_json::json!("a, b"))),
+            "literal('a, b')"
+        );
+    }
+
+    #[test]
+    fn round_trip_literals() {
+        for value in [
+            serde_json::json!("spec"),
+            serde_json::json!("2"),
+            serde_json::json!("true"),
+            serde_json::json!("a, b"),
+            serde_json::json!(2),
+            serde_json::json!(-5),
+            serde_json::json!(2.5),
+            serde_json::json!(true),
+            serde_json::json!(false),
+        ] {
+            round_trip(literal_atom(value));
+        }
+    }
+
+    #[test]
+    fn round_trip_literal_with_required() {
+        round_trip(PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::Literal),
+            is_array: false,
+            constraints: vec![
+                Constraint::LiteralValue(serde_json::json!("spec")),
+                Constraint::Required,
+            ],
+            array_constraints: vec![],
+            description: None,
+        });
+    }
+
+    #[test]
+    fn round_trip_literal_array() {
+        round_trip(PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::Literal),
+            is_array: true,
+            constraints: vec![Constraint::LiteralValue(serde_json::json!("auto"))],
+            array_constraints: vec![Constraint::MinItems(1)],
+            description: None,
+        });
+    }
+
+    #[test]
+    fn round_trip_expression() {
+        round_trip(PropertyAtom::bare(SimplifiedType::Expression));
+        round_trip(PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::Expression),
+            is_array: false,
+            constraints: vec![Constraint::Required],
             array_constraints: vec![],
             description: None,
         });

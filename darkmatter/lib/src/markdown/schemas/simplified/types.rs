@@ -252,6 +252,16 @@ pub enum SimplifiedType {
     Yaml,
     /// A string whose content parses as strict JSON.
     Json,
+    /// A property whose value must equal exactly one scalar. The value is
+    /// carried by the required [`Constraint::LiteralValue`] (keeps this enum
+    /// `Copy`), lexed with its scalar type: bare `true`/`false` → boolean,
+    /// bare numberlike token → number, everything else / quoted → string.
+    /// Compiles to JSON Schema `const`; the single-member-enum replacement.
+    Literal,
+    /// A string that must parse under the Darkmatter expression grammar
+    /// (parse-only, never evaluated). The third content-format string type
+    /// alongside [`SimplifiedType::Yaml`] and [`SimplifiedType::Json`].
+    Expression,
     /// Anything.
     Any,
 }
@@ -275,6 +285,8 @@ impl SimplifiedType {
             SimplifiedType::Email => "email",
             SimplifiedType::Yaml => "yaml",
             SimplifiedType::Json => "json",
+            SimplifiedType::Literal => "literal",
+            SimplifiedType::Expression => "expression",
             SimplifiedType::Any => "any",
         }
     }
@@ -297,6 +309,8 @@ impl SimplifiedType {
             "email" => SimplifiedType::Email,
             "yaml" => SimplifiedType::Yaml,
             "json" => SimplifiedType::Json,
+            "literal" => SimplifiedType::Literal,
+            "expression" => SimplifiedType::Expression,
             "any" => SimplifiedType::Any,
             _ => return None,
         })
@@ -363,6 +377,13 @@ pub enum Constraint {
     /// Enumerated members.
     Members(Vec<String>),
 
+    // ── literal ──────────────────────────────────────────────────────────
+    /// The single scalar value a `literal(...)` property must equal, carried
+    /// with its lexed JSON type (string / number / boolean). Positional like
+    /// [`Constraint::Members`]; `keyword()` → `"<value>"`. Compiles to JSON
+    /// Schema `const` (Phase 3).
+    LiteralValue(serde_json::Value),
+
     // ── file ─────────────────────────────────────────────────────────────
     /// Glob patterns the resolved path must match. Patterns starting with `!`
     /// exclude.
@@ -420,6 +441,7 @@ impl Constraint {
             Constraint::Pattern(_) => "pattern",
             Constraint::Suggest(_) => "suggest",
             Constraint::Members(_) => "<members>",
+            Constraint::LiteralValue(_) => "<value>",
             Constraint::Match(_) => "match",
             Constraint::Eager => "eager",
             Constraint::Scheme(_) => "scheme",
@@ -486,6 +508,8 @@ mod tests {
             SimplifiedType::Email,
             SimplifiedType::Yaml,
             SimplifiedType::Json,
+            SimplifiedType::Literal,
+            SimplifiedType::Expression,
             SimplifiedType::Any,
         ] {
             let kw = ty.as_keyword();

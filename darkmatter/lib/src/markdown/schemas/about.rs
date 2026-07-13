@@ -100,6 +100,18 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"email\" }",
     },
     SchemaTypeDescriptor {
+        keyword: "literal",
+        description: "The value must equal exactly one scalar of any scalar type. Bare `true`/`false` types as boolean, a bare numberlike token as number, and quoted or any other bare token as string. Replaces the single-member enum and makes discriminated unions first-class. Coerces a document value to the literal's scalar type (`\"2\"` against `literal(2)` → `2`); string literals never coerce.",
+        accepted_constraints: "<value>; default; required",
+        json_schema_effect: "{ \"const\": <value> } with the value's lexed type, wrapped by the optional-nullable wrapper; `literal(x)[]` places the `const` under `items`",
+    },
+    SchemaTypeDescriptor {
+        keyword: "expression",
+        description: "A string that must parse under the Darkmatter expression grammar. Parse-only and never evaluated — the third content-format string type alongside `yaml` and `json`. Native boolean/number values coerce to their string forms (`true` → `\"true\"`); mappings and sequences are type mismatches.",
+        accepted_constraints: "default, required, generated",
+        json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-expression\" }",
+    },
+    SchemaTypeDescriptor {
         keyword: "any",
         description: "Anything. Useful when you only care that a property exists.",
         accepted_constraints: "required",
@@ -203,6 +215,16 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         argument_arity: "1+",
         description: "Lists the allowed values. At least one member is required.",
         json_schema_effect: "enum list of supplied members",
+    },
+    // ── literal ────────────────────────────────────────────────────────
+    SchemaConstraintDescriptor {
+        name: "<value>",
+        keyword: "<value>",
+        form: "literal(value)",
+        target_types: "literal",
+        argument_arity: "1",
+        description: "The single scalar value the property must equal. Typed like YAML: bare `true`/`false` → boolean, bare numberlike → number, quoted or any other bare token → string. Exactly one value; use `enum(...)` for a set.",
+        json_schema_effect: "const set to the typed value",
     },
     // ── file ───────────────────────────────────────────────────────────
     SchemaConstraintDescriptor {
@@ -662,6 +684,8 @@ mod tests {
             SimplifiedType::Enum,
             SimplifiedType::Url,
             SimplifiedType::Email,
+            SimplifiedType::Literal,
+            SimplifiedType::Expression,
             SimplifiedType::Any,
         ] {
             implemented.insert(ty.as_keyword());
@@ -718,6 +742,7 @@ mod tests {
             Constraint::Pattern(String::new()),
             Constraint::Suggest(Vec::new()),
             Constraint::Members(Vec::new()),
+            Constraint::LiteralValue(serde_json::Value::Null),
             Constraint::Eager,
             Constraint::Match(Vec::new()),
             Constraint::Scheme(Vec::new()),

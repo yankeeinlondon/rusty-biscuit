@@ -279,6 +279,13 @@ fn primitive_matches(ty: SimplifiedType, value: &Value) -> bool {
         SimplifiedType::Boolean => value.is_boolean(),
         SimplifiedType::Boolish => value.is_boolean() || value.is_string(),
         SimplifiedType::Enum => value.is_string(),
+        // `expression` is a content-format string type (like `yaml` / `json`):
+        // any string is shape-compatible; parseability is a format concern.
+        SimplifiedType::Expression => value.is_string(),
+        // `literal` accepts any scalar shape here; identity is enforced by its
+        // `LiteralValue` equality constraint. Full trigger equality lands in
+        // Phase 3 of the `2026-07-12-literal-expression` feature.
+        SimplifiedType::Literal => true,
         SimplifiedType::Object => value.is_object(),
         SimplifiedType::Any => true,
     }
