@@ -109,7 +109,7 @@ fn split_number_unit(input: &str) -> Option<(&str, &str)> {
 // Commit message parsing
 // ---------------------------------------------------------------------------
 
-fn parse_commit_message(message: &str) -> (String, Vec<String>) {
+pub fn parse_commit_message(message: &str) -> (String, Vec<String>) {
     let trimmed = message.trim();
     if trimmed.is_empty() {
         return (String::new(), Vec::new());
