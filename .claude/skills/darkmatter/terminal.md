@@ -163,15 +163,19 @@ match renderer.render_for_terminal() {
 }
 ```
 
-HTML (via darkmatter):
+Browser (via darkmatter): Mermaid browser output is a page **feature**, not a
+method on `Mermaid`. Render a `lang="mermaid"` fence through
+`DarkmatterPage::render_to_browser` (interactive by default): the body carries
+`<pre class="mermaid">` and `DarkmatterFeatureResolver`
+(`darkmatter::mermaid::feature`) injects the shared CSS + inline ESM bootstrap
+once per page (jsDelivr primary, unpkg fallback, exact `MERMAID_VERSION`).
 
 ```rust
-use darkmatter::mermaid::{Mermaid, MermaidTheme};
+use biscuit_terminal::terminal::Terminal;
+use darkmatter::layout::DarkmatterPage;
+use darkmatter::markdown::Markdown;
 
-let diagram = Mermaid::new("flowchart LR\n    A --> B")
-    .with_title("My Flowchart")
-    .with_footer("Generated 2026-01-29");
-
-let html = diagram.render_for_html();
-println!("<head>{}</head><body>{}</body>", html.head, html.body);
+let md = Markdown::from("```mermaid\nflowchart LR\n    A --> B\n```\n");
+let term = Terminal::new_optimistic(80);
+let html = DarkmatterPage::new(&term).render_to_browser(&md).unwrap();
 ```
