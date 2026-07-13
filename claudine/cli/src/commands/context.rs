@@ -132,7 +132,9 @@ fn context_value_type_markup(ty: &ContextValueType) -> String {
         | SimplifiedType::Url
         | SimplifiedType::Email
         | SimplifiedType::Yaml
-        | SimplifiedType::Json => "blue",
+        | SimplifiedType::Json
+        | SimplifiedType::Expression
+        | SimplifiedType::Literal => "blue",
     };
     format!("<{color}>{ty}</{color}>")
 }
