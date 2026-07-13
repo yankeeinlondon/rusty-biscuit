@@ -1,27 +1,6 @@
-//! Phase-1 failing-test scaffold for the SimplifiedSchema `literal` and
-//! `expression` types (feature `2026-07-12-literal-expression`).
-//!
-//! Every test here asserts behavior that does **not** exist yet, so each is
-//! gated with `#[ignore = "pending Phase N: …"]`. That keeps the area
-//! `just test` suite green while pinning the acceptance criteria as executable
-//! intent. As each phase lands the corresponding type behavior, lift the
-//! `#[ignore]` (or migrate the assertion into its permanent home listed in
-//! `features/2026-07-12-literal-expression/phase1-test-matrix.md`) and confirm
-//! it passes.
-//!
-//! To confirm a scaffold "fails for the intended missing behavior rather than a
-//! harness error", run a single case with `--ignored`, e.g.:
-//!
-//! ```text
-//! cargo nextest run -p darkmatter --test schemas_literal_expression \
-//!     literal_bare_string_parses --run-ignored all
-//! ```
-//!
-//! All entry points below are compile-safe against the **current** public API:
-//! `literal` / `expression` currently lex as unknown type keywords, so the
-//! grammar helpers return `Err`, validation of an inline `$schema` fails to
-//! compile the schema, and the compose write-back never runs — exactly the
-//! missing behavior these scaffolds document.
+//! Acceptance suite for the SimplifiedSchema `literal` and `expression` types:
+//! grammar parsing and round-trip serialization, JSON Schema conversion, and
+//! read-only document validation across the two type keywords.
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::expression::{parse, parse_condition};
@@ -340,6 +319,30 @@ fn union_conflicting_multi_key_discriminants_are_not_narrowed() {
     let doc = "---\n$schema:\n  cfg:\n    - '{ kind: literal(a), mode: literal(x), one: string(required) }'\n    - '{ kind: literal(b), mode: literal(y), two: string(required) }'\ncfg:\n  kind: a\n  mode: y\n---\nbody\n";
     let report = validate(doc);
     assert!(!report.valid, "conflicting discriminants cannot satisfy any arm");
+}
+
+#[test]
+fn union_sparse_known_key_plus_unknown_key_are_not_narrowed() {
+    // Sparse arms: `kind` tags arms 0/1, `mode` tags arms 2/3. An instance
+    // authors `kind: a` (which alone selects arm 0) AND `mode: z` (a qualifying
+    // discriminant matching no arm). Because arm 0 does not declare `mode`, the
+    // pre-fix selector wrongly narrowed to arm 0; the unknown second
+    // discriminant must instead preserve the merged anyOf reporting.
+    let doc = concat!(
+        "---\n$schema:\n  cfg:\n",
+        "    - '{ kind: literal(a), one: string(required) }'\n",
+        "    - '{ kind: literal(b), two: string(required) }'\n",
+        "    - '{ mode: literal(x), three: string(required) }'\n",
+        "    - '{ mode: literal(y), four: string(required) }'\n",
+        "cfg:\n  kind: a\n  mode: z\n---\nbody\n",
+    );
+    let report = validate(doc);
+    assert!(!report.valid, "no arm is satisfied");
+    assert!(
+        report.problems.iter().any(|p| p.message.contains("anyOf")),
+        "an unknown second discriminant must retain the merged anyOf diagnostic, got {:?}",
+        report.problems
+    );
 }
 
 #[test]
