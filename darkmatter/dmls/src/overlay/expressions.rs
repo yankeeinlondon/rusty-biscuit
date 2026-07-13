@@ -88,8 +88,10 @@ pub fn interpolation_at(text: &str, body_base: usize, offset: usize) -> Option<I
 }
 
 /// Parses a **value-dialect** expression, span-carrying. This is the body
-/// `{{ }}` interpolation parser: it rejects the `&&`/`||` operators, matching
-/// `md compose`'s interpolation grammar.
+/// `{{ }}` interpolation parser: it accepts `&&` (logical AND, identical to the
+/// condition dialect) and `||` (as fallback / first-truthy, whereas the
+/// condition dialect reads `||` as logical OR) — matching `md compose`'s
+/// interpolation grammar.
 ///
 /// ## Errors
 ///
