@@ -27,17 +27,17 @@ kind: schema
 $schema:
     sequence_id: string(required;generated) -> a generated string token which is guaranteed to be unique across sequences.
     state: step_state@this(required;generated) -> the current state
-    next: step_state@this -> the next state
-    previous: step_state@this -> the previous state
+    next: step_state@this(generated) -> the next state (absent on the last step)
+    previous: step_state@this(generated) -> the previous state (absent on the first step)
 types:
     step_state:
         name: string(required) -> a state object _always_ has a string based 'name' property; typically this is intended to be a unique value for each state but it doesn't strictly need to be because the `id` property provides that guarantee 
         id: string(required;generated) -> a generated string token which is guaranteed to be unique for each state in a sequence.
-        sequence_id: 
+        sequence_id: string(required;generated) -> the id of the owning sequence (copied into every step's state)
         is_last: boolean(required;generated)
         is_first: boolean(required;generated)
-        index: number(integer;generated)
-        count: number(integer;generated)
+        index: number(integer;required;generated)
+        count: number(integer;required;generated)
         "<string>": any
 ```
 
@@ -49,6 +49,8 @@ Each step's state is defined as:
     - `is_first` - boolean flag indicating whether this is the first step in the sequence
     - `index` - the numeric index in the sequence we are currently on (starts with 1)
     - `count` - the number of states that exist in the sequence
+
+> **Clean break from the current implementation (RATIFIED 2026-07-12):** the reserved overlay keys `previous_state`, `next_state`, `step`, and `total_steps` are retired. `previous_state`/`next_state` become `previous`/`next` (full `step_state` objects), and `step`/`total_steps`/`is_first`/`is_last` move *inside* each `step_state` as `index`/`count`/`is_first`/`is_last` (so `state.index`, `state.count`, `state.is_first`, ...). There are no production users, so no deprecation aliases are provided.
 
 It should be noted that at the root of the frontmatter dictionary, documents in a sequence will be assigned four top level properties:
 
@@ -85,7 +87,52 @@ The inverse of this though is that sequences will want to _refer_ to state; you 
 The person's name is {{state}}.
 ```
 
-This kind of referencing (aka, using `state` instead of `state.name`) would make sense to someone who used the shorthand of defining each state with a scalar. Of course we know that internally Claudine sees the state as a dictionary shape but do we allow for this? The short answer is: if it's not to hard or taxing from a performance standpoint we _should_ allow for `{{state}}` to be a proxy for `{{state.name}}`. If it's not easy or it exacts a notable performance penalty then we should not allow this and instead just educate users.
+This kind of referencing (aka, using `state` instead of `state.name`) would make sense to someone who used the shorthand of defining each state with a scalar. Of course we know that internally Claudine sees the state as a dictionary shape.
+
+**RATIFIED (2026-07-12): `{{state}}` IS a proxy for `{{state.name}}`.** The rule is defined as a string-coercion rule, not an alias: a `step_state` value rendered in *string context* renders its `name` property. A whole-value `{{state}}` span in an expression context still yields the typed object (consistent with Darkmatter's whole-value frontmatter expansion strictness), so `{{state.age}}`, passing `state` to expression functions, etc. all keep working. The same coercion applies to `{{previous}}` and `{{next}}`.
+
+### Steps and Tasks: the Unified Execution Model
+
+**RATIFIED (2026-07-12).** The earlier design document split sequences into "headed" (the document body is the prompt for every step) and "headless" (each step carries its own `prompt`/`shell`). That dichotomy is dissolved. There is one model:
+
+A **task** is the atomic executable unit. It declares exactly one executable field:
+
+- `prompt: <file-ref>` — compose and execute the referenced Markdown document (if that document is configured for `inline-compose` that is executed; otherwise a normal `compose`)
+- `shell: <string | string[]>` — run one or more shell commands (every command participates in sequence preflight approval; each command gets a 30-second default timeout, overridable per task via `timeout:`)
+- `side_effect: <action>` — run one of Darkmatter's safe side effects, written as a single action in the standard lifecycle action grammar (e.g. `side_effect: { set: ["ready", "{{ true }}"] }`; the retired `verb(args)` short form does not return here)
+- `group: <group-ref | inline group>` — execute a group (see [Groups](#groups))
+- `task: <file-ref>` — reference to an externalized `kind: task` file
+
+Optional task fields: `name`, `setup:` / `teardown:` (action stacks using the standard lifecycle action grammar), `params:` (values passed to a `prompt` document as user setters), `timeout:` (seconds, per shell command in this task), `operation:`, `flow:`.
+
+A **step** is an entry in a `sequence:` list: its state (the `name` plus arbitrary state keys) **plus, optionally, the task fields above**:
+
+- a step with **no executable field** runs the **default action**: composing the source document's Markdown body (today's "headed" behavior)
+- a step **with** an executable field runs that instead of the body for that step
+- a source with no Markdown body (e.g. a `kind: sequence` YAML file invoked directly) simply requires every step to carry an executable field — "headless" stops being a mode and becomes the degenerate case
+
+One sequence mixing all forms:
+
+```yaml
+---
+sequence:
+    - name: alpha          # no executable → composes this document's body
+      topic: parsing
+    - name: run-tests      # shell step → body is skipped for this step
+      shell: just test
+    - name: review
+      prompt: "@prompts/review.md"
+      params:
+          topic: "{{ state.topic }}"
+    - name: build-phase
+      group: build-group@my-catalog.yaml
+---
+Work on {{ state.topic }}.
+```
+
+**Reserved step keys.** Because executable fields now live alongside state keys, the following keys are reserved on step objects and rejected as arbitrary state: `prompt`, `shell`, `side_effect`, `group`, `task`, `setup`, `teardown`, `params`, `timeout`, `operation`, `flow` — plus the generated state keys (`id`, `is_first`, `is_last`, `index`, `count`, `sequence_id`) and the root reserved keys (`state`, `previous`, `next`, `outputs`, `sequence_id`). The implementation must emit a typed error naming the offending key when a step's state collides with this list.
+
+> **RATIFIED (2026-07-12):** document-level `prompt:` (a string) flips the whole sequence to inline-compose semantics, while step/task-level `prompt:` is a *file reference* — the same word carries two meanings at adjacent levels. We **accept and document** this rather than rename: the two never co-occur at the same level, their value types differ (prose string vs file reference), and `prompt` is entrenched in inline-compose across the codebase and docs. User-facing documentation must call the distinction out prominently.
 
 ### Dynamic Sequences
 
@@ -103,7 +150,8 @@ In the example above we leverage the fact that `ctx.dirty_files` provides a list
     - that means that we must quickly be able to evaluate the string data being passed in and determine what "list" data structure it is
     - this kind of performant detection of data into a classified set of data types has high reuse potential and as a result we should wrap this functionality around a struct called `DataType` which can take a string or a string stream and classify it'd data type.
         - eventually this struct will offer type conversions too but unless we benefit from that in this spec, this can be deferred to later
-    - this struct should be defined in `biscuit-visualized` to optimize reuse potential (validate this during review)
+    - **RATIFIED (2026-07-12):** this struct is defined in `biscuit-file` — it already owns `DataFormat`, `FileType`, and format detection/conversion, so list-shape classification is squarely in its charter
+    - note: where the expression engine already delivers a *typed* list (whole-value `{{ctx.*}}` spans preserve typed results), no classification is needed; `DataType` is chiefly for string inputs — `$(...)` shell expansion output and raw file content (validate during implementation which `ctx.*` variables are list-typed vs CSV strings)
 
 In addition to creating sequences off the back of context variables, we also allow expression functions and shell expansions. Like everywhere else, a shell expansion requires that the command be whitelisted before it will be allowed.
 
@@ -111,6 +159,28 @@ In addition to creating sequences off the back of context variables, we also all
 # create a sequence off the the back of the `ls -la` command
 sequence: "$(ls -la)"
 ```
+
+#### Source Grammar
+
+**RATIFIED (2026-07-12).** All file-based sequence sources share one reference grammar:
+
+```text
+sequence: <file-ref> [-> <offset.path>] [::<operator>(<args>)]
+```
+
+- the `<file-ref>` portion keeps its full existing powers (relative paths, `@` magic, `!` package, `~`, `vault:`, and `{{ }}` env interpolation) — interpolation resolves *before* the `->`/`::` suffix is parsed
+- `->` introduces a dot-notation **offset path** into the document; it applies to YAML/JSON/JSON5 only and is a typed error on JSONL/NDJSON (their root is always the list)
+- `::` introduces an **operator** applied to the resolved list; **exactly one operator per reference in v1** — the grammar is forward-compatible with chaining (`::a()::b()`), but `map`/`name`/`template` all solve the same produce-a-name problem, so chaining buys nothing today
+- expression sources (`{{ctx.dirty_files}}`) and shell sources (`$(ls)`) do **not** take `->`/`::` suffixes — they produce lists directly; the offset/operator grammar belongs to file references only
+
+**Strictness is split by provenance (RATIFIED):**
+
+- **authored-for-sequences lists** stay strict: inline lists *and* formal `kind: sequence` documents require objects to carry a string `name` and scalars to be strings — an authored omission is a typo worth catching
+- **foreign data sources** (arbitrary data files reached via offset/operator, JSONL/NDJSON data, `{{expr}}`, `$(shell)`) are lenient: number/boolean scalars coerce to string names (`[1, 2, 3]` works), and objects missing `name` receive generated names `"1"`, `"2"`, ... (ids dasherize from those names as usual); `null` items remain a typed error
+
+**Empty dynamic lists (RATIFIED):** a dynamic source that resolves to zero steps at preflight is a graceful no-op — Claudine prints a styled "resolved to 0 steps" notice to stderr and exits `0` (a clean repo legitimately makes `{{ctx.dirty_files}}` empty). A static empty `sequence: []` remains an authoring error, as today.
+
+**`DataType` classification precedence:** when a string input must be classified, detection runs in this order: Markdown list markers (ordered/unordered) → multiple lines = line-separated → tabs = TSV → commas = CSV (quote-aware) → spaces = space-separated → otherwise a single-item list. Whitespace-only entries are dropped after splitting.
 
 #### Advanced Dynamics
 
@@ -136,8 +206,10 @@ There are a few more advanced techniques we allow for in dynamic sequences:
         # template:
         #     description: "{{name}} ({{age}} years old)"
         # ```
-        template: "{ '<string>': any }[]"
+        template: "{ '<string>': any }"
     ```
+
+    > **RATIFIED (2026-07-12):** the earlier external-only `kind: sequence` + `list:` document form is **retired**. A sequence YAML document uses the `sequence:` property whether it is invoked directly (`claudine sequence file.yaml`) or referenced from a Markdown document — both entry modes accept the identical document shape, resolving the asymmetry the current-state analysis flagged.
 
     The ability to define documents explicitly as data sources for sequences by itself provides a lot of utility:
 
@@ -196,6 +268,16 @@ There are a few more advanced techniques we allow for in dynamic sequences:
     sequence: things.yaml -> colors.data::template(color + '-is-great')
     ```
 
+    **Operator semantics (RATIFIED 2026-07-12):**
+
+    | Operator | Effect | Typed error cases |
+    |---|---|---|
+    | `map(from, to)` | *Renames* key `from` to `to` on every item (the original key is removed). Generic rename, not `name`-specific. | an item is missing `from`, or an item is a scalar — the error names the item index |
+    | `name(from)` | *Copies* the value at `from` into `name` (the original key is retained). | same as `map` |
+    | `template(expr)` | Computes `name` per item with a Darkmatter expression; the item's top-level fields are in scope as bare variables (shadowing globals). | the result is `null`/empty — a `name` must be a non-empty string; the error names the item index |
+
+    An offset path that does not exist, or that resolves to a non-list, is a typed error reporting the path attempted and what was actually found.
+
 2. JSON and JSON5 Files
 
     - in a nearly identical way that we allow YAML files to serve as raw data, we provide the same functionality with JSON and JSON5:
@@ -203,14 +285,14 @@ There are a few more advanced techniques we allow for in dynamic sequences:
 
 3. JSONL and NDJSON
 
-    - same idea for JSONL and NDJSON files except that these files are ALWAYS a list at the root so we do not provide offsetting
-    - an example might be:
+    - same idea for JSONL and NDJSON files except that these files are ALWAYS a list at the root, so the `->` offset is not available (using one is a typed error)
+    - operators still apply, attached directly to the file reference:
 
         ```yaml
-        sequence: list.ndjson -> map(color, name)
+        sequence: list.ndjson::map(color, name)
         ```
 
-### The `agent_output` Property
+### The `outputs` Array
 
 Outside of a `sequence` operation, Claudine executes documents _atomically_ (aka, there is no chain of executions; only a single document that starts and eventually stops). The looping functionality is the one grey zone where `compose` operations can have multiple executions. In some ways, the ability to pass "state" are actually rather straight forward:
 
@@ -218,24 +300,18 @@ Outside of a `sequence` operation, Claudine executes documents _atomically_ (aka
 - the task can mutate the state as they see fit
     - in the example of a looping process you might increment a counter (aka, a Frontmatter property) on each loop as a way to know when the loop is done (this is exactly what @prompts/implement-plan.md does)
 
-This is probably the most commonly use of state that we have but one thing we have so far largely ignored is the Agent's final STDOUT reply. We have done this because for the prompts we've built so far the final STDOUT is usually just summary information that is most useful as information reported back to the user (via the terminal). This is what we do but we do not capture, let alone pass along this final output.
+This is probably the most common use of state that we have but one thing we have so far largely ignored is the Agent's final STDOUT reply. We have done this because for the prompts we've built so far the final STDOUT is usually just summary information that is most useful as information reported back to the user (via the terminal). This is what we do but we do not capture, let alone pass along this final output.
 
-As a part of this feature we are going to change that:
+**RATIFIED (2026-07-12).** As part of this feature we capture that output into a single reserved frontmatter key, `outputs`, an accumulating array (this name supersedes both the earlier `agent_output` proposal and the group schema's `output` property — shell and side-effect tasks push entries too, so the name is deliberately provider-neutral):
 
-- for normal **compose** and **inline-compose** operations the `success` lifecycle hook will be given access to a new global variable `agent_output` (a string)
-    - earlier lifecycle hooks simply can't have this output because it hasn't been produced yet
-    - the `failure` hook can't have it because this indicates a situation where there's an `err` instead
-    - we could provide `agent_output` to the `finalize` hook when a successful outcome were achieved (decision needs to be made)
-- for **sequence** operations our scope is no longer focused on a document but instead a _chain_ of documents
-    - whereas the Frontmatter payload is already transferred through that chain -- allowing convenient methods to build up state through the sequence -- the issue of the agent's output has no feed forward design.
-    - if there were a desire to capture this agent output and have some later part of the sequence react to it we'd have to catch the output in the `success` lifecycle event and set it's value into the Frontmatter dictionary.
-
-To aid in the accessibility of the agent's output, in this feature release we will start setting the `agent_output` property in Frontmatter. We need to decide between two schemas:
-
-1. the `agent_output` property is the output from the previous task
-2. the `agent_output` is an array and each task that executes pushes their output onto this array
-    - concurrent groups would push an array for their element of the outer array (multi-dimensional array)
-    - serial groups would push task by task (single dimensional array)
+- every executed task pushes its final STDOUT onto `outputs` as a string entry, in execution order; a task with no STDOUT pushes an empty string so entries stay aligned with executed tasks
+- a **parallel group** pushes a single entry which is itself an array — one string per task, in *declaration* order (never completion order) — so the overall shape is `(string | string[])[]`
+- the earlier `passthrough` concept is **removed**: with an array there is nothing to protect; every task pushes unconditionally
+- ergonomics requirement: the expression engine must provide `last(list)` (and/or negative indexing) so the common case — "the previous task's output" — is simply `{{ last(outputs) }}`
+- **single-document `compose` / `inline-compose` use the same key**: the `success` lifecycle hook sees `outputs` with exactly one element, so a prompt written with `{{ last(outputs) }}` behaves identically standalone and mid-sequence
+- `finalize` sees `outputs` with whatever has accumulated at that point: after a successful outcome that includes the final run's output; after a failure it contains only prior tasks' entries (or is empty in single-document context). This resolves the draft's open `finalize` question without a special case.
+- earlier lifecycle hooks (`initialize`, `start`, ...) see only prior tasks' entries — the current run's output does not exist yet; the `failure` hook likewise has `err` instead of a new entry
+- `outputs` joins the reserved-key list: it cannot be authored as state nor set via `--set`/shorthand setters
 
 ### Assigning Schemas to Step State
 
@@ -249,7 +325,7 @@ sequence:
     - color: red
       rank: 3
 template:
-    - desc: {{ color }}({{ rank }})
+    desc: "{{ color }}({{ rank }})"
 $schema:
     color: string(required) -> the color being evaluated
     rank: number(required) -> a 1-5 ranking with 5 being the best
@@ -278,9 +354,66 @@ What Claudine can't do, is prevent later steps in the process from being kicked 
 > Note: this section describes what I believe is already implemented but it is here to reinforce the idea that interaction
 > should be front-loaded and that where Claudine can help it will.
 
+### Execution Architecture
+
+**RATIFIED (2026-07-12).** The current implementation eagerly prepares (fully composes) every step before executing any of them. That architecture cannot support this feature: the `outputs` array and runtime state mutation mean a later step *cannot* be composed until the tasks before it have run. Sequence Plus replaces the single "prepare everything" phase with a two-phase model.
+
+#### Phase 1 — Static Preflight
+
+Before anything executes, Claudine walks the **entire task graph** and performs everything that is statically knowable:
+
+- **Dynamic list resolution happens exactly once.** `sequence: {{ctx.dirty_files}}`, `$(...)` expansions, and file-sourced lists (`file.yaml -> data`) resolve at preflight and the resulting step list is a **snapshot** — it never re-evaluates mid-run, even if the environment changes while the sequence executes.
+- **Recursive document loading.** Preflight loads every referenced document transitively: `kind: group` files, `kind: group-catalog` entries, `kind: task` files, and every `prompt:` document. A `prompt:` task is a full composition of another document with its own frontmatter — so *its* shell expansions and *its* required-property gaps join this same up-front pass. This is what makes "all shell commands approved before the sequence starts — no exceptions" honest.
+- **No nested sequences (v1).** A `prompt:` task referencing a document that itself declares `sequence:` is rejected at preflight with a typed error. Recursion multiplies the preflight, rendering, and interrupt stories; groups already cover "bundle of work". This can be relaxed later without a breaking change.
+- **Schema validation and missing-property aggregation** across all steps *and all referenced prompt documents*, with the single interactive collection pass, as today.
+- **Shell approval with strict byte-parity.** Every shell string — `shell:` tasks and `$(...)` expansions alike, across every step, group, and referenced document, including those in conditional branches that may never run — is resolved at preflight via an **early-binding-only lookup** (`state`, `params`, template values, `doc.*`, `ctx.*`, `env.*`) and approved byte-for-byte: **approved == executed**. A shell string referencing a late-binding value (`outputs`, runtime-mutated state) is a typed prepare-time error, mirroring the lifecycle C3 rule. Work that consumes prior task output must route through `prompt` or `side_effect` tasks instead.
+- **Provider/model resolution** happens once, exactly as today (explicit flags, auto-selection, or the interactive review screen producing a per-step target vector).
+
+Preflight failures abort the sequence before any execution, regardless of `fail_fast` — preparation never degrades to best-effort.
+
+#### Phase 2 — Just-in-Time Composition and Execution
+
+Each step — and each task within a group, and each loop iteration (the existing loop-engine `rematerialize` machinery is the precedent) — is composed **at its turn**, not up front:
+
+1. check the sequence interrupt flag (Ctrl+C between steps exits 130 as today)
+2. re-read the **live source file from disk**
+3. layer the effective state (see below), compose, and validate
+4. execute the task; push its final STDOUT onto `outputs`; fold any state mutations into the runtime layer
+
+**State layering** — a just-in-time composition sees these layers, lowest to highest precedence:
+
+1. source document frontmatter (live, from disk)
+2. user setters (`--set` / shorthand `key=value`)
+3. accumulated runtime mutations (the `set` side effect writes here)
+4. the reserved per-step overlay (`state`, `previous`, `next`, `outputs`, `sequence_id`)
+
+Corollaries:
+
+- reserved keys are **read-only**: a `set` targeting `state`, `outputs`, `previous`, `next`, or `sequence_id` is a typed error
+- `state`, `previous`, and `next` remain *authored* views (plus generated fields); runtime mutation flows through ordinary frontmatter keys, never through the step objects
+- `outputs` lives in the runtime layer and is appended by the executor only
+
+**The `set` side effect (drafted — needs Darkmatter implementation).** `set` is the canonical state-mutation mechanism referenced throughout this spec. It is a new Darkmatter side effect, usable anywhere the lifecycle action grammar applies (lifecycle stacks, task `setup:`/`teardown:`):
+
+- positional form `set: [key, value]`; key/value form `{action: set, key: …, value: …}`
+- standard action-grammar evaluation applies: values are literal text, `{{ … }}` injects, and a whole-value `{{ expr }}` span carries its typed value (`set: ["ready", "{{ true }}"]` writes boolean `true`)
+- it writes to the **runtime mutation layer** (in-memory), never to a file on disk — that is what distinguishes it from the existing `set_frontmatter` side effect, which targets a file
+- keys are top-level only in v1 (no dotted-path nesting); reserved keys are rejected with a typed error
+- outside a sequence, `set` still works: it mutates the live document state visible to subsequent lifecycle actions and loop iterations within the same run
+
+**Live-disk chaining (RATIFIED).** Because each step re-reads the source at its turn, an inline-compose sequence's body write-backs — and any frontmatter edits made by an agent mid-run — are visible to later steps. This delivers the chaining behavior the current code's stale comments promised but the eager architecture never implemented. (It also means mid-run external edits take effect; that is accepted as both feature and hazard.)
+
+**Mid-run failure policy (RATIFIED).** A just-in-time composition failure is a failure *of that step*: it is recorded in the run summary, halts the run under `fail_fast: true`, and lets later steps continue under `fail_fast: false`. Composition is part of execution now; only *preflight* failures retain the abort-everything rule.
+
+**Late required properties.** When a step's just-in-time validation finds required properties still unsatisfied (the preceding steps were expected to `set` them but did not), the standard compose behavior applies: interactive collection in a TTY, typed failure otherwise — exactly the mid-sequence human-in-the-loop case the [Requiring Caller Input](#requiring-caller-input) section warns sequence authors to design away.
+
+**Dry-run.** Dry-run performs the full preflight, then just-in-time-composes each step against the *initial* state (empty `outputs`, no runtime mutations) without launching providers or writing back. Late-binding references render as empty/null exactly as a first-step composition would see them.
+
+**Out of scope.** Persisted checkpoint/resume for interrupted sequences remains out of scope for this feature (unchanged from the current implementation). The JIT architecture is deliberately compatible with adding a run journal later.
+
 ### Groups
 
-Groups encapsulate two or more Darkmatter documents into a group. This grouping function offers several potential benefits:
+Groups encapsulate one or more tasks under a single name. This grouping function offers several potential benefits:
 
 - semantic naming 
 - higher reuse
@@ -288,6 +421,46 @@ Groups encapsulate two or more Darkmatter documents into a group. This grouping 
 - looping (where configured)
 
 Unlike Markdown documents setup for inline-compose, compose, or sequence execution, or a YAML file setup for sequence execution, a **group** can not be executed directly! To be executed, a group must be added to a sequence.
+
+#### Defining and Referencing Groups
+
+**RATIFIED (2026-07-12).** A group definition can live in three places:
+
+1. **Inline** — the step's `group:` value is the full group object:
+
+    ```yaml
+    sequence:
+        - name: build-phase
+          group:
+              name: ICR
+              execution: serial
+              tasks:
+                  - prompt: "@prompts/implement.md"
+                  - shell: just commit
+                  - prompt: "@prompts/review.md"
+    ```
+
+2. **`kind: group` file** — one group per file, referenced with the normal file-reference grammar (relative, `@` magic, `!` package, `~`, `vault:`):
+
+    ```yaml
+    sequence:
+        - name: build-phase
+          group: my-group-file.yaml
+    ```
+
+3. **`kind: group-catalog` file** — defines a root property `groups:` holding a list of group definitions. A single group is referenced as `{name}@{file}` — name first, matching Darkmatter's named-type import convention (`step_state@this`, `Name@file`):
+
+    ```yaml
+    sequence:
+        - name: build-phase
+          group: build-group@my-catalog.yaml
+    ```
+
+    Magic file refs compose: `group: build-group@@catalogs/all.yaml` (the reference splits on the first `@` after the group name).
+
+**Groups do not nest in v1**: a task inside a group may not itself be a `group` task. Nesting can be added later without a breaking change; today it would drag in recursive concurrency semantics and a much harder rendering story for little proven value.
+
+Tasks may likewise be externalized: a `kind: task` file is referenced from a group's `tasks:` list (or directly from a sequence step) via `task: <file-ref>`.
 
 #### Schema
 
@@ -298,40 +471,40 @@ kind: schema
 $schema:
     name: string(required) -> the name for a group provides a succinct way to identify what the group's utility is
     description: string -> you may optionally add a longer description for the group
-    variables: variable[]@this -> set variables scoped to the group
-    output: string(required;generated) -> the prior task's final STDOUT output
-    tasks: task[](required; min(2))@this -> tasks included in the group
+    variables: "{ '<string>': any }" -> group-scoped variables, exposed to the group's tasks on the `group.*` global and discarded from scope when the group completes
+    tasks: task[](required; min(1))@this -> tasks included in the group
     execution: enum(serial,parallel;default(serial)) -> whether to execute this group serially (the default) or in parallel
+    max_parallel: number(integer) -> optional cap on simultaneously running tasks in a parallel group; absent means all tasks launch at once; tasks are scheduled in declaration order as slots free up
     operation: string -> you can assign all tasks in the group to a single operation (where that makes sense)
     flow: string -> you can assign all tasks in the group to a flow (where that makes sense)
     loop: (same structure as in a document)
 types:
-    variable:
-        "<string>": any
-        $description: a variable defined and used in the group's lifetime but discarded from scope afterward
     task:
         - prompt: file(required)
+          name: string
+          params: "{ '<string>': any }"
           setup: (actions stack just like a lifecycle hook)
           teardown: (actions stack just like a lifecycle hook)
-          passthrough: boolean
-        - shell: string(required)
+        - shell: string_or_list(required)
+          name: string
+          timeout: number(integer) -> seconds allowed per command in this task (default 30)
           setup: (actions stack just like a lifecycle hook)
           teardown: (actions stack just like a lifecycle hook)
-          passthrough: boolean
-        - side_effect: string(required)
+        - side_effect: (a single action in the standard positional/key-value lifecycle action grammar)
+          name: string
           setup: (actions stack just like a lifecycle hook)
           teardown: (actions stack just like a lifecycle hook)
-          passthrough: boolean
+        - task: file(required) -> reference to an externalized `kind: task` file
 ```
 
 **Notes:**
 
+- `min(1)` is deliberate (**RATIFIED**, was `min(2)`): a single-task group is the honest way to get group-level machinery — a `loop` condition, `variables` scoping, or a semantic name — around one task. The alternative under `min(2)` is a no-op filler task, which is worse.
+- The former `output: string(required;generated)` property is **removed**; it is superseded by the sequence-wide `outputs` array (see [The `outputs` Array](#the-outputs-array)). Likewise `passthrough` is gone from the task variants.
 - Tasks that execute inside of a group can interpolate using the group's defined variables. These variables hang off a new global called `group` (similar in scope to `doc`, `env`, `ctx`, and `current`)
-- by default groups are executed serially and in serial execution:
-    - the _state_ that each task gets is passed along the task chain, allowing each task to mutate the state for the benefit of the next task
-    - also the _output_ variable receives the final STDOUT output from the previous task
-        - this is true regardless of serial/parallel execution but the "previous task" in a serial task is the output of the previous task in the group when run serially
-        - when run in parallel, the _output_ that every task in the group gets is the output from the task before 
+- **Serial execution** (the default): the _state_ each task gets is passed along the task chain, allowing each task to mutate the state for the benefit of the next task; `outputs` grows entry by entry, so `{{ last(outputs) }}` inside a task is the previous task's output — whether that previous task was inside this group or before it in the sequence
+- **Parallel execution**: every task receives the same state snapshot and the same `outputs` view, both taken when the group starts; the tasks' own outputs land as a single nested-array entry in declaration order once the group completes
+    - what happens when parallel tasks *mutate state* concurrently (merge order, conflicts) is specified in the [Concurrency](#concurrency) section
 
 The tasks in a group will probably be largely just references to prompt documents but we allow more than just this option:
 
@@ -339,12 +512,14 @@ The tasks in a group will probably be largely just references to prompt document
     - a file reference to a markdown document
     - if the document is configured for `inline-compose` then that will be executed on it
     - otherwise it will be composed with the normal `compose` operation
-- `command` 
-    - allows the task to call a shell command
+- `shell` 
+    - allows the task to call one or more shell commands
 - `side_effect`
-    - allows the execution of one of the provided safe side effects that Darkmatter provides
+    - allows the execution of one of the provided safe side effects that Darkmatter provides, written as a single action in the standard lifecycle action grammar
+- `task`
+    - a file reference to an externalized `kind: task` file
 
-> IMPORTANT: I am using "task" and "step" fairly interchangeably in this document. Up until this point "step" was the most common vernacular but when we start talking about concurrent actions the more generic "task" feels more appropriate as "step" has an inferred sequential nature to it that doesn't fit concurrency.
+> Vocabulary: [Steps and Tasks](#steps-and-tasks-the-unified-execution-model) defines the terms precisely — a **step** is an entry in a `sequence:` list (state plus an optional executable), while a **task** is the executable unit itself (standalone, inside a group, or embedded in a step). "Step" carries the serial connotation; "task" is the right word inside groups, where execution may be concurrent.
 
 #### Example Task Definition
 
@@ -359,8 +534,7 @@ setup: # a lifecycle hook for groups which is executed directly before the prima
           - message: "the file exists"
           - shell: scream 'i'm gonna do it'
     - action:
-          - set: title
-            value: About to do the thing
+          - set: ["title", "About to do the thing"]
 teardown: 
     - when: "ctx.dirty_files"
       action:
@@ -372,9 +546,9 @@ teardown:
 
 In this example we see that a task can both _setup_ the environment before we run the prompt as well as _teardown_ the environment as we see fit after the prompt has completed. This behaves exactly the same regardless of whether the group is being run in parallel or serially.
 
-> Note: we didn't touch on the `passthrough` property in this example but it was shown in the schema definition; it is an optional property but it is used to express whether this task's final STDOUT output should be passed forward in the `output` variable.
+> Note: the task's final STDOUT is always pushed onto the `outputs` array (see [The `outputs` Array](#the-outputs-array)); there is no per-task opt-out.
 
-> Note: the action `set` is used in the example above which is meant to be one of the side effects which Darkmatter offers but I just realized that we didn't add this pretty basic (and important) side effect. It's utility is that it allows the frontmatter state to be mutated.
+> Note: the `set` action used above is the new state-mutation side effect defined in [Execution Architecture](#execution-architecture); it does not exist in Darkmatter yet and is part of this feature's scope.
 
 In this example above we defined the task in it's own file using the `task` kind but tasks can also be defined inline with a `group` definition:
 
@@ -389,7 +563,8 @@ tasks:
             action: 
                 - message: "the file exists"
                 - shell: scream 'i'm gonna do it'
-    - side_effect: set(ready, true)
+    - side_effect:
+          set: ["ready", "{{ true }}"]
     - shell: git commit
       teardown:
           - action:
@@ -398,18 +573,55 @@ tasks:
 
 ## Concurrency
 
-Concurrency is a powerful feature but it introduces a few new challenges:
+**RATIFIED (2026-07-12).** Concurrency exists in exactly one place: a group with `execution: parallel`. Sequences themselves remain serial; there is no step-level parallelism outside a group. This section specifies the semantics.
 
-1. How to render multiple streams of work to the terminal?
-2. New failure scenarios?
+### Scheduling
 
-What else?
+- all tasks in a parallel group launch simultaneously unless `max_parallel: <n>` is set, in which case tasks are scheduled in **declaration order** as slots free up
+- each task runs as an independent child (its own provider session or shell process) with per-child spawn-level environment and working directory — the implementation must never mutate process-level env (`setenv` is thread-unsafe) or process CWD on behalf of one task while siblings run
+
+### Snapshot Isolation
+
+As ratified in [Groups](#groups) and [Execution Architecture](#execution-architecture): every task in a parallel group receives the same state snapshot and the same `outputs` view, both taken when the group starts. Corollary: live-disk re-reads happen **between sequence steps**, never between sibling tasks — a sibling's mid-group file edits are not visible inside the group.
+
+### State Merge
+
+Parallel tasks may mutate state via `set` (the common pattern: each task writes its own distinct key). When the group completes, mutations fold into the runtime state layer in **task-declaration order** — deterministic, never completion order:
+
+- disjoint keys merge cleanly; this is the expected case
+- when two tasks wrote the **same key**, the later-declared task wins and Claudine emits a stderr warning naming the key and both tasks
+- reserved keys remain read-only inside groups exactly as everywhere else
+
+### Failure Policy
+
+Fixed policy in v1 — no new knobs:
+
+- **serial group**: the first failing task stops the group; remaining tasks do not run; the group is a failed step
+- **parallel group**: all tasks run to completion regardless of sibling failures — canceling a mid-flight agent run discards useful work; a failed task's partial STDOUT still lands in its `outputs` slot. The group fails if *any* task failed.
+- the **sequence-level `fail_fast`** then decides whether the sequence continues past a failed group
+- a group-level `fail_fast` and cancel-siblings-on-first-failure are deliberately deferred; both can be added later without breaking changes
+
+### No Interactivity Inside a Parallel Group
+
+Preflight already front-loads shell approval and schema collection. The one remaining interactive surface — late required properties discovered at just-in-time validation — becomes a **task failure** inside a parallel group, never a TTY prompt: N concurrent tasks cannot share one terminal. (Serial contexts retain the standard interactive-collection behavior.)
+
+### Write-Back Collision Detection
+
+Two tasks in the same parallel group whose `prompt` documents are inline-compose targets of the **same file** (or of the sequence source document itself) is a **typed preflight error**. Racing write-backs are never legal, and preflight has the whole graph loaded to detect this statically.
+
+### Timeouts, Guards, and Signals
+
+- `timeout`, `step_timeout`, the OpenCode stall backstop, and the runaway content guards apply to **each parallel task independently**; a task tripping a guard fails that task only (the group then follows the failure policy above)
+- Ctrl+C fans out to all running children through the existing unified wait-loop machinery; interrupted tasks are recorded as such, the group is marked interrupted, and the sequence exits 130
+- per-provider JSONL logging remains per-session and therefore concurrency-safe; the reporting index and the sequence `--perf` report aggregate per-task timings under the owning group
 
 ### Reporting Concurrency
 
-In order to address what would otherwise be chaotic to look at, we will provide the simplest solution for reporting parallel streams as we can:
+In order to address what would otherwise be chaotic to look at, we render parallel streams with **line-interleaved color bars**:
 
-- when a concurrent group starts, each task is assigned a color
-- when stream results are available we add the stream's color as vertical bar on the left
-- this would likely be achieve by using the BlockQuote component (but open to alternatives)
-- one visual nicety that we should account for is that if we're adding a vertical bar when concurrency hits we should probably also render with the same BlockQuote for non-concurrent work but where the vertical bar is invisible. Doing that means that when we switch between normal serial operation to concurrent operation we don't suddenly see the stream reporting lurch to the right to accommodate the new need for the vertical bar.
+- when a parallel group starts, each task is assigned a color from a fixed palette (cycling if tasks outnumber palette entries) and announces itself with a header line (`▶ <task-name>`) in its color
+- every subsequent status/output line from a task renders wrapped in that task's colored vertical bar on the left — the BlockQuote component is the expected mechanism (but open to alternatives)
+- lines interleave in **arrival order**; attribution comes from the color bar, not from ordering
+- task completion emits a footer line in the task's color carrying its outcome (success/failure/interrupted) and duration
+- one visual nicety that we must account for: since concurrency adds a vertical bar, non-concurrent work should render inside the same BlockQuote geometry with an **invisible** bar. That way, when execution switches between serial and parallel work, the stream reporting does not lurch to the right to accommodate the bar.
+- the `outputs` nested array remains **declaration-ordered** regardless of the interleaved display order (see [The `outputs` Array](#the-outputs-array))
