@@ -245,24 +245,28 @@ schema semantics.
 
 ## Phase 6: DMLS Literal UX and Union Narrowing
 
-- [ ] Add schema accessors that expose Literal values alongside enum members,
+- [x] Add schema accessors that expose Literal values alongside enum members,
   including every Literal arm in a property union without erasing scalar type.
-- [ ] Offer exactly the authored Literal value as a preselected completion item;
+- [x] Offer exactly the authored Literal value as a preselected completion item;
   for unions, combine each Literal value with the existing non-literal
   scaffolds and serialize insertion text as valid YAML for its scalar type.
-- [ ] Render Literal hover details as `Type: **literal**` plus the exact value,
+- [x] Render Literal hover details as `Type: **literal**` plus the exact value,
   then the existing constraint and description lines.
-- [ ] Make add-missing-required-key code actions insert the Literal value rather
+- [x] Make add-missing-required-key code actions insert the Literal value rather
   than an empty scaffold, including string quoting where YAML requires it.
-- [ ] Reuse the Phase 4 arm selector for sibling-key completion and DMLS
+- [x] Reuse the Phase 4 arm selector for sibling-key completion and DMLS
   missing-required/unknown-key diagnostics; never implement a second DMLS-only
-  discriminant algorithm.
-- [ ] Add DMLS tests for matched-arm key sets and diagnostics, root/property
+  discriminant algorithm. Sibling-key completion projects each union arm to the
+  minimal `{properties:{k:{const}}}` JSON the library
+  `select_literal_discriminant_arm` consumes (instance = the parsed frontmatter
+  mapping), and missing-required/unknown-key diagnostics inherit the library's
+  Phase-4 `narrow_property_union_problems` narrowing verbatim.
+- [x] Add DMLS tests for matched-arm key sets and diagnostics, root/property
   unions, typed equality, absent/unknown/duplicate/conflicting tags, exact-value
   completion, hover, and correct-by-construction required-key edits.
-- [ ] Parallelizable after shared accessors land: Literal completion/hover/code
+- [x] Parallelizable after shared accessors land: Literal completion/hover/code
   actions and union-narrowing provider work can proceed independently.
-- [ ] Validation checkpoint: run the focused DMLS provider and integration tests
+- [x] Validation checkpoint: run the focused DMLS provider and integration tests
   and confirm non-Literal schemas retain their baseline completion and
   diagnostic behavior.
 
