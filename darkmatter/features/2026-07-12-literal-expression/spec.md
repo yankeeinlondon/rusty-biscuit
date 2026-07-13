@@ -1,7 +1,7 @@
 ---
 status: ready for planning and implementation
 reviewed: true
-review_iterations: 2
+review_iterations: 4
 rulings: Q1–Q5 ruled by Ken 2026-07-12; folded into body
 inputs:
   - ../../lib/src/markdown/schemas/simplified/types.rs
