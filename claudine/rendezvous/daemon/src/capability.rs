@@ -13,8 +13,6 @@
 //! document. `available_storage` is quantized to whole GB with 5%
 //! hysteresis so a volatile number cannot churn the register.
 
-use std::time::Duration;
-
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
 use sniff::hardware::detect_hardware_with_request;
 use sniff::os::{OsType, detect_os_with_request};
@@ -27,9 +25,6 @@ use crate::register::{RegisterError, RegisterStore};
 /// (ratified D5), so this only needs to bump on incompatible
 /// *reinterpretations* of an existing field.
 pub const CAPABILITY_SCHEMA_VERSION: i64 = 1;
-
-/// Ratified refresh cadence for the hardware fields.
-pub const REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 /// Detect this host's capability fields. Detection failures degrade to
 /// omitting the affected fields (missing = "unknown" per the ratified
@@ -109,67 +104,6 @@ pub fn refresh_capabilities(store: &RegisterStore) -> Result<bool, RegisterError
     let mut fields = detect_capability_fields(doc_id.owner_node_id());
     apply_storage_hysteresis(store, &doc_id, &mut fields)?;
     store.upsert_local_fields(&doc_id, &fields)
-}
-
-/// Spawn the background refresher: one pass at startup, then one per
-/// [`REFRESH_INTERVAL`]. Detection is synchronous (sniff probes the
-/// OS), so each pass runs on the blocking pool.
-///
-/// Shutdown discipline: each detection pass holds a [`RegisterStore`]
-/// clone (and through it the open redb database), and an in-flight
-/// blocking task cannot be aborted. The refresher therefore takes a
-/// shutdown signal and — when signalled mid-pass — WAITS for the pass
-/// to finish before exiting, so awaiting the returned handle guarantees
-/// the storage handle is released (a daemon restarting on the same
-/// storage path would otherwise hit `DatabaseAlreadyOpen`).
-pub fn spawn_capability_refresher(
-    store: RegisterStore,
-    mut shutdown: tokio::sync::oneshot::Receiver<()>,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(REFRESH_INTERVAL);
-        loop {
-            tokio::select! {
-                _ = &mut shutdown => break,
-                _ = ticker.tick() => {}
-            }
-            let mut pass = tokio::task::spawn_blocking({
-                let store = store.clone();
-                move || refresh_capabilities(&store)
-            });
-            let (outcome, stop) = tokio::select! {
-                _ = &mut shutdown => ((&mut pass).await, true),
-                outcome = &mut pass => (outcome, false),
-            };
-            match outcome {
-                Ok(Ok(changed)) => {
-                    if changed {
-                        tracing::info!(
-                            target: "rendezvous_daemon::capability",
-                            "capability register updated",
-                        );
-                    }
-                }
-                Ok(Err(err)) => {
-                    tracing::warn!(
-                        target: "rendezvous_daemon::capability",
-                        %err,
-                        "capability refresh failed; will retry next interval",
-                    );
-                }
-                Err(join_err) => {
-                    tracing::warn!(
-                        target: "rendezvous_daemon::capability",
-                        %join_err,
-                        "capability refresh task panicked; will retry next interval",
-                    );
-                }
-            }
-            if stop {
-                break;
-            }
-        }
-    })
 }
 
 /// Hysteresis for the one genuinely volatile field: keep the register's

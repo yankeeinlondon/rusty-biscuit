@@ -26,7 +26,7 @@ use crate::batcher::{BatcherConfig, BatcherWorker, spawn as spawn_batcher};
 use crate::discovery::{self, DiscoveryError, DiscoveryHandle};
 use crate::peers::{PeerRegistry, PeerRegistryWorkers};
 use crate::projection::{Projection, ProjectionError};
-use crate::capability::spawn_capability_refresher;
+use crate::refresher::spawn_register_refresher;
 use crate::quic::{QuicEndpoint, QuicError};
 use crate::register::{RegisterError, RegisterStore};
 use crate::service::RendezvousService;
@@ -57,6 +57,11 @@ pub struct DaemonConfig {
     /// and the peer registry entirely, so the daemon still works for
     /// local-only Phase 1–3 testing.
     pub networking: Option<NetworkConfig>,
+    /// Directories scanned (bounded depth) for git checkouts to fill
+    /// the `repos/{node_id}` register. Empty (the default) leaves the
+    /// register unwritten — the feature is opt-in until the host's
+    /// coding roots are configured.
+    pub repo_scan_roots: Vec<PathBuf>,
 }
 
 /// Configuration for the Phase-4 networking stack (QUIC + mDNS).
@@ -94,7 +99,16 @@ impl DaemonConfig {
             chunk_config: ChunkConfig::default(),
             batcher_config: BatcherConfig::default(),
             networking: Some(NetworkConfig::default()),
+            repo_scan_roots: Vec::new(),
         }
+    }
+
+    /// Configure the directories scanned for git checkouts (the
+    /// `repos/{node_id}` register).
+    #[must_use]
+    pub fn with_repo_scan_roots(mut self, roots: Vec<PathBuf>) -> Self {
+        self.repo_scan_roots = roots;
+        self
     }
 
     /// Mark the projection database as in-memory only. The redb path is
@@ -355,7 +369,11 @@ pub fn spawn_uds_server(
     // Fill (and hourly refresh) this host's capability register so the
     // mesh learns what this node can run.
     let (capability_shutdown_tx, capability_shutdown_rx) = oneshot::channel();
-    let capability_task = spawn_capability_refresher(registers.clone(), capability_shutdown_rx);
+    let capability_task = spawn_register_refresher(
+        registers.clone(),
+        config.repo_scan_roots.clone(),
+        capability_shutdown_rx,
+    );
 
     let listener = UnixListener::bind(&socket_path).map_err(|source| ServerError::Bind {
         path: socket_path.clone(),

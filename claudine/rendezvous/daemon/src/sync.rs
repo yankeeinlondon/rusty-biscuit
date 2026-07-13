@@ -716,14 +716,18 @@ impl SyncService {
                                         expected_kind,
                                         &mut inbox,
                                     ),
-                                    DocumentId::Capability { .. } => service.receive_register(
-                                        &peer_node_id_hex,
-                                        &doc,
-                                        &delta_doc_id,
-                                        &envelope,
-                                        expected_kind,
-                                        &mut inbox,
-                                    ),
+                                    DocumentId::Capability { .. }
+                                    | DocumentId::Repos { .. }
+                                    | DocumentId::SessionsActive { .. } => {
+                                        service.receive_register(
+                                            &peer_node_id_hex,
+                                            &doc,
+                                            &delta_doc_id,
+                                            &envelope,
+                                            expected_kind,
+                                            &mut inbox,
+                                        )
+                                    }
                                 }
                             }
                         })

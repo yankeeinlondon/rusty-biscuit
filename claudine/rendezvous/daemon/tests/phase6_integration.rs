@@ -877,3 +877,85 @@ async fn capability_registers_converge_across_mesh() {
     alice.shutdown().await.expect("alice shutdown");
     bob.shutdown().await.expect("bob shutdown");
 }
+
+/// The repos register travels the mesh like any other document: alice
+/// scans a configured root containing a real git checkout, and after
+/// pairing + sync bob can read alice's canonical-repo → HEAD map via
+/// `ListHostRepos`. Requires a `git` binary (used to build the
+/// fixture); skips loudly when absent.
+#[tokio::test]
+async fn repos_register_converges_across_mesh() {
+    let git_ok = std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .is_ok_and(|out| out.status.success());
+    if !git_ok {
+        eprintln!("skipping: git binary not available");
+        return;
+    }
+
+    let tmp = TempDir::new().expect("tempdir");
+    let scan_root = tmp.path().join("coding");
+    let repo_dir = scan_root.join("widget");
+    std::fs::create_dir_all(&repo_dir).expect("mkdir");
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&repo_dir)
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.com")
+            .env("GIT_COMMITTER_NAME", "test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.com")
+            .output()
+            .expect("run git");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    git(&["init", "--quiet", "--initial-branch=main"]);
+    git(&["remote", "add", "origin", "git@github.com:acme/widget.git"]);
+    std::fs::write(repo_dir.join("README.md"), "widget").expect("write");
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "init"]);
+    let head = git(&["rev-parse", "HEAD"]);
+
+    let alice_config =
+        base_config(tmp.path().join("alice")).with_repo_scan_roots(vec![scan_root]);
+    let (alice, alice_socket) = boot_daemon_with(&tmp, "alice", alice_config).await;
+    let (bob, bob_socket) = boot_daemon(&tmp, "bob").await;
+    let mut alice_client = connect_uds(&alice_socket).await.expect("alice client");
+    let mut bob_client = connect_uds(&bob_socket).await.expect("bob client");
+    pair_and_connect(&alice, &mut alice_client, &bob, &mut bob_client).await;
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        alice_client
+            .sync_with_peer(rendezvous_core::SyncWithPeerRequest {
+                node_id: bob.node_id(),
+            })
+            .await
+            .expect("sync");
+        let hosts = bob_client
+            .list_host_repos(rendezvous_core::ListHostReposRequest {})
+            .await
+            .expect("list repos")
+            .into_inner()
+            .hosts;
+        if let Some(alice_repos) = hosts.iter().find(|h| h.owner_node_id == alice.node_id()) {
+            let repos: serde_json::Value =
+                serde_json::from_str(&alice_repos.repos_json).expect("repos json");
+            assert_eq!(
+                repos.get("github.com/acme/widget").and_then(|v| v.as_str()),
+                Some(head.as_str()),
+                "unexpected repos map: {repos}",
+            );
+            break;
+        }
+        if Instant::now() >= deadline {
+            panic!("bob never received alice's repos register; saw {hosts:?}");
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    alice.shutdown().await.expect("alice shutdown");
+    bob.shutdown().await.expect("bob shutdown");
+}

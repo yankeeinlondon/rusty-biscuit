@@ -159,13 +159,72 @@ impl RegisterStore {
         DocumentId::capability(self.identity.node_id())
     }
 
+    /// Document id of this host's own checked-out-repos register.
+    #[must_use]
+    pub fn local_repos_id(&self) -> DocumentId {
+        DocumentId::repos(self.identity.node_id())
+    }
+
+    /// Document id of this host's own active-sessions register.
+    #[must_use]
+    pub fn local_sessions_active_id(&self) -> DocumentId {
+        DocumentId::sessions_active(self.identity.node_id())
+    }
+
     /// Write `fields` into a locally-owned register, touching only the
     /// fields whose value differs from what the register already holds.
+    /// Fields absent from `fields` are left alone — right for registers
+    /// whose producers may legitimately omit fields (e.g. a failed
+    /// detection must not erase a previously known capability).
     /// Returns `true` when anything was written (and persisted).
     pub fn upsert_local_fields(
         &self,
         doc_id: &DocumentId,
         fields: &serde_json::Map<String, JsonValue>,
+    ) -> Result<bool, RegisterError> {
+        self.write_local_fields(doc_id, fields, false)
+    }
+
+    /// Like [`Self::upsert_local_fields`] but `fields` is the complete
+    /// current set: keys present in the register but absent from
+    /// `fields` are deleted. Right for registers that mirror a
+    /// disk/world state (e.g. `repos/{node}` — a deleted checkout must
+    /// leave the register).
+    pub fn replace_local_fields(
+        &self,
+        doc_id: &DocumentId,
+        fields: &serde_json::Map<String, JsonValue>,
+    ) -> Result<bool, RegisterError> {
+        self.write_local_fields(doc_id, fields, true)
+    }
+
+    /// Delete `keys` from a locally-owned register; keys not present
+    /// are ignored. Returns `true` when anything was removed. Built on
+    /// the replace path so persistence and compaction behavior are
+    /// identical to every other local write.
+    pub fn remove_local_fields(
+        &self,
+        doc_id: &DocumentId,
+        keys: &[&str],
+    ) -> Result<bool, RegisterError> {
+        let Some(JsonValue::Object(current)) = self.deep_value(doc_id)? else {
+            return Ok(false);
+        };
+        if !keys.iter().any(|k| current.contains_key(*k)) {
+            return Ok(false);
+        }
+        let remaining: serde_json::Map<String, JsonValue> = current
+            .into_iter()
+            .filter(|(k, _)| !keys.contains(&k.as_str()))
+            .collect();
+        self.replace_local_fields(doc_id, &remaining)
+    }
+
+    fn write_local_fields(
+        &self,
+        doc_id: &DocumentId,
+        fields: &serde_json::Map<String, JsonValue>,
+        delete_missing: bool,
     ) -> Result<bool, RegisterError> {
         let local = self.identity.node_id();
         if doc_id.owner_node_id() != local {
@@ -201,6 +260,20 @@ impl RegisterStore {
             });
             if current.as_ref() != Some(&candidate) {
                 map.insert(field, candidate)?;
+                changed = true;
+            }
+        }
+        if delete_missing {
+            let stale: Vec<String> = match map.get_deep_value() {
+                LoroValue::Map(current) => current
+                    .keys()
+                    .filter(|k| !fields.contains_key(k.as_str()))
+                    .map(|k| k.to_string())
+                    .collect(),
+                _ => Vec::new(),
+            };
+            for field in stale {
+                map.delete(&field)?;
                 changed = true;
             }
         }

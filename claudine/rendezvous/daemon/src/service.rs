@@ -450,6 +450,185 @@ impl Rendezvous for RendezvousService {
         .map_err(internal)?;
         Ok(Response::new(rendezvous_core::ListHostCapabilitiesResponse { hosts }))
     }
+
+    async fn list_host_repos(
+        &self,
+        _request: Request<rendezvous_core::ListHostReposRequest>,
+    ) -> Result<Response<rendezvous_core::ListHostReposResponse>, Status> {
+        let registers = self.registers.clone();
+        let hosts = tokio::task::spawn_blocking(move || {
+            let docs = registers.list_documents()?;
+            let mut hosts = Vec::with_capacity(docs.len());
+            for doc in docs {
+                if !matches!(doc, rendezvous_core::DocumentId::Repos { .. }) {
+                    continue;
+                }
+                let Some(repos) = registers.deep_value(&doc)? else {
+                    continue;
+                };
+                hosts.push(rendezvous_core::HostRepos {
+                    document_id: doc.as_path(),
+                    owner_node_id: doc.owner_node_id().to_string(),
+                    repos_json: repos.to_string(),
+                });
+            }
+            Ok::<_, crate::register::RegisterError>(hosts)
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(internal)?;
+        Ok(Response::new(rendezvous_core::ListHostReposResponse { hosts }))
+    }
+
+    async fn report_session_event(
+        &self,
+        request: Request<rendezvous_core::ReportSessionEventRequest>,
+    ) -> Result<Response<rendezvous_core::ReportSessionEventResponse>, Status> {
+        let body = request.into_inner();
+        if body.session_id.is_empty() {
+            return Err(Status::invalid_argument("session_id must not be empty"));
+        }
+        let kind = rendezvous_core::SessionEventKind::try_from(body.kind)
+            .map_err(|_| Status::invalid_argument("unknown session event kind"))?;
+        if kind == rendezvous_core::SessionEventKind::Unspecified {
+            return Err(Status::invalid_argument("session event kind must be specified"));
+        }
+        let details = match parse_optional_json(&body.details_json) {
+            Ok(Some(serde_json::Value::Object(map))) => map,
+            Ok(Some(_)) => {
+                return Err(Status::invalid_argument("details_json must be a JSON object"));
+            }
+            Ok(None) => serde_json::Map::new(),
+            Err(err) => {
+                return Err(Status::invalid_argument(format!(
+                    "details_json is not valid JSON: {err}"
+                )));
+            }
+        };
+
+        let registers = self.registers.clone();
+        let session_id = body.session_id;
+        let active_count = tokio::task::spawn_blocking(move || {
+            apply_session_event(&registers, &session_id, kind, details)
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(internal)?;
+        Ok(Response::new(rendezvous_core::ReportSessionEventResponse { active_count }))
+    }
+
+    async fn list_active_sessions(
+        &self,
+        _request: Request<rendezvous_core::ListActiveSessionsRequest>,
+    ) -> Result<Response<rendezvous_core::ListActiveSessionsResponse>, Status> {
+        let registers = self.registers.clone();
+        let hosts = tokio::task::spawn_blocking(move || {
+            let docs = registers.list_documents()?;
+            let mut hosts = Vec::with_capacity(docs.len());
+            for doc in docs {
+                if !matches!(doc, rendezvous_core::DocumentId::SessionsActive { .. }) {
+                    continue;
+                }
+                let Some(raw) = registers.deep_value(&doc)? else {
+                    continue;
+                };
+                hosts.push(rendezvous_core::HostActiveSessions {
+                    document_id: doc.as_path(),
+                    owner_node_id: doc.owner_node_id().to_string(),
+                    sessions_json: inflate_session_entries(&raw).to_string(),
+                });
+            }
+            Ok::<_, crate::register::RegisterError>(hosts)
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(internal)?;
+        Ok(Response::new(rendezvous_core::ListActiveSessionsResponse { hosts }))
+    }
+}
+
+/// Apply one session transition to the local sessions-active register.
+///
+/// Register fields are flat scalars, so each session's entry is stored
+/// as a JSON-encoded string keyed by session id; this merges details
+/// over the existing entry (STARTED / UPDATED) or removes the key
+/// (ENDED) and returns the post-event active count.
+fn apply_session_event(
+    registers: &crate::register::RegisterStore,
+    session_id: &str,
+    kind: rendezvous_core::SessionEventKind,
+    details: serde_json::Map<String, serde_json::Value>,
+) -> Result<u64, crate::register::RegisterError> {
+    use rendezvous_core::SessionEventKind as Kind;
+    let doc = registers.local_sessions_active_id();
+    let now = unix_now_ms();
+
+    match kind {
+        Kind::Ended => {
+            registers.remove_local_fields(&doc, &[session_id])?;
+        }
+        Kind::Started | Kind::Updated => {
+            let mut entry = registers
+                .deep_value(&doc)?
+                .and_then(|v| {
+                    v.get(session_id)
+                        .and_then(|e| e.as_str())
+                        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+                })
+                .and_then(|v| match v {
+                    serde_json::Value::Object(map) => Some(map),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            for (k, v) in details {
+                entry.insert(k, v);
+            }
+            // The daemon owns the clocks: producers cannot be trusted
+            // to agree on wall time, and consumers judge staleness
+            // from updated_at.
+            if kind == Kind::Started || !entry.contains_key("started_at_unix_ms") {
+                entry.insert("started_at_unix_ms".into(), serde_json::json!(now));
+            }
+            entry.insert("updated_at_unix_ms".into(), serde_json::json!(now));
+
+            let mut fields = serde_json::Map::new();
+            fields.insert(
+                session_id.to_string(),
+                serde_json::Value::String(serde_json::Value::Object(entry).to_string()),
+            );
+            registers.upsert_local_fields(&doc, &fields)?;
+        }
+        Kind::Unspecified => unreachable!("rejected at the RPC boundary"),
+    }
+
+    let count = registers
+        .deep_value(&doc)?
+        .and_then(|v| match v {
+            serde_json::Value::Object(map) => Some(map.len() as u64),
+            _ => None,
+        })
+        .unwrap_or(0);
+    Ok(count)
+}
+
+/// The register stores each session entry as a JSON-encoded string
+/// (register fields are flat scalars); re-inflate them into real
+/// objects so RPC consumers get one clean nested JSON document.
+fn inflate_session_entries(raw: &serde_json::Value) -> serde_json::Value {
+    let serde_json::Value::Object(map) = raw else {
+        return serde_json::Value::Object(serde_json::Map::new());
+    };
+    let inflated: serde_json::Map<String, serde_json::Value> = map
+        .iter()
+        .map(|(session_id, entry)| {
+            let value = entry
+                .as_str()
+                .and_then(|raw| serde_json::from_str(raw).ok())
+                .unwrap_or_else(|| entry.clone());
+            (session_id.clone(), value)
+        })
+        .collect();
+    serde_json::Value::Object(inflated)
 }
 
 fn parse_optional_json(raw: &str) -> Result<Option<serde_json::Value>, serde_json::Error> {
