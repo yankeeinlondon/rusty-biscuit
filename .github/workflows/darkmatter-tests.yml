@@ -41,6 +41,10 @@ jobs:
       # darkmatter's L1 suite is the largest in the repo; partition it 4 ways so
       # the run stays well under the 30-minute ceiling it was breaching.
       shards: '["1/4", "2/4", "3/4", "4/4"]'
+      # TEMP (diagnostic): disable kache to isolate whether the Linux-only
+      # `options_hash_sensitive_*` 30s hang is a kache miscompilation or a real
+      # code deadlock. Revert to default (true) once determined.
+      kache: false
     secrets: inherit
 
   # Area-specific regression guard (kept out of the shared workflow): the local
