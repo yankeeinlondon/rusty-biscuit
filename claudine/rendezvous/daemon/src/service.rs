@@ -787,4 +787,108 @@ mod tests {
         assert_eq!(listed.entries.len(), 1);
         assert_eq!(listed.entries[0].message, "hello");
     }
+
+    #[tokio::test]
+    async fn session_events_drive_the_active_register() {
+        let h = harness();
+
+        // START creates the entry with daemon-stamped clocks.
+        let response = h
+            .service
+            .report_session_event(Request::new(rendezvous_core::ReportSessionEventRequest {
+                session_id: "sess-1".into(),
+                kind: rendezvous_core::SessionEventKind::Started as i32,
+                details_json: r#"{"agent":"claude","status":"active"}"#.into(),
+            }))
+            .await
+            .expect("start")
+            .into_inner();
+        assert_eq!(response.active_count, 1);
+
+        // UPDATE merges new attributes over the existing entry.
+        h.service
+            .report_session_event(Request::new(rendezvous_core::ReportSessionEventRequest {
+                session_id: "sess-1".into(),
+                kind: rendezvous_core::SessionEventKind::Updated as i32,
+                details_json: r#"{"status":"waiting_on_user"}"#.into(),
+            }))
+            .await
+            .expect("update");
+
+        let hosts = h
+            .service
+            .list_active_sessions(Request::new(rendezvous_core::ListActiveSessionsRequest {}))
+            .await
+            .expect("list")
+            .into_inner()
+            .hosts;
+        assert_eq!(hosts.len(), 1);
+        let sessions: serde_json::Value =
+            serde_json::from_str(&hosts[0].sessions_json).expect("sessions json");
+        let entry = &sessions["sess-1"];
+        assert_eq!(entry["agent"], serde_json::json!("claude"));
+        assert_eq!(entry["status"], serde_json::json!("waiting_on_user"));
+        assert!(entry["started_at_unix_ms"].is_i64(), "entry: {entry}");
+        assert!(entry["updated_at_unix_ms"].is_i64(), "entry: {entry}");
+
+        // END removes the entry — the register holds only live sessions.
+        let response = h
+            .service
+            .report_session_event(Request::new(rendezvous_core::ReportSessionEventRequest {
+                session_id: "sess-1".into(),
+                kind: rendezvous_core::SessionEventKind::Ended as i32,
+                details_json: String::new(),
+            }))
+            .await
+            .expect("end")
+            .into_inner();
+        assert_eq!(response.active_count, 0);
+
+        // Ending an unknown session is a harmless no-op.
+        let response = h
+            .service
+            .report_session_event(Request::new(rendezvous_core::ReportSessionEventRequest {
+                session_id: "never-started".into(),
+                kind: rendezvous_core::SessionEventKind::Ended as i32,
+                details_json: String::new(),
+            }))
+            .await
+            .expect("end unknown")
+            .into_inner();
+        assert_eq!(response.active_count, 0);
+    }
+
+    #[tokio::test]
+    async fn session_event_validation_rejects_bad_input() {
+        let h = harness();
+        let empty_id = h
+            .service
+            .report_session_event(Request::new(rendezvous_core::ReportSessionEventRequest {
+                session_id: String::new(),
+                kind: rendezvous_core::SessionEventKind::Started as i32,
+                details_json: String::new(),
+            }))
+            .await;
+        assert!(empty_id.is_err());
+
+        let bad_details = h
+            .service
+            .report_session_event(Request::new(rendezvous_core::ReportSessionEventRequest {
+                session_id: "sess-2".into(),
+                kind: rendezvous_core::SessionEventKind::Started as i32,
+                details_json: "[1,2,3]".into(),
+            }))
+            .await;
+        assert!(bad_details.is_err(), "non-object details must be rejected");
+
+        let unspecified = h
+            .service
+            .report_session_event(Request::new(rendezvous_core::ReportSessionEventRequest {
+                session_id: "sess-3".into(),
+                kind: rendezvous_core::SessionEventKind::Unspecified as i32,
+                details_json: String::new(),
+            }))
+            .await;
+        assert!(unspecified.is_err());
+    }
 }

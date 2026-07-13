@@ -959,3 +959,107 @@ async fn repos_register_converges_across_mesh() {
     alice.shutdown().await.expect("alice shutdown");
     bob.shutdown().await.expect("bob shutdown");
 }
+
+/// Session transitions travel the mesh: alice reports a started
+/// session, bob sees it in `ListActiveSessions` after sync; alice ends
+/// it, and the next sync removes it from bob's replica — the NOW view
+/// converges in both directions.
+#[tokio::test]
+async fn active_sessions_converge_across_mesh() {
+    let tmp = TempDir::new().expect("tempdir");
+    let (alice, alice_socket) = boot_daemon(&tmp, "alice").await;
+    let (bob, bob_socket) = boot_daemon(&tmp, "bob").await;
+    let mut alice_client = connect_uds(&alice_socket).await.expect("alice client");
+    let mut bob_client = connect_uds(&bob_socket).await.expect("bob client");
+    pair_and_connect(&alice, &mut alice_client, &bob, &mut bob_client).await;
+
+    alice_client
+        .report_session_event(rendezvous_core::ReportSessionEventRequest {
+            session_id: "sess-42".into(),
+            kind: rendezvous_core::SessionEventKind::Started as i32,
+            details_json: r#"{"agent":"claude","repo":"github.com/acme/widget"}"#.into(),
+        })
+        .await
+        .expect("report start");
+    alice_client
+        .sync_with_peer(rendezvous_core::SyncWithPeerRequest {
+            node_id: bob.node_id(),
+        })
+        .await
+        .expect("sync after start");
+
+    let bob_view = |client: &mut RendezvousClient<Channel>| {
+        let mut client = client.clone();
+        async move {
+            client
+                .list_active_sessions(rendezvous_core::ListActiveSessionsRequest {})
+                .await
+                .expect("list")
+                .into_inner()
+                .hosts
+        }
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let hosts = bob_view(&mut bob_client).await;
+        if let Some(alice_sessions) = hosts.iter().find(|h| h.owner_node_id == alice.node_id()) {
+            let sessions: serde_json::Value =
+                serde_json::from_str(&alice_sessions.sessions_json).expect("json");
+            assert_eq!(
+                sessions["sess-42"]["agent"],
+                serde_json::json!("claude"),
+                "unexpected sessions: {sessions}",
+            );
+            break;
+        }
+        if Instant::now() >= deadline {
+            panic!("bob never received alice's sessions register; saw {hosts:?}");
+        }
+        sleep(Duration::from_millis(100)).await;
+        alice_client
+            .sync_with_peer(rendezvous_core::SyncWithPeerRequest {
+                node_id: bob.node_id(),
+            })
+            .await
+            .expect("re-sync");
+    }
+
+    // Session ends; the removal propagates on the next sync.
+    alice_client
+        .report_session_event(rendezvous_core::ReportSessionEventRequest {
+            session_id: "sess-42".into(),
+            kind: rendezvous_core::SessionEventKind::Ended as i32,
+            details_json: String::new(),
+        })
+        .await
+        .expect("report end");
+    // The initiator's sync RPC returns once IT has read the peer's
+    // End frame; the responder may still be applying our deltas in its
+    // own read phase. Convergence is eventual — poll like every other
+    // cross-daemon assertion in this suite.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        alice_client
+            .sync_with_peer(rendezvous_core::SyncWithPeerRequest {
+                node_id: bob.node_id(),
+            })
+            .await
+            .expect("sync after end");
+        let hosts = bob_view(&mut bob_client).await;
+        let sessions: serde_json::Value = hosts
+            .iter()
+            .find(|h| h.owner_node_id == alice.node_id())
+            .map(|h| serde_json::from_str(&h.sessions_json).expect("json"))
+            .unwrap_or_else(|| serde_json::json!({}));
+        if sessions.as_object().is_some_and(|m| m.is_empty()) {
+            break;
+        }
+        if Instant::now() >= deadline {
+            panic!("ended session never left bob's view: {sessions}");
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    alice.shutdown().await.expect("alice shutdown");
+    bob.shutdown().await.expect("bob shutdown");
+}

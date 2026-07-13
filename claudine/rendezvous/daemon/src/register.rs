@@ -724,4 +724,50 @@ mod tests {
         assert_eq!(value["cpu_cores"], json!(8));
         assert_eq!(value["memory"], json!(1024));
     }
+
+    #[test]
+    fn field_deletion_propagates_via_delta() {
+        let local = build_harness();
+        let (remote, remote_doc, _tmp) = remote_store(11);
+
+        remote
+            .upsert_local_fields(&remote_doc, &fields(&[("a", json!(1)), ("b", json!(2))]))
+            .expect("seed");
+        let exported = remote
+            .export_updates_since(&remote_doc, None)
+            .expect("export")
+            .expect("doc");
+        let staged = local
+            .store
+            .stage_remote(&remote_doc, &exported.bytes, exported.kind)
+            .expect("stage");
+        local.store.commit_staged(&remote_doc, staged).expect("commit");
+
+        // Remote deletes a field; local follows via delta.
+        assert!(remote.remove_local_fields(&remote_doc, &["a"]).expect("remove"));
+        let local_vv = local
+            .store
+            .state_vector(&remote_doc)
+            .expect("vv")
+            .expect("present");
+        let exported = remote
+            .export_updates_since(&remote_doc, Some(&local_vv))
+            .expect("export")
+            .expect("doc");
+        assert_eq!(exported.kind, PayloadKind::Delta);
+        assert!(!exported.bytes.is_empty(), "delete must produce a delta");
+        let staged = local
+            .store
+            .stage_remote(&remote_doc, &exported.bytes, exported.kind)
+            .expect("stage");
+        assert!(local.store.commit_staged(&remote_doc, staged).expect("commit"));
+
+        let value = local
+            .store
+            .deep_value(&remote_doc)
+            .expect("read")
+            .expect("present");
+        assert!(value.get("a").is_none(), "deleted field must propagate: {value}");
+        assert_eq!(value["b"], json!(2));
+    }
 }
