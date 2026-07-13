@@ -114,14 +114,33 @@ pub fn refresh_capabilities(store: &RegisterStore) -> Result<bool, RegisterError
 /// Spawn the background refresher: one pass at startup, then one per
 /// [`REFRESH_INTERVAL`]. Detection is synchronous (sniff probes the
 /// OS), so each pass runs on the blocking pool.
-pub fn spawn_capability_refresher(store: RegisterStore) -> tokio::task::JoinHandle<()> {
+///
+/// Shutdown discipline: each detection pass holds a [`RegisterStore`]
+/// clone (and through it the open redb database), and an in-flight
+/// blocking task cannot be aborted. The refresher therefore takes a
+/// shutdown signal and — when signalled mid-pass — WAITS for the pass
+/// to finish before exiting, so awaiting the returned handle guarantees
+/// the storage handle is released (a daemon restarting on the same
+/// storage path would otherwise hit `DatabaseAlreadyOpen`).
+pub fn spawn_capability_refresher(
+    store: RegisterStore,
+    mut shutdown: tokio::sync::oneshot::Receiver<()>,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(REFRESH_INTERVAL);
         loop {
-            ticker.tick().await;
-            let store = store.clone();
-            let outcome =
-                tokio::task::spawn_blocking(move || refresh_capabilities(&store)).await;
+            tokio::select! {
+                _ = &mut shutdown => break,
+                _ = ticker.tick() => {}
+            }
+            let mut pass = tokio::task::spawn_blocking({
+                let store = store.clone();
+                move || refresh_capabilities(&store)
+            });
+            let (outcome, stop) = tokio::select! {
+                _ = &mut shutdown => ((&mut pass).await, true),
+                outcome = &mut pass => (outcome, false),
+            };
             match outcome {
                 Ok(Ok(changed)) => {
                     if changed {
@@ -145,6 +164,9 @@ pub fn spawn_capability_refresher(store: RegisterStore) -> tokio::task::JoinHand
                         "capability refresh task panicked; will retry next interval",
                     );
                 }
+            }
+            if stop {
+                break;
             }
         }
     })

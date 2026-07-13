@@ -203,6 +203,7 @@ pub struct ServerHandle {
     join_handle: Option<JoinHandle<Result<(), tonic::transport::Error>>>,
     batcher: Option<BatcherWorker>,
     capability_task: Option<JoinHandle<()>>,
+    capability_shutdown_tx: Option<oneshot::Sender<()>>,
     identity: Arc<NodeIdentity>,
     peers: Option<PeerRegistry>,
     peer_workers: Option<PeerRegistryWorkers>,
@@ -268,8 +269,15 @@ impl ServerHandle {
                 .await
                 .map_err(ServerError::Join)?;
         }
+        // Signal the capability refresher and WAIT for it: an
+        // in-flight detection pass holds the storage handle, and a
+        // restarted daemon reopening the same redb file would hit
+        // `DatabaseAlreadyOpen` if we only fired-and-forgot.
+        if let Some(tx) = self.capability_shutdown_tx.take() {
+            let _ = tx.send(());
+        }
         if let Some(task) = self.capability_task.take() {
-            task.abort();
+            let _ = task.await;
         }
         remove_socket(&self.socket_path);
         Ok(())
@@ -287,7 +295,12 @@ impl Drop for ServerHandle {
         if let Some(worker) = self.batcher.take() {
             worker.shutdown();
         }
+        if let Some(tx) = self.capability_shutdown_tx.take() {
+            let _ = tx.send(());
+        }
         if let Some(task) = self.capability_task.take() {
+            // Drop cannot await; the refresher exits on its own after
+            // the signal (waiting out any in-flight detection pass).
             task.abort();
         }
         remove_socket(&self.socket_path);
@@ -341,7 +354,8 @@ pub fn spawn_uds_server(
     );
     // Fill (and hourly refresh) this host's capability register so the
     // mesh learns what this node can run.
-    let capability_task = spawn_capability_refresher(registers.clone());
+    let (capability_shutdown_tx, capability_shutdown_rx) = oneshot::channel();
+    let capability_task = spawn_capability_refresher(registers.clone(), capability_shutdown_rx);
 
     let listener = UnixListener::bind(&socket_path).map_err(|source| ServerError::Bind {
         path: socket_path.clone(),
@@ -410,6 +424,7 @@ pub fn spawn_uds_server(
         join_handle: Some(join_handle),
         batcher: Some(batcher),
         capability_task: Some(capability_task),
+        capability_shutdown_tx: Some(capability_shutdown_tx),
         identity,
         peers,
         peer_workers,
