@@ -13,7 +13,7 @@
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::schemas::{
-    Constraint, DecodedScalar, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema,
+    Constraint, DecodedScalar, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
     SimplifiedType, TypeExpr, darkmatter_base_schema, decode_scalar,
     select_literal_discriminant_arm, suggestions_for_path,
 };
@@ -179,20 +179,14 @@ fn value_completions(
         return Vec::new();
     };
 
-    // Expression-typed value: `ctx.*`, expression functions, and same-document
-    // frontmatter keys, scoped to the value text and the `.`/`(` triggers. This
-    // reuses the exact catalog completion the body-interpolation surface uses.
-    if expression_atom(def).is_some() {
-        return expression_value_completions(ctx, offset, partial, start);
-    }
-
     let mut items = Vec::new();
 
     // Literal values: offer exactly each authored `literal(x)` value, preselected,
     // with YAML insertion text matching the value's scalar type. In a property
-    // union these combine with the non-literal scaffolds below (a
-    // `[literal(auto), number]` offers `auto`; a `[literal(a), literal(b)]`
-    // offers both).
+    // union these combine with the expression candidates and non-literal
+    // scaffolds below (a `[literal(auto), number]` offers `auto`; a
+    // `[literal(a), literal(b)]` offers both; a `[literal(auto), expression]`
+    // offers `auto` plus every expression candidate).
     for atom in atoms_of(def) {
         if let Some(value) = atom.literal_value() {
             let insert = yaml_scalar_literal(value);
@@ -204,8 +198,18 @@ fn value_completions(
         }
     }
 
+    // Expression-typed arm: the shared `ctx.*`, expression-function, and
+    // same-document frontmatter-key catalog (scoped to the value text and the
+    // `.`/`(` triggers), reusing the exact catalog completion the
+    // body-interpolation surface uses. Accumulated — never early-returned — so a
+    // union pairing `expression` with `literal` arms still offers each literal
+    // value alongside the expression candidates.
+    if expression_atom(def).is_some() {
+        items.extend(expression_value_completions(ctx, offset, partial, start));
+    }
+
     // Non-literal value scaffolds from the first completable arm (enum members,
-    // boolish, or file paths), combined with any literals above.
+    // boolish, or file paths), combined with any literals/expression items above.
     if let Some(atom) = completable_atom(def) {
         if let Some(members) = enum_members(atom) {
             items.extend(
@@ -225,7 +229,26 @@ fn value_completions(
         }
     }
 
+    dedup_completions(items)
+}
+
+/// Deduplicates completion items by label and inserted text, preserving
+/// first-seen order. A merged union list (literal + expression + scaffold arms)
+/// can otherwise repeat an item two arms both produce; keeping the first
+/// occurrence lets a preselected literal offered ahead of a colliding
+/// expression candidate retain its preselection.
+fn dedup_completions(items: Vec<CompletionItem>) -> Vec<CompletionItem> {
+    let mut seen = std::collections::HashSet::new();
     items
+        .into_iter()
+        .filter(|item| {
+            let insert = match &item.text_edit {
+                Some(CompletionTextEdit::Edit(edit)) => edit.new_text.clone(),
+                _ => item.label.clone(),
+            };
+            seen.insert((item.label.clone(), insert))
+        })
+        .collect()
 }
 
 /// A preselected completion item offering exactly one authored `literal(x)`
@@ -418,14 +441,15 @@ fn expression_value_at<'a>(
         .find(|value| value.entry.value_span.contains(&offset))
 }
 
-/// Hover on an Expression-typed frontmatter value — byte-identical to the body
-/// interpolation hover via the shared [`expressions::hover_markdown`]. Fires
-/// only when the cursor is inside the value (a cursor on the key falls through
-/// to the schema hover, which describes the `expression` type itself).
+/// Hover on an Expression-typed frontmatter value, via the shared
+/// [`expressions::hover_markdown_condition`] authority (condition dialect, so
+/// `&&`/`||` values hover like any other expression). Fires only when the cursor
+/// is inside the value (a cursor on the key falls through to the schema hover,
+/// which describes the `expression` type itself).
 fn expression_hover(ctx: &DocumentContext, ast: &FrontmatterAst, offset: usize) -> Option<Hover> {
     let value = expression_value_at(ctx, ast, offset)?;
     let expr_offset = value.decoded_offset(offset);
-    let markdown = expressions::hover_markdown(
+    let markdown = expressions::hover_markdown_condition(
         value.expression(),
         expr_offset,
         |name| frontmatter_scalar(ctx, name),
@@ -818,13 +842,65 @@ pub(crate) fn known_shape(ctx: &DocumentContext) -> SchemaShape {
                 shape.properties.insert(name.clone(), def.clone());
             }
         }
-        if let Some(SimplifiedSchema::Single(document)) = &bundle.effective.simplified {
-            for (name, def) in &document.properties {
-                shape.properties.insert(name.clone(), def.clone());
+        match &bundle.effective.simplified {
+            Some(SimplifiedSchema::Single(document)) => {
+                for (name, def) in &document.properties {
+                    shape.properties.insert(name.clone(), def.clone());
+                }
             }
+            // A root `$schema` union: overlay the arm a shared literal
+            // discriminant selects (so top-level completion/hover narrows), or
+            // every arm's keys merged when no arm is unambiguously selected.
+            Some(SimplifiedSchema::Union(arms)) => {
+                overlay_root_union(&mut shape, arms, &bundle.frontmatter_json);
+            }
+            None => {}
         }
     }
     shape
+}
+
+/// Overlays a root `$schema` union's arm properties onto the effective
+/// top-level shape.
+///
+/// When the top-level frontmatter mapping selects exactly one arm via the
+/// shared literal discriminant (the Phase-4 [`select_literal_discriminant_arm`]
+/// — never a second, DMLS-only algorithm), only that arm's properties overlay,
+/// so top-level key completion offers just the matched arm's remaining keys.
+/// Before a discriminant is present, or for an unknown, duplicate, or
+/// conflicting discriminant, every inline arm's properties merge instead
+/// (union behavior). A file-reference arm contributes no directly-known
+/// properties here.
+fn overlay_root_union(shape: &mut SchemaShape, arms: &[SchemaArm], frontmatter_json: &Value) {
+    let arm_json: Vec<Value> = arms.iter().map(root_arm_discriminant_json).collect();
+    match select_literal_discriminant_arm(&arm_json, frontmatter_json) {
+        Some(index) => overlay_arm(shape, &arms[index]),
+        None => {
+            for arm in arms {
+                overlay_arm(shape, arm);
+            }
+        }
+    }
+}
+
+/// Overlays one inline root-union arm's properties, ignoring a file-reference
+/// arm (its properties are not resolved into the arm shape here).
+fn overlay_arm(shape: &mut SchemaShape, arm: &SchemaArm) {
+    if let SchemaArm::Inline(arm_shape) = arm {
+        for (name, def) in &arm_shape.properties {
+            shape.properties.insert(name.clone(), def.clone());
+        }
+    }
+}
+
+/// The minimal discriminant JSON for one root-union arm, aligned by index with
+/// the arm slice so the selector's returned index maps back. A file-reference
+/// arm contributes no discriminant properties but still occupies its slot.
+fn root_arm_discriminant_json(arm: &SchemaArm) -> Value {
+    match arm {
+        SchemaArm::Inline(shape) => shape_discriminant_json(shape),
+        SchemaArm::FileRef(_) => serde_json::json!({}),
+    }
 }
 
 /// The nested [`SchemaShape`] reached by walking each `ancestors` segment into
@@ -896,9 +972,16 @@ fn discriminated_arm_shape<'a>(
 /// object (no discriminant properties) but still occupies its slot so the
 /// selector's arm index stays aligned with [`atoms_of`].
 fn arm_discriminant_json(atom: &PropertyAtom) -> Value {
-    let TypeExpr::InlineObject(shape) = &atom.ty else {
-        return serde_json::json!({});
-    };
+    match &atom.ty {
+        TypeExpr::InlineObject(shape) => shape_discriminant_json(shape),
+        _ => serde_json::json!({}),
+    }
+}
+
+/// The minimal discriminant JSON the selector reads for one inline-object
+/// shape: `{ "properties": { key: { "const": <value> } } }` for each of its
+/// `literal(...)`-typed properties.
+fn shape_discriminant_json(shape: &SchemaShape) -> Value {
     let mut props = serde_json::Map::new();
     for (key, def) in &shape.properties {
         if let PropertyDef::Single(child) = def
@@ -1309,6 +1392,40 @@ mod tests {
         });
     }
 
+    #[test]
+    fn condition_dialect_expression_value_hover_uses_condition_grammar() {
+        // The `expression` schema format validates with `parse_condition`; the
+        // value hover must parse the same dialect, so `||` lowers to a logical
+        // `or(...)` (not the value-dialect fallback) and the `is_empty` function
+        // call under the cursor is still enriched.
+        let text = expression_doc(r#"when: 'is_empty(title) || is_string(title)'"#);
+        with_ctx(&text, |ctx| {
+            let offset = text.find("is_empty").unwrap() + 2;
+            let hover = hover(ctx, offset).expect("condition expression hover");
+            let HoverContents::Markup(MarkupContent { value, .. }) = hover.contents else {
+                panic!("markdown hover");
+            };
+            assert!(value.contains("or("), "condition dialect lowers || to or(): {value}");
+            let is_empty = expressions::function_descriptor("is_empty").unwrap();
+            assert!(value.contains(&expressions::format_function_block(is_empty)), "{value}");
+        });
+    }
+
+    #[test]
+    fn condition_dialect_expression_value_completion_offers_catalog() {
+        // Completion is token-based and dialect-agnostic: a `&&`-containing value
+        // still offers `ctx.*` for the trailing token.
+        let text = expression_doc(r#"when: 'is_agent() && ctx.'"#);
+        with_ctx(&text, |ctx| {
+            let offset = text.find("ctx.'").unwrap() + "ctx.".len();
+            let items = completion(ctx, offset);
+            assert!(
+                items.iter().any(|item| item.label == "ctx.packages"),
+                "completion inside a condition expression still offers ctx.*: {items:#?}"
+            );
+        });
+    }
+
     // ── Literal UX (Phase 6) ──
 
     #[test]
@@ -1368,6 +1485,68 @@ mod tests {
             assert!(items.iter().any(|item| item.label == "created"), "{items:#?}");
             assert!(items.iter().any(|item| item.label == "deleted"), "{items:#?}");
         });
+    }
+
+    /// The deduplicated `(label, inserted-text)` pairs of a completion list, so a
+    /// merged union list can be asserted duplicate-free.
+    fn completion_keys(items: &[CompletionItem]) -> Vec<(String, String)> {
+        items
+            .iter()
+            .map(|item| {
+                let insert = match &item.text_edit {
+                    Some(CompletionTextEdit::Edit(edit)) => edit.new_text.clone(),
+                    _ => item.label.clone(),
+                };
+                (item.label.clone(), insert)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn literal_expression_union_offers_literal_and_expression_candidates() {
+        // `[literal(auto), expression]` in either arm order must offer the
+        // preselected literal `auto` AND the catalog-backed expression candidates
+        // (an Expression arm must not suppress the Literal value completions), and
+        // the merged list must be duplicate-free.
+        for arms in [
+            "    - literal(auto)\n    - expression\n",
+            "    - expression\n    - literal(auto)\n",
+        ] {
+            let text = format!("---\n$schema:\n  width:\n{arms}width: \n---\n\nbody\n");
+            with_ctx(&text, |ctx| {
+                let offset = text.find("width: \n").unwrap() + "width: ".len();
+                let items = completion(ctx, offset);
+
+                let auto = items
+                    .iter()
+                    .find(|item| item.label == "auto")
+                    .unwrap_or_else(|| panic!("literal `auto` offered for arms `{arms}`: {items:#?}"));
+                assert_eq!(
+                    auto.preselect,
+                    Some(true),
+                    "the literal value stays preselected for arms `{arms}`",
+                );
+
+                assert!(
+                    items.iter().any(|item| item.label == "ctx.packages"),
+                    "a catalog-backed `ctx.*` candidate is offered for arms `{arms}`: {items:#?}",
+                );
+                assert!(
+                    items.iter().any(|item| item.label.starts_with("length(")),
+                    "an expression function is offered for arms `{arms}`: {items:#?}",
+                );
+
+                let keys = completion_keys(&items);
+                let mut deduped = keys.clone();
+                deduped.sort();
+                deduped.dedup();
+                assert_eq!(
+                    keys.len(),
+                    deduped.len(),
+                    "the merged union list has no duplicates for arms `{arms}`: {keys:#?}",
+                );
+            });
+        }
     }
 
     #[test]
@@ -1430,6 +1609,122 @@ mod tests {
             let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
             assert!(labels.contains(&"kind"), "the discriminant key is offered: {labels:?}");
         });
+    }
+
+    // ── Root `$schema` union key completion (Phase 6, D3) ──
+
+    /// Top-level completion labels with the cursor on the empty line that
+    /// immediately follows `marker` (a whole authored line including its
+    /// trailing newline). The empty line is a bare top-level key position.
+    fn top_level_labels_after(text: &str, marker: &str) -> Vec<String> {
+        with_ctx(text, |ctx| {
+            let offset = text.find(marker).expect("marker present") + marker.len();
+            completion(ctx, offset).into_iter().map(|item| item.label).collect()
+        })
+    }
+
+    /// A root `$schema` union of two inline arms tagged by a shared literal
+    /// `kind` discriminant, with the authored top-level frontmatter `body` and a
+    /// trailing empty line for the cursor.
+    fn kind_root_union_doc(body: &str) -> String {
+        format!(
+            "---\n$schema:\n  - kind: literal(created)\n    path: string\n  \
+             - kind: literal(deleted)\n    reason: string\n{body}\n---\n\nbody\n"
+        )
+    }
+
+    #[test]
+    fn root_union_key_completion_narrows_to_matched_arm() {
+        // `kind: created` selects the first arm, so only its `path` key is
+        // offered — never the deleted arm's `reason`.
+        let text = kind_root_union_doc("kind: created");
+        let labels = top_level_labels_after(&text, "kind: created\n");
+        assert!(labels.iter().any(|l| l == "path"), "created arm key offered: {labels:?}");
+        assert!(!labels.iter().any(|l| l == "reason"), "deleted arm key suppressed: {labels:?}");
+    }
+
+    #[test]
+    fn root_union_key_completion_absent_discriminant_keeps_union() {
+        // No discriminant authored: every arm's keys merge (union behavior).
+        let text = kind_root_union_doc("");
+        let labels = top_level_labels_after(&text, "reason: string\n");
+        assert!(labels.iter().any(|l| l == "path"), "created arm key offered: {labels:?}");
+        assert!(labels.iter().any(|l| l == "reason"), "deleted arm key offered: {labels:?}");
+        assert!(labels.iter().any(|l| l == "kind"), "the discriminant key is offered: {labels:?}");
+    }
+
+    #[test]
+    fn root_union_key_completion_unknown_value_keeps_union() {
+        // `kind: renamed` matches no arm → union behavior.
+        let text = kind_root_union_doc("kind: renamed");
+        let labels = top_level_labels_after(&text, "kind: renamed\n");
+        assert!(labels.iter().any(|l| l == "path"), "created arm key offered: {labels:?}");
+        assert!(labels.iter().any(|l| l == "reason"), "deleted arm key offered: {labels:?}");
+    }
+
+    #[test]
+    fn root_union_key_completion_duplicate_value_keeps_union() {
+        // Both arms tag `kind: created`, so the value is ambiguous → union.
+        let text = concat!(
+            "---\n$schema:\n  - kind: literal(created)\n    path: string\n  ",
+            "- kind: literal(created)\n    reason: string\nkind: created\n\n---\n\nbody\n",
+        );
+        let labels = top_level_labels_after(text, "kind: created\n");
+        assert!(labels.iter().any(|l| l == "path"), "first arm key offered: {labels:?}");
+        assert!(labels.iter().any(|l| l == "reason"), "second arm key offered: {labels:?}");
+    }
+
+    #[test]
+    fn root_union_key_completion_is_type_sensitive() {
+        // A numeric `literal(2)` discriminant. The string `'2'` must not select
+        // the numeric arm (union behavior), while the number `2` narrows.
+        let arms = "  - version: literal(2)\n    path: string\n  \
+                    - version: literal(3)\n    reason: string\n";
+
+        let mismatch = format!("---\n$schema:\n{arms}version: '2'\n\n---\n\nbody\n");
+        let labels = top_level_labels_after(&mismatch, "version: '2'\n");
+        assert!(labels.iter().any(|l| l == "path"), "arm-0 key offered under union: {labels:?}");
+        assert!(labels.iter().any(|l| l == "reason"), "arm-1 key offered under union: {labels:?}");
+
+        let matched = format!("---\n$schema:\n{arms}version: 2\n\n---\n\nbody\n");
+        let labels = top_level_labels_after(&matched, "version: 2\n");
+        assert!(labels.iter().any(|l| l == "path"), "numeric 2 narrows to arm 0: {labels:?}");
+        assert!(!labels.iter().any(|l| l == "reason"), "arm-1 key suppressed: {labels:?}");
+    }
+
+    #[test]
+    fn root_union_key_completion_conflicting_discriminants_keeps_union() {
+        // `kind` selects arm 0, `mode` selects arm 1 — the two discriminants
+        // disagree, so narrowing is abandoned (union behavior).
+        let text = concat!(
+            "---\n$schema:\n  ",
+            "- kind: literal(created)\n    mode: literal(fast)\n    path: string\n  ",
+            "- kind: literal(deleted)\n    mode: literal(slow)\n    reason: string\n",
+            "kind: created\nmode: slow\n\n---\n\nbody\n",
+        );
+        let labels = top_level_labels_after(text, "mode: slow\n");
+        assert!(labels.iter().any(|l| l == "path"), "arm-0 key offered under union: {labels:?}");
+        assert!(labels.iter().any(|l| l == "reason"), "arm-1 key offered under union: {labels:?}");
+    }
+
+    #[test]
+    fn root_union_key_completion_sparse_unknown_discriminant_keeps_union() {
+        // Sparse arms: `kind` tags arms 0/1, `mode` tags arms 2/3. `kind: created`
+        // alone selects arm 0, but `mode: unknown` is a qualifying discriminant
+        // matching no arm. Because arm 0 does not declare `mode`, the pre-fix
+        // selector wrongly narrowed to arm 0 and hid the other arms' keys; the
+        // unknown second discriminant must instead preserve union behavior.
+        let text = concat!(
+            "---\n$schema:\n  ",
+            "- kind: literal(created)\n    one: string\n  ",
+            "- kind: literal(deleted)\n    two: string\n  ",
+            "- mode: literal(fast)\n    three: string\n  ",
+            "- mode: literal(slow)\n    four: string\n",
+            "kind: created\nmode: unknown\n\n---\n\nbody\n",
+        );
+        let labels = top_level_labels_after(text, "mode: unknown\n");
+        assert!(labels.iter().any(|l| l == "one"), "arm-0 key offered under union: {labels:?}");
+        assert!(labels.iter().any(|l| l == "three"), "arm-2 key offered under union: {labels:?}");
     }
 
     #[test]
