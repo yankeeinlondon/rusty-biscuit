@@ -87,6 +87,14 @@ do not belong here.
   parallel structural refactors when the full final history is coherent.
 - Git lock failures are transient contention. Retry the identical commit up to
   five times with a short backoff.
+- Under heavy parallel contention (five or more sub-agents committing
+  concurrently against the same worktree), the per-agent retry budget is
+  sometimes insufficient: `index.lock` can persist longer than five
+  attempts. Expect some groups to fail in the first round and re-dispatch
+  them in a second round once the bulk of contention has cleared. Before
+  re-dispatching, re-verify each failed group's assigned paths are still
+  staged (`git status --short`). Never `rm` the lock file — that races
+  against sibling agents and can corrupt an in-flight index write.
 - Never disable repository signing to avoid or preempt signing failures. If
   signing hangs or fails, stop and report it.
 - Never amend or create follow-up fixup commits after a successful commit in a
