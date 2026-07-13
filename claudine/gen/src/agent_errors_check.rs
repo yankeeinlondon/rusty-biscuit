@@ -29,6 +29,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use biscuit_file::FileReference;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -85,6 +86,15 @@ pub struct ResearchNeedle {
     pub evidence: String,
     #[serde(default)]
     pub source: Option<String>,
+    #[serde(default)]
+    pub empirical: Option<EmpiricalEvidence>,
+}
+
+/// Capture details required when a row uses `evidence: empirical`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct EmpiricalEvidence {
+    pub fixture: String,
+    pub capture_notes: String,
 }
 
 /// One ordered research code bucket (Kimi JSON-RPC codes).
@@ -104,6 +114,8 @@ pub struct ResearchCode {
     pub evidence: String,
     #[serde(default)]
     pub source: Option<String>,
+    #[serde(default)]
+    pub empirical: Option<EmpiricalEvidence>,
 }
 
 /// An unresearchable-area acknowledgement.
@@ -143,10 +155,10 @@ pub enum Check {
     SeedRekind,
     /// A seeded needle/code changed bucket or item position.
     SeedReorder,
-    /// A research needle is not lowercase or carries leading/trailing/interior
-    /// whitespace the substring matcher would never see.
+    /// A research needle violates the lowercase or leading/trailing-whitespace
+    /// input hygiene required by the runtime matcher.
     NeedleHygiene,
-    /// A non-`seed` needle/code lacks the required `source` citation.
+    /// A non-`seed` row lacks its required source or empirical capture data.
     ProvenanceCoherence,
     /// A needle/code claims `evidence: seed` but does not match its immutable
     /// Phase-A seed row.
@@ -212,11 +224,20 @@ pub fn evaluate(
     seed: Option<&ErrorVocabulary>,
     research: &ResearchVocabulary,
 ) -> FindingsReport {
+    evaluate_with_fixture_base(provider, seed, research, None)
+}
+
+fn evaluate_with_fixture_base(
+    provider: &str,
+    seed: Option<&ErrorVocabulary>,
+    research: &ResearchVocabulary,
+    fixture_base: Option<&Path>,
+) -> FindingsReport {
     let mut findings = Vec::new();
 
     check_seed_preservation(seed, research, &mut findings);
     check_needle_hygiene(research, &mut findings);
-    check_provenance(seed, research, &mut findings);
+    check_provenance(seed, research, fixture_base, &mut findings);
     check_motivating_class(research, &mut findings);
 
     FindingsReport {
@@ -309,8 +330,8 @@ fn check_seed_preservation(
     }
 }
 
-/// Needles are matched against ASCII-lowercased input, so a research needle
-/// that is not already lowercase or carries stray whitespace could never fire.
+/// Enforces the normalized authored-input form required by the runtime's
+/// ASCII-lowercased substring matcher.
 fn check_needle_hygiene(research: &ResearchVocabulary, findings: &mut Vec<Finding>) {
     for (branch, buckets) in [
         (Branch::Kind, &research.kind_buckets),
@@ -363,31 +384,26 @@ fn check_needle_hygiene(research: &ResearchVocabulary, findings: &mut Vec<Findin
 fn check_provenance(
     seed: Option<&ErrorVocabulary>,
     research: &ResearchVocabulary,
+    fixture_base: Option<&Path>,
     findings: &mut Vec<Finding>,
 ) {
     let seed_rows = seed.map(seed_rows).unwrap_or_default();
     for row in research_rows_with_provenance(research) {
         let in_seed = seed_rows.iter().any(|seeded| row.row.same_identity(seeded));
-        provenance_for(
-            row.row.branch,
-            &row.row.value.to_string(),
-            row.evidence,
-            row.source,
-            in_seed,
-            findings,
-        );
+        provenance_for(&row, in_seed, fixture_base, findings);
     }
 }
 
 /// The per-needle/per-code provenance rule, shared across branches.
 fn provenance_for(
-    branch: Branch,
-    label: &str,
-    evidence: &str,
-    source: Option<&str>,
+    row: &ProvenanceRow<'_>,
     in_seed: bool,
+    fixture_base: Option<&Path>,
     findings: &mut Vec<Finding>,
 ) {
+    let branch = row.row.branch;
+    let label = row.row.value.to_string();
+    let evidence = row.evidence;
     if evidence == "seed" {
         if !in_seed {
             findings.push(Finding {
@@ -406,7 +422,7 @@ fn provenance_for(
     // Every non-seed evidence class (documented/source_code/issue_tracker/
     // empirical) requires a stable `source` citation — the sidecar cannot
     // express that conditional, so it is enforced here.
-    if source.map(str::trim).unwrap_or("").is_empty() {
+    if row.source.map(str::trim).unwrap_or("").is_empty() {
         findings.push(Finding {
             check: Check::ProvenanceCoherence,
             branch: Some(branch),
@@ -416,6 +432,110 @@ fn provenance_for(
             ),
         });
     }
+    if evidence == "empirical" {
+        check_empirical_provenance(
+            branch,
+            &label,
+            row.empirical,
+            fixture_base,
+            findings,
+        );
+    }
+}
+
+fn check_empirical_provenance(
+    branch: Branch,
+    label: &str,
+    empirical: Option<&EmpiricalEvidence>,
+    fixture_base: Option<&Path>,
+    findings: &mut Vec<Finding>,
+) {
+    let Some(empirical) = empirical else {
+        findings.push(Finding {
+            check: Check::ProvenanceCoherence,
+            branch: Some(branch),
+            detail: format!(
+                "{}: empirical `{label}` has no `empirical.fixture` and \
+                 `empirical.capture_notes`",
+                branch.wire()
+            ),
+        });
+        return;
+    };
+
+    if empirical.capture_notes.trim().is_empty() {
+        findings.push(Finding {
+            check: Check::ProvenanceCoherence,
+            branch: Some(branch),
+            detail: format!(
+                "{}: empirical `{label}` has empty `empirical.capture_notes`",
+                branch.wire()
+            ),
+        });
+    }
+
+    let fixture = empirical.fixture.as_str();
+    if !is_scoped_fixture_reference(fixture) {
+        findings.push(Finding {
+            check: Check::ProvenanceCoherence,
+            branch: Some(branch),
+            detail: format!(
+                "{}: empirical `{label}` fixture `{fixture}` must be a portable, traversal-free \
+                 `./_fixtures/...` file reference",
+                branch.wire()
+            ),
+        });
+        return;
+    }
+
+    let Some(fixture_base) = fixture_base else {
+        return;
+    };
+    let resolved = FileReference::new(fixture)
+        .and_then(|reference| reference.resolve_from(fixture_base));
+    match resolved {
+        Ok(Some(_)) => {}
+        Ok(None) => findings.push(Finding {
+            check: Check::ProvenanceCoherence,
+            branch: Some(branch),
+            detail: format!(
+                "{}: empirical `{label}` fixture `{fixture}` does not resolve to an existing file",
+                branch.wire()
+            ),
+        }),
+        Err(error) => findings.push(Finding {
+            check: Check::ProvenanceCoherence,
+            branch: Some(branch),
+            detail: format!(
+                "{}: empirical `{label}` fixture `{fixture}` is invalid: {error}",
+                branch.wire()
+            ),
+        }),
+    }
+}
+
+fn is_scoped_fixture_reference(fixture: &str) -> bool {
+    if fixture != fixture.trim()
+        || !fixture.starts_with("./_fixtures/")
+        || fixture.contains('\\')
+    {
+        return false;
+    }
+    let relative = &fixture["./_fixtures/".len()..];
+    !relative.is_empty()
+        && relative.split('/').all(|component| {
+            !component.is_empty()
+                && component != "."
+                && component != ".."
+                && !component.contains("{{")
+                && !component.contains("}}")
+                && !component.chars().any(|character| {
+                    character.is_control()
+                        || matches!(character, '<' | '>' | ':' | '"' | '|' | '?' | '*')
+                })
+                && !component.ends_with(' ')
+                && !component.ends_with('.')
+        })
 }
 
 /// The motivating incident (Codex "Selected model is at capacity") must be
@@ -429,6 +549,7 @@ fn check_motivating_class(research: &ResearchVocabulary, findings: &mut Vec<Find
     }
     for bucket in &research.code_buckets {
         for code in &bucket.codes {
+            haystacks.push(code.code.to_string());
             if let Some(name) = &code.name {
                 haystacks.push(name.to_ascii_lowercase());
             }
@@ -496,6 +617,7 @@ struct ProvenanceRow<'a> {
     row: SeedRow,
     evidence: &'a str,
     source: Option<&'a str>,
+    empirical: Option<&'a EmpiricalEvidence>,
 }
 
 fn keyword_rows(
@@ -555,6 +677,7 @@ fn research_rows_with_provenance(research: &ResearchVocabulary) -> Vec<Provenanc
                     },
                     evidence: &needle.evidence,
                     source: needle.source.as_deref(),
+                    empirical: needle.empirical.as_ref(),
                 });
             }
         }
@@ -571,6 +694,7 @@ fn research_rows_with_provenance(research: &ResearchVocabulary) -> Vec<Provenanc
                 },
                 evidence: &code.evidence,
                 source: code.source.as_deref(),
+                empirical: code.empirical.as_ref(),
             });
         }
     }
@@ -636,8 +760,11 @@ pub fn check_provider(
     slug: &str,
     findings_path: &Path,
 ) -> Result<FindingsReport, GenError> {
+    let fixture_base = area.join(format!("docs/research/{TOPIC}"));
     let report = match read_seed(area, slug).and_then(|seed| {
-        read_research(area, slug).map(|research| evaluate(slug, seed.as_ref(), &research))
+        read_research(area, slug).map(|research| {
+            evaluate_with_fixture_base(slug, seed.as_ref(), &research, Some(&fixture_base))
+        })
     }) {
         Ok(report) => report,
         Err(error) => FindingsReport::gate_error(slug, error.to_string()),
@@ -733,6 +860,7 @@ mod tests {
             text: text.into(),
             evidence: evidence.into(),
             source: source.map(str::to_string),
+            empirical: None,
         }
     }
 
@@ -770,6 +898,7 @@ mod tests {
                         name: Some("AUTH_EXPIRED".into()),
                         evidence: "seed".into(),
                         source: None,
+                        empirical: None,
                     }],
                 },
                 ResearchCodeBucket {
@@ -779,6 +908,7 @@ mod tests {
                         name: Some("REMOTE_ERROR".into()),
                         evidence: "seed".into(),
                         source: None,
+                        empirical: None,
                     }],
                 },
             ],
@@ -991,3 +1121,6 @@ mod tests {
         assert!(!clean_text.contains("status: findings"));
     }
 }
+
+#[cfg(test)]
+mod review6_tests;

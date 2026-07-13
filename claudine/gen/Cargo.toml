@@ -19,6 +19,7 @@ path = "src/main.rs"
 [dependencies]
 # Internal
 claudine-catalog-types = { path = "../catalog-types" }
+biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["file-reference"] }
 darkmatter = { path = "../../darkmatter/lib" }
 
 # Serialization
