@@ -1,9 +1,10 @@
 # Rendezvous Data Model — CRDT Documents and the Analytics Projection
 
-> **Status: DRAFT** — this document establishes the shared data-model vocabulary for the
-> rendezvous feature specs (logging-refactor, host-capability-broadcast, process-monitor,
-> rendezvous-dashboard). Specs should reference this document rather than re-deriving
-> storage patterns per feature.
+> **Status: RATIFIED (2026-07-12)** — this document is the authoritative shared
+> data-model vocabulary for the rendezvous feature specs (logging-refactor,
+> host-capability-broadcast, process-monitor, rendezvous-dashboard). Specs reference
+> this document rather than re-deriving storage patterns per feature. The riskiest
+> assumptions were validated by the register-compaction spike before ratification.
 
 ## The Two Stores
 

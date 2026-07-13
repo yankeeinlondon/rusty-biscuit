@@ -28,9 +28,10 @@ Storage follows the shared [rendezvous data-model doc](../../rendezvous/docs/crd
 
 This mirrors how presence works (live boolean is ephemeral, transitions are facts) and keeps the registers within their write-cadence budget: a poll that observes *no change* writes *nothing*.
 
-## Open Decisions
+## Decisions (RATIFIED 2026-07-12)
 
-Recommendations are PROPOSED, not ratified.
+All decisions below were ratified as recommended; the option discussion is kept for
+context.
 
 - **D1 — Where the monitor runs.** In-process inside the daemon (a tokio task) vs a separate spawned client like `agent-tail`. *Recommendation:* in-process. Unlike log tailing (per-source parsers, likely to churn), process scanning is one small loop; a separate process buys isolation we don't need and costs supervision we do.
 - **D2 — Poll interval.** Fast enough that the dashboard's "now" view feels live, slow enough to be invisible in Activity Monitor. *Recommendation:* 5s for the process scan with change-driven emission; make it configurable and consider slowing when no agent processes exist at all.

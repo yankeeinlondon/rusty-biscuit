@@ -61,7 +61,7 @@ Storage follows the shared [rendezvous data-model doc](../../rendezvous/docs/crd
 
 All of the capabilities have a relatively low genuine update cadence, so while any given daemon is only "eventually consistent" with its peers' capabilities, in practice their view will be in sync nearly all of the time.
 
-### Resolved (PROPOSED via the data-model doc, pending ratification)
+### Resolved (RATIFIED 2026-07-12 via the data-model doc)
 
 The three questions from the original draft are answered by the data-model taxonomy:
 
@@ -69,9 +69,11 @@ The three questions from the original draft are answered by the data-model taxon
 2. **Capabilities are projected to DuckDB, not moved.** redb keeps the living register (authoritative); DuckDB (our embedded analytics database) mirrors it as the `hosts` dimension table, rebuilt from redb at any time. If capabilities-over-time reporting is wanted, each register write also emits a `capability_changes` fact.
 3. **24-hour uptime is easy — from facts, not from this document.** A register only knows its latest value, so the metric comes from a windowed SQL aggregation over the `presence_events` fact table (sum of online intervals intersected with the window). General rule: metrics are *event-shaped facts in, window queries out* — never stored in CRDT state.
 
-## Open Decisions
+## Decisions (RATIFIED 2026-07-12)
 
-Recommendations are PROPOSED, not ratified.
+All decisions below were ratified as recommended (D6's trust posture is a noted
+assumption to revisit if the mesh ever spans trust boundaries); the option discussion
+is kept for context.
 
 - **D1 — Where `repos` lives.** Its cadence (every commit, every repo) violates the register budget if kept alongside the cold hardware fields — every commit would grow the shared document's history. Options: (a) split into its own `repos/{node_id}` register so the churn is isolated; (b) drop the commit hash and sync only the repo list (colder, but the scheduler loses freshness information); (c) model repo-head-moved as facts. *Recommendation:* (a) — the scheduler genuinely wants the commit hash (how far behind is this checkout?), and isolating the churn keeps the capability document permanently cold. Pair with the compaction spike (S1).
 - **D2 — Volatile numbers need quantization.** `available_storage` changes constantly; write-on-change alone won't protect the register. *Recommendation:* quantize to coarse buckets (e.g. whole GB, or 5% steps) with hysteresis, so only *meaningful* movement writes. The scheduler needs "is there room", not byte precision. Same treatment for any future volatile field (load average, battery).
