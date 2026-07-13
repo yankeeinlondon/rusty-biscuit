@@ -121,6 +121,7 @@ impl Rendezvous for RendezvousService {
             daemon_version: DAEMON_VERSION.to_string(),
             uptime_seconds,
             started_at_unix_ms: self.started_at_unix_ms,
+            node_id: self.identity.node_id(),
         }))
     }
 
@@ -373,6 +374,7 @@ impl Rendezvous for RendezvousService {
             .sync_initiator(&connection, &node_id)
             .await
             .map_err(map_sync_error)?;
+        peers.record_sync_success(&node_id);
         let chunks = outcome
             .chunks
             .iter()
@@ -568,7 +570,7 @@ fn apply_session_event(
             registers.remove_local_fields(&doc, &[session_id])?;
         }
         Kind::Started | Kind::Updated => {
-            let mut entry = registers
+            let existing = registers
                 .deep_value(&doc)?
                 .and_then(|v| {
                     v.get(session_id)
@@ -578,25 +580,36 @@ fn apply_session_event(
                 .and_then(|v| match v {
                     serde_json::Value::Object(map) => Some(map),
                     _ => None,
-                })
-                .unwrap_or_default();
-            for (k, v) in details {
-                entry.insert(k, v);
-            }
-            // The daemon owns the clocks: producers cannot be trusted
-            // to agree on wall time, and consumers judge staleness
-            // from updated_at.
-            if kind == Kind::Started || !entry.contains_key("started_at_unix_ms") {
-                entry.insert("started_at_unix_ms".into(), serde_json::json!(now));
-            }
-            entry.insert("updated_at_unix_ms".into(), serde_json::json!(now));
+                });
 
-            let mut fields = serde_json::Map::new();
-            fields.insert(
-                session_id.to_string(),
-                serde_json::Value::String(serde_json::Value::Object(entry).to_string()),
-            );
-            registers.upsert_local_fields(&doc, &fields)?;
+            // UPDATED merges over an EXISTING live session and never
+            // creates one: only STARTED brings a session into being.
+            // This keeps a late, fire-and-forget status UPDATE (the
+            // dashboard trigger-1 producer) from racing a completed
+            // ENDED and resurrecting a phantom entry — the register
+            // holds live sessions only.
+            if kind == Kind::Updated && existing.is_none() {
+                // Nothing to update; leave the register untouched.
+            } else {
+                let mut entry = existing.unwrap_or_default();
+                for (k, v) in details {
+                    entry.insert(k, v);
+                }
+                // The daemon owns the clocks: producers cannot be
+                // trusted to agree on wall time, and consumers judge
+                // staleness from updated_at.
+                if kind == Kind::Started || !entry.contains_key("started_at_unix_ms") {
+                    entry.insert("started_at_unix_ms".into(), serde_json::json!(now));
+                }
+                entry.insert("updated_at_unix_ms".into(), serde_json::json!(now));
+
+                let mut fields = serde_json::Map::new();
+                fields.insert(
+                    session_id.to_string(),
+                    serde_json::Value::String(serde_json::Value::Object(entry).to_string()),
+                );
+                registers.upsert_local_fields(&doc, &fields)?;
+            }
         }
         Kind::Unspecified => unreachable!("rejected at the RPC boundary"),
     }
@@ -761,6 +774,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn status_reports_the_local_node_id() {
+        let h = harness();
+        let body = h
+            .service
+            .status(Request::new(StatusRequest {}))
+            .await
+            .expect("status ok")
+            .into_inner();
+        // The dashboard uses this to tell its own registers (always
+        // fresh) apart from synced peer replicas.
+        assert_eq!(body.node_id, h.service.identity.node_id());
+        assert!(!body.node_id.is_empty());
+    }
+
+    #[tokio::test]
     async fn append_then_list_chunk_entries() {
         let h = harness();
         let node_id = h.service.identity.node_id();
@@ -856,6 +884,41 @@ mod tests {
             .expect("end unknown")
             .into_inner();
         assert_eq!(response.active_count, 0);
+    }
+
+    #[tokio::test]
+    async fn updated_on_missing_session_does_not_resurrect_it() {
+        let h = harness();
+
+        // An UPDATE for a session that was never STARTED (or already
+        // ENDED) must not create an entry — otherwise a late,
+        // fire-and-forget status report could race a completed ENDED
+        // and leave a phantom live session in the register.
+        let response = h
+            .service
+            .report_session_event(Request::new(rendezvous_core::ReportSessionEventRequest {
+                session_id: "ghost".into(),
+                kind: rendezvous_core::SessionEventKind::Updated as i32,
+                details_json: r#"{"status":"waiting_on_user"}"#.into(),
+            }))
+            .await
+            .expect("update missing")
+            .into_inner();
+        assert_eq!(response.active_count, 0, "UPDATE must not create a session");
+
+        let hosts = h
+            .service
+            .list_active_sessions(Request::new(rendezvous_core::ListActiveSessionsRequest {}))
+            .await
+            .expect("list")
+            .into_inner()
+            .hosts;
+        let empty = hosts.is_empty()
+            || serde_json::from_str::<serde_json::Value>(&hosts[0].sessions_json)
+                .expect("sessions json")
+                .as_object()
+                .is_some_and(serde_json::Map::is_empty);
+        assert!(empty, "register must hold no sessions: {hosts:?}");
     }
 
     #[tokio::test]
