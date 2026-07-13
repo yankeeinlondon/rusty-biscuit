@@ -313,6 +313,194 @@ pub fn format_function_block(descriptor: &ExpressionFunctionDescriptor) -> Strin
     )
 }
 
+/// The kind of an [`ExprCompletion`] candidate, so a caller can map it onto its
+/// own LSP `CompletionItemKind` without this module depending on `lsp-types`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExprCompletionKind {
+    /// A same-document top-level frontmatter key.
+    FrontmatterKey,
+    /// A fully qualified `ctx.<name>` context variable.
+    ContextVariable,
+    /// An expression function.
+    Function,
+}
+
+/// One completion candidate for an expression context — either a body `{{ }}`
+/// interpolation or an Expression-typed frontmatter value. Presentation-neutral:
+/// every field is derived from the one catalog descriptor (or a frontmatter
+/// key), and LSP lowering happens in the provider.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExprCompletion {
+    /// The completion label — the untyped `signature` for functions.
+    pub label: String,
+    /// The eagerly inserted text — the bare name for functions (no snippet, no
+    /// synthesized parentheses), the fully qualified `ctx.<name>` for context
+    /// variables, the key for frontmatter keys.
+    pub insert_text: String,
+    /// The candidate kind.
+    pub kind: ExprCompletionKind,
+    /// The rendered `display_type` (`ctx.*`) or `typed_signature()` (functions).
+    pub detail: Option<String>,
+    /// The catalog description, ready to lower to eager Markdown documentation.
+    pub documentation: Option<String>,
+}
+
+/// Catalog + frontmatter-key completion candidates matching `partial`
+/// (prefix-based, case-sensitive): same-document top-level frontmatter keys,
+/// fully qualified `ctx.*` variables, and expression functions.
+///
+/// The single authority for expression completion so the body-interpolation and
+/// Expression-typed-frontmatter surfaces can never drift.
+pub fn completion_candidates(partial: &str, frontmatter_keys: &[String]) -> Vec<ExprCompletion> {
+    let mut items = Vec::new();
+
+    for key in frontmatter_keys {
+        if key.starts_with(partial) {
+            items.push(ExprCompletion {
+                label: key.clone(),
+                insert_text: key.clone(),
+                kind: ExprCompletionKind::FrontmatterKey,
+                detail: Some("frontmatter key".to_string()),
+                documentation: None,
+            });
+        }
+    }
+
+    for descriptor in context_descriptors() {
+        let label = format!("ctx.{}", descriptor.name);
+        if label.starts_with(partial) {
+            items.push(ExprCompletion {
+                insert_text: label.clone(),
+                label,
+                kind: ExprCompletionKind::ContextVariable,
+                detail: Some(descriptor.display_type.to_string()),
+                documentation: Some(descriptor.description.to_string()),
+            });
+        }
+    }
+
+    for descriptor in function_descriptors() {
+        let signature = descriptor.signature;
+        let name = function_name(signature);
+        if name.starts_with(partial) {
+            items.push(ExprCompletion {
+                label: signature.to_string(),
+                insert_text: name.to_string(),
+                kind: ExprCompletionKind::Function,
+                detail: Some(descriptor.typed_signature()),
+                documentation: Some(descriptor.description.to_string()),
+            });
+        }
+    }
+
+    items
+}
+
+/// The Markdown body of an expression hover. Pure so the D2/D5 classification is
+/// unit-testable; `expr_offset` is the cursor's byte offset into `expression`.
+///
+/// The single authority for expression hover markdown so a body `{{ }}`
+/// interpolation and an Expression-typed frontmatter value render byte-identical
+/// hovers. The D2 classification rule: only an explicitly `ctx.`-qualified root
+/// receives context-variable metadata — a bare identifier is a frontmatter
+/// variable even when its name matches a known `ctx.*` tail, and an unknown
+/// `ctx.<name>` keeps the generic hover without borrowing a similarly named bare
+/// key's value. A bare identifier with no static frontmatter value falls back to
+/// `schema_property` — the effective schema's type/constraints/description for a
+/// declared-but-unset property — before the generic function-name description.
+/// Nothing here evaluates the expression or reads `ctx.*`.
+pub fn hover_markdown(
+    expression: &str,
+    expr_offset: usize,
+    frontmatter_scalar: impl Fn(&str) -> Option<String>,
+    schema_property: impl Fn(&str) -> Option<String>,
+) -> String {
+    let parsed = parse(expression);
+    let mut value = match &parsed {
+        Ok(expr) => format!("**Expression**\n\n`{}`", expr.erase()),
+        Err(_) => format!("**Expression** (unparsed)\n\n`{expression}`"),
+    };
+    let Ok(expr) = parsed else {
+        return value;
+    };
+
+    // D5: a cursor on a known function-name identifier wins.
+    if let Some(name) = function_call_at(&expr, expression, expr_offset)
+        && let Some(descriptor) = function_descriptor(name)
+    {
+        value.push_str(&format!("\n\n{}", format_function_block(descriptor)));
+        return value;
+    }
+
+    // Resolve the identifier against the sub-expression under the cursor (e.g.
+    // a `ctx.packages` argument inside a call) rather than the top-level
+    // expression, so an argument's ctx/frontmatter hover is not shadowed by
+    // the enclosing call.
+    let Some(sub_expr) = expression_at(&expr, expr_offset) else {
+        return value;
+    };
+    let Some(name) = root_identifier(sub_expr) else {
+        return value;
+    };
+    if let Some(tail) = name.strip_prefix("ctx.") {
+        if let Some(descriptor) = ctx_descriptor(tail) {
+            value.push_str(&format!(
+                "\n\n{}\n\nThe `ctx` variable is evaluated at _compose_ time (rather than now).",
+                format_ctx_hover_block(descriptor)
+            ));
+        }
+    } else if let Some(scalar) = frontmatter_scalar(&name) {
+        value.push_str(&format!("\n\nStatic value: `{scalar}` (from frontmatter `{name}`)"));
+    } else if let Some(block) = schema_property(&name) {
+        value.push_str(&format!("\n\n{block}"));
+    } else if let Some(descriptor) = function_descriptor(&name) {
+        value.push_str(&format!("\n\nFunction: {}", descriptor.description));
+    }
+    value
+}
+
+/// Whether a bare identifier `name` names nothing DMLS can resolve — no
+/// frontmatter key, schema property, `ctx.*`/`env.*`/`doc.*` namespace, or
+/// expression function. The single authority for the unknown-root check so the
+/// body-interpolation and frontmatter-expression diagnostics agree.
+///
+/// Namespaced roots (`ctx.*`, `env.*`, `doc.*`) and any dotted path are always
+/// treated as known here; the caller supplies frontmatter-key and
+/// schema-property membership.
+pub fn is_unknown_root(
+    name: &str,
+    is_frontmatter_key: impl Fn(&str) -> bool,
+    is_schema_property: impl Fn(&str) -> bool,
+) -> bool {
+    if matches!(name, "ctx" | "env" | "doc") || name.contains('.') {
+        return false;
+    }
+    if function_description(name).is_some() {
+        return false;
+    }
+    if is_frontmatter_key(name) {
+        return false;
+    }
+    !is_schema_property(name)
+}
+
+/// The expression completion partial being typed inside an Expression-typed
+/// frontmatter value, and the document offset where it begins.
+///
+/// `value_text` is the authored text of the value from its start to the cursor;
+/// `value_start` is that value start's document offset. The token is the
+/// trailing run of identifier/`.` characters (so `ctx.to`, `as_csv(ctx.pa`'s
+/// `ctx.pa`, and a bare `len` all resolve). Always `Some` — an empty partial
+/// offers the full catalog — so the caller decides whether the value is
+/// Expression-typed before calling.
+pub fn value_completion_partial(value_text: &str, value_start: usize) -> (usize, &str) {
+    let token_rel = value_text
+        .rfind(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))
+        .map(|index| index + 1)
+        .unwrap_or(0);
+    (value_start + token_rel, &value_text[token_rel..])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

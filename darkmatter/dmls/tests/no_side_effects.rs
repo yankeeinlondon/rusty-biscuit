@@ -128,11 +128,14 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
     let sentinel = workspace.path().join("SENTINEL_SHOULD_NOT_EXIST");
     let sentinel_display = sentinel.to_string_lossy().replace('\\', "/");
 
-    // Frontmatter `$()` + body `::shell` (dangerous + sentinel), a remote `::url`,
-    // and a remote image link — every construct that could touch a process or a
-    // socket if the analyzer were not passive.
+    // Frontmatter `$()` + an inline `$schema` Expression-typed value + body
+    // `::shell` (dangerous + sentinel), a remote `::url`, and a remote image
+    // link — every construct that could touch a process or a socket if the
+    // analyzer were not passive. The Expression value exercises the Phase-5
+    // frontmatter expression completion/hover/diagnostics path, which parses but
+    // never evaluates.
     let text = format!(
-        "---\ntitle: Passive\ncommand: $(echo pwned)\n---\n\n\
+        "---\ntitle: Passive\ncommand: $(echo pwned)\n$schema:\n  when: expression\nwhen: length(title)\n---\n\n\
          # Heading\n\n\
          ::shell rm -rf /tmp/dmls-should-not-run\n\n\
          ::shell touch {sentinel_display}\n\n\
@@ -166,9 +169,11 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
         .any(|diagnostic| diagnostic["code"] == json!("dm.security.disallowed_command"));
     assert!(has_security, "the dangerous ::shell must be diagnosed: {diagnostics:?}");
 
-    // Drive every read-side request across the shell/remote spans. Each must
-    // return promptly (no network hang) and never execute anything.
-    let positions = [(6u32, 8u32), (8, 8), (10, 8), (12, 8), (14, 8), (2, 12)];
+    // Drive every read-side request across the shell/remote spans and the
+    // Expression-typed frontmatter value. Each must return promptly (no network
+    // hang) and never execute anything. Body positions are shifted by the three
+    // added frontmatter lines; `(5, 8)` lands inside `when: length(title)`.
+    let positions = [(10u32, 8u32), (12, 8), (14, 8), (16, 8), (18, 8), (2, 12), (5, 8)];
     for (line, character) in positions {
         for method in [
             "textDocument/hover",

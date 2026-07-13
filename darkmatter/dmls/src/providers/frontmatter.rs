@@ -13,14 +13,16 @@
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::schemas::{
-    Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
-    darkmatter_base_schema, suggestions_for_path,
+    Constraint, DecodedScalar, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema,
+    SimplifiedType, TypeExpr, darkmatter_base_schema, decode_scalar,
+    select_literal_discriminant_arm, suggestions_for_path,
 };
+use serde_json::Value;
 use darkmatter::markdown::span::SourceSpan;
 use lsp_types::{
     CompletionItem, CompletionItemKind, CompletionTextEdit, Diagnostic, DocumentLink,
-    DocumentSymbol, FoldingRange, Hover, HoverContents, Location, MarkupContent, MarkupKind, Range,
-    SymbolKind, TextEdit,
+    Documentation, DocumentSymbol, FoldingRange, Hover, HoverContents, Location, MarkupContent,
+    MarkupKind, Range, SymbolKind, TextEdit,
 };
 
 use super::DocumentContext;
@@ -92,7 +94,7 @@ fn nested_key_completions(
     let ancestors = enclosing_path(ctx.text, line_start, indent);
     let ancestor_refs: Vec<&str> = ancestors.iter().map(String::as_str).collect();
     let shape = known_shape(ctx);
-    if let Some(nested) = nested_shape(&shape, &ancestor_refs) {
+    if let Some(nested) = nested_shape_for_completion(ctx, &shape, &ancestor_refs) {
         let present = present_child_keys(ast, &ancestors);
         return shape_key_completions(ctx, offset, nested, &present, partial);
     }
@@ -173,32 +175,78 @@ fn value_completions(
     }
 
     let shape = known_shape(ctx);
-    let Some(atom) = def_at_path(&shape, &path).and_then(completable_atom) else {
+    let Some(def) = def_at_path(&shape, &path) else {
         return Vec::new();
     };
 
-    if let Some(members) = enum_members(atom) {
-        return members
-            .iter()
-            .filter(|member| member.starts_with(partial))
-            .filter_map(|member| {
-                item(ctx, start, offset, member, member, CompletionItemKind::ENUM_MEMBER, None)
-            })
-            .collect();
+    // Expression-typed value: `ctx.*`, expression functions, and same-document
+    // frontmatter keys, scoped to the value text and the `.`/`(` triggers. This
+    // reuses the exact catalog completion the body-interpolation surface uses.
+    if expression_atom(def).is_some() {
+        return expression_value_completions(ctx, offset, partial, start);
     }
-    if is_boolish(atom) {
-        return ["true", "false"]
-            .into_iter()
-            .filter(|value| value.starts_with(partial))
-            .filter_map(|value| {
-                item(ctx, start, offset, value, value, CompletionItemKind::VALUE, None)
-            })
-            .collect();
+
+    let mut items = Vec::new();
+
+    // Literal values: offer exactly each authored `literal(x)` value, preselected,
+    // with YAML insertion text matching the value's scalar type. In a property
+    // union these combine with the non-literal scaffolds below (a
+    // `[literal(auto), number]` offers `auto`; a `[literal(a), literal(b)]`
+    // offers both).
+    for atom in atoms_of(def) {
+        if let Some(value) = atom.literal_value() {
+            let insert = yaml_scalar_literal(value);
+            if insert.starts_with(partial)
+                && let Some(completion) = literal_value_item(ctx, start, offset, &insert)
+            {
+                items.push(completion);
+            }
+        }
     }
-    if is_file(atom) {
-        return file_path_completions(ctx, offset, partial);
+
+    // Non-literal value scaffolds from the first completable arm (enum members,
+    // boolish, or file paths), combined with any literals above.
+    if let Some(atom) = completable_atom(def) {
+        if let Some(members) = enum_members(atom) {
+            items.extend(
+                members
+                    .iter()
+                    .filter(|member| member.starts_with(partial))
+                    .filter_map(|member| {
+                        item(ctx, start, offset, member, member, CompletionItemKind::ENUM_MEMBER, None)
+                    }),
+            );
+        } else if is_boolish(atom) {
+            items.extend(["true", "false"].into_iter().filter(|value| value.starts_with(partial)).filter_map(
+                |value| item(ctx, start, offset, value, value, CompletionItemKind::VALUE, None),
+            ));
+        } else if is_file(atom) {
+            items.extend(file_path_completions(ctx, offset, partial));
+        }
     }
-    Vec::new()
+
+    items
+}
+
+/// A preselected completion item offering exactly one authored `literal(x)`
+/// value, with an eager text edit inserting valid YAML for its scalar type.
+fn literal_value_item(
+    ctx: &DocumentContext,
+    start: usize,
+    offset: usize,
+    insert_text: &str,
+) -> Option<CompletionItem> {
+    let range = ctx.source_map.byte_range_to_lsp(start..offset)?;
+    Some(CompletionItem {
+        label: insert_text.to_string(),
+        kind: Some(CompletionItemKind::VALUE),
+        preselect: Some(true),
+        text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+            range,
+            new_text: insert_text.to_string(),
+        })),
+        ..Default::default()
+    })
 }
 
 /// Workspace document paths (relative to the current document) for a
@@ -224,6 +272,182 @@ fn file_path_completions(ctx: &DocumentContext, offset: usize, partial: &str) ->
         }
     }
     out
+}
+
+// ── Expression-typed values ─────────────────────────────────────────────────
+
+/// Completion inside an Expression-typed frontmatter value: the shared
+/// `ctx.*` / function / frontmatter-key catalog, scoped to the trailing
+/// identifier token of the value text (so a `.` after `ctx` or a `(` after a
+/// function name re-triggers cleanly). `value_partial` is the value text after
+/// `key:` up to the cursor and `value_start` its document offset.
+fn expression_value_completions(
+    ctx: &DocumentContext,
+    offset: usize,
+    value_partial: &str,
+    value_start: usize,
+) -> Vec<CompletionItem> {
+    let (token_start, token) = expressions::value_completion_partial(value_partial, value_start);
+    let frontmatter_keys: Vec<String> = ctx
+        .overlay
+        .and_then(|overlay| overlay.ast.as_ref())
+        .map(|ast| ast.top_level().map(|entry| entry.key.clone()).collect())
+        .unwrap_or_default();
+    expressions::completion_candidates(token, &frontmatter_keys)
+        .into_iter()
+        .filter_map(|candidate| expr_completion_item(ctx, token_start, offset, candidate))
+        .collect()
+}
+
+/// Lowers a neutral [`expressions::ExprCompletion`] to an LSP item with an eager
+/// text edit over `start..offset` and eager Markdown documentation.
+fn expr_completion_item(
+    ctx: &DocumentContext,
+    start: usize,
+    offset: usize,
+    candidate: expressions::ExprCompletion,
+) -> Option<CompletionItem> {
+    let range = ctx.source_map.byte_range_to_lsp(start..offset)?;
+    let kind = match candidate.kind {
+        expressions::ExprCompletionKind::FrontmatterKey => CompletionItemKind::FIELD,
+        expressions::ExprCompletionKind::ContextVariable => CompletionItemKind::VARIABLE,
+        expressions::ExprCompletionKind::Function => CompletionItemKind::FUNCTION,
+    };
+    Some(CompletionItem {
+        label: candidate.label,
+        kind: Some(kind),
+        detail: candidate.detail,
+        documentation: candidate.documentation.map(|value| {
+            Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            })
+        }),
+        text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+            range,
+            new_text: candidate.insert_text,
+        })),
+        ..Default::default()
+    })
+}
+
+/// An Expression-typed scalar frontmatter value: the authored entry plus the
+/// decoded expression text with a projection from decoded byte offsets back to
+/// authored document bytes (YAML quotes excluded).
+pub(crate) struct ExpressionValue<'a> {
+    /// The authored entry — `value_span` is the whole authored value range.
+    pub(crate) entry: &'a FmEntry,
+    /// The decoded expression + byte map, relative to `value_span.start`.
+    decoded: DecodedScalar,
+}
+
+impl ExpressionValue<'_> {
+    /// The decoded expression text the compose parser sees.
+    pub(crate) fn expression(&self) -> &str {
+        self.decoded.decoded()
+    }
+
+    /// Projects a decoded byte range to a document span, YAML quotes excluded.
+    pub(crate) fn project(&self, range: std::ops::Range<usize>) -> Option<SourceSpan> {
+        let base = self.entry.value_span.start;
+        self.decoded.project(range).map(|r| base + r.start..base + r.end)
+    }
+
+    /// The whole decoded-expression authored span (quotes excluded), falling
+    /// back to the whole value node when projection is impossible.
+    pub(crate) fn expression_span(&self) -> SourceSpan {
+        self.project(0..self.decoded.decoded().len())
+            .unwrap_or_else(|| self.entry.value_span.clone())
+    }
+
+    /// The decoded byte offset for a document cursor inside the value.
+    fn decoded_offset(&self, doc_offset: usize) -> usize {
+        self.decoded
+            .decoded_offset(doc_offset.saturating_sub(self.entry.value_span.start))
+    }
+}
+
+/// Whether an atom is an `expression`-typed scalar.
+fn is_expression(atom: &PropertyAtom) -> bool {
+    matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::Expression))
+}
+
+/// The first `expression`-typed arm of a property, if any — so a union whose
+/// expression arm is not first is still recognized.
+fn expression_atom(def: &PropertyDef) -> Option<&PropertyAtom> {
+    atoms_of(def).iter().find(|atom| is_expression(atom))
+}
+
+/// Every Expression-typed **scalar** frontmatter value, in document order. A
+/// mapping/sequence value on an expression property is intentionally excluded —
+/// it stays a schema type mismatch, not an expression.
+pub(crate) fn expression_values<'a>(
+    ctx: &DocumentContext,
+    ast: &'a FrontmatterAst,
+) -> Vec<ExpressionValue<'a>> {
+    let shape = known_shape(ctx);
+    let mut out = Vec::new();
+    for entry in ast.entries() {
+        if entry.kind != FmValueKind::Scalar {
+            continue;
+        }
+        let path: Vec<&str> = entry.dotted.split('.').collect();
+        if def_at_path(&shape, &path).and_then(expression_atom).is_none() {
+            continue;
+        }
+        let Some(raw) = ctx.text.get(entry.value_span.clone()) else {
+            continue;
+        };
+        let Some(decoded) = decode_scalar(raw) else {
+            continue;
+        };
+        out.push(ExpressionValue { entry, decoded });
+    }
+    out
+}
+
+/// The Expression-typed scalar value whose authored value span contains
+/// `offset`.
+fn expression_value_at<'a>(
+    ctx: &DocumentContext,
+    ast: &'a FrontmatterAst,
+    offset: usize,
+) -> Option<ExpressionValue<'a>> {
+    expression_values(ctx, ast)
+        .into_iter()
+        .find(|value| value.entry.value_span.contains(&offset))
+}
+
+/// Hover on an Expression-typed frontmatter value — byte-identical to the body
+/// interpolation hover via the shared [`expressions::hover_markdown`]. Fires
+/// only when the cursor is inside the value (a cursor on the key falls through
+/// to the schema hover, which describes the `expression` type itself).
+fn expression_hover(ctx: &DocumentContext, ast: &FrontmatterAst, offset: usize) -> Option<Hover> {
+    let value = expression_value_at(ctx, ast, offset)?;
+    let expr_offset = value.decoded_offset(offset);
+    let markdown = expressions::hover_markdown(
+        value.expression(),
+        expr_offset,
+        |name| frontmatter_scalar(ctx, name),
+        |name| schema_property_details(ctx, name),
+    );
+    markup_hover(ctx, value.expression_span(), markdown)
+}
+
+/// The static scalar value of a top-level frontmatter key, for expression hover.
+fn frontmatter_scalar(ctx: &DocumentContext, name: &str) -> Option<String> {
+    ctx.overlay
+        .and_then(|overlay| overlay.ast.as_ref())
+        .and_then(|ast| ast.entry_by_dotted(name))
+        .and_then(|entry| entry.scalar.clone())
+}
+
+/// The heading-less schema hover details for a declared top-level property, for
+/// a bare expression identifier that names a caller-supplied parameter.
+fn schema_property_details(ctx: &DocumentContext, name: &str) -> Option<String> {
+    let shape = known_shape(ctx);
+    let def = def_at_path(&shape, &[name])?;
+    schema_hover_details(def)
 }
 
 // ── Suggestion completion ──────────────────────────────────────────────────
@@ -337,6 +561,14 @@ pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     if !ast.contains_offset(offset) {
         return None;
     }
+
+    // A cursor inside an Expression-typed value gets the shared expression hover
+    // (parsed form + `ctx.*`/function catalog); a cursor on its key falls
+    // through to the schema hover describing the `expression` type.
+    if let Some(hover) = expression_hover(ctx, ast, offset) {
+        return Some(hover);
+    }
+
     let entry = ast.entry_at_offset(offset)?;
 
     if entry.dotted == "ctx" || entry.dotted.starts_with("ctx.") {
@@ -386,6 +618,12 @@ pub(crate) fn schema_hover_details(def: &PropertyDef) -> Option<String> {
         }
     };
     lines.push(type_line);
+
+    // A `literal(x)` atom shows its exact pinned value directly under the type,
+    // ahead of the shared constraint/description lines.
+    if let Some(value) = atom.literal_value() {
+        lines.push(format!("Value: _{value}_"));
+    }
 
     if is_required(def) {
         lines.push("Required".to_string());
@@ -601,6 +839,86 @@ pub(crate) fn nested_shape<'a>(root: &'a SchemaShape, ancestors: &[&str]) -> Opt
     Some(shape)
 }
 
+/// The nested completion shape for `ancestors`, like [`nested_shape`] but
+/// arm-selecting a discriminated inline-object union at each level.
+///
+/// When an ancestor property is a union of inline-object arms tagged by a shared
+/// `literal(...)` discriminant, and the authored sibling values in the current
+/// mapping select exactly one arm (via the Phase-4
+/// [`select_literal_discriminant_arm`] — never a second, DMLS-only algorithm),
+/// completion descends into that arm's shape so only its keys are offered. Every
+/// other case falls back to [`inline_object_shape`] (the first inline-object
+/// arm), so non-discriminated nesting keeps its existing behavior.
+fn nested_shape_for_completion<'a>(
+    ctx: &DocumentContext,
+    root: &'a SchemaShape,
+    ancestors: &[&str],
+) -> Option<&'a SchemaShape> {
+    let mut shape = root;
+    for depth in 0..ancestors.len() {
+        let def = shape.properties.get(ancestors[depth])?;
+        let path = &ancestors[..=depth];
+        shape = discriminated_arm_shape(ctx, def, path).or_else(|| inline_object_shape(def))?;
+    }
+    Some(shape)
+}
+
+/// The inline-object shape of the union arm a shared literal discriminant selects
+/// for the mapping at `path`, or `None` when the property is not a discriminated
+/// inline-object union or no arm is unambiguously selected.
+///
+/// The authored instance is the already-parsed, correctly-typed frontmatter
+/// mapping at `path` (from the effective schema bundle), so a string `'2'` never
+/// matches a numeric `literal(2)`. Arm projection preserves atom order so the
+/// selector's returned index lines up with [`atoms_of`].
+fn discriminated_arm_shape<'a>(
+    ctx: &DocumentContext,
+    def: &'a PropertyDef,
+    path: &[&str],
+) -> Option<&'a SchemaShape> {
+    let atoms = atoms_of(def);
+    if atoms.len() < 2 {
+        return None;
+    }
+    let arms: Vec<Value> = atoms.iter().map(arm_discriminant_json).collect();
+    let bundle = ctx.overlay.and_then(|overlay| overlay.bundle())?;
+    let instance = navigate_json(&bundle.frontmatter_json, path)?;
+    let index = select_literal_discriminant_arm(&arms, instance)?;
+    match &atoms[index].ty {
+        TypeExpr::InlineObject(shape) => Some(shape),
+        _ => None,
+    }
+}
+
+/// Projects one property-union arm to the minimal JSON the discriminant selector
+/// reads: `{ "properties": { key: { "const": <value> } } }` for each of the
+/// arm's `literal(...)`-typed properties. A non-inline-object arm yields an empty
+/// object (no discriminant properties) but still occupies its slot so the
+/// selector's arm index stays aligned with [`atoms_of`].
+fn arm_discriminant_json(atom: &PropertyAtom) -> Value {
+    let TypeExpr::InlineObject(shape) = &atom.ty else {
+        return serde_json::json!({});
+    };
+    let mut props = serde_json::Map::new();
+    for (key, def) in &shape.properties {
+        if let PropertyDef::Single(child) = def
+            && let Some(value) = child.literal_value()
+        {
+            props.insert(key.clone(), serde_json::json!({ "const": value }));
+        }
+    }
+    serde_json::json!({ "properties": props })
+}
+
+/// Walks `path` into a JSON object, returning the value at that key path.
+fn navigate_json<'a>(root: &'a Value, path: &[&str]) -> Option<&'a Value> {
+    let mut current = root;
+    for segment in path {
+        current = current.as_object()?.get(*segment)?;
+    }
+    Some(current)
+}
+
 /// The [`PropertyDef`] at a full key `path` (ancestor segments followed by the
 /// leaf key), descending inline objects for the ancestors. `None` when any
 /// ancestor is missing/not an inline object, or the leaf key is absent.
@@ -687,6 +1005,30 @@ fn is_boolish(atom: &PropertyAtom) -> bool {
 /// Whether an atom is a `file(...)` value.
 pub(crate) fn is_file(atom: &PropertyAtom) -> bool {
     matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::File))
+}
+
+/// The sole `literal(x)` value of a property, or `None` when the property is not
+/// a single unambiguous literal (a union with several literal arms has no single
+/// value, so no correct-by-construction insertion exists). Used by the
+/// add-missing-required-key code action to insert the literal instead of an
+/// empty scaffold.
+pub(crate) fn sole_literal_value(def: &PropertyDef) -> Option<&Value> {
+    let mut values = atoms_of(def).iter().filter_map(PropertyAtom::literal_value);
+    let first = values.next()?;
+    values.next().is_none().then_some(first)
+}
+
+/// Serializes a scalar literal value to valid YAML source text: booleans and
+/// numbers verbatim, strings bare unless YAML would reparse the bare form as a
+/// non-string (then single-quoted — e.g. `'2'`, `'true'`). Backed by the YAML
+/// emitter so quoting is correct for every edge case (colons, leading/trailing
+/// space, indicator characters), not a hand-rolled heuristic.
+pub(crate) fn yaml_scalar_literal(value: &Value) -> String {
+    serde_yaml_ng::to_string(value)
+        .ok()
+        .map(|rendered| rendered.trim_end_matches('\n').to_string())
+        .filter(|rendered| !rendered.is_empty())
+        .unwrap_or_else(|| value.to_string())
 }
 
 // ── Small helpers ───────────────────────────────────────────────────────────
@@ -822,6 +1164,300 @@ fn markup_hover(ctx: &DocumentContext, span: SourceSpan, value: String) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    use lsp_types::{InitializeParams, Uri};
+
+    use crate::capabilities::ClientProfile;
+    use crate::config::DmlsConfig;
+    use crate::graph::WorkspaceGraph;
+    use crate::overlay::OverlayState;
+    use crate::source_map::{PositionEncoding, SourceMap};
+
+    /// Builds a real overlay-backed [`DocumentContext`] for `text` and runs `f`.
+    /// Used by the Expression-typed frontmatter tests, which need the effective
+    /// schema and the [`FrontmatterAst`], not just a pure helper.
+    fn with_ctx<R>(text: &str, f: impl FnOnce(&DocumentContext) -> R) -> R {
+        let path = Path::new("/w/doc.md");
+        let uri: Uri = "file:///w/doc.md".parse().unwrap();
+        let config = DmlsConfig::default();
+        let roots = [PathBuf::from("/w")];
+        let state = OverlayState::default();
+        let overlay = state.for_document(&uri, text, path, &config, &roots);
+        let source_map = SourceMap::new(uri.clone(), 1, PositionEncoding::Utf16, Arc::from(text));
+        let graph = WorkspaceGraph::build(&BTreeMap::new(), 1);
+        let profile = ClientProfile::from_initialize(&InitializeParams::default(), PositionEncoding::Utf16);
+        let ctx = DocumentContext {
+            uri: &uri,
+            path,
+            text,
+            source_map: &source_map,
+            graph: &graph,
+            doc_id: None,
+            config: &config,
+            profile: &profile,
+            overlay: overlay.as_ref(),
+        };
+        f(&ctx)
+    }
+
+    /// A document whose inline `$schema` types `when` as `expression` and leaves
+    /// `title` an ordinary string, so schema gating can be asserted.
+    fn expression_doc(value_line: &str) -> String {
+        format!("---\n$schema:\n  when: expression\n  title: string\n{value_line}\n---\n\nbody\n")
+    }
+
+    #[test]
+    fn expression_value_completion_offers_ctx_functions_and_keys() {
+        let text = expression_doc("when: ctx.");
+        with_ctx(&text, |ctx| {
+            let offset = text.find("ctx.").unwrap() + "ctx.".len();
+            let items = completion(ctx, offset);
+            // Every offered `ctx.*` item carries its rendered type in `detail`.
+            let packages = items
+                .iter()
+                .find(|item| item.label == "ctx.packages")
+                .expect("expression value completion offers ctx.packages");
+            assert_eq!(packages.detail.as_deref(), Some("string[]"));
+            assert_eq!(packages.kind, Some(CompletionItemKind::VARIABLE));
+            // The eager text edit replaces exactly the typed `ctx.` token.
+            let Some(CompletionTextEdit::Edit(edit)) = &packages.text_edit else {
+                panic!("eager text edit");
+            };
+            assert_eq!(edit.new_text, "ctx.packages");
+        });
+
+        // A bare partial also offers functions and same-document frontmatter keys.
+        let text = expression_doc("title: hello\nwhen: len");
+        with_ctx(&text, |ctx| {
+            let offset = text.rfind("len").unwrap() + "len".len();
+            let items = completion(ctx, offset);
+            assert!(
+                items.iter().any(|item| item.label.starts_with("length(")),
+                "functions are offered inside an expression value"
+            );
+        });
+        let text = expression_doc("title: hello\nwhen: ti");
+        with_ctx(&text, |ctx| {
+            let offset = text.rfind("ti").unwrap() + "ti".len();
+            let items = completion(ctx, offset);
+            assert!(
+                items.iter().any(|item| item.label == "title"),
+                "same-document frontmatter keys are offered inside an expression value"
+            );
+        });
+    }
+
+    #[test]
+    fn non_expression_value_offers_no_expression_completion() {
+        // Schema gating: `title` is a plain string, so a `.` in its value offers
+        // no `ctx.*`/function completion.
+        let text = expression_doc("title: ctx.");
+        with_ctx(&text, |ctx| {
+            let offset = text.find("ctx.").unwrap() + "ctx.".len();
+            let items = completion(ctx, offset);
+            assert!(
+                items.iter().all(|item| !item.label.starts_with("ctx.")),
+                "a non-expression value must not offer expression completion: {items:#?}"
+            );
+        });
+    }
+
+    #[test]
+    fn expression_value_hover_is_byte_identical_to_interpolation() {
+        let text = expression_doc("when: ctx.today");
+        with_ctx(&text, |ctx| {
+            let offset = text.find("ctx.today").unwrap() + 2; // on `x` in `ctx`
+            let hover = hover(ctx, offset).expect("expression value hover");
+            let HoverContents::Markup(MarkupContent { value, .. }) = hover.contents else {
+                panic!("markdown hover");
+            };
+            // Byte-identical to the shared interpolation hover for the same text.
+            let expected = expressions::hover_markdown(
+                "ctx.today",
+                2,
+                |_| None,
+                |_| None,
+            );
+            assert_eq!(value, expected);
+            let today = expressions::ctx_descriptor("today").unwrap();
+            assert!(value.contains(&expressions::format_ctx_hover_block(today)));
+            // The hover range excludes the key and covers just the value.
+            let value_range = ctx
+                .source_map
+                .byte_range_to_lsp({
+                    let start = text.find("ctx.today").unwrap();
+                    start..start + "ctx.today".len()
+                });
+            assert_eq!(hover.range, value_range);
+        });
+    }
+
+    #[test]
+    fn hover_on_expression_key_keeps_schema_type_hover() {
+        // A cursor on the key describes the `expression` type, not the value.
+        let text = expression_doc("when: ctx.today");
+        with_ctx(&text, |ctx| {
+            let offset = text.rfind("when:").unwrap() + 1;
+            let hover = hover(ctx, offset).expect("schema key hover");
+            let HoverContents::Markup(MarkupContent { value, .. }) = hover.contents else {
+                panic!("markdown hover");
+            };
+            assert!(value.contains("Type: **expression**"), "{value}");
+        });
+    }
+
+    // ── Literal UX (Phase 6) ──
+
+    #[test]
+    fn literal_value_completion_offers_exact_value_preselected() {
+        let text =
+            "---\n$schema:\n  status: literal(published)\n  title: string\nstatus: \n---\n\nbody\n";
+        with_ctx(text, |ctx| {
+            let offset = text.find("status: \n").unwrap() + "status: ".len();
+            let items = completion(ctx, offset);
+            let published = items
+                .iter()
+                .find(|item| item.label == "published")
+                .expect("literal value is offered");
+            assert_eq!(published.preselect, Some(true), "the literal value is preselected");
+            let Some(CompletionTextEdit::Edit(edit)) = &published.text_edit else {
+                panic!("eager text edit");
+            };
+            assert_eq!(edit.new_text, "published");
+        });
+    }
+
+    #[test]
+    fn literal_string_value_completion_is_yaml_quoted() {
+        // A string literal that looks numeric must insert quoted YAML so it
+        // reparses as a string, not a number.
+        let text = "---\n$schema:\n  tag: literal('2')\ntag: \n---\n\nbody\n";
+        with_ctx(text, |ctx| {
+            let offset = text.find("tag: \n").unwrap() + "tag: ".len();
+            let items = completion(ctx, offset);
+            let item = items.iter().find(|item| item.label == "'2'").expect("quoted literal offered");
+            let Some(CompletionTextEdit::Edit(edit)) = &item.text_edit else {
+                panic!("eager text edit");
+            };
+            assert_eq!(edit.new_text, "'2'");
+        });
+    }
+
+    #[test]
+    fn literal_union_combines_each_value_with_scaffolds() {
+        // `[literal(auto), number]` offers `auto` (literal) — a number arm has
+        // no scaffold — and `[literal(created), literal(deleted)]` offers both.
+        let text =
+            "---\n$schema:\n  width:\n    - literal(auto)\n    - number\nwidth: \n---\n\nbody\n";
+        with_ctx(text, |ctx| {
+            let offset = text.find("width: \n").unwrap() + "width: ".len();
+            let items = completion(ctx, offset);
+            assert!(items.iter().any(|item| item.label == "auto"), "literal arm offered: {items:#?}");
+        });
+
+        let text = concat!(
+            "---\n$schema:\n  kind:\n    - literal(created)\n    - literal(deleted)\n",
+            "kind: \n---\n\nbody\n",
+        );
+        with_ctx(text, |ctx| {
+            let offset = text.find("kind: \n").unwrap() + "kind: ".len();
+            let items = completion(ctx, offset);
+            assert!(items.iter().any(|item| item.label == "created"), "{items:#?}");
+            assert!(items.iter().any(|item| item.label == "deleted"), "{items:#?}");
+        });
+    }
+
+    #[test]
+    fn literal_hover_shows_type_and_exact_value() {
+        let text = "---\n$schema:\n  status: literal(published)\nstatus: published\n---\n\nbody\n";
+        with_ctx(text, |ctx| {
+            let offset = text.rfind("status:").unwrap() + 1; // on the key
+            let hover = hover(ctx, offset).expect("literal key hover");
+            let HoverContents::Markup(MarkupContent { value, .. }) = hover.contents else {
+                panic!("markdown hover");
+            };
+            assert!(value.contains("Type: **literal**"), "{value}");
+            assert!(value.contains("Value: _\"published\"_"), "{value}");
+        });
+    }
+
+    #[test]
+    fn sibling_completion_narrows_to_discriminated_arm() {
+        // `change` is a union of two inline-object arms tagged by `kind`. With
+        // `kind: created` authored, sibling completion offers only the created
+        // arm's `path`, never the deleted arm's `reason`.
+        let text = concat!(
+            "---\n",
+            "$schema:\n",
+            "  change:\n",
+            "    - \"{ kind: literal(created), path: string }\"\n",
+            "    - \"{ kind: literal(deleted), reason: string }\"\n",
+            "change:\n",
+            "  kind: created\n",
+            "  \n",
+            "---\n\nbody\n",
+        );
+        with_ctx(text, |ctx| {
+            // The cursor sits on the two-space empty line under `change`.
+            let offset = text.find("  kind: created\n  \n").unwrap() + "  kind: created\n  ".len();
+            let items = completion(ctx, offset);
+            let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
+            assert!(labels.contains(&"path"), "created arm key offered: {labels:?}");
+            assert!(!labels.contains(&"reason"), "deleted arm key suppressed: {labels:?}");
+        });
+    }
+
+    #[test]
+    fn sibling_completion_without_discriminant_keeps_union_behavior() {
+        // No discriminant authored: the first inline-object arm's keys (which
+        // include the discriminant `kind`) are offered — existing behavior.
+        let text = concat!(
+            "---\n",
+            "$schema:\n",
+            "  change:\n",
+            "    - \"{ kind: literal(created), path: string }\"\n",
+            "    - \"{ kind: literal(deleted), reason: string }\"\n",
+            "change:\n",
+            "  \n",
+            "---\n\nbody\n",
+        );
+        with_ctx(text, |ctx| {
+            let offset = text.find("change:\n  \n").unwrap() + "change:\n  ".len();
+            let items = completion(ctx, offset);
+            let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
+            assert!(labels.contains(&"kind"), "the discriminant key is offered: {labels:?}");
+        });
+    }
+
+    #[test]
+    fn test_yaml_scalar_literal_quotes_when_required() {
+        assert_eq!(yaml_scalar_literal(&Value::from("created")), "created");
+        assert_eq!(yaml_scalar_literal(&Value::from("2")), "'2'");
+        assert_eq!(yaml_scalar_literal(&Value::from("true")), "'true'");
+        assert_eq!(yaml_scalar_literal(&Value::from(2)), "2");
+        assert_eq!(yaml_scalar_literal(&Value::from(true)), "true");
+    }
+
+    #[test]
+    fn test_sole_literal_value_is_none_for_multi_literal_union() {
+        let single = PropertyDef::Single({
+            let mut atom = PropertyAtom::bare(SimplifiedType::Literal);
+            atom.constraints.push(Constraint::LiteralValue(Value::from("x")));
+            atom
+        });
+        assert_eq!(sole_literal_value(&single), Some(&Value::from("x")));
+
+        let literal = |value: &str| {
+            let mut atom = PropertyAtom::bare(SimplifiedType::Literal);
+            atom.constraints.push(Constraint::LiteralValue(Value::from(value)));
+            atom
+        };
+        let multi = PropertyDef::Union(vec![literal("a"), literal("b")]);
+        assert!(sole_literal_value(&multi).is_none());
+    }
 
     #[test]
     fn test_schema_hover_body_applies_style_rules() {
