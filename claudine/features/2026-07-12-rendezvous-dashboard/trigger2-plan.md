@@ -36,9 +36,16 @@ vocabulary rather than adding a field:
 | `waiting_on_user`   | sink (Trigger 1)    | permission ask (strong) | `NeedsInput`        |
 | `idle`              | hook (Trigger 2)    | interactive turn-complete (weak) | `PossiblyIdle` |
 
-Idle **duration** is derived consumer-side from `updated_at_unix_ms` (the daemon stamps it
-on the UPDATED that set `idle`), so the dashboard can render "idle 45s". Both intervention
-tiers are suppressed for stale hosts (reusing the existing `sessions_trusted()` gate).
+Idle **duration** is derived consumer-side from `updated_at_unix_ms`. **Clock-skew caveat
+(review Finding 5): this is skew-free only for the LOCAL host** — its `updated_at` was
+stamped by the same daemon whose clock the dashboard reads. A REMOTE session's `updated_at`
+was stamped by the *remote* daemon, so comparing it to the consumer's local clock mis-reports
+idle age under clock skew (a 5-min-slow remote clock shows "idle 5m" instantly; a fast one
+clamps to 0). **v1 therefore shows idle duration for LOCAL sessions only**; for remote
+sessions render "idle" without a duration, or derive a conservative *local observation age*
+from per-document sync metadata (deferred — the daemon does not expose it yet). Both
+intervention tiers are suppressed for stale hosts (reusing the existing `sessions_trusted()`
+gate).
 
 ## Decisions (baked in; ⚠ = confirm before Phase 3)
 
@@ -152,7 +159,9 @@ no write. If `handle`'s source shifts dispatch-inventory line numbers, regenerat
 
 **Risks:** double-reporting if a provider fires `Stop` more than once per turn (idempotent —
 same status). Interactive-*structured* sessions could get both a sink `waiting_on_user`
-and a hook `idle`; last-writer-wins on `status` is acceptable (note it).
+and a hook `idle` — **last-writer-wins is NOT acceptable here (review Finding 4)**: the
+weaker `idle` must never overwrite an unresolved `waiting_on_user`. This is resolved by the
+typed-precedence reducer in `session-state-design.md`, which this phase must build on.
 
 ## Phase 5 — End-to-end verification + drift
 
@@ -178,8 +187,18 @@ match behavior.
   a wrong one). The dashboard already renders honestly when a signal is absent.
 - **Write cadence (S3).** Trigger 2 writes at most twice per interactive turn (idle, then
   active) — negligible vs the register-compaction budget.
-- **Clock source.** Idle duration uses the daemon-stamped `updated_at_unix_ms`, read
-  against the consumer's local clock — the same skew-free arrangement the staleness clock
-  already relies on.
+- **Clock source (review Finding 5 — CORRECTED).** `updated_at_unix_ms` is skew-free only
+  for the LOCAL host (same daemon clock the dashboard reads). A remote session's `updated_at`
+  is stamped by the remote daemon, so idle duration derived from it is wrong under clock skew.
+  v1 shows idle duration for local sessions only; remote sessions show "idle" without a
+  duration (or a conservative local observation age once the daemon exposes per-document sync
+  metadata — deferred).
+- **Status precedence (review Finding 4 — BLOCKER, gates this plan).** This plan cannot ship
+  on the current open `status` string + arrival-order last-writer-wins: a weaker `idle` must
+  not overwrite an unresolved stronger `waiting_on_user` just because its hook arrived later,
+  and separate hook processes can reorder writes. Trigger 2 depends on the session-state
+  foundation (atomic transitions + causal revision + typed precedence + hook-primary Trigger 1)
+  being designed and landed first — see `session-state-design.md`. The D1/D2 vocabulary below
+  is provisional and will be reconciled with that typed model.
 - **Unwrapped sessions.** Out of scope for v1 (spec S4); they arrive with the process
   monitor. Any stray UPDATE from an unwrapped hook safely no-ops.
