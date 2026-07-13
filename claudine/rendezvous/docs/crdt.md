@@ -276,9 +276,15 @@ Before adding a document type or DuckDB table, answer:
 
 ## Open Questions
 
-- **Register history compaction:** at what document size / op count do we shallow-snapshot
-  re-base a Kind-2 register, and does re-basing interact safely with peers holding older
-  state vectors? Needs a spike before any register gains a >1/minute write cadence.
+- **Register history compaction:** ✅ answered by the
+  [compaction spike](../../features/2026-07-11-host-capability-broadcast/spike-register-compaction.md)
+  (2026-07-12). Growth is modest (~3–42 B/write depending on churn shape), re-basing via
+  shallow snapshot preserves state/peer-id/persistence, and lazy thresholds
+  (~256 KiB / 10k ops) suffice. One hard rule fell out: a reader behind the re-base
+  point **silently** stops converging on delta sync, so the sync engine must gate
+  updates-since requests on `shallow_since_vv` and respond with a snapshot-replace.
+  Remaining work is implementing that gate in `daemon/src/sync.rs` (see next bullet —
+  it composes with foreign-writer enforcement).
 - **Foreign-writer enforcement:** the single-writer rule is currently convention; the
   import path should reject deltas whose ops originate from a peer other than the
   document's `owner_node_id`. Decide where this check lives (sync engine vs storage).
