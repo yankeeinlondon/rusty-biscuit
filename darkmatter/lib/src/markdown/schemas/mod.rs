@@ -91,7 +91,7 @@ pub use simplified::{
     Constraint, DRAFT_2020_12, DecodedScalar, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
     SimplifiedSchema, SimplifiedType, SuggestionItem, SuggestionLintProblem, SuggestionLintReason,
     SuggestionQuery, TypeExpr, decode_scalar, decode_scalar_at, lint_suggestions,
-    suggestions_for_path,
+    suggestions_for_def, suggestions_for_path,
     StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,
     parse_yaml_schema, to_json_schema,
 };

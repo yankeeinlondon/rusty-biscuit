@@ -21,7 +21,7 @@ pub mod yaml_scalar;
 
 pub use convert::{DRAFT_2020_12, to_json_schema};
 pub use lint::{SuggestionLintProblem, SuggestionLintReason, lint_suggestions};
-pub use query::{SuggestionItem, SuggestionQuery, suggestions_for_path};
+pub use query::{SuggestionItem, SuggestionQuery, suggestions_for_def, suggestions_for_path};
 pub use serialize::serialize_property_atom;
 pub use source::{parse_yaml_schema_with_source, project_suggestion_spans};
 pub use standalone::{

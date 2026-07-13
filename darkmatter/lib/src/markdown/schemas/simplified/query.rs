@@ -126,6 +126,60 @@ pub fn suggestions_for_path(
     Some(SuggestionQuery { is_array, items })
 }
 
+/// Queries lint-valid suggestion candidates from an already-resolved property
+/// definition.
+///
+/// This is the context-aware companion to [`suggestions_for_path`]. A caller
+/// that has resolved a property to its selected discriminated-union arm (or a
+/// merged-union fallback view) passes that `PropertyDef` here, so the candidates
+/// follow the caller's selected arm rather than the context-free first-arm
+/// choice [`suggestions_for_path`] makes during its own ancestor traversal.
+///
+/// `leaf` is the property's leaf key name, used only for target-schema error
+/// context while linting candidates.
+///
+/// Returns `None` when no atom of `def` carries a `suggest(...)` constraint.
+/// Candidates from every suggest-bearing atom are combined in atom-declaration
+/// order — so a merged union carrying suggestions on more than one arm offers
+/// all of them — with invalid candidates omitted per the same per-atom lint as
+/// [`suggestions_for_path`]. `is_array` is set when any suggest-bearing atom is
+/// an array form.
+///
+/// ## Side-effect freedom
+///
+/// No filesystem discovery, shell execution, composition directive evaluation,
+/// or network access occurs.
+pub fn suggestions_for_def(leaf: &str, def: &PropertyDef) -> Option<SuggestionQuery> {
+    let mut is_array = false;
+    let mut items = Vec::new();
+    let mut found = false;
+    for atom in atoms_of(def) {
+        if !atom
+            .constraints
+            .iter()
+            .any(|constraint| matches!(constraint, Constraint::Suggest(_)))
+        {
+            continue;
+        }
+        found = true;
+        // Lint each suggest-bearing atom in isolation by wrapping it in a
+        // single-property schema and reusing the whole `suggestions_for_path`
+        // lint/filter/build path. The cross-property provenance matching that
+        // path performs is a no-op here (one property, one atom), so this avoids
+        // duplicating the candidate-classification logic.
+        let mut shape = SchemaShape::default();
+        shape
+            .properties
+            .insert(leaf.to_string(), PropertyDef::Single(atom.clone()));
+        let mini = SimplifiedSchema::Single(shape);
+        if let Some(query) = suggestions_for_path(&mini, &[leaf]) {
+            is_array |= query.is_array;
+            items.extend(query.items);
+        }
+    }
+    found.then_some(SuggestionQuery { is_array, items })
+}
+
 /// Resolves the [`PropertyAtom`] carrying `suggest(...)` for a path together
 /// with the lint-problem provenance `(root_arm, property_arm)`, applying the
 /// union-selection rules.
@@ -323,6 +377,66 @@ mod tests {
         let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml_body).unwrap();
         let schema_value = value.get("$schema").unwrap();
         super::super::parse_yaml_schema(schema_value).unwrap()
+    }
+
+    /// The single-shape property definition for `name`.
+    fn def<'a>(schema: &'a SimplifiedSchema, name: &str) -> &'a PropertyDef {
+        match schema {
+            SimplifiedSchema::Single(shape) => shape.properties.get(name).unwrap(),
+            SimplifiedSchema::Union(_) => panic!("expected a single-shape schema"),
+        }
+    }
+
+    /// The first atom of a definition.
+    fn atom(def: &PropertyDef) -> &PropertyAtom {
+        match def {
+            PropertyDef::Single(atom) => atom,
+            PropertyDef::Union(atoms) => &atoms[0],
+        }
+    }
+
+    #[test]
+    fn suggestions_for_def_resolves_single_atom() {
+        let s = schema("$schema:\n  color: string(suggest(red, green, blue))\n");
+        let q = suggestions_for_def("color", def(&s, "color")).unwrap();
+        assert!(!q.is_array);
+        let labels: Vec<&str> = q.items.iter().map(|item| item.label.as_str()).collect();
+        assert_eq!(labels, vec!["red", "green", "blue"]);
+    }
+
+    #[test]
+    fn suggestions_for_def_returns_none_without_suggest() {
+        let s = schema("$schema:\n  title: string\n");
+        assert!(suggestions_for_def("title", def(&s, "title")).is_none());
+    }
+
+    #[test]
+    fn suggestions_for_def_omits_invalid_candidates() {
+        let s = schema("$schema:\n  count: number(min(0); suggest(1, many, 2))\n");
+        let q = suggestions_for_def("count", def(&s, "count")).unwrap();
+        let labels: Vec<&str> = q.items.iter().map(|item| item.label.as_str()).collect();
+        assert_eq!(labels, vec!["1", "2"]);
+    }
+
+    #[test]
+    fn suggestions_for_def_array_form_sets_is_array() {
+        let s = schema("$schema:\n  tags: string(suggest(alpha, beta))[]\n");
+        let q = suggestions_for_def("tags", def(&s, "tags")).unwrap();
+        assert!(q.is_array);
+        assert_eq!(q.items.len(), 2);
+    }
+
+    #[test]
+    fn suggestions_for_def_combines_every_suggest_atom() {
+        // A merged-union view (as DMLS builds for an unresolved discriminated
+        // union) carrying `suggest(...)` on more than one atom offers every
+        // arm's candidates in atom-declaration order.
+        let a = schema("$schema:\n  a: string(suggest(red, green))\n");
+        let b = schema("$schema:\n  b: string(suggest(cyan, magenta))\n");
+        let merged = PropertyDef::Union(vec![atom(def(&a, "a")).clone(), atom(def(&b, "b")).clone()]);
+        let q = suggestions_for_def("palette", &merged).unwrap();
+        let labels: Vec<&str> = q.items.iter().map(|item| item.label.as_str()).collect();
+        assert_eq!(labels, vec!["red", "green", "cyan", "magenta"]);
     }
 
     #[test]
