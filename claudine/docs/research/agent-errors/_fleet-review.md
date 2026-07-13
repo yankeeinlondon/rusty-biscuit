@@ -76,21 +76,36 @@ No document was returned for independent re-research on copy-paste grounds.
 ## Source-liveness advisory (advisory only)
 
 Per Phase 6, source liveness is reported, **not** enforced — a transient network
-resolution error must never fail the fleet. This non-interactive session did not
-probe the cited URLs over the network. Advisory notes on citation stability:
+resolution error must never fail the fleet. On 2026-07-13 each unique HTTP(S)
+URL cited by the ten research documents was requested with redirects enabled, a
+5-second connection timeout, and a 15-second total timeout. Outcomes are
+classified as `reachable` (an HTTP response was received), `HTTP failure`
+(response status 400 or higher), `timeout`, or `network unavailable` (DNS or
+connection failure). A failed or unavailable probe remains an advisory result;
+it does not change the deterministic gate outcome.
 
-- **Strong (source-pinned or official docs):** claude (Anthropic API errors +
-  Agent SDK), codex (OpenAI error-codes + non-interactive docs), kimi (wire-mode
-  docs + `protocol/kimi.rs` constants), pi (repo `json.md`), opencode/kilo
-  (`signals/` `LogClassification` source_code records).
-- **Documentation-only / weaker:** gemini and qwen (headless docs pages; the
-  exact capacity phrasing is an explicit gap, not graduated), antigravity (no
-  published implementation source at tag 1.1.0 — surfaces are empirical from the
-  installed `agy` binary, recorded as a gap), goose (docs page + `signals/`
-  `ProviderError` catalog; research-only, no runtime vocabulary).
+| Provider | Cited URL | Outcome | Final URL after redirects |
+|---|---|---|---|
+| antigravity | `https://antigravity.google/docs/cli-statusline` | reachable (HTTP 200) | same URL |
+| claude | `https://code.claude.com/docs/en/agent-sdk/typescript` | reachable (HTTP 200) | same URL |
+| claude | `https://docs.claude.com/en/api/errors` | reachable (HTTP 200) | `https://platform.claude.com/docs/en/api/errors` |
+| codex | `https://developers.openai.com/codex/noninteractive` | reachable (HTTP 200) | `https://learn.chatgpt.com/docs/non-interactive-mode` |
+| codex | `https://github.com/openai/codex/issues/17014` | reachable (HTTP 200) | same URL |
+| codex | `https://platform.openai.com/docs/guides/error-codes` | reachable (HTTP 200) | `https://developers.openai.com/api/docs/guides/error-codes` |
+| gemini | `https://geminicli.com/docs/cli/headless/` | reachable (HTTP 200) | same URL |
+| goose | `https://goose-docs.ai/docs/guides/running-tasks/` | reachable (HTTP 200) | same URL |
+| kilo | `https://kilocode.ai/docs/` | reachable (HTTP 200) | `https://kilo.ai/docs` |
+| kimi | `https://moonshotai.github.io/kimi-cli/en/customization/wire-mode.html` | reachable (HTTP 200) | same URL |
+| opencode | `https://opencode.ai/docs/cli/` | reachable (HTTP 200) | same URL |
+| pi | `https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/json.md` | reachable (HTTP 200) | same URL |
+| qwen | `https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/` | reachable (HTTP 200) | same URL |
 
-None of these blocks the fleet; the weaker-cited capacity/overload phrasings are
-deliberately withheld as gaps rather than graduated on a soft citation.
+This run produced 13 reachable outcomes and no HTTP failures, timeouts, or
+network-unavailable outcomes. Liveness does not strengthen a citation's
+provenance: gemini and qwen still lack source-pinned capacity phrasing,
+antigravity still lacks published implementation source, and goose remains
+research-only. Those limitations remain explicit gaps rather than graduated
+vocabulary.
 
 ## Per-document review
 
