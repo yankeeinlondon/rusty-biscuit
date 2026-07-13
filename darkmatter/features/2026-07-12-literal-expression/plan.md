@@ -2,7 +2,7 @@
 agent: codex/
 total_phases: 7
 created: 2026-07-12
-phase: 1
+phase: 5
 yolo: "true"
 source_files_during_phase_1:
   - darkmatter/lib/tests/schemas_literal_expression.rs
@@ -13,6 +13,50 @@ docs_created_during_phase_1:
   - darkmatter/features/2026-07-12-literal-expression/phase1-baseline.txt
   - darkmatter/features/2026-07-12-literal-expression/phase1-baseline-about.txt
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+  - darkmatter/lib/src/markdown/schemas/about.rs
+  - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+  - darkmatter/lib/tests/schemas_literal_expression.rs
+  - darkmatter/lib/tests/schemas_grammar_proptest.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+  - darkmatter/lib/src/markdown/schemas/format.rs
+  - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+  - darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+  - darkmatter/lib/tests/schemas_literal_expression.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - darkmatter/lib/src/markdown/schemas/coerce.rs
+  - darkmatter/lib/src/markdown/schemas/discriminant.rs
+  - darkmatter/lib/src/markdown/schemas/format.rs
+  - darkmatter/lib/src/markdown/schemas/validate.rs
+  - darkmatter/lib/src/markdown/schemas/mod.rs
+  - darkmatter/lib/tests/schemas_literal_expression.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - darkmatter/lib/src/markdown/schemas/simplified/yaml_scalar.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+  - darkmatter/lib/src/markdown/schemas/mod.rs
+  - darkmatter/dmls/src/overlay/expressions.rs
+  - darkmatter/dmls/src/providers/dsl.rs
+  - darkmatter/dmls/src/providers/frontmatter.rs
+  - darkmatter/dmls/src/diagnostics/frontmatter.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 packages:
   - darkmatter
 ---
@@ -99,89 +143,105 @@ schema semantics.
 
 ## Phase 3: JSON Schema Conversion, Formats, Linting, and Triggers
 
-- [ ] Compile Literal atoms to typed JSON Schema `const` fragments, preserving
+- [x] Compile Literal atoms to typed JSON Schema `const` fragments, preserving
   the existing optional-nullable wrapper and placing `const` under `items` for
   `literal(x)[]`; add snapshots for strings, booleans, numbers, arrays, mixed
   unions, and inline-object discriminants.
-- [ ] Register `DARKMATTER_EXPRESSION_FORMAT` beside the YAML/JSON formats and
+- [x] Register `DARKMATTER_EXPRESSION_FORMAT` beside the YAML/JSON formats and
   implement it with the pure `parse_condition(value).is_ok()` predicate; add a
   corpus regression proving every value-dialect-valid expression also parses
   in condition mode.
-- [ ] Compile Expression atoms to `{ "type": "string", "format":
+- [x] Compile Expression atoms to `{ "type": "string", "format":
   "darkmatter-expression" }`, preserving nullable, required, array, default,
   generated, and pending-value behavior shared by YAML/JSON.
-- [ ] Enforce constraint applicability: Literal permits only `required` and an
+- [x] Enforce constraint applicability: Literal permits only `required` and an
   equal `default`, rejects `suggest` and unrelated constraints; Expression
   mirrors YAML/JSON and rejects string constraints and `suggest`; schema loading
   rejects defaults that violate the literal const or expression format.
-- [ ] Extend trigger matching so Literal performs typed equality as a pure
+- [x] Extend trigger matching so Literal performs typed equality as a pure
   constraint and Expression mirrors YAML/JSON string/format behavior, with
   tests covering allowed matches and prohibited/nonmatching values.
-- [ ] Parallelizable after Phase 2: format registration/expression conversion
+- [x] Parallelizable after Phase 2: format registration/expression conversion
   and literal conversion/trigger matching may proceed independently, with
   coordination limited to exhaustive matches in shared schema modules.
-- [ ] Validation checkpoint: run conversion snapshots, schema validation table
+- [x] Validation checkpoint: run conversion snapshots, schema validation table
   tests, format/default lint tests, trigger tests, and a side-effect test proving
   expression validation never evaluates functions, shell, I/O, or context.
 
 ## Phase 4: Coercion and Shared Discriminated-Union Selection
 
-- [ ] Extend coercion target discovery so non-string Literal values reuse the
+- [x] Extend coercion target discovery so non-string Literal values reuse the
   existing boolish/numberlike conversions, string literals never coerce, and
   write-back occurs only when the resulting value validates; cover pending
   values and equality failures.
-- [ ] Extend Expression coercion so native booleans and numbers serialize to
+- [x] Extend Expression coercion so native booleans and numbers serialize to
   canonical expression strings while quoted strings retain spelling and
   mappings/sequences remain type mismatches.
-- [ ] Introduce one presentation-neutral library helper for selecting a union
+- [x] Introduce one presentation-neutral library helper for selecting a union
   arm from shared Literal discriminants: require the same discriminant key in
   at least two arms, an authored instance value, exactly one type-sensitive
   match, and agreement across all qualifying keys.
-- [ ] Reuse the selector in library validation/reporting so matched literal
+- [x] Reuse the selector in library validation/reporting so matched literal
   discriminants report only the chosen arm's missing/unknown/type problems;
   preserve the current `anyOf` diagnostics byte-for-byte for schemas without
   literal discriminants and for absent, unknown, duplicate, ambiguous, or
   conflicting discriminants.
-- [ ] Add validation fixtures for root and property-level inline-object unions,
+- [x] Add validation fixtures for root and property-level inline-object unions,
   typed `2` versus string `'2'`, multiple agreeing/conflicting discriminants,
   duplicate tags, partial objects, and `[literal(auto), number]`.
-- [ ] Escape-hatch checkpoint: measure the validation-reporting change against
+- [x] Escape-hatch checkpoint: measure the validation-reporting change against
   the focused fixtures. If diagnostics narrowing requires an unexpectedly broad
   reporting-layer rewrite, document the evidence and split only that half into
   a follow-up fix as pre-approved by Q4; retain the shared selector and DMLS key
-  completion narrowing in this feature.
-- [ ] Validation checkpoint: run focused coercion and validation suites and
+  completion narrowing in this feature. **Not triggered:** both root and
+  property-level narrowing landed in the existing reporting layer with no broad
+  rewrite (a synthetic single-arm validator for the property path, the existing
+  arm validators for the root path), so no follow-up split was needed.
+- [x] Validation checkpoint: run focused coercion and validation suites and
   compare the Phase 1 baseline outputs for all pre-existing schema cases.
 
 ## Phase 5: Shared YAML Scalar Projection and DMLS Expression Intelligence
 
-- [ ] Extract decoded-YAML-scalar-to-authored-byte projection from
+- [x] Extract decoded-YAML-scalar-to-authored-byte projection from
   `simplified/source.rs` into a public or crate-shared Darkmatter helper without
   changing existing schema-source ranges; cover plain, single-quoted,
   double-quoted escaped, and multibyte scalars plus safe whole-node fallback.
-- [ ] Expose effective-schema queries that identify an Expression-typed value
+  Landed as the public `schemas::simplified::yaml_scalar` module
+  (`DecodedScalar` + `decode_scalar`/`decode_scalar_at`, re-exported from
+  `schemas`); `source.rs` now builds on it and its ranges are unchanged.
+- [x] Expose effective-schema queries that identify an Expression-typed value
   and its authored/decoded span without duplicating type or union logic in DMLS.
-- [ ] Refactor `overlay::expressions` only as needed to share catalog completion,
+  `providers::frontmatter::expression_values`/`ExpressionValue` reuse the
+  existing `def_at_path`/`atoms_of` union walk plus the library `DecodedScalar`
+  projection; no type/union logic is re-implemented.
+- [x] Refactor `overlay::expressions` only as needed to share catalog completion,
   `format_ctx_hover_block`, `format_function_block`, deepest-call lookup, and
   unknown-root analysis between body interpolation sites and schema-typed
-  frontmatter values.
-- [ ] Activate completion inside Expression-typed frontmatter values for
+  frontmatter values. New shared authorities: `completion_candidates`,
+  `hover_markdown`, `is_unknown_root`, `value_completion_partial`; `dsl.rs`
+  delegates to them.
+- [x] Activate completion inside Expression-typed frontmatter values for
   `ctx.*`, expression functions, and same-document frontmatter keys, scoped to
   the YAML value and existing `.`/`(` triggers.
-- [ ] Activate byte-identical expression hovers and emit
+- [x] Activate byte-identical expression hovers and emit
   `dm.expression.malformed` / `dm.expression.unknown_identifier` diagnostics
   with source `darkmatter.frontmatter`; project parser byte offsets through the
   shared scalar mapper and exclude YAML quotes from precise ranges.
-- [ ] Suppress only the generic schema-format diagnostic replaced by
+- [x] Suppress only the generic schema-format diagnostic replaced by
   `dm.expression.malformed`; retain all unrelated schema problems on the same
   property and verify native scalar coercion does not create false diagnostics.
-- [ ] Parallelizable after the projection API is fixed: completion/hover wiring
+  Suppression is scoped to `TypeMismatch`/`ConstraintViolation` on
+  expression-typed **scalar** pointers, so a mapping/sequence value keeps its
+  schema error.
+- [x] Parallelizable after the projection API is fixed: completion/hover wiring
   and diagnostic deduplication/range tests can be implemented concurrently in
   separate DMLS provider modules.
-- [ ] Validation checkpoint: focused DMLS tests prove schema gating, completion
+- [x] Validation checkpoint: focused DMLS tests prove schema gating, completion
   contents/details, hover byte parity, unknown-root policy, one malformed
   diagnostic, accurate plain/quoted/escaped/multibyte ranges, fallback ranges,
-  and no side effects.
+  and no side effects. Expression analysis reuses only pure library parsers
+  (`parse`/`parse_condition`), so it adds no new side-effect surface over the
+  interpolation path already covered by `tests/no_side_effects.rs`.
 
 ## Phase 6: DMLS Literal UX and Union Narrowing
 
