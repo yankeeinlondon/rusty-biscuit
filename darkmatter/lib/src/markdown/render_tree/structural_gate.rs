@@ -419,7 +419,8 @@ fn styled_browser_fragment_and_streaming_paths_agree() {
     let via_fragments = render_browser_document(&doc, &opts)
         .expect("fragment browser render")
         .output
-        .render();
+        .render()
+        .expect("fragment browser render");
 
     assert_eq!(
         streamed, via_fragments,

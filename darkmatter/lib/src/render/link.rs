@@ -617,6 +617,17 @@ impl Link {
     /// ## Returns
     ///
     /// `None` when the link carries no prompt.
+    ///
+    /// ## Notes
+    ///
+    /// The popover `id` is derived deterministically from this link's target and
+    /// display alone, with no document-scoped occurrence state, so this helper
+    /// guarantees a document-unique id only for a **single** prompted link.
+    /// Emitting several links this way and concatenating the fragments can repeat
+    /// an id and make `aria-describedby` ambiguous. For a document with more than
+    /// one prompted link, render through the render-tree browser path
+    /// (`renderable::tree::render`), which defers id allocation to final-document
+    /// assembly and keeps every occurrence unique.
     pub fn to_html_with_popover(&self) -> Option<String> {
         let prompt = self
             .prompt

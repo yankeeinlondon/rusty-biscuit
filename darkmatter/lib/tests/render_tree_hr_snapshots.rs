@@ -115,7 +115,8 @@ fn render_tree_hr_html_snapshots() {
         let html = render_browser_document(&doc, &browser_options())
             .expect("tree browser render must succeed")
             .output
-            .render();
+            .render()
+            .expect("tree browser render must succeed");
         assert_snapshot!(format!("html_{name}"), html);
     }
 }

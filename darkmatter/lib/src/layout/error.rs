@@ -43,13 +43,14 @@ pub enum PageRenderError {
     Render(String),
 
     /// A requested page feature could not be resolved or placed for the
-    /// browser render. Carries the underlying
+    /// browser render. Carries the typed
     /// [`FeatureResolveError`](renderable::browser::feature::FeatureResolveError)
-    /// message, so it names the feature and target — e.g. a body-only render
-    /// whose feature resolves to `<link>` dependencies fails with
-    /// `HeadRequired`.
-    #[error("feature resolution failed: {0}")]
-    FeatureResolution(String),
+    /// so callers can match the underlying variant instead of parsing prose —
+    /// e.g. a body-only render whose feature resolves to `<link>` dependencies
+    /// fails with
+    /// [`HeadRequired`](renderable::browser::feature::FeatureResolveError::HeadRequired).
+    #[error(transparent)]
+    FeatureResolution(#[from] renderable::browser::feature::FeatureResolveError),
 
     /// A list left-margin builder was called with a non-`Ul` component.
     ///

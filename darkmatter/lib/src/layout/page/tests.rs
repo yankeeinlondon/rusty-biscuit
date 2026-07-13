@@ -3058,9 +3058,11 @@
     }
 
     /// A body-only render whose requested feature resolves to a `<head>` `<link>`
-    /// dependency fails with `HeadRequired` (spec acceptance criterion 9): the
-    /// error message names the offending feature and cannot silently drop or
-    /// mis-place a document-head dependency inside an embeddable fragment.
+    /// dependency fails with the typed
+    /// [`FeatureResolveError::HeadRequired`](renderable::browser::feature::FeatureResolveError::HeadRequired)
+    /// variant (spec acceptance criterion 9): callers match the variant rather
+    /// than parse prose, and the document-head dependency is never silently
+    /// dropped or mis-placed inside an embeddable fragment.
     #[test]
     fn body_only_feature_requiring_head_link_fails_with_head_required() {
         let err = resolve_feature_body_assets(
@@ -3069,14 +3071,68 @@
             &FeatureContext::default(),
         )
         .expect_err("a head-only <link> cannot be embedded in a body-only render");
-        let msg = err.to_string();
         assert!(
-            msg.contains("mermaid-diagram"),
-            "the failure names the feature: {msg}"
+            matches!(
+                err,
+                PageRenderError::FeatureResolution(
+                    renderable::browser::feature::FeatureResolveError::HeadRequired {
+                        feature: PageFeature::MermaidDiagram,
+                        target: RenderTarget::Browser,
+                    }
+                )
+            ),
+            "body-only head-link render fails with typed HeadRequired: {err:?}"
         );
+    }
+
+    /// A resolver that refuses to produce assets for the requested Browser
+    /// feature, forcing the typed
+    /// [`FeatureResolveError::UnresolvedFeature`](renderable::browser::feature::FeatureResolveError::UnresolvedFeature)
+    /// failure through `resolve_feature_body_assets`.
+    struct UnresolvedFeatureResolver;
+
+    impl FeatureResolver for UnresolvedFeatureResolver {
+        fn resolve(
+            &self,
+            feature: PageFeature,
+            target: RenderTarget,
+            _ctx: &FeatureContext,
+        ) -> Result<
+            Option<renderable::browser::feature::FeatureAssets>,
+            renderable::browser::feature::FeatureResolveError,
+        > {
+            Err(
+                renderable::browser::feature::FeatureResolveError::UnresolvedFeature {
+                    feature,
+                    target,
+                },
+            )
+        }
+    }
+
+    /// An unresolved Browser feature surfaces the typed
+    /// [`FeatureResolveError::UnresolvedFeature`](renderable::browser::feature::FeatureResolveError::UnresolvedFeature)
+    /// variant through `PageRenderError::FeatureResolution`, so callers match the
+    /// variant (naming the feature and target) rather than parsing the message.
+    #[test]
+    fn body_only_unresolved_feature_fails_with_unresolved_feature() {
+        let err = resolve_feature_body_assets(
+            &[PageFeature::MermaidDiagram],
+            &UnresolvedFeatureResolver,
+            &FeatureContext::default(),
+        )
+        .expect_err("an unresolved feature cannot produce body assets");
         assert!(
-            msg.contains("document <head>") || msg.contains("head"),
-            "the failure explains the head requirement: {msg}"
+            matches!(
+                err,
+                PageRenderError::FeatureResolution(
+                    renderable::browser::feature::FeatureResolveError::UnresolvedFeature {
+                        feature: PageFeature::MermaidDiagram,
+                        target: RenderTarget::Browser,
+                    }
+                )
+            ),
+            "unresolved feature render fails with typed UnresolvedFeature: {err:?}"
         );
     }
 

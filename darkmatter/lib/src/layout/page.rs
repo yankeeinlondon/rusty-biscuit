@@ -973,8 +973,20 @@ impl DarkmatterPage {
     /// `CodeBlock::rust(...).render_html_fragment()` for the same code,
     /// language, and metadata.
     ///
-    /// When all layout fields are at their defaults, the output is the same as
+    /// For **feature-free** content — no component requests a browser feature
+    /// and all layout fields are at their defaults — the output is the same as
     /// `md.as_html(HtmlOptions::default())` with no wrapper.
+    ///
+    /// Feature-bearing content diverges, because this page path is
+    /// feature-aware:
+    ///
+    /// - Mermaid defaults to the interactive experience here, whereas
+    ///   `HtmlOptions::default()` (and the low-level renderable path) keeps
+    ///   Mermaid in `Code` mode. A document with a mermaid fence therefore does
+    ///   not match the low-level output.
+    /// - Prompted links and Mermaid force the body wrapper into existence so
+    ///   their inline `<style>`/`<script>` assets can be embedded (body-only
+    ///   feature rendering), rather than emitting a bare no-wrapper body.
     ///
     /// ## Errors
     ///
@@ -985,6 +997,14 @@ impl DarkmatterPage {
     ///
     /// Returns [`PageRenderError::Render`] when the underlying markdown HTML
     /// renderer fails.
+    ///
+    /// Returns [`PageRenderError::FeatureResolution`] when a requested browser
+    /// feature cannot be resolved or placed on this body-only path — either an
+    /// unresolved browser feature
+    /// ([`UnresolvedFeature`](renderable::browser::feature::FeatureResolveError::UnresolvedFeature)),
+    /// or a feature whose assets require a document-head `<link>`
+    /// ([`HeadRequired`](renderable::browser::feature::FeatureResolveError::HeadRequired)),
+    /// which a body-only fragment cannot carry.
     pub fn render_to_browser(&self, md: &Markdown) -> Result<String, PageRenderError> {
         let ctx = LayoutContext::from_page(
             self.terminal_width,
@@ -1058,7 +1078,9 @@ impl DarkmatterPage {
             graphics_mode,
         )
         .map_err(|e| PageRenderError::Render(e.to_string()))?;
+        let document = rendered.output.document;
         let body = rendered.output.body;
+        let page_assets = rendered.output.assets;
         let features = rendered.output.features;
 
         // Resolve the collected features into inline `<style>`/`<script>` assets
@@ -1075,16 +1097,23 @@ impl DarkmatterPage {
         // their presence must not add a wrapper an unmatched policy would not
         // need (review-1 finding 2). A requested feature also forces the wrapper
         // into existence so its inline assets have somewhere to live.
+        //
+        // With no wrapper the output stands alone, so emit the complete
+        // standalone document. When a wrapper is forced, embed the body
+        // *fragment* (no nested `<!DOCTYPE>`/`<html>`/`<head>`/`<body>`) plus the
+        // page-level `<style>`/`<script>` the standalone `<head>` would carry, so
+        // the wrapper is a single valid element.
         if !ctx.needs_decoration()
             && self.stylesheet().is_none()
             && self.page_meta().is_none()
             && !has_features
         {
-            return Ok(body);
+            return Ok(document);
         }
 
         Ok(wrap_browser_html(
             &body,
+            &page_assets,
             &ctx,
             self,
             &features,
@@ -1590,12 +1619,19 @@ pub(crate) fn resolve_feature_body_assets(
     if features.is_empty() {
         return Ok(String::new());
     }
-    let resolved = resolve_features(features, resolver, RenderTarget::Browser, ctx)
-        .map_err(|e| PageRenderError::FeatureResolution(e.to_string()))?;
-    serialize_features_body(&resolved).map_err(|e| PageRenderError::FeatureResolution(e.to_string()))
+    let resolved = resolve_features(features, resolver, RenderTarget::Browser, ctx)?;
+    Ok(serialize_features_body(&resolved)?)
 }
 
-/// Wrap HTML markdown body in a page-level container with layout CSS.
+/// Wrap an HTML markdown body **fragment** in a page-level container with
+/// layout CSS.
+///
+/// `body` must be a body-only fragment (no `<!DOCTYPE>`/`<html>`/`<head>`/
+/// `<body>`); it is embedded directly so the wrapper is a single valid element.
+/// `page_assets` carries the page-level `<style>`/`<script>` the standalone
+/// document would place in `<head>` (design-token `:root` block, `.code-block`
+/// panel stylesheet, component styles); it is emitted inside the wrapper before
+/// the body so the fragment is self-contained.
 ///
 /// When `features` is non-empty the wrapper is stamped with a stable
 /// `data-darkmatter-features` attribute (space-separated feature names, for
@@ -1604,6 +1640,7 @@ pub(crate) fn resolve_feature_body_assets(
 /// embeddable fragment carries its own feature assets.
 fn wrap_browser_html(
     body: &str,
+    page_assets: &str,
     ctx: &LayoutContext,
     page: &DarkmatterPage,
     features: &[PageFeature],
@@ -1754,6 +1791,12 @@ fn wrap_browser_html(
     output.push_str(" style=\"");
     output.push_str(&wrapper_styles);
     output.push_str("\">\n");
+
+    // Page-level `<style>`/`<script>` (the `:root` design tokens and the
+    // `.code-block` panel stylesheet the standalone `<head>` would carry) are
+    // embedded inside the wrapper so the fragment styles its own content without
+    // a nested `<head>`.
+    output.push_str(page_assets);
 
     // Inline feature assets are placed before the body so feature code can rely
     // on its own declarations being present when the body renders.

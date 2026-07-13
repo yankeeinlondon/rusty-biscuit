@@ -39,7 +39,7 @@ use renderable::browser::feature::{FeatureContext, FeatureResolver, PageFeature}
 use renderable::tree::{
     BrowserMermaidMode, BrowserRenderOptions, Diagnostic, Document, GraphicsMode, MarkdownDialect,
     MarkdownRenderOptions, RawHtmlPolicy, RenderStrictness, SourceDescriptor, TerminalMermaidMode,
-    render_browser_document_html, render_markdown_document,
+    render_browser_document_body, render_browser_document_html, render_markdown_document,
 };
 
 use renderable::tree::{NodeKind, RenderNode};
@@ -210,14 +210,25 @@ pub(crate) fn render_tree_html_with_context(
     ))
 }
 
-/// A browser render for Darkmatter's full-page path, keeping the body HTML and
-/// the requested page features separate so the caller can place feature assets
-/// **inside** an embeddable wrapper rather than in the document `<head>`.
+/// A browser render for Darkmatter's full-page path, keeping the standalone
+/// document, the embeddable body fragment, and the requested page features
+/// separate so the caller can place feature assets **inside** an embeddable
+/// wrapper rather than in the document `<head>`.
 ///
 /// See [`render_tree_html_page_body`].
 pub(crate) struct BrowserPageRender {
-    /// The rendered browser HTML (no feature assets injected).
+    /// The standalone full document (`<!DOCTYPE html>…`), for the no-wrapper
+    /// path where the page frame adds nothing so the output stands alone.
+    pub document: String,
+    /// The `<body>` inner HTML fragment — no `<!DOCTYPE>`/`<html>`/`<head>`/
+    /// `<body>` — for embedding inside the `<div class="darkmatter-page">`
+    /// wrapper.
     pub body: String,
+    /// The rolled-up page-level `<style>`/`<script>` assets (design-token
+    /// `:root` block, `.code-block` panel stylesheet, component styles) the
+    /// wrapper embeds inline before the body so the fragment is self-contained.
+    /// Empty when the render produced none.
+    pub assets: String,
     /// The deduplicated features the components requested, in first-seen order.
     pub features: Vec<PageFeature>,
 }
@@ -243,6 +254,12 @@ pub(crate) struct BrowserPageRender {
 ///    the caller resolves them through `resolver`/`feature_context` and injects
 ///    inline `<style>`/`<script>` into the page wrapper (spec "Body-only
 ///    renders").
+///
+/// The render is produced through the body-fragment path
+/// ([`render_browser_document_body`]) so [`BrowserPageRender::body`] is the
+/// `<body>` inner HTML with no document scaffold, ready to embed inside the
+/// page wrapper. [`BrowserPageRender::document`] carries the standalone
+/// full-document form for the no-wrapper path where the page frame adds nothing.
 ///
 /// ## Errors
 ///
@@ -276,10 +293,12 @@ pub(crate) fn render_tree_html_page_body(
     // requests without resolving/injecting them into `<head>`.
     browser_opts.defer_feature_injection = true;
 
-    let rendered = render_browser_document_html(&doc, &browser_opts)?;
+    let rendered = render_browser_document_body(&doc, &browser_opts)?;
     Ok(PipelineResult::new(
         BrowserPageRender {
-            body: rendered.output,
+            document: rendered.output.document,
+            body: rendered.output.body,
+            assets: rendered.output.assets,
             features: rendered.features,
         },
         fold_diagnostics,
