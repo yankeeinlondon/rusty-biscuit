@@ -68,8 +68,8 @@ enum Command {
     },
     /// Deterministic validate-and-resume gate for the `agent-errors` research
     /// topic (spec D10). Its subcommands are the mechanical half of the fleet
-    /// lifecycle: the fleet `success` stack runs `check` with `no_error: true`,
-    /// then resumes the session when a findings file survives.
+    /// lifecycle: the fleet `success` stack runs `check`, then branches on the
+    /// explicit outcome report status.
     AgentErrors {
         #[command(subcommand)]
         command: AgentErrorsCommand,
@@ -79,14 +79,14 @@ enum Command {
 #[derive(Debug, Subcommand)]
 enum AgentErrorsCommand {
     /// Check one provider's `agent-errors/<slug>.md` research document against
-    /// its facts seed, writing a JSON findings file (stale removed first,
-    /// written only when findings survive). Exits zero after writing so the
-    /// fleet `resume` step can fire; hard input errors exit non-zero.
+    /// its facts seed, writing an explicit Markdown outcome report. Input and
+    /// schema failures are reported as `gate_error`; report persistence errors
+    /// exit non-zero so lifecycle processing cannot consume stale state.
     Check {
         /// Provider slug (the research document stem).
         slug: String,
-        /// Findings-file path (default:
-        /// `docs/research/agent-errors/.findings/<slug>.json`).
+        /// Outcome-report path (default:
+        /// `docs/research/agent-errors/.findings/<slug>.md`).
         #[arg(long)]
         findings: Option<PathBuf>,
     },
@@ -277,20 +277,30 @@ fn run(area: Option<PathBuf>, command: Command) -> Result<ExitCode, GenError> {
                     let findings_path = findings
                         .unwrap_or_else(|| claudine_gen::default_findings_path(&area, &slug));
                     let report = claudine_gen::check_agent_errors(&area, &slug, &findings_path)?;
-                    if report.is_clean() {
-                        println!("{slug}: agent-errors research clean (no findings)");
-                    } else {
-                        println!(
-                            "{slug}: {} deterministic finding(s) written to {}",
-                            report.findings.len(),
-                            findings_path.display()
-                        );
-                        for finding in &report.findings {
-                            println!("  {}", finding.detail);
+                    match report.status {
+                        claudine_gen::GateStatus::Clean => {
+                            println!("{slug}: agent-errors research clean (explicit outcome)");
+                        }
+                        claudine_gen::GateStatus::Findings => {
+                            println!(
+                                "{slug}: {} deterministic finding(s) written to {}",
+                                report.findings.len(),
+                                findings_path.display()
+                            );
+                            for finding in &report.findings {
+                                println!("  {}", finding.detail);
+                            }
+                        }
+                        claudine_gen::GateStatus::GateError => {
+                            println!(
+                                "{slug}: deterministic gate error written to {}: {}",
+                                findings_path.display(),
+                                report.error.as_deref().unwrap_or("unknown gate error")
+                            );
                         }
                     }
-                    // Exit zero even with findings: the outcome is communicated
-                    // through the file so the fleet `resume` step can run.
+                    // Every persisted outcome exits zero so the fleet can
+                    // branch on its typed status. Persistence errors propagate.
                     Ok(ExitCode::SUCCESS)
                 }
             }

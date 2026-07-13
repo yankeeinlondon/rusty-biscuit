@@ -55,6 +55,7 @@ fn full_fixture() -> Fixture {
     for topic in [
         "acp",
         "agent-cli",
+        "agent-errors",
         "agent-logging",
         "agent-models",
         "model-config",

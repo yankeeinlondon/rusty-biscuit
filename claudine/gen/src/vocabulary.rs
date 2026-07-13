@@ -12,12 +12,10 @@
 //!
 //! ## Source lifecycle
 //!
-//! Phase A seeds each parser-backed provider's facts file with an
-//! `error_vocabulary:` key ([`FACTS_KEY`]); [`DECLARED_SOURCE`] is
-//! [`VocabularySource::Facts`]. Phase C re-points [`DECLARED_SOURCE`] to
-//! [`VocabularySource::Research`] (the `agent-errors` topic, [`RESEARCH_TOPIC`]),
-//! at which point the collision guard fails while any facts file still carries
-//! the key.
+//! The graduated source is the `agent-errors` research topic
+//! ([`RESEARCH_TOPIC`]). Its provenance-bearing objects are projected into the
+//! lean runtime shape below; the collision guard fails while any facts file
+//! still carries the retired [`FACTS_KEY`].
 //!
 //! ## Order is the behavior contract
 //!
@@ -33,6 +31,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::agent_errors_check::ResearchVocabulary;
 use crate::emit::{pascal, provider_variant, render_slice};
 use crate::errors::GenError;
 use crate::generate::{CheckOutcome, diff_lines, provider_slugs};
@@ -64,12 +63,11 @@ impl VocabularySource {
     }
 }
 
-/// The declared source-of-truth for the current phase. Phase A reads facts;
-/// Phase C flips this to [`VocabularySource::Research`], and the collision
-/// guard then rejects any facts file that still carries [`FACTS_KEY`].
-pub const DECLARED_SOURCE: VocabularySource = VocabularySource::Facts;
+/// The graduated source-of-truth. The collision guard rejects any retired
+/// facts entry that remains after research graduation.
+pub const DECLARED_SOURCE: VocabularySource = VocabularySource::Research;
 
-/// One provider's ordered error-classification vocabulary (facts shape).
+/// One provider's ordered runtime error-classification vocabulary.
 ///
 /// Absent `kind_buckets`/`code_buckets` deserialize as empty vectors —
 /// message-only classifiers (Pi, Antigravity) omit the kind branch, and only
@@ -124,13 +122,14 @@ pub struct CodeBucket {
 ///   match the [`ErrorVocabulary`] shape.
 pub fn load_error_vocabulary(inputs: &ProviderInputs) -> Result<Option<ErrorVocabulary>, GenError> {
     let facts = inputs.facts.get(FACTS_KEY);
-    // Phase C loads the `agent-errors` topic; its frontmatter (shape owned by
-    // that phase) is the research-layer value. In Phase A the topic is not
-    // loaded, so this stays `None`.
     let research = inputs.research.get(RESEARCH_TOPIC);
     match resolve_source(&inputs.slug, facts, research, DECLARED_SOURCE)? {
         None => Ok(None),
-        Some(value) => Ok(Some(parse_error_vocabulary(&inputs.slug, value)?)),
+        Some(value) => Ok(Some(parse_declared_vocabulary(
+            &inputs.slug,
+            value,
+            DECLARED_SOURCE,
+        )?)),
     }
 }
 
@@ -169,8 +168,56 @@ fn parse_error_vocabulary(slug: &str, value: &Value) -> Result<ErrorVocabulary, 
     })
 }
 
+/// Parses the selected source and drops research-only provenance while
+/// preserving branch, bucket, and item order exactly.
+fn parse_declared_vocabulary(
+    slug: &str,
+    value: &Value,
+    source: VocabularySource,
+) -> Result<ErrorVocabulary, GenError> {
+    match source {
+        VocabularySource::Facts => parse_error_vocabulary(slug, value),
+        VocabularySource::Research => {
+            let research: ResearchVocabulary = serde_json::from_value(value.clone()).map_err(
+                |err| GenError::VocabularyInvalid {
+                    slug: slug.to_string(),
+                    message: err.to_string(),
+                },
+            )?;
+            Ok(project_research_vocabulary(research))
+        }
+    }
+}
+
+fn project_research_vocabulary(research: ResearchVocabulary) -> ErrorVocabulary {
+    let project_buckets = |buckets: Vec<crate::agent_errors_check::ResearchBucket>| {
+        buckets
+            .into_iter()
+            .map(|bucket| KeywordBucket {
+                kind: bucket.kind,
+                needles: bucket.needles.into_iter().map(|needle| needle.text).collect(),
+            })
+            .collect()
+    };
+    ErrorVocabulary {
+        kind_buckets: project_buckets(research.kind_buckets),
+        msg_buckets: project_buckets(research.msg_buckets),
+        code_buckets: research
+            .code_buckets
+            .into_iter()
+            .flat_map(|bucket| {
+                let kind = bucket.kind;
+                bucket.codes.into_iter().map(move |code| CodeBucket {
+                    code: code.code,
+                    kind: kind.clone(),
+                })
+            })
+            .collect(),
+    }
+}
+
 // ---------------------------------------------------------------------------
-// Generation stage: facts → lib/src/stream/providers/vocabulary.rs
+// Generation stage: research → lib/src/stream/providers/vocabulary.rs
 // ---------------------------------------------------------------------------
 
 /// Wired providers with no structured stream parser. They emit an explicit
@@ -196,7 +243,7 @@ pub fn vocabulary_path(area: &Path) -> PathBuf {
 }
 
 /// Builds the deterministic `vocabulary.rs` text from every wired provider's
-/// facts (Kilo carries its own seeded copy of OpenCode's table).
+/// schema-validated `agent-errors` research document.
 ///
 /// ## Errors
 ///
@@ -208,25 +255,26 @@ pub fn build_vocabulary(area: &Path) -> Result<String, GenError> {
     let slugs = provider_slugs();
     let mut tables = Vec::with_capacity(slugs.len());
     for slug in slugs {
-        let inputs = inputs::load(area, slug, &[])?;
+        let inputs = inputs::load(area, slug, &[RESEARCH_TOPIC])?;
         let loaded = load_error_vocabulary(&inputs)?;
         let parserless = PARSERLESS_SLUGS.contains(&slug);
         let vocab = match (loaded, parserless) {
             // Providers without a stream parser emit an explicit empty table.
             (None, true) => ErrorVocabulary::default(),
-            (Some(_), true) => {
+            (Some(vocab), true) if vocab != ErrorVocabulary::default() => {
                 return Err(gen_invalid(
                     slug,
                     "provider has no structured stream parser but carries an \
-                     `error_vocabulary` — remove it (only parser-backed providers \
-                     have vocabularies)",
+                     executable `agent-errors` vocabulary — keep its researched \
+                     findings non-executable until a parser lands",
                 ));
             }
+            (Some(vocab), true) => vocab,
             (None, false) => {
                 return Err(gen_invalid(
                     slug,
-                    "parser-backed provider is missing its required `error_vocabulary` \
-                     (no facts key) — seed it before generating",
+                    "parser-backed provider is missing its required ordered vocabulary \
+                     in `agent-errors` research — research it before generating",
                 ));
             }
             (Some(vocab), false) => {
@@ -353,7 +401,7 @@ fn emit_file(tables: &[(&str, &str, ErrorVocabulary)]) -> String {
     for (slug, _, _) in tables {
         if !PARSERLESS_SLUGS.contains(slug) {
             out.push_str(&format!(
-                "//   docs/providers/facts/{slug}.yaml (error_vocabulary)\n"
+                "//   docs/research/agent-errors/{slug}.md (ordered vocabulary projection)\n"
             ));
         }
     }
@@ -463,6 +511,30 @@ mod tests {
         })
     }
 
+    fn research_vocab() -> Value {
+        json!({
+            "kind_buckets": [{
+                "kind": "api_remote",
+                "needles": [
+                    { "text": "rate", "evidence": "seed" },
+                    { "text": "overloaded", "evidence": "documented", "source": "https://example.com/errors" }
+                ]
+            }],
+            "msg_buckets": [{
+                "kind": "configuration",
+                "needles": [{ "text": "api key", "evidence": "seed" }]
+            }],
+            "code_buckets": [{
+                "kind": "agent_native",
+                "codes": [
+                    { "code": -32700, "name": "PARSE_ERROR", "evidence": "seed" },
+                    { "code": -32600, "evidence": "source_code", "source": "https://example.com/source" }
+                ]
+            }],
+            "gaps": [{ "area": "capacity", "notes": "Exact phrasing remains unknown." }]
+        })
+    }
+
     #[test]
     fn parse_preserves_sequence_order_of_buckets_and_needles() {
         let vocab = parse_error_vocabulary("codex", &facts_vocab()).unwrap();
@@ -517,6 +589,26 @@ mod tests {
         assert_eq!(codes, [-32004, -32005, -32700]);
         assert_eq!(vocab.code_buckets[0].kind, "configuration");
         assert_eq!(vocab.code_buckets[2].kind, "agent_native");
+    }
+
+    #[test]
+    fn research_projection_drops_provenance_and_preserves_order() {
+        let vocab = parse_declared_vocabulary(
+            "codex",
+            &research_vocab(),
+            VocabularySource::Research,
+        )
+        .unwrap();
+        assert_eq!(vocab.kind_buckets[0].kind, "api_remote");
+        assert_eq!(vocab.kind_buckets[0].needles, ["rate", "overloaded"]);
+        assert_eq!(vocab.msg_buckets[0].needles, ["api key"]);
+        assert_eq!(
+            vocab.code_buckets,
+            [
+                CodeBucket { code: -32700, kind: "agent_native".into() },
+                CodeBucket { code: -32600, kind: "agent_native".into() },
+            ]
+        );
     }
 
     #[test]
@@ -575,6 +667,29 @@ mod tests {
             }
             other => panic!("expected VocabularyCollision, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn graduated_loader_rejects_a_stale_facts_entry() {
+        let inputs = ProviderInputs {
+            slug: "codex".into(),
+            roster: json!({}),
+            facts: [(FACTS_KEY.into(), facts_vocab())].into_iter().collect(),
+            research: [(RESEARCH_TOPIC.into(), research_vocab())]
+                .into_iter()
+                .collect(),
+            sidecars: Default::default(),
+            overrides: Default::default(),
+        };
+        let err = load_error_vocabulary(&inputs).unwrap_err();
+        assert!(matches!(
+            err,
+            GenError::VocabularyCollision {
+                declared,
+                offending,
+                ..
+            } if declared == "research" && offending == "facts"
+        ));
     }
 
     // -- generation-stage validation + emission ----------------------------
@@ -734,8 +849,10 @@ mod tests {
         assert!(codex_at < goose_at, "table order must follow the input order");
         assert!(file.contains("Provider::Codex => &CODEX_VOCABULARY,"));
         assert!(file.contains("Provider::Goose => &GOOSE_VOCABULARY,"));
-        // Goose carries no facts input line; codex does.
-        assert!(file.contains("docs/providers/facts/codex.yaml (error_vocabulary)"));
-        assert!(!file.contains("docs/providers/facts/goose.yaml"));
+        // Goose is research-only and therefore carries no executable input line.
+        assert!(file.contains(
+            "docs/research/agent-errors/codex.md (ordered vocabulary projection)"
+        ));
+        assert!(!file.contains("docs/research/agent-errors/goose.md"));
     }
 }

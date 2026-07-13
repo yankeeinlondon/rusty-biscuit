@@ -28,8 +28,8 @@ pub mod signals;
 pub mod vocabulary;
 
 pub use agent_errors_check::{
-    Branch, Check, Finding, FindingsReport, ResearchVocabulary, check_provider as check_agent_errors,
-    default_findings_path, evaluate as evaluate_agent_errors,
+    Branch, Check, Finding, FindingsReport, GateStatus, ResearchVocabulary,
+    check_provider as check_agent_errors, default_findings_path, evaluate as evaluate_agent_errors,
 };
 pub use apply::{ApplyOutcome, DeclinedDrift, Decision, apply_generations, override_snippet};
 pub use artifact::{ArtifactIndex, artifact_path};

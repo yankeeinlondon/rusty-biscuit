@@ -1,15 +1,13 @@
-//! Loader tests over the REAL committed facts inputs (Phase A seed).
+//! Loader tests over the REAL graduated `agent-errors` research inputs.
 //!
-//! These prove the seeded `error_vocabulary` in every parser-backed
-//! provider's facts file parses through the vocabulary loader with its bucket
-//! order and repeated kinds intact — and, because needles are typed `String`,
-//! that an accidentally-unquoted numeric needle (e.g. `503` parsing as an
-//! integer) is a hard parse failure rather than silent data loss.
+//! These prove every parser-backed provider projects provenance-bearing
+//! frontmatter through the runtime vocabulary loader with bucket order and
+//! repeated kinds intact.
 
 use std::path::Path;
 
 use claudine_gen::inputs::load;
-use claudine_gen::{build_vocabulary, load_error_vocabulary};
+use claudine_gen::{RESEARCH_TOPIC, build_vocabulary, load_error_vocabulary};
 
 /// The claudine package-area root (parent of this crate's manifest dir).
 fn area() -> &'static Path {
@@ -19,18 +17,19 @@ fn area() -> &'static Path {
 }
 
 /// Every provider that owns a structured stream parser (Kilo shares
-/// OpenCode's wire parser but carries its own seeded vocabulary).
-const SEEDED: &[&str] = &[
+/// OpenCode's wire parser but carries its own researched vocabulary).
+const PARSER_BACKED: &[&str] = &[
     "claude", "codex", "gemini", "opencode", "kilo", "pi", "qwen", "antigravity", "kimi",
 ];
 
 #[test]
-fn every_seeded_facts_vocabulary_parses_with_string_needles() {
-    for slug in SEEDED {
-        let inputs = load(area(), slug, &[]).unwrap_or_else(|err| panic!("load `{slug}`: {err}"));
+fn every_research_vocabulary_projects_to_runtime_strings() {
+    for slug in PARSER_BACKED {
+        let inputs = load(area(), slug, &[RESEARCH_TOPIC])
+            .unwrap_or_else(|err| panic!("load `{slug}`: {err}"));
         let vocab = load_error_vocabulary(&inputs)
             .unwrap_or_else(|err| panic!("parse `{slug}` vocabulary: {err}"))
-            .unwrap_or_else(|| panic!("`{slug}` facts carry no error_vocabulary"));
+            .unwrap_or_else(|| panic!("`{slug}` research carries no runtime vocabulary"));
         assert!(
             !vocab.msg_buckets.is_empty(),
             "`{slug}`: a parser-backed provider must seed a non-empty message vocabulary"
@@ -38,15 +37,15 @@ fn every_seeded_facts_vocabulary_parses_with_string_needles() {
         for bucket in vocab.kind_buckets.iter().chain(&vocab.msg_buckets) {
             assert!(
                 !bucket.needles.is_empty(),
-                "`{slug}`: every seeded bucket must carry at least one needle"
+                "`{slug}`: every projected bucket must carry at least one needle"
             );
         }
     }
 }
 
 #[test]
-fn kimi_seed_carries_the_complete_jsonrpc_code_mapping() {
-    let inputs = load(area(), "kimi", &[]).unwrap();
+fn kimi_research_projects_the_complete_jsonrpc_code_mapping() {
+    let inputs = load(area(), "kimi", &[RESEARCH_TOPIC]).unwrap();
     let vocab = load_error_vocabulary(&inputs).unwrap().unwrap();
     // AUTH_EXPIRED, CHAT_PROVIDER_ERROR, then the five standard JSON-RPC codes.
     let codes: Vec<i64> = vocab.code_buckets.iter().map(|c| c.code).collect();
@@ -69,15 +68,17 @@ fn build_vocabulary_is_deterministic_and_well_formed() {
 }
 
 #[test]
-fn kilo_seed_is_a_verbatim_ordered_copy_of_opencode() {
-    let opencode = load_error_vocabulary(&load(area(), "opencode", &[]).unwrap())
+fn kilo_research_is_a_verbatim_ordered_copy_of_opencode() {
+    let opencode = load_error_vocabulary(
+        &load(area(), "opencode", &[RESEARCH_TOPIC]).unwrap(),
+    )
         .unwrap()
         .unwrap();
-    let kilo = load_error_vocabulary(&load(area(), "kilo", &[]).unwrap())
+    let kilo = load_error_vocabulary(&load(area(), "kilo", &[RESEARCH_TOPIC]).unwrap())
         .unwrap()
         .unwrap();
     assert_eq!(
         opencode, kilo,
-        "Kilo's Phase A seed must be a verbatim ordered copy of OpenCode's table"
+        "Kilo's graduated research must remain an ordered copy of OpenCode's table"
     );
 }

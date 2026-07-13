@@ -2,19 +2,19 @@
 //! topic (spec `2026-07-11-provider-errors-as-data`, D10).
 //!
 //! This is the mechanical half of the fleet lifecycle: it reads one provider's
-//! `agent-errors/<slug>.md` research frontmatter and its Phase-A facts seed,
-//! runs the deterministic checks the fleet cannot self-attest, and writes a
-//! JSON findings file. The fleet `success` stack runs this check with
-//! `no_error: true`, then — when the file exists — `resume`s the same research
-//! session with the findings so the model corrects its own output.
+//! `agent-errors/<slug>.md` research frontmatter and its immutable Phase-A seed,
+//! runs the deterministic checks the fleet cannot self-attest, and writes an
+//! explicit Markdown outcome report. The fleet `success` stack branches on
+//! that report's `status` instead of inferring success from file absence.
 //!
-//! ## Findings-file contract
+//! ## Outcome-report contract
 //!
-//! The check **removes any stale findings first**, then writes the file **only
-//! when at least one finding survives**. So an absent file means "clean" and a
-//! present file means "needs a resume" — the two states the `when:` guard and
-//! the resume message branch on. The write is atomic (temp file + rename) so a
-//! concurrent reader never observes a half-written report.
+//! Every completed check writes exactly one typed state: `clean`, `findings`,
+//! or `gate_error`. Replacement uses a synced sibling temporary file and an
+//! atomic persist, so the last valid failure report remains visible until its
+//! replacement is durably ready. If the replacement itself fails, the command
+//! returns an error and the fleet lifecycle stops before evaluating a stale
+//! report.
 //!
 //! ## Why here and not in the mapping registry
 //!
@@ -26,6 +26,7 @@
 //! vocabulary into the runtime tables.
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -33,7 +34,7 @@ use serde_json::Value;
 
 use crate::errors::GenError;
 use crate::inputs;
-use crate::vocabulary::{ErrorVocabulary, FACTS_KEY};
+use crate::vocabulary::ErrorVocabulary;
 
 /// The research topic directory under `docs/research/`.
 const TOPIC: &str = "agent-errors";
@@ -114,7 +115,7 @@ pub struct Gap {
 
 /// Which structured branch a needle lives in — carried on findings so a
 /// resume message can point the model at the exact list to fix.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Branch {
     Kind,
@@ -133,18 +134,22 @@ impl Branch {
 }
 
 /// The deterministic check a finding came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Check {
-    /// A seeded needle/code is missing from the research frontmatter (the
-    /// mechanical half of R1 — seeds are sticky).
-    SeedPreservation,
+    /// A seeded needle/code is absent from its research branch.
+    SeedRemoval,
+    /// A seeded needle/code moved to a different semantic kind.
+    SeedRekind,
+    /// A seeded needle/code changed bucket or item position.
+    SeedReorder,
     /// A research needle is not lowercase or carries leading/trailing/interior
     /// whitespace the substring matcher would never see.
     NeedleHygiene,
     /// A non-`seed` needle/code lacks the required `source` citation.
     ProvenanceCoherence,
-    /// A needle/code claims `evidence: seed` but is absent from the facts seed.
+    /// A needle/code claims `evidence: seed` but does not match its immutable
+    /// Phase-A seed row.
     InventedSeed,
     /// No overload/capacity vocabulary in any bucket AND no `gaps` entry
     /// acknowledging it.
@@ -152,32 +157,54 @@ pub enum Check {
 }
 
 /// One deterministic finding.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Finding {
     pub check: Check,
     pub branch: Option<Branch>,
     pub detail: String,
 }
 
-/// The full findings report for one provider's research document.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// The explicit result of one deterministic gate execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GateStatus {
+    Clean,
+    Findings,
+    GateError,
+}
+
+/// The durable outcome report for one provider's research document.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct FindingsReport {
+    pub status: GateStatus,
     pub provider: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub findings: Vec<Finding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 impl FindingsReport {
-    /// A clean report has no surviving findings — the fleet leaves no file.
+    /// A clean report is explicit and never inferred from file absence.
     pub fn is_clean(&self) -> bool {
-        self.findings.is_empty()
+        self.status == GateStatus::Clean
+    }
+
+    fn gate_error(provider: &str, error: impl Into<String>) -> Self {
+        Self {
+            status: GateStatus::GateError,
+            provider: provider.to_string(),
+            findings: Vec::new(),
+            error: Some(error.into()),
+        }
     }
 }
 
 /// Runs every deterministic check on one provider's research vocabulary
-/// against its facts seed. Pure and order-stable: findings are grouped by
+/// against its immutable Phase-A seed. Pure and order-stable: findings are grouped by
 /// check in a fixed sequence so the same inputs always produce the same file.
 ///
-/// `seed` is `None` for a parser-less provider (no facts seed to preserve);
+/// `seed` is `None` for a parser-less provider (no Phase-A seed to preserve);
 /// seed-preservation and invented-seed then degenerate to "any `evidence:
 /// seed` needle is invented", which is the correct behavior.
 pub fn evaluate(
@@ -193,15 +220,21 @@ pub fn evaluate(
     check_motivating_class(research, &mut findings);
 
     FindingsReport {
+        status: if findings.is_empty() {
+            GateStatus::Clean
+        } else {
+            GateStatus::Findings
+        },
         provider: provider.to_string(),
         findings,
+        error: None,
     }
 }
 
-/// Every seeded needle/code must reappear in the research frontmatter of the
-/// same branch (R1 mechanical half). Text is compared verbatim — seeds are
-/// already lowercase, and hygiene separately catches a research needle that
-/// mangled one.
+/// Every seeded needle/code must retain its branch, bucket position, semantic
+/// kind, item position, and value (R1/R3/R4 mechanical half). A mismatch is
+/// classified as removal, re-kind, or reorder so adjudication can apply the
+/// corresponding rule deliberately.
 fn check_seed_preservation(
     seed: Option<&ErrorVocabulary>,
     research: &ResearchVocabulary,
@@ -209,50 +242,70 @@ fn check_seed_preservation(
 ) {
     let Some(seed) = seed else { return };
 
-    let kind_texts = research_texts(&research.kind_buckets);
-    let msg_texts = research_texts(&research.msg_buckets);
-    let codes = research_codes(research);
+    let seed_rows = seed_rows(seed);
+    let research_rows = research_rows(research);
 
-    for bucket in &seed.kind_buckets {
-        for needle in &bucket.needles {
-            if !kind_texts.contains(needle.as_str()) {
-                findings.push(Finding {
-                    check: Check::SeedPreservation,
-                    branch: Some(Branch::Kind),
-                    detail: format!(
-                        "seeded kind_buckets needle `{needle}` is missing from the research \
-                         frontmatter — seeds are sticky (R1); re-add it with `evidence: seed`"
-                    ),
-                });
-            }
+    for seeded in &seed_rows {
+        if research_rows.iter().any(|candidate| candidate.same_identity(seeded)) {
+            continue;
         }
-    }
-    for bucket in &seed.msg_buckets {
-        for needle in &bucket.needles {
-            if !msg_texts.contains(needle.as_str()) {
-                findings.push(Finding {
-                    check: Check::SeedPreservation,
-                    branch: Some(Branch::Msg),
-                    detail: format!(
-                        "seeded msg_buckets needle `{needle}` is missing from the research \
-                         frontmatter — seeds are sticky (R1); re-add it with `evidence: seed`"
-                    ),
-                });
-            }
-        }
-    }
-    for bucket in &seed.code_buckets {
-        if !codes.contains(&bucket.code) {
-            findings.push(Finding {
-                check: Check::SeedPreservation,
-                branch: Some(Branch::Code),
-                detail: format!(
-                    "seeded code_buckets code `{}` is missing from the research frontmatter — \
-                     seeds are sticky (R1); re-add it with `evidence: seed`",
-                    bucket.code
+
+        let same_value: Vec<&SeedRow> = research_rows
+            .iter()
+            .filter(|candidate| candidate.branch == seeded.branch && candidate.value == seeded.value)
+            .collect();
+        let (check, detail) = if same_value.is_empty() {
+            (
+                Check::SeedRemoval,
+                format!(
+                    "seeded {} {} `{}` at bucket {}, item {} is missing from that research \
+                     branch — seeds are sticky (R1)",
+                    seeded.branch.wire(),
+                    seeded.value.label(),
+                    seeded.value,
+                    seeded.bucket_index,
+                    seeded.item_index
                 ),
-            });
-        }
+            )
+        } else if same_value.iter().all(|candidate| candidate.kind != seeded.kind) {
+            let candidate = same_value[0];
+            (
+                Check::SeedRekind,
+                format!(
+                    "seeded {} {} `{}` changed semantic kind from `{}` to `{}` — re-kinds \
+                     require explicit R4 adjudication",
+                    seeded.branch.wire(),
+                    seeded.value.label(),
+                    seeded.value,
+                    seeded.kind,
+                    candidate.kind
+                ),
+            )
+        } else {
+            let candidate = same_value
+                .iter()
+                .find(|candidate| candidate.kind == seeded.kind)
+                .expect("same-kind candidate established above");
+            (
+                Check::SeedReorder,
+                format!(
+                    "seeded {} {} `{}` moved from bucket {}, item {} to bucket {}, item {} — \
+                     cascade-order changes require explicit R3 adjudication",
+                    seeded.branch.wire(),
+                    seeded.value.label(),
+                    seeded.value,
+                    seeded.bucket_index,
+                    seeded.item_index,
+                    candidate.bucket_index,
+                    candidate.item_index
+                ),
+            )
+        };
+        findings.push(Finding {
+            check,
+            branch: Some(seeded.branch),
+            detail,
+        });
     }
 }
 
@@ -305,47 +358,24 @@ fn check_needle_hygiene(research: &ResearchVocabulary, findings: &mut Vec<Findin
 }
 
 /// Provenance coherence: every non-`seed` needle/code needs a `source`
-/// citation, and every `evidence: seed` claim must correspond to a real seed
-/// needle/code (no invented provenance).
+/// citation, and every `evidence: seed` claim must match a complete seed-row
+/// identity (no invented or behavior-changing provenance).
 fn check_provenance(
     seed: Option<&ErrorVocabulary>,
     research: &ResearchVocabulary,
     findings: &mut Vec<Finding>,
 ) {
-    let seed_kind = seed.map(|s| flatten_seed(&s.kind_buckets)).unwrap_or_default();
-    let seed_msg = seed.map(|s| flatten_seed(&s.msg_buckets)).unwrap_or_default();
-    let seed_codes: std::collections::BTreeSet<i64> = seed
-        .map(|s| s.code_buckets.iter().map(|c| c.code).collect())
-        .unwrap_or_default();
-
-    for (branch, buckets, seed_set) in [
-        (Branch::Kind, &research.kind_buckets, &seed_kind),
-        (Branch::Msg, &research.msg_buckets, &seed_msg),
-    ] {
-        for bucket in buckets {
-            for needle in &bucket.needles {
-                provenance_for(
-                    branch,
-                    &needle.text,
-                    &needle.evidence,
-                    needle.source.as_deref(),
-                    seed_set.contains(needle.text.as_str()),
-                    findings,
-                );
-            }
-        }
-    }
-    for bucket in &research.code_buckets {
-        for code in &bucket.codes {
-            provenance_for(
-                Branch::Code,
-                &code.code.to_string(),
-                &code.evidence,
-                code.source.as_deref(),
-                seed_codes.contains(&code.code),
-                findings,
-            );
-        }
+    let seed_rows = seed.map(seed_rows).unwrap_or_default();
+    for row in research_rows_with_provenance(research) {
+        let in_seed = seed_rows.iter().any(|seeded| row.row.same_identity(seeded));
+        provenance_for(
+            row.row.branch,
+            &row.row.value.to_string(),
+            row.evidence,
+            row.source,
+            in_seed,
+            findings,
+        );
     }
 }
 
@@ -364,7 +394,8 @@ fn provenance_for(
                 check: Check::InventedSeed,
                 branch: Some(branch),
                 detail: format!(
-                    "{}: `{label}` claims `evidence: seed` but is not in the facts seed — cite \
+                    "{}: `{label}` claims `evidence: seed` but does not match the seed's branch, \
+                     bucket, semantic kind, and item position — restore the seed row or cite \
                      real evidence (documented/source_code/issue_tracker/empirical) instead",
                     branch.wire()
                 ),
@@ -422,34 +453,128 @@ fn check_motivating_class(research: &ResearchVocabulary, findings: &mut Vec<Find
     }
 }
 
-/// Flattens research needle text into a lookup set for one branch.
-fn research_texts(buckets: &[ResearchBucket]) -> std::collections::BTreeSet<&str> {
-    buckets
-        .iter()
-        .flat_map(|b| b.needles.iter())
-        .map(|n| n.text.as_str())
-        .collect()
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SeedValue {
+    Needle(String),
+    Code(i64),
 }
 
-/// Collects every research code value across code buckets.
-fn research_codes(research: &ResearchVocabulary) -> std::collections::BTreeSet<i64> {
-    research
-        .code_buckets
-        .iter()
-        .flat_map(|b| b.codes.iter())
-        .map(|c| c.code)
-        .collect()
+impl SeedValue {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Needle(_) => "needle",
+            Self::Code(_) => "code",
+        }
+    }
 }
 
-/// Flattens a seed branch's needle strings into a lookup set.
-fn flatten_seed(
+impl std::fmt::Display for SeedValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Needle(value) => value.fmt(f),
+            Self::Code(value) => value.fmt(f),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SeedRow {
+    branch: Branch,
+    bucket_index: usize,
+    kind: String,
+    item_index: usize,
+    value: SeedValue,
+}
+
+impl SeedRow {
+    fn same_identity(&self, other: &Self) -> bool {
+        self == other
+    }
+}
+
+struct ProvenanceRow<'a> {
+    row: SeedRow,
+    evidence: &'a str,
+    source: Option<&'a str>,
+}
+
+fn keyword_rows(
+    branch: Branch,
     buckets: &[crate::vocabulary::KeywordBucket],
-) -> std::collections::BTreeSet<String> {
+) -> Vec<SeedRow> {
     buckets
         .iter()
-        .flat_map(|b| b.needles.iter())
-        .cloned()
+        .enumerate()
+        .flat_map(|(bucket_index, bucket)| {
+            bucket.needles.iter().enumerate().map(move |(item_index, needle)| SeedRow {
+                branch,
+                bucket_index,
+                kind: bucket.kind.clone(),
+                item_index,
+                value: SeedValue::Needle(needle.clone()),
+            })
+        })
         .collect()
+}
+
+fn seed_rows(seed: &ErrorVocabulary) -> Vec<SeedRow> {
+    let mut rows = keyword_rows(Branch::Kind, &seed.kind_buckets);
+    rows.extend(keyword_rows(Branch::Msg, &seed.msg_buckets));
+    rows.extend(seed.code_buckets.iter().enumerate().map(|(bucket_index, bucket)| SeedRow {
+        branch: Branch::Code,
+        bucket_index,
+        kind: bucket.kind.clone(),
+        item_index: 0,
+        value: SeedValue::Code(bucket.code),
+    }));
+    rows
+}
+
+fn research_rows(research: &ResearchVocabulary) -> Vec<SeedRow> {
+    research_rows_with_provenance(research)
+        .into_iter()
+        .map(|row| row.row)
+        .collect()
+}
+
+fn research_rows_with_provenance(research: &ResearchVocabulary) -> Vec<ProvenanceRow<'_>> {
+    let mut rows = Vec::new();
+    for (branch, buckets) in [
+        (Branch::Kind, &research.kind_buckets),
+        (Branch::Msg, &research.msg_buckets),
+    ] {
+        for (bucket_index, bucket) in buckets.iter().enumerate() {
+            for (item_index, needle) in bucket.needles.iter().enumerate() {
+                rows.push(ProvenanceRow {
+                    row: SeedRow {
+                        branch,
+                        bucket_index,
+                        kind: bucket.kind.clone(),
+                        item_index,
+                        value: SeedValue::Needle(needle.text.clone()),
+                    },
+                    evidence: &needle.evidence,
+                    source: needle.source.as_deref(),
+                });
+            }
+        }
+    }
+    for (bucket_index, bucket) in research.code_buckets.iter().enumerate() {
+        for (item_index, code) in bucket.codes.iter().enumerate() {
+            rows.push(ProvenanceRow {
+                row: SeedRow {
+                    branch: Branch::Code,
+                    bucket_index,
+                    kind: bucket.kind.clone(),
+                    item_index,
+                    value: SeedValue::Code(code.code),
+                },
+                evidence: &code.evidence,
+                source: code.source.as_deref(),
+            });
+        }
+    }
+    rows
 }
 
 // ---------------------------------------------------------------------------
@@ -461,31 +586,25 @@ fn research_doc_path(area: &Path, slug: &str) -> PathBuf {
     area.join(format!("docs/research/{TOPIC}/{slug}.md"))
 }
 
-/// The default transient findings-file path (removed on a clean run; never
-/// committed). Callers may override it via `--findings`.
+/// The default transient outcome-report path (never committed). Callers may
+/// override it via `--findings`.
 pub fn default_findings_path(area: &Path, slug: &str) -> PathBuf {
-    area.join(format!("docs/research/{TOPIC}/.findings/{slug}.json"))
+    area.join(format!("docs/research/{TOPIC}/.findings/{slug}.md"))
 }
 
-/// Reads a provider's facts seed vocabulary, or `None` when the provider has
-/// no facts seed (parser-less provider, or the seed already graduated).
+/// Reads a provider's immutable Phase-A seed baseline, or `None` when the
+/// provider never had runtime vocabulary (currently Goose).
 pub fn read_seed(area: &Path, slug: &str) -> Result<Option<ErrorVocabulary>, GenError> {
-    let path = area.join(format!("docs/providers/facts/{slug}.yaml"));
+    let path = area.join(format!("docs/research/{TOPIC}/_seeds/{slug}.yaml"));
     if !path.is_file() {
         return Ok(None);
     }
-    let facts = inputs::read_yaml(&path)?;
-    match facts.get(FACTS_KEY) {
-        None => Ok(None),
-        Some(value) => {
-            let vocab: ErrorVocabulary =
-                serde_json::from_value(value.clone()).map_err(|err| GenError::VocabularyInvalid {
-                    slug: slug.to_string(),
-                    message: err.to_string(),
-                })?;
-            Ok(Some(vocab))
-        }
-    }
+    let value = inputs::read_yaml(&path)?;
+    let vocab = serde_json::from_value(value).map_err(|err| GenError::VocabularyInvalid {
+        slug: slug.to_string(),
+        message: err.to_string(),
+    })?;
+    Ok(Some(vocab))
 }
 
 /// Reads a provider's research vocabulary from its schema-validated
@@ -504,63 +623,71 @@ fn parse_research(slug: &str, frontmatter: &Value) -> Result<ResearchVocabulary,
     })
 }
 
-/// The full gate: read the seed + research doc, evaluate, and reconcile the
-/// findings file (stale removed first, written only when findings survive).
+/// The full gate: read the seed + research doc, evaluate, and atomically replace
+/// the explicit outcome report.
 ///
 /// ## Returns
 ///
-/// The [`FindingsReport`], whether or not it is clean, so the caller can print
-/// a summary and exit zero (findings are communicated via the file, per D10).
+/// The [`FindingsReport`] after it has been durably persisted. Input and schema
+/// failures become `gate_error` reports. An inability to persist the report is
+/// returned as an error so lifecycle processing cannot inspect stale state.
 pub fn check_provider(
     area: &Path,
     slug: &str,
     findings_path: &Path,
 ) -> Result<FindingsReport, GenError> {
-    let seed = read_seed(area, slug)?;
-    let research = read_research(area, slug)?;
-    let report = evaluate(slug, seed.as_ref(), &research);
-    reconcile_findings_file(findings_path, &report)?;
+    let report = match read_seed(area, slug).and_then(|seed| {
+        read_research(area, slug).map(|research| evaluate(slug, seed.as_ref(), &research))
+    }) {
+        Ok(report) => report,
+        Err(error) => FindingsReport::gate_error(slug, error.to_string()),
+    };
+    write_outcome_report(findings_path, &report)?;
     Ok(report)
 }
 
-/// Removes any stale findings file, then writes the report atomically only
-/// when it carries at least one finding.
-fn reconcile_findings_file(path: &Path, report: &FindingsReport) -> Result<(), GenError> {
-    // Stale-first: a prior run's file must never survive a now-clean run.
-    if path.exists() {
-        fs::remove_file(path).map_err(|source| GenError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    }
-    if report.is_clean() {
-        return Ok(());
-    }
+/// Atomically replaces the prior outcome without deleting it first.
+fn write_outcome_report(path: &Path, report: &FindingsReport) -> Result<(), GenError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|source| GenError::Io {
             path: parent.to_path_buf(),
             source,
         })?;
     }
-    let json = serde_json::to_string_pretty(report).map_err(|err| GenError::Json {
+    let yaml = serde_yaml_ng::to_string(report).map_err(|err| GenError::Json {
         message: err.to_string(),
     })?;
-    atomic_write(path, &json)
+    let contents = format!("---\n{yaml}---\n\n# Agent Errors Gate Outcome\n");
+    atomic_write(path, contents.as_bytes())
 }
 
-/// Writes `contents` to `path` via a sibling temp file + rename so a reader
-/// never sees a partial JSON document. The destination was already removed by
-/// [`reconcile_findings_file`], so the rename lands cleanly on every OS.
-fn atomic_write(path: &Path, contents: &str) -> Result<(), GenError> {
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, contents).map_err(|source| GenError::Io {
-        path: tmp.clone(),
+/// Writes and syncs a unique sibling temporary file before atomically replacing
+/// the destination. `persist` overwrites on all supported platforms.
+fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), GenError> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut tmp = tempfile::NamedTempFile::new_in(parent).map_err(|source| GenError::Io {
+        path: parent.to_path_buf(),
         source,
     })?;
-    fs::rename(&tmp, path).map_err(|source| GenError::Io {
+    tmp.as_file_mut()
+        .write_all(contents)
+        .and_then(|()| tmp.as_file_mut().sync_all())
+        .map_err(|source| GenError::Io {
+            path: tmp.path().to_path_buf(),
+            source,
+        })?;
+    tmp.persist(path).map_err(|error| GenError::Io {
         path: path.to_path_buf(),
-        source,
-    })
+        source: error.error,
+    })?;
+    #[cfg(unix)]
+    fs::File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|source| GenError::Io {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -570,18 +697,34 @@ mod tests {
 
     fn seed() -> ErrorVocabulary {
         ErrorVocabulary {
-            kind_buckets: vec![KeywordBucket {
-                kind: "api_remote".into(),
-                needles: vec!["rate".into(), "quota".into()],
-            }],
+            kind_buckets: vec![
+                KeywordBucket {
+                    kind: "api_remote".into(),
+                    needles: vec!["rate".into(), "quota".into()],
+                },
+                KeywordBucket {
+                    kind: "configuration".into(),
+                    needles: vec!["auth".into()],
+                },
+                KeywordBucket {
+                    kind: "api_remote".into(),
+                    needles: vec!["upstream".into()],
+                },
+            ],
             msg_buckets: vec![KeywordBucket {
                 kind: "configuration".into(),
                 needles: vec!["api key".into()],
             }],
-            code_buckets: vec![CodeBucket {
-                code: -32001,
-                kind: "configuration".into(),
-            }],
+            code_buckets: vec![
+                CodeBucket {
+                    code: -32001,
+                    kind: "configuration".into(),
+                },
+                CodeBucket {
+                    code: -32002,
+                    kind: "api_remote".into(),
+                },
+            ],
         }
     }
 
@@ -597,27 +740,48 @@ mod tests {
     /// covers the capacity class — no findings.
     fn clean_research() -> ResearchVocabulary {
         ResearchVocabulary {
-            kind_buckets: vec![ResearchBucket {
-                kind: "api_remote".into(),
-                needles: vec![
-                    needle("rate", "seed", None),
-                    needle("quota", "seed", None),
-                    needle("overloaded", "documented", Some("https://example/docs")),
-                ],
-            }],
+            kind_buckets: vec![
+                ResearchBucket {
+                    kind: "api_remote".into(),
+                    needles: vec![
+                        needle("rate", "seed", None),
+                        needle("quota", "seed", None),
+                        needle("overloaded", "documented", Some("https://example/docs")),
+                    ],
+                },
+                ResearchBucket {
+                    kind: "configuration".into(),
+                    needles: vec![needle("auth", "seed", None)],
+                },
+                ResearchBucket {
+                    kind: "api_remote".into(),
+                    needles: vec![needle("upstream", "seed", None)],
+                },
+            ],
             msg_buckets: vec![ResearchBucket {
                 kind: "configuration".into(),
                 needles: vec![needle("api key", "seed", None)],
             }],
-            code_buckets: vec![ResearchCodeBucket {
-                kind: "configuration".into(),
-                codes: vec![ResearchCode {
-                    code: -32001,
-                    name: Some("AUTH_EXPIRED".into()),
-                    evidence: "seed".into(),
-                    source: None,
-                }],
-            }],
+            code_buckets: vec![
+                ResearchCodeBucket {
+                    kind: "configuration".into(),
+                    codes: vec![ResearchCode {
+                        code: -32001,
+                        name: Some("AUTH_EXPIRED".into()),
+                        evidence: "seed".into(),
+                        source: None,
+                    }],
+                },
+                ResearchCodeBucket {
+                    kind: "api_remote".into(),
+                    codes: vec![ResearchCode {
+                        code: -32002,
+                        name: Some("REMOTE_ERROR".into()),
+                        evidence: "seed".into(),
+                        source: None,
+                    }],
+                },
+            ],
             gaps: vec![],
         }
     }
@@ -629,33 +793,92 @@ mod tests {
     }
 
     #[test]
-    fn dropped_seed_needle_is_flagged() {
-        let mut research = clean_research();
-        research.kind_buckets[0].needles.retain(|n| n.text != "quota");
-        let report = evaluate("codex", Some(&seed()), &research);
-        assert!(
-            report
-                .findings
-                .iter()
-                .any(|f| f.check == Check::SeedPreservation && f.detail.contains("quota")),
-            "expected a seed-preservation finding, got {:?}",
-            report.findings
-        );
-    }
+    fn seed_row_changes_are_classified_and_seed_claims_are_identity_bound() {
+        enum Mutation {
+            Removal,
+            CrossKind,
+            RepeatedKindBucketMove,
+            IntraBucketReorder,
+            BucketReorder,
+            NumericRekind,
+            NumericReorder,
+        }
 
-    #[test]
-    fn dropped_seed_code_is_flagged() {
-        let mut research = clean_research();
-        research.code_buckets.clear();
-        let report = evaluate("kimi", Some(&seed()), &research);
-        assert!(
-            report
-                .findings
-                .iter()
-                .any(|f| f.check == Check::SeedPreservation && f.branch == Some(Branch::Code)),
-            "expected a code seed-preservation finding, got {:?}",
-            report.findings
-        );
+        let cases = [
+            ("removal", Mutation::Removal, Check::SeedRemoval, "quota", false),
+            ("cross-kind move", Mutation::CrossKind, Check::SeedRekind, "rate", true),
+            (
+                "repeated-kind bucket move",
+                Mutation::RepeatedKindBucketMove,
+                Check::SeedReorder,
+                "rate",
+                true,
+            ),
+            (
+                "intra-bucket reorder",
+                Mutation::IntraBucketReorder,
+                Check::SeedReorder,
+                "rate",
+                true,
+            ),
+            (
+                "bucket reorder",
+                Mutation::BucketReorder,
+                Check::SeedReorder,
+                "rate",
+                true,
+            ),
+            (
+                "numeric-code re-kind",
+                Mutation::NumericRekind,
+                Check::SeedRekind,
+                "-32001",
+                true,
+            ),
+            (
+                "numeric-code reorder",
+                Mutation::NumericReorder,
+                Check::SeedReorder,
+                "-32001",
+                true,
+            ),
+        ];
+
+        for (name, mutation, expected_check, target, expects_invented_seed) in cases {
+            let mut research = clean_research();
+            match mutation {
+                Mutation::Removal => {
+                    research.kind_buckets[0].needles.retain(|needle| needle.text != target);
+                }
+                Mutation::CrossKind => research.kind_buckets[0].kind = "configuration".into(),
+                Mutation::RepeatedKindBucketMove => {
+                    let moved = research.kind_buckets[0].needles.remove(0);
+                    research.kind_buckets[2].needles.push(moved);
+                }
+                Mutation::IntraBucketReorder => research.kind_buckets[0].needles.swap(0, 1),
+                Mutation::BucketReorder => research.kind_buckets.swap(0, 2),
+                Mutation::NumericRekind => {
+                    research.code_buckets[0].kind = "api_remote".into();
+                }
+                Mutation::NumericReorder => research.code_buckets.swap(0, 1),
+            }
+
+            let report = evaluate("codex", Some(&seed()), &research);
+            assert!(
+                report.findings.iter().any(|finding| {
+                    finding.check == expected_check && finding.detail.contains(target)
+                }),
+                "{name}: expected {expected_check:?} for `{target}`, got {:?}",
+                report.findings
+            );
+            assert_eq!(
+                report.findings.iter().any(|finding| {
+                    finding.check == Check::InventedSeed && finding.detail.contains(target)
+                }),
+                expects_invented_seed,
+                "{name}: moved seed provenance must be checked against the complete row identity"
+            );
+        }
     }
 
     #[test]
@@ -736,27 +959,35 @@ mod tests {
     }
 
     #[test]
-    fn reconcile_writes_on_findings_and_removes_stale_on_clean() {
+    fn outcome_replacement_covers_findings_then_clean() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("nested").join("codex.json");
 
         let dirty = FindingsReport {
+            status: GateStatus::Findings,
             provider: "codex".into(),
             findings: vec![Finding {
                 check: Check::MotivatingClass,
                 branch: None,
                 detail: "x".into(),
             }],
+            error: None,
         };
-        reconcile_findings_file(&path, &dirty).expect("write findings");
-        assert!(path.exists(), "findings file should be written");
+        write_outcome_report(&path, &dirty).expect("write findings");
+        let dirty_text = fs::read_to_string(&path).unwrap();
+        assert!(dirty_text.contains("status: findings"));
 
-        // A subsequent clean run removes the stale file.
+        // A subsequent clean run atomically replaces findings with an explicit
+        // clean outcome; clean is never represented by absence.
         let clean = FindingsReport {
+            status: GateStatus::Clean,
             provider: "codex".into(),
             findings: vec![],
+            error: None,
         };
-        reconcile_findings_file(&path, &clean).expect("clean reconcile");
-        assert!(!path.exists(), "clean run must remove the stale findings file");
+        write_outcome_report(&path, &clean).expect("clean replace");
+        let clean_text = fs::read_to_string(&path).unwrap();
+        assert!(clean_text.contains("status: clean"));
+        assert!(!clean_text.contains("status: findings"));
     }
 }
