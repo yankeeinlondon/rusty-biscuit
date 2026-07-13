@@ -1377,7 +1377,7 @@ mod tests {
     fn test_browser_renderable_page_includes_fragment() {
         let quote = BlockQuote::from("Quoted text");
         let page = BrowserRenderable::render_html_page(&quote, None);
-        let html = page.render();
+        let html = page.render().expect("render");
         assert!(html.contains("<html"));
         assert!(html.contains("<body>"));
         assert!(html.contains("<blockquote"));
@@ -1396,7 +1396,7 @@ mod tests {
                 ..PageOptions::default()
             }),
         );
-        let html = page.render();
+        let html = page.render().expect("render");
         // PageOptions wire through to the rolled-up CSS, and the fragment is
         // preserved inside the body.
         assert!(html.contains("<blockquote"));

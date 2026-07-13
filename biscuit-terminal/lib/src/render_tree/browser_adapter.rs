@@ -262,7 +262,7 @@ mod tests {
     fn render_html_page_produces_full_page() {
         let component = BrowserTreeComponent::new(Para("page content".into()));
         let page = component.render_html_page(None);
-        let html = page.render();
+        let html = page.render().expect("render");
         assert!(html.contains("<html"), "{html}");
         assert!(html.contains("<body>"), "{html}");
         assert!(html.contains("page content"), "{html}");
