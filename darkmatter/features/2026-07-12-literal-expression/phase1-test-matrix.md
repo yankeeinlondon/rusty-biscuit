@@ -16,7 +16,7 @@ behavior lands and the ignore is lifted). Each row also notes where the
 | 5 | `expression` accepts either-dialect (condition-mode parse; superset regression); rejects garbage w/ format-name `constraint` problem; never executes | `schemas_validate_table.rs`, expression corpus regression (Phase 3), `dmls/tests/no_side_effects.rs` | `expression_accepts_*`, `expression_rejects_*`, `expression_superset_*` |
 | 6 | Native bool/number coerce to string; mappings/sequences are mismatches | `schemas/coerce.rs` unit tests + compose-level test | `expression_coerce_*`, `expression_mapping_sequence_mismatch` |
 | 7 | `literal` as trigger constraint; `expression` behaves like yaml/json in triggers | `triggers/matcher.rs` unit tests, `triggers/lint.rs` | `literal_trigger_*`, `expression_trigger_*` (matcher unit — Phase 3) |
-| 8 | `md schema about` lists both; existing `md schema validate` byte-identical | `style_frontmatter_parity.rs`-style parity + `phase1-baseline*.txt` diff | baseline captured; `about_lists_literal_expression` (Phase 2) |
+| 8 | `md schema about` lists both; existing `md schema validate` byte-identical | `cli/tests/schema_validate_baseline.rs` (executable pretty+JSON snapshots) + `about_lists_literal_expression` about parity | baseline captured; `about_lists_literal_expression` (Phase 2) |
 | 9 | DMLS: D1 expr completion/hover/`dm.expression.*`; D2 literal exact-value/hover/required-key; D3 union key-completion narrowing; ranges for plain/quoted/escaped/multibyte | `dmls/tests/lsp_session.rs`, `dmls/tests/no_side_effects.rs`, DMLS provider unit tests | Phases 5–6 (DMLS crate); scaffolds land with those phases |
 | 10 | Discriminant narrowing type-sensitive, single unambiguous arm; absent/unknown/duplicate/conflicting preserve union behavior | `schemas_validate_table.rs` fixtures + shared selector unit tests; `dmls` provider tests | `union_narrow_*`, `union_no_narrow_*` (Phase 4) |
 | 11 | All L1/L2 green via area `just test` / `just test-l2` | area CI gate | n/a (release gate, Phase 7) |
@@ -36,8 +36,13 @@ behavior lands and the ignore is lifted). Each row also notes where the
 
 ## Baseline artifacts (this phase)
 
-- `phase1-baseline.txt` — `md schema validate` pretty + JSON for representative
-  union/enum/required fixtures. The union-failure diagnostics here MUST stay
-  byte-identical for schemas without literal discriminants (AC #8/#10).
+- `phase1-baseline.txt` — original `md schema validate` pretty + JSON capture for
+  representative union/enum/required fixtures. The union-failure diagnostics here
+  MUST stay byte-identical for schemas without literal discriminants (AC #8/#10).
+  This capture is now an **executable regression**: the seven cases and their
+  expected pretty/JSON output are checked in under
+  `darkmatter/cli/tests/fixtures/schema_validate_baseline/` and asserted
+  byte-for-byte by `darkmatter/cli/tests/schema_validate_baseline.rs` (run by
+  `just test`), so the recorded output can no longer drift undetected.
 - `phase1-baseline-about.txt` — `md schema about` full output. Post-change output
   must be a pure superset (both new types appended in deterministic order).
