@@ -361,6 +361,17 @@ impl Serialize for CanonicalJson<'_> {
 mod tests {
     use super::*;
 
+    /// Builds `ComposeOptions` without the full environment capture that
+    /// `opts()` performs (git/repo/docs/OS/hardware detection via
+    /// sniff). `options_hash` reads only option fields — never the runtime
+    /// context — so that capture is pure waste in these tests. Empty content
+    /// makes `capture_for_content` do date/time only (zero I/O); calling the
+    /// full `new()` several times per test otherwise exceeded nextest's 30s
+    /// terminate ceiling on CI's large working tree.
+    fn opts() -> ComposeOptions {
+        ComposeOptions::new_with_context(ComposeContext::capture_for_content(Path::new("."), ""))
+    }
+
     #[test]
     fn canonical_json_sorts_keys() {
         let value: Value = serde_json::json!({
@@ -549,8 +560,8 @@ mod tests {
 
     #[test]
     fn options_hash_sensitive_to_magic_paths() {
-        let base = ComposeOptions::new();
-        let with_magic = ComposeOptions::new()
+        let base = opts();
+        let with_magic = opts()
             .with_magic_path("/custom/root", biscuit_file::PathPosition::Start);
 
         assert_ne!(options_hash(&base), options_hash(&with_magic));
@@ -559,8 +570,8 @@ mod tests {
     #[test]
     fn options_hash_sensitive_to_magic_path_position() {
         let start =
-            ComposeOptions::new().with_magic_path("/path", biscuit_file::PathPosition::Start);
-        let end = ComposeOptions::new().with_magic_path("/path", biscuit_file::PathPosition::End);
+            opts().with_magic_path("/path", biscuit_file::PathPosition::Start);
+        let end = opts().with_magic_path("/path", biscuit_file::PathPosition::End);
 
         assert_ne!(options_hash(&start), options_hash(&end));
     }
@@ -635,7 +646,7 @@ mod tests {
         };
         use indexmap::IndexMap;
 
-        let base = ComposeOptions::new();
+        let base = opts();
 
         let mut props_a = IndexMap::new();
         props_a.insert(
@@ -669,8 +680,8 @@ mod tests {
             ..Default::default()
         });
 
-        let with_a = ComposeOptions::new().with_baseline_schema(schema_a);
-        let with_b = ComposeOptions::new().with_baseline_schema(schema_b);
+        let with_a = opts().with_baseline_schema(schema_a);
+        let with_b = opts().with_baseline_schema(schema_b);
 
         assert_ne!(options_hash(&base), options_hash(&with_a));
         assert_ne!(options_hash(&base), options_hash(&with_b));
@@ -679,9 +690,9 @@ mod tests {
 
     #[test]
     fn options_hash_sensitive_to_file_ref_fallback_dir() {
-        let base = ComposeOptions::new();
-        let with_a = ComposeOptions::new().with_file_ref_fallback_dir("/launch/area-a");
-        let with_b = ComposeOptions::new().with_file_ref_fallback_dir("/launch/area-b");
+        let base = opts();
+        let with_a = opts().with_file_ref_fallback_dir("/launch/area-a");
+        let with_b = opts().with_file_ref_fallback_dir("/launch/area-b");
 
         // None vs Some, and Some(a) vs Some(b), must all differ.
         assert_ne!(options_hash(&base), options_hash(&with_a));
@@ -689,7 +700,7 @@ mod tests {
         assert_ne!(options_hash(&with_a), options_hash(&with_b));
 
         // Identical anchors must hash identically.
-        let with_a_again = ComposeOptions::new().with_file_ref_fallback_dir("/launch/area-a");
+        let with_a_again = opts().with_file_ref_fallback_dir("/launch/area-a");
         assert_eq!(options_hash(&with_a), options_hash(&with_a_again));
     }
 }
