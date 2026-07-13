@@ -1,3 +1,9 @@
+// `CompositionError` is intentionally large (it carries frontmatter excerpts);
+// the whole composition/wrap execution path returns it and opts out of the
+// `result_large_err` lint the same way (see `wrap/composition/target.rs`,
+// `commands/compose/`, `commands/sequence.rs`).
+#![allow(clippy::result_large_err)]
+
 use claudine::provider::Provider;
 use color_eyre::eyre::{Result, eyre};
 use std::fs;

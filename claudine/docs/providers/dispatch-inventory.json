@@ -18,19 +18,19 @@
     "reference": "code merely names a provider (fixtures, constructor arguments); nothing to migrate"
   },
   "totals": {
-    "sites": 657,
-    "provider_refs": 696,
+    "sites": 655,
+    "provider_refs": 704,
     "by_form": {
-      "direct-ref": 628,
+      "direct-ref": 624,
       "eq-comparison": 12,
-      "match-provider": 2,
+      "match-provider": 4,
       "matches-macro": 4,
       "ne-comparison": 10,
       "tuple-array": 1
     },
     "by_dispatch_class": {
-      "conditional": 29,
-      "reference": 628
+      "conditional": 31,
+      "reference": 624
     }
   },
   "sites": [
@@ -5796,6 +5796,16 @@
       "exempt_candidate": false
     },
     {
+      "path": "claudine/lib/src/stream/providers/antigravity.rs",
+      "line": 256,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Antigravity"
+      ],
+      "exempt_candidate": false
+    },
+    {
       "path": "claudine/lib/src/stream/providers/claude.rs",
       "line": 120,
       "form": "direct-ref",
@@ -5926,6 +5936,16 @@
       "exempt_candidate": false
     },
     {
+      "path": "claudine/lib/src/stream/providers/claude.rs",
+      "line": 935,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": false
+    },
+    {
       "path": "claudine/lib/src/stream/providers/codex.rs",
       "line": 88,
       "form": "direct-ref",
@@ -6036,6 +6056,16 @@
       "exempt_candidate": false
     },
     {
+      "path": "claudine/lib/src/stream/providers/codex.rs",
+      "line": 609,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Codex"
+      ],
+      "exempt_candidate": false
+    },
+    {
       "path": "claudine/lib/src/stream/providers/gemini.rs",
       "line": 76,
       "form": "direct-ref",
@@ -6128,6 +6158,16 @@
     {
       "path": "claudine/lib/src/stream/providers/gemini.rs",
       "line": 403,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Gemini"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/stream/providers/gemini.rs",
+      "line": 464,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -6266,8 +6306,18 @@
       "exempt_candidate": false
     },
     {
+      "path": "claudine/lib/src/stream/providers/kimi.rs",
+      "line": 1097,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "KimiCode"
+      ],
+      "exempt_candidate": false
+    },
+    {
       "path": "claudine/lib/src/stream/providers/mod.rs",
-      "line": 40,
+      "line": 44,
       "form": "match-provider",
       "dispatch_class": "conditional",
       "providers": [
@@ -6284,138 +6334,39 @@
       "exempt_candidate": true
     },
     {
-      "path": "claudine/lib/src/stream/providers/opencode.rs",
-      "line": 81,
+      "path": "claudine/lib/src/stream/providers/mod.rs",
+      "line": 52,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
+        "OpenCode"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/lib/src/stream/providers/mod.rs",
+      "line": 62,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Kilo"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/lib/src/stream/providers/opencode.rs",
+      "line": 580,
+      "form": "match-provider",
+      "dispatch_class": "conditional",
+      "providers": [
+        "Kilo",
         "OpenCode"
       ],
       "exempt_candidate": false
     },
     {
       "path": "claudine/lib/src/stream/providers/opencode.rs",
-      "line": 98,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "OpenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/stream/providers/opencode.rs",
-      "line": 109,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "OpenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/stream/providers/opencode.rs",
-      "line": 143,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "OpenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/stream/providers/opencode.rs",
-      "line": 179,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "OpenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/stream/providers/opencode.rs",
-      "line": 285,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "OpenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/stream/providers/opencode.rs",
-      "line": 332,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "OpenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/stream/providers/opencode.rs",
-      "line": 406,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "OpenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/stream/providers/opencode.rs",
-      "line": 410,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "OpenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/stream/providers/opencode.rs",
-      "line": 428,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "OpenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/stream/providers/opencode.rs",
-      "line": 478,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "OpenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/stream/providers/opencode.rs",
-      "line": 491,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "OpenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/stream/providers/opencode.rs",
-      "line": 500,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "OpenCode"
-      ],
-      "exempt_candidate": false
-    },
-    {
-      "path": "claudine/lib/src/stream/providers/opencode.rs",
-      "line": 508,
+      "line": 587,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -6534,6 +6485,16 @@
       "exempt_candidate": false
     },
     {
+      "path": "claudine/lib/src/stream/providers/pi.rs",
+      "line": 391,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Pi"
+      ],
+      "exempt_candidate": false
+    },
+    {
       "path": "claudine/lib/src/stream/providers/qwen.rs",
       "line": 63,
       "form": "direct-ref",
@@ -6632,6 +6593,35 @@
         "QwenCode"
       ],
       "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/stream/providers/qwen.rs",
+      "line": 327,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "QwenCode"
+      ],
+      "exempt_candidate": false
+    },
+    {
+      "path": "claudine/lib/src/stream/providers/vocabulary.rs",
+      "line": 162,
+      "form": "match-provider",
+      "dispatch_class": "conditional",
+      "providers": [
+        "Antigravity",
+        "Claude",
+        "Codex",
+        "Gemini",
+        "Goose",
+        "Kilo",
+        "KimiCode",
+        "OpenCode",
+        "Pi",
+        "QwenCode"
+      ],
+      "exempt_candidate": true
     },
     {
       "path": "claudine/lib/src/stream/summary.rs",
