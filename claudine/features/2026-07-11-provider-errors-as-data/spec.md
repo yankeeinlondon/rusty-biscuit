@@ -52,6 +52,12 @@ Three phases:
 > parser-level positive and collision coverage. Other recorded provider gaps
 > remain non-executable research scope and do not block this graduation.
 
+> **RECOVERY FOLLOW-UP (2026-07-13):** D10 was amended after review found that
+> the fleet resumed deterministic findings but aborted other agent-correctable
+> conditions. The vocabulary graduation above remains complete; the recovery
+> amendment is specified below and implemented in the fleet lifecycle, checker
+> outcome contract, and focused integration coverage.
+
 ## Motivation
 
 A standing goal of the fleet-research → metadata-knowledge-base workstream
@@ -473,24 +479,69 @@ that `StackControl::Error` to `Abort`, so the fleet/compose command exits
 non-zero while preserving both the machine-visible findings report and the
 authored finalize reason for C1 human review.
 
-**Shape in the fleet doc's `success` stack:** an approved `shell` check
+**Recovery-policy amendment (2026-07-13):** validation is useful only when the
+lifecycle attempts repairs that are both safe and likely to converge. Every
+negative condition is therefore classified by *who can correct it*, not merely
+by the phase in which it was detected:
+
+| Condition | Owner | Lifecycle response |
+|---|---|---|
+| The provider returned success but did not create/update the research document | research session | `resume` the same session with the missing postcondition |
+| Deterministic report has `status: findings` | research session | `resume` with the durable findings report |
+| Deterministic report has `status: gate_error` and `error_scope: research_document` | research session | `resume` with the document/schema error |
+| Provider execution failed with a transient disposition | runtime/provider | bounded `retry` with exponential backoff; a timeout may `resume` when the wrapper captured a resumable session |
+| Seed loading, checker inputs, or other authoritative gate state failed | maintainer/infrastructure | fail closed; the research session must not edit immutable authority to make the gate pass |
+| Checker process or outcome-report persistence failed | maintainer/infrastructure | fail closed before reading any possibly stale report |
+| Completed checker produced no report or an unknown status/scope | checker protocol | fail closed |
+| Authentication, configuration, billing, interruption, runaway, or a non-waitable cap failed | operator/policy | fail closed; blind replay is unsafe or predictably ineffective |
+| A recovery budget was exhausted | maintainer | fall through to `finalize`, preserve the last durable report, and exit non-zero |
+
+`resume` and `retry` budgets are run-scoped by control type, not independently
+reset for each conditional branch. All same-session remediation branches use
+the same `max_attempts: 2` ceiling, allowing at most two additional agent turns
+in total whether the first defect was a missing file, invalid document, or
+deterministic finding. Transient fresh-run recovery has its own bounded retry
+budget. A later branch consumes the remaining budget rather than opening a new
+one; this prevents a sequence of different failed checks from multiplying the
+attempt ceiling.
+
+The outcome report retains the `clean | findings | gate_error` status contract.
+A `gate_error` additionally carries `error_scope: research_document |
+gate_input`. `research_document` covers the provider-authored document being
+missing, malformed, schema-invalid, or incompatible with the research
+vocabulary shape and is repairable by resume. `gate_input` covers immutable
+seed or other authoritative checker-input failures and is terminal. The field
+is omitted for `clean` and `findings`. Report persistence failure remains an
+ordinary non-zero checker error because no new report can be trusted.
+
+**Shape in the fleet doc's `success` stack:** first, a missing/stale-document
+guard resumes the live research session. Otherwise an approved `shell` check
 script (early-binding, reads the output doc from its static path, atomically
-writes an explicit outcome report), followed by a `when:`-guarded
-`resume: {message: "… {{ findings }} …", max_attempts: 2}` item that fires
-only for `status: findings`. The same report represents `clean`, `findings`,
-and `gate_error`; fleet conditions branch on the status through Markdown
-frontmatter read-side functions.
+writes an explicit outcome report) runs. `when:`-guarded branches then resume
+for `findings` and repairable `gate_error`, report success for `clean`, and fail
+closed for absent, unknown, or non-repairable outcomes. Fleet conditions read
+the report through Markdown frontmatter read-side functions.
+
+**Shape in the fleet doc's `failure` stack:** timeout recovery prefers a
+bounded same-session `resume` because it retains research context. Other errors
+whose diagnostic disposition projects `err.is_transient == true` use bounded
+`retry` with exponential backoff. The stack deliberately has no catch-all
+recovery: every other failure falls through to its terminal report and
+`finalize` guard.
 
 Completed checks exit zero after the outcome is durably persisted. Report
 persistence failures exit non-zero and stop the stack, so lifecycle processing
 never consumes stale state. Replacement must not remove the prior failure
 report first: a synced sibling temporary file atomically replaces it only when
-the new report is ready. Clean is never inferred from absence. B2 covers check
-failure → one resume → corrected document → no second resume, schema failure,
-report-write failure, and budget exhaustion. Exhaustion must leave a
-machine-visible failing validation result and make B3/C1 fail; it may fall
-through to **human adjudication**, but must not turn a known-bad research
-document into a successful fleet result.
+the new report is ready. Clean is never inferred from absence. The original B2
+coverage remains responsible for check failure → one resume → corrected
+document → no second resume, schema failure, report-write failure, and resume
+budget exhaustion. The recovery follow-up adds missing/stale document recovery,
+transient execution retry, authoritative gate-input failure, unknown outcome
+protocol, and retry-budget exhaustion. Exhaustion must leave a machine-visible
+failing validation result and make the fleet fail; it may fall through to
+**human adjudication**, but must not turn a known-bad research document into a
+successful fleet result.
 
 **Deterministic checks for `agent-errors` (initial set):**
 
@@ -601,11 +652,15 @@ Proposals awaiting review (defaults applied unless overruled):
   with needle-level provenance objects (see D7); bucket order rides on YAML
   sequence order, same as facts. B1 re-verifies against the Darkmatter
   version current at implementation time.
-- **P5 (D10):** this topic pilots deterministic validate-and-resume in its
-  fleet lifecycle (checks in the `success` stack; `resume` the session with
-  findings; `max_attempts: 2`; exhaustion falls through only to `finalize`,
-  whose non-clean `error` guard aborts the fleet/compose command with a
-  non-zero exit while preserving the findings report and authored reason for
-  C1 human review). The B2 checkpoint decides whether the pattern graduates
-  into the general fleet-research recipe — tracked as
+- **P5 (D10):** this topic pilots deterministic recovery in its fleet
+  lifecycle: one run-scoped, two-additional-turn `resume` budget repairs a
+  missing/stale output document, repairable document/schema gate errors, and
+  deterministic findings; a separate bounded `retry` budget with exponential
+  backoff handles transient execution failures. Checker persistence,
+  authoritative gate inputs, unknown outcome protocol, hard operator/policy
+  failures, and exhausted budgets fail closed. Exhaustion falls through only
+  to `finalize`, whose non-clean `error` guard aborts the fleet/compose command
+  with a non-zero exit while preserving the findings report and authored
+  reason for C1 human review. The B2 checkpoint decides whether the pattern
+  graduates into the general fleet-research recipe — tracked as
   `features/_unscheduled/fleet-validate-and-resume.md`.
