@@ -826,3 +826,54 @@ async fn projection_is_idempotent_across_repeated_syncs() {
         sleep(Duration::from_millis(50)).await;
     }
 }
+
+/// Two paired daemons exchange their host-capability registers through
+/// normal document sync: after pairing and syncing, bob holds a synced
+/// replica of alice's `capability/{node_id}` register, readable via the
+/// `ListHostCapabilities` RPC. Each daemon fills its own register in a
+/// background detection pass at startup, so the test syncs repeatedly
+/// until the replica appears (absorbing that startup latency).
+#[tokio::test]
+async fn capability_registers_converge_across_mesh() {
+    let tmp = TempDir::new().expect("tempdir");
+    let (alice, alice_socket) = boot_daemon(&tmp, "alice").await;
+    let (bob, bob_socket) = boot_daemon(&tmp, "bob").await;
+    let mut alice_client = connect_uds(&alice_socket).await.expect("alice client");
+    let mut bob_client = connect_uds(&bob_socket).await.expect("bob client");
+    pair_and_connect(&alice, &mut alice_client, &bob, &mut bob_client).await;
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        alice_client
+            .sync_with_peer(rendezvous_core::SyncWithPeerRequest {
+                node_id: bob.node_id(),
+            })
+            .await
+            .expect("sync");
+        let hosts = bob_client
+            .list_host_capabilities(rendezvous_core::ListHostCapabilitiesRequest {})
+            .await
+            .expect("list capabilities")
+            .into_inner()
+            .hosts;
+        if let Some(alice_caps) = hosts.iter().find(|h| h.owner_node_id == alice.node_id()) {
+            let fields: serde_json::Value =
+                serde_json::from_str(&alice_caps.fields_json).expect("fields json");
+            assert_eq!(fields["id"], serde_json::json!(alice.node_id()));
+            assert_eq!(fields["schema_version"], serde_json::json!(1));
+            assert!(fields.get("os").is_some(), "os missing from {fields}");
+            assert_eq!(
+                alice_caps.document_id,
+                format!("capability/{}", alice.node_id()),
+            );
+            break;
+        }
+        if Instant::now() >= deadline {
+            panic!("bob never received alice's capability register; saw {hosts:?}");
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    alice.shutdown().await.expect("alice shutdown");
+    bob.shutdown().await.expect("bob shutdown");
+}
