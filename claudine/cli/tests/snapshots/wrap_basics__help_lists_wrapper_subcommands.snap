@@ -37,6 +37,7 @@ Administration:
   uninstall         Remove Claudine hooks from all agents
   providers         Show provider capability matrix
   logs              Query and sync Claudine JSONL logs
+  dashboard         Show the mesh NOW view: live sessions across rendezvous hosts
   completions       Generate shell completions
   context           Show Darkmatter runtime context, expression engine, and side effects
   errors            Show the diagnostic error-code contract (codes, dispositions, details)

@@ -153,6 +153,7 @@ fn command_name(command: &Commands) -> &'static str {
         Commands::Compose(_) => "compose",
         Commands::InlineCompose(_) => "inline-compose",
         Commands::Sequence(_) => "sequence",
+        Commands::Dashboard(_) => "dashboard",
         Commands::Context(_) => "context",
         Commands::Errors(_) => "errors",
     }
