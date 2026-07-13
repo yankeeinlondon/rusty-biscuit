@@ -8,8 +8,8 @@
 use std::path::Path;
 
 use claudine_gen::{
-    CheckOutcome, check_area, check_catalog, check_families, check_signals, generate_all,
-    provider_slugs,
+    CheckOutcome, check_area, check_catalog, check_families, check_signals, check_vocabulary,
+    generate_all, provider_slugs,
 };
 
 /// The claudine package-area root (parent of this crate's manifest dir).
@@ -55,6 +55,25 @@ fn committed_signals_match_regenerated_inputs() {
         ),
         CheckOutcome::MissingCommitted { path } => panic!(
             "committed signals generated.rs missing at {} — run `claudine-gen generate`",
+            path.display()
+        ),
+    }
+}
+
+/// build_vocabulary(committed facts) == committed
+/// lib/src/stream/providers/vocabulary.rs (full scope, every wired provider —
+/// Goose's explicitly empty table included).
+#[test]
+fn committed_vocabulary_matches_regenerated_inputs() {
+    match check_vocabulary(area()).expect("vocabulary generation must succeed") {
+        CheckOutcome::Clean => {}
+        CheckOutcome::Drift { details } => panic!(
+            "drift between committed facts and lib/src/stream/providers/vocabulary.rs — \
+             run `claudine-gen generate`:\n{}",
+            details.join("\n")
+        ),
+        CheckOutcome::MissingCommitted { path } => panic!(
+            "committed vocabulary.rs missing at {} — run `claudine-gen generate`",
             path.display()
         ),
     }

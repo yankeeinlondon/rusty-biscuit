@@ -58,11 +58,12 @@ pub struct ApplyOutcome {
 }
 
 /// Applies regenerated artifacts under `area`: one `data.rs` per scoped
-/// slug, then `catalog.json`, the signals `generated.rs`, and the
-/// families `families_generated.rs` (all always full scope —
-/// `generations` must cover every provider; `signals` and `families` are
-/// the prebuilt [`crate::signals::build_signals`] /
-/// [`crate::families::build_families`] texts).
+/// slug, then `catalog.json`, the signals `generated.rs`, the families
+/// `families_generated.rs`, and the stream `vocabulary.rs` (all always full
+/// scope — `generations` must cover every provider; `signals`, `families`,
+/// and `vocabulary` are the prebuilt [`crate::signals::build_signals`] /
+/// [`crate::families::build_families`] / [`crate::vocabulary::build_vocabulary`]
+/// texts).
 ///
 /// `decide` receives each drifted file's path and line-diff and owns the
 /// interaction; after a [`Decision::Quit`] every remaining drifted file is
@@ -73,6 +74,7 @@ pub fn apply_generations(
     generations: &[Generation],
     signals: &str,
     families: &str,
+    vocabulary: &str,
     decide: &mut dyn FnMut(&Path, &[String]) -> Decision,
 ) -> Result<ApplyOutcome, GenError> {
     let committed_catalog = load_committed_catalog(area)?;
@@ -128,6 +130,16 @@ pub fn apply_generations(
     apply_one(
         &crate::families::families_path(area),
         families,
+        &mut outcome,
+        &mut quit,
+        decide,
+        None,
+        || None,
+    )?;
+
+    apply_one(
+        &crate::vocabulary::vocabulary_path(area),
+        vocabulary,
         &mut outcome,
         &mut quit,
         decide,
@@ -310,7 +322,7 @@ mod tests {
         std::fs::write(committed_data_path(area, "claude"), "old\n").unwrap();
 
         let mut asked = Vec::new();
-        let outcome = apply_generations(area, &["claude"], std::slice::from_ref(&generation), "signals\n", "families\n", &mut |path,
+        let outcome = apply_generations(area, &["claude"], std::slice::from_ref(&generation), "signals\n", "families\n", "vocabulary\n", &mut |path,
                 diff| {
             asked.push(path.to_path_buf());
             assert!(!diff.is_empty());
@@ -320,8 +332,8 @@ mod tests {
 
         assert_eq!(
             outcome.written.len(),
-            4,
-            "data.rs, catalog.json, signals, families"
+            5,
+            "data.rs, catalog.json, signals, families, vocabulary"
         );
         assert!(outcome.declined.is_empty());
         assert_eq!(
@@ -331,14 +343,15 @@ mod tests {
         assert!(catalog_path(area).is_file());
         assert!(crate::signals::signals_path(area).is_file());
         assert!(crate::families::families_path(area).is_file());
+        assert!(crate::vocabulary::vocabulary_path(area).is_file());
 
         // Second run: everything clean, callback never invoked.
-        let outcome = apply_generations(area, &["claude"], std::slice::from_ref(&generation), "signals\n", "families\n", &mut |_,
+        let outcome = apply_generations(area, &["claude"], std::slice::from_ref(&generation), "signals\n", "families\n", "vocabulary\n", &mut |_,
                 _| {
             panic!("clean files must not prompt")
         })
         .unwrap();
-        assert_eq!(outcome.clean.len(), 4);
+        assert_eq!(outcome.clean.len(), 5);
         assert!(outcome.written.is_empty() && outcome.declined.is_empty());
     }
 
@@ -357,7 +370,7 @@ mod tests {
         .unwrap();
 
         let outcome =
-            apply_generations(area, &["claude"], std::slice::from_ref(&generation), "signals\n", "families\n", &mut |_, _| {
+            apply_generations(area, &["claude"], std::slice::from_ref(&generation), "signals\n", "families\n", "vocabulary\n", &mut |_, _| {
                 Decision::Decline
             })
             .unwrap();
@@ -365,8 +378,8 @@ mod tests {
         assert!(outcome.written.is_empty());
         assert_eq!(
             outcome.declined.len(),
-            4,
-            "data.rs, catalog.json, signals, families"
+            5,
+            "data.rs, catalog.json, signals, families, vocabulary"
         );
         assert_eq!(
             std::fs::read_to_string(committed_data_path(area, "claude")).unwrap(),
@@ -381,10 +394,11 @@ mod tests {
         assert!(snippet.contains("OLD_VAR"), "{snippet}");
         assert!(snippet.contains("reason: TODO"), "{snippet}");
         // Only data.rs gets a field-keyed pin — catalog.json, signals,
-        // and families do not.
+        // families, and vocabulary do not.
         assert!(outcome.declined[1].override_snippet.is_none());
         assert!(outcome.declined[2].override_snippet.is_none());
         assert!(outcome.declined[3].override_snippet.is_none());
+        assert!(outcome.declined[4].override_snippet.is_none());
     }
 
     #[test]
@@ -399,7 +413,7 @@ mod tests {
 
         let mut calls = 0;
         let outcome =
-            apply_generations(area, &["claude", "codex"], &generations, "signals\n", "families\n", &mut |_, _| {
+            apply_generations(area, &["claude", "codex"], &generations, "signals\n", "families\n", "vocabulary\n", &mut |_, _| {
                 calls += 1;
                 Decision::Quit
             })
@@ -408,8 +422,8 @@ mod tests {
         assert_eq!(calls, 1, "quit stops further prompting");
         assert_eq!(
             outcome.declined.len(),
-            5,
-            "both data.rs plus catalog.json, signals, and families"
+            6,
+            "both data.rs plus catalog.json, signals, families, and vocabulary"
         );
         assert!(outcome.written.is_empty());
     }

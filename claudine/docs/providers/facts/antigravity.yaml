@@ -294,3 +294,17 @@ model_required_in_non_tty: false
 # not a BYO-key aggregator.
 platform_kind: vendor_platform
 unmapped_native_events: []
+# Ordered error-classification vocabulary (Phase A seed, transcribed verbatim
+# from lib/src/stream/providers/antigravity.rs::ERROR_KEYWORDS). agy is a
+# message-only classifier (no structured error kind), so `kind_buckets` is
+# omitted. Sequence order IS the cascade order; the auth bucket is checked
+# first and its `401`/`403`/`sign in` needles were empirically hardened for
+# agy's keyring/OAuth failure modes.
+error_vocabulary:
+  msg_buckets:
+  - kind: configuration
+    needles: [sign in, sign-in, not logged in, authentication failed, authentication, unauthorized, "401", "403"]
+  - kind: api_remote
+    needles: [rate limit, quota, exhausted, out of credits, overloaded, "503", resource_exhausted]
+  - kind: interrupted
+    needles: [abort, cancel, interrupt]

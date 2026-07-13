@@ -279,3 +279,25 @@ unmapped_native_events:
 - native_event: tool.definition
   description: Mutates a tool's description and parameter schema before the tool list is sent to the model.
   remediation: Author an OpenCode plugin exporting a tool.definition hook; Claudine cannot dispatch this phase.
+# Ordered error-classification vocabulary (Phase A seed, transcribed verbatim
+# from lib/src/stream/providers/opencode.rs::ERROR_KEYWORDS). Sequence order IS
+# the cascade order; the message bucket's `providermodelnotfound` needle was
+# empirically hardened. The repeated api_remote bucket is the "late ApiRemote"
+# second pass after Interrupted.
+error_vocabulary:
+  kind_buckets:
+  - kind: api_remote
+    needles: [rate, quota, billing]
+  - kind: configuration
+    needles: [auth, config, permission, provider, model]
+  - kind: interrupted
+    needles: [interrupt, cancel, abort]
+  - kind: api_remote
+    needles: [api, upstream, server]
+  msg_buckets:
+  - kind: api_remote
+    needles: [rate limit, quota, billing, api error, api timeout]
+  - kind: configuration
+    needles: [api key, authentication, not authorized, permission denied, model not found, invalid model, providermodelnotfound]
+  - kind: interrupted
+    needles: [interrupt, cancel, aborted]

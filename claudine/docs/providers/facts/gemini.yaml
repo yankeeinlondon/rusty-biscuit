@@ -287,3 +287,24 @@ unmapped_native_events:
 - native_event: BeforeToolSelection
   description: Filters which tools the model may choose before any concrete tool call exists; returns toolConfig {mode, allowedFunctionNames}.
   remediation: Register a command hook for BeforeToolSelection directly in Gemini settings (hooksConfig); Claudine cannot dispatch this phase.
+# Ordered error-classification vocabulary (Phase A seed, transcribed verbatim
+# from lib/src/stream/providers/gemini.rs::ERROR_KEYWORDS). Sequence order IS
+# the cascade order; Gemini checks Configuration before ApiRemote in the kind
+# branch, and runs a "late ApiRemote" second pass after Interrupted.
+error_vocabulary:
+  kind_buckets:
+  - kind: configuration
+    needles: [auth, permission, config, denied]
+  - kind: api_remote
+    needles: [rate, quota, billing]
+  - kind: interrupted
+    needles: [interrupt, cancel, abort]
+  - kind: api_remote
+    needles: [api, upstream, server]
+  msg_buckets:
+  - kind: api_remote
+    needles: [rate limit, quota, billing, api error]
+  - kind: configuration
+    needles: [api key, authentication, not authorized, permission denied]
+  - kind: interrupted
+    needles: [interrupt, cancel, aborted]

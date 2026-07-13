@@ -288,3 +288,25 @@ unmapped_native_events:
 - native_event: tool.definition
   description: Mutates a tool's description and parameter schema before the tool list is sent to the model.
   remediation: Author a Kilo plugin exporting a tool.definition hook; Claudine cannot dispatch this phase.
+# Ordered error-classification vocabulary (Phase A seed). Kilo shares
+# OpenCode's wire parser today, so this is an explicit ordered COPY of
+# OpenCode's current table (Phase B researches the copy independently; the
+# shared parser selects vocabulary by the wrapped provider's identity, not the
+# parser module name — so Kilo consumes Kilo data, not OpenCode's).
+error_vocabulary:
+  kind_buckets:
+  - kind: api_remote
+    needles: [rate, quota, billing]
+  - kind: configuration
+    needles: [auth, config, permission, provider, model]
+  - kind: interrupted
+    needles: [interrupt, cancel, abort]
+  - kind: api_remote
+    needles: [api, upstream, server]
+  msg_buckets:
+  - kind: api_remote
+    needles: [rate limit, quota, billing, api error, api timeout]
+  - kind: configuration
+    needles: [api key, authentication, not authorized, permission denied, model not found, invalid model, providermodelnotfound]
+  - kind: interrupted
+    needles: [interrupt, cancel, aborted]
