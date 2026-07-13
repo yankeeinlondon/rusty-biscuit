@@ -288,9 +288,13 @@ Before adding a document type or DuckDB table, answer:
   + `SyncDelta.replace` on the wire, replica-swap semantics on receive
   (`stage_remote_replace` / `commit_staged_replace`), and a pending-ops import guard
   as defense-in-depth. It composes with foreign-writer enforcement (next bullet).
-- **Foreign-writer enforcement:** the single-writer rule is currently convention; the
-  import path should reject deltas whose ops originate from a peer other than the
-  document's `owner_node_id`. Decide where this check lives (sync engine vs storage).
+- **Foreign-writer enforcement:** ✅ implemented for registers (2026-07-12). A
+  register's Loro peer id is derived deterministically from its owner's node id
+  (`register::owner_peer_id`), and the import path rejects any staged update carrying
+  ops from a different peer id — the op-level half of single-writer enforcement, on top
+  of the sync layer's existing namespace check. Session-log *chunks* remain
+  namespace-level only: existing chunk documents were created with random peer ids, so
+  op-level binding there needs a migration story first (open).
 - **Projection scheduling:** today the projection rebuilds at startup and appends on
   sync; a long-lived daemon may want periodic reconciliation (cheap `row_count` vs
   redb-entry-count comparison) to detect drift.
