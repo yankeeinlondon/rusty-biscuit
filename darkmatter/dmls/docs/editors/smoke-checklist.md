@@ -6,6 +6,19 @@ tests are Level 1 (in-process JSON-RPC protocol tests) and do not exercise real
 editor GUIs or OS-specific rendering. The items below require execution in each
 real editor (VS Code, Zed, Neovim, Helix) on each target OS (macOS, Windows, Linux).
 
+**Automated for Neovim:** `tests/level2_editor_neovim.rs` (run via
+`just test-l2`; requires `nvim` on `PATH`, plus `tmux` for the rendering test)
+drives Neovim's real LSP client against the real `dmls` binary and covers the
+Neovim column of these semantic-token rows: **capability** (the documented
+recipe's highlight groups produce visible SGR color in a real terminal),
+**families (full)**, **fenced-code exclusion**, **Unicode + multiline**
+positioning after the client's UTF-8 decode, and **config** (both the
+`[semantic_tokens] enable` and wiki-only `wiki.enable` toggles repaint live via
+the `workspace/semanticTokens/refresh` round trip). The **range** row is not
+exercisable on Neovim (its client issues `full` requests only) — verify range
+behavior in VS Code. All non-semantic-token rows, and all rows for VS Code,
+Zed, and Helix, remain manual.
+
 Run this checklist once per target editor after installing `dmls` on `PATH` and
 wiring the editor per its guide in this folder. It exercises every v1 feature
 family end to end. Record results and any client-quirk observations in the

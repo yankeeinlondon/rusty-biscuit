@@ -138,11 +138,16 @@ against. CI wires the full per-target build.
 From the `darkmatter/` package area:
 
 ```
-just test        # L1 (unit) across lib, cli, dmls
-just test-l2     # L2 in-memory LSP-session integration tests
+just test        # L1 (unit + in-process LSP-session) across lib, cli, dmls
+just test-l2     # L2 real-editor tests (Neovim + tmux; skip cleanly if absent)
 just lint
 ```
 
-Testing follows `.claude/skills/rust-testing/SKILL.md` (nextest, L1 default, L2
-gated where real resources are involved — DMLS L2 is in-memory, so it stays
-ungated).
+Testing follows `.claude/skills/rust-testing/SKILL.md` (nextest, L1 default).
+The in-process JSON-RPC session tests (`tests/lsp_session.rs`) are L1. The L2
+tier (`tests/level2_editor_neovim.rs`) drives Neovim's real LSP client against
+the built `dmls` binary — headless token-decode probes plus a tmux-rendered
+SGR capture — and skips cleanly when `nvim`/`tmux` are missing
+(`BISCUIT_TEST_LEVEL_REQUIRED=2` hard-fails instead). The remaining manual
+editor verification lives in
+[`docs/editors/smoke-checklist.md`](docs/editors/smoke-checklist.md).
