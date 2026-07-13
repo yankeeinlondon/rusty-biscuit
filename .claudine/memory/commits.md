@@ -73,6 +73,29 @@ details do not belong here.
   plumbing above or split into separate commits. A quick diff side-by-side
   (`git diff -- <path>` vs `git diff --staged -- <path>`) is enough to
   classify the working tree as clean-superset vs divergent.
+- **The temp-index plumbing (`TMPIDX=$(mktemp -d) …`) must chain inside a
+  single shell invocation (2026-07-12 claudine logging-refactor batch).**
+  `mktemp -d` followed by `trap 'rm -rf "$TMPIDX"' EXIT` clears the directory
+  when the parent shell exits — so the `read-tree → update-index → write-tree
+  → commit-tree → update-ref` steps must all run inside the same `bash` call.
+  Splitting them across separate tool invocations leaves the temp index gone
+  before the next step reads it. Verified when the first attempt at the
+  logging-refactor plumbing kept losing the index between calls; chaining
+  everything into one shell pipeline (and reusing the captured `HEAD`/`NEW`
+  variables inside that same call) committed cleanly.
+- **Under zsh, plain `git show "$REV:$PATH"` is unreliable for verifying a
+  temp-index plumbing commit (2026-07-12 claudine logging-refactor batch).**
+  zsh treats the `:` after `$REV` as a parameter modifier that strips text
+  from the variable's value, mangling the `rev:path` argument into something
+  like `9be2e74...099fdspec.md` instead of the literal rev:path. The
+  `bash`-style `git show "$NEW:$path"` works under bash but fails under the
+  default zsh shell. Use `git cat-file -p "${NEW}":claudine/...` (literal
+  colon, separated from the variable) or `git cat-file -p ':claudine/...'`
+  (single-quoted colon, resolves the path against the current HEAD). When
+  verifying a temp-index commit, prefer `git cat-file -p` over `git show
+  "<rev>:<path>"` whenever the shell is zsh — `git show` and `git cat-file`
+  are equivalent for blob retrieval, but only `cat-file` survives zsh's
+  parameter-modifier interpretation.
 - For a rename, include both the old and new paths so the deletion and addition
   remain in the same commit.
 - Put all Git options before `--`. For very large explicit path lists, use
