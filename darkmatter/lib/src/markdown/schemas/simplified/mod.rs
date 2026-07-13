@@ -17,6 +17,7 @@ mod serialize;
 mod source;
 mod standalone;
 pub mod types;
+pub mod yaml_scalar;
 
 pub use convert::{DRAFT_2020_12, to_json_schema};
 pub use lint::{SuggestionLintProblem, SuggestionLintReason, lint_suggestions};
@@ -30,6 +31,7 @@ pub use types::{
     Constraint, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
     SimplifiedSchema, SimplifiedType, SuggestionCandidate, TypeExpr,
 };
+pub use yaml_scalar::{DecodedScalar, decode_scalar, decode_scalar_at};
 
 use indexmap::IndexMap;
 use serde_yaml_ng::Value as YamlValue;

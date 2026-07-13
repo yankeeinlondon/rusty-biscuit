@@ -282,9 +282,8 @@ fn primitive_matches(ty: SimplifiedType, value: &Value) -> bool {
         // `expression` is a content-format string type (like `yaml` / `json`):
         // any string is shape-compatible; parseability is a format concern.
         SimplifiedType::Expression => value.is_string(),
-        // `literal` accepts any scalar shape here; identity is enforced by its
-        // `LiteralValue` equality constraint. Full trigger equality lands in
-        // Phase 3 of the `2026-07-12-literal-expression` feature.
+        // `literal` accepts any scalar shape here; typed identity is enforced by
+        // the `LiteralValue` equality constraint in `constraint_holds`.
         SimplifiedType::Literal => true,
         SimplifiedType::Object => value.is_object(),
         SimplifiedType::Any => true,
@@ -303,6 +302,10 @@ fn constraint_holds(constraint: &Constraint, value: &Value) -> bool {
         Constraint::Members(members) => value
             .as_str()
             .is_some_and(|s| members.iter().any(|m| m == s)),
+        // Typed equality for `literal(...)` discriminants: a document value
+        // matches only when it equals the authored scalar, type-sensitively
+        // (string `'2'` never satisfies number `literal(2)`).
+        Constraint::LiteralValue(expected) => literal_value_matches(value, expected),
         Constraint::Pattern(pattern) => {
             let Some(s) = value.as_str() else { return false };
             regex_match(pattern, s)
@@ -323,6 +326,22 @@ fn constraint_holds(constraint: &Constraint, value: &Value) -> bool {
         | Constraint::MaxKeys(_) => true,
         // The remaining constraints are forbidden at load time; unreachable.
         _ => true,
+    }
+}
+
+/// Type-sensitive equality between a document value and a `literal(...)`
+/// discriminant. Equal JSON values match directly; two numbers additionally
+/// match when their representations differ only in integer-vs-float encoding
+/// (`literal(2)` authored as `i64` versus a decoded `2` scalar). A string and a
+/// number never match — that type sensitivity is what makes discriminated
+/// unions unambiguous.
+fn literal_value_matches(value: &Value, expected: &Value) -> bool {
+    if value == expected {
+        return true;
+    }
+    match (value, expected) {
+        (Value::Number(a), Value::Number(b)) => a.as_f64() == b.as_f64(),
+        _ => false,
     }
 }
 
@@ -664,5 +683,67 @@ mod tests {
         let expr = prop("must", SimplifiedType::String, vec![Constraint::Required]);
         let defeat = first_defeat(&expr, &frontmatter(&[]), "");
         assert!(defeat.as_deref().unwrap().contains("required"));
+    }
+
+    // ── literal / expression discriminants ───────────────────────────────
+
+    #[test]
+    fn literal_matches_typed_equality() {
+        // `kind: literal(spec)` behaves as a value-equality discriminant.
+        let expr = prop(
+            "kind",
+            SimplifiedType::Literal,
+            vec![Constraint::LiteralValue(json!("spec"))],
+        );
+        assert!(matches(&expr, &frontmatter(&[("kind", json!("spec"))]), ""));
+        assert!(!matches(&expr, &frontmatter(&[("kind", json!("other"))]), ""));
+    }
+
+    #[test]
+    fn literal_number_equality_is_type_sensitive() {
+        // `version: literal(2)` (number) must not match the string `'2'`.
+        let expr = prop(
+            "version",
+            SimplifiedType::Literal,
+            vec![Constraint::LiteralValue(json!(2))],
+        );
+        assert!(matches(&expr, &frontmatter(&[("version", json!(2))]), ""));
+        assert!(matches(&expr, &frontmatter(&[("version", json!(2.0))]), ""));
+        assert!(!matches(&expr, &frontmatter(&[("version", json!("2"))]), ""));
+    }
+
+    #[test]
+    fn literal_boolean_equality() {
+        let expr = prop(
+            "archived",
+            SimplifiedType::Literal,
+            vec![Constraint::LiteralValue(json!(false))],
+        );
+        assert!(matches(&expr, &frontmatter(&[("archived", json!(false))]), ""));
+        assert!(!matches(&expr, &frontmatter(&[("archived", json!(true))]), ""));
+        // Type-sensitive: the string "false" is not the boolean literal.
+        assert!(!matches(&expr, &frontmatter(&[("archived", json!("false"))]), ""));
+    }
+
+    #[test]
+    fn optional_literal_guard_passes_when_absent() {
+        // A bare (non-required) literal is a guard: absence holds vacuously.
+        let expr = prop(
+            "kind",
+            SimplifiedType::Literal,
+            vec![Constraint::LiteralValue(json!("spec"))],
+        );
+        assert!(matches(&expr, &frontmatter(&[]), ""));
+        // Present-but-wrong still defeats.
+        assert!(!matches(&expr, &frontmatter(&[("kind", json!("plan"))]), ""));
+    }
+
+    #[test]
+    fn expression_is_string_shaped_like_yaml_json() {
+        // `expression` mirrors the content-format string types in triggers: any
+        // string is shape-compatible; a non-string defeats.
+        let expr = prop("when", SimplifiedType::Expression, vec![]);
+        assert!(matches(&expr, &frontmatter(&[("when", json!("is_agent()"))]), ""));
+        assert!(!matches(&expr, &frontmatter(&[("when", json!(3))]), ""));
     }
 }
