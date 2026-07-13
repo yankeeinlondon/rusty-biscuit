@@ -42,6 +42,12 @@ pub enum PayloadKind {
     Snapshot,
     /// Incremental update bundle.
     Delta,
+    /// Full Loro snapshot the receiver must adopt WHOLESALE, replacing
+    /// its local replica instead of merging. Sent when the sender's
+    /// document was re-based (history compacted) past the receiver's
+    /// version, so no delta can connect and a merge import does not
+    /// converge.
+    SnapshotReplace,
 }
 
 impl PayloadKind {
@@ -50,6 +56,7 @@ impl PayloadKind {
         match self {
             PayloadKind::Snapshot => 0,
             PayloadKind::Delta => 1,
+            PayloadKind::SnapshotReplace => 2,
         }
     }
 
@@ -59,6 +66,7 @@ impl PayloadKind {
         match byte {
             0 => Some(PayloadKind::Snapshot),
             1 => Some(PayloadKind::Delta),
+            2 => Some(PayloadKind::SnapshotReplace),
             _ => None,
         }
     }

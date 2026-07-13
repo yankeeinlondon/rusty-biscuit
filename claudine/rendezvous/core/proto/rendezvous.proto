@@ -349,7 +349,7 @@ message SignedEnvelopeWire {
   // Chunk path this envelope is bound to (e.g.
   // "session/shared/s1/part/0").
   string document_id = 6;
-  // Payload kind: 0 = snapshot, 1 = delta.
+  // Payload kind: 0 = snapshot, 1 = delta, 2 = snapshot-replace.
   int32 payload_kind = 7;
 }
 
@@ -385,6 +385,14 @@ message SyncDelta {
     // `true` if `envelope.payload` is a full Loro snapshot (peer had
     // no prior state); `false` if it is an incremental update bundle.
     bool is_snapshot = 3;
+    // `true` when the snapshot must REPLACE the receiver's replica
+    // wholesale: the sender's document was re-based (history
+    // compacted) past the receiver's advertised version, so no delta
+    // can connect and merging does not converge. Implies
+    // `is_snapshot`. The flag is authenticated via the envelope's
+    // `payload_kind` (2 = snapshot-replace), which is covered by the
+    // signature.
+    bool replace = 4;
 }
 
 // Closing frame in the sync phase. Tells the peer no more deltas are
