@@ -75,6 +75,9 @@ windows = { version = "0.62", optional = true, features = [
     "Win32_Media_Audio",
     "Win32_Media_Multimedia",
     "Win32_System_Com",
+    # IMMDevice::Activate's signature references PROPVARIANT, which lives behind
+    # this feature; without it the Activate method is gated out entirely.
+    "Win32_System_Com_StructuredStorage",
 ] }
 
 [dev-dependencies]

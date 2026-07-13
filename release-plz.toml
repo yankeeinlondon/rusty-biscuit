@@ -16,7 +16,13 @@ git_tag_name = "{{ package }}-v{{ version }}"
 
 # No crates.io publishing
 publish = false
-semver_check = true
+# Disabled: semver-checks builds each crate during version determination, which
+# regenerates the intentionally-untracked, gitignored Cargo.lock files at the
+# nested workspace roots (tree-hugger, scripts, schematic/schema) and the stray
+# research locks. Those older release tags still track them, so release-plz's
+# internal `git checkout` then aborts on "local changes would be overwritten".
+# With `publish = false` there is no crates.io consumer for semver gating anyway.
+semver_check = false
 changelog_update = true
 
 [changelog]
