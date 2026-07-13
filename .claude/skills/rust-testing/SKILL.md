@@ -4,8 +4,8 @@ description: |-
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
   `require_level!` gating, nextest filtersets, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 1acc7c1c76b11142-ce770f461c0ba526
-last_updated: 2026-06-29
+hash: 1acc7c1c76b11142-e4cbc766e6e491e6
+last_updated: 2026-07-13
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
@@ -241,6 +241,28 @@ async fn dispatch_with_dry_run(#[from(dry_run)] _g: EnvGuard) {
 ```
 
 ## Browser Tests
+
+### Headless and focus-isolation invariant
+
+The Browser tier is always headless. A `browser_*` test must not create or
+activate a visible window, request foreground focus, move the host pointer, or
+inject host OS input. Do not use headed-browser flags, application activation,
+`osascript`, `cliclick`, `xdotool`, `SendInput`, or equivalent desktop
+automation in this tier. Browser tests must be safe to run while someone is
+using the same workstation.
+
+Drive keyboard, pointer, media-query, and viewport behavior through the
+browser's automation protocol (for example CDP key/mouse dispatch and media
+emulation), then assert on the live DOM, computed styles, accessibility state,
+or used geometry. Browser-dispatched input is the correct evidence when the
+requirement concerns browser behavior; duplicating it with Level-3 OS input
+usually adds focus races and platform dependence without testing more product
+logic.
+
+Use Level 3 only when the requirement explicitly concerns the OS-to-application
+input path itself. Such a test must live outside Browser-tier binaries, remain
+opt-in through `RUN_LEVEL3=1`, and must not be added merely to strengthen an
+HTML/CSS/DOM interaction test that headless browser automation already covers.
 
 Assert on **computed styles**, not source substrings or screenshots:
 

@@ -80,3 +80,4 @@ trace/*
 **/test-*timing.jsonl
 .claudine/tmp/
 **/tmp-stream*
+/.gitnexus/

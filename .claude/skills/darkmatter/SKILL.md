@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-4b2ea96f0a67fdf2
-last_updated: 2026-07-12
+hash: 87f17662fa397abe-10d54cfdeef6993c
+last_updated: 2026-07-13
 ---
 
 # darkmatter
@@ -42,6 +42,29 @@ Other entry points:
 - Use `darkmatter::style` for document `style:` frontmatter.
 - Use `biscuit-terminal` components for rich terminal UI outside ordinary
   parsed Markdown rendering.
+
+## Browser Test Contract
+
+Darkmatter browser-rendering behavior is verified with real **headless**
+Chrome through `biscuit-browser-harness`. Run it with `just test-browser` from
+the `darkmatter` package area. Browser tests must not open or activate a visible
+browser window, steal foreground focus, move the host pointer, or inject host
+OS input. Use CDP-dispatched keyboard/pointer events, media emulation, live DOM
+state, computed styles, and used geometry for interaction and layout evidence.
+
+Keep host-UI and Level-3 tests out of
+`darkmatter/lib/tests/browser_render.rs`. The shared Nextest selector
+`test(/browser_/)` can match the `browser_render` integration-binary name, so a
+test in that file may be selected by the Browser tier regardless of its
+function prefix. Never add headed-launch switches, application activation,
+`osascript`, `cliclick`, `xdotool`, `SendInput`, or equivalent desktop
+automation to this browser suite or its harness path.
+
+Only introduce a Darkmatter Level-3 browser-adjacent test when the requirement
+explicitly concerns OS-to-browser event delivery rather than HTML/CSS/DOM
+behavior. Put it in a dedicated integration-test binary whose filename does not
+contain `browser_`, gate it with `RUN_LEVEL3=1`, and do not duplicate coverage
+already provided by the headless Browser tier.
 
 ## Cleanup Pipeline
 

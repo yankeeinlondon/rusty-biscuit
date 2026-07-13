@@ -564,7 +564,11 @@ _test_l3 pkg *args="":
     echo
     echo -e "🎹 Level-3 tests for {{ bold }}{{ pkg }}{{ reset }} {{ dim }}(RUN_LEVEL3=1){{ reset }}"
     echo
-    RUN_LEVEL3=1 cargo nextest run -p {{ pkg }} -E 'test(/level3_/)' --no-tests=pass {{ args }}
+    # Run one test at a time (`-j 1`). These tests inject real OS keyboard/pointer
+    # events and so compete for the single global frontmost window + pointer;
+    # `#[serial]` cannot serialize them because nextest runs each test in a
+    # separate process — mirror the browser tier and serialize the tier itself.
+    RUN_LEVEL3=1 cargo nextest run -p {{ pkg }} -j 1 -E 'test(/level3_/)' --no-tests=pass {{ args }}
 
 # Browser tier: headless browser tests. Skip-clean if Chrome absent unless
 # BISCUIT_BROWSER_REQUIRED=1 is set in the environment.
