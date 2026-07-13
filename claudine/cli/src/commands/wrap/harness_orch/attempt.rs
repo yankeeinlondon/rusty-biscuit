@@ -125,7 +125,7 @@ pub(crate) fn execute_harness_attempt(
 
     // Presence bracket: STARTED now, ENDED when this guard drops on any
     // exit path of the attempt (best-effort; no-op without a daemon).
-    let _session_presence = crate::commands::wrap::session_report::SessionPresence::started(
+    let session_presence = crate::commands::wrap::session_report::SessionPresence::started(
         provider,
         run_model.as_deref(),
         !effective_non_interactive,
@@ -158,7 +158,8 @@ pub(crate) fn execute_harness_attempt(
             stream_verbosity,
             summary_details.clone(),
         )
-        .with_context_extra(dispatch_context.clone());
+        .with_context_extra(dispatch_context.clone())
+        .with_status_reporter(session_presence.status_reporter());
         // Arm the content detector (Phase 6) before plumbing so
         // `build_structured_plumbing` can wire the trip channel, and wire
         // the re-scope source so a provider-reported `SessionStart` model

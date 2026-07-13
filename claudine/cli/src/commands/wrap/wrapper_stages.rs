@@ -526,13 +526,14 @@ pub(crate) fn run_execution_stage(
         // Presence bracket for the direct structured-stream path (the
         // harness path above reports per attempt inside
         // `execute_harness_attempt`).
-        let _session_presence = session_report::SessionPresence::started(
+        let session_presence = session_report::SessionPresence::started(
             provider,
             args.model.as_deref(),
             !effective_non_interactive,
             env_context,
             &env_plan.env,
         );
+        let status_reporter = session_presence.status_reporter();
         wrapper_exec::run_structured_stream_session(
             args,
             provider,
@@ -553,6 +554,7 @@ pub(crate) fn run_execution_stage(
             term,
             wrapper_span,
             perf_collector,
+            status_reporter,
         )
     } else {
         let _session_presence = session_report::SessionPresence::started(

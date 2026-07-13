@@ -15,6 +15,7 @@
 //! there is nothing to clear. Kill switch:
 //! `CLAUDINE_RENDEZVOUS_REPORT=false`.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use claudine::events::EnvironmentContext;
@@ -83,6 +84,79 @@ impl SessionPresence {
         Self {
             session_id: sent.then_some(session_id),
         }
+    }
+}
+
+impl SessionPresence {
+    /// A cheap, cloneable handle for mid-session status transitions
+    /// (dashboard trigger 1). Active only when the `STARTED` report
+    /// reached a daemon *and* a usable runtime handle exists; otherwise
+    /// every `report` is a no-op. The runtime handle is captured now —
+    /// on the runtime thread that ran `started` — so a later `report`
+    /// works even when called from an off-runtime stream-reader thread.
+    pub(crate) fn status_reporter(&self) -> StatusReporter {
+        match (self.session_id.clone(), usable_runtime_handle()) {
+            (Some(session_id), Some(handle)) => StatusReporter {
+                inner: Some((Arc::from(session_id.as_str()), handle)),
+            },
+            _ => StatusReporter { inner: None },
+        }
+    }
+}
+
+/// Fire-and-forget reporter for `UPDATED` status transitions on a live
+/// session. Unlike the `STARTED`/`ENDED` bracket it never blocks: each
+/// `report` spawns a detached, timeout-bounded task so a wedged daemon
+/// cannot stall the stream render path it is called from.
+#[derive(Clone)]
+pub(crate) struct StatusReporter {
+    /// `(session_id, runtime handle)` when reporting is live.
+    inner: Option<(Arc<str>, tokio::runtime::Handle)>,
+}
+
+impl StatusReporter {
+    /// A reporter that does nothing — the default before a session is
+    /// bracketed, and whenever presence reporting is unavailable.
+    pub(crate) fn inert() -> Self {
+        Self { inner: None }
+    }
+
+    /// Report a status transition (e.g. `waiting_on_user`, `active`).
+    /// No-op when inert.
+    pub(crate) fn report(&self, status: &'static str) {
+        let Some((session_id, handle)) = self.inner.clone() else {
+            return;
+        };
+        handle.spawn(async move {
+            let send = async {
+                let endpoint = rendezvous_core::socket::default_socket_path();
+                let mut client = rendezvous_client::connect(endpoint).await?;
+                let mut details = serde_json::Map::new();
+                details.insert("status".into(), json!(status));
+                client
+                    .report_session_event(rendezvous_core::ReportSessionEventRequest {
+                        session_id: session_id.to_string(),
+                        kind: rendezvous_core::SessionEventKind::Updated as i32,
+                        details_json: serde_json::Value::Object(details).to_string(),
+                    })
+                    .await?;
+                Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+            };
+            match tokio::time::timeout(REPORT_TIMEOUT, send).await {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => tracing::debug!(
+                    target: "claudine::session_report",
+                    %err,
+                    status,
+                    "session status update skipped (daemon unreachable)",
+                ),
+                Err(_) => tracing::debug!(
+                    target: "claudine::session_report",
+                    status,
+                    "session status update timed out",
+                ),
+            }
+        });
     }
 }
 
@@ -286,5 +360,90 @@ mod tests {
         );
 
         daemon.shutdown().await.expect("daemon shutdown");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn status_reporter_flips_and_clears_waiting() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let socket = tmp.path().join("daemon.sock");
+        point_socket_at(&socket);
+
+        let mut config = rendezvous_daemon::server::DaemonConfig::with_data_dir(
+            tmp.path().join("data"),
+        )
+        .with_in_memory_projection();
+        config.networking = None;
+        let daemon = rendezvous_daemon::server::spawn_uds_server(socket.clone(), config)
+            .expect("spawn daemon");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !socket.exists() {
+            assert!(Instant::now() < deadline, "daemon socket never appeared");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        let child_env: std::collections::HashMap<std::ffi::OsString, std::ffi::OsString> = [(
+            std::ffi::OsString::from("CLAUDINE_SESSION_ID"),
+            std::ffi::OsString::from("sess-status"),
+        )]
+        .into_iter()
+        .collect();
+        let presence = SessionPresence::started(
+            Provider::Claude,
+            Some("opus"),
+            true,
+            &env_context(),
+            &child_env,
+        );
+        let reporter = presence.status_reporter();
+
+        let mut client = rendezvous_client::connect(&socket).await.expect("client");
+
+        // Trigger 1: a permission ask flips the session to waiting.
+        reporter.report("waiting_on_user");
+        await_status(&mut client, "sess-status", "waiting_on_user").await;
+
+        // Progress clears it back to active.
+        reporter.report("active");
+        await_status(&mut client, "sess-status", "active").await;
+
+        drop(presence);
+        daemon.shutdown().await.expect("daemon shutdown");
+    }
+
+    /// Poll the active-sessions register until `session_id` carries
+    /// `expected` status, since `StatusReporter::report` is
+    /// fire-and-forget.
+    async fn await_status(
+        client: &mut rendezvous_core::RendezvousClient<tonic::transport::Channel>,
+        session_id: &str,
+        expected: &str,
+    ) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let hosts = client
+                .list_active_sessions(rendezvous_core::ListActiveSessionsRequest {})
+                .await
+                .expect("list")
+                .into_inner()
+                .hosts;
+            let observed = hosts.first().and_then(|h| {
+                serde_json::from_str::<serde_json::Value>(&h.sessions_json)
+                    .ok()
+                    .and_then(|v| {
+                        v.get(session_id)
+                            .and_then(|e| e.get("status"))
+                            .and_then(|s| s.as_str())
+                            .map(str::to_string)
+                    })
+            });
+            if observed.as_deref() == Some(expected) {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "status never became {expected} (saw {observed:?})",
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     }
 }
