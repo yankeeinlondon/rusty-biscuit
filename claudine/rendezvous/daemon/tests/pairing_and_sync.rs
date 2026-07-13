@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use rendezvous_client::connect_uds;
 use rendezvous_core::{
     AppendEntryRequest, ApprovePeerRequest, ConnectToPeerRequest, CreateInvitationRequest,
-    ListChunkEntriesRequest, ListPairingsRequest, ListSessionChunksRequest,
+    ListChunkEntriesRequest, ListPairingsRequest, ListPeersRequest, ListSessionChunksRequest,
     PeerConnectionState, RendezvousClient, RevokePeerRequest, SyncWithPeerRequest,
 };
 use rendezvous_daemon::server::{DaemonConfig, NetworkConfig, ServerHandle, spawn_uds_server};
@@ -139,6 +139,23 @@ async fn paired_daemons_converge_after_direct_sync() {
         .expect("alice sync_with_peer")
         .into_inner();
     assert_eq!(sync.node_id, bob_node);
+
+    // A successful sync stamps the freshness clock the dashboard reads
+    // — distinct from mDNS-driven `last_seen`. Bob's peer row on Alice
+    // must now carry a positive `last_synced_unix_ms`.
+    let bob_peer = alice_client
+        .list_peers(ListPeersRequest {})
+        .await
+        .expect("alice list_peers")
+        .into_inner()
+        .peers
+        .into_iter()
+        .find(|p| p.node_id == bob_node)
+        .expect("bob present in alice's peer registry");
+    assert!(
+        bob_peer.last_synced_unix_ms > 0,
+        "successful sync must stamp last_synced_unix_ms: {bob_peer:?}",
+    );
 
     // After sync, each side should see their own and the other's data.
     let alice_node = alice_node.clone();
