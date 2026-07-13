@@ -196,6 +196,85 @@ image protocols; Browser can express CSS and richer structure; portable Markdown
 can express the least. Strictness and diagnostics make those differences explicit
 instead of hiding them inside each renderer.
 
+## Page features — resolving CSS/JS dependencies
+
+A browser render can carry more than markup: a component may declare that it
+needs a shared CSS or JavaScript dependency to work. The `renderable` crate
+models that as a **page feature** (`renderable::browser::feature`): a
+`PageFeature` is a type-safe identity (`Popover`, `MermaidDiagram`, …) that a
+component *requests*, and a `FeatureResolver` maps a requested feature to the
+concrete `FeatureAssets` (inline CSS, a typed `FeatureScript`, and/or `<link>`
+tags) that satisfy it.
+
+### The flow
+
+1. **Request.** A renderer emitting a feature-bearing node calls
+   `add_feature(PageFeature::…)` (fragment path) or pushes onto the streaming
+   writer's accumulator. Requests are collection-only — a Mermaid fence
+   rendered as *code* or a link with no prompt requests nothing.
+2. **Collect.** Requests ride the `Rendered<T>` side channel
+   (`Rendered.features`, first-seen order) exactly like `diagnostics`.
+   `Rendered::map` preserves them, so no renderer transform silently drops the
+   channel. Both browser paths — recursive `BrowserFragment` collection and the
+   streaming `StreamWriter` (which also merges features from code-renderer hook
+   fragments at their document position) — surface the same feature set.
+3. **Resolve + inject.** The outermost document assembler deduplicates the
+   feature list by variant and resolves each through the installed
+   `FeatureResolver`, then serializes the assets exactly once.
+
+### Resolver installation
+
+`HtmlPage` and `BrowserRenderOptions` each own an `Rc<dyn FeatureResolver>` plus
+a `FeatureContext`, defaulting to `DefaultFeatureResolver`. A host installs its
+own resolver on those entry points to own theme-aware or crate-specific
+features (Darkmatter installs `DarkmatterFeatureResolver` on its full-page
+browser path to own `MermaidDiagram`). Because the default is generic, a caller
+constructing an `HtmlPage` directly gets only the shared assets and acquires no
+dependency on the installing crate. `FeatureContext` carries only
+renderable-owned values (resolved color mode, resolved semantic colors) so a
+resolver in another crate can derive theme-aware assets while the dependency
+direction stays `darkmatter → renderable`.
+
+### Ordering
+
+Feature assets are emitted in **first-seen feature order**; within one feature
+the order is `<link>`, then `<style>`, then `<script>`. Page-authored
+links/styles/scripts keep their existing relative order and feature assets
+follow them, so a page requesting no feature is byte-for-byte unchanged and
+feature code can rely on its own declarations landing after the page's.
+
+### Targets and failures
+
+- `RenderTarget::Markdown` and `RenderTarget::MarkdownPlus` (and Terminal)
+  **bypass** feature collection and resolution entirely — their output is
+  byte-for-byte neutral, and a resolver returns `Ok(None)` for them.
+- On the Browser target, `Ok(None)` means a feature *intentionally* has no
+  assets; a requested-but-unresolved Browser feature is a hard
+  `FeatureResolveError::UnresolvedFeature` (naming the feature and target).
+  Silently dropping a browser dependency is forbidden — an unowned feature
+  fails the render rather than emitting an inert element.
+- A **body-only** render (assets injected before the body, no document `<head>`)
+  cannot host `<link>` dependencies; a feature that resolves to links there
+  fails with `FeatureResolveError::HeadRequired`. V1's inline-only Mermaid and
+  Popover assets never hit this.
+- Both variants surface through `RenderError::FeatureResolution` at the fallible
+  document entry points, so `HtmlPage::render()` itself stays infallible.
+
+### Deduplication and divergent configuration (fieldless v1)
+
+Deduplication identity is the `PageFeature` variant, preserved in first-seen
+order. V1 features are fieldless (`PageFeature` is a `Copy` enum) and all
+per-page configuration lives in the resolver/context pair, so two requests for
+the same feature cannot diverge — a feature's assets are injected at most once.
+
+The spec's rule that *divergent configuration for one feature on one page is a
+hard error* is therefore **forward-looking**: it binds the first future feature
+that gains per-request configuration. Activating it requires evolving the
+identity to a comparable request type (for example `FeatureRequest { feature,
+config }`) and failing the render on unequal configs. Because a fieldless enum
+cannot represent divergent config, v1 deliberately ships no dead comparison
+machinery.
+
 ## Layout and style on the tree
 
 Block-level positioning (`Layout`: margins, alignment, max-width, wrapping) and
